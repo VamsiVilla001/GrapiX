@@ -1,0 +1,23 @@
+{
+  "name": "grapix",
+  "private": true,
+  "version": "0.1.0",
+  "description": "GrapiX broadcast graphics editor, sequencer, and renderer platform.",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "services/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @grapix/desktop-electron",
+    "dev:desktop": "npm run dev -w @grapix/desktop-electron",
+    "dev:web": "npm run dev -w @grapix/editor-web",
+    "dev:api": "npm run dev -w @grapix/api-server",
+    "start": "npm run start -w @grapix/desktop-electron",
+    "build": "npm run build -w @grapix/shared-types && npm run build -w @grapix/api-server && npm run build -w @grapix/editor-web && npm run build -w @grapix/desktop-electron",
+    "typecheck": "npm run typecheck -w @grapix/shared-types && npm run typecheck -w @grapix/api-server && npm run typecheck -w @grapix/editor-web && npm run typecheck -w @grapix/desktop-electron"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

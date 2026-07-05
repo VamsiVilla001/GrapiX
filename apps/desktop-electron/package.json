@@ -1,0 +1,21 @@
+{
+  "name": "@grapix/desktop-electron",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "electron .",
+    "dev": "npm run build:workspace && electron .",
+    "build:workspace": "npm run build -w @grapix/shared-types && npm run build -w @grapix/api-server && npm run build -w @grapix/editor-web && npm run build -w @grapix/desktop-electron"
+  },
+  "dependencies": {
+    "electron": "^31.7.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.0",
+    "typescript": "^5.5.4"
+  }
+}
