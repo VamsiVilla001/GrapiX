@@ -1,4 +1,5 @@
 import { Group, Panel, Separator, type Layout } from "react-resizable-panels";
+import { useEffect } from "react";
 import { CanvasStage } from "./components/CanvasStage";
 import { DockArea } from "./components/DockWorkspace";
 import { ObjectLibrary } from "./components/ObjectLibrary";
@@ -8,11 +9,19 @@ import { SceneManager } from "./components/SceneManager";
 import { StatusBar } from "./components/StatusBar";
 import { TemplatesPanel } from "./components/TemplatesPanel";
 import { TimelinePanel } from "./components/TimelinePanel";
+import { MaterialManagerPanel } from "./modules/material-manager";
 import { useSceneAutosave } from "./hooks/useSceneAutosave";
 import type { DockPanelId } from "./store/dockStore";
+import { useEditorStore } from "./store/editorStore";
 
 export function App() {
   useSceneAutosave();
+  const sceneId = useEditorStore((state) => state.scene.id);
+  const refreshAssetAvailability = useEditorStore((state) => state.refreshAssetAvailability);
+
+  useEffect(() => {
+    void refreshAssetAvailability();
+  }, [refreshAssetAvailability, sceneId]);
 
   return (
     <div className="app-shell reference-editor-shell">
@@ -69,6 +78,8 @@ function renderDockPanel(panelId: DockPanelId) {
       return <SceneManager />;
     case "properties":
       return <PropertiesSidebar />;
+    case "material-manager":
+      return <MaterialManagerPanel />;
     case "timeline":
       return <TimelinePanel />;
   }

@@ -1,0 +1,37 @@
+{
+  "manifestVersion": 1,
+  "shaders": [
+    {
+      "shaderId": "grapix.material.solid-colour",
+      "name": "Solid Colour",
+      "version": 1,
+      "sourcePath": "wgsl/composite_quad.wgsl",
+      "vertexEntry": "vs_main",
+      "fragmentEntry": "fs_main",
+      "textureSlots": [],
+      "supportedPrimitives": ["rect", "ellipse", "text", "image"],
+      "parameters": [
+        { "name": "baseColor", "label": "Base colour", "type": "colour", "default": "#ffffff", "animatable": true, "bindable": true },
+        { "name": "opacity", "label": "Opacity", "type": "float", "default": 1, "min": 0, "max": 1, "step": 0.01, "animatable": true, "bindable": true }
+      ]
+    },
+    {
+      "shaderId": "grapix.material.textured",
+      "name": "Textured Unlit",
+      "version": 1,
+      "sourcePath": "wgsl/materials/textured.wgsl",
+      "vertexEntry": "vs_main",
+      "fragmentEntry": "fs_main",
+      "textureSlots": [
+        { "name": "baseTexture", "label": "Base texture", "required": true }
+      ],
+      "supportedPrimitives": ["rect", "image"],
+      "parameters": [
+        { "name": "tint", "label": "Tint", "type": "colour", "default": "#ffffff", "animatable": true, "bindable": true },
+        { "name": "opacity", "label": "Opacity", "type": "float", "default": 1, "min": 0, "max": 1, "step": 0.01, "animatable": true, "bindable": true },
+        { "name": "uvScale", "label": "UV scale", "type": "vector2", "default": [1, 1], "animatable": true },
+        { "name": "uvOffset", "label": "UV offset", "type": "vector2", "default": [0, 0], "animatable": true }
+      ]
+    }
+  ]
+}

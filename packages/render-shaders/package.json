@@ -1,0 +1,17 @@
+{
+  "name": "@grapix/render-shaders",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared WGSL shaders and byte-layout contract for the GrapiX render daemon and the future browser WebGPU preview.",
+  "files": [
+    "wgsl",
+    "manifests",
+    "layouts.json",
+    "docs"
+  ],
+  "exports": {
+    "./layouts.json": "./layouts.json",
+    "./manifests/*": "./manifests/*",
+    "./wgsl/*": "./wgsl/*"
+  }
+}

@@ -1,5 +1,8 @@
 # GrapiX Rendering Engine
 
+Material architecture, shared WGSL rules, alpha/blend behavior, and current
+renderer support are documented in [material-system.md](./material-system.md).
+
 ## Current Direction
 
 GrapiX uses a web-based desktop architecture:
@@ -34,7 +37,11 @@ The editor viewport now separates rendering from editing:
 - Object Library primitives render immediately: quads, spheres, lines, cube/cylinder/torus/slab/model placeholders, light symbols, camera symbols, layer frames, event markers, and groups.
 - Render order is explicit: objects sort by layer, z-depth, and z-index rather than accidental array order.
 - Image fit modes support stretch, contain, and cover-style sizing.
-- Video assets can be imported and converted into video materials.
+- The renderer can play an explicitly configured video URL, but the central
+  Material Manager video importer/metadata/shared-playback path is disabled
+  until a shared decoder lifecycle is implemented.
+- Solid and textured rectangle/image materials resolve shared definitions,
+  instances, opacity, tint, UV scale/offset, and Normal/Add blending.
 - The viewport reports GPU backend and max texture size in the stage toolbar.
 
 ## Next Rendering Steps

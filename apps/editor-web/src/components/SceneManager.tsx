@@ -1,4 +1,4 @@
-import type { SceneObject } from "@grapix/shared-types";
+import { getMaterialBindingId, isMaterialCompatible, type SceneObject } from "@grapix/shared-types";
 import {
   ArrowDown,
   ArrowDownToLine,
@@ -33,6 +33,7 @@ export function SceneManager() {
   const duplicateObject = useEditorStore((state) => state.duplicateObject);
   const deleteObject = useEditorStore((state) => state.deleteObject);
   const [searchTerm, setSearchTerm] = useState("");
+  const [materialDropTarget, setMaterialDropTarget] = useState<{ objectId: string; compatible: boolean } | null>(null);
   const normalizedSearch = searchTerm.trim().toLowerCase();
   const layerStacks = useMemo(
     () => createLayerStacks(scene.objects, normalizedSearch),
@@ -68,9 +69,28 @@ export function SceneManager() {
             </div>
             {layer.objects.map((object) => (
               <div
-                className={`scene-row layer-row ${object.id === selectedObjectId ? "selected" : ""}`}
+                className={`scene-row layer-row ${object.id === selectedObjectId ? "selected" : ""} ${materialDropTarget?.objectId === object.id ? materialDropTarget.compatible ? "material-drop-compatible" : "material-drop-blocked" : ""}`}
                 key={object.id}
                 onClick={() => selectObject(object.id)}
+                onDragLeave={() => setMaterialDropTarget((value) => value?.objectId === object.id ? null : value)}
+                onDragOver={(event) => {
+                  if (!event.dataTransfer.types.includes("application/x-grapix-material")) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const materialId = event.dataTransfer.getData("application/x-grapix-material");
+                  const material = scene.materials.find((item) => item.materialId === materialId);
+                  const compatible = Boolean(material && isMaterialCompatible(material, object.type));
+                  event.dataTransfer.dropEffect = compatible ? "copy" : "none";
+                  setMaterialDropTarget({ objectId: object.id, compatible });
+                }}
+                onDrop={(event) => {
+                  const materialId = event.dataTransfer.getData("application/x-grapix-material");
+                  const instanceId = event.dataTransfer.getData("application/x-grapix-material-instance");
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (materialId && materialDropTarget?.objectId === object.id && materialDropTarget.compatible) assignMaterialSlot(object.id, "main", instanceId ? { materialId, instanceId } : materialId);
+                  setMaterialDropTarget(null);
+                }}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
@@ -95,11 +115,11 @@ export function SceneManager() {
                     <label onClick={(event) => event.stopPropagation()}>
                       Mat
                       <select
-                        value={object.materialSlots.main ?? ""}
+                        value={getMaterialBindingId(object.materialSlots.main) ?? ""}
                         onChange={(event) => assignMaterialSlot(object.id, "main", event.target.value)}
                       >
                         <option value="">None</option>
-                        {scene.materials.map((material) => (
+                        {scene.materials.filter((material) => isMaterialCompatible(material, object.type)).map((material) => (
                           <option value={material.materialId} key={material.materialId}>
                             {material.name}
                           </option>
@@ -159,7 +179,7 @@ function createLayerStacks(objects: SceneObject[], search: string): LayerStack[]
       return true;
     }
 
-    return `${object.name} ${object.type} ${object.layerId} ${object.materialSlots.main ?? ""}`.toLowerCase().includes(search);
+    return `${object.name} ${object.type} ${object.layerId} ${getMaterialBindingId(object.materialSlots.main) ?? ""}`.toLowerCase().includes(search);
   });
   const grouped = new Map<string, SceneObject[]>();
 

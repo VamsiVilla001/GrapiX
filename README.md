@@ -31,3 +31,17 @@ npm run dev:web
 ## Current Packages
 
 - `packages/shared-types`: scene, binding, and package model types shared across apps and future services.
+- `packages/render-shaders`: shared WGSL shaders and layout contract for the render daemon and the future browser WebGPU preview.
+
+## Current Services
+
+- `services/api-server`: local Fastify API (scenes, packages, render-daemon bridge).
+- `services/render-daemon`: Rust + wgpu broadcast render daemon with NDI output (optional; `npm run dev:daemon`, see its README).
+
+## Material Manager
+
+The dockable Material Manager is the central library for imported render assets,
+reusable materials, one-level material instances, WGSL manifests, preview,
+assignment, missing-asset relinking, and usage tracing. See
+[`docs/material-system.md`](docs/material-system.md) for architecture, alpha and
+blend rules, renderer support, extension instructions, and current limitations.

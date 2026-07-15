@@ -1,9 +1,18 @@
 import { create } from "zustand";
 import {
-  type AssetKind,
   type AssetLibraryItem,
+  appendSceneHistory,
+  createMaterialDefinition,
   createObjectId,
   createSceneId,
+  findAssetUsageDetails,
+  findMaterialUsage,
+  isMaterialCompatible,
+  normalizeMaterial,
+  normalizeMaterialSceneDocument,
+  normalizePrimitiveMaterialBinding,
+  redoSceneHistory,
+  undoSceneHistory,
   type BindingMap,
   type CameraSceneObject,
   type EllipseSceneObject,
@@ -13,6 +22,9 @@ import {
   type LightSceneObject,
   type LineSceneObject,
   type Material,
+  type MaterialInstance,
+  type MaterialParameterValue,
+  type PrimitiveMaterialBinding,
   type MarkerSceneObject,
   type MeshSceneObject,
   type RectSceneObject,
@@ -22,6 +34,9 @@ import {
   type SceneObject,
   type TextSceneObject
 } from "@grapix/shared-types";
+import { importMaterialAsset } from "../modules/material-manager/services/assetImporter";
+import { builtInShaders } from "../modules/material-manager/services/shaderRegistry";
+import { assetExistsOnApi } from "../lib/apiClient";
 
 export type LibraryObjectKind =
   | "text"
@@ -44,13 +59,22 @@ export type LibraryObjectKind =
   | "event-marker"
   | "group";
 
-interface EditorState {
+interface SceneHistoryTransaction {
+  label: string;
+  scene: SceneDocument;
+}
+
+export interface EditorState {
   scene: SceneDocument;
   selectedObjectId: string | null;
   dataJson: string;
   dataError: string | null;
   saveStatus: "local" | "saving" | "saved" | "error";
   saveError: string | null;
+  materialActionError: string | null;
+  undoStack: SceneDocument[];
+  redoStack: SceneDocument[];
+  historyTransaction: SceneHistoryTransaction | null;
   setSaveStatus: (status: EditorState["saveStatus"], error?: string | null) => void;
   selectObject: (objectId: string | null) => void;
   setSceneId: (id: string) => void;
@@ -71,9 +95,25 @@ interface EditorState {
   updateObjectKeyframe: (keyframeId: string, patch: Partial<SceneKeyframe>) => void;
   deleteObjectKeyframe: (keyframeId: string) => void;
   updateTimeline: (patch: Partial<SceneTimeline>) => void;
-  assignMaterialSlot: (objectId: string, slotName: string, materialId: string) => void;
+  assignMaterialSlot: (objectId: string, slotName: string, binding: string | PrimitiveMaterialBinding) => void;
+  assignMaterialToObjects: (objectIds: string[], materialId: string, slotName?: string) => boolean;
   importAsset: (file: File) => Promise<void>;
+  relinkAsset: (assetId: string, file: File) => Promise<void>;
+  updateAsset: (assetId: string, patch: Partial<AssetLibraryItem>) => void;
+  refreshAssetAvailability: () => Promise<void>;
+  deleteAsset: (assetId: string) => boolean;
+  createMaterial: (type: "solid-color" | "image" | "unlit-texture", assetId?: string) => string;
+  duplicateMaterial: (materialId: string) => string | null;
+  deleteMaterial: (materialId: string) => boolean;
   updateMaterial: (materialId: string, patch: Partial<Material>) => void;
+  createMaterialInstance: (baseMaterialId: string) => string | null;
+  deleteMaterialInstance: (instanceId: string) => boolean;
+  updateMaterialInstance: (instanceId: string, patch: Partial<MaterialInstance>) => void;
+  setMaterialInstanceParameter: (instanceId: string, name: string, value: MaterialParameterValue | undefined) => void;
+  beginHistory: (label: string) => void;
+  commitHistory: () => void;
+  undo: () => void;
+  redo: () => void;
   setDataJson: (json: string) => void;
   applyDataJson: () => boolean;
   loadScene: (scene: SceneDocument) => void;
@@ -132,6 +172,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
     dataError: null,
     saveStatus: "local",
     saveError: null,
+    materialActionError: null,
+    undoStack: [],
+    redoStack: [],
+    historyTransaction: null,
     setSaveStatus: (saveStatus, saveError = null) => set({ saveStatus, saveError }),
     selectObject: (objectId) => set({ selectedObjectId: objectId }),
     setSceneId: (id) =>
@@ -248,44 +292,258 @@ export const useEditorStore = create<EditorState>((set, get) => {
           }
         })
       })),
-    assignMaterialSlot: (objectId, slotName, materialId) =>
-      set((state) => ({
-        scene: touchScene({
-          ...state.scene,
-          objects: state.scene.objects.map((object) =>
-            object.id === objectId
-              ? ({
-                  ...object,
-                  materialSlots: {
-                    ...object.materialSlots,
-                    [slotName]: materialId
-                  }
-                } as SceneObject)
-              : object
-          )
-        })
-      })),
-    importAsset: async (file) => {
-      const asset = await fileToAsset(file);
-      const material = assetToMaterial(asset);
-
-      set((state) => ({
-        scene: touchScene({
-          ...state.scene,
-          assets: [...state.scene.assets, asset],
-          materials: material ? [...state.scene.materials, material] : state.scene.materials
-        })
-      }));
+    assignMaterialSlot: (objectId, slotName, binding) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      const materialId = normalizePrimitiveMaterialBinding(binding)?.materialId;
+      if (object && !materialId) {
+        const materialSlots = { ...object.materialSlots };
+        delete materialSlots[slotName];
+        commitScene({
+          ...scene,
+          objects: scene.objects.map((item) => item.id === objectId ? ({ ...item, materialSlots } as SceneObject) : item)
+        });
+        return;
+      }
+      const material = scene.materials.find((item) => item.materialId === materialId);
+      if (!object || !material || !isMaterialCompatible(material, object.type)) {
+        set({ materialActionError: "The selected material is not compatible with this primitive slot." });
+        return;
+      }
+      commitScene({
+        ...scene,
+        objects: scene.objects.map((object) => object.id === objectId
+          ? ({ ...object, materialSlots: { ...object.materialSlots, [slotName]: binding } } as SceneObject)
+          : object)
+      });
     },
-    updateMaterial: (materialId, patch) =>
-      set((state) => ({
-        scene: touchScene({
-          ...state.scene,
-          materials: state.scene.materials.map((material) =>
-            material.materialId === materialId ? { ...material, ...patch } : material
-          )
+    assignMaterialToObjects: (objectIds, materialId, slotName = "main") => {
+      const { scene } = get();
+      const material = scene.materials.find((item) => item.materialId === materialId);
+      const selectedIds = new Set(objectIds);
+      const selectedObjects = scene.objects.filter((object) => selectedIds.has(object.id));
+      if (!material || !selectedObjects.length || selectedObjects.some((object) => !isMaterialCompatible(material, object.type))) {
+        set({ materialActionError: "The material cannot be assigned because at least one selected primitive is incompatible." });
+        return false;
+      }
+      commitScene({
+        ...scene,
+        objects: scene.objects.map((object) => selectedIds.has(object.id)
+          ? ({ ...object, materialSlots: { ...object.materialSlots, [slotName]: materialId } } as SceneObject)
+          : object)
+      });
+      return true;
+    },
+    importAsset: async (file) => {
+      try {
+        const { asset, shader } = await importMaterialAsset(file);
+        const { scene } = get();
+        const hasAsset = scene.assets.some((item) => item.assetId === asset.assetId);
+        const material = asset.kind === "image" || asset.kind === "svg"
+          ? createMaterialDefinition(asset.name.replace(/\.[^.]+$/, ""), "image", asset.assetId)
+          : null;
+        commitScene({
+          ...scene,
+          assets: hasAsset ? scene.assets.map((item) => item.assetId === asset.assetId ? asset : item) : [...scene.assets, asset],
+          materials: material && !hasAsset ? [...scene.materials, material] : scene.materials,
+          shaders: shader ? [...(scene.shaders ?? []).filter((item) => item.shaderId !== shader.shaderId), shader] : scene.shaders
+        });
+        set({ materialActionError: null });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Asset import failed.";
+        set({ materialActionError: message });
+        throw error;
+      }
+    },
+    relinkAsset: async (assetId, file) => {
+      // Store new bytes under their content hash and keep the scene asset ID
+      // stable. Undo can then restore the old metadata/source without losing
+      // the previous binary.
+      const { asset: importedAsset } = await importMaterialAsset(file);
+      const asset = { ...importedAsset, assetId };
+      const { scene } = get();
+      commitScene({ ...scene, assets: scene.assets.map((item) => item.assetId === assetId ? asset : item) });
+      set({ materialActionError: null });
+    },
+    updateAsset: (assetId, patch) => {
+      const { scene } = get();
+      commitScene({
+        ...scene,
+        assets: scene.assets.map((asset) => asset.assetId === assetId ? { ...asset, ...patch } : asset)
+      });
+    },
+    refreshAssetAvailability: async () => {
+      const { scene } = get();
+      const managedAssets = scene.assets.filter((asset) => asset.sourcePath?.startsWith("assets/"));
+      const results = new Map<string, boolean>();
+      await Promise.all(managedAssets.map(async (asset) => {
+        results.set(asset.assetId, await assetExistsOnApi(asset.storageAssetId ?? asset.assetId));
+      }));
+      const current = get().scene;
+      set({
+        scene: {
+          ...current,
+          assets: current.assets.map((asset) => results.has(asset.assetId)
+            ? {
+                ...asset,
+                status: results.get(asset.assetId) ? "READY" : "MISSING",
+                error: results.get(asset.assetId) ? undefined : "The stored source could not be found. Use Relink Asset to restore it."
+              }
+            : asset)
+        }
+      });
+    },
+    deleteAsset: (assetId) => {
+      const { scene } = get();
+      const usage = findAssetUsageDetails(scene, assetId);
+      if (usage.materialIds.length || usage.shaderIds.length) {
+        set({ materialActionError: `Asset is used by ${usage.materialIds.length} material(s) and ${usage.shaderIds.length} shader(s). Relink it or remove those references first.` });
+        return false;
+      }
+      commitScene({ ...scene, assets: scene.assets.filter((asset) => asset.assetId !== assetId) });
+      set({ materialActionError: null });
+      return true;
+    },
+    createMaterial: (type, assetId) => {
+      const { scene } = get();
+      const material = createMaterialDefinition(
+        type === "solid-color" ? "Solid Colour" : type === "unlit-texture" ? "Unlit Texture" : "Image Material",
+        type,
+        assetId
+      );
+      commitScene({ ...scene, materials: [...scene.materials, material] });
+      set({ materialActionError: null });
+      return material.materialId;
+    },
+    duplicateMaterial: (materialId) => {
+      const { scene } = get();
+      const material = scene.materials.find((item) => item.materialId === materialId);
+      if (!material) return null;
+      const timestamp = new Date().toISOString();
+      const duplicated = normalizeMaterial({
+        ...structuredClone(material),
+        materialId: createSceneId("mat"),
+        name: `${material.name} Copy`,
+        builtIn: false,
+        createdAt: timestamp,
+        updatedAt: timestamp
+      });
+      commitScene({ ...scene, materials: [...scene.materials, duplicated] });
+      return duplicated.materialId;
+    },
+    deleteMaterial: (materialId) => {
+      const { scene } = get();
+      const material = scene.materials.find((item) => item.materialId === materialId);
+      if (material?.builtIn) {
+        set({ materialActionError: "Built-in materials cannot be deleted; duplicate one to create an editable project material." });
+        return false;
+      }
+      const usage = findMaterialUsage(scene, materialId);
+      if (usage.objectIds.length || usage.instanceIds.length) {
+        const details = [
+          usage.objectIds.length ? `${usage.objectIds.length} primitive${usage.objectIds.length === 1 ? "" : "s"}` : "",
+          usage.instanceIds.length ? `${usage.instanceIds.length} instance${usage.instanceIds.length === 1 ? "" : "s"}` : ""
+        ].filter(Boolean).join(" and ");
+        set({ materialActionError: `Material is still used by ${details}.` });
+        return false;
+      }
+      commitScene({ ...scene, materials: scene.materials.filter((material) => material.materialId !== materialId) });
+      set({ materialActionError: null });
+      return true;
+    },
+    updateMaterial: (materialId, patch) => {
+      const { scene } = get();
+      commitScene({
+        ...scene,
+        materials: scene.materials.map((material) => material.materialId === materialId
+          ? normalizeMaterial({ ...material, ...patch, updatedAt: new Date().toISOString() })
+          : material)
+      });
+    },
+    createMaterialInstance: (baseMaterialId) => {
+      const { scene } = get();
+      const material = scene.materials.find((item) => item.materialId === baseMaterialId);
+      if (!material) return null;
+      const timestamp = new Date().toISOString();
+      const instance: MaterialInstance = {
+        materialInstanceId: createSceneId("matinst"),
+        name: `${material.name} Instance`,
+        baseMaterialId,
+        parameterOverrides: {},
+        textureOverrides: {},
+        createdAt: timestamp,
+        updatedAt: timestamp
+      };
+      commitScene({ ...scene, materialInstances: [...(scene.materialInstances ?? []), instance] });
+      return instance.materialInstanceId;
+    },
+    deleteMaterialInstance: (instanceId) => {
+      const { scene } = get();
+      const usedBy = scene.objects.filter((object) => Object.values(object.materialSlots).some((binding) => normalizePrimitiveMaterialBinding(binding)?.instanceId === instanceId));
+      if (usedBy.length) {
+        set({ materialActionError: `Material instance is still assigned to ${usedBy.length} primitive${usedBy.length === 1 ? "" : "s"}.` });
+        return false;
+      }
+      commitScene({ ...scene, materialInstances: (scene.materialInstances ?? []).filter((instance) => instance.materialInstanceId !== instanceId) });
+      return true;
+    },
+    updateMaterialInstance: (instanceId, patch) => {
+      const { scene } = get();
+      commitScene({
+        ...scene,
+        materialInstances: (scene.materialInstances ?? []).map((instance) => instance.materialInstanceId === instanceId
+          ? { ...instance, ...patch, updatedAt: new Date().toISOString() }
+          : instance)
+      });
+    },
+    setMaterialInstanceParameter: (instanceId, name, value) => {
+      const { scene } = get();
+      commitScene({
+        ...scene,
+        materialInstances: (scene.materialInstances ?? []).map((instance) => {
+          if (instance.materialInstanceId !== instanceId) return instance;
+          const parameterOverrides = { ...instance.parameterOverrides };
+          if (value === undefined) delete parameterOverrides[name];
+          else parameterOverrides[name] = value;
+          return { ...instance, parameterOverrides, updatedAt: new Date().toISOString() };
         })
-      })),
+      });
+    },
+    beginHistory: (label) => {
+      const state = get();
+      if (!state.historyTransaction) set({ historyTransaction: { label, scene: state.scene } });
+    },
+    commitHistory: () => {
+      const state = get();
+      if (!state.historyTransaction) return;
+      set({
+        undoStack: state.scene === state.historyTransaction.scene
+          ? state.undoStack
+          : appendSceneHistory(state.undoStack, state.historyTransaction.scene),
+        redoStack: state.scene === state.historyTransaction.scene ? state.redoStack : [],
+        historyTransaction: null
+      });
+    },
+    undo: () => {
+      const state = get();
+      const snapshot = undoSceneHistory(state.scene, state.undoStack, state.redoStack);
+      if (!snapshot) return;
+      set({
+        ...snapshot,
+        historyTransaction: null,
+        materialActionError: null
+      });
+    },
+    redo: () => {
+      const state = get();
+      const snapshot = redoSceneHistory(state.scene, state.undoStack, state.redoStack);
+      if (!snapshot) return;
+      set({
+        ...snapshot,
+        historyTransaction: null,
+        materialActionError: null
+      });
+    },
     setDataJson: (json) => set({ dataJson: json }),
     applyDataJson: () => {
       const dataJson = get().dataJson;
@@ -310,7 +568,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
         scene: touchScene(normalized),
         selectedObjectId: normalized.objects[0]?.id ?? null,
         dataJson: JSON.stringify(normalized.dataContext, null, 2),
-        dataError: null
+        dataError: null,
+        undoStack: [],
+        redoStack: [],
+        historyTransaction: null,
+        materialActionError: null
       });
     },
     resetScene: () => {
@@ -319,10 +581,24 @@ export const useEditorStore = create<EditorState>((set, get) => {
         scene,
         selectedObjectId: scene.objects[1]?.id ?? null,
         dataJson: JSON.stringify(scene.dataContext, null, 2),
-        dataError: null
+        dataError: null,
+        undoStack: [],
+        redoStack: [],
+        historyTransaction: null,
+        materialActionError: null
       });
     }
   };
+
+  function commitScene(scene: SceneDocument) {
+    const state = get();
+    set({
+      scene: touchScene(scene),
+      undoStack: state.historyTransaction ? state.undoStack : appendSceneHistory(state.undoStack, state.scene),
+      redoStack: state.historyTransaction ? state.redoStack : [],
+      materialActionError: null
+    });
+  }
 
   function addObject(object: SceneObject) {
     const { scene } = get();
@@ -478,7 +754,7 @@ function createDefaultScene(): SceneDocument {
     }
   });
 
-  return {
+  return normalizeMaterialSceneDocument({
     id: createSceneId("lower_third"),
     name: "Lower Third Starter",
     version: 1,
@@ -530,11 +806,18 @@ function createDefaultScene(): SceneDocument {
         readiness: "READY"
       }
     ],
+    materialInstances: [],
+    shaders: builtInShaders.map((shader) => shader.definition),
+    materialFolders: [
+      { folderId: "folder_materials", name: "Materials", kind: "material" },
+      { folderId: "folder_images", name: "Images", kind: "asset" },
+      { folderId: "folder_shaders", name: "Shaders", kind: "shader" }
+    ],
     objects: normalizeObjectStack([plate, accent, name, role, logo, score]),
     timeline: createDefaultTimeline(),
     createdAt: timestamp,
     updatedAt: timestamp
-  };
+  });
 }
 
 function createTextObject(patch: Partial<TextSceneObject> = {}): TextSceneObject {
@@ -788,10 +1071,15 @@ function createBaseObject(type: SceneObject["type"]) {
 }
 
 function normalizeScene(scene: SceneDocument): SceneDocument {
-  return {
+  const builtInShaderDefinitions = builtInShaders.map((shader) => shader.definition);
+  const existingShaderIds = new Set((scene.shaders ?? []).map((shader) => shader.shaderId));
+  return normalizeMaterialSceneDocument({
     ...scene,
     assets: scene.assets ?? [],
     materials: scene.materials ?? [],
+    materialInstances: scene.materialInstances ?? [],
+    shaders: [...(scene.shaders ?? []), ...builtInShaderDefinitions.filter((shader) => !existingShaderIds.has(shader.shaderId))],
+    materialFolders: scene.materialFolders ?? [],
     timeline: normalizeTimeline(scene.timeline),
     objects: normalizeObjectStack(
       scene.objects.map((object, index) => ({
@@ -803,7 +1091,7 @@ function normalizeScene(scene: SceneDocument): SceneDocument {
         materialSlots: object.materialSlots ?? {}
       }))
     )
-  };
+  });
 }
 
 function createDefaultTimeline(): SceneTimeline {
@@ -845,72 +1133,6 @@ function createObjectSnapshot(object: SceneObject): SceneKeyframe["properties"] 
   }
 
   return snapshot;
-}
-
-async function fileToAsset(file: File): Promise<AssetLibraryItem> {
-  return {
-    assetId: createSceneId("asset"),
-    name: file.name,
-    kind: assetKindFromFile(file),
-    source: await readAsDataUrl(file),
-    mimeType: file.type || undefined,
-    sizeBytes: file.size,
-    importedAt: new Date().toISOString()
-  };
-}
-
-function assetToMaterial(asset: AssetLibraryItem): Material | null {
-  if (!["image", "svg", "video"].includes(asset.kind)) {
-    return null;
-  }
-
-  return {
-    materialId: createSceneId("mat"),
-    name: asset.name.replace(/\.[^.]+$/, ""),
-    type: asset.kind === "svg" ? "svg-vector" : asset.kind === "video" ? "video" : "image",
-    assetId: asset.assetId,
-    dynamic: false,
-    sampling: "linear",
-    wrap: "clamp",
-    opacity: 1,
-    readiness: "READY"
-  };
-}
-
-function assetKindFromFile(file: File): AssetKind {
-  const type = file.type.toLowerCase();
-  const name = file.name.toLowerCase();
-
-  if (type.includes("svg") || name.endsWith(".svg")) {
-    return "svg";
-  }
-
-  if (type.startsWith("image/")) {
-    return "image";
-  }
-
-  if (type.startsWith("video/")) {
-    return "video";
-  }
-
-  if (type.includes("font") || /\.(otf|ttf|woff|woff2)$/.test(name)) {
-    return "font";
-  }
-
-  if (type.includes("json") || name.endsWith(".json")) {
-    return "json";
-  }
-
-  return "unknown";
-}
-
-function readAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
 }
 
 function svgDataUri(background: string, foreground: string, label: string): string {

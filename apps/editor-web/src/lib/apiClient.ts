@@ -25,6 +25,47 @@ export interface ApiPackageSummary {
   createdAt: string;
 }
 
+export interface ApiImportedAsset {
+  assetId: string;
+  fileName: string;
+  relativePath: string;
+  mimeType: string;
+  sizeBytes: number;
+  checksum: string;
+  importedAt: string;
+  duplicate: boolean;
+  contentUrl: string;
+}
+
+export async function importAssetFileToApi(file: File, replaceAssetId?: string): Promise<ApiImportedAsset> {
+  const query = new URLSearchParams({
+    fileName: file.name,
+    mimeType: file.type || "application/octet-stream"
+  });
+  if (replaceAssetId) query.set("replaceAssetId", replaceAssetId);
+
+  const response = await request<{ ok: true; asset: ApiImportedAsset }>(`/api/assets/import?${query}`, {
+    method: "POST",
+    headers: { "content-type": "application/octet-stream" },
+    body: file
+  });
+  return {
+    ...response.asset,
+    contentUrl: `${apiBaseUrl}${response.asset.contentUrl}`
+  };
+}
+
+export async function assetExistsOnApi(assetId: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${apiBaseUrl}/api/assets/${encodeURIComponent(assetId)}/content`, {
+      method: "HEAD"
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function getApiHealth(): Promise<ApiHealth> {
   return request<ApiHealth>("/health");
 }

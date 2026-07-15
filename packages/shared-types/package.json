@@ -13,7 +13,10 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "fixtures:emit": "npm run build && node scripts/emit-fixtures.mjs",
+    "fixtures:check": "npm run build && node scripts/emit-fixtures.mjs --check"
   },
   "devDependencies": {
     "typescript": "^5.5.4"

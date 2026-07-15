@@ -38,9 +38,17 @@ export type AssetKind =
   | "video"
   | "svg"
   | "font"
+  | "image-sequence"
+  | "wgsl"
+  | "live"
+  | "render-texture"
   | "json"
   | "lut"
   | "unknown";
+
+export type AssetAvailability = "READY" | "MISSING" | "IMPORTING" | "UNSUPPORTED" | "ERROR";
+export type AssetAlphaMode = "opaque" | "straight" | "premultiplied" | "alpha-test" | "alpha-mask" | "unknown";
+export type AssetColorSpace = "srgb" | "linear" | "display-p3" | "rec709" | "unknown";
 
 export interface AssetLibraryItem {
   assetId: string;
@@ -50,6 +58,26 @@ export interface AssetLibraryItem {
   mimeType?: string;
   sizeBytes?: number;
   importedAt: string;
+  sourcePath?: string;
+  /** API storage object ID; differs from the stable scene assetId after an undoable relink. */
+  storageAssetId?: string;
+  checksum?: string;
+  width?: number;
+  height?: number;
+  durationSeconds?: number;
+  frameRate?: number;
+  codec?: string;
+  hasAlpha?: boolean | "unknown";
+  hasAudio?: boolean | "unknown";
+  alphaMode?: AssetAlphaMode;
+  colorSpace?: AssetColorSpace;
+  loop?: boolean;
+  status?: AssetAvailability;
+  error?: string;
+  tags?: string[];
+  folderId?: string;
+  thumbnailSource?: string;
+  license?: string;
 }
 
 export type MaterialType =
@@ -59,7 +87,75 @@ export type MaterialType =
   | "gradient"
   | "text-style"
   | "svg-vector"
-  | "shader";
+  | "shader"
+  | "image-sequence"
+  | "unlit-texture"
+  | "chroma-key"
+  | "mask"
+  | "matte"
+  | "additive-glow"
+  | "basic-lit"
+  | "pbr";
+
+export type MaterialBlendMode = "normal" | "add" | "multiply" | "screen" | "overlay" | "darken" | "lighten" | "subtract" | "alpha-mask" | "inverse-alpha-mask";
+export type MaterialAlphaMode = "opaque" | "straight" | "premultiplied" | "alpha-test" | "alpha-mask";
+export type MaterialCullMode = "none" | "front" | "back";
+export type MaterialDepthMode = "disabled" | "read" | "read-write";
+export type TextureFitMode = "stretch" | "fit" | "fill" | "crop" | "tile" | "original" | "pixel-perfect" | "nine-slice";
+export type TextureWrapMode = "clamp" | "repeat" | "mirror-repeat";
+export type TextureFilteringMode = "nearest" | "linear";
+export type MaterialParameterType = "float" | "integer" | "boolean" | "colour" | "vector2" | "vector3" | "vector4" | "texture" | "sampler" | "enum" | "matrix";
+export type MaterialParameterValue = number | boolean | string | number[];
+
+export interface MaterialParameterDefinition {
+  name: string;
+  label?: string;
+  type: MaterialParameterType;
+  default: MaterialParameterValue;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: string[];
+  animatable?: boolean;
+  bindable?: boolean;
+  group?: string;
+}
+
+export interface ShaderTextureSlotDefinition {
+  name: string;
+  label?: string;
+  required: boolean;
+}
+
+export interface MaterialTextureSlot {
+  name: string;
+  assetId?: string;
+  fit: TextureFitMode;
+  wrap: TextureWrapMode;
+  filtering: TextureFilteringMode;
+  uvScale: [number, number];
+  uvOffset: [number, number];
+  uvRotation: number;
+  uvPivot: [number, number];
+  flipX: boolean;
+  flipY: boolean;
+}
+
+export interface ShaderDefinition {
+  shaderId: string;
+  name: string;
+  version: number;
+  sourcePath: string;
+  vertexEntry: string;
+  fragmentEntry: string;
+  textureSlots: ShaderTextureSlotDefinition[];
+  parameters: MaterialParameterDefinition[];
+  supportedPrimitives: SceneObjectType[];
+  validationStatus: "VALID" | "INVALID" | "UNSUPPORTED";
+  compilationErrors: string[];
+  builtIn: boolean;
+  updatedAt: string;
+}
 
 export type MaterialBindingType =
   | "assetId"
@@ -97,9 +193,50 @@ export interface Material {
   wrap?: "clamp" | "repeat" | "mirror";
   opacity: number;
   readiness: MaterialReadinessState;
+  shaderId?: string;
+  textureSlots?: MaterialTextureSlot[];
+  parameters?: Record<string, MaterialParameterValue>;
+  blendMode?: MaterialBlendMode;
+  alphaMode?: MaterialAlphaMode;
+  cullMode?: MaterialCullMode;
+  depthMode?: MaterialDepthMode;
+  colorSpace?: AssetColorSpace;
+  doubleSided?: boolean;
+  enabled?: boolean;
+  tags?: string[];
+  folderId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  supportedPrimitives?: SceneObjectType[];
+  builtIn?: boolean;
 }
 
-export type MaterialSlotMap = Record<string, string>;
+export type MaterialDefinition = Material;
+
+export interface MaterialInstance {
+  materialInstanceId: string;
+  name: string;
+  baseMaterialId: string;
+  parameterOverrides: Record<string, MaterialParameterValue>;
+  textureOverrides: Record<string, string>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PrimitiveMaterialBinding {
+  materialId: string;
+  instanceId?: string;
+  overrides?: Record<string, MaterialParameterValue>;
+}
+
+export interface MaterialFolder {
+  folderId: string;
+  name: string;
+  parentId?: string;
+  kind: "material" | "asset" | "shader" | "mixed";
+}
+
+export type MaterialSlotMap = Record<string, string | PrimitiveMaterialBinding>;
 
 export type SceneKeyframeEasing = "linear" | "ease-in" | "ease-out" | "ease-in-out";
 
@@ -259,6 +396,9 @@ export interface SceneDocument {
   dataContext: Record<string, unknown>;
   assets: AssetLibraryItem[];
   materials: Material[];
+  materialInstances?: MaterialInstance[];
+  shaders?: ShaderDefinition[];
+  materialFolders?: MaterialFolder[];
   objects: SceneObject[];
   timeline: SceneTimeline;
   createdAt: string;
@@ -404,13 +544,406 @@ export function findAsset(
 
 export function findMaterial(
   materials: Material[],
-  materialId: string | undefined
+  materialId: string | PrimitiveMaterialBinding | undefined
 ): Material | undefined {
-  if (!materialId) {
+  const resolvedMaterialId = getMaterialBindingId(materialId);
+
+  if (!resolvedMaterialId) {
     return undefined;
   }
 
-  return materials.find((material) => material.materialId === materialId);
+  return materials.find((material) => material.materialId === resolvedMaterialId);
+}
+
+export function normalizePrimitiveMaterialBinding(
+  binding: string | PrimitiveMaterialBinding | undefined
+): PrimitiveMaterialBinding | null {
+  if (typeof binding === "string") {
+    return binding ? { materialId: binding } : null;
+  }
+
+  return binding?.materialId ? binding : null;
+}
+
+export function getMaterialBindingId(
+  binding: string | PrimitiveMaterialBinding | undefined
+): string | undefined {
+  return normalizePrimitiveMaterialBinding(binding)?.materialId;
+}
+
+export interface ResolvedMaterial {
+  material: Material;
+  instance?: MaterialInstance;
+  parameters: Record<string, MaterialParameterValue>;
+  textureSlots: MaterialTextureSlot[];
+  blendMode: MaterialBlendMode;
+  alphaMode: MaterialAlphaMode;
+  warnings: string[];
+}
+
+export function resolvePrimitiveMaterial(
+  scene: SceneDocument,
+  object: SceneObject,
+  slotName = "main"
+): ResolvedMaterial | null {
+  const binding = normalizePrimitiveMaterialBinding(object.materialSlots[slotName]);
+  if (!binding) {
+    return null;
+  }
+
+  const material = findMaterial(scene.materials, binding.materialId);
+  if (!material) {
+    return null;
+  }
+
+  const instance = binding.instanceId
+    ? (scene.materialInstances ?? []).find((item) => item.materialInstanceId === binding.instanceId)
+    : undefined;
+  const warnings: string[] = [];
+
+  if (binding.instanceId && (!instance || instance.baseMaterialId !== material.materialId)) {
+    warnings.push(`Material instance ${binding.instanceId} is missing or does not inherit from ${material.name}.`);
+  }
+
+  const shader = material.shaderId
+    ? (scene.shaders ?? []).find((item) => item.shaderId === material.shaderId)
+    : undefined;
+  const parameters = {
+    ...parameterDefaults(shader?.parameters ?? []),
+    ...(material.parameters ?? {}),
+    ...(instance?.parameterOverrides ?? {}),
+    ...(binding.overrides ?? {})
+  };
+  const textureOverrides = instance?.textureOverrides ?? {};
+  const textureSlots = (material.textureSlots ?? defaultTextureSlots(material)).map((slot) => ({
+    ...slot,
+    assetId: textureOverrides[slot.name] ?? slot.assetId
+  }));
+
+  for (const slot of textureSlots) {
+    const asset = slot.assetId ? findAsset(scene.assets, slot.assetId) : undefined;
+    if (slot.assetId && (!asset || asset.status === "MISSING" || asset.status === "ERROR" || asset.status === "UNSUPPORTED")) {
+      warnings.push(`Texture ${slot.assetId} used by ${material.name} is missing or unavailable.`);
+    }
+    if (slot.wrap !== "clamp") {
+      warnings.push(`Texture wrap mode ${slot.wrap} is reserved until both renderers support it.`);
+    }
+    if (["tile", "nine-slice"].includes(slot.fit)) {
+      warnings.push(`Texture fit mode ${slot.fit} is not implemented by both renderers.`);
+    }
+    if (slot.filtering !== "linear") {
+      warnings.push(`Texture filtering mode ${slot.filtering} is reserved until both renderers support per-material samplers.`);
+    }
+  }
+
+  if (shader?.validationStatus === "INVALID") {
+    warnings.push(`Shader ${shader.name} is invalid; the last valid material state remains active.`);
+  }
+
+  const blendMode = material.blendMode ?? "normal";
+  const alphaMode = material.alphaMode ?? "premultiplied";
+  if (!["normal", "add"].includes(blendMode)) {
+    warnings.push(`Blend mode ${blendMode} is not implemented by both GrapiX renderers.`);
+  }
+  if (!["opaque", "straight", "premultiplied"].includes(alphaMode)) {
+    warnings.push(`Alpha mode ${alphaMode} is not implemented by both GrapiX renderers.`);
+  }
+
+  return {
+    material,
+    instance,
+    parameters,
+    textureSlots,
+    blendMode,
+    alphaMode,
+    warnings
+  };
+}
+
+export function isMaterialCompatible(material: Material, objectType: SceneObjectType): boolean {
+  if (material.supportedPrimitives) {
+    return material.supportedPrimitives.includes(objectType);
+  }
+
+  switch (material.type) {
+    case "solid-color":
+    case "gradient":
+      return ["rect", "ellipse", "text", "image"].includes(objectType);
+    case "image":
+    case "svg-vector":
+    case "unlit-texture":
+      return ["rect", "image"].includes(objectType);
+    case "text-style":
+      return objectType === "text";
+    case "video":
+    case "image-sequence":
+      return objectType === "image";
+    case "basic-lit":
+    case "pbr":
+      return objectType === "mesh";
+    default:
+      return false;
+  }
+}
+
+export interface MaterialUsage {
+  objectIds: string[];
+  objectNames: string[];
+  instanceIds: string[];
+  assetIds: string[];
+  shaderIds: string[];
+}
+
+export function findMaterialUsage(scene: SceneDocument, materialId: string): MaterialUsage {
+  const objects = scene.objects.filter((object) =>
+    Object.values(object.materialSlots).some((binding) => getMaterialBindingId(binding) === materialId)
+  );
+  const material = findMaterial(scene.materials, materialId);
+
+  return {
+    objectIds: objects.map((object) => object.id),
+    objectNames: objects.map((object) => object.name),
+    instanceIds: (scene.materialInstances ?? [])
+      .filter((instance) => instance.baseMaterialId === materialId)
+      .map((instance) => instance.materialInstanceId),
+    assetIds: material
+      ? [...new Set([material.assetId, ...(material.textureSlots ?? []).map((slot) => slot.assetId)].filter((value): value is string => Boolean(value)))]
+      : [],
+    shaderIds: material?.shaderId ? [material.shaderId] : []
+  };
+}
+
+export function findAssetUsage(scene: SceneDocument, assetId: string): string[] {
+  return findAssetUsageDetails(scene, assetId).materialIds;
+}
+
+export interface AssetUsage {
+  materialIds: string[];
+  shaderIds: string[];
+}
+
+export function findAssetUsageDetails(scene: SceneDocument, assetId: string): AssetUsage {
+  const asset = findAsset(scene.assets, assetId);
+  const materialIds = scene.materials
+    .filter((material) =>
+      material.assetId === assetId || material.textureSlots?.some((slot) => slot.assetId === assetId)
+    )
+    .map((material) => material.materialId);
+  const shaderIds = asset?.sourcePath
+    ? (scene.shaders ?? []).filter((shader) => shader.sourcePath === asset.sourcePath).map((shader) => shader.shaderId)
+    : [];
+  return { materialIds, shaderIds };
+}
+
+export function parameterDefaults(
+  definitions: MaterialParameterDefinition[]
+): Record<string, MaterialParameterValue> {
+  return Object.fromEntries(definitions.map((definition) => [definition.name, definition.default]));
+}
+
+export function validateShaderDefinition(shader: ShaderDefinition): string[] {
+  const errors: string[] = [];
+
+  if (!shader.shaderId.trim()) errors.push("Shader ID is required.");
+  if (!shader.name.trim()) errors.push("Shader name is required.");
+  if (!shader.sourcePath.toLowerCase().endsWith(".wgsl")) errors.push("Shader source must be a WGSL file.");
+  if (!shader.vertexEntry.trim()) errors.push("Vertex entry point is required.");
+  if (!shader.fragmentEntry.trim()) errors.push("Fragment entry point is required.");
+  if (shader.supportedPrimitives.length === 0) errors.push("At least one supported primitive is required.");
+
+  const parameterNames = new Set<string>();
+  for (const parameter of shader.parameters) {
+    if (!parameter.name.trim()) errors.push("Shader parameters require names.");
+    if (parameterNames.has(parameter.name)) errors.push(`Duplicate shader parameter ${parameter.name}.`);
+    parameterNames.add(parameter.name);
+  }
+
+  const textureNames = new Set<string>();
+  for (const slot of shader.textureSlots) {
+    if (textureNames.has(slot.name)) errors.push(`Duplicate texture slot ${slot.name}.`);
+    textureNames.add(slot.name);
+  }
+
+  return errors;
+}
+
+export function validateMaterialAssetImportDescriptor(
+  name: string,
+  mimeType: string,
+  sizeBytes: number
+): string[] {
+  const extension = name.toLowerCase().split(".").pop() ?? "";
+  const supportedImages = new Set(["png", "jpg", "jpeg", "webp", "svg", "tif", "tiff"]);
+  const errors: string[] = [];
+  if (!name.trim()) errors.push("File name is required.");
+  if (sizeBytes <= 0) errors.push("The file is empty.");
+  if (sizeBytes > 50 * 1024 * 1024) errors.push("Files larger than 50 MiB require the future proxy importer.");
+  if (!supportedImages.has(extension) && extension !== "wgsl") {
+    errors.push(`.${extension || "unknown"} is not supported by the first material importer.`);
+  }
+  if (extension === "exr") errors.push("EXR import is reserved for the future linear/HDR loader.");
+  if (mimeType.startsWith("video/")) errors.push("Video metadata and shared decoding are not enabled in this first importer.");
+  return errors;
+}
+
+export interface SceneHistorySnapshot {
+  scene: SceneDocument;
+  undoStack: SceneDocument[];
+  redoStack: SceneDocument[];
+}
+
+export function appendSceneHistory(stack: SceneDocument[], scene: SceneDocument, limit = 100): SceneDocument[] {
+  return [...stack, scene].slice(-Math.max(1, limit));
+}
+
+export function undoSceneHistory(
+  scene: SceneDocument,
+  undoStack: SceneDocument[],
+  redoStack: SceneDocument[]
+): SceneHistorySnapshot | null {
+  const previous = undoStack.at(-1);
+  if (!previous) return null;
+  return {
+    scene: previous,
+    undoStack: undoStack.slice(0, -1),
+    redoStack: appendSceneHistory(redoStack, scene)
+  };
+}
+
+export function redoSceneHistory(
+  scene: SceneDocument,
+  undoStack: SceneDocument[],
+  redoStack: SceneDocument[]
+): SceneHistorySnapshot | null {
+  const next = redoStack.at(-1);
+  if (!next) return null;
+  return {
+    scene: next,
+    undoStack: appendSceneHistory(undoStack, scene),
+    redoStack: redoStack.slice(0, -1)
+  };
+}
+
+export function normalizeMaterialSceneDocument(scene: SceneDocument): SceneDocument {
+  return {
+    ...scene,
+    assets: (scene.assets ?? []).map((asset) => ({
+      ...asset,
+      status: asset.status ?? "READY",
+      alphaMode: asset.alphaMode ?? "unknown",
+      colorSpace: asset.colorSpace ?? "srgb",
+      tags: asset.tags ?? []
+    })),
+    materials: (scene.materials ?? []).map(normalizeMaterial),
+    materialInstances: scene.materialInstances ?? [],
+    shaders: scene.shaders ?? [],
+    materialFolders: scene.materialFolders ?? []
+  };
+}
+
+export function normalizeMaterial(material: Material): Material {
+  const timestamp = material.updatedAt ?? material.createdAt ?? new Date(0).toISOString();
+  return {
+    ...material,
+    shaderId: material.shaderId ?? defaultShaderId(material.type),
+    textureSlots: material.textureSlots ?? defaultTextureSlots(material),
+    parameters: {
+      baseColor: material.color ?? "#ffffff",
+      tint: "#ffffff",
+      opacity: material.opacity,
+      uvScale: [1, 1],
+      uvOffset: [0, 0],
+      ...(material.parameters ?? {})
+    },
+    blendMode: material.blendMode ?? "normal",
+    alphaMode: material.alphaMode ?? "premultiplied",
+    cullMode: material.cullMode ?? "none",
+    depthMode: material.depthMode ?? "disabled",
+    colorSpace: material.colorSpace ?? "srgb",
+    doubleSided: material.doubleSided ?? true,
+    enabled: material.enabled ?? true,
+    tags: material.tags ?? [],
+    createdAt: material.createdAt ?? timestamp,
+    updatedAt: timestamp,
+    supportedPrimitives: material.supportedPrimitives ?? defaultSupportedPrimitives(material.type)
+  };
+}
+
+export function createMaterialDefinition(
+  name: string,
+  type: "solid-color" | "image" | "unlit-texture",
+  assetId?: string
+): Material {
+  const timestamp = new Date().toISOString();
+  const material: Material = {
+    materialId: createSceneId("mat"),
+    name,
+    type,
+    assetId,
+    dynamic: false,
+    opacity: 1,
+    readiness: assetId ? "READY" : type === "solid-color" ? "READY" : "MISSING",
+    shaderId: type === "solid-color" ? "grapix.material.solid-colour" : "grapix.material.textured",
+    parameters: type === "solid-color"
+      ? { baseColor: "#ffffff", opacity: 1 }
+      : { tint: "#ffffff", opacity: 1, uvScale: [1, 1], uvOffset: [0, 0] },
+    textureSlots: type === "solid-color" ? [] : [createDefaultTextureSlot("baseTexture", assetId)],
+    blendMode: "normal",
+    alphaMode: type === "solid-color" ? "premultiplied" : "straight",
+    cullMode: "none",
+    depthMode: "disabled",
+    colorSpace: "srgb",
+    doubleSided: true,
+    enabled: true,
+    tags: [],
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    supportedPrimitives: type === "solid-color" ? ["rect", "ellipse", "text", "image"] : ["rect", "image"]
+  };
+
+  return normalizeMaterial(material);
+}
+
+function defaultShaderId(type: MaterialType): string {
+  return ["image", "svg-vector", "video", "unlit-texture", "image-sequence"].includes(type)
+    ? "grapix.material.textured"
+    : "grapix.material.solid-colour";
+}
+
+function defaultTextureSlots(material: Material): MaterialTextureSlot[] {
+  if (!["image", "svg-vector", "video", "unlit-texture", "image-sequence"].includes(material.type)) {
+    return [];
+  }
+
+  return [createDefaultTextureSlot("baseTexture", material.assetId, material)];
+}
+
+function createDefaultTextureSlot(
+  name: string,
+  assetId?: string,
+  legacy?: Pick<Material, "wrap" | "sampling">
+): MaterialTextureSlot {
+  return {
+    name,
+    assetId,
+    fit: "fill",
+    wrap: legacy?.wrap === "repeat" ? "repeat" : legacy?.wrap === "mirror" ? "mirror-repeat" : "clamp",
+    filtering: legacy?.sampling ?? "linear",
+    uvScale: [1, 1],
+    uvOffset: [0, 0],
+    uvRotation: 0,
+    uvPivot: [0.5, 0.5],
+    flipX: false,
+    flipY: false
+  };
+}
+
+function defaultSupportedPrimitives(type: MaterialType): SceneObjectType[] {
+  if (["image", "svg-vector", "unlit-texture"].includes(type)) return ["rect", "image"];
+  if (["video", "image-sequence"].includes(type)) return ["image"];
+  if (type === "text-style") return ["text"];
+  if (["basic-lit", "pbr"].includes(type)) return ["mesh"];
+  return ["rect", "ellipse", "text", "image"];
 }
 
 export function resolveMaterialAsset(
@@ -446,7 +979,8 @@ export function resolveMaterialColor(
   dataContext: Record<string, unknown>
 ): string | undefined {
   if (!material.dynamic || !material.binding) {
-    return material.color;
+    const parameterColor = material.parameters?.baseColor;
+    return material.color ?? (typeof parameterColor === "string" ? parameterColor : undefined);
   }
 
   const boundValue = resolveDataPath(dataContext, material.binding.path);
@@ -455,7 +989,8 @@ export function resolveMaterialColor(
     return boundValue;
   }
 
-  return material.binding.fallbackColor ?? material.color;
+  const parameterColor = material.parameters?.baseColor;
+  return material.binding.fallbackColor ?? material.color ?? (typeof parameterColor === "string" ? parameterColor : undefined);
 }
 
 export function buildScenePackageManifest(
@@ -492,7 +1027,8 @@ export function preflightScenePackage(scene: SceneDocument): ScenePackagePreflig
   let missingMaterials = 0;
 
   for (const object of scene.objects) {
-    for (const [slotName, materialId] of Object.entries(object.materialSlots)) {
+    for (const [slotName, materialBinding] of Object.entries(object.materialSlots)) {
+      const materialId = getMaterialBindingId(materialBinding);
       if (!materialId) {
         continue;
       }
@@ -558,8 +1094,18 @@ export function getMaterialReadiness(
     return resolveMaterialColor(material, dataContext) ? "READY" : "MISSING";
   }
 
+  const textureAssetId = material.textureSlots?.find((slot) => slot.name === "baseTexture")?.assetId;
+  if (textureAssetId) {
+    const textureAsset = findAsset(assets, textureAssetId);
+    if (!textureAsset || textureAsset.status === "MISSING" || textureAsset.status === "ERROR" || textureAsset.status === "UNSUPPORTED") {
+      return "MISSING";
+    }
+    return "READY";
+  }
+
   if (!material.dynamic) {
-    return findAsset(assets, material.assetId) ? "READY" : "MISSING";
+    const asset = findAsset(assets, material.assetId);
+    return asset && asset.status !== "MISSING" && asset.status !== "ERROR" && asset.status !== "UNSUPPORTED" ? "READY" : "MISSING";
   }
 
   if (!material.binding) {

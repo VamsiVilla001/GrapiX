@@ -13,6 +13,9 @@
     "dev:desktop": "npm run dev -w @grapix/desktop-electron",
     "dev:web": "npm run dev -w @grapix/editor-web",
     "dev:api": "npm run dev -w @grapix/api-server",
+    "dev:daemon": "cargo run --manifest-path services/render-daemon/Cargo.toml",
+    "test:daemon": "cargo test --manifest-path services/render-daemon/Cargo.toml",
+    "test:materials": "npm test -w @grapix/shared-types && cargo test --manifest-path services/render-daemon/Cargo.toml --no-default-features",
     "start": "npm run start -w @grapix/desktop-electron",
     "build": "npm run build -w @grapix/shared-types && npm run build -w @grapix/api-server && npm run build -w @grapix/editor-web && npm run build -w @grapix/desktop-electron",
     "typecheck": "npm run typecheck -w @grapix/shared-types && npm run typecheck -w @grapix/api-server && npm run typecheck -w @grapix/editor-web && npm run typecheck -w @grapix/desktop-electron"

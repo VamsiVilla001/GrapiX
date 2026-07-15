@@ -1,4 +1,4 @@
-import type { BindingMap, SceneObject, SceneProperty } from "@grapix/shared-types";
+import { getMaterialBindingId, isMaterialCompatible, type BindingMap, type SceneObject, type SceneProperty } from "@grapix/shared-types";
 import { Eye, EyeOff, Lock, Unlock } from "lucide-react";
 import { useEditorStore } from "../store/editorStore";
 
@@ -77,8 +77,8 @@ export function Inspector() {
         <TextField label="Name" value={object.name} onChange={(value) => patch({ name: value })} />
         <SelectField
           label="Main Material"
-          value={object.materialSlots.main ?? ""}
-          options={["", ...scene.materials.map((material) => material.materialId)]}
+          value={getMaterialBindingId(object.materialSlots.main) ?? ""}
+          options={["", ...scene.materials.filter((material) => isMaterialCompatible(material, object.type)).map((material) => material.materialId)]}
           renderOption={(value) =>
             value ? scene.materials.find((material) => material.materialId === value)?.name ?? value : "None"
           }

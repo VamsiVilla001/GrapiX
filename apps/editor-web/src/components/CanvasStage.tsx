@@ -1,4 +1,4 @@
-import type { SceneObject } from "@grapix/shared-types";
+import { isMaterialCompatible, type SceneObject } from "@grapix/shared-types";
 import { useMemo, useState, type PointerEvent } from "react";
 import { GpuSceneStage } from "./GpuSceneStage";
 import type { GpuRendererCapabilities } from "../rendering/GpuSceneRenderer";
@@ -19,11 +19,13 @@ export function CanvasStage() {
   const selectedObjectId = useEditorStore((state) => state.selectedObjectId);
   const selectObject = useEditorStore((state) => state.selectObject);
   const updateObject = useEditorStore((state) => state.updateObject);
+  const assignMaterialSlot = useEditorStore((state) => state.assignMaterialSlot);
   const zoom = useUiStore((state) => state.zoom);
   const snapping = useUiStore((state) => state.snapping);
   const toggleSnapping = useUiStore((state) => state.toggleSnapping);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [capabilities, setCapabilities] = useState<GpuRendererCapabilities | null>(null);
+  const [materialDropTarget, setMaterialDropTarget] = useState<{ objectId: string; compatible: boolean } | null>(null);
   const displayObjects = useMemo(
     () => resolveRenderableObjects(scene),
     [scene]
@@ -63,6 +65,14 @@ export function CanvasStage() {
     });
   }
 
+  function materialAtPointer(clientX: number, clientY: number) {
+    const host = document.querySelector(".stage.gpu-stage")?.getBoundingClientRect();
+    if (!host) return null;
+    const x = ((clientX - host.left) / host.width) * scene.canvas.width;
+    const y = ((clientY - host.top) / host.height) * scene.canvas.height;
+    return [...displayObjects].reverse().find((object) => object.visible && x >= object.x && x <= object.x + object.width && y >= object.y && y <= object.y + object.height) ?? null;
+  }
+
   return (
     <main className="stage-shell">
       <div className="stage-toolbar">
@@ -82,6 +92,25 @@ export function CanvasStage() {
           style={{ transform: `scale(${zoom / 100})` }}
           role="application"
           aria-label={`${scene.name} GPU viewport`}
+          onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setMaterialDropTarget(null); }}
+          onDragOver={(event) => {
+            if (!event.dataTransfer.types.includes("application/x-grapix-material")) return;
+            event.preventDefault();
+            const materialId = event.dataTransfer.getData("application/x-grapix-material");
+            const material = scene.materials.find((item) => item.materialId === materialId);
+            const object = materialAtPointer(event.clientX, event.clientY);
+            const compatible = Boolean(material && object && isMaterialCompatible(material, object.type));
+            event.dataTransfer.dropEffect = compatible ? "copy" : "none";
+            setMaterialDropTarget(object ? { objectId: object.id, compatible } : null);
+          }}
+          onDrop={(event) => {
+            const materialId = event.dataTransfer.getData("application/x-grapix-material");
+            const instanceId = event.dataTransfer.getData("application/x-grapix-material-instance");
+            const target = materialDropTarget;
+            event.preventDefault();
+            setMaterialDropTarget(null);
+            if (materialId && target?.compatible) assignMaterialSlot(target.objectId, "main", instanceId ? { materialId, instanceId } : materialId);
+          }}
         >
           <GpuSceneStage scene={scene} objects={displayObjects} onCapabilities={setCapabilities} />
           <svg
@@ -114,6 +143,18 @@ export function CanvasStage() {
                     stroke="#f5b942"
                     strokeWidth="4"
                     strokeDasharray="16 10"
+                    pointerEvents="none"
+                  />
+                ) : null}
+                {materialDropTarget?.objectId === object.id ? (
+                  <rect
+                    x={-10}
+                    y={-10}
+                    width={object.width + 20}
+                    height={object.height + 20}
+                    fill={materialDropTarget.compatible ? "rgba(35, 199, 217, 0.14)" : "rgba(220, 76, 86, 0.18)"}
+                    stroke={materialDropTarget.compatible ? "#23c7d9" : "#dc4c56"}
+                    strokeWidth="6"
                     pointerEvents="none"
                   />
                 ) : null}

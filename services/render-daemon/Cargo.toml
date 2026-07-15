@@ -1,0 +1,33 @@
+[package]
+name = "grapix-render-daemon"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.87"
+description = "GrapiX broadcast render daemon: receives SceneDocument JSON over a local WebSocket, renders with wgpu, and outputs frames over NDI."
+publish = false
+
+[features]
+default = []
+# NDI output requires the NDI SDK 6.x installed locally (see README.md).
+# The daemon compiles and tests without it; the null output is always available.
+ndi = ["dep:grafton-ndi"]
+
+[dependencies]
+anyhow = "1"
+bytemuck = { version = "1", features = ["derive"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+getrandom = "0.3"
+glam = "0.29"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
+tokio-tungstenite = "0.26"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Pinned to a verified major. wgpu majors change APIs frequently; upgrade
+# deliberately together with the browser WebGPU renderer, not incidentally.
+wgpu = "26"
+
+# Compiled only with `--features ndi`; needs the NDI SDK + LLVM at build time.
+grafton-ndi = { version = "1.0", optional = true }

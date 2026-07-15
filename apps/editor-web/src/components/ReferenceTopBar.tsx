@@ -9,6 +9,7 @@ import {
   Settings,
   Undo2
 } from "lucide-react";
+import { useEffect } from "react";
 import { publishSavedSceneOnApi, saveSceneToApi } from "../lib/apiClient";
 import { useDockStore } from "../store/dockStore";
 import { useEditorStore } from "../store/editorStore";
@@ -20,6 +21,23 @@ export function ReferenceTopBar() {
   const zoom = useUiStore((state) => state.zoom);
   const setZoom = useUiStore((state) => state.setZoom);
   const resetDockLayout = useDockStore((state) => state.resetDockLayout);
+  const undo = useEditorStore((state) => state.undo);
+  const redo = useEditorStore((state) => state.redo);
+  const canUndo = useEditorStore((state) => state.undoStack.length > 0);
+  const canRedo = useEditorStore((state) => state.redoStack.length > 0);
+
+  useEffect(() => {
+    function handleHistoryShortcut(event: KeyboardEvent) {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "z") return;
+      const target = event.target as HTMLElement | null;
+      if (target?.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target?.tagName ?? "")) return;
+      event.preventDefault();
+      if (event.shiftKey) redo();
+      else undo();
+    }
+    window.addEventListener("keydown", handleHistoryShortcut);
+    return () => window.removeEventListener("keydown", handleHistoryShortcut);
+  }, [redo, undo]);
 
   async function saveScene() {
     try {
@@ -60,8 +78,8 @@ export function ReferenceTopBar() {
       </div>
 
       <div className="topbar-center">
-        <button className="topbar-icon" disabled title="Undo history coming later"><Undo2 size={17} /></button>
-        <button className="topbar-icon muted" disabled title="Redo history coming later"><Redo2 size={17} /></button>
+        <button className="topbar-icon" disabled={!canUndo} onClick={undo} title="Undo material action (Ctrl+Z)"><Undo2 size={17} /></button>
+        <button className="topbar-icon muted" disabled={!canRedo} onClick={redo} title="Redo material action (Ctrl+Shift+Z)"><Redo2 size={17} /></button>
         <span className="topbar-divider" />
         <select className="zoom-control" value={zoom} onChange={(event) => setZoom(Number(event.target.value))}>
           <option value={50}>50%</option>

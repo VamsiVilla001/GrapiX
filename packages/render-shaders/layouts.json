@@ -1,0 +1,41 @@
+{
+  "contractVersion": 1,
+  "shaders": {
+    "composite_quad": {
+      "file": "wgsl/composite_quad.wgsl",
+      "entryPoints": {
+        "vertex": "vs_main",
+        "fragment": "fs_main"
+      },
+      "vertexInput": {
+        "mode": "generated",
+        "note": "Unit quad produced from @builtin(vertex_index); no vertex buffer, draw 6 vertices as a triangle list."
+      },
+      "uniforms": {
+        "QuadUniforms": {
+          "group": 0,
+          "binding": 0,
+          "sizeBytes": 96,
+          "alignBytes": 16,
+          "fields": [
+            { "name": "transform", "type": "mat4x4<f32>", "offsetBytes": 0, "sizeBytes": 64, "matrixOrder": "column-major" },
+            { "name": "fill_color", "type": "vec4<f32>", "offsetBytes": 64, "sizeBytes": 16 },
+            { "name": "params", "type": "vec4<f32>", "offsetBytes": 80, "sizeBytes": 16 }
+          ]
+        }
+      }
+    }
+  },
+  "blendModes": [
+    { "id": 0, "name": "normal", "implemented": true, "blend": "src * ONE + dst * ONE_MINUS_SRC_ALPHA (premultiplied source-over), same equation for color and alpha" },
+    { "id": 1, "name": "multiply", "implemented": false },
+    { "id": 2, "name": "screen", "implemented": false },
+    { "id": 3, "name": "add", "implemented": true, "blend": "src * ONE + dst * ONE for color and alpha; source is premultiplied before blending" }
+  ],
+  "colorPipeline": {
+    "alphaMode": "premultiplied",
+    "shaderColorSpace": "linear-light",
+    "renderTargetFormats": ["bgra8unorm-srgb"],
+    "note": "Scene colors are CSS sRGB hex strings. CPU side converts sRGB -> linear and premultiplies by alpha before writing uniforms. The *-srgb render target re-encodes on store, so readback bytes are sRGB-encoded."
+  }
+}

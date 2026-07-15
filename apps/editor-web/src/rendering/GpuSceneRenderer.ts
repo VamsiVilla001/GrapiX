@@ -9,7 +9,7 @@ import {
   type TextureSourceLike
 } from "pixi.js";
 import type { SceneDocument, SceneObject } from "@grapix/shared-types";
-import { isVideoSource } from "./sceneMaterial";
+import { isVideoSource, type RenderableSceneObject } from "./sceneMaterial";
 
 export interface GpuRendererCapabilities {
   backend: "webgl" | "webgpu" | "unknown";
@@ -52,7 +52,7 @@ export class GpuSceneRenderer {
     this.app.renderer.resize(scene.canvas.width, scene.canvas.height);
   }
 
-  async renderScene(scene: SceneDocument, objects: SceneObject[]): Promise<void> {
+  async renderScene(scene: SceneDocument, objects: RenderableSceneObject[]): Promise<void> {
     if (!this.initialized) {
       return;
     }
@@ -63,6 +63,14 @@ export class GpuSceneRenderer {
     nextRoot.addChild(drawBackground(scene));
 
     for (const object of objects) {
+      if (object.resolvedMaterial && (
+        object.resolvedMaterial.material.enabled === false
+        || !["normal", "add"].includes(object.resolvedMaterial.blendMode)
+        || !["opaque", "straight", "premultiplied"].includes(object.resolvedMaterial.alphaMode)
+        || object.resolvedMaterial.textureSlots.some((slot) => slot.wrap !== "clamp" || slot.filtering !== "linear" || ["tile", "nine-slice"].includes(slot.fit))
+      )) {
+        continue;
+      }
       const displayObject = await this.createDisplayObject(object);
 
       if (version !== this.renderVersion) {
@@ -75,6 +83,7 @@ export class GpuSceneRenderer {
       displayObject.rotation = degreesToRadians(object.rotation);
       displayObject.alpha = object.opacity;
       displayObject.visible = object.visible;
+      displayObject.blendMode = object.resolvedMaterial?.blendMode === "add" ? "add" : "normal";
 
       nextRoot.addChild(displayObject);
     }
@@ -121,10 +130,10 @@ export class GpuSceneRenderer {
     }
   }
 
-  private async createDisplayObject(object: SceneObject): Promise<Container | Graphics | Text> {
+  private async createDisplayObject(object: RenderableSceneObject): Promise<Container | Graphics | Text> {
     switch (object.type) {
       case "rect":
-        return drawRect(object);
+        return object.materialAssetSource ? this.drawTexturedQuad(object) : drawRect(object);
       case "ellipse":
         return drawEllipse(object);
       case "text":
@@ -148,27 +157,15 @@ export class GpuSceneRenderer {
     }
   }
 
-  private async drawImageObject(object: Extract<SceneObject, { type: "image" }>): Promise<Container> {
+  private async drawImageObject(object: Extract<RenderableSceneObject, { type: "image" }>): Promise<Container> {
     const container = new Container();
     const texture = await this.getTexture(object.src);
     const sprite = new Sprite(texture);
     const naturalWidth = Math.max(1, texture.width || object.width);
     const naturalHeight = Math.max(1, texture.height || object.height);
-    const scale = object.objectFit === "contain"
-      ? Math.min(object.width / naturalWidth, object.height / naturalHeight)
-      : object.objectFit === "cover"
-        ? Math.max(object.width / naturalWidth, object.height / naturalHeight)
-        : 1;
-
-    if (object.objectFit === "stretch") {
-      sprite.width = object.width;
-      sprite.height = object.height;
-    } else {
-      sprite.width = naturalWidth * scale;
-      sprite.height = naturalHeight * scale;
-      sprite.x = (object.width - sprite.width) / 2;
-      sprite.y = (object.height - sprite.height) / 2;
-    }
+    const materialFit = object.resolvedMaterial?.textureSlots[0]?.fit;
+    sizeTextureSprite(sprite, naturalWidth, naturalHeight, object.width, object.height, materialFit ?? object.objectFit);
+    applyTextureMaterial(sprite, object);
 
     const mask = new Graphics().rect(0, 0, object.width, object.height).fill("#ffffff");
     container.addChild(sprite, mask);
@@ -184,6 +181,31 @@ export class GpuSceneRenderer {
     return container;
   }
 
+  private async drawTexturedQuad(object: Extract<RenderableSceneObject, { type: "rect" }>): Promise<Container> {
+    const container = new Container();
+    const texture = await this.getTexture(object.materialAssetSource!);
+    const sprite = new Sprite(texture);
+    sizeTextureSprite(
+      sprite,
+      Math.max(1, texture.width || object.width),
+      Math.max(1, texture.height || object.height),
+      object.width,
+      object.height,
+      object.resolvedMaterial?.textureSlots[0]?.fit ?? "fill"
+    );
+    applyTextureMaterial(sprite, object);
+    const mask = new Graphics().roundRect(0, 0, object.width, object.height, object.radius).fill("#ffffff");
+    container.addChild(sprite, mask);
+    container.mask = mask;
+    if (object.strokeWidth > 0 && object.stroke !== "transparent") {
+      container.addChild(new Graphics().roundRect(0, 0, object.width, object.height, object.radius).stroke({
+        color: object.stroke,
+        width: object.strokeWidth
+      }));
+    }
+    return container;
+  }
+
   private async getTexture(source: string): Promise<Texture> {
     if (this.textureCache.has(source)) {
       return this.textureCache.get(source)!;
@@ -191,7 +213,7 @@ export class GpuSceneRenderer {
 
     const texturePromise = isVideoSource(source)
       ? Promise.resolve(this.createVideoTexture(source))
-      : Assets.load<Texture>(source);
+      : Assets.load<Texture>(source).catch(() => Texture.EMPTY);
 
     this.textureCache.set(source, texturePromise);
 
@@ -497,6 +519,52 @@ function drawText(object: Extract<SceneObject, { type: "text" }>): Text {
   }
 
   return text;
+}
+
+function applyTextureMaterial(sprite: Sprite, object: RenderableSceneObject): void {
+  const parameters = object.resolvedMaterial?.parameters;
+  const tint = parameters?.tint;
+  const uvScale = parameters?.uvScale;
+  const uvOffset = parameters?.uvOffset;
+  if (typeof tint === "string") {
+    sprite.tint = tint;
+  }
+
+  if (Array.isArray(uvScale) && uvScale.length >= 2) {
+    const scaleX = Math.max(0.001, Math.abs(Number(uvScale[0]) || 1));
+    const scaleY = Math.max(0.001, Math.abs(Number(uvScale[1]) || 1));
+    sprite.width /= scaleX;
+    sprite.height /= scaleY;
+  }
+
+  if (Array.isArray(uvOffset) && uvOffset.length >= 2) {
+    sprite.x -= (Number(uvOffset[0]) || 0) * object.width;
+    sprite.y -= (Number(uvOffset[1]) || 0) * object.height;
+  }
+}
+
+function sizeTextureSprite(
+  sprite: Sprite,
+  naturalWidth: number,
+  naturalHeight: number,
+  targetWidth: number,
+  targetHeight: number,
+  fit: string
+): void {
+  if (fit === "stretch") {
+    sprite.width = targetWidth;
+    sprite.height = targetHeight;
+    return;
+  }
+  const scale = fit === "fit" || fit === "contain"
+    ? Math.min(targetWidth / naturalWidth, targetHeight / naturalHeight)
+    : fit === "fill" || fit === "crop" || fit === "cover"
+      ? Math.max(targetWidth / naturalWidth, targetHeight / naturalHeight)
+      : 1;
+  sprite.width = naturalWidth * scale;
+  sprite.height = naturalHeight * scale;
+  sprite.x = (targetWidth - sprite.width) / 2;
+  sprite.y = (targetHeight - sprite.height) / 2;
 }
 
 function adjustHex(color: string, amount: number): string {

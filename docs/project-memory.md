@@ -71,6 +71,24 @@ The product should feel web-like for designers and operators, while the renderer
 
 ## Build Log
 
+### 2026-07-15
+
+- Scaffolded the native render daemon at `services/render-daemon`: Rust + wgpu headless renderer with a versioned WebSocket protocol (`scene.load`/`scene.update` as full `SceneDocument` replacement, `output.configure`/`start`/`stop`, `status`), rational frame rates (59.94 = 60000/1001), and explicit validation errors for unsupported broadcast modes (interlaced, straight alpha).
+- v1 renders solid-color rects over the canvas background in editor render order; every unsupported object type is reported as a warning, never silently dropped.
+- Created `packages/render-shaders`: shared WGSL shaders, machine-readable uniform layouts (`layouts.json`), blend-mode ids, and the colour/alpha/transform contract, to be consumed by both the daemon and the future browser WebGPU preview so preview and program output cannot drift.
+- Added a TypeScript↔Rust scene contract: fixture typed against `SceneDocument` in `packages/shared-types/src/fixtures.ts`, emitted to JSON via `npm run fixtures:emit`, parsed by daemon tests; plus a byte-layout contract test against `layouts.json`.
+- NDI output implemented behind a Cargo `ndi` feature via grafton-ndi (needs local NDI SDK; untested here); null output backend runs everywhere. Output abstraction is a `VideoOutput` trait so the renderer is not coupled to one NDI crate.
+- `services/api-server` gained optional `/api/render-daemon/*` bridge routes (503 when the daemon is down) using Node 22's built-in WebSocket client; daemon remains fully optional.
+- Hardened the bridge with a generated per-install authentication token, WebSocket Origin checks, server-side API Origin enforcement, bounded 1–240 fps validation, and interruptible frame waits for prompt stop/shutdown.
+- MCP/Figma/Adobe integration explicitly deferred and ordered in `docs/render-daemon-architecture.md` (GrapiX's own MCP server first, then Figma Dev Mode MCP, then Adobe Firefly Services MCP; imported assets must flow through the normal asset/render pipeline).
+
+### 2026-07-14
+
+- Began the next editor-workspace architecture step with real dock tab stacks.
+- Dock layout persistence moved from a flat panel list to stack-aware layout storage with automatic migration from the previous `grapix-dock-layout-v1` format.
+- Default docking now groups Templates and Object Library into a left browser stack, keeps Scene Manager as its own left stack, and preserves Properties and Timeline in their primary work zones.
+- Dock panels now expose active tabs, tab switching, drag-to-stack behavior, and active-panel movement between left, right, and bottom dock areas.
+
 ### 2026-07-05
 
 - Shifted the app into the XPression/After Effects style editor direction: the viewport is the fixed center anchor, while surrounding modules can be resized and docked.
