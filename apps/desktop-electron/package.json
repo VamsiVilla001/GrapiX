@@ -12,7 +12,7 @@
     "build:workspace": "npm run build -w @grapix/shared-types && npm run build -w @grapix/api-server && npm run build -w @grapix/editor-web && npm run build -w @grapix/desktop-electron"
   },
   "dependencies": {
-    "electron": "^31.7.7"
+    "electron": "^43.1.1"
   },
   "devDependencies": {
     "@types/node": "^22.5.0",
