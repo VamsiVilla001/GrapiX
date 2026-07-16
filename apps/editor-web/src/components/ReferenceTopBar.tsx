@@ -1,14 +1,4 @@
-import {
-  ChevronDown,
-  HelpCircle,
-  Menu,
-  MessageSquare,
-  Redo2,
-  RotateCcw,
-  Search,
-  Settings,
-  Undo2
-} from "lucide-react";
+import { ChevronDown, Redo2, RotateCcw, Undo2 } from "lucide-react";
 import { useEffect } from "react";
 import { publishSavedSceneOnApi, saveSceneToApi } from "../lib/apiClient";
 import { useDockStore } from "../store/dockStore";
@@ -62,26 +52,15 @@ export function ReferenceTopBar() {
   return (
     <header className="reference-topbar">
       <div className="topbar-left">
-        <button className="topbar-icon" disabled title="Main menu coming later"><Menu size={20} /></button>
         <div className="product-stack-mark" aria-hidden="true" />
         <strong>Live Graphics Editor</strong>
-        <span className="topbar-divider" />
-        <button className="project-selector" disabled title="Project switcher coming later">
-          Sports Package v3
-          <ChevronDown size={15} />
-        </button>
-        <span className="scene-dot" />
-        <button className="project-selector" disabled title="Scene switcher coming later">
-          {scene.name}
-          <ChevronDown size={15} />
-        </button>
       </div>
 
       <div className="topbar-center">
-        <button className="topbar-icon" disabled={!canUndo} onClick={undo} title="Undo material action (Ctrl+Z)"><Undo2 size={17} /></button>
-        <button className="topbar-icon muted" disabled={!canRedo} onClick={redo} title="Redo material action (Ctrl+Shift+Z)"><Redo2 size={17} /></button>
+        <button className="topbar-icon" disabled={!canUndo} onClick={undo} title="Undo (Ctrl+Z)"><Undo2 size={15} /></button>
+        <button className="topbar-icon" disabled={!canRedo} onClick={redo} title="Redo (Ctrl+Shift+Z)"><Redo2 size={15} /></button>
         <span className="topbar-divider" />
-        <select className="zoom-control" value={zoom} onChange={(event) => setZoom(Number(event.target.value))}>
+        <select className="zoom-control" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} title="Viewport zoom">
           <option value={50}>50%</option>
           <option value={75}>75%</option>
           <option value={100}>100%</option>
@@ -89,17 +68,13 @@ export function ReferenceTopBar() {
           <option value={150}>150%</option>
         </select>
         <button className="topbar-icon" onClick={resetDockLayout} title="Reset docks">
-          <RotateCcw size={17} />
+          <RotateCcw size={15} />
         </button>
-        <button className="topbar-icon" disabled title="Search coming later"><Search size={17} /></button>
       </div>
 
       <div className="topbar-right">
-        <button className="topbar-icon" disabled title="Comments coming later"><MessageSquare size={17} /></button>
-        <button className="topbar-icon" disabled title="Help coming later"><HelpCircle size={17} /></button>
-        <button className="topbar-icon" disabled title="Settings coming later"><Settings size={17} /></button>
         <button className="save-button" onClick={() => void saveScene()}>Save</button>
-        <button className="publish-button" onClick={() => void publishScene()}>Publish <ChevronDown size={14} /></button>
+        <button className="publish-button" onClick={() => void publishScene()}>Publish <ChevronDown size={13} /></button>
       </div>
     </header>
   );
