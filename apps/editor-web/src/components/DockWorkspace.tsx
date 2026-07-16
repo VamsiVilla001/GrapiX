@@ -160,8 +160,10 @@ function titleForPanel(panelId: DockPanelId): string {
       return "Templates";
     case "object-library":
       return "Object Library";
+    // Panel id stays "scene-manager" so persisted dock layouts keep working;
+    // the user-facing name is Scene Inspector.
     case "scene-manager":
-      return "Scene Manager";
+      return "Scene Inspector";
     case "properties":
       return "Properties";
     case "material-manager":

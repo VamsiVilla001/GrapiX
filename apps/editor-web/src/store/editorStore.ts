@@ -110,6 +110,12 @@ export interface EditorState {
   deleteMaterialInstance: (instanceId: string) => boolean;
   updateMaterialInstance: (instanceId: string, patch: Partial<MaterialInstance>) => void;
   setMaterialInstanceParameter: (instanceId: string, name: string, value: MaterialParameterValue | undefined) => void;
+  moveObjectToLayer: (objectId: string, layerId: string) => void;
+  createLayerForObject: (objectId: string) => string | null;
+  renameLayer: (layerId: string, nextLayerId: string) => void;
+  deleteLayer: (layerId: string) => void;
+  setLayerVisibility: (layerId: string, visible: boolean) => void;
+  setLayerLocked: (layerId: string, locked: boolean) => void;
   beginHistory: (label: string) => void;
   commitHistory: () => void;
   undo: () => void;
@@ -507,6 +513,115 @@ export const useEditorStore = create<EditorState>((set, get) => {
           else parameterOverrides[name] = value;
           return { ...instance, parameterOverrides, updatedAt: new Date().toISOString() };
         })
+      });
+    },
+    moveObjectToLayer: (objectId, layerId) => {
+      const targetLayer = normalizeLayerId(layerId);
+      const { scene } = get();
+      const target = scene.objects.find((object) => object.id === objectId);
+
+      if (!targetLayer || !target || target.layerId === targetLayer) {
+        return;
+      }
+
+      commitScene({
+        ...scene,
+        objects: normalizeObjectStack(
+          scene.objects.map((object) =>
+            object.id === objectId ? ({ ...object, layerId: targetLayer } as SceneObject) : object
+          )
+        )
+      });
+    },
+    createLayerForObject: (objectId) => {
+      const { scene } = get();
+      const target = scene.objects.find((object) => object.id === objectId);
+
+      if (!target) {
+        return null;
+      }
+
+      const existing = new Set(scene.objects.map((object) => object.layerId || "main"));
+      let index = existing.size + 1;
+      let layerId = `layer-${index}`;
+
+      while (existing.has(layerId)) {
+        index += 1;
+        layerId = `layer-${index}`;
+      }
+
+      commitScene({
+        ...scene,
+        objects: normalizeObjectStack(
+          scene.objects.map((object) =>
+            object.id === objectId ? ({ ...object, layerId } as SceneObject) : object
+          )
+        )
+      });
+
+      return layerId;
+    },
+    renameLayer: (layerId, nextLayerId) => {
+      const targetLayer = normalizeLayerId(nextLayerId);
+      const { scene } = get();
+
+      if (!targetLayer || targetLayer === layerId || !scene.objects.some((object) => object.layerId === layerId)) {
+        return;
+      }
+
+      commitScene({
+        ...scene,
+        objects: normalizeObjectStack(
+          scene.objects.map((object) =>
+            object.layerId === layerId ? ({ ...object, layerId: targetLayer } as SceneObject) : object
+          )
+        )
+      });
+    },
+    deleteLayer: (layerId) => {
+      const { scene } = get();
+
+      // Deleting a layer keeps its objects: they move back to Main. Deleting
+      // objects is a separate, explicit action.
+      if (layerId === "main" || !scene.objects.some((object) => object.layerId === layerId)) {
+        return;
+      }
+
+      commitScene({
+        ...scene,
+        objects: normalizeObjectStack(
+          scene.objects.map((object) =>
+            object.layerId === layerId ? ({ ...object, layerId: "main" } as SceneObject) : object
+          )
+        )
+      });
+    },
+    setLayerVisibility: (layerId, visible) => {
+      const { scene } = get();
+
+      if (!scene.objects.some((object) => object.layerId === layerId)) {
+        return;
+      }
+
+      commitScene({
+        ...scene,
+        objects: scene.objects.map((object) =>
+          object.layerId === layerId ? ({ ...object, visible } as SceneObject) : object
+        )
+      });
+    },
+    setLayerLocked: (layerId, locked) => {
+      const { scene } = get();
+
+      if (!scene.objects.some((object) => object.layerId === layerId)) {
+        return;
+      }
+
+      commitScene({
+        ...scene,
+        objects: scene.objects.map((object) =>
+          object.layerId === layerId ? ({ ...object, locked } as SceneObject) : object
+        )
       });
     },
     beginHistory: (label) => {
@@ -1145,6 +1260,15 @@ function touchScene(scene: SceneDocument): SceneDocument {
     ...scene,
     updatedAt: new Date().toISOString()
   };
+}
+
+/** Layers are identified by kebab-case slugs on objects ("main", "layer-2"). */
+function normalizeLayerId(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function moveObjectInStack(

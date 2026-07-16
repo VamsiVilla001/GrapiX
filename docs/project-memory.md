@@ -71,6 +71,19 @@ The product should feel web-like for designers and operators, while the renderer
 
 ## Build Log
 
+### 2026-07-16
+
+- Fixed three GPU viewport faults, diagnosed live against the packaged Electron app over the DevTools protocol:
+  - Blank viewport (pre-existing on main): Pixi v8's `removeChildren()` returns children in reverse order, so the per-frame reparent re-added the full-canvas background quad last and painted it over every scene object. Reparent now preserves draw order.
+  - Canvas overflow (pre-existing on main): Pixi's `autoDensity` writes inline `style.width/height` equal to the logical canvas size, beating the fitted stylesheet rule; only the scene's empty top-left corner was visible while the SVG interaction overlay scaled correctly. The renderer now re-asserts 100% sizing after mount/resize.
+  - Undo crash (introduced with material previews): destroying a per-panel renderer with `app.destroy(true, ...)` released Pixi's global resource registry, clearing the shared `TexturePool` under the main viewport; its next Text destroy crashed in `returnTexture`. Per-panel renderers now destroy with `{ removeView: true }` only.
+  - Also: the renderer error banner clears on the next successful render instead of poisoning the viewport until reload, and live renderers register on `window.__grapixRenderers` for debugging packaged builds.
+- Verified after the fixes: the Lower Third Starter scene renders on screen with dynamic material bindings resolving (accent bar shows the bound team colour `#ffcc00`, name text the bound `#23c7d9`, bound SOUL logo and score) and stage-extract pixel samples matching expected values exactly; the create-material→undo repro leaves no error and identical pixels.
+- Slimmed the top bar (34px, was 56px): removed the seven disabled placeholder buttons (menu, project/scene switchers, search, comments, help, settings), kept brand, working undo/redo, zoom, reset docks, Save, and Publish. The Ctrl+Z/Ctrl+Shift+Z handler stays in the top bar component.
+- Renamed Scene Manager to **Scene Inspector** (dock panel id stays `scene-manager` so persisted layouts keep working). The panel header now shows the opened template (`Template 001: <name>`) and falls back to the scene name.
+- Added layer management to the Scene Inspector, all history-integrated (undoable): move object to layer (per-row dropdown with `+ New layer`), move selected object to a new auto-named layer, inline layer rename (Electron has no `window.prompt`), delete layer (objects return to Main), and layer-level show/hide + lock/unlock for all objects in a layer. Layers remain implicit kebab-case slugs on objects; no schema change.
+- Branch `feat/material-manager-and-render-daemon` carries this work; PR body prepared, opened manually (no `gh` CLI on this machine).
+
 ### 2026-07-15
 
 - Scaffolded the native render daemon at `services/render-daemon`: Rust + wgpu headless renderer with a versioned WebSocket protocol (`scene.load`/`scene.update` as full `SceneDocument` replacement, `output.configure`/`start`/`stop`, `status`), rational frame rates (59.94 = 60000/1001), and explicit validation errors for unsupported broadcast modes (interlaced, straight alpha).
@@ -81,6 +94,8 @@ The product should feel web-like for designers and operators, while the renderer
 - `services/api-server` gained optional `/api/render-daemon/*` bridge routes (503 when the daemon is down) using Node 22's built-in WebSocket client; daemon remains fully optional.
 - Hardened the bridge with a generated per-install authentication token, WebSocket Origin checks, server-side API Origin enforcement, bounded 1–240 fps validation, and interruptible frame waits for prompt stop/shutdown.
 - MCP/Figma/Adobe integration explicitly deferred and ordered in `docs/render-daemon-architecture.md` (GrapiX's own MCP server first, then Figma Dev Mode MCP, then Adobe Firefly Services MCP; imported assets must flow through the normal asset/render pipeline).
+- Landed the Material Manager v1 (`apps/editor-web/src/modules/material-manager`): dockable panel with search/filter/grid+list library, image and WGSL import with content-hashed external storage under `data/assets` (no binaries in scene JSON), solid/textured materials with opacity, tint, UV scale/offset and Normal/Add blending, shared materials plus one-level instances with parameter overrides, compatibility-checked assignment (canvas drop, scene tree, inspector), Find Usage with deletion protection, missing-asset badges with undo-safe relinking, and scene-history undo/redo. Unsupported source types (video, sequences, live inputs, fonts, render textures) are visibly marked planned/disabled. Docs in `docs/material-system.md`; sample at `samples/material-manager-v1.scene.json`.
+- Dependency security refresh in its own commit (npm audit: 8 advisories, all requiring majors): Electron 31→43, Vite 5→8 (+plugin-react 6), Fastify 4→5 (+cors 11), Node engine ≥22.12. Zero vulnerabilities after; build, Electron launch, and API serving verified.
 
 ### 2026-07-14
 

@@ -5,7 +5,7 @@ import { DockArea } from "./components/DockWorkspace";
 import { ObjectLibrary } from "./components/ObjectLibrary";
 import { PropertiesSidebar } from "./components/PropertiesSidebar";
 import { ReferenceTopBar } from "./components/ReferenceTopBar";
-import { SceneManager } from "./components/SceneManager";
+import { SceneInspector } from "./components/SceneInspector";
 import { StatusBar } from "./components/StatusBar";
 import { TemplatesPanel } from "./components/TemplatesPanel";
 import { TimelinePanel } from "./components/TimelinePanel";
@@ -75,7 +75,7 @@ function renderDockPanel(panelId: DockPanelId) {
     case "object-library":
       return <ObjectLibrary />;
     case "scene-manager":
-      return <SceneManager />;
+      return <SceneInspector />;
     case "properties":
       return <PropertiesSidebar />;
     case "material-manager":

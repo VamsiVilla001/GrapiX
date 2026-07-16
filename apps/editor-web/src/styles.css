@@ -448,6 +448,29 @@
   font-weight: 800;
 }
 
+.scene-layer-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.scene-layer-controls > span {
+  margin-right: 4px;
+  color: #8fa2b8;
+  font-weight: 600;
+}
+
+.layer-rename-input {
+  width: 130px;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid #2c3947;
+  border-radius: 4px;
+  color: #dbe6f5;
+  background: #0d131b;
+  font-size: 12px;
+}
+
 .scene-layer-label {
   display: flex;
   align-items: center;
