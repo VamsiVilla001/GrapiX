@@ -41,6 +41,7 @@ export class GpuSceneRenderer {
     this.app.stage.addChild(this.root);
     this.app.canvas.className = "gpu-render-canvas";
     host.replaceChildren(this.app.canvas);
+    this.fitCanvasToHost();
     this.initialized = true;
   }
 
@@ -50,6 +51,20 @@ export class GpuSceneRenderer {
     }
 
     this.app.renderer.resize(scene.canvas.width, scene.canvas.height);
+    this.fitCanvasToHost();
+  }
+
+  /**
+   * Pixi's autoDensity writes inline style.width/height equal to the logical
+   * canvas size (e.g. 1920px) on every resize. Inline styles beat the
+   * .gpu-render-canvas { width: 100% } stylesheet rule, so the canvas
+   * overflowed its fitted stage container and only the scene's empty
+   * top-left corner was visible on screen. Re-assert the fitted size after
+   * every mount/resize; the backing store keeps the full scene resolution.
+   */
+  private fitCanvasToHost(): void {
+    this.app.canvas.style.width = "100%";
+    this.app.canvas.style.height = "100%";
   }
 
   async renderScene(scene: SceneDocument, objects: RenderableSceneObject[]): Promise<void> {
@@ -90,7 +105,11 @@ export class GpuSceneRenderer {
 
     destroyContainer(this.root);
     this.root.removeChildren();
-    this.root.addChild(...nextRoot.removeChildren());
+    // Reparent in draw order. Do NOT spread removeChildren() here: Pixi v8
+    // returns removed children in REVERSE order, which re-added the
+    // full-canvas background quad last — painting it over every scene
+    // object and blanking the viewport.
+    this.root.addChild(...nextRoot.children.slice());
   }
 
   getCapabilities(): GpuRendererCapabilities {
@@ -125,7 +144,13 @@ export class GpuSceneRenderer {
     this.textureCache.clear();
 
     if (this.initialized) {
-      this.app.destroy(true, { children: true });
+      // Never pass `true` here: renderer.destroy(true) releases Pixi's
+      // GLOBAL resource registry, clearing the shared TexturePool while
+      // other GpuSceneRenderer instances (main viewport + material
+      // previews) still hold checked-out textures. Their next Text destroy
+      // would then crash in TexturePool.returnTexture with
+      // "Cannot read properties of undefined (reading 'push')".
+      this.app.destroy({ removeView: true }, { children: true });
       this.initialized = false;
     }
   }
