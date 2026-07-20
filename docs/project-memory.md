@@ -71,6 +71,14 @@ The product should feel web-like for designers and operators, while the renderer
 
 ## Build Log
 
+### 2026-07-18
+
+- Added the XPression-style **Texture Coordinates** feature to the Material Manager: UV offset, UV scale, and UV rotation transform the texture; address mode (clamp/repeat/mirror-repeat) and filtering (linear/nearest) are real GPU sampler settings. The editor renders non-identity UV transforms through a Pixi `TilingSprite` (purpose-built for UV transforms + wrap); the default identity path keeps the plain sprite + fit-mode sizing so existing image rendering is untouched.
+- Enabled the previously-disabled Wrap (repeat/mirror) and Filtering (nearest) inspector options; added a dedicated "Texture coordinates" panel (Offset X/Y, Scale X/Y, Rotation) editing `material.parameters` (where the renderer reads UV), and removed the duplicate uvScale/uvOffset entries from the generic parameter list. Relaxed the editor render guard and the shared-types resolver warnings so wrap/filtering no longer warn (only tile/nine-slice fit remain unimplemented).
+- Verified in the packaged Electron app by extracting the preview renderer to PNG: UV scale 3 + repeat wrap renders an exact 3×3 tile grid; UV rotation 30° rotates the tiled pattern; no error banner. (Note: the imported `frame.png` couldn't override the Home Team Logo material's texture because that material is dynamic/data-bound — correct behaviour — so tiling was verified on the bound SOUL logo instead.)
+- Committed the two provided sample assets (`materials/frame.png`, `materials/Mask.png`) with a README as import test fixtures (user-approved).
+- Sampler settings are per-asset in the editor today (texture source shared by URL); true per-material samplers need a WebGPU bind group and are tracked with the daemon texture work. Tests: shared-types 13 pass (added a repeat/nearest-no-warning + tile-fit-still-warns test); editor typecheck+build clean.
+
 ### 2026-07-17
 
 - Implemented six blend modes natively in **both** renderers as fixed-function GPU blending, using Adobe's standard blend-mode math where fixed-function-expressible: normal, add, multiply, screen, darken, lighten. `IMPLEMENTED_BLEND_MODES` in `@grapix/shared-types` is the single source of truth (inspector dropdown, editor render guard, and resolver warning all read it). The editor maps ids to PixiJS blend modes (darken→min, lighten→max); the daemon builds one cached wgpu pipeline per blend id via `blend_state_for_id`, mirroring PixiJS's premultiplied blend equations so preview and program output match. Per-mode colour/alpha equations recorded in `packages/render-shaders/layouts.json` (ids 0–5) and `shader-contract.md`.

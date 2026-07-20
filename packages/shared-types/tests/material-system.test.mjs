@@ -56,6 +56,31 @@ test("stable assignment resolves one shared material for every primitive and ref
   assert.equal(resolvePrimitiveMaterial(updated, updated.objects[1]).parameters.baseColor, "#00ff00");
 });
 
+test("repeat wrap and nearest filtering resolve without a warning; tile fit still warns", () => {
+  const material = createMaterialDefinition("Frame", "image", "asset_frame");
+  material.textureSlots = [{
+    name: "baseTexture", assetId: "asset_frame", fit: "fill", wrap: "repeat", filtering: "nearest",
+    uvScale: [3, 3], uvOffset: [0, 0], uvRotation: 30, uvPivot: [0.5, 0.5]
+  }];
+  const object = rect("frame_rect", material.materialId);
+  const doc = scene([material], [object], {
+    assets: [{ assetId: "asset_frame", name: "frame.png", kind: "image", source: "frame.png", status: "READY", importedAt: timestamp }]
+  });
+  const resolved = resolvePrimitiveMaterial(doc, object);
+
+  // wrap=repeat and filtering=nearest are supported by the editor sampler +
+  // TilingSprite path, so they must NOT produce a warning.
+  assert.ok(!resolved.warnings.some((w) => /wrap mode/i.test(w)), `unexpected wrap warning: ${resolved.warnings}`);
+  assert.ok(!resolved.warnings.some((w) => /filtering mode/i.test(w)), `unexpected filtering warning: ${resolved.warnings}`);
+
+  // tile / nine-slice fit remain unimplemented and must still warn.
+  material.textureSlots[0].fit = "tile";
+  const tiled = resolvePrimitiveMaterial(scene([material], [object], {
+    assets: [{ assetId: "asset_frame", name: "frame.png", kind: "image", source: "frame.png", status: "READY", importedAt: timestamp }]
+  }), object);
+  assert.ok(tiled.warnings.some((w) => /fit mode tile/i.test(w)), `expected tile-fit warning: ${tiled.warnings}`);
+});
+
 test("one-level material instance overrides only selected parameters", () => {
   const material = createMaterialDefinition("Team", "solid-color");
   material.parameters = { baseColor: "#ffffff", opacity: 0.8 };

@@ -3263,6 +3263,19 @@ h3 {
 .material-inspector input:disabled,
 .material-inspector select:disabled { opacity: 0.5; }
 
+.material-inspector .uv-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.material-inspector .uv-hint {
+  margin: 4px 0 0;
+  color: #8fa2b8;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .material-inspector fieldset {
   margin: 7px;
   padding: 3px 0 7px;

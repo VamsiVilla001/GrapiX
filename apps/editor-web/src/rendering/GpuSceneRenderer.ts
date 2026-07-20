@@ -6,15 +6,77 @@ import {
   Sprite,
   Text,
   Texture,
-  type TextureSourceLike
+  TilingSprite,
+  type TextureSourceLike,
+  type WRAP_MODE
 } from "pixi.js";
 import {
   IMPLEMENTED_BLEND_MODES,
   type MaterialBlendMode,
+  type MaterialTextureSlot,
   type SceneDocument,
   type SceneObject
 } from "@grapix/shared-types";
 import { isVideoSource, type RenderableSceneObject } from "./sceneMaterial";
+
+/** GrapiX texture wrap mode -> Pixi WebGPU/WebGL address mode. */
+function pixiWrapMode(wrap: MaterialTextureSlot["wrap"] | undefined): WRAP_MODE {
+  switch (wrap) {
+    case "repeat":
+      return "repeat";
+    case "mirror-repeat":
+      return "mirror-repeat";
+    default:
+      return "clamp-to-edge";
+  }
+}
+
+interface UvTransform {
+  scale: [number, number];
+  offset: [number, number];
+  rotationDegrees: number;
+}
+
+/** Read the UV transform the renderer honours from resolved material parameters. */
+function readUvTransform(parameters: Record<string, unknown> | undefined): UvTransform {
+  const scale = parameters?.uvScale;
+  const offset = parameters?.uvOffset;
+  const rotation = parameters?.uvRotation;
+  const pair = (value: unknown, fallback: [number, number]): [number, number] =>
+    Array.isArray(value) && value.length >= 2 ? [Number(value[0]) || 0, Number(value[1]) || 0] : fallback;
+
+  return {
+    scale: pair(scale, [1, 1]),
+    offset: pair(offset, [0, 0]),
+    rotationDegrees: typeof rotation === "number" ? rotation : 0
+  };
+}
+
+/** A UV transform needs the tiling path only when it differs from identity. */
+function uvTransformActive(uv: UvTransform): boolean {
+  return (
+    uv.scale[0] !== 1 ||
+    uv.scale[1] !== 1 ||
+    uv.offset[0] !== 0 ||
+    uv.offset[1] !== 0 ||
+    uv.rotationDegrees !== 0
+  );
+}
+
+/**
+ * Apply the material's sampler settings (filtering + wrap) to the texture
+ * source. Note: the source is shared/cached by URL, so these settings are
+ * per-asset in the editor, not strictly per-material — the shader contract
+ * lists true per-material samplers (a WebGPU bind group) as future work.
+ */
+function applyTextureSampler(texture: Texture, slot: MaterialTextureSlot | undefined): void {
+  if (!slot || !texture.source) {
+    return;
+  }
+
+  texture.source.scaleMode = slot.filtering === "nearest" ? "nearest" : "linear";
+  texture.source.addressMode = pixiWrapMode(slot.wrap);
+}
 
 /**
  * Material blend mode -> PixiJS blend mode. Adobe's darken/lighten are
@@ -112,7 +174,10 @@ export class GpuSceneRenderer {
         object.resolvedMaterial.material.enabled === false
         || !IMPLEMENTED_BLEND_MODES.includes(object.resolvedMaterial.blendMode)
         || !["opaque", "straight", "premultiplied"].includes(object.resolvedMaterial.alphaMode)
-        || object.resolvedMaterial.textureSlots.some((slot) => slot.wrap !== "clamp" || slot.filtering !== "linear" || ["tile", "nine-slice"].includes(slot.fit))
+        // wrap (clamp/repeat/mirror) and filtering (linear/nearest) are now
+        // applied via the texture sampler + TilingSprite path; only tile and
+        // nine-slice fit modes remain unimplemented and are skipped.
+        || object.resolvedMaterial.textureSlots.some((slot) => ["tile", "nine-slice"].includes(slot.fit))
       )) {
         continue;
       }
@@ -215,15 +280,10 @@ export class GpuSceneRenderer {
   private async drawImageObject(object: Extract<RenderableSceneObject, { type: "image" }>): Promise<Container> {
     const container = new Container();
     const texture = await this.getTexture(object.src);
-    const sprite = new Sprite(texture);
-    const naturalWidth = Math.max(1, texture.width || object.width);
-    const naturalHeight = Math.max(1, texture.height || object.height);
-    const materialFit = object.resolvedMaterial?.textureSlots[0]?.fit;
-    sizeTextureSprite(sprite, naturalWidth, naturalHeight, object.width, object.height, materialFit ?? object.objectFit);
-    applyTextureMaterial(sprite, object);
+    const inner = this.buildTexturedInner(texture, object, object.objectFit);
 
     const mask = new Graphics().rect(0, 0, object.width, object.height).fill("#ffffff");
-    container.addChild(sprite, mask);
+    container.addChild(inner, mask);
     container.mask = mask;
 
     if (object.strokeWidth > 0 && object.stroke !== "transparent") {
@@ -239,18 +299,9 @@ export class GpuSceneRenderer {
   private async drawTexturedQuad(object: Extract<RenderableSceneObject, { type: "rect" }>): Promise<Container> {
     const container = new Container();
     const texture = await this.getTexture(object.materialAssetSource!);
-    const sprite = new Sprite(texture);
-    sizeTextureSprite(
-      sprite,
-      Math.max(1, texture.width || object.width),
-      Math.max(1, texture.height || object.height),
-      object.width,
-      object.height,
-      object.resolvedMaterial?.textureSlots[0]?.fit ?? "fill"
-    );
-    applyTextureMaterial(sprite, object);
+    const inner = this.buildTexturedInner(texture, object, "fill");
     const mask = new Graphics().roundRect(0, 0, object.width, object.height, object.radius).fill("#ffffff");
-    container.addChild(sprite, mask);
+    container.addChild(inner, mask);
     container.mask = mask;
     if (object.strokeWidth > 0 && object.stroke !== "transparent") {
       container.addChild(new Graphics().roundRect(0, 0, object.width, object.height, object.radius).stroke({
@@ -259,6 +310,60 @@ export class GpuSceneRenderer {
       }));
     }
     return container;
+  }
+
+  /**
+   * Build the texture display object for a textured rect/image. When the
+   * material has a non-identity UV transform (offset / scale / rotation) the
+   * texture is drawn through a Pixi TilingSprite — the primitive designed for
+   * UV transforms and repeat/mirror wrap, matching the XPression "Texture
+   * Coordinates" panel. The default (identity) case keeps the plain Sprite
+   * path with its fit-mode sizing, so existing image rendering is unchanged.
+   */
+  private buildTexturedInner(
+    texture: Texture,
+    object: RenderableSceneObject,
+    fallbackFit: string
+  ): Sprite | TilingSprite {
+    const slot = object.resolvedMaterial?.textureSlots[0];
+    const parameters = object.resolvedMaterial?.parameters;
+    const tint = parameters?.tint;
+    applyTextureSampler(texture, slot);
+
+    const uv = readUvTransform(parameters);
+
+    if (uvTransformActive(uv)) {
+      const tiling = new TilingSprite({ texture, width: object.width, height: object.height });
+      const textureWidth = Math.max(1, texture.width || object.width);
+      const textureHeight = Math.max(1, texture.height || object.height);
+      // Base tileScale makes one copy fill the quad; dividing by UV scale
+      // turns UV scale > 1 into that many repeats across the quad.
+      tiling.tileScale.set(
+        object.width / textureWidth / Math.max(0.0001, Math.abs(uv.scale[0]) || 1),
+        object.height / textureHeight / Math.max(0.0001, Math.abs(uv.scale[1]) || 1)
+      );
+      // UV offset is normalized (0..1) of the quad; convert to tile pixels.
+      tiling.tilePosition.set(uv.offset[0] * object.width, uv.offset[1] * object.height);
+      tiling.tileRotation = degreesToRadians(uv.rotationDegrees);
+      if (typeof tint === "string") {
+        tiling.tint = tint;
+      }
+      return tiling;
+    }
+
+    const sprite = new Sprite(texture);
+    sizeTextureSprite(
+      sprite,
+      Math.max(1, texture.width || object.width),
+      Math.max(1, texture.height || object.height),
+      object.width,
+      object.height,
+      slot?.fit ?? fallbackFit
+    );
+    if (typeof tint === "string") {
+      sprite.tint = tint;
+    }
+    return sprite;
   }
 
   private async getTexture(source: string): Promise<Texture> {
@@ -574,28 +679,6 @@ function drawText(object: Extract<SceneObject, { type: "text" }>): Text {
   }
 
   return text;
-}
-
-function applyTextureMaterial(sprite: Sprite, object: RenderableSceneObject): void {
-  const parameters = object.resolvedMaterial?.parameters;
-  const tint = parameters?.tint;
-  const uvScale = parameters?.uvScale;
-  const uvOffset = parameters?.uvOffset;
-  if (typeof tint === "string") {
-    sprite.tint = tint;
-  }
-
-  if (Array.isArray(uvScale) && uvScale.length >= 2) {
-    const scaleX = Math.max(0.001, Math.abs(Number(uvScale[0]) || 1));
-    const scaleY = Math.max(0.001, Math.abs(Number(uvScale[1]) || 1));
-    sprite.width /= scaleX;
-    sprite.height /= scaleY;
-  }
-
-  if (Array.isArray(uvOffset) && uvOffset.length >= 2) {
-    sprite.x -= (Number(uvOffset[0]) || 0) * object.width;
-    sprite.y -= (Number(uvOffset[1]) || 0) * object.height;
-  }
 }
 
 function sizeTextureSprite(

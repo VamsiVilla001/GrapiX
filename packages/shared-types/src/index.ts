@@ -647,14 +647,11 @@ export function resolvePrimitiveMaterial(
     if (slot.assetId && (!asset || asset.status === "MISSING" || asset.status === "ERROR" || asset.status === "UNSUPPORTED")) {
       warnings.push(`Texture ${slot.assetId} used by ${material.name} is missing or unavailable.`);
     }
-    if (slot.wrap !== "clamp") {
-      warnings.push(`Texture wrap mode ${slot.wrap} is reserved until both renderers support it.`);
-    }
+    // wrap (clamp/repeat/mirror) and filtering (linear/nearest) are applied by
+    // the editor's texture sampler + TilingSprite path. Only tile and
+    // nine-slice fit modes remain unimplemented.
     if (["tile", "nine-slice"].includes(slot.fit)) {
       warnings.push(`Texture fit mode ${slot.fit} is not implemented by both renderers.`);
-    }
-    if (slot.filtering !== "linear") {
-      warnings.push(`Texture filtering mode ${slot.filtering} is reserved until both renderers support per-material samplers.`);
     }
   }
 

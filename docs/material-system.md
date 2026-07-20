@@ -181,10 +181,24 @@ warning rather than silently falling back to Normal.
 
 The browser resolves bindings before drawing and caches image/video textures by
 source. Video elements are also shared by source, so one asset is not decoded
-per primitive. Opacity, tint, UV scale/offset, and the six shared blend modes
-(normal, add, multiply, screen, darken, lighten) are applied to rectangles and
-images. Preview uses this real scene pipeline on a quad over selectable
+per primitive. Opacity, tint, and the six shared blend modes (normal, add,
+multiply, screen, darken, lighten) are applied to rectangles and images.
+Preview uses this real scene pipeline on a quad over selectable
 checker/light/dark backgrounds.
+
+**Texture coordinates** (the XPression-style panel): UV offset, UV scale, and
+UV rotation transform the texture, and the address mode (clamp / repeat /
+mirror-repeat) plus filtering (linear / nearest) are real GPU sampler settings.
+When a material has a non-identity UV transform the texture is drawn through a
+Pixi `TilingSprite` (the primitive designed for UV transforms and wrap); the
+default identity case keeps the plain sprite path with its fit-mode sizing, so
+existing image rendering is unchanged. UV scale > 1 tiles the texture that many
+times across the quad; the address mode controls how the extra copies wrap.
+Verified in-app: UV scale 3 + repeat wrap renders an exact 3x3 tile grid, and
+UV rotation rotates the tiled pattern. Sampler settings are per-asset in the
+editor today (the texture source is shared by URL); true per-material samplers
+need a WebGPU bind group and are tracked with the daemon texture work. `tile`
+and `nine-slice` fit modes remain unimplemented and are refused with a warning.
 
 The Rust daemon resolves base material, instance, primitive overrides, opacity,
 alpha interpretation, and all six shared blend modes for solid rectangles. It
@@ -216,12 +230,16 @@ per asset and synchronize against scene time.
 
 Implemented: image and WGSL import/storage, reusable solid and textured
 materials, duplication/protected deletion, one-level instances, shared updates,
-opacity/tint/UV scale/offset, six shared blend modes (normal/add/multiply/screen/darken/lighten), real browser preview, rectangle
+opacity/tint, six shared blend modes (normal/add/multiply/screen/darken/lighten),
+texture coordinates (UV offset/scale/rotation, clamp/repeat/mirror wrap,
+linear/nearest filtering via a TilingSprite path), real browser preview, rectangle
 and image assignment, missing warnings/relink, usage lookup, scene save/load
 migration, undo/redo grouping, shared manifests/WGSL, and Rust solid-material
 compatibility.
 
-Not implemented: daemon texture decode/rendering, WebGPU-native browser material
+Not implemented: daemon texture decode/rendering, per-material samplers (a
+WebGPU bind group; sampler settings are per-asset in the editor today),
+tile/nine-slice fit modes, WebGPU-native browser material
 pipelines, shader execution/editor/hot reload, video and sequence playback,
 thumbnail workers/proxies, folder mutation, material export, copy/paste, full
 primitive multi-selection UI, model slot import, PBR/chroma/mask/gradient

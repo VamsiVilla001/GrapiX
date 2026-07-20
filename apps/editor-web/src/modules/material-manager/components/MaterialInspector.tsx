@@ -61,6 +61,18 @@ export function MaterialInspector() {
       ...(name === "baseColor" && typeof value === "string" ? { color: value } : {}),
       ...(name === "opacity" && typeof value === "number" ? { opacity: value } : {})
     });
+
+    // Texture Coordinate values live on material.parameters (the renderer
+    // reads them there). Vector2 params are edited a component at a time.
+    const uvOffset = (Array.isArray(material.parameters?.uvOffset) ? material.parameters.uvOffset : [0, 0]) as number[];
+    const uvScale = (Array.isArray(material.parameters?.uvScale) ? material.parameters.uvScale : [1, 1]) as number[];
+    const uvRotation = typeof material.parameters?.uvRotation === "number" ? material.parameters.uvRotation : 0;
+    const setUvComponent = (name: "uvOffset" | "uvScale", index: 0 | 1, base: number[], value: number) => {
+      const next: [number, number] = [base[0] ?? 0, base[1] ?? 0];
+      next[index] = value;
+      patchParameter(name, next);
+    };
+
     return (
       <section className="material-inspector">
         <header><strong>Material Inspector</strong><span>{material.type}</span></header>
@@ -82,8 +94,22 @@ export function MaterialInspector() {
               <option value="">Missing / none</option>{compatibleAssets.map((item) => <option key={item.assetId} value={item.assetId}>{item.name}{item.status === "MISSING" ? " (missing)" : ""}</option>)}
             </select></label>
             <label>Fit<select value={texture.fit} onChange={(event) => updateMaterial(material.materialId, { textureSlots: [{ ...texture, fit: event.target.value as typeof texture.fit }] })}>{["stretch", "fit", "fill", "crop", "tile", "original", "pixel-perfect", "nine-slice"].map((value) => <option key={value} value={value} disabled={value === "tile" || value === "nine-slice"}>{value}{value === "tile" || value === "nine-slice" ? " (planned)" : ""}</option>)}</select></label>
-            <label>Wrap<select value={texture.wrap} onChange={(event) => updateMaterial(material.materialId, { textureSlots: [{ ...texture, wrap: event.target.value as typeof texture.wrap }] })}><option value="clamp">Clamp</option><option value="repeat" disabled>Repeat (planned)</option><option value="mirror-repeat" disabled>Mirror repeat (planned)</option></select></label>
-            <label>Filtering<select value={texture.filtering} onChange={(event) => updateMaterial(material.materialId, { textureSlots: [{ ...texture, filtering: event.target.value as typeof texture.filtering }] })}><option value="linear">Linear</option><option value="nearest" disabled>Nearest (planned)</option></select></label>
+            <label>Address mode (wrap)<select value={texture.wrap} onChange={(event) => updateMaterial(material.materialId, { textureSlots: [{ ...texture, wrap: event.target.value as typeof texture.wrap }] })}><option value="clamp">Clamp</option><option value="repeat">Repeat</option><option value="mirror-repeat">Mirror repeat</option></select></label>
+            <label>Filtering<select value={texture.filtering} onChange={(event) => updateMaterial(material.materialId, { textureSlots: [{ ...texture, filtering: event.target.value as typeof texture.filtering }] })}><option value="linear">Linear</option><option value="nearest">Nearest</option></select></label>
+          </fieldset>
+        ) : null}
+        {texture ? (
+          <fieldset className="texture-coordinates"><legend>Texture coordinates</legend>
+            <div className="uv-row">
+              <label>Offset X<input type="number" step="0.01" value={uvOffset[0] ?? 0} onFocus={() => beginHistory("UV offset")} onBlur={commitHistory} onChange={(event) => setUvComponent("uvOffset", 0, uvOffset, Number(event.target.value))} /></label>
+              <label>Offset Y<input type="number" step="0.01" value={uvOffset[1] ?? 0} onFocus={() => beginHistory("UV offset")} onBlur={commitHistory} onChange={(event) => setUvComponent("uvOffset", 1, uvOffset, Number(event.target.value))} /></label>
+            </div>
+            <div className="uv-row">
+              <label>Scale X<input type="number" step="0.1" value={uvScale[0] ?? 1} onFocus={() => beginHistory("UV scale")} onBlur={commitHistory} onChange={(event) => setUvComponent("uvScale", 0, uvScale, Number(event.target.value))} /></label>
+              <label>Scale Y<input type="number" step="0.1" value={uvScale[1] ?? 1} onFocus={() => beginHistory("UV scale")} onBlur={commitHistory} onChange={(event) => setUvComponent("uvScale", 1, uvScale, Number(event.target.value))} /></label>
+            </div>
+            <label>Rotation (deg)<input type="number" step="1" value={uvRotation} onFocus={() => beginHistory("UV rotation")} onBlur={commitHistory} onChange={(event) => patchParameter("uvRotation", Number(event.target.value))} /></label>
+            <p className="uv-hint">Scale &gt; 1 tiles the texture; set Address mode to Repeat or Mirror to control how tiles wrap.</p>
           </fieldset>
         ) : null}
         <fieldset><legend>Exposed parameters</legend>{definitions.map((definition) => <ParameterControl definition={definition} key={definition.name} value={material.parameters?.[definition.name] ?? definition.default} onBegin={() => beginHistory(`Edit ${definition.label ?? definition.name}`)} onCommit={commitHistory} onChange={(value) => patchParameter(definition.name, value)} />)}</fieldset>
@@ -162,7 +188,9 @@ function ParameterControl(props: { definition: MaterialParameterDefinition; valu
 function fallbackDefinitions(material?: Material): MaterialParameterDefinition[] {
   return material?.type === "solid-color"
     ? [{ name: "baseColor", label: "Base colour", type: "colour", default: "#ffffff", animatable: true, bindable: true }, { name: "opacity", label: "Opacity", type: "float", default: 1, min: 0, max: 1, step: 0.01, animatable: true, bindable: true }]
-    : [{ name: "tint", label: "Tint", type: "colour", default: "#ffffff", animatable: true, bindable: true }, { name: "opacity", label: "Opacity", type: "float", default: 1, min: 0, max: 1, step: 0.01, animatable: true, bindable: true }, { name: "uvScale", label: "UV scale", type: "vector2", default: [1, 1], animatable: true }, { name: "uvOffset", label: "UV offset", type: "vector2", default: [0, 0], animatable: true }];
+    // uvScale/uvOffset/uvRotation are edited in the dedicated Texture
+    // Coordinates panel, not here, to avoid duplicate controls.
+    : [{ name: "tint", label: "Tint", type: "colour", default: "#ffffff", animatable: true, bindable: true }, { name: "opacity", label: "Opacity", type: "float", default: 1, min: 0, max: 1, step: 0.01, animatable: true, bindable: true }];
 }
 
 function Metadata(props: { label: string; value: string }) {
