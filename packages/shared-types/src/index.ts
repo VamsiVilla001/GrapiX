@@ -98,6 +98,28 @@ export type MaterialType =
   | "pbr";
 
 export type MaterialBlendMode = "normal" | "add" | "multiply" | "screen" | "overlay" | "darken" | "lighten" | "subtract" | "alpha-mask" | "inverse-alpha-mask";
+
+/**
+ * Blend modes implemented identically in BOTH renderers (PixiJS preview and
+ * the Rust render daemon) as fixed-function GPU blending, using Adobe's
+ * standard blend-mode math where it is fixed-function-expressible. The exact
+ * per-mode blend equations are the contract in
+ * packages/render-shaders/layouts.json; both renderers mirror PixiJS's
+ * premultiplied-alpha equations so preview and program output match.
+ *
+ * Deliberately excluded until a shader-compositing path exists: "overlay"
+ * (PixiJS core silently aliases it to screen — misrepresenting it would
+ * violate the no-silent-fallback rule), "subtract", "alpha-mask",
+ * "inverse-alpha-mask".
+ */
+export const IMPLEMENTED_BLEND_MODES: readonly MaterialBlendMode[] = [
+  "normal",
+  "add",
+  "multiply",
+  "screen",
+  "darken",
+  "lighten"
+];
 export type MaterialAlphaMode = "opaque" | "straight" | "premultiplied" | "alpha-test" | "alpha-mask";
 export type MaterialCullMode = "none" | "front" | "back";
 export type MaterialDepthMode = "disabled" | "read" | "read-write";
@@ -642,7 +664,7 @@ export function resolvePrimitiveMaterial(
 
   const blendMode = material.blendMode ?? "normal";
   const alphaMode = material.alphaMode ?? "premultiplied";
-  if (!["normal", "add"].includes(blendMode)) {
+  if (!IMPLEMENTED_BLEND_MODES.includes(blendMode)) {
     warnings.push(`Blend mode ${blendMode} is not implemented by both GrapiX renderers.`);
   }
   if (!["opaque", "straight", "premultiplied"].includes(alphaMode)) {

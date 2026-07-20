@@ -7,6 +7,7 @@ import {
   findAssetUsage,
   findAssetUsageDetails,
   findMaterialUsage,
+  IMPLEMENTED_BLEND_MODES,
   normalizeMaterialSceneDocument,
   parameterDefaults,
   redoSceneHistory,
@@ -144,4 +145,26 @@ test("TypeScript and Rust consume the declared 96-byte shared uniform contract",
   const layouts = JSON.parse(await readFile(new URL("../../render-shaders/layouts.json", import.meta.url), "utf8"));
   assert.equal(layouts.shaders.composite_quad.uniforms.QuadUniforms.sizeBytes, 96);
   assert.equal(layouts.blendModes.find((mode) => mode.name === "add").implemented, true);
+});
+
+test("implemented blend modes match the shared layout contract exactly", async () => {
+  const layouts = JSON.parse(await readFile(new URL("../../render-shaders/layouts.json", import.meta.url), "utf8"));
+  const implementedInContract = layouts.blendModes
+    .filter((mode) => mode.implemented)
+    .map((mode) => mode.name)
+    .sort();
+
+  // The TypeScript IMPLEMENTED_BLEND_MODES list and the layouts.json contract
+  // must describe the same set — this is the drift guard between the editor
+  // guard/inspector and the shared renderer contract.
+  assert.deepEqual([...IMPLEMENTED_BLEND_MODES].sort(), implementedInContract);
+  assert.deepEqual([...IMPLEMENTED_BLEND_MODES].sort(), ["add", "darken", "lighten", "multiply", "normal", "screen"]);
+
+  // Every implemented mode declares both a color and an alpha equation, and
+  // the ids are stable and contiguous (the daemon indexes pipelines by id).
+  for (const mode of layouts.blendModes) {
+    assert.ok(typeof mode.color === "string" && mode.color.length > 0, `${mode.name} missing color equation`);
+    assert.ok(typeof mode.alpha === "string" && mode.alpha.length > 0, `${mode.name} missing alpha equation`);
+  }
+  assert.deepEqual(layouts.blendModes.map((mode) => mode.id), [0, 1, 2, 3, 4, 5]);
 });

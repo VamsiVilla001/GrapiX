@@ -1,8 +1,10 @@
 import {
   findAssetUsageDetails,
   findMaterialUsage,
+  IMPLEMENTED_BLEND_MODES,
   parameterDefaults,
   type Material,
+  type MaterialBlendMode,
   type MaterialParameterDefinition,
   type MaterialParameterValue
 } from "@grapix/shared-types";
@@ -11,6 +13,23 @@ import { useRef } from "react";
 import { shaderSource } from "../services/shaderRegistry";
 import { useEditorStore } from "../../../store/editorStore";
 import { useMaterialManagerStore } from "../stores/materialManagerStore";
+
+// Friendly labels for the blend modes implemented in both renderers. Adobe's
+// naming, with the additive alias shown so users coming from other tools
+// recognise it. Options are driven from IMPLEMENTED_BLEND_MODES so the menu
+// can never advertise a mode the renderers do not support.
+const BLEND_MODE_LABELS: Record<MaterialBlendMode, string> = {
+  normal: "Normal",
+  add: "Additive (Linear Dodge)",
+  multiply: "Multiply",
+  screen: "Screen",
+  darken: "Darken",
+  lighten: "Lighten",
+  overlay: "Overlay",
+  subtract: "Subtract",
+  "alpha-mask": "Alpha Mask",
+  "inverse-alpha-mask": "Inverse Alpha Mask"
+};
 
 export function MaterialInspector() {
   const scene = useEditorStore((state) => state.scene);
@@ -49,9 +68,9 @@ export function MaterialInspector() {
         <label>Name<input value={material.name} onFocus={() => beginHistory("Rename material")} onBlur={commitHistory} onChange={(event) => updateMaterial(material.materialId, { name: event.target.value })} /></label>
         <label>Shader<select value={material.shaderId} disabled><option>{shaderDefinition?.name ?? material.shaderId ?? "Unassigned"}</option></select></label>
         <label>Blend mode<select value={material.blendMode ?? "normal"} onChange={(event) => updateMaterial(material.materialId, { blendMode: event.target.value as Material["blendMode"] })}>
-          <option value="normal">Normal</option><option value="add">Additive</option>
-          <option value="multiply" disabled>Multiply (not available in both renderers)</option>
-          <option value="screen" disabled>Screen (not available in both renderers)</option>
+          {IMPLEMENTED_BLEND_MODES.map((mode) => (
+            <option key={mode} value={mode}>{BLEND_MODE_LABELS[mode]}</option>
+          ))}
         </select></label>
         <label>Alpha interpretation<select value={material.alphaMode ?? "premultiplied"} onChange={(event) => updateMaterial(material.materialId, { alphaMode: event.target.value as Material["alphaMode"] })}>
           <option value="straight">Straight</option><option value="premultiplied">Premultiplied</option><option value="opaque">Opaque</option><option value="alpha-test" disabled>Alpha test (planned)</option><option value="alpha-mask" disabled>Alpha mask (planned)</option>

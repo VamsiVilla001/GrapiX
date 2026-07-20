@@ -71,6 +71,15 @@ The product should feel web-like for designers and operators, while the renderer
 
 ## Build Log
 
+### 2026-07-17
+
+- Implemented six blend modes natively in **both** renderers as fixed-function GPU blending, using Adobe's standard blend-mode math where fixed-function-expressible: normal, add, multiply, screen, darken, lighten. `IMPLEMENTED_BLEND_MODES` in `@grapix/shared-types` is the single source of truth (inspector dropdown, editor render guard, and resolver warning all read it). The editor maps ids to PixiJS blend modes (darken→min, lighten→max); the daemon builds one cached wgpu pipeline per blend id via `blend_state_for_id`, mirroring PixiJS's premultiplied blend equations so preview and program output match. Per-mode colour/alpha equations recorded in `packages/render-shaders/layouts.json` (ids 0–5) and `shader-contract.md`.
+- Clarified with the user that "Adobe's API" for blending is a misconception: Adobe blend modes are published math formulas (PDF/ISO-32000), not a service; a per-frame network call could never meet broadcast timing. Firefly Services stays deferred for asset generation per the render-daemon architecture doc. Overlay/subtract/alpha-mask remain unimplemented (need a shader compositing pass) and are refused with a warning — overlay is NOT aliased to screen.
+- Verified all six modes in the live packaged Electron app by driving the Material Manager over CDP and extracting stage pixels: normal `[255,204,0]`, multiply `[7,9,0]`, screen `[255,206,18]`, darken `[7,11,0]` (exact per-channel min), lighten `[255,204,18]` (exact per-channel max), add `[255,215,18]` — all mathematically correct, no error banner.
+- Imported the two real provided PNGs (`materials/frame.png`, `materials/Mask.png`) through the real import pipeline: content-hashed and stored under `data/assets/images/` with metadata records, shown in the Material Manager library with correct size/dimension metadata and **alpha auto-detected** (frame.png → alpha detected, straight). This is the XPression-style per-asset inspector the user wants to adapt.
+- Tests: added a daemon `blend_states_match_pixi_equations` unit test (40 Rust tests pass) and a shared-types contract test asserting `IMPLEMENTED_BLEND_MODES` matches the `layouts.json` implemented set exactly (12 shared-types tests pass). Editor typecheck + build clean; nothing in the existing app regressed.
+- Note: `data/` is gitignored so the imported asset files are local runtime artifacts. The source `materials/` folder is left untracked (user's working art; not committed without being asked).
+
 ### 2026-07-16
 
 - Fixed three GPU viewport faults, diagnosed live against the packaged Electron app over the DevTools protocol:

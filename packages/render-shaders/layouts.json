@@ -27,10 +27,18 @@
     }
   },
   "blendModes": [
-    { "id": 0, "name": "normal", "implemented": true, "blend": "src * ONE + dst * ONE_MINUS_SRC_ALPHA (premultiplied source-over), same equation for color and alpha" },
-    { "id": 1, "name": "multiply", "implemented": false },
-    { "id": 2, "name": "screen", "implemented": false },
-    { "id": 3, "name": "add", "implemented": true, "blend": "src * ONE + dst * ONE for color and alpha; source is premultiplied before blending" }
+    { "id": 0, "name": "normal", "implemented": true, "color": "src*ONE + dst*ONE_MINUS_SRC_ALPHA", "alpha": "src*ONE + dst*ONE_MINUS_SRC_ALPHA", "note": "premultiplied source-over" },
+    { "id": 1, "name": "multiply", "implemented": true, "color": "src*DST + dst*ONE_MINUS_SRC_ALPHA", "alpha": "src*ONE + dst*ONE_MINUS_SRC_ALPHA", "note": "Adobe Multiply; premultiplied, matches PixiJS" },
+    { "id": 2, "name": "screen", "implemented": true, "color": "src*ONE + dst*ONE_MINUS_SRC", "alpha": "src*ONE + dst*ONE_MINUS_SRC_ALPHA", "note": "Adobe Screen; premultiplied, matches PixiJS" },
+    { "id": 3, "name": "add", "implemented": true, "color": "src*ONE + dst*ONE", "alpha": "src*ONE + dst*ONE", "note": "linear dodge / additive" },
+    { "id": 4, "name": "darken", "implemented": true, "color": "MIN(src, dst)", "alpha": "MIN(src, dst)", "note": "Adobe Darken via GPU min op; matches PixiJS min" },
+    { "id": 5, "name": "lighten", "implemented": true, "color": "MAX(src, dst)", "alpha": "MAX(src, dst)", "note": "Adobe Lighten via GPU max op; matches PixiJS max" }
+  ],
+  "blendModesUnimplemented": [
+    { "name": "overlay", "reason": "PixiJS core silently aliases overlay to screen; needs shader compositing to be correct" },
+    { "name": "subtract", "reason": "reverse-subtract over premultiplied alpha needs shader compositing" },
+    { "name": "alpha-mask", "reason": "requires a separate mask pass" },
+    { "name": "inverse-alpha-mask", "reason": "requires a separate mask pass" }
   ],
   "colorPipeline": {
     "alphaMode": "premultiplied",

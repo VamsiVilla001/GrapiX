@@ -83,14 +83,31 @@ transform = projection * translate(x, y) * rotate_z(radians(rotation)) * scale(w
 ## Alpha and blending
 
 - Everything is **premultiplied** from uniform upload onward.
-- Blend mode 0 ("normal") is fixed-function premultiplied source-over:
-  `RGBA = src * ONE + dst * (1 - src.alpha)` for both color and alpha
-  (`wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING`; the browser must
-  configure the identical `GPUBlendState`).
-- Blend mode 3 ("add") is fixed-function additive composition:
-  `RGBA = src * ONE + dst * ONE`. Source colour is already premultiplied.
-- Other blend-mode ids are reserved in `layouts.json` and are **not
-  implemented**; renderers must refuse them, not approximate them.
+- Six blend modes are implemented as fixed-function GPU blending, using
+  Adobe's standard blend-mode math where it is expressible without a shader
+  compositing pass. Both renderers mirror PixiJS's premultiplied blend
+  equations so preview and program match. The `layouts.json` `blendModes`
+  table is the authoritative per-mode contract; the daemon builds one cached
+  pipeline per id and the editor maps the id to the equivalent PixiJS mode.
+
+  | id | name | colour | alpha |
+  | --- | --- | --- | --- |
+  | 0 | normal | `src·ONE + dst·(1−srcA)` | `src·ONE + dst·(1−srcA)` |
+  | 1 | multiply | `src·dst + dst·(1−srcA)` | `src·ONE + dst·(1−srcA)` |
+  | 2 | screen | `src·ONE + dst·(1−src)` | `src·ONE + dst·(1−srcA)` |
+  | 3 | add | `src·ONE + dst·ONE` | `src·ONE + dst·ONE` |
+  | 4 | darken | `MIN(src, dst)` | `MIN(src, dst)` |
+  | 5 | lighten | `MAX(src, dst)` | `MAX(src, dst)` |
+
+  Source colour is already premultiplied. darken/lighten use the GPU Min/Max
+  blend operations (the hardware ignores the factors for Min/Max), matching
+  PixiJS's "min"/"max" modes. Exact Adobe *separable* darken/lighten over
+  partial transparency, and overlay/subtract/soft-light etc., require a shader
+  compositing pass and are **not implemented** — renderers refuse any blend
+  mode outside this table with a warning rather than approximating it. There
+  is no silent fallback to normal.
+- The editor mapping: normal→normal, add→add, multiply→multiply,
+  screen→screen, darken→min, lighten→max (PixiJS blend-mode names).
 - The frame is cleared to transparent black `(0,0,0,0)`; the scene canvas
   background is drawn as an ordinary full-canvas quad, matching the editor
   (which also draws the background as scene content).

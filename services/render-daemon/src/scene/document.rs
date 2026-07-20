@@ -292,9 +292,17 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
                 .unwrap_or(material.opacity);
                 opacity *= material_opacity;
 
+                // Shared blend ids from packages/render-shaders/layouts.json.
+                // Only the modes implemented in BOTH renderers are accepted;
+                // anything else is skipped with a warning rather than silently
+                // falling back to normal.
                 blend_mode = match material.blend_mode.as_deref().unwrap_or("normal") {
                     "normal" => 0,
+                    "multiply" => 1,
+                    "screen" => 2,
                     "add" => 3,
+                    "darken" => 4,
+                    "lighten" => 5,
                     unsupported => {
                         warnings.push(format!(
                             "rect {} material {:?} uses unsupported blend mode {:?}; it is not rendered instead of silently falling back",

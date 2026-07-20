@@ -147,28 +147,49 @@ implemented and must be added to the shared shader contract first.
 
 ## Blend modes
 
-Only **Normal** and **Add** are supported by both active hosts.
+Six blend modes are supported by both active hosts (editor preview + render
+daemon), implemented as fixed-function GPU blending using Adobe's standard
+blend-mode math where it is expressible without a shader compositing pass:
+**Normal, Additive (Linear Dodge), Multiply, Screen, Darken, Lighten**. The
+exact per-mode colour/alpha equations are the contract in
+`packages/render-shaders/layouts.json`; both renderers mirror PixiJS's
+premultiplied blend equations so preview and program output match.
 
-- Normal: premultiplied source-over,
-  `src * ONE + dst * ONE_MINUS_SRC_ALPHA`.
-- Add: `src * ONE + dst * ONE` for colour and alpha.
+- `IMPLEMENTED_BLEND_MODES` in `@grapix/shared-types` is the single source of
+  truth for the supported set. The Material Inspector dropdown, the editor's
+  render guard, and the resolver's warning check all read from it, so the menu
+  can never advertise a mode the renderers do not support.
+- The daemon builds one cached fixed-function pipeline per blend id and
+  selects by id at draw time (`blend_state_for_id`).
+- Darken/Lighten use the GPU Min/Max blend operations, matching PixiJS's
+  min/max modes.
 
-Multiply, screen, overlay, darken, lighten, subtract, alpha mask, and inverse
-alpha mask are reserved. The inspector disables them. If one arrives from a
-scene file, both renderers refuse that draw and report a warning rather than
-silently falling back to Normal.
+Overlay, subtract, alpha mask, and inverse alpha mask remain reserved (they
+need a shader compositing pass — overlay in particular is *not* aliased to
+screen the way some engines do). The inspector never lists them. If one
+arrives from a scene file, both renderers refuse that draw and report a
+warning rather than silently falling back to Normal.
+
+> Note on "Adobe's API": Adobe's blend modes are published *math formulas*
+> (the PDF/ISO-32000 separable blend functions), not a network service. They
+> are implemented natively here in both GPU renderers. Adobe's actual APIs
+> (Firefly Services) are for asset generation/editing and remain deferred per
+> `docs/render-daemon-architecture.md` — a per-frame network call could never
+> meet real-time broadcast timing.
 
 ## Renderer and resource lifecycle
 
 The browser resolves bindings before drawing and caches image/video textures by
 source. Video elements are also shared by source, so one asset is not decoded
-per primitive. Opacity, tint, UV scale/offset, and normal/add blend state are
-applied to rectangles and images. Preview uses this real scene pipeline on a
-quad over selectable checker/light/dark backgrounds.
+per primitive. Opacity, tint, UV scale/offset, and the six shared blend modes
+(normal, add, multiply, screen, darken, lighten) are applied to rectangles and
+images. Preview uses this real scene pipeline on a quad over selectable
+checker/light/dark backgrounds.
 
 The Rust daemon resolves base material, instance, primitive overrides, opacity,
-alpha interpretation, and normal/add blend for solid rectangles. It builds two
-cached fixed-function pipelines once and switches by the shared blend ID. It
+alpha interpretation, and all six shared blend modes for solid rectangles. It
+builds one cached fixed-function pipeline per blend id once and switches by the
+shared blend ID. It
 explicitly warns and skips textured materials because daemon-side image decode,
 GPU texture upload, and the shared textured bind group are not implemented yet.
 
@@ -195,7 +216,7 @@ per asset and synchronize against scene time.
 
 Implemented: image and WGSL import/storage, reusable solid and textured
 materials, duplication/protected deletion, one-level instances, shared updates,
-opacity/tint/UV scale/offset, normal/add blend, real browser preview, rectangle
+opacity/tint/UV scale/offset, six shared blend modes (normal/add/multiply/screen/darken/lighten), real browser preview, rectangle
 and image assignment, missing warnings/relink, usage lookup, scene save/load
 migration, undo/redo grouping, shared manifests/WGSL, and Rust solid-material
 compatibility.

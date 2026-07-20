@@ -8,8 +8,38 @@ import {
   Texture,
   type TextureSourceLike
 } from "pixi.js";
-import type { SceneDocument, SceneObject } from "@grapix/shared-types";
+import {
+  IMPLEMENTED_BLEND_MODES,
+  type MaterialBlendMode,
+  type SceneDocument,
+  type SceneObject
+} from "@grapix/shared-types";
 import { isVideoSource, type RenderableSceneObject } from "./sceneMaterial";
+
+/**
+ * Material blend mode -> PixiJS blend mode. Adobe's darken/lighten are
+ * per-channel min/max, which Pixi exposes as the fixed-function "min"/"max"
+ * modes. The daemon mirrors Pixi's exact blend equations per
+ * packages/render-shaders/layouts.json, so this mapping is the preview half
+ * of that contract. Unimplemented modes never reach this function — the
+ * render guard skips those objects with a warning.
+ */
+function pixiBlendMode(blendMode: MaterialBlendMode | undefined): "normal" | "add" | "multiply" | "screen" | "min" | "max" {
+  switch (blendMode) {
+    case "add":
+      return "add";
+    case "multiply":
+      return "multiply";
+    case "screen":
+      return "screen";
+    case "darken":
+      return "min";
+    case "lighten":
+      return "max";
+    default:
+      return "normal";
+  }
+}
 
 export interface GpuRendererCapabilities {
   backend: "webgl" | "webgpu" | "unknown";
@@ -80,7 +110,7 @@ export class GpuSceneRenderer {
     for (const object of objects) {
       if (object.resolvedMaterial && (
         object.resolvedMaterial.material.enabled === false
-        || !["normal", "add"].includes(object.resolvedMaterial.blendMode)
+        || !IMPLEMENTED_BLEND_MODES.includes(object.resolvedMaterial.blendMode)
         || !["opaque", "straight", "premultiplied"].includes(object.resolvedMaterial.alphaMode)
         || object.resolvedMaterial.textureSlots.some((slot) => slot.wrap !== "clamp" || slot.filtering !== "linear" || ["tile", "nine-slice"].includes(slot.fit))
       )) {
@@ -98,7 +128,7 @@ export class GpuSceneRenderer {
       displayObject.rotation = degreesToRadians(object.rotation);
       displayObject.alpha = object.opacity;
       displayObject.visible = object.visible;
-      displayObject.blendMode = object.resolvedMaterial?.blendMode === "add" ? "add" : "normal";
+      displayObject.blendMode = pixiBlendMode(object.resolvedMaterial?.blendMode);
 
       nextRoot.addChild(displayObject);
     }

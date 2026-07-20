@@ -44,14 +44,104 @@ pub const MAX_QUADS_PER_FRAME: usize = 1024;
 /// `-srgb` so the hardware encodes linear shader output back to sRGB bytes.
 pub const RENDER_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
 
+/// Number of implemented blend modes, indexed by the shared blend id from
+/// packages/render-shaders/layouts.json: 0 normal, 1 multiply, 2 screen,
+/// 3 add, 4 darken, 5 lighten.
+pub const BLEND_PIPELINE_COUNT: usize = 6;
+
 pub struct QuadPipeline {
-    normal_pipeline: wgpu::RenderPipeline,
-    additive_pipeline: wgpu::RenderPipeline,
+    /// One pre-built pipeline per implemented blend mode, indexed by blend id.
+    /// Built up front (cheap, one-time) so the render loop never compiles a
+    /// pipeline per frame.
+    blend_pipelines: [wgpu::RenderPipeline; BLEND_PIPELINE_COUNT],
     bind_group: wgpu::BindGroup,
     uniform_buffer: wgpu::Buffer,
     /// Byte stride between quad uniform slots; QUAD_UNIFORMS_SIZE rounded up
     /// to the device's min_uniform_buffer_offset_alignment (dynamic offsets).
     stride: u32,
+}
+
+/// Fixed-function blend state for a shared blend id, mirroring PixiJS's
+/// premultiplied-alpha blend equations (GpuBlendModesToPixi) so the editor
+/// preview and the daemon match exactly. These are Adobe's standard blend
+/// formulas where they are expressible as fixed-function GPU blending.
+///
+/// darken/lighten use the GPU Min/Max blend operations (factors are ignored
+/// by the hardware for Min/Max), matching PixiJS's "min"/"max" modes. Exact
+/// Adobe separable darken/lighten over partial transparency would need shader
+/// compositing; that is future work and documented in the shader contract.
+pub fn blend_state_for_id(blend_mode: u32) -> wgpu::BlendState {
+    use wgpu::{BlendComponent, BlendFactor, BlendOperation, BlendState};
+
+    // Alpha channel is premultiplied source-over for every mode except add,
+    // matching PixiJS.
+    let src_over_alpha = BlendComponent {
+        src_factor: BlendFactor::One,
+        dst_factor: BlendFactor::OneMinusSrcAlpha,
+        operation: BlendOperation::Add,
+    };
+
+    match blend_mode {
+        // multiply: color = src*dst + dst*(1-srcAlpha)
+        1 => BlendState {
+            color: BlendComponent {
+                src_factor: BlendFactor::Dst,
+                dst_factor: BlendFactor::OneMinusSrcAlpha,
+                operation: BlendOperation::Add,
+            },
+            alpha: src_over_alpha,
+        },
+        // screen: color = src*1 + dst*(1-src)
+        2 => BlendState {
+            color: BlendComponent {
+                src_factor: BlendFactor::One,
+                dst_factor: BlendFactor::OneMinusSrc,
+                operation: BlendOperation::Add,
+            },
+            alpha: src_over_alpha,
+        },
+        // add: color and alpha = src*1 + dst*1
+        3 => BlendState {
+            color: BlendComponent {
+                src_factor: BlendFactor::One,
+                dst_factor: BlendFactor::One,
+                operation: BlendOperation::Add,
+            },
+            alpha: BlendComponent {
+                src_factor: BlendFactor::One,
+                dst_factor: BlendFactor::One,
+                operation: BlendOperation::Add,
+            },
+        },
+        // darken: component-wise min(src, dst)
+        4 => BlendState {
+            color: BlendComponent {
+                src_factor: BlendFactor::One,
+                dst_factor: BlendFactor::One,
+                operation: BlendOperation::Min,
+            },
+            alpha: BlendComponent {
+                src_factor: BlendFactor::One,
+                dst_factor: BlendFactor::One,
+                operation: BlendOperation::Min,
+            },
+        },
+        // lighten: component-wise max(src, dst)
+        5 => BlendState {
+            color: BlendComponent {
+                src_factor: BlendFactor::One,
+                dst_factor: BlendFactor::One,
+                operation: BlendOperation::Max,
+            },
+            alpha: BlendComponent {
+                src_factor: BlendFactor::One,
+                dst_factor: BlendFactor::One,
+                operation: BlendOperation::Max,
+            },
+        },
+        // normal (0) and any unexpected id: premultiplied source-over.
+        _ => BlendState::PREMULTIPLIED_ALPHA_BLENDING,
+    }
 }
 
 impl QuadPipeline {
@@ -104,7 +194,7 @@ impl QuadPipeline {
             push_constant_ranges: &[],
         });
 
-        let create_pipeline = |label: &'static str, blend: wgpu::BlendState| {
+        let create_pipeline = |label: &str, blend: wgpu::BlendState| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(&pipeline_layout),
@@ -135,29 +225,17 @@ impl QuadPipeline {
                 cache: None,
             })
         };
-        let normal_pipeline = create_pipeline(
-            "grapix-quad-pipeline-normal",
-            wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING,
-        );
-        let additive_pipeline = create_pipeline(
-            "grapix-quad-pipeline-additive",
-            wgpu::BlendState {
-                color: wgpu::BlendComponent {
-                    src_factor: wgpu::BlendFactor::One,
-                    dst_factor: wgpu::BlendFactor::One,
-                    operation: wgpu::BlendOperation::Add,
-                },
-                alpha: wgpu::BlendComponent {
-                    src_factor: wgpu::BlendFactor::One,
-                    dst_factor: wgpu::BlendFactor::One,
-                    operation: wgpu::BlendOperation::Add,
-                },
-            },
-        );
+
+        // One pipeline per blend id (0..BLEND_PIPELINE_COUNT).
+        let blend_pipelines = std::array::from_fn(|id| {
+            create_pipeline(
+                &format!("grapix-quad-pipeline-blend-{id}"),
+                blend_state_for_id(id as u32),
+            )
+        });
 
         Self {
-            normal_pipeline,
-            additive_pipeline,
+            blend_pipelines,
             bind_group,
             uniform_buffer,
             stride,
@@ -217,12 +295,10 @@ impl QuadPipeline {
     /// Record one draw per quad. `upload` must have been called for this frame.
     pub fn draw<'pass>(&'pass self, pass: &mut wgpu::RenderPass<'pass>, quads: &[QuadUniforms]) {
         for (index, quad) in quads.iter().enumerate() {
-            let pipeline = if quad.params[0] == 3.0 {
-                &self.additive_pipeline
-            } else {
-                &self.normal_pipeline
-            };
-            pass.set_pipeline(pipeline);
+            // params[0] carries the shared blend id; clamp to the built set so
+            // an out-of-range id falls back to normal rather than panicking.
+            let blend_id = (quad.params[0] as usize).min(BLEND_PIPELINE_COUNT - 1);
+            pass.set_pipeline(&self.blend_pipelines[blend_id]);
             pass.set_bind_group(0, &self.bind_group, &[index as u32 * self.stride]);
             pass.draw(0..6, 0..1);
         }
@@ -284,6 +360,40 @@ mod tests {
         // tests/layout_contract.rs; this is the fast in-crate guard.
         assert_eq!(QUAD_UNIFORMS_SIZE, 96);
         assert_eq!(std::mem::align_of::<QuadUniforms>(), 4);
+    }
+
+    #[test]
+    fn blend_states_match_pixi_equations() {
+        use wgpu::{BlendFactor, BlendOperation};
+
+        // normal (0): premultiplied source-over.
+        let normal = blend_state_for_id(0);
+        assert_eq!(normal.color.src_factor, BlendFactor::One);
+        assert_eq!(normal.color.dst_factor, BlendFactor::OneMinusSrcAlpha);
+
+        // multiply (1): color = src*dst + dst*(1-srcAlpha).
+        let multiply = blend_state_for_id(1);
+        assert_eq!(multiply.color.src_factor, BlendFactor::Dst);
+        assert_eq!(multiply.color.dst_factor, BlendFactor::OneMinusSrcAlpha);
+
+        // screen (2): color = src + dst*(1-src).
+        let screen = blend_state_for_id(2);
+        assert_eq!(screen.color.src_factor, BlendFactor::One);
+        assert_eq!(screen.color.dst_factor, BlendFactor::OneMinusSrc);
+
+        // add (3): color and alpha = src + dst.
+        let add = blend_state_for_id(3);
+        assert_eq!(add.color.dst_factor, BlendFactor::One);
+        assert_eq!(add.alpha.dst_factor, BlendFactor::One);
+
+        // darken (4) / lighten (5): component-wise min / max.
+        assert_eq!(blend_state_for_id(4).color.operation, BlendOperation::Min);
+        assert_eq!(blend_state_for_id(5).color.operation, BlendOperation::Max);
+
+        // Out-of-range ids fall back to normal, never panic.
+        let fallback = blend_state_for_id(99);
+        assert_eq!(fallback.color.src_factor, BlendFactor::One);
+        assert_eq!(fallback.color.dst_factor, BlendFactor::OneMinusSrcAlpha);
     }
 
     #[test]
