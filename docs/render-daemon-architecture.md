@@ -9,9 +9,9 @@ decisions behind `services/render-daemon` and the shared-shader strategy in
 ```text
 Web Editor (React, PixiJS preview today / WebGPU preview later)
         -> Shared Scene / Timeline / Binding Model  (packages/shared-types)
-        -> Local WebSocket (protocol v1, full SceneDocument replacement)
+        -> Authenticated local WebSocket (protocol v2, safe envelope)
         -> Rust Render Daemon (wgpu, headless)      (services/render-daemon)
-        -> VideoOutput trait -> NDI | null          (feature-gated backend)
+        -> VideoOutput trait -> NDI | recording | null
 ```
 
 The daemon is the first concrete step toward the native renderer in
@@ -62,7 +62,7 @@ schema from TS) are unavailable without new tooling. The scaffold implements
 Drift path: a `SceneDocument` change breaks the fixture's compile or, after
 re-emitting, breaks the Rust test — never silently misreads scenes at
 runtime. Typed Rust DTOs cover the material, instance, and primitive binding
-fields consumed by the v1 solid-rectangle renderer. `serde_json::Value` remains
+fields consumed by the current solid-rectangle/ellipse renderer. `serde_json::Value` remains
 at extension boundaries such as parameter maps and document sections the v1
 renderer does not consume (timeline details and asset payload metadata).
 
@@ -74,11 +74,12 @@ the TypeScript source and deriving the Rust types from it.
 Versioned JSON over an authenticated local WebSocket; daemon is the server (it
 is the long-lived process; controllers reconnect). A per-install 256-bit token
 is generated in the ignored `data/` directory and shared automatically with
-the API bridge. Browser Origins are denied unless explicitly allowlisted. v1 uses **full-scene
-replacement** on `scene.load`/`scene.update` — the repo defines no renderer
-patch format, and inventing one before the sequencer exists would be
-speculation. `RendererPatch` in shared-types is the obvious candidate for a
-future `scene.patch` message.
+the API bridge. Browser Origins are denied unless explicitly allowlisted.
+Structural edits use full-scene replacement on `scene.load`/`scene.update`.
+High-frequency live data and object properties use typed, revision-safe
+`scene.patch`; preparation runs off the render thread and the watch channel
+coalesces bursts at frame boundaries. Updating only affected prepared binding
+targets instead of re-preparing the document remains an optimization gate.
 
 ## Broadcast formats
 
@@ -103,6 +104,8 @@ frame interval.
   step if readback becomes the bottleneck.
 - Genlock/reference sync is out of scope for the scaffold and tracked as
   future work.
+- Status reports last/average/p99 render time and utilization of the rational
+  frame budget. Those measurements are not hardware certification.
 
 ## Future work: MCP / Figma / Adobe (LAST priority)
 

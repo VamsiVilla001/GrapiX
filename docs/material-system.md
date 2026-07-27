@@ -73,17 +73,13 @@ can use the existing property system rather than inventing another animator.
 ## Assignment workflow
 
 Materials can be selected and dragged onto compatible primitives in the canvas
-or Scene Manager. The target is cyan when compatible and red with a blocked
-drop effect when incompatible. Dropping commits one history entry. The object
-inspector filters its material list by primitive compatibility. A material's
-context menu also offers **Assign to Selected**. The store accepts a list of
-object IDs so an existing or future multi-object selection can use the same
-single undoable operation.
-
-Rectangle and image primitives support the first-version `main` slot. The
-schema is a named map, so text Face/Outline/Shadow slots and imported model slot
-names can be added without a schema replacement. Model slot preservation and a
-multi-slot inspector remain future work.
+or Scene Inspector. The target is cyan when compatible and red with a blocked
+drop effect when incompatible. Whole-object drops and initial object selection
+apply to every bindable face; the Materials inspector supports independent face
+selection, assignment, and unbinding. A cube/slab exposes six real faces, a
+cylinder exposes side/top/bottom, continuous surfaces expose `main`, and
+imported models expose their authored glTF material elements. Dropping or
+assigning multiple faces commits one history entry.
 
 ## Asset importing and relinking
 
@@ -107,7 +103,7 @@ disabled prepared categories rather than controls that pretend to work.
 ## Shared WGSL and shader manifests
 
 `packages/render-shaders/manifests/shader-manifest.json` describes the built-in
-solid-colour and textured-unlit shaders. The editor validates IDs, entry points,
+solid-colour, textured-unlit, Basic Lit mesh, and PBR mesh shaders. The editor validates IDs, entry points,
 supported primitives, duplicate slots/parameters, source size, entry-point
 presence, and balanced braces before exposing a shader. Imported WGSL is stored
 outside the scene and an invalid reload remains inactive, preserving the last
@@ -134,8 +130,10 @@ Image import records detected alpha separately from user interpretation. The
 supported interpretations are opaque, straight, and premultiplied. The host
 converts straight sRGB samples to linear light and premultiplies RGB by alpha
 before composition. Premultiplied sources must not be multiplied twice. Opaque
-forces alpha to one. Alpha-test and alpha-mask are represented in the schema but
-disabled until both renderers implement the same threshold/mask behavior.
+is represented in the schema, but forcing sampled texture alpha to one is not
+yet consistent across Pixi, Three, and native Program and remains a parity
+gate. Alpha-test and alpha-mask are represented in the schema but disabled
+until both renderers implement the same threshold/mask behavior.
 
 The Rust solid-colour path converts CSS sRGB hex to linear, multiplies by final
 opacity, and uploads premultiplied RGBA. The sRGB render target encodes the
@@ -200,17 +198,34 @@ editor today (the texture source is shared by URL); true per-material samplers
 need a WebGPU bind group and are tracked with the daemon texture work. `tile`
 and `nine-slice` fit modes remain unimplemented and are refused with a warning.
 
-The Rust daemon resolves base material, instance, primitive overrides, opacity,
-alpha interpretation, and all six shared blend modes for solid rectangles. It
-builds one cached fixed-function pipeline per blend id once and switches by the
-shared blend ID. It
-explicitly warns and skips textured materials because daemon-side image decode,
-GPU texture upload, and the shared textured bind group are not implemented yet.
+The Rust daemon resolves base material, instance, primitive/mesh-surface
+overrides, opacity, alpha interpretation, and all six shared blend modes. Its
+native mesh path decodes image assets while warming a scene, uploads sRGB or
+linear textures, creates per-material samplers, and applies UV
+scale/offset/rotation/pivot/flip to depth-tested primitive and imported glTF
+surfaces. The older quad path remains solid-colour only; image objects and
+textured 2D rects still require their native sprite pipeline.
 
-Future pipeline cache keys are shader ID, blend/alpha mode, topology, depth,
-cull, texture format, and sample count. Texture caches need reference counts or
-equivalent ownership and deferred GPU disposal. Current Pixi and daemon
-pipelines already avoid per-frame compilation.
+Mesh lighting is selected by material type, never by whether a light happens to
+exist. Solid-colour, image, and unlit-texture surfaces retain their authored
+colour under any light rig. Basic Lit, PBR, imported glTF PBR, and unassigned
+fallback surfaces consume directional, point, and spot scene lights. With no
+authored light both preview and Program use a readable fallback; the presence
+of an authored zero-intensity light deliberately suppresses that fallback.
+Program supports at most 16 visible authored lights and blocks Take rather than
+silently dropping additional lights.
+
+Failed Pixi texture loads are evicted from the cache so they can retry, and the
+primitive displays an authored-colour or missing-texture fallback instead of
+disappearing. Transparent Three mesh surfaces depth-test but do not write
+depth, preventing alpha-zero texels from hiding geometry behind them. Native
+transparent depth sorting/write control remains a parity gate.
+
+Future pipeline cache keys include custom shader ID and sample count. The
+native mesh path already keys fixed pipelines by blend and cull mode and keeps
+prepared GPU resources stable across frames; shared cross-scene texture
+residency and deferred GPU disposal remain to be connected to the asset-cache
+accounting.
 
 ## Adding material and asset support
 
@@ -228,22 +243,23 @@ per asset and synchronize against scene time.
 
 ## First-version limitations and roadmap
 
-Implemented: image and WGSL import/storage, reusable solid and textured
-materials, duplication/protected deletion, one-level instances, shared updates,
-opacity/tint, six shared blend modes (normal/add/multiply/screen/darken/lighten),
+Implemented: image and WGSL import/storage, reusable solid, textured-unlit,
+Basic Lit, and PBR materials, duplication/protected deletion, one-level
+instances, shared updates, opacity/tint, six shared blend modes
+(normal/add/multiply/screen/darken/lighten),
 texture coordinates (UV offset/scale/rotation, clamp/repeat/mirror wrap,
-linear/nearest filtering via a TilingSprite path), real browser preview, rectangle
-and image assignment, missing warnings/relink, usage lookup, scene save/load
-migration, undo/redo grouping, shared manifests/WGSL, and Rust solid-material
-compatibility.
+linear/nearest filtering via a TilingSprite path), real browser preview,
+rectangle/image and real mesh-face assignment, missing warnings/relink, usage
+lookup, scene save/load migration, undo/redo grouping, shared manifests/WGSL,
+and native textured/PBR mesh lighting.
 
-Not implemented: daemon texture decode/rendering, per-material samplers (a
-WebGPU bind group; sampler settings are per-asset in the editor today),
+Not implemented: native 2D image/sprite material rendering, per-material browser
+samplers (a WebGPU bind group; sampler settings are per-asset in the editor today),
 tile/nine-slice fit modes, WebGPU-native browser material
 pipelines, shader execution/editor/hot reload, video and sequence playback,
 thumbnail workers/proxies, folder mutation, material export, copy/paste, full
-primitive multi-selection UI, model slot import, PBR/chroma/mask/gradient
-pipelines, parameter animation/data binding, nine-slice, live inputs, fonts,
+primitive multi-object selection UI, chroma/mask/gradient pipelines, parameter
+animation/data binding, nine-slice, live inputs, native text/fonts,
 GPU-memory estimates, and cache reference-count disposal. Their schema/UI
 extension points are visible but disabled or explicitly labelled.
 

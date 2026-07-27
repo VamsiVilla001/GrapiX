@@ -31,39 +31,46 @@ export async function publishScenePackage(scene: SceneDocument): Promise<Publish
 
   const zip = new JSZip();
   const assetEntries: ScenePackageAssetEntry[] = [];
+  const packageFiles = new Map<string, Uint8Array>();
 
   for (const asset of scene.assets) {
-    const assetFile = dataUrlToAssetFile(asset.source, asset.assetId, asset.mimeType);
-
-    if (!assetFile) {
-      assetEntries.push({
-        assetId: asset.assetId,
-        name: asset.name,
-        kind: asset.kind,
-        path: asset.source,
-        mimeType: asset.mimeType,
-        sizeBytes: asset.sizeBytes
-      });
-      continue;
-    }
-
-    const path = `assets/${assetFile.fileName}`;
-    zip.file(path, assetFile.bytes);
+    const assetFile = dataUrlToAssetFile(asset.source, asset.assetId, asset.mimeType)
+      ?? await fetchAssetFile(asset.source, asset.assetId, asset.name, asset.mimeType);
+    const path = `${asset.kind === "wgsl" ? "shaders" : asset.kind === "script" ? "scripts" : asset.kind === "font" ? "fonts" : ["video", "image-sequence"].includes(asset.kind) ? "media" : "assets"}/${assetFile.fileName}`;
+    packageFiles.set(path, assetFile.bytes);
     assetEntries.push({
       assetId: asset.assetId,
       name: asset.name,
       kind: asset.kind,
       path,
       mimeType: asset.mimeType,
-      sizeBytes: asset.sizeBytes
+      sizeBytes: assetFile.bytes.byteLength,
+      checksum: await sha256(assetFile.bytes)
     });
   }
 
-  zip.file("manifest.json", stableJson(buildScenePackageManifest(scene, assetEntries)));
-  zip.file("scene.json", stableJson(scene));
-  zip.file("materials.json", stableJson(scene.materials));
-  zip.file("bindings.json", stableJson(createBindingTable(scene)));
-  zip.file("timeline.json", stableJson(scene.timeline));
+  const manifest = buildScenePackageManifest(scene, assetEntries);
+  packageFiles.set("manifest.json", encodeJson(manifest));
+  packageFiles.set("scene.json", encodeJson(scene));
+  packageFiles.set("materials.json", encodeJson(scene.materials));
+  packageFiles.set("bindings.json", encodeJson(createBindingTable(scene)));
+  packageFiles.set("timeline.json", encodeJson(scene.timeline));
+  if (scene.fonts?.length) packageFiles.set("fonts.json", encodeJson(scene.fonts));
+  if (scene.automation) packageFiles.set("automation.json", encodeJson(scene.automation));
+  packageFiles.set("metadata.json", encodeJson({
+    generator: "GrapiX editor",
+    packageVersion: manifest.packageVersion,
+    sceneRevision: manifest.sceneRevision,
+    generatedAt: manifest.createdAt,
+    sourceSceneUpdatedAt: scene.updatedAt
+  }));
+  const checksums = Object.fromEntries(await Promise.all(
+    [...packageFiles.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(async ([filePath, bytes]) => [filePath, await sha256(bytes)])
+  ));
+  packageFiles.set("checksums.json", encodeJson({ algorithm: "sha256", files: checksums }));
+  for (const [filePath, bytes] of packageFiles) zip.file(filePath, bytes);
 
   const blob = await zip.generateAsync({
     type: "blob",
@@ -141,6 +148,24 @@ function dataUrlToAssetFile(
   };
 }
 
+async function fetchAssetFile(
+  source: string,
+  assetId: string,
+  name: string,
+  mimeType: string | undefined
+): Promise<{ fileName: string; bytes: Uint8Array }> {
+  const response = await fetch(source);
+  if (!response.ok) throw new Error(`Could not read package asset ${assetId} (${response.status}).`);
+  return {
+    fileName: `${assetId}.${extensionFromName(name) || extensionForMime(mimeType ?? response.headers.get("content-type") ?? "")}`,
+    bytes: new Uint8Array(await response.arrayBuffer())
+  };
+}
+
+function extensionFromName(name: string): string {
+  return name.toLowerCase().split(".").pop()?.replace(/[^a-z0-9]+/g, "") ?? "";
+}
+
 function extensionForMime(mimeType: string): string {
   switch (mimeType) {
     case "image/jpeg":
@@ -175,6 +200,11 @@ function slugify(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "scene";
 }
 
-function stableJson(value: unknown): string {
-  return `${JSON.stringify(value, null, 2)}\n`;
+function encodeJson(value: unknown): Uint8Array {
+  return new TextEncoder().encode(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function sha256(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes as BufferSource);
+  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
 }

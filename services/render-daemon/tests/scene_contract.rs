@@ -32,11 +32,12 @@ fn fixture_scene_prepares_for_rendering() {
     assert_eq!(scene.canvas_width, 1920.0);
     assert_eq!(scene.canvas_height, 1080.0);
 
-    // The fixture contains exactly one visible rect the daemon can render...
+    // The fixture contains one visible rect and one ellipse the shared quad
+    // shader renders with its analytic ellipse fragment path.
     assert_eq!(
         scene.rects.len(),
-        1,
-        "expected exactly one renderable rect in the fixture"
+        2,
+        "expected a renderable rect and ellipse in the fixture"
     );
     let rect = &scene.rects[0];
     assert_eq!(rect.object_id, "rect_fixture_plate");
@@ -45,17 +46,14 @@ fn fixture_scene_prepares_for_rendering() {
     assert_eq!(rect.width, 640.0);
     assert_eq!(rect.height, 120.0);
 
-    // ...plus a text and an ellipse object that must produce explicit
-    // unsupported-type warnings, never silent omission.
+    assert_eq!(scene.rects[1].object_id, "ellipse_fixture_badge");
+    assert_eq!(scene.rects[1].primitive_kind, 1);
+
+    // Text remains unsupported and must produce an explicit warning.
     assert_eq!(scene.object_count, 3);
     assert!(
         scene.warnings.iter().any(|w| w.contains("\"text\"")),
         "missing unsupported warning for text: {:?}",
-        scene.warnings
-    );
-    assert!(
-        scene.warnings.iter().any(|w| w.contains("\"ellipse\"")),
-        "missing unsupported warning for ellipse: {:?}",
         scene.warnings
     );
 }

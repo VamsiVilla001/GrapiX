@@ -1,19 +1,31 @@
 import { create } from "zustand";
 import {
   type AssetLibraryItem,
+  type AnimatableProperty,
   appendSceneHistory,
+  bezierPathBounds,
   createMaterialDefinition,
   createObjectId,
   createSceneId,
+  faceSlotKey,
   findAssetUsageDetails,
   findMaterialUsage,
+  getBindableFaces,
+  getMaterialBindingId,
   isMaterialCompatible,
+  isMaterialCompatibleWithFace,
   normalizeMaterial,
   normalizeMaterialSceneDocument,
+  normalizeColorValue,
   normalizePrimitiveMaterialBinding,
+  resolveSceneObjectHierarchy,
+  readAnimatableProperty,
   redoSceneHistory,
   undoSceneHistory,
   type BindingMap,
+  type CanvasGuide,
+  type CanvasMargins,
+  type ColorValue,
   type CameraSceneObject,
   type EllipseSceneObject,
   type GroupSceneObject,
@@ -21,22 +33,36 @@ import {
   type LayerSceneObject,
   type LightSceneObject,
   type LineSceneObject,
+  type BezierPath,
+  type ObjectMask,
+  type PaintSceneObject,
+  type PaintStroke,
+  type Vec2,
+  type FontDefinition,
+  type GradientPreset,
   type Material,
+  type MaterialFace,
   type MaterialInstance,
   type MaterialParameterValue,
   type PrimitiveMaterialBinding,
+  type PropertyKeyframe,
   type MarkerSceneObject,
   type MeshSceneObject,
   type RectSceneObject,
+  type ShapeSceneObject,
   type SceneDocument,
+  type SceneAutomationDefinition,
   type SceneKeyframe,
   type SceneTimeline,
+  type SceneViewportSettings,
   type SceneObject,
+  type SceneScriptReference,
   type TextSceneObject
 } from "@grapix/shared-types";
 import { importMaterialAsset } from "../modules/material-manager/services/assetImporter";
 import { builtInShaders } from "../modules/material-manager/services/shaderRegistry";
 import { assetExistsOnApi } from "../lib/apiClient";
+import { clonePropertyAnimation, removePropertyKeyframe } from "./timelineAnimation";
 
 export type LibraryObjectKind =
   | "text"
@@ -49,6 +75,7 @@ export type LibraryObjectKind =
   | "torus"
   | "slab"
   | "line"
+  | "shape"
   | "directional-light"
   | "point-light"
   | "spot-light"
@@ -66,7 +93,10 @@ interface SceneHistoryTransaction {
 
 export interface EditorState {
   scene: SceneDocument;
+  hasActiveScene: boolean;
   selectedObjectId: string | null;
+  selectedFaceIndices: number[];
+  faceSelectionAnchor: number | null;
   dataJson: string;
   dataError: string | null;
   saveStatus: "local" | "saving" | "saved" | "error";
@@ -79,38 +109,124 @@ export interface EditorState {
   selectObject: (objectId: string | null) => void;
   setSceneId: (id: string) => void;
   setSceneName: (name: string) => void;
+  updateCanvasViewport: (patch: Partial<SceneViewportSettings>) => void;
   addTextObject: () => void;
   addRectObject: () => void;
   addEllipseObject: () => void;
   addImageObject: () => void;
+  addTextAt: (origin: Vec2, size: Vec2 | null, writingMode: "horizontal-tb" | "vertical-rl" | "vertical-lr") => string;
+  createPaintLayer: () => string;
+  addPaintStroke: (objectId: string, stroke: PaintStroke) => void;
+  updatePaintStroke: (objectId: string, strokeId: string, patch: Partial<PaintStroke>) => void;
   addLibraryObject: (kind: LibraryObjectKind) => void;
+  addModelObjectFromAsset: (assetId: string) => boolean;
   duplicateSelectedObject: () => void;
   deleteSelectedObject: () => void;
   duplicateObject: (objectId: string) => void;
   deleteObject: (objectId: string) => void;
   updateObject: (objectId: string, patch: Partial<SceneObject>) => void;
+  setActiveCameraId: (cameraId: string | null) => void;
+  setContainerChild: (containerId: string, childId: string, included: boolean) => boolean;
+  // Pen-tool / bezier-path authoring. All commit through the scene history, so a
+  // pen gesture wrapped in beginHistory/commitHistory is a single undo step.
+  createPenShape: (origin: Vec2) => string;
+  appendShapeVertex: (objectId: string, vertex: Vec2, inTangent?: Vec2, outTangent?: Vec2) => number;
+  updateShapeVertex: (objectId: string, index: number, patch: { vertex?: Vec2; inTangent?: Vec2; outTangent?: Vec2 }) => void;
+  addShapePoint: (objectId: string, afterIndex: number, point?: Vec2) => void;
+  removeShapePoints: (objectId: string, indices: number[]) => void;
+  setShapePointsSmooth: (objectId: string, indices: number[], smooth: boolean, linked?: boolean) => void;
+  convertObjectToShape: (objectId: string) => string | null;
+  closeShapePath: (objectId: string) => void;
+  // AE-style layer masks. addMask is for pen-drawing (empty path at a local
+  // origin); addRectMask drops a ready rectangular mask. All history-committed.
+  addRectMask: (objectId: string) => string | null;
+  addMask: (objectId: string, origin: Vec2) => string | null;
+  addMaskFromPath: (objectId: string, path: BezierPath, type?: ObjectMask["type"], feather?: Vec2) => string | null;
+  appendMaskVertex: (objectId: string, maskId: string, vertex: Vec2) => void;
+  closeMaskPath: (objectId: string, maskId: string) => void;
+  updateMask: (objectId: string, maskId: string, patch: Partial<ObjectMask>) => void;
+  updateMaskVertex: (objectId: string, maskId: string, index: number, patch: { vertex?: Vec2; inTangent?: Vec2; outTangent?: Vec2 }) => void;
+  duplicateMask: (objectId: string, maskId: string) => string | null;
+  moveMask: (objectId: string, maskId: string, direction: "up" | "down") => void;
+  toggleMaskKeyframe: (objectId: string, maskId: string, property: "path" | "opacity" | "feather" | "expansion", frame: number) => void;
+  updateMaskKeyframeFrame: (objectId: string, maskId: string, property: "path" | "opacity" | "feather" | "expansion", keyframeId: string, frame: number) => void;
+  deleteMask: (objectId: string, maskId: string) => void;
   moveObjectInStack: (objectId: string, direction: "up" | "down" | "front" | "back") => void;
   updateObjectBindings: (objectId: string, bindings: BindingMap) => void;
   addObjectKeyframe: (objectId: string, frame: number) => void;
   updateObjectKeyframe: (keyframeId: string, patch: Partial<SceneKeyframe>) => void;
   deleteObjectKeyframe: (keyframeId: string) => void;
+  setPropertyAnimationEnabled: (
+    objectId: string,
+    property: AnimatableProperty,
+    enabled: boolean,
+    frame: number
+  ) => void;
+  setAnimatedPropertyValue: (
+    objectId: string,
+    property: AnimatableProperty,
+    value: number,
+    frame: number
+  ) => void;
+  addPropertyKeyframe: (
+    objectId: string,
+    property: AnimatableProperty,
+    frame: number,
+    value?: number
+  ) => void;
+  updatePropertyKeyframe: (
+    objectId: string,
+    property: AnimatableProperty,
+    keyframeId: string,
+    patch: Partial<PropertyKeyframe>
+  ) => void;
+  deletePropertyKeyframe: (
+    objectId: string,
+    property: AnimatableProperty,
+    keyframeId: string
+  ) => void;
   updateTimeline: (patch: Partial<SceneTimeline>) => void;
+  addFontDefinition: (font: FontDefinition, asset?: AssetLibraryItem) => void;
+  removeFontDefinition: (fontId: string) => boolean;
+  assignFontToSelectedText: (fontId: string) => boolean;
+  updateAutomation: (automation: SceneAutomationDefinition) => void;
+  attachSceneScript: (script: SceneScriptReference, asset: AssetLibraryItem) => void;
   assignMaterialSlot: (objectId: string, slotName: string, binding: string | PrimitiveMaterialBinding) => void;
   assignMaterialToObjects: (objectIds: string[], materialId: string, slotName?: string) => boolean;
-  importAsset: (file: File) => Promise<void>;
+  assignAssetToObjects: (objectIds: string[], assetId: string, slotName?: string) => boolean;
+  // Central XPression-style face-index material-binding API. One bind/unbind =
+  // one undo entry; multi-face assignments commit as a single transaction. The
+  // same API backs Material Manager double-click, Inspector commands, drag-drop,
+  // and any future script / Visual Logic / data-driven material switching.
+  selectFace: (faceIndex: number, mode: "single" | "toggle" | "range") => void;
+  clearFaceSelection: () => void;
+  assignMaterial: (objectId: string, faceIndex: number, materialId: string) => boolean;
+  assignMaterialToFaces: (objectId: string, faceIndices: number[], binding: string | PrimitiveMaterialBinding) => boolean;
+  assignAssetToFaces: (objectId: string, faceIndices: number[], assetId: string) => boolean;
+  unbindMaterial: (objectId: string, faceIndex: number) => void;
+  unbindMaterialFromFaces: (objectId: string, faceIndices: number[]) => void;
+  getMaterial: (objectId: string, faceIndex: number) => string | undefined;
+  getBindableFaces: (objectId: string) => MaterialFace[];
+  getObjectsUsingMaterial: (materialId: string) => string[];
+  importAsset: (file: File) => Promise<string | null>;
   relinkAsset: (assetId: string, file: File) => Promise<void>;
   updateAsset: (assetId: string, patch: Partial<AssetLibraryItem>) => void;
   refreshAssetAvailability: () => Promise<void>;
   deleteAsset: (assetId: string) => boolean;
-  createMaterial: (type: "solid-color" | "image" | "unlit-texture", assetId?: string) => string;
+  createMaterial: (assetId?: string) => string;
   duplicateMaterial: (materialId: string) => string | null;
   deleteMaterial: (materialId: string) => boolean;
+  deleteUnusedMaterials: () => number;
   updateMaterial: (materialId: string, patch: Partial<Material>) => void;
   createMaterialInstance: (baseMaterialId: string) => string | null;
   deleteMaterialInstance: (instanceId: string) => boolean;
   updateMaterialInstance: (instanceId: string, patch: Partial<MaterialInstance>) => void;
   setMaterialInstanceParameter: (instanceId: string, name: string, value: MaterialParameterValue | undefined) => void;
   moveObjectToLayer: (objectId: string, layerId: string) => void;
+  saveGradientPreset: (name: string, value: GradientPreset["value"]) => string;
+  updateGradientPreset: (presetId: string, patch: Partial<Pick<GradientPreset, "name" | "value">>) => void;
+  duplicateGradientPreset: (presetId: string) => string | null;
+  deleteGradientPreset: (presetId: string) => void;
   createLayerForObject: (objectId: string) => string | null;
   renameLayer: (layerId: string, nextLayerId: string) => void;
   deleteLayer: (layerId: string) => void;
@@ -118,62 +234,33 @@ export interface EditorState {
   setLayerLocked: (layerId: string, locked: boolean) => void;
   beginHistory: (label: string) => void;
   commitHistory: () => void;
+  cancelHistory: () => void;
   undo: () => void;
   redo: () => void;
   setDataJson: (json: string) => void;
   applyDataJson: () => boolean;
   loadScene: (scene: SceneDocument) => void;
+  applyImportedScene: (scene: SceneDocument, mode: "replace" | "merge") => void;
   resetScene: () => void;
+  clearScene: () => void;
 }
 
-const defaultDataContext = {
-  player: {
-    name: "Maya Chen",
-    role: "Lead Anchor",
-    headshot:
-      "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=600&q=80"
-  },
-  team: {
-    primaryColor: "#23c7d9",
-    secondaryColor: "#f5b942"
-  },
-  teams: {
-    home: {
-      name: "Team Soul",
-      logo: "asset_team_soul_logo",
-      primaryColor: "#ffcc00"
-    }
-  },
-  score: {
-    home: 15,
-    away: 12
-  }
-};
-
-const defaultLogoAsset: AssetLibraryItem = {
-  assetId: "asset_default_logo",
-  name: "Default Team Logo",
-  kind: "svg",
-  source: svgDataUri("#263348", "#23c7d9", "GX"),
-  mimeType: "image/svg+xml",
-  importedAt: new Date(0).toISOString()
-};
-
-const teamSoulLogoAsset: AssetLibraryItem = {
-  assetId: "asset_team_soul_logo",
-  name: "Team Soul Logo",
-  kind: "svg",
-  source: svgDataUri("#141414", "#ffcc00", "SOUL"),
-  mimeType: "image/svg+xml",
-  importedAt: new Date(0).toISOString()
-};
+function isMaterialCompatibleWithSlot(material: Material, object: SceneObject, slotName: string): boolean {
+  const face = getBindableFaces(object).find((candidate) => candidate.slotKey === slotName);
+  return face
+    ? isMaterialCompatibleWithFace(material, object, face.index)
+    : isMaterialCompatible(material, object.type);
+}
 
 export const useEditorStore = create<EditorState>((set, get) => {
-  const initialScene = createDefaultScene();
+  const initialScene = createEmptyScene();
 
   return {
     scene: initialScene,
-    selectedObjectId: initialScene.objects[1]?.id ?? null,
+    hasActiveScene: false,
+    selectedObjectId: null,
+    selectedFaceIndices: [],
+    faceSelectionAnchor: null,
     dataJson: JSON.stringify(initialScene.dataContext, null, 2),
     dataError: null,
     saveStatus: "local",
@@ -183,7 +270,20 @@ export const useEditorStore = create<EditorState>((set, get) => {
     redoStack: [],
     historyTransaction: null,
     setSaveStatus: (saveStatus, saveError = null) => set({ saveStatus, saveError }),
-    selectObject: (objectId) => set({ selectedObjectId: objectId }),
+    // Object selection means "the whole object" by default, so applying a
+    // material to a cube/model cannot appear to fail merely because its Front
+    // face is rotated away. An explicit face click in Materials narrows this
+    // selection, and re-clicking the same object preserves that choice.
+    selectObject: (objectId) => set((state) => {
+      if (state.selectedObjectId === objectId) {
+        return { selectedObjectId: objectId };
+      }
+      const object = state.scene.objects.find((item) => item.id === objectId);
+      return {
+        selectedObjectId: objectId,
+        ...materialFaceSelection(object)
+      };
+    }),
     setSceneId: (id) =>
       set((state) => ({
         scene: touchScene({ ...state.scene, id })
@@ -192,11 +292,53 @@ export const useEditorStore = create<EditorState>((set, get) => {
       set((state) => ({
         scene: touchScene({ ...state.scene, name })
       })),
+    updateCanvasViewport: (patch) =>
+      set((state) => ({
+        scene: touchScene({
+          ...state.scene,
+          canvas: {
+            ...state.scene.canvas,
+            editorViewport: normalizeViewportSettings({
+              ...state.scene.canvas.editorViewport,
+              ...patch,
+              margins: patch.margins
+                ? { ...state.scene.canvas.editorViewport?.margins, ...patch.margins }
+                : state.scene.canvas.editorViewport?.margins,
+              guides: patch.guides ?? state.scene.canvas.editorViewport?.guides
+            }, state.scene.canvas.width, state.scene.canvas.height)
+          }
+        })
+      })),
     addTextObject: () => addObject(createTextObject()),
     addRectObject: () => addObject(createRectObject()),
     addEllipseObject: () => addObject(createEllipseObject()),
     addImageObject: () => addObject(createImageObject()),
     addLibraryObject: (kind) => addObject(createLibraryObject(kind, get().scene)),
+    addModelObjectFromAsset: (assetId) => {
+      const { scene, hasActiveScene } = get();
+      const asset = scene.assets.find((item) => item.assetId === assetId);
+      if (!hasActiveScene) {
+        set({ materialActionError: "Create or open a scene before adding a 3D model." });
+        return false;
+      }
+      if (!asset || asset.kind !== "model" || ["MISSING", "ERROR", "UNSUPPORTED"].includes(asset.status ?? "")) {
+        set({ materialActionError: "The selected GLB/glTF model is missing or unavailable." });
+        return false;
+      }
+      addObject(createMeshObject("model", {
+        name: asset.name.replace(/\.(glb|gltf)$/i, ""),
+        x: scene.canvas.width / 2,
+        y: scene.canvas.height / 2,
+        width: 320,
+        height: 320,
+        depth: 320,
+        src: asset.source,
+        modelAssetId: asset.assetId,
+        materialElements: asset.modelMaterialNames ?? []
+      }));
+      set({ materialActionError: null });
+      return true;
+    },
     duplicateSelectedObject: () => {
       const { selectedObjectId } = get();
 
@@ -213,7 +355,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
     duplicateObject: duplicateObjectById,
     deleteObject: deleteObjectById,
-    updateObject: (objectId, patch) =>
+  updateObject: (objectId, patch) =>
       set((state) => ({
         scene: touchScene({
           ...state.scene,
@@ -224,6 +366,380 @@ export const useEditorStore = create<EditorState>((set, get) => {
           )
         })
       })),
+    addTextAt: (origin, size, writingMode) => {
+      const text = createTextObject({
+        x: origin.x,
+        y: origin.y,
+        width: Math.max(1, size?.x ?? (writingMode === "horizontal-tb" ? 420 : 96)),
+        height: Math.max(1, size?.y ?? (writingMode === "horizontal-tb" ? 72 : 420)),
+        textLayout: size ? "paragraph" : "point",
+        writingMode,
+        verticalAlign: "top",
+        direction: "ltr"
+      });
+      addObject(text);
+      return text.id;
+    },
+    createPaintLayer: () => {
+      const { scene } = get();
+      const paint = createPaintObject({
+        x: 0,
+        y: 0,
+        width: scene.canvas.width,
+        height: scene.canvas.height
+      });
+      addObject(paint);
+      return paint.id;
+    },
+    addPaintStroke: (objectId, stroke) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      if (!object || object.type !== "paint") return;
+      commitScene({
+        ...scene,
+        objects: scene.objects.map((item) =>
+          item.id === objectId ? { ...object, strokes: [...object.strokes, stroke] } : item
+        )
+      });
+    },
+    updatePaintStroke: (objectId, strokeId, patch) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      if (!object || object.type !== "paint") return;
+      commitScene({
+        ...scene,
+        objects: scene.objects.map((item) => item.id === objectId
+          ? { ...object, strokes: object.strokes.map((stroke) => stroke.id === strokeId ? { ...stroke, ...patch } : stroke) }
+          : item)
+      });
+    },
+    setActiveCameraId: (cameraId) => {
+      const { scene } = get();
+      if (cameraId && !scene.objects.some((object) => object.id === cameraId && object.type === "camera")) {
+        return;
+      }
+      set({
+        scene: touchScene({
+          ...scene,
+          activeCameraId: cameraId ?? undefined
+        })
+      });
+    },
+    setContainerChild: (containerId, childId, included) => {
+      const { scene } = get();
+      const container = scene.objects.find((object) => object.id === containerId);
+      const child = scene.objects.find((object) => object.id === childId);
+      if (!container || !child || !isContainerObject(container) || container.id === child.id) {
+        return false;
+      }
+      if (included && !isAllowedContainerChild(container, child)) {
+        return false;
+      }
+      if (included && isContainerObject(child) && containerContains(scene.objects, child.id, container.id)) {
+        return false;
+      }
+
+      const hierarchy = resolveSceneObjectHierarchy(scene.objects);
+      const effectiveChild = hierarchy.objects.find((object) => object.id === childId) ?? child;
+      const effectiveContainer = hierarchy.objects.find((object) => object.id === containerId) ?? container;
+      const childTransformPatch = included
+        ? localizeSceneObjectTransform(effectiveChild, effectiveContainer)
+        : bakeEffectiveSceneObjectTransform(effectiveChild);
+      const adoptedIds = included
+        ? collectContainerSubtreeIds(scene.objects, childId)
+        : new Set<string>();
+      const objects = scene.objects.map((object) => {
+        let nextObject = object;
+        if (isContainerObject(object)) {
+          const withoutChild = object.childIds.filter((id) => id !== childId);
+          if (object.id === containerId) {
+            nextObject = {
+              ...object,
+              childIds: included ? [...withoutChild, childId] : withoutChild
+            } as SceneObject;
+          } else if (withoutChild.length !== object.childIds.length) {
+            nextObject = { ...object, childIds: withoutChild } as SceneObject;
+          }
+        }
+        if (adoptedIds.has(object.id) && nextObject.layerId !== container.layerId) {
+          nextObject = { ...nextObject, layerId: container.layerId } as SceneObject;
+        }
+        if (object.id === childId) {
+          nextObject = { ...nextObject, ...childTransformPatch } as SceneObject;
+        }
+        return nextObject;
+      });
+
+      set({ scene: touchScene({ ...scene, objects: normalizeObjectStack(objects) }) });
+      return true;
+    },
+    createPenShape: (origin) => {
+      const { scene } = get();
+      const shape = createShapeObject({
+        x: origin.x,
+        y: origin.y,
+        width: 1,
+        height: 1,
+        path: { closed: false, vertices: [{ x: 0, y: 0 }], inTangents: [{ x: 0, y: 0 }], outTangents: [{ x: 0, y: 0 }] },
+        // Draw with both a fill and stroke (like AE's pen), so a new path is
+        // immediately a coloured, editable shape — a fill renders even while open.
+        fillEnabled: true,
+        fill: "#7c5cff",
+        strokeEnabled: true,
+        strokeWidth: 2,
+        stroke: "#ffffff"
+      });
+      const layerObjects = scene.objects.filter((item) => item.layerId === shape.layerId);
+      const objectWithStack = { ...shape, zIndex: layerObjects.reduce((highest, item) => Math.max(highest, item.zIndex), -1) + 1 };
+      commitScene({ ...scene, objects: normalizeObjectStack([...scene.objects, objectWithStack]) });
+      set({ selectedObjectId: objectWithStack.id, selectedFaceIndices: [0], faceSelectionAnchor: 0 });
+      return objectWithStack.id;
+    },
+    appendShapeVertex: (objectId, vertex, inTangent = { x: 0, y: 0 }, outTangent = { x: 0, y: 0 }) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      if (!object || object.type !== "shape") {
+        return -1;
+      }
+      const path: BezierPath = {
+        closed: object.path.closed,
+        vertices: [...object.path.vertices, vertex],
+        inTangents: [...object.path.inTangents, inTangent],
+        outTangents: [...object.path.outTangents, outTangent]
+      };
+      const bounds = bezierPathBounds(path);
+      const updated: ShapeSceneObject = { ...object, path, width: Math.max(1, bounds.width), height: Math.max(1, bounds.height) };
+      commitScene({ ...scene, objects: scene.objects.map((item) => item.id === objectId ? updated : item) });
+      return path.vertices.length - 1;
+    },
+    updateShapeVertex: (objectId, index, patch) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      if (!object || object.type !== "shape" || index < 0 || index >= object.path.vertices.length) {
+        return;
+      }
+      const at = <T,>(list: T[], value: T | undefined) => value === undefined ? list : list.map((existing, i) => (i === index ? value : existing));
+      const path: BezierPath = {
+        closed: object.path.closed,
+        vertices: at(object.path.vertices, patch.vertex),
+        inTangents: at(object.path.inTangents, patch.inTangent),
+        outTangents: at(object.path.outTangents, patch.outTangent)
+      };
+      const bounds = bezierPathBounds(path);
+      const updated: ShapeSceneObject = { ...object, path, width: Math.max(1, bounds.width), height: Math.max(1, bounds.height) };
+      commitScene({ ...scene, objects: scene.objects.map((item) => item.id === objectId ? updated : item) });
+    },
+    addShapePoint: (objectId, afterIndex, authoredPoint) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      if (!object || object.type !== "shape" || object.path.vertices.length === 0) return;
+      const fromIndex = Math.min(object.path.vertices.length - 1, Math.max(0, afterIndex));
+      const toIndex = object.path.closed
+        ? (fromIndex + 1) % object.path.vertices.length
+        : Math.min(object.path.vertices.length - 1, fromIndex + 1);
+      const from = object.path.vertices[fromIndex];
+      const to = object.path.vertices[toIndex];
+      const point = authoredPoint ?? { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+      const insertAt = fromIndex + 1;
+      const path = insertPathPoint(object.path, insertAt, point);
+      commitScene({
+        ...scene,
+        objects: scene.objects.map((item) => item.id === objectId ? { ...object, path } : item)
+      });
+    },
+    removeShapePoints: (objectId, indices) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      if (!object || object.type !== "shape") return;
+      const removed = new Set(indices);
+      const minimum = object.path.closed ? 3 : 2;
+      if (object.path.vertices.length - removed.size < minimum) return;
+      const path = filterPathPoints(object.path, (_, index) => !removed.has(index));
+      commitScene({
+        ...scene,
+        objects: scene.objects.map((item) => item.id === objectId ? { ...object, path } : item)
+      });
+    },
+    setShapePointsSmooth: (objectId, indices, smooth, linked = true) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      if (!object || object.type !== "shape") return;
+      const selected = new Set(indices);
+      const path: BezierPath = {
+        ...object.path,
+        inTangents: object.path.inTangents.map((handle, index) => {
+          if (!selected.has(index)) return handle;
+          if (!smooth) return { x: 0, y: 0 };
+          const derived = smoothHandles(object.path, index);
+          return linked ? derived.inTangent : handle;
+        }),
+        outTangents: object.path.outTangents.map((handle, index) => {
+          if (!selected.has(index)) return handle;
+          if (!smooth) return { x: 0, y: 0 };
+          const derived = smoothHandles(object.path, index);
+          return derived.outTangent;
+        })
+      };
+      commitScene({
+        ...scene,
+        objects: scene.objects.map((item) => item.id === objectId ? { ...object, path } : item)
+      });
+    },
+    convertObjectToShape: (objectId) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      if (!object || (object.type !== "rect" && object.type !== "ellipse")) return null;
+      const path = object.type === "rect"
+        ? rectangleBezierPath(object.width, object.height)
+        : ellipseBezierPath(object.width, object.height);
+      const shape: ShapeSceneObject = {
+        ...object,
+        type: "shape",
+        path,
+        fillEnabled: true,
+        strokeEnabled: object.strokeWidth > 0,
+        fillRule: "nonzero"
+      };
+      commitScene({
+        ...scene,
+        objects: scene.objects.map((item) => item.id === objectId ? shape : item)
+      });
+      return shape.id;
+    },
+    closeShapePath: (objectId) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      if (!object || object.type !== "shape") {
+        return;
+      }
+      const updated: ShapeSceneObject = { ...object, path: { ...object.path, closed: true }, fillEnabled: true };
+      commitScene({ ...scene, objects: scene.objects.map((item) => item.id === objectId ? updated : item) });
+    },
+    addRectMask: (objectId) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      if (!object) return null;
+      const ix = object.width * 0.2;
+      const iy = object.height * 0.2;
+      const zero = { x: 0, y: 0 };
+      const path: BezierPath = {
+        closed: true,
+        vertices: [{ x: ix, y: iy }, { x: object.width - ix, y: iy }, { x: object.width - ix, y: object.height - iy }, { x: ix, y: object.height - iy }],
+        inTangents: [zero, zero, zero, zero],
+        outTangents: [zero, zero, zero, zero]
+      };
+      return addMaskToObject(objectId, path);
+    },
+    addMask: (objectId, origin) => {
+      const path: BezierPath = { closed: false, vertices: [{ x: origin.x, y: origin.y }], inTangents: [{ x: 0, y: 0 }], outTangents: [{ x: 0, y: 0 }] };
+      return addMaskToObject(objectId, path);
+    },
+    addMaskFromPath: (objectId, path, type = "bezier", feather = { x: 0, y: 0 }) =>
+      addMaskToObject(objectId, path, { type, feather }),
+    appendMaskVertex: (objectId, maskId, vertex) => {
+      mutateMask(objectId, maskId, (mask) => ({
+        ...mask,
+        path: {
+          closed: mask.path.closed,
+          vertices: [...mask.path.vertices, vertex],
+          inTangents: [...mask.path.inTangents, { x: 0, y: 0 }],
+          outTangents: [...mask.path.outTangents, { x: 0, y: 0 }]
+        }
+      }));
+    },
+    closeMaskPath: (objectId, maskId) => {
+      mutateMask(objectId, maskId, (mask) => ({ ...mask, path: { ...mask.path, closed: true } }));
+    },
+    updateMask: (objectId, maskId, patch) => {
+      mutateMask(objectId, maskId, (mask) => ({ ...mask, ...patch }));
+    },
+    updateMaskVertex: (objectId, maskId, index, patch) => {
+      mutateMask(objectId, maskId, (mask) => ({
+        ...mask,
+        path: patchPathPoint(mask.path, index, patch)
+      }));
+    },
+    duplicateMask: (objectId, maskId) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      const mask = object?.masks?.find((item) => item.id === maskId);
+      if (!object || !mask) return null;
+      const duplicated: ObjectMask = {
+        ...structuredClone(mask),
+        id: createSceneId("mask"),
+        name: `${mask.name} Copy`,
+        path: {
+          ...mask.path,
+          vertices: mask.path.vertices.map((point) => ({ x: point.x + 12, y: point.y + 12 }))
+        }
+      };
+      commitScene({
+        ...scene,
+        objects: scene.objects.map((item) => item.id === objectId
+          ? { ...item, masks: [...(item.masks ?? []), duplicated] } as SceneObject
+          : item)
+      });
+      return duplicated.id;
+    },
+    moveMask: (objectId, maskId, direction) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      if (!object?.masks) return;
+      const index = object.masks.findIndex((mask) => mask.id === maskId);
+      const target = direction === "up" ? index - 1 : index + 1;
+      if (index < 0 || target < 0 || target >= object.masks.length) return;
+      const masks = object.masks.slice();
+      [masks[index], masks[target]] = [masks[target], masks[index]];
+      commitScene({
+        ...scene,
+        objects: scene.objects.map((item) => item.id === objectId ? { ...item, masks } as SceneObject : item)
+      });
+    },
+    deleteMask: (objectId, maskId) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      if (!object || !object.masks) return;
+      const masks = object.masks.filter((mask) => mask.id !== maskId);
+      commitScene({ ...scene, objects: scene.objects.map((item) => item.id === objectId ? ({ ...item, masks } as SceneObject) : item) });
+    },
+    toggleMaskKeyframe: (objectId, maskId, property, frame) => {
+      mutateMask(objectId, maskId, (mask) => {
+        const animation = { ...(mask.animation ?? {}) };
+        if (property === "path") {
+          const existing = animation.path ?? [];
+          animation.path = existing.some((key) => key.frame === frame)
+            ? existing.filter((key) => key.frame !== frame)
+            : [...existing, { id: createSceneId("maskkey"), frame, value: structuredClone(mask.path) }];
+        } else if (property === "feather") {
+          const existing = animation.feather ?? [];
+          animation.feather = existing.some((key) => key.frame === frame)
+            ? existing.filter((key) => key.frame !== frame)
+            : [...existing, { id: createSceneId("maskkey"), frame, value: { ...mask.feather } }];
+        } else {
+          const existing = animation[property] ?? [];
+          const value = property === "opacity" ? mask.opacity : mask.expansion;
+          animation[property] = existing.some((key) => key.frame === frame)
+            ? existing.filter((key) => key.frame !== frame)
+            : [...existing, { id: createSceneId("maskkey"), frame, value }];
+        }
+        return { ...mask, animation };
+      });
+    },
+    updateMaskKeyframeFrame: (objectId, maskId, property, keyframeId, frame) => {
+      mutateMask(objectId, maskId, (mask) => {
+        const animation = { ...(mask.animation ?? {}) };
+        if (property === "path") {
+          animation.path = (animation.path ?? []).map((key) => key.id === keyframeId ? { ...key, frame } : key);
+        } else if (property === "feather") {
+          animation.feather = (animation.feather ?? []).map((key) => key.id === keyframeId ? { ...key, frame } : key);
+        } else if (property === "opacity") {
+          animation.opacity = (animation.opacity ?? []).map((key) => key.id === keyframeId ? { ...key, frame } : key);
+        } else {
+          animation.expansion = (animation.expansion ?? []).map((key) => key.id === keyframeId ? { ...key, frame } : key);
+        }
+        return { ...mask, animation };
+      });
+    },
     moveObjectInStack: (objectId, direction) =>
       set((state) => ({
         scene: touchScene({
@@ -288,6 +804,151 @@ export const useEditorStore = create<EditorState>((set, get) => {
           }
         })
       })),
+    setPropertyAnimationEnabled: (objectId, property, enabled, frame) =>
+      set((state) => ({
+        scene: touchScene({
+          ...state.scene,
+          objects: state.scene.objects.map((object) => {
+            if (object.id !== objectId) return object;
+            const animation = { ...(object.animation ?? {}) };
+
+            if (enabled) {
+              const key: PropertyKeyframe = {
+                id: createSceneId("pkf"),
+                frame: clampTimelineFrame(frame, state.scene.timeline.durationFrames),
+                value: readAnimatableProperty(object, property),
+                easing: "linear"
+              };
+              animation[property] = { keys: [key] };
+            } else {
+              delete animation[property];
+            }
+
+            return {
+              ...object,
+              animation: Object.keys(animation).length > 0 ? animation : undefined
+            } as SceneObject;
+          })
+        })
+      })),
+    setAnimatedPropertyValue: (objectId, property, value, frame) =>
+      set((state) => ({
+        scene: touchScene({
+          ...state.scene,
+          objects: state.scene.objects.map((object) => {
+            if (object.id !== objectId) return object;
+            const nextObject = { ...object, [property]: value } as SceneObject;
+            const channel = object.animation?.[property];
+
+            if (!channel) return nextObject;
+
+            const nextFrame = clampTimelineFrame(frame, state.scene.timeline.durationFrames);
+            const existing = channel.keys.find((key) => key.frame === nextFrame);
+            const nextKey: PropertyKeyframe = existing
+              ? { ...existing, value }
+              : {
+                  id: createSceneId("pkf"),
+                  frame: nextFrame,
+                  value,
+                  easing: "linear"
+                };
+            const keys = existing
+              ? channel.keys.map((key) => key.id === existing.id ? nextKey : key)
+              : [...channel.keys, nextKey];
+
+            return {
+              ...nextObject,
+              animation: {
+                ...object.animation,
+                [property]: { keys: sortPropertyKeys(keys) }
+              }
+            } as SceneObject;
+          })
+        })
+      })),
+    addPropertyKeyframe: (objectId, property, frame, value) =>
+      set((state) => ({
+        scene: touchScene({
+          ...state.scene,
+          objects: state.scene.objects.map((object) => {
+            if (object.id !== objectId) return object;
+            const nextFrame = clampTimelineFrame(frame, state.scene.timeline.durationFrames);
+            const channel = object.animation?.[property];
+            const nextValue = value ?? readAnimatableProperty(object, property);
+            const existing = channel?.keys.find((key) => key.frame === nextFrame);
+            const nextKey: PropertyKeyframe = existing
+              ? { ...existing, value: nextValue }
+              : {
+                  id: createSceneId("pkf"),
+                  frame: nextFrame,
+                  value: nextValue,
+                  easing: "linear"
+                };
+            const keys = existing
+              ? channel!.keys.map((key) => key.id === existing.id ? nextKey : key)
+              : [...(channel?.keys ?? []), nextKey];
+
+            return {
+              ...object,
+              animation: {
+                ...object.animation,
+                [property]: { keys: sortPropertyKeys(keys) }
+              }
+            } as SceneObject;
+          })
+        })
+      })),
+    updatePropertyKeyframe: (objectId, property, keyframeId, patch) =>
+      set((state) => ({
+        scene: touchScene({
+          ...state.scene,
+          objects: state.scene.objects.map((object) => {
+            if (object.id !== objectId) return object;
+            const channel = object.animation?.[property];
+            if (!channel) return object;
+            const keys = channel.keys.map((key) =>
+              key.id === keyframeId
+                ? {
+                    ...key,
+                    ...patch,
+                    frame: clampTimelineFrame(
+                      patch.frame ?? key.frame,
+                      state.scene.timeline.durationFrames
+                    )
+                  }
+                : key
+            );
+            const updatedKey = keys.find((key) => key.id === keyframeId);
+            const uniqueKeys = updatedKey
+              ? keys.filter((key) => key.id === keyframeId || key.frame !== updatedKey.frame)
+              : keys;
+
+            return {
+              ...object,
+              animation: {
+                ...object.animation,
+                [property]: { keys: sortPropertyKeys(uniqueKeys) }
+              }
+            } as SceneObject;
+          })
+        })
+      })),
+    deletePropertyKeyframe: (objectId, property, keyframeId) =>
+      set((state) => ({
+        scene: touchScene({
+          ...state.scene,
+          objects: state.scene.objects.map((object) => {
+            if (object.id !== objectId) return object;
+            const channel = object.animation?.[property];
+            if (!channel) return object;
+
+            return {
+              ...object,
+              animation: removePropertyKeyframe(object.animation, property, keyframeId)
+            } as SceneObject;
+          })
+        })
+      })),
     updateTimeline: (patch) =>
       set((state) => ({
         scene: touchScene({
@@ -298,6 +959,69 @@ export const useEditorStore = create<EditorState>((set, get) => {
           }
         })
       })),
+    addFontDefinition: (font, asset) => {
+      const { scene } = get();
+      const assets = asset && !scene.assets.some((item) => item.assetId === asset.assetId)
+        ? [...scene.assets, asset]
+        : scene.assets;
+      commitScene({
+        ...scene,
+        assets,
+        fonts: [...(scene.fonts ?? []).filter((item) => item.fontId !== font.fontId), font]
+      });
+    },
+    removeFontDefinition: (fontId) => {
+      const { scene } = get();
+      const font = scene.fonts?.find((item) => item.fontId === fontId);
+      if (!font) return false;
+      if (scene.objects.some((object) => object.type === "text" && object.fontFamily === font.family)) {
+        set({ materialActionError: `Font ${font.family} is still assigned to a text object.` });
+        return false;
+      }
+      commitScene({ ...scene, fonts: (scene.fonts ?? []).filter((item) => item.fontId !== fontId) });
+      return true;
+    },
+    assignFontToSelectedText: (fontId) => {
+      const { scene, selectedObjectId } = get();
+      const font = scene.fonts?.find((item) => item.fontId === fontId);
+      const object = scene.objects.find((item) => item.id === selectedObjectId);
+      if (!font || !object || object.type !== "text") {
+        set({ materialActionError: "Select a text object before assigning a font." });
+        return false;
+      }
+      const fileFace = font.faces.find((face) => face.source.kind === "file");
+      commitScene({
+        ...scene,
+        objects: scene.objects.map((item) => item.id === object.id
+          ? ({
+              ...item,
+              fontFamily: font.family,
+              fontWeight: nearestSupportedFontWeight(font.faces[0]?.weight ?? 400),
+              fontAssetId: fileFace?.source.kind === "file" ? fileFace.source.assetId : undefined
+            } as SceneObject)
+          : item)
+      });
+      return true;
+    },
+    updateAutomation: (automation) => {
+      const { scene } = get();
+      commitScene({ ...scene, automation });
+    },
+    attachSceneScript: (script, asset) => {
+      const { scene } = get();
+      commitScene({
+        ...scene,
+        assets: scene.assets.some((item) => item.assetId === asset.assetId)
+          ? scene.assets
+          : [...scene.assets, asset],
+        automation: {
+          version: 1,
+          transitions: scene.automation?.transitions ?? [],
+          triggers: scene.automation?.triggers ?? [],
+          script
+        }
+      });
+    },
     assignMaterialSlot: (objectId, slotName, binding) => {
       const { scene } = get();
       const object = scene.objects.find((item) => item.id === objectId);
@@ -312,7 +1036,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         return;
       }
       const material = scene.materials.find((item) => item.materialId === materialId);
-      if (!object || !material || !isMaterialCompatible(material, object.type)) {
+      if (!object || !material || !isMaterialCompatibleWithSlot(material, object, slotName)) {
         set({ materialActionError: "The selected material is not compatible with this primitive slot." });
         return;
       }
@@ -328,7 +1052,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const material = scene.materials.find((item) => item.materialId === materialId);
       const selectedIds = new Set(objectIds);
       const selectedObjects = scene.objects.filter((object) => selectedIds.has(object.id));
-      if (!material || !selectedObjects.length || selectedObjects.some((object) => !isMaterialCompatible(material, object.type))) {
+      if (!material || !selectedObjects.length || selectedObjects.some((object) => !isMaterialCompatibleWithSlot(material, object, slotName))) {
         set({ materialActionError: "The material cannot be assigned because at least one selected primitive is incompatible." });
         return false;
       }
@@ -340,25 +1064,228 @@ export const useEditorStore = create<EditorState>((set, get) => {
       });
       return true;
     },
+    assignAssetToObjects: (objectIds, assetId, slotName = "main") => {
+      // XPression-style: double-clicking / dropping an imported image applies it
+      // to the selected primitive. We back the asset with an image material
+      // (reusing the one auto-created on import, or minting one if it was
+      // deleted) so the renderer's material pipeline resolves the texture.
+      // The material add + slot assignment land in a single history entry.
+      const { scene } = get();
+      const asset = scene.assets.find((item) => item.assetId === assetId);
+      if (!asset) {
+        set({ materialActionError: "The imported asset could not be found." });
+        return false;
+      }
+      if (!["image", "svg"].includes(asset.kind)) {
+        set({ materialActionError: `${asset.kind} assets can't be applied to a primitive directly yet.` });
+        return false;
+      }
+      if (asset.status === "MISSING" || asset.status === "ERROR" || asset.status === "UNSUPPORTED") {
+        set({ materialActionError: "This asset is missing or unsupported. Relink it before assigning." });
+        return false;
+      }
+      const selectedIds = new Set(objectIds);
+      const selectedObjects = scene.objects.filter((object) => selectedIds.has(object.id));
+      if (!selectedObjects.length) {
+        set({ materialActionError: "Select a primitive first, then double-click the image to apply it." });
+        return false;
+      }
+      const existing = scene.materials.find((material) =>
+        material.assetId === assetId || material.textureSlots?.some((slot) => slot.assetId === assetId));
+      const material = existing ?? createMaterialDefinition(
+        asset.name.replace(/\.[^.]+$/, ""),
+        { baseTextureAssetId: assetId }
+      );
+      if (selectedObjects.some((object) => !isMaterialCompatibleWithSlot(material, object, slotName))) {
+        set({ materialActionError: "This image or texture is not compatible with the selected surface." });
+        return false;
+      }
+      commitScene({
+        ...scene,
+        materials: existing ? scene.materials : [...scene.materials, material],
+        objects: scene.objects.map((object) => selectedIds.has(object.id)
+          ? ({ ...object, materialSlots: { ...object.materialSlots, [slotName]: material.materialId } } as SceneObject)
+          : object)
+      });
+      set({ materialActionError: null });
+      return true;
+    },
+    selectFace: (faceIndex, mode) => {
+      const { selectedObjectId, scene, selectedFaceIndices, faceSelectionAnchor } = get();
+      const object = scene.objects.find((item) => item.id === selectedObjectId);
+      if (!object) return;
+      const faces = getBindableFaces(object);
+      if (!faces[faceIndex]) return;
+      if (mode === "toggle") {
+        const next = selectedFaceIndices.includes(faceIndex)
+          ? selectedFaceIndices.filter((index) => index !== faceIndex)
+          : [...selectedFaceIndices, faceIndex].sort((a, b) => a - b);
+        set({ selectedFaceIndices: next, faceSelectionAnchor: faceIndex });
+        return;
+      }
+      if (mode === "range") {
+        const anchor = faceSelectionAnchor ?? faceIndex;
+        const [lo, hi] = anchor <= faceIndex ? [anchor, faceIndex] : [faceIndex, anchor];
+        const range: number[] = [];
+        for (let index = lo; index <= hi; index += 1) {
+          if (faces[index]) range.push(index);
+        }
+        set({ selectedFaceIndices: range, faceSelectionAnchor: anchor });
+        return;
+      }
+      set({ selectedFaceIndices: [faceIndex], faceSelectionAnchor: faceIndex });
+    },
+    clearFaceSelection: () => set({ selectedFaceIndices: [], faceSelectionAnchor: null }),
+    assignMaterial: (objectId, faceIndex, materialId) => get().assignMaterialToFaces(objectId, [faceIndex], materialId),
+    assignMaterialToFaces: (objectId, faceIndices, binding) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      if (!object) {
+        set({ materialActionError: "Select a compatible object or material face first." });
+        return false;
+      }
+      const materialId = normalizePrimitiveMaterialBinding(binding)?.materialId;
+      const material = materialId ? scene.materials.find((item) => item.materialId === materialId) : undefined;
+      if (!material) {
+        set({ materialActionError: "The material to bind could not be found." });
+        return false;
+      }
+      const faces = getBindableFaces(object);
+      // Default to the primary surface when no explicit face is required/selected.
+      const targetIndices = faceIndices.length ? faceIndices : [0];
+      const slotKeys: string[] = [];
+      for (const index of targetIndices) {
+        const face = faces[index];
+        if (!face) {
+          set({ materialActionError: "A selected face no longer exists on this object." });
+          return false;
+        }
+        if (!isMaterialCompatibleWithFace(material, object, index)) {
+          set({ materialActionError: `“${material.name}” is not compatible with the ${face.label} face.` });
+          return false;
+        }
+        slotKeys.push(face.slotKey);
+      }
+      const materialSlots = { ...object.materialSlots };
+      for (const key of slotKeys) materialSlots[key] = binding;
+      // Single commitScene -> one undo entry, even for a multi-face assignment.
+      commitScene({
+        ...scene,
+        objects: scene.objects.map((item) => item.id === objectId ? ({ ...item, materialSlots } as SceneObject) : item)
+      });
+      set({ materialActionError: null });
+      return true;
+    },
+    assignAssetToFaces: (objectId, faceIndices, assetId) => {
+      // Face-aware counterpart of assignAssetToObjects: back the imported image
+      // with an image material (reused or minted) and bind it to the selected
+      // faces — the material add + all face slots land in ONE history entry.
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      const asset = scene.assets.find((item) => item.assetId === assetId);
+      if (!object) {
+        set({ materialActionError: "Select a compatible object or material face first." });
+        return false;
+      }
+      if (!asset) {
+        set({ materialActionError: "The imported asset could not be found." });
+        return false;
+      }
+      if (!["image", "svg"].includes(asset.kind)) {
+        set({ materialActionError: `${asset.kind} assets can't be applied to a face directly yet.` });
+        return false;
+      }
+      if (asset.status === "MISSING" || asset.status === "ERROR" || asset.status === "UNSUPPORTED") {
+        set({ materialActionError: "This asset is missing or unsupported. Relink it before assigning." });
+        return false;
+      }
+      const existing = scene.materials.find((material) =>
+        material.assetId === assetId || material.textureSlots?.some((slot) => slot.assetId === assetId));
+      const material = existing ?? createMaterialDefinition(
+        asset.name.replace(/\.[^.]+$/, ""),
+        { baseTextureAssetId: assetId }
+      );
+      const faces = getBindableFaces(object);
+      const targetIndices = faceIndices.length ? faceIndices : [0];
+      const slotKeys: string[] = [];
+      for (const index of targetIndices) {
+        const face = faces[index];
+        if (!face) {
+          set({ materialActionError: "A selected face no longer exists on this object." });
+          return false;
+        }
+        if (!isMaterialCompatibleWithFace(material, object, index)) {
+          set({ materialActionError: `This image can't be applied to the ${face.label} face.` });
+          return false;
+        }
+        slotKeys.push(face.slotKey);
+      }
+      const materialSlots = { ...object.materialSlots };
+      for (const key of slotKeys) materialSlots[key] = material.materialId;
+      commitScene({
+        ...scene,
+        materials: existing ? scene.materials : [...scene.materials, material],
+        objects: scene.objects.map((item) => item.id === objectId ? ({ ...item, materialSlots } as SceneObject) : item)
+      });
+      set({ materialActionError: null });
+      return true;
+    },
+    unbindMaterial: (objectId, faceIndex) => get().unbindMaterialFromFaces(objectId, [faceIndex]),
+    unbindMaterialFromFaces: (objectId, faceIndices) => {
+      // Remove the object-level material binding for the given faces. This does
+      // NOT delete the shared project material — it only clears the slot, so the
+      // primitive returns to its default look and text returns to its font style.
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      if (!object) return;
+      const faces = getBindableFaces(object);
+      const materialSlots = { ...object.materialSlots };
+      let changed = false;
+      for (const index of (faceIndices.length ? faceIndices : [0])) {
+        const key = faces[index]?.slotKey;
+        if (key && key in materialSlots) {
+          delete materialSlots[key];
+          changed = true;
+        }
+      }
+      if (!changed) return;
+      commitScene({
+        ...scene,
+        objects: scene.objects.map((item) => item.id === objectId ? ({ ...item, materialSlots } as SceneObject) : item)
+      });
+      set({ materialActionError: null });
+    },
+    getMaterial: (objectId, faceIndex) => {
+      const object = get().scene.objects.find((item) => item.id === objectId);
+      if (!object) return undefined;
+      const key = faceSlotKey(object, faceIndex);
+      return key ? getMaterialBindingId(object.materialSlots[key]) : undefined;
+    },
+    getBindableFaces: (objectId) => {
+      const object = get().scene.objects.find((item) => item.id === objectId);
+      return object ? getBindableFaces(object) : [];
+    },
+    getObjectsUsingMaterial: (materialId) => findMaterialUsage(get().scene, materialId).objectIds,
     importAsset: async (file) => {
       try {
         const { asset, shader } = await importMaterialAsset(file);
         const { scene } = get();
         const hasAsset = scene.assets.some((item) => item.assetId === asset.assetId);
-        const material = asset.kind === "image" || asset.kind === "svg"
-          ? createMaterialDefinition(asset.name.replace(/\.[^.]+$/, ""), "image", asset.assetId)
-          : null;
         commitScene({
           ...scene,
           assets: hasAsset ? scene.assets.map((item) => item.assetId === asset.assetId ? asset : item) : [...scene.assets, asset],
-          materials: material && !hasAsset ? [...scene.materials, material] : scene.materials,
+          // XPression-style sources stay separate from reusable materials.
+          // Applying an image to a face creates/reuses the one physical
+          // backing material at assignment time.
+          materials: scene.materials,
           shaders: shader ? [...(scene.shaders ?? []).filter((item) => item.shaderId !== shader.shaderId), shader] : scene.shaders
         });
         set({ materialActionError: null });
+        return asset.assetId;
       } catch (error) {
         const message = error instanceof Error ? error.message : "Asset import failed.";
         set({ materialActionError: message });
-        throw error;
+        return null;
       }
     },
     relinkAsset: async (assetId, file) => {
@@ -368,7 +1295,17 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const { asset: importedAsset } = await importMaterialAsset(file);
       const asset = { ...importedAsset, assetId };
       const { scene } = get();
-      commitScene({ ...scene, assets: scene.assets.map((item) => item.assetId === assetId ? asset : item) });
+      commitScene({
+        ...scene,
+        assets: scene.assets.map((item) => item.assetId === assetId ? asset : item),
+        objects: scene.objects.map((object) => object.type === "mesh" && object.modelAssetId === assetId
+          ? {
+              ...object,
+              src: asset.source,
+              materialElements: asset.modelMaterialNames ?? []
+            }
+          : object)
+      });
       set({ materialActionError: null });
     },
     updateAsset: (assetId, patch) => {
@@ -402,20 +1339,19 @@ export const useEditorStore = create<EditorState>((set, get) => {
     deleteAsset: (assetId) => {
       const { scene } = get();
       const usage = findAssetUsageDetails(scene, assetId);
-      if (usage.materialIds.length || usage.shaderIds.length) {
-        set({ materialActionError: `Asset is used by ${usage.materialIds.length} material(s) and ${usage.shaderIds.length} shader(s). Relink it or remove those references first.` });
+      if (usage.materialIds.length || usage.shaderIds.length || usage.objectIds.length) {
+        set({ materialActionError: `Asset is used by ${usage.materialIds.length} material(s), ${usage.shaderIds.length} shader(s), and ${usage.objectIds.length} scene object(s). Relink it or remove those references first.` });
         return false;
       }
       commitScene({ ...scene, assets: scene.assets.filter((asset) => asset.assetId !== assetId) });
       set({ materialActionError: null });
       return true;
     },
-    createMaterial: (type, assetId) => {
+    createMaterial: (assetId) => {
       const { scene } = get();
       const material = createMaterialDefinition(
-        type === "solid-color" ? "Solid Colour" : type === "unlit-texture" ? "Unlit Texture" : "Image Material",
-        type,
-        assetId
+        "New Material",
+        assetId ? { baseTextureAssetId: assetId } : {}
       );
       commitScene({ ...scene, materials: [...scene.materials, material] });
       set({ materialActionError: null });
@@ -456,6 +1392,23 @@ export const useEditorStore = create<EditorState>((set, get) => {
       commitScene({ ...scene, materials: scene.materials.filter((material) => material.materialId !== materialId) });
       set({ materialActionError: null });
       return true;
+    },
+    deleteUnusedMaterials: () => {
+      const { scene } = get();
+      const unusedIds = new Set(scene.materials
+        .filter((material) => {
+          if (material.builtIn) return false;
+          const usage = findMaterialUsage(scene, material.materialId);
+          return usage.objectIds.length === 0 && usage.instanceIds.length === 0;
+        })
+        .map((material) => material.materialId));
+      if (!unusedIds.size) return 0;
+      commitScene({
+        ...scene,
+        materials: scene.materials.filter((material) => !unusedIds.has(material.materialId))
+      });
+      set({ materialActionError: null });
+      return unusedIds.size;
     },
     updateMaterial: (materialId, patch) => {
       const { scene } = get();
@@ -624,6 +1577,59 @@ export const useEditorStore = create<EditorState>((set, get) => {
         )
       });
     },
+    saveGradientPreset: (name, value) => {
+      const state = get();
+      const presetId = createSceneId("gradient");
+      commitScene({
+        ...state.scene,
+        gradientPresets: [
+          ...(state.scene.gradientPresets ?? []),
+          { presetId, name: name.trim() || "Custom gradient", value }
+        ]
+      });
+      return presetId;
+    },
+    updateGradientPreset: (presetId, patch) => {
+      const state = get();
+      if (!(state.scene.gradientPresets ?? []).some((preset) => preset.presetId === presetId)) return;
+      commitScene({
+        ...state.scene,
+        gradientPresets: (state.scene.gradientPresets ?? []).map((preset) =>
+          preset.presetId === presetId
+            ? {
+                ...preset,
+                ...patch,
+                name: patch.name === undefined ? preset.name : patch.name.trim() || "Custom gradient"
+              }
+            : preset
+        )
+      });
+    },
+    duplicateGradientPreset: (presetId) => {
+      const state = get();
+      const source = (state.scene.gradientPresets ?? []).find((preset) => preset.presetId === presetId);
+      if (!source) return null;
+      const duplicateId = createSceneId("gradient");
+      commitScene({
+        ...state.scene,
+        gradientPresets: [
+          ...(state.scene.gradientPresets ?? []),
+          {
+            ...structuredClone(source),
+            presetId: duplicateId,
+            name: `${source.name} copy`
+          }
+        ]
+      });
+      return duplicateId;
+    },
+    deleteGradientPreset: (presetId) => {
+      const state = get();
+      commitScene({
+        ...state.scene,
+        gradientPresets: (state.scene.gradientPresets ?? []).filter((preset) => preset.presetId !== presetId)
+      });
+    },
     beginHistory: (label) => {
       const state = get();
       if (!state.historyTransaction) set({ historyTransaction: { label, scene: state.scene } });
@@ -636,6 +1642,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
           ? state.undoStack
           : appendSceneHistory(state.undoStack, state.historyTransaction.scene),
         redoStack: state.scene === state.historyTransaction.scene ? state.redoStack : [],
+        historyTransaction: null
+      });
+    },
+    cancelHistory: () => {
+      const transaction = get().historyTransaction;
+      if (!transaction) return;
+      set({
+        scene: transaction.scene,
         historyTransaction: null
       });
     },
@@ -679,9 +1693,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
     loadScene: (scene) => {
       const normalized = normalizeScene(scene);
+      const selectedObject = normalized.objects[0];
       set({
         scene: touchScene(normalized),
-        selectedObjectId: normalized.objects[0]?.id ?? null,
+        hasActiveScene: true,
+        selectedObjectId: selectedObject?.id ?? null,
+        ...materialFaceSelection(selectedObject),
         dataJson: JSON.stringify(normalized.dataContext, null, 2),
         dataError: null,
         undoStack: [],
@@ -690,13 +1707,51 @@ export const useEditorStore = create<EditorState>((set, get) => {
         materialActionError: null
       });
     },
+    applyImportedScene: (incoming, mode) => {
+      const state = get();
+      const imported = normalizeScene(incoming);
+      const next = mode === "merge" && state.hasActiveScene
+        ? mergeImportedScene(state.scene, imported)
+        : imported;
+      commitScene(next);
+      set({
+        hasActiveScene: true,
+        selectedObjectId: imported.objects[0]?.id ?? null,
+        dataJson: JSON.stringify(next.dataContext, null, 2),
+        dataError: null,
+        historyTransaction: null,
+        saveStatus: "local",
+        saveError: null
+      });
+    },
     resetScene: () => {
-      const scene = createDefaultScene();
+      const scene = createEmptyScene();
       set({
         scene,
-        selectedObjectId: scene.objects[1]?.id ?? null,
+        hasActiveScene: true,
+        selectedObjectId: null,
+        selectedFaceIndices: [],
+        faceSelectionAnchor: null,
         dataJson: JSON.stringify(scene.dataContext, null, 2),
         dataError: null,
+        undoStack: [],
+        redoStack: [],
+        historyTransaction: null,
+        materialActionError: null
+      });
+    },
+    clearScene: () => {
+      const scene = createEmptyScene();
+      set({
+        scene,
+        hasActiveScene: false,
+        selectedObjectId: null,
+        selectedFaceIndices: [],
+        faceSelectionAnchor: null,
+        dataJson: JSON.stringify(scene.dataContext, null, 2),
+        dataError: null,
+        saveStatus: "local",
+        saveError: null,
         undoStack: [],
         redoStack: [],
         historyTransaction: null,
@@ -715,8 +1770,45 @@ export const useEditorStore = create<EditorState>((set, get) => {
     });
   }
 
-  function addObject(object: SceneObject) {
+  function addMaskToObject(
+    objectId: string,
+    path: BezierPath,
+    patch: Partial<ObjectMask> = {}
+  ): string | null {
     const { scene } = get();
+    const object = scene.objects.find((item) => item.id === objectId);
+    if (!object) return null;
+    const mask: ObjectMask = {
+      id: createSceneId("mask"),
+      name: `Mask ${(object.masks?.length ?? 0) + 1}`,
+      path,
+      mode: "add",
+      inverted: false,
+      opacity: 1,
+      expansion: 0,
+      feather: { x: 0, y: 0 },
+      type: "bezier",
+      visible: true,
+      locked: false,
+      editorColor: "#f5b942",
+      ...patch
+    };
+    const masks = [...(object.masks ?? []), mask];
+    commitScene({ ...scene, objects: scene.objects.map((item) => item.id === objectId ? ({ ...item, masks } as SceneObject) : item) });
+    return mask.id;
+  }
+
+  function mutateMask(objectId: string, maskId: string, mutate: (mask: ObjectMask) => ObjectMask): void {
+    const { scene } = get();
+    const object = scene.objects.find((item) => item.id === objectId);
+    if (!object || !object.masks) return;
+    const masks = object.masks.map((mask) => mask.id === maskId ? mutate(mask) : mask);
+    commitScene({ ...scene, objects: scene.objects.map((item) => item.id === objectId ? ({ ...item, masks } as SceneObject) : item) });
+  }
+
+  function addObject(object: SceneObject) {
+    const { scene, hasActiveScene } = get();
+    if (!hasActiveScene) return;
     const layerObjects = scene.objects.filter((item) => item.layerId === object.layerId);
     const objectWithStack = {
       ...object,
@@ -724,8 +1816,15 @@ export const useEditorStore = create<EditorState>((set, get) => {
     } as SceneObject;
 
     set({
-      scene: touchScene({ ...scene, objects: normalizeObjectStack([...scene.objects, objectWithStack]) }),
-      selectedObjectId: objectWithStack.id
+      scene: touchScene({
+        ...scene,
+        objects: normalizeObjectStack([...scene.objects, objectWithStack]),
+        activeCameraId: objectWithStack.type === "camera" && !scene.activeCameraId
+          ? objectWithStack.id
+          : scene.activeCameraId
+      }),
+      selectedObjectId: objectWithStack.id,
+      ...materialFaceSelection(objectWithStack)
     });
   }
 
@@ -739,12 +1838,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     const duplicated = {
       ...selected,
+      animation: clonePropertyAnimation(selected.animation),
       id: createObjectId(selected.type),
       name: `${selected.name} Copy`,
       x: selected.x + 48,
       y: selected.y + 48,
       zIndex: selected.zIndex + 1,
-      locked: false
+      locked: false,
+      ...((selected.type === "layer" || selected.type === "group") ? { childIds: [] } : {})
     } as SceneObject;
     const duplicatedKeyframes = scene.timeline.keyframes
       .filter((keyframe) => keyframe.objectId === selected.id)
@@ -763,176 +1864,101 @@ export const useEditorStore = create<EditorState>((set, get) => {
           keyframes: [...scene.timeline.keyframes, ...duplicatedKeyframes]
         }
       }),
-      selectedObjectId: duplicated.id
+      selectedObjectId: duplicated.id,
+      ...materialFaceSelection(duplicated)
     });
   }
 
   function deleteObjectById(objectId: string) {
     const { scene, selectedObjectId } = get();
+    const nextActiveCameraId = scene.activeCameraId === objectId
+      ? scene.objects.find((object) => object.id !== objectId && object.type === "camera" && object.visible)?.id
+      : scene.activeCameraId;
+    const remainingObjects = scene.objects
+      .filter((object) => object.id !== objectId)
+      .map((object) => isContainerObject(object) && object.childIds.includes(objectId)
+        ? ({ ...object, childIds: object.childIds.filter((id) => id !== objectId) } as SceneObject)
+        : object);
 
     set({
       scene: touchScene({
         ...scene,
-        objects: normalizeObjectStack(scene.objects.filter((object) => object.id !== objectId)),
+        activeCameraId: nextActiveCameraId,
+        objects: normalizeObjectStack(remainingObjects),
         timeline: {
           ...scene.timeline,
           keyframes: scene.timeline.keyframes.filter((keyframe) => keyframe.objectId !== objectId)
         }
       }),
-      selectedObjectId: selectedObjectId === objectId ? null : selectedObjectId
+      selectedObjectId: selectedObjectId === objectId ? null : selectedObjectId,
+      ...(selectedObjectId === objectId ? { selectedFaceIndices: [], faceSelectionAnchor: null } : {})
     });
   }
 });
 
-function createDefaultScene(): SceneDocument {
+function createEmptyScene(): SceneDocument {
   const timestamp = new Date().toISOString();
-  const plate = createRectObject({
-    name: "Lower Third Plate",
-    x: 140,
-    y: 760,
-    width: 1120,
-    height: 176,
-    fill: "#121826",
-    stroke: "#23c7d9",
-    opacity: 0.92,
-    radius: 24,
-    materialSlots: {
-      main: "mat_lowerthird_bg"
-    }
-  });
-  const accent = createRectObject({
-    name: "Accent Bar",
-    x: 140,
-    y: 742,
-    width: 420,
-    height: 18,
-    fill: "#f5b942",
-    stroke: "transparent",
-    radius: 12,
-    materialSlots: {
-      main: "mat_accent_team_color"
-    }
-  });
-  const name = createTextObject({
-    name: "Player Name",
-    x: 200,
-    y: 790,
-    width: 700,
-    height: 72,
-    text: "Maya Chen",
-    fontSize: 58,
-    fill: "#f7fbff",
-    bindings: {
-      text: "player.name",
-      fill: "team.primaryColor"
-    }
-  });
-  const role = createTextObject({
-    name: "Player Role",
-    x: 204,
-    y: 864,
-    width: 620,
-    height: 42,
-    text: "Lead Anchor",
-    fontSize: 30,
-    fontWeight: "500",
-    fill: "#d6dde8",
-    bindings: {
-      text: "player.role"
-    }
-  });
-  const score = createTextObject({
-    name: "Home Score",
-    x: 1000,
-    y: 792,
-    width: 170,
-    height: 86,
-    text: "15",
-    fontSize: 76,
-    fontWeight: "800",
-    fill: "#ffffff",
-    align: "center",
-    bindings: {
-      text: "score.home"
-    }
-  });
-  const logo = createImageObject({
-    name: "Home Team Logo",
-    x: 820,
-    y: 788,
-    width: 128,
-    height: 128,
-    stroke: "transparent",
-    src: defaultLogoAsset.source,
-    materialSlots: {
-      main: "mat_home_team_logo"
-    }
-  });
 
-  return normalizeMaterialSceneDocument({
-    id: createSceneId("lower_third"),
-    name: "Lower Third Starter",
+  return normalizeScene({
+    id: createSceneId("empty"),
+    name: "Untitled Scene",
     version: 1,
     canvas: {
       width: 1920,
       height: 1080,
       background: "#070b12"
     },
-    dataContext: defaultDataContext,
-    assets: [defaultLogoAsset, teamSoulLogoAsset],
-    materials: [
-      {
-        materialId: "mat_lowerthird_bg",
-        name: "Lower Third Background",
-        type: "solid-color",
-        color: "#121826",
-        dynamic: false,
-        opacity: 1,
-        readiness: "READY"
-      },
-      {
-        materialId: "mat_accent_team_color",
-        name: "Team Accent Color",
-        type: "solid-color",
-        color: "#f5b942",
-        dynamic: true,
-        binding: {
-          path: "teams.home.primaryColor",
-          type: "color",
-          fallbackColor: "#f5b942"
-        },
-        opacity: 1,
-        readiness: "READY"
-      },
-      {
-        materialId: "mat_home_team_logo",
-        name: "Home Team Logo",
-        type: "image",
-        assetId: "asset_default_logo",
-        dynamic: true,
-        binding: {
-          path: "teams.home.logo",
-          type: "assetId",
-          fallbackAssetId: "asset_default_logo"
-        },
-        sampling: "linear",
-        wrap: "clamp",
-        opacity: 1,
-        readiness: "READY"
-      }
-    ],
+    dataContext: {},
+    assets: [],
+    materials: [],
     materialInstances: [],
-    shaders: builtInShaders.map((shader) => shader.definition),
-    materialFolders: [
-      { folderId: "folder_materials", name: "Materials", kind: "material" },
-      { folderId: "folder_images", name: "Images", kind: "asset" },
-      { folderId: "folder_shaders", name: "Shaders", kind: "shader" }
-    ],
-    objects: normalizeObjectStack([plate, accent, name, role, logo, score]),
+    shaders: [],
+    materialFolders: [],
+    objects: [],
     timeline: createDefaultTimeline(),
     createdAt: timestamp,
     updatedAt: timestamp
   });
+}
+
+function mergeImportedScene(current: SceneDocument, imported: SceneDocument): SceneDocument {
+  const existingIds = new Set(current.objects.map((object) => object.id));
+  const idMap = new Map<string, string>();
+  for (const object of imported.objects) {
+    idMap.set(object.id, existingIds.has(object.id) ? createSceneId("import-object") : object.id);
+  }
+  const objects = imported.objects.map((object) => {
+    const id = idMap.get(object.id)!;
+    const remapped = {
+      ...structuredClone(object),
+      id,
+      layerId: idMap.get(object.layerId) ?? object.layerId,
+      ...(object.type === "group" || object.type === "layer"
+        ? { childIds: object.childIds.map((childId) => idMap.get(childId) ?? childId) }
+        : {})
+    } as SceneObject;
+    return remapped;
+  });
+  const uniqueById = <T, K extends keyof T>(left: T[], right: T[], key: K): T[] => {
+    const seen = new Set(left.map((item) => String(item[key])));
+    return [...left, ...right.filter((item) => !seen.has(String(item[key])))];
+  };
+  return {
+    ...current,
+    assets: uniqueById(current.assets, imported.assets, "assetId"),
+    materials: uniqueById(current.materials, imported.materials, "materialId"),
+    materialInstances: uniqueById(current.materialInstances ?? [], imported.materialInstances ?? [], "materialInstanceId"),
+    fonts: uniqueById(current.fonts ?? [], imported.fonts ?? [], "fontId"),
+    gradientPresets: uniqueById(current.gradientPresets ?? [], imported.gradientPresets ?? [], "presetId"),
+    objects: normalizeObjectStack([...current.objects, ...objects]),
+    dataContext: {
+      ...current.dataContext,
+      importedDesigns: [
+        ...((current.dataContext.importedDesigns as unknown[] | undefined) ?? []),
+        imported.dataContext.__designImport
+      ]
+    }
+  };
 }
 
 function createTextObject(patch: Partial<TextSceneObject> = {}): TextSceneObject {
@@ -948,7 +1974,34 @@ function createTextObject(patch: Partial<TextSceneObject> = {}): TextSceneObject
     fontSize: 48,
     fontFamily: "Inter, Arial, sans-serif",
     fontWeight: "700",
+    fontStyle: "normal",
+    textDecoration: {},
+    textLayout: "point",
+    writingMode: "horizontal-tb",
+    verticalAlign: "top",
+    direction: "ltr",
+    lineHeight: 1.2,
+    letterSpacing: 0,
+    wordSpacing: 0,
+    paragraphSpacing: 0,
+    textIndent: 0,
+    overflow: "visible",
     align: "left",
+    ...patch
+  };
+}
+
+function createPaintObject(patch: Partial<PaintSceneObject> = {}): PaintSceneObject {
+  return {
+    ...createBaseObject("paint"),
+    type: "paint",
+    name: "Paint Layer",
+    width: 1920,
+    height: 1080,
+    fill: "transparent",
+    stroke: "transparent",
+    strokes: [],
+    paintBlendMode: "normal",
     ...patch
   };
 }
@@ -961,6 +2014,128 @@ function createRectObject(patch: Partial<RectSceneObject> = {}): RectSceneObject
     fill: "#263348",
     radius: 10,
     ...patch
+  };
+}
+
+function createShapeObject(patch: Partial<ShapeSceneObject> = {}): ShapeSceneObject {
+  // Default sample = a smooth closed "rounded diamond" bezier so a new shape is
+  // visibly a curve, not a polygon. The pen tool (S-2) replaces this by author.
+  const defaultPath: BezierPath = {
+    closed: true,
+    vertices: [
+      { x: 100, y: 10 },
+      { x: 190, y: 90 },
+      { x: 100, y: 170 },
+      { x: 10, y: 90 }
+    ],
+    outTangents: [
+      { x: 50, y: 0 },
+      { x: 0, y: 50 },
+      { x: -50, y: 0 },
+      { x: 0, y: -50 }
+    ],
+    inTangents: [
+      { x: -50, y: 0 },
+      { x: 0, y: -50 },
+      { x: 50, y: 0 },
+      { x: 0, y: 50 }
+    ]
+  };
+  const path = patch.path ?? defaultPath;
+  const bounds = bezierPathBounds(path);
+  return {
+    ...createBaseObject("shape"),
+    type: "shape",
+    name: "Shape",
+    width: bounds.width || 180,
+    height: bounds.height || 160,
+    fill: "#7c5cff",
+    stroke: "#f7fbff",
+    strokeWidth: 0,
+    path,
+    fillEnabled: true,
+    strokeEnabled: false,
+    fillRule: "nonzero",
+    ...patch
+  };
+}
+
+function insertPathPoint(path: BezierPath, index: number, point: Vec2): BezierPath {
+  const insert = <T,>(values: T[], value: T) => [
+    ...values.slice(0, index),
+    value,
+    ...values.slice(index)
+  ];
+  return {
+    ...path,
+    vertices: insert(path.vertices, point),
+    inTangents: insert(path.inTangents, { x: 0, y: 0 }),
+    outTangents: insert(path.outTangents, { x: 0, y: 0 })
+  };
+}
+
+function filterPathPoints(path: BezierPath, include: (point: Vec2, index: number) => boolean): BezierPath {
+  const included = path.vertices.map(include);
+  return {
+    ...path,
+    vertices: path.vertices.filter((_, index) => included[index]),
+    inTangents: path.inTangents.filter((_, index) => included[index]),
+    outTangents: path.outTangents.filter((_, index) => included[index])
+  };
+}
+
+function patchPathPoint(
+  path: BezierPath,
+  index: number,
+  patch: { vertex?: Vec2; inTangent?: Vec2; outTangent?: Vec2 }
+): BezierPath {
+  if (index < 0 || index >= path.vertices.length) return path;
+  const replace = (values: Vec2[], value: Vec2 | undefined) =>
+    value ? values.map((current, currentIndex) => currentIndex === index ? value : current) : values;
+  return {
+    ...path,
+    vertices: replace(path.vertices, patch.vertex),
+    inTangents: replace(path.inTangents, patch.inTangent),
+    outTangents: replace(path.outTangents, patch.outTangent)
+  };
+}
+
+function smoothHandles(path: BezierPath, index: number): { inTangent: Vec2; outTangent: Vec2 } {
+  const count = path.vertices.length;
+  const point = path.vertices[index];
+  const previous = path.vertices[index === 0 ? (path.closed ? count - 1 : 0) : index - 1];
+  const next = path.vertices[index === count - 1 ? (path.closed ? 0 : count - 1) : index + 1];
+  const dx = next.x - previous.x;
+  const dy = next.y - previous.y;
+  const length = Math.max(0.0001, Math.hypot(dx, dy));
+  const inLength = Math.hypot(point.x - previous.x, point.y - previous.y) / 3;
+  const outLength = Math.hypot(next.x - point.x, next.y - point.y) / 3;
+  return {
+    inTangent: { x: -dx / length * inLength, y: -dy / length * inLength },
+    outTangent: { x: dx / length * outLength, y: dy / length * outLength }
+  };
+}
+
+function rectangleBezierPath(width: number, height: number): BezierPath {
+  const zero = { x: 0, y: 0 };
+  return {
+    closed: true,
+    vertices: [{ x: 0, y: 0 }, { x: width, y: 0 }, { x: width, y: height }, { x: 0, y: height }],
+    inTangents: [zero, zero, zero, zero],
+    outTangents: [zero, zero, zero, zero]
+  };
+}
+
+function ellipseBezierPath(width: number, height: number): BezierPath {
+  const rx = width / 2;
+  const ry = height / 2;
+  const kx = rx * 0.5522847498307936;
+  const ky = ry * 0.5522847498307936;
+  return {
+    closed: true,
+    vertices: [{ x: rx, y: 0 }, { x: width, y: ry }, { x: rx, y: height }, { x: 0, y: ry }],
+    inTangents: [{ x: -kx, y: 0 }, { x: 0, y: -ky }, { x: kx, y: 0 }, { x: 0, y: ky }],
+    outTangents: [{ x: kx, y: 0 }, { x: 0, y: ky }, { x: -kx, y: 0 }, { x: 0, y: -ky }]
   };
 }
 
@@ -1011,33 +2186,98 @@ function createLibraryObject(kind: LibraryObjectKind, scene: SceneDocument): Sce
     case "quad":
       return createRectObject({ name: "Quad", width: 360, height: 210, fill: "#263348", radius: 0 });
     case "sphere":
-      return createEllipseObject({ name: "Sphere", width: 220, height: 220, fill: "#9fc7ff" });
+      return createMeshObject("sphere", {
+        name: "Sphere",
+        x: scene.canvas.width / 2,
+        y: scene.canvas.height / 2,
+        width: 220,
+        height: 220,
+        depth: 220,
+        fill: "#9fc7ff"
+      });
     case "line":
       return createLineObject();
+    case "shape":
+      return createShapeObject();
     case "model":
-      return createMeshObject("model", { name: "3D Model", fill: "#6be7ff" });
+      return createMeshObject("model", { name: "3D Model", x: scene.canvas.width / 2, y: scene.canvas.height / 2, fill: "#6be7ff" });
     case "cube":
-      return createMeshObject("cube", { name: "Cube", fill: "#84a7ff" });
+      return createMeshObject("cube", { name: "Cube", x: scene.canvas.width / 2, y: scene.canvas.height / 2, fill: "#84a7ff" });
     case "cylinder":
-      return createMeshObject("cylinder", { name: "Cylinder", fill: "#66d9a8" });
+      return createMeshObject("cylinder", { name: "Cylinder", x: scene.canvas.width / 2, y: scene.canvas.height / 2, fill: "#66d9a8" });
     case "torus":
-      return createMeshObject("torus", { name: "Torus", fill: "#b889ff" });
+      return createMeshObject("torus", { name: "Torus", x: scene.canvas.width / 2, y: scene.canvas.height / 2, fill: "#b889ff" });
     case "slab":
-      return createMeshObject("slab", { name: "Slab", fill: "#8bd1c7", width: 360, height: 92, depth: 42 });
+      return createMeshObject("slab", { name: "Slab", x: scene.canvas.width / 2, y: scene.canvas.height / 2, fill: "#8bd1c7", width: 360, height: 92, depth: 42 });
     case "directional-light":
-      return createLightObject("directional", { name: "Directional Light" });
+      return createLightObject("directional", {
+        name: "Directional Light",
+        x: scene.canvas.width / 2 - 420,
+        y: scene.canvas.height / 2 - 320,
+        zDepth: sceneFocalDistance(scene),
+        intensity: 2.2,
+        target: { x: scene.canvas.width / 2, y: scene.canvas.height / 2, z: 0 }
+      });
     case "point-light":
-      return createLightObject("point", { name: "Point Light" });
+      return createLightObject("point", {
+        name: "Point Light",
+        x: scene.canvas.width / 2,
+        y: scene.canvas.height / 2 - 260,
+        zDepth: sceneFocalDistance(scene) * 0.75,
+        range: sceneFocalDistance(scene) * 4,
+        decay: 2,
+        target: { x: scene.canvas.width / 2, y: scene.canvas.height / 2, z: 0 }
+      });
     case "spot-light":
-      return createLightObject("spot", { name: "Spot Light" });
+      return createLightObject("spot", {
+        name: "Spot Light",
+        x: scene.canvas.width / 2,
+        y: scene.canvas.height / 2 - 420,
+        zDepth: sceneFocalDistance(scene),
+        range: sceneFocalDistance(scene) * 5,
+        decay: 2,
+        coneAngleDeg: 42,
+        penumbra: 0.25,
+        target: { x: scene.canvas.width / 2, y: scene.canvas.height / 2, z: 0 }
+      });
     case "perspective-camera":
-      return createCameraObject("perspective", { name: "Persp. Camera" });
+      return createCameraObject("perspective", {
+        name: "Persp. Camera",
+        x: scene.canvas.width / 2,
+        y: scene.canvas.height / 2,
+        zDepth: sceneFocalDistance(scene),
+        near: 1,
+        far: 20_000,
+        target: { x: scene.canvas.width / 2, y: scene.canvas.height / 2, z: 0 },
+        up: { x: 0, y: -1, z: 0 }
+      });
     case "orthographic-camera":
-      return createCameraObject("orthographic", { name: "Ortho. Camera" });
+      return createCameraObject("orthographic", {
+        name: "Ortho. Camera",
+        x: scene.canvas.width / 2,
+        y: scene.canvas.height / 2,
+        zDepth: sceneFocalDistance(scene),
+        near: 1,
+        far: 20_000,
+        target: { x: scene.canvas.width / 2, y: scene.canvas.height / 2, z: 0 },
+        up: { x: 0, y: -1, z: 0 }
+      });
     case "layer-object":
-      return createLayerObject("object", { name: "Layer Object" });
+      return createLayerObject("object", {
+        name: "Layer Object",
+        x: 0,
+        y: 0,
+        width: scene.canvas.width,
+        height: scene.canvas.height
+      });
     case "camera-layer":
-      return createLayerObject("camera", { name: "Camera Layer" });
+      return createLayerObject("camera", {
+        name: "Camera Layer",
+        x: 0,
+        y: 0,
+        width: scene.canvas.width,
+        height: scene.canvas.height
+      });
     case "event-marker":
       return createMarkerObject();
     case "group":
@@ -1066,7 +2306,7 @@ function createLineObject(patch: Partial<LineSceneObject> = {}): LineSceneObject
 }
 
 function createMeshObject(meshKind: MeshSceneObject["meshKind"], patch: Partial<MeshSceneObject> = {}): MeshSceneObject {
-  return {
+  const mesh: MeshSceneObject = {
     ...createBaseObject("mesh"),
     type: "mesh",
     name: "Mesh",
@@ -1077,7 +2317,19 @@ function createMeshObject(meshKind: MeshSceneObject["meshKind"], patch: Partial<
     stroke: "#ffffff",
     strokeWidth: 2,
     meshKind,
+    rotationX: 0,
+    rotationY: 0,
+    rotationZ: 0,
+    scaleZ: 1,
     ...patch
+  };
+  return {
+    ...mesh,
+    anchor3d: mesh.anchor3d ?? {
+      x: mesh.width / 2,
+      y: mesh.height / 2,
+      z: mesh.depth / 2
+    }
   };
 }
 
@@ -1094,6 +2346,12 @@ function createLightObject(lightKind: LightSceneObject["lightKind"], patch: Part
     lightKind,
     intensity: 1,
     color: "#fff56b",
+    range: 0,
+    decay: 2,
+    coneAngleDeg: 42,
+    penumbra: 0.25,
+    target: { x: 960, y: 540, z: 0 },
+    castShadow: false,
     ...patch
   };
 }
@@ -1111,6 +2369,10 @@ function createCameraObject(cameraKind: CameraSceneObject["cameraKind"], patch: 
     cameraKind,
     fov: cameraKind === "perspective" ? 45 : 0,
     zoom: 1,
+    near: 1,
+    far: 20_000,
+    target: { x: 960, y: 540, z: 0 },
+    up: { x: 0, y: -1, z: 0 },
     ...patch
   };
 }
@@ -1174,11 +2436,16 @@ function createBaseObject(type: SceneObject["type"]) {
     width: 300,
     height: 140,
     rotation: 0,
+    scaleX: 1,
+    scaleY: 1,
+    anchor: { x: 0, y: 0 },
     opacity: 1,
     visible: true,
     locked: false,
     fill: "#23c7d9",
     stroke: "#f7fbff",
+    fillStyle: { type: "solid", color: "#23c7d9" } as ColorValue,
+    strokeStyle: { type: "solid", color: "#f7fbff" } as ColorValue,
     strokeWidth: 0,
     bindings: {},
     materialSlots: {}
@@ -1187,26 +2454,286 @@ function createBaseObject(type: SceneObject["type"]) {
 
 function normalizeScene(scene: SceneDocument): SceneDocument {
   const builtInShaderDefinitions = builtInShaders.map((shader) => shader.definition);
-  const existingShaderIds = new Set((scene.shaders ?? []).map((shader) => shader.shaderId));
+  const builtInShaderIds = new Set(builtInShaderDefinitions.map((shader) => shader.shaderId));
+  // Built-in shader definitions are app-owned, not user data: always refresh them
+  // from the current manifest so scenes saved by older builds pick up renames and
+  // new flags (userFacing / compatibilityAliasFor) instead of keeping stale copies.
+  // Scene-authored shaders (imported WGSL) are preserved untouched.
+  const authoredShaders = (scene.shaders ?? []).filter((shader) => !builtInShaderIds.has(shader.shaderId));
+  const objects = normalizeObjectStack(
+    scene.objects.map((object, index) => ({
+      ...object,
+      zDepth: object.type === "camera" && object.zDepth === 0 && !object.target
+        ? sceneFocalDistance(scene)
+        : object.zDepth ?? 0,
+      zIndex: object.zIndex ?? index,
+      layerId: object.layerId ?? "main",
+      locked: object.locked ?? false,
+      scaleX: object.scaleX ?? 1,
+      scaleY: object.scaleY ?? 1,
+      scaleZ: object.scaleZ ?? 1,
+      anchor: object.anchor ?? { x: 0, y: 0 },
+      fillStyle: normalizeColorValue(object.fillStyle ?? object.fill, object.fill),
+      strokeStyle: normalizeColorValue(object.strokeStyle ?? object.stroke, object.stroke),
+      masks: (object.masks ?? []).map((mask, maskIndex) => ({
+        ...mask,
+        name: mask.name || `Mask ${maskIndex + 1}`,
+        type: mask.type ?? "bezier",
+        visible: mask.visible ?? true,
+        locked: mask.locked ?? false,
+        editorColor: mask.editorColor ?? "#f5b942",
+        opacity: mask.opacity ?? 1,
+        expansion: mask.expansion ?? 0,
+        feather: mask.feather ?? { x: 0, y: 0 }
+        ,
+        paintStrokes: (mask.paintStrokes ?? []).map((stroke) => ({
+          ...stroke,
+          color: normalizeColorValue(stroke.color, "#ffffff")
+        }))
+      })),
+      materialSlots: object.materialSlots ?? {},
+      ...((object.type === "layer" || object.type === "group")
+        ? { childIds: Array.isArray(object.childIds) ? object.childIds : [] }
+        : {}),
+      ...(object.type === "light"
+        ? {
+            intensity: object.intensity ?? 1,
+            color: object.color ?? object.fill ?? "#fff56b",
+            range: object.range ?? 0,
+            decay: object.decay ?? 2,
+            coneAngleDeg: object.coneAngleDeg ?? 42,
+            penumbra: object.penumbra ?? 0.25,
+            target: object.target ?? { x: scene.canvas.width / 2, y: scene.canvas.height / 2, z: 0 },
+            castShadow: object.castShadow ?? false
+          }
+        : {}),
+      ...(object.type === "camera"
+        ? {
+            fov: object.cameraKind === "perspective" ? object.fov ?? 45 : 0,
+            zoom: object.zoom ?? 1,
+            near: object.near ?? 1,
+            far: object.far ?? 20_000,
+            target: object.target ?? { x: scene.canvas.width / 2, y: scene.canvas.height / 2, z: 0 },
+            up: object.up ?? { x: 0, y: -1, z: 0 }
+          }
+        : {}),
+      ...(object.type === "mesh"
+        ? {
+            rotationX: object.rotationX ?? 0,
+            rotationY: object.rotationY ?? 0,
+            rotationZ: object.rotationZ ?? object.rotation ?? 0,
+            scaleZ: object.scaleZ ?? 1,
+            anchor3d: object.anchor3d ?? {
+              x: object.anchor?.x ?? 0,
+              y: object.anchor?.y ?? 0,
+              z: object.depth / 2
+            }
+          }
+        : {})
+      ,
+      ...(object.type === "text"
+        ? {
+            textLayout: object.textLayout ?? "point",
+            writingMode: object.writingMode ?? "horizontal-tb",
+            verticalAlign: object.verticalAlign ?? "top",
+            direction: object.direction ?? "ltr",
+            fontStyle: object.fontStyle ?? "normal",
+            textDecoration: object.textDecoration ?? {},
+            lineHeight: object.lineHeight ?? object.fontSize * 1.2,
+            letterSpacing: object.letterSpacing ?? 0,
+            wordSpacing: object.wordSpacing ?? 0,
+            paragraphSpacing: object.paragraphSpacing ?? 0,
+            textIndent: object.textIndent ?? 0,
+            overflow: object.overflow ?? "visible"
+          }
+        : {}),
+      ...(object.type === "paint"
+        ? {
+            strokes: Array.isArray(object.strokes) ? object.strokes.map((stroke) => ({
+              ...stroke,
+              color: normalizeColorValue(stroke.color, "#ffffff")
+            })) : [],
+            paintBlendMode: object.paintBlendMode ?? "normal"
+          }
+        : {})
+    } as SceneObject))
+  );
+  const requestedCamera = objects.find((object) => object.id === scene.activeCameraId && object.type === "camera");
+  const activeCameraId = requestedCamera?.id
+    ?? objects.find((object) => object.type === "camera" && object.visible)?.id;
+
   return normalizeMaterialSceneDocument({
     ...scene,
+    canvas: {
+      ...scene.canvas,
+      backgroundStyle: normalizeColorValue(scene.canvas.backgroundStyle ?? scene.canvas.background, scene.canvas.background),
+      editorViewport: normalizeViewportSettings(
+        scene.canvas.editorViewport,
+        scene.canvas.width,
+        scene.canvas.height
+      )
+    },
+    activeCameraId,
     assets: scene.assets ?? [],
     materials: scene.materials ?? [],
     materialInstances: scene.materialInstances ?? [],
-    shaders: [...(scene.shaders ?? []), ...builtInShaderDefinitions.filter((shader) => !existingShaderIds.has(shader.shaderId))],
+    shaders: [...authoredShaders, ...builtInShaderDefinitions],
     materialFolders: scene.materialFolders ?? [],
+    fonts: scene.fonts ?? [],
+    gradientPresets: scene.gradientPresets ?? [],
     timeline: normalizeTimeline(scene.timeline),
-    objects: normalizeObjectStack(
-      scene.objects.map((object, index) => ({
-        ...object,
-        zDepth: object.zDepth ?? 0,
-        zIndex: object.zIndex ?? index,
-        layerId: object.layerId ?? "main",
-        locked: object.locked ?? false,
-        materialSlots: object.materialSlots ?? {}
-      }))
-    )
+    objects
   });
+}
+
+function normalizeViewportSettings(
+  viewport: Partial<SceneViewportSettings> | undefined,
+  canvasWidth: number,
+  canvasHeight: number
+): SceneViewportSettings {
+  const margins = viewport?.margins as Partial<CanvasMargins> | undefined;
+  const guides = Array.isArray(viewport?.guides) ? viewport.guides : [];
+  return {
+    showRulers: viewport?.showRulers ?? true,
+    margins: {
+      top: clampViewportDistance(margins?.top, canvasHeight),
+      right: clampViewportDistance(margins?.right, canvasWidth),
+      bottom: clampViewportDistance(margins?.bottom, canvasHeight),
+      left: clampViewportDistance(margins?.left, canvasWidth)
+    },
+    guides: guides
+      .filter((guide): guide is CanvasGuide =>
+        Boolean(guide?.guideId)
+        && (guide.orientation === "horizontal" || guide.orientation === "vertical")
+        && Number.isFinite(guide.position)
+      )
+      .map((guide) => ({
+        ...guide,
+        position: clampViewportDistance(
+          guide.position,
+          guide.orientation === "horizontal" ? canvasHeight : canvasWidth
+        )
+      }))
+  };
+}
+
+function clampViewportDistance(value: number | undefined, maximum: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(Math.max(0, maximum), Math.max(0, Math.round(value!)));
+}
+
+function sceneFocalDistance(scene: Pick<SceneDocument, "canvas">): number {
+  return (scene.canvas.height / 2) / Math.tan((45 * Math.PI / 180) / 2);
+}
+
+function materialFaceSelection(object: SceneObject | undefined): Pick<
+  EditorState,
+  "selectedFaceIndices" | "faceSelectionAnchor"
+> {
+  const selectedFaceIndices = object
+    ? getBindableFaces(object).map((face) => face.index)
+    : [];
+  return {
+    selectedFaceIndices,
+    faceSelectionAnchor: selectedFaceIndices[0] ?? null
+  };
+}
+
+function isContainerObject(object: SceneObject): object is LayerSceneObject | GroupSceneObject {
+  return object.type === "layer" || object.type === "group";
+}
+
+function isAllowedContainerChild(container: LayerSceneObject | GroupSceneObject, child: SceneObject): boolean {
+  if (container.type === "group") {
+    return true;
+  }
+  return container.layerKind === "camera" ? child.type === "camera" : child.type !== "camera";
+}
+
+function containerContains(objects: SceneObject[], containerId: string, soughtId: string): boolean {
+  const byId = new Map(objects.map((object) => [object.id, object]));
+  const visited = new Set<string>();
+  const visit = (id: string): boolean => {
+    if (id === soughtId) return true;
+    if (visited.has(id)) return false;
+    visited.add(id);
+    const object = byId.get(id);
+    if (!object || !isContainerObject(object)) return false;
+    return object.childIds.some(visit);
+  };
+  return visit(containerId);
+}
+
+function localizeSceneObjectTransform(
+  worldObject: SceneObject,
+  worldContainer: SceneObject
+): Partial<SceneObject> {
+  const anchor = worldContainer.anchor ?? { x: 0, y: 0 };
+  const deltaX = worldObject.x - worldContainer.x;
+  const deltaY = worldObject.y - worldContainer.y;
+  const radians = -worldContainer.rotation * Math.PI / 180;
+  const cosine = Math.cos(radians);
+  const sine = Math.sin(radians);
+  const unrotatedX = deltaX * cosine - deltaY * sine;
+  const unrotatedY = deltaX * sine + deltaY * cosine;
+  const scaleX = safeHierarchyScale(worldContainer.scaleX ?? 1);
+  const scaleY = safeHierarchyScale(worldContainer.scaleY ?? 1);
+  const scaleZ = safeHierarchyScale(worldContainer.scaleZ ?? 1);
+  const patch: Record<string, unknown> = {
+    x: anchor.x + unrotatedX / scaleX,
+    y: anchor.y + unrotatedY / scaleY,
+    zDepth: worldObject.zDepth - worldContainer.zDepth,
+    rotation: worldObject.rotation - worldContainer.rotation,
+    scaleX: (worldObject.scaleX ?? 1) / scaleX,
+    scaleY: (worldObject.scaleY ?? 1) / scaleY,
+    scaleZ: (worldObject.scaleZ ?? 1) / scaleZ
+  };
+  if (worldObject.type === "mesh") {
+    patch.rotationX = (worldObject.rotationX ?? 0) - (worldContainer.rotationX ?? 0);
+    patch.rotationY = (worldObject.rotationY ?? 0) - (worldContainer.rotationY ?? 0);
+    patch.rotationZ = (worldObject.rotationZ ?? worldObject.rotation) - worldContainer.rotation;
+  }
+  return patch as Partial<SceneObject>;
+}
+
+function bakeEffectiveSceneObjectTransform(worldObject: SceneObject): Partial<SceneObject> {
+  const patch: Record<string, unknown> = {
+    x: worldObject.x,
+    y: worldObject.y,
+    zDepth: worldObject.zDepth,
+    rotation: worldObject.rotation,
+    scaleX: worldObject.scaleX ?? 1,
+    scaleY: worldObject.scaleY ?? 1,
+    scaleZ: worldObject.scaleZ ?? 1,
+    opacity: worldObject.opacity,
+    visible: worldObject.visible,
+    locked: worldObject.locked
+  };
+  if (worldObject.type === "mesh") {
+    patch.rotationX = worldObject.rotationX ?? 0;
+    patch.rotationY = worldObject.rotationY ?? 0;
+    patch.rotationZ = worldObject.rotationZ ?? worldObject.rotation;
+  }
+  return patch as Partial<SceneObject>;
+}
+
+function safeHierarchyScale(value: number): number {
+  if (Math.abs(value) >= 0.0001) return value;
+  return value < 0 ? -0.0001 : 0.0001;
+}
+
+function collectContainerSubtreeIds(objects: SceneObject[], rootId: string): Set<string> {
+  const byId = new Map(objects.map((object) => [object.id, object]));
+  const collected = new Set<string>();
+  const visit = (id: string): void => {
+    if (collected.has(id)) return;
+    collected.add(id);
+    const object = byId.get(id);
+    if (!object || !isContainerObject(object)) return;
+    object.childIds.forEach(visit);
+  };
+  visit(rootId);
+  return collected;
 }
 
 function createDefaultTimeline(): SceneTimeline {
@@ -1225,6 +2752,13 @@ function normalizeTimeline(timeline: SceneTimeline | undefined): SceneTimeline {
   };
 }
 
+function nearestSupportedFontWeight(weight: number): TextSceneObject["fontWeight"] {
+  const weights: Array<TextSceneObject["fontWeight"]> = ["400", "500", "600", "700", "800"];
+  return weights.reduce((nearest, candidate) =>
+    Math.abs(Number(candidate) - weight) < Math.abs(Number(nearest) - weight) ? candidate : nearest
+  );
+}
+
 function createObjectSnapshot(object: SceneObject): SceneKeyframe["properties"] {
   const snapshot: SceneKeyframe["properties"] = {
     x: object.x,
@@ -1233,6 +2767,9 @@ function createObjectSnapshot(object: SceneObject): SceneKeyframe["properties"] 
     width: object.width,
     height: object.height,
     rotation: object.rotation,
+    scaleX: object.scaleX ?? 1,
+    scaleY: object.scaleY ?? 1,
+    anchor: structuredClone(object.anchor ?? { x: 0, y: 0 }),
     opacity: object.opacity,
     fill: object.fill,
     stroke: object.stroke,
@@ -1247,12 +2784,19 @@ function createObjectSnapshot(object: SceneObject): SceneKeyframe["properties"] 
     snapshot.src = object.src;
   }
 
-  return snapshot;
-}
+  if (object.type === "shape") {
+    // Deep-copy so later path edits don't mutate the captured keyframe.
+    snapshot.path = structuredClone(object.path);
+  }
 
-function svgDataUri(background: string, foreground: string, label: string): string {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><rect width="256" height="256" rx="48" fill="${background}"/><circle cx="128" cy="128" r="82" fill="${foreground}"/><text x="128" y="144" text-anchor="middle" font-family="Arial,sans-serif" font-size="44" font-weight="800" fill="${background}">${label}</text></svg>`;
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  if (object.type === "mesh") {
+    snapshot.rotationX = object.rotationX ?? 0;
+    snapshot.rotationY = object.rotationY ?? 0;
+    snapshot.rotationZ = object.rotationZ ?? object.rotation ?? 0;
+    snapshot.scaleZ = object.scaleZ ?? 1;
+  }
+
+  return snapshot;
 }
 
 function touchScene(scene: SceneDocument): SceneDocument {
@@ -1260,6 +2804,18 @@ function touchScene(scene: SceneDocument): SceneDocument {
     ...scene,
     updatedAt: new Date().toISOString()
   };
+}
+
+function clampTimelineFrame(frame: number, durationFrames: number): number {
+  return Math.max(0, Math.min(durationFrames, Math.round(frame)));
+}
+
+function sortPropertyKeys(keys: PropertyKeyframe[]): PropertyKeyframe[] {
+  return [...keys].sort((left, right) =>
+    left.frame === right.frame
+      ? left.id.localeCompare(right.id)
+      : left.frame - right.frame
+  );
 }
 
 /** Layers are identified by kebab-case slugs on objects ("main", "layer-2"). */

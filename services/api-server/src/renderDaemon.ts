@@ -1,4 +1,14 @@
-import type { SceneDocument } from "@grapix/shared-types";
+import {
+  createRendererCommand,
+  isRendererReply,
+  type RendererCommandPayload,
+  type RendererChannel,
+  type RendererExpectedState,
+  type RendererOutputConfig,
+  type RendererQualityProfile,
+  type RendererSuccessReply
+} from "@grapix/renderer-protocol";
+import type { RendererPatch, SceneDocument } from "@grapix/shared-types";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -11,31 +21,16 @@ import { fileURLToPath } from "node:url";
  * requestId, and surfaces daemon errors distinctly from connectivity errors
  * so routes can answer 422 vs 503.
  *
- * Protocol v1 reference: services/render-daemon/README.md.
+ * Protocol v2 reference: services/render-daemon/README.md.
  */
 
-const protocolVersion = 1;
 const connectTimeoutMs = 2000;
 const requestTimeoutMs = 5000;
 const defaultAuthTokenPath = fileURLToPath(new URL("../../../data/render-daemon.token", import.meta.url));
 
-export interface RenderDaemonOutputConfig {
-  width: number;
-  height: number;
-  frameRateNumerator: number;
-  frameRateDenominator: number;
-  scanMode?: "p" | "i";
-  alphaMode?: "premultiplied" | "straight";
-  colorFormat?: "bgra8";
-  colorSpace?: "srgb";
-  ndiSourceName?: string;
-  backend?: "ndi" | "null";
-}
-
-export interface RenderDaemonReply {
-  type: "ack" | "status";
-  [key: string]: unknown;
-}
+/** Backwards-compatible API route names, now sourced from one wire contract. */
+export type RenderDaemonOutputConfig = RendererOutputConfig;
+export type RenderDaemonReply = RendererSuccessReply;
 
 /** Error reported by the daemon itself (bad scene, bad config, state error). */
 export class RenderDaemonRequestError extends Error {
@@ -76,20 +71,76 @@ export class RenderDaemonClient {
     return this.request({ type: "scene.load", scene });
   }
 
+  async warmScene(scene: SceneDocument): Promise<RenderDaemonReply> {
+    return this.request({ type: "scene.warm", scene });
+  }
+
+  async patchScene(
+    patch: RendererPatch,
+    currentSceneRevision: string,
+    nextSceneRevision: string
+  ): Promise<RenderDaemonReply> {
+    return this.request(
+      { type: "scene.patch", patch, nextSceneRevision },
+      "any",
+      {
+        sceneId: patch.sceneId,
+        sceneRevision: currentSceneRevision,
+        channel: null
+      }
+    );
+  }
+
+  async setPreview(sceneId: string, sceneRevision: string): Promise<RenderDaemonReply> {
+    return this.request(
+      { type: "channel.preview.set" },
+      "any",
+      { sceneId, sceneRevision, channel: "preview" }
+    );
+  }
+
+  async take(sceneId: string, sceneRevision: string): Promise<RenderDaemonReply> {
+    return this.request(
+      { type: "channel.take", transition: "cut" },
+      "any",
+      { sceneId, sceneRevision, channel: "program" }
+    );
+  }
+
+  async releaseScene(sceneId: string, sceneRevision: string): Promise<RenderDaemonReply> {
+    return this.request(
+      { type: "scene.release" },
+      "any",
+      { sceneId, sceneRevision, channel: null }
+    );
+  }
+
   async configureOutput(config: RenderDaemonOutputConfig): Promise<RenderDaemonReply> {
-    return this.request({ type: "output.configure", ...config });
+    return this.request({ type: "output.configure", ...config }, "any");
   }
 
   async startOutput(): Promise<RenderDaemonReply> {
-    return this.request({ type: "output.start" });
+    return this.request({ type: "output.start" }, "configured");
   }
 
   async stopOutput(): Promise<RenderDaemonReply> {
-    return this.request({ type: "output.stop" });
+    return this.request({ type: "output.stop" }, "running");
   }
 
   async getStatus(): Promise<RenderDaemonReply> {
     return this.request({ type: "status" });
+  }
+
+  async getCapabilities(): Promise<RenderDaemonReply> {
+    return this.request({ type: "capabilities.get" });
+  }
+
+  async heartbeat(): Promise<RenderDaemonReply> {
+    return this.request({ type: "heartbeat" });
+  }
+
+  async setQualityProfile(profile: RendererQualityProfile): Promise<RenderDaemonReply> {
+    return this.request({ type: "resource.profile.set", profile });
   }
 
   close(): void {
@@ -104,9 +155,18 @@ export class RenderDaemonClient {
     this.openPromise = null;
   }
 
-  private async request(message: Record<string, unknown>): Promise<RenderDaemonReply> {
+  private async request(
+    message: RendererCommandPayload,
+    expectedRendererState: RendererExpectedState = "any",
+    context: {
+      sceneId?: string | null;
+      sceneRevision?: string | null;
+      channel?: RendererChannel | null;
+    } = {}
+  ): Promise<RenderDaemonReply> {
     const socket = await this.ensureSocket();
-    const requestId = `req_${++this.requestCounter}`;
+    const sequence = ++this.requestCounter;
+    const requestId = `req_${sequence}`;
 
     return new Promise<RenderDaemonReply>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -115,7 +175,12 @@ export class RenderDaemonClient {
       }, requestTimeoutMs);
 
       this.pending.set(requestId, { resolve, reject, timer });
-      socket.send(JSON.stringify({ ...message, protocolVersion, requestId }));
+      socket.send(JSON.stringify(createRendererCommand(message, {
+        requestId,
+        sequence,
+        expectedRendererState,
+        ...context
+      })));
     });
   }
 
@@ -170,15 +235,19 @@ export class RenderDaemonClient {
   }
 
   private handleMessage(raw: string): void {
-    let parsed: Record<string, unknown>;
+    let parsed: unknown;
 
     try {
-      parsed = JSON.parse(raw) as Record<string, unknown>;
+      parsed = JSON.parse(raw) as unknown;
     } catch {
       return;
     }
 
-    const requestId = typeof parsed.requestId === "string" ? parsed.requestId : undefined;
+    if (!isRendererReply(parsed)) {
+      return;
+    }
+
+    const requestId = parsed.requestId;
     if (!requestId) {
       return;
     }
@@ -194,14 +263,14 @@ export class RenderDaemonClient {
     if (parsed.type === "error") {
       pending.reject(
         new RenderDaemonRequestError(
-          typeof parsed.code === "string" ? parsed.code : "UNKNOWN",
-          typeof parsed.message === "string" ? parsed.message : "render daemon reported an error"
+          parsed.code,
+          parsed.message
         )
       );
       return;
     }
 
-    pending.resolve(parsed as RenderDaemonReply);
+    pending.resolve(parsed);
   }
 }
 

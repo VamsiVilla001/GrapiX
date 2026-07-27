@@ -5,7 +5,7 @@ import {
   type AssetLibraryItem,
   type ShaderDefinition
 } from "@grapix/shared-types";
-import { importAssetFileToApi } from "../../../lib/apiClient";
+import { importAssetFileToApi, importModelFileToApi } from "../../../lib/apiClient";
 import { validateWgslSource } from "./shaderRegistry";
 
 export interface ImportedAssetResult {
@@ -22,10 +22,17 @@ export async function importMaterialAsset(file: File, replaceAssetId?: string): 
   const errors = validateAssetDescriptor(file.name, file.type, file.size);
   if (errors.length) throw new Error(errors.join(" "));
 
-  const stored = await importAssetFileToApi(file, replaceAssetId);
   const extension = file.name.toLowerCase().split(".").pop() ?? "";
-  const kind: AssetKind = extension === "wgsl" ? "wgsl" : extension === "svg" ? "svg" : "image";
-  const metadata = kind === "wgsl" ? {} : await inspectImage(file);
+  const kind: AssetKind = extension === "wgsl"
+    ? "wgsl"
+    : extension === "svg"
+      ? "svg"
+      : ["glb", "gltf"].includes(extension)
+        ? "model"
+        : "image";
+  const importedModel = kind === "model" ? await importModelFileToApi(file) : null;
+  const stored = importedModel?.asset ?? await importAssetFileToApi(file, replaceAssetId);
+  const metadata = kind === "image" || kind === "svg" ? await inspectImage(file) : {};
   const asset: AssetLibraryItem = {
     assetId: stored.assetId,
     name: file.name,
@@ -40,6 +47,7 @@ export async function importMaterialAsset(file: File, replaceAssetId?: string): 
     status: "READY",
     colorSpace: "srgb",
     tags: [],
+    modelMaterialNames: importedModel?.materialNames,
     ...metadata
   };
 

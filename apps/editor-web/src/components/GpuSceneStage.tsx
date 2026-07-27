@@ -1,26 +1,31 @@
-import type { SceneDocument, SceneObject } from "@grapix/shared-types";
+import type { SceneDocument } from "@grapix/shared-types";
 import { useEffect, useRef, useState } from "react";
-import { GpuSceneRenderer, type GpuRendererCapabilities } from "../rendering/GpuSceneRenderer";
+import { createEditorPreviewRenderer } from "../rendering/PixiPreviewRendererAdapter";
+import type {
+  PreviewRendererCapabilities,
+  ScenePreviewRenderer
+} from "../rendering/ScenePreviewRenderer";
+import type { RenderableSceneObject } from "../rendering/sceneMaterial";
 
 // Live registry of mounted renderers, reachable from the devtools console as
 // window.__grapixRenderers. Rendering faults in packaged builds are invisible
 // (no source maps, error banner instead of console output); this hook lets a
 // debugger inspect app.stage / extract pixels from a running instance.
-const rendererRegistry: Set<GpuSceneRenderer> =
-  ((window as typeof window & { __grapixRenderers?: Set<GpuSceneRenderer> }).__grapixRenderers ??= new Set());
+const rendererRegistry: Set<ScenePreviewRenderer> =
+  ((window as typeof window & { __grapixRenderers?: Set<ScenePreviewRenderer> }).__grapixRenderers ??= new Set());
 
 export function GpuSceneStage(props: {
   scene: SceneDocument;
-  objects: SceneObject[];
-  onCapabilities?: (capabilities: GpuRendererCapabilities) => void;
+  objects: RenderableSceneObject[];
+  onCapabilities?: (capabilities: PreviewRendererCapabilities) => void;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
-  const rendererRef = useRef<GpuSceneRenderer | null>(null);
+  const rendererRef = useRef<ScenePreviewRenderer | null>(null);
   const [rendererError, setRendererError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    const renderer = new GpuSceneRenderer();
+    const renderer = createEditorPreviewRenderer();
 
     rendererRef.current = renderer;
     rendererRegistry.add(renderer);

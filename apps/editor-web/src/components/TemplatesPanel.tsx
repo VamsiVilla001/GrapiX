@@ -31,6 +31,7 @@ interface ContextMenuState {
 export function TemplatesPanel() {
   const scene = useEditorStore((state) => state.scene);
   const loadScene = useEditorStore((state) => state.loadScene);
+  const clearScene = useEditorStore((state) => state.clearScene);
   const setSceneId = useEditorStore((state) => state.setSceneId);
   const setSceneName = useEditorStore((state) => state.setSceneName);
   const templates = useTemplateStore((state) => state.templates);
@@ -109,7 +110,16 @@ export function TemplatesPanel() {
 
   function deleteSelectedTemplate() {
     if (selectedTemplateId) {
-      deleteTemplate(selectedTemplateId);
+      deleteSceneTemplate(selectedTemplateId);
+    }
+  }
+
+  function deleteSceneTemplate(templateId: string) {
+    const wasOpen = openedTemplateId === templateId;
+    deleteTemplate(templateId);
+
+    if (wasOpen) {
+      clearScene();
     }
   }
 
@@ -155,7 +165,7 @@ export function TemplatesPanel() {
         exportTemplateScene(template);
         break;
       case "Delete":
-        deleteTemplate(templateId);
+        deleteSceneTemplate(templateId);
         break;
       case "To Sequencer":
       case "Edit Script Events...":
@@ -177,13 +187,13 @@ export function TemplatesPanel() {
       }
 
       event.preventDefault();
-      deleteTemplate(selectedTemplateId);
+      deleteSceneTemplate(selectedTemplateId);
     }
 
     window.addEventListener("keydown", deleteFromKeyboard);
 
     return () => window.removeEventListener("keydown", deleteFromKeyboard);
-  }, [deleteTemplate, selectedTemplateId]);
+  }, [openedTemplateId, selectedTemplateId]);
 
   function updateTemplateName(templateId: string, name: string) {
     renameTemplate(templateId, name);
@@ -314,7 +324,6 @@ export function TemplatesPanel() {
               role="menuitem"
             >
               <span>{item}</span>
-              <kbd>{shortcutForMenuItem(item)}</kbd>
             </button>
           ))}
         </div>
@@ -437,7 +446,6 @@ function isEditableElement(target: EventTarget | null): boolean {
 
 function renderTemplateObject(object: SceneObject) {
   const commonProps = {
-    key: object.id,
     transform: `translate(${object.x} ${object.y}) rotate(${object.rotation})`,
     opacity: object.opacity,
     visibility: object.visible ? "visible" : "hidden"
@@ -447,6 +455,7 @@ function renderTemplateObject(object: SceneObject) {
     case "text":
       return (
         <text
+          key={object.id}
           {...commonProps}
           x={0}
           y={0}
@@ -460,14 +469,15 @@ function renderTemplateObject(object: SceneObject) {
         </text>
       );
     case "rect":
-      return <rect {...commonProps} width={object.width} height={object.height} rx={object.radius} fill={object.fill} stroke={object.stroke} strokeWidth={object.strokeWidth} />;
+      return <rect key={object.id} {...commonProps} width={object.width} height={object.height} rx={object.radius} fill={object.fill} stroke={object.stroke} strokeWidth={object.strokeWidth} />;
     case "ellipse":
-      return <ellipse {...commonProps} cx={object.width / 2} cy={object.height / 2} rx={object.width / 2} ry={object.height / 2} fill={object.fill} stroke={object.stroke} strokeWidth={object.strokeWidth} />;
+      return <ellipse key={object.id} {...commonProps} cx={object.width / 2} cy={object.height / 2} rx={object.width / 2} ry={object.height / 2} fill={object.fill} stroke={object.stroke} strokeWidth={object.strokeWidth} />;
     case "image":
-      return <image {...commonProps} href={object.src} width={object.width} height={object.height} preserveAspectRatio={object.objectFit === "stretch" ? "none" : "xMidYMid slice"} />;
+      return <image key={object.id} {...commonProps} href={object.src} width={object.width} height={object.height} preserveAspectRatio={object.objectFit === "stretch" ? "none" : "xMidYMid slice"} />;
     case "line":
       return (
         <polyline
+          key={object.id}
           {...commonProps}
           points={object.points.map((point) => `${point.x},${point.y}`).join(" ")}
           fill="none"
@@ -476,31 +486,16 @@ function renderTemplateObject(object: SceneObject) {
         />
       );
     case "mesh":
-      return <rect {...commonProps} width={object.width} height={object.height} rx={12} fill={object.fill} stroke={object.stroke} strokeWidth={object.strokeWidth} />;
+      return <rect key={object.id} {...commonProps} width={object.width} height={object.height} rx={12} fill={object.fill} stroke={object.stroke} strokeWidth={object.strokeWidth} />;
     case "light":
-      return <circle {...commonProps} cx={object.width / 2} cy={object.height / 2} r={Math.min(object.width, object.height) / 2} fill={object.color} />;
+      return <circle key={object.id} {...commonProps} cx={object.width / 2} cy={object.height / 2} r={Math.min(object.width, object.height) / 2} fill={object.color} />;
     case "camera":
-      return <rect {...commonProps} width={object.width} height={object.height} rx={10} fill={object.fill} stroke={object.stroke} strokeWidth={object.strokeWidth} />;
+      return <rect key={object.id} {...commonProps} width={object.width} height={object.height} rx={10} fill={object.fill} stroke={object.stroke} strokeWidth={object.strokeWidth} />;
     case "layer":
     case "group":
-      return <rect {...commonProps} width={object.width} height={object.height} rx={10} fill="none" stroke={object.stroke} strokeWidth={object.strokeWidth} strokeDasharray="18 12" />;
+      return <rect key={object.id} {...commonProps} width={object.width} height={object.height} rx={10} fill="none" stroke={object.stroke} strokeWidth={object.strokeWidth} strokeDasharray="18 12" />;
     case "marker":
-      return <circle {...commonProps} cx={object.width / 2} cy={object.height / 2} r={Math.min(object.width, object.height) / 2} fill={object.fill} stroke={object.stroke} strokeWidth={object.strokeWidth} />;
-  }
-}
-
-function shortcutForMenuItem(item: ContextMenuItem): string {
-  switch (item) {
-    case "Edit Script Events...":
-      return "Shift+Ctrl+E";
-    case "Rename":
-      return "F2";
-    case "Change ID...":
-      return "F7";
-    case "Delete":
-      return "Del";
-    default:
-      return "";
+      return <circle key={object.id} {...commonProps} cx={object.width / 2} cy={object.height / 2} r={Math.min(object.width, object.height) / 2} fill={object.fill} stroke={object.stroke} strokeWidth={object.strokeWidth} />;
   }
 }
 

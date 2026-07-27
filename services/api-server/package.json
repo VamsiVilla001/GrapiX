@@ -8,17 +8,26 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test tests/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/index.js"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",
+    "@grapix/renderer-protocol": "0.1.0",
+    "@grapix/sdk": "0.1.0",
     "@grapix/shared-types": "0.1.0",
+    "@napi-rs/canvas": "^0.1.80",
+    "ag-psd": "^22.0.1",
+    "fast-xml-parser": "^5.9.0",
     "fastify": "^5.10.0",
-    "jszip": "^3.10.1"
+    "jszip": "^3.10.1",
+    "pdfjs-dist": "^5.4.624",
+    "pngjs": "^7.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.5.0",
+    "@types/pngjs": "^6.0.5",
     "tsx": "^4.19.0",
     "typescript": "^5.5.4"
   }

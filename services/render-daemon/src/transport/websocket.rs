@@ -111,39 +111,61 @@ async fn handle_connection(
         let controller = controller.lock().await;
         Arc::clone(&controller.connected_clients)
     };
+    let mut events = controller.lock().await.subscribe_events();
     client_counter.fetch_add(1, Ordering::Relaxed);
     tracing::info!(%peer, clients = client_counter.load(Ordering::Relaxed), "controller connected");
+    let mut last_sequence = 0_u64;
 
     // A controller disconnect must never take the output down: the render
     // loop keeps running on the last received scene; the controller can
     // reconnect and resync at any time.
-    while let Some(message) = source.next().await {
-        let message = match message {
-            Ok(message) => message,
-            Err(error) => {
-                tracing::warn!(%peer, %error, "websocket read error; dropping connection");
-                break;
+    loop {
+        tokio::select! {
+            incoming = source.next() => {
+                let Some(message) = incoming else { break };
+                let message = match message {
+                    Ok(message) => message,
+                    Err(error) => {
+                        tracing::warn!(%peer, %error, "websocket read error; dropping connection");
+                        break;
+                    }
+                };
+
+                let reply = match message {
+                    Message::Text(text) => {
+                        Some(dispatch(text.as_str(), &controller, &mut last_sequence).await)
+                    }
+                    Message::Binary(_) => Some(ServerMessage::error(ProtocolError::new(
+                        ErrorCode::UnsupportedMessage,
+                        "binary frames are not part of protocol v2; send JSON text frames",
+                    ))),
+                    Message::Close(_) => break,
+                    // Ping/pong are handled by tungstenite automatically.
+                    _ => None,
+                };
+
+                if let Some(reply) = reply {
+                    if sink
+                        .send(Message::Text(reply.to_json().into()))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
             }
-        };
-
-        let reply = match message {
-            Message::Text(text) => Some(dispatch(text.as_str(), &controller).await),
-            Message::Binary(_) => Some(ServerMessage::error(ProtocolError::new(
-                ErrorCode::UnsupportedMessage,
-                "binary frames are not part of protocol v1; send JSON text frames",
-            ))),
-            Message::Close(_) => break,
-            // Ping/pong are handled by tungstenite automatically.
-            _ => None,
-        };
-
-        if let Some(reply) = reply {
-            if sink
-                .send(Message::Text(reply.to_json().into()))
-                .await
-                .is_err()
-            {
-                break;
+            event = events.recv() => {
+                match event {
+                    Ok(event) => {
+                        if sink.send(Message::Text(event.to_json().into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        tracing::warn!(%peer, skipped, "controller lagged renderer event stream");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
             }
         }
     }
@@ -202,19 +224,94 @@ fn handshake_error(status: StatusCode, message: &str) -> ErrorResponse {
         .expect("static handshake error response must be valid")
 }
 
-async fn dispatch(text: &str, controller: &Arc<Mutex<DaemonController>>) -> ServerMessage {
+async fn dispatch(
+    text: &str,
+    controller: &Arc<Mutex<DaemonController>>,
+    last_sequence: &mut u64,
+) -> ServerMessage {
     let message = match parse_client_message(text) {
         Ok(message) => message,
         Err(error) => return ServerMessage::error(error),
     };
 
+    if let Err(error) = validate_sequence(&message, last_sequence) {
+        return ServerMessage::error(error);
+    }
+
     let message_type = message.message_type();
-    let request_id = message.request_id().map(str::to_string);
+    let request_id = message.request_id().to_string();
+    let sequence = message.sequence();
+    let expected_state = message.expected_renderer_state();
     let mut controller = controller.lock().await;
 
+    if let Err(error) = controller.validate_expected_state(expected_state) {
+        return ServerMessage::error(error.with_metadata(message.metadata()));
+    }
+
     let result = match message {
-        ClientMessage::SceneLoad { scene, .. } | ClientMessage::SceneUpdate { scene, .. } => {
-            controller.load_scene(&scene).map(Some)
+        ClientMessage::Capabilities { .. } => {
+            return ServerMessage::capabilities(request_id, sequence);
+        }
+        ClientMessage::Heartbeat { .. } => Ok(None),
+        ClientMessage::SceneLoad { scene, .. } => controller.load_scene(&scene).map(Some),
+        ClientMessage::SceneUpdate { scene, .. } => controller.update_scene(&scene).map(Some),
+        ClientMessage::SceneWarm { scene, .. } => controller.warm_scene(&scene).map(Some),
+        ClientMessage::ScenePatch {
+            metadata,
+            patch,
+            next_scene_revision,
+        } => controller
+            .patch_scene(
+                metadata
+                    .scene_id
+                    .as_deref()
+                    .expect("parser validates sceneId"),
+                metadata
+                    .scene_revision
+                    .as_deref()
+                    .expect("parser validates sceneRevision"),
+                &next_scene_revision,
+                &patch,
+            )
+            .map(Some),
+        ClientMessage::SceneRelease { metadata } => controller
+            .release_scene(
+                metadata
+                    .scene_id
+                    .as_deref()
+                    .expect("parser validates sceneId"),
+                metadata
+                    .scene_revision
+                    .as_deref()
+                    .expect("parser validates sceneRevision"),
+            )
+            .map(|()| None),
+        ClientMessage::SetPreview { metadata } => controller
+            .set_preview(
+                metadata
+                    .scene_id
+                    .as_deref()
+                    .expect("parser validates sceneId"),
+                metadata
+                    .scene_revision
+                    .as_deref()
+                    .expect("parser validates sceneRevision"),
+            )
+            .map(Some),
+        ClientMessage::Take { metadata } => controller
+            .take_program(
+                metadata
+                    .scene_id
+                    .as_deref()
+                    .expect("parser validates sceneId"),
+                metadata
+                    .scene_revision
+                    .as_deref()
+                    .expect("parser validates sceneRevision"),
+            )
+            .map(Some),
+        ClientMessage::SetResourceProfile { profile, .. } => {
+            Ok(Some(controller.set_quality_profile(profile)))
         }
         ClientMessage::OutputConfigure { config, .. } => OutputConfig::from_message(config)
             .map_err(|error| ProtocolError::new(ErrorCode::InvalidOutputConfig, error.to_string()))
@@ -224,18 +321,49 @@ async fn dispatch(text: &str, controller: &Arc<Mutex<DaemonController>>) -> Serv
         ClientMessage::OutputStop { .. } => controller.stop_output().map(|()| None),
         ClientMessage::Status { .. } => {
             let report = controller.status();
-            return ServerMessage::status(request_id, report);
+            return ServerMessage::status(request_id, sequence, report);
         }
     };
 
     match result {
-        Ok(warnings) => ServerMessage::ack(message_type, request_id, warnings.unwrap_or_default()),
-        Err(error) => ServerMessage::error(error.with_request_id(request_id)),
+        Ok(warnings) => ServerMessage::ack(
+            message_type,
+            request_id,
+            sequence,
+            warnings.unwrap_or_default(),
+        ),
+        Err(error) => ServerMessage::error(
+            error
+                .with_request_id(Some(request_id))
+                .with_sequence(Some(sequence)),
+        ),
     }
+}
+
+fn validate_sequence(
+    message: &ClientMessage,
+    last_sequence: &mut u64,
+) -> Result<(), ProtocolError> {
+    let sequence = message.sequence();
+    if sequence <= *last_sequence {
+        return Err(ProtocolError::new(
+            ErrorCode::StaleSequence,
+            format!(
+                "sequence {sequence} is not newer than last accepted sequence {}",
+                *last_sequence
+            ),
+        )
+        .with_metadata(message.metadata()));
+    }
+
+    *last_sequence = sequence;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
 
     fn security(allowed_origins: &[&str]) -> HandshakeSecurity {
@@ -287,5 +415,40 @@ mod tests {
             Some("http://127.0.0.1:5173"),
         );
         assert!(validate_handshake(&request, &security(&["http://127.0.0.1:5173"])).is_ok());
+    }
+
+    fn control_message(sequence: u64) -> ClientMessage {
+        let raw = json!({
+            "type": "heartbeat",
+            "protocolVersion": crate::protocol::PROTOCOL_VERSION,
+            "requestId": format!("req_{sequence}"),
+            "sequence": sequence,
+            "timestampMs": 1_753_400_000_000_u64,
+            "expectedRendererState": "any",
+            "sceneId": null,
+            "sceneRevision": null,
+            "channel": null
+        });
+        parse_client_message(&raw.to_string()).expect("test command must parse")
+    }
+
+    #[test]
+    fn accepts_strictly_increasing_sequences() {
+        let mut last_sequence = 0;
+        assert!(validate_sequence(&control_message(1), &mut last_sequence).is_ok());
+        assert!(validate_sequence(&control_message(2), &mut last_sequence).is_ok());
+        assert_eq!(last_sequence, 2);
+    }
+
+    #[test]
+    fn rejects_duplicate_and_out_of_order_sequences() {
+        let mut last_sequence = 7;
+        for sequence in [7, 6] {
+            let error = validate_sequence(&control_message(sequence), &mut last_sequence)
+                .expect_err("stale sequence must fail");
+            assert_eq!(error.code, ErrorCode::StaleSequence);
+            assert_eq!(error.sequence, Some(sequence));
+            assert_eq!(last_sequence, 7);
+        }
     }
 }

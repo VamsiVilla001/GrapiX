@@ -7,6 +7,7 @@
 //! NDI SDK is unavailable.
 
 pub mod null;
+pub mod recording;
 
 #[cfg(feature = "ndi")]
 pub mod ndi;
@@ -36,6 +37,13 @@ pub trait VideoOutput: Send {
 pub fn create_output(config: &OutputConfig) -> anyhow::Result<Box<dyn VideoOutput>> {
     match config.backend {
         OutputBackend::Null => Ok(Box::new(null::NullOutput::default())),
+        OutputBackend::Recording => Ok(Box::new(recording::RecordingOutput::default())),
+        OutputBackend::Decklink => anyhow::bail!(
+            "DeckLink output plugin is unavailable; install and certify the vendor SDK build"
+        ),
+        OutputBackend::Aja => anyhow::bail!(
+            "AJA output plugin is unavailable; install and certify the vendor SDK build"
+        ),
         OutputBackend::Ndi => {
             #[cfg(feature = "ndi")]
             {

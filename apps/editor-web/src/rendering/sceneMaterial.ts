@@ -2,32 +2,112 @@ import {
   applyBindings,
   findAsset,
   findMaterial,
+  getBindableFaces,
+  IMPLEMENTED_BLEND_MODES,
   resolveMaterialAsset,
   resolveMaterialColor,
   resolvePrimitiveMaterial,
+  resolveSceneObjectHierarchy,
   type ResolvedMaterial,
   type SceneDocument,
   type SceneObject
 } from "@grapix/shared-types";
 
+/** A face slot's material resolved to what the symbol painter needs. */
+export interface ResolvedFaceMaterial {
+  color?: string;
+  assetSource?: string;
+  assetMime?: string;
+  opacity?: number;
+  resolved: ResolvedMaterial;
+}
+
 export type RenderableSceneObject = SceneObject & {
   resolvedMaterial?: ResolvedMaterial;
   materialAssetSource?: string;
+  materialAssetMime?: string;
+  /** Per-face resolutions keyed by materialSlots slot key (incl. "main"). */
+  faceMaterials?: Record<string, ResolvedFaceMaterial>;
 };
 
 export function resolveRenderableObjects(scene: SceneDocument): RenderableSceneObject[] {
-  return sortObjectsForRender(scene.objects.map((object) => applyMaterialSlots(applyBindings(object, scene.dataContext), scene)));
+  const hierarchy = resolveSceneObjectHierarchy(scene.objects);
+  return sortObjectsForRender(
+    hierarchy.objects.map((object) => applyMaterialSlots(applyBindings(object, scene.dataContext), scene))
+  );
+}
+
+/** Resolve one bound slot to the color/texture the mesh-symbol painter consumes. */
+function resolveFaceMaterial(scene: SceneDocument, object: SceneObject, slotKey: string): ResolvedFaceMaterial | null {
+  const material = findMaterial(scene.materials, object.materialSlots[slotKey]);
+  if (!material || material.enabled === false) {
+    return null;
+  }
+  const resolved = resolvePrimitiveMaterial(scene, object, slotKey);
+  if (!isResolvedMaterialPreviewSupported(resolved)) {
+    return null;
+  }
+  const boundColor = material.dynamic
+    ? resolveMaterialColor(material, scene.dataContext)
+    : resolved?.parameters.baseColor ?? resolved?.parameters.tint ?? material.color;
+  const legacyAsset = resolveMaterialAsset(material, scene.assets, scene.dataContext);
+  const textureAsset = findAsset(scene.assets, resolved?.textureSlots[0]?.assetId);
+  const asset = material.dynamic ? legacyAsset : textureAsset ?? legacyAsset;
+  const usableAsset = asset && asset.status !== "MISSING" && asset.status !== "ERROR" && asset.status !== "UNSUPPORTED" ? asset : undefined;
+  if (!resolved) {
+    return null;
+  }
+  return {
+    color: typeof boundColor === "string" ? boundColor : undefined,
+    assetSource: usableAsset?.source,
+    assetMime: usableAsset?.mimeType,
+    opacity: typeof resolved.parameters.opacity === "number"
+      ? resolved.parameters.opacity
+      : material.opacity,
+    resolved
+  };
+}
+
+/**
+ * Mesh geometry resolves every bound surface (main + face:*) independently.
+ * The resulting records include shader parameters and texture sampler/UV
+ * metadata so the 3D renderer does not flatten a material into a colour swatch.
+ */
+function resolveMeshFaceMaterials(scene: SceneDocument, object: SceneObject): Record<string, ResolvedFaceMaterial> | undefined {
+  if (object.type !== "mesh") {
+    return undefined;
+  }
+  const entries: Record<string, ResolvedFaceMaterial> = {};
+  for (const face of getBindableFaces(object)) {
+    const resolved = object.materialSlots[face.slotKey] ? resolveFaceMaterial(scene, object, face.slotKey) : null;
+    if (resolved) {
+      entries[face.slotKey] = resolved;
+    }
+  }
+  return Object.keys(entries).length ? entries : undefined;
 }
 
 export function applyMaterialSlots<T extends SceneObject>(object: T, scene: SceneDocument): T & RenderableSceneObject {
+  const faceMaterials = resolveMeshFaceMaterials(scene, object);
   const material = findMaterial(scene.materials, object.materialSlots.main);
 
   if (!material) {
+    // A mesh can be bound only on non-main faces; carry those resolutions even
+    // when the primary slot is empty.
+    if (faceMaterials) {
+      return { ...object, faceMaterials } as T & RenderableSceneObject;
+    }
     return object as T & RenderableSceneObject;
   }
 
   const nextObject = { ...object } as RenderableSceneObject;
+  if (faceMaterials) {
+    nextObject.faceMaterials = faceMaterials;
+  }
   const resolved = resolvePrimitiveMaterial(scene, object);
+  if (!isResolvedMaterialPreviewSupported(resolved)) {
+    return nextObject as T & RenderableSceneObject;
+  }
   const color = material.dynamic
     ? resolveMaterialColor(material, scene.dataContext)
     : resolved?.parameters.baseColor;
@@ -36,23 +116,44 @@ export function applyMaterialSlots<T extends SceneObject>(object: T, scene: Scen
   const asset = material.dynamic ? legacyAsset : textureAsset ?? legacyAsset;
   const opacity = resolved?.parameters.opacity;
 
-  if (typeof color === "string" && ["solid-color", "gradient", "text-style"].includes(material.type)) {
+  if (typeof color === "string") {
     nextObject.fill = color;
   }
 
-  if (typeof opacity === "number") {
+  // Three.js applies each mesh face's material opacity in createMaterial().
+  // Multiplying the mesh object here as well squares the main-face opacity and
+  // leaks it into independently-bound faces. Pixi primitives still need their
+  // single display-object alpha multiplied here.
+  if (typeof opacity === "number" && nextObject.type !== "mesh") {
     nextObject.opacity = Math.max(0, Math.min(1, nextObject.opacity * opacity));
   }
 
   if (asset?.status !== "MISSING" && asset?.status !== "ERROR" && asset?.status !== "UNSUPPORTED") {
     nextObject.materialAssetSource = asset?.source;
-    if (asset && nextObject.type === "image" && ["image", "svg-vector", "video", "unlit-texture"].includes(material.type)) {
+    nextObject.materialAssetMime = asset?.mimeType;
+    if (
+      asset
+      && nextObject.type === "image"
+      && Boolean(material.assetId || resolved?.textureSlots.some((slot) => Boolean(slot.assetId)))
+    ) {
       nextObject.src = asset.source;
     }
   }
 
   nextObject.resolvedMaterial = resolved ?? undefined;
   return nextObject as T & RenderableSceneObject;
+}
+
+export function isResolvedMaterialPreviewSupported(
+  resolved: ResolvedMaterial | null | undefined
+): resolved is ResolvedMaterial {
+  return Boolean(
+    resolved
+    && resolved.material.enabled !== false
+    && IMPLEMENTED_BLEND_MODES.includes(resolved.blendMode)
+    && ["opaque", "straight", "premultiplied"].includes(resolved.alphaMode)
+    && resolved.textureSlots.every((slot) => !["tile", "nine-slice"].includes(slot.fit))
+  );
 }
 
 export function isVideoSource(source: string): boolean {

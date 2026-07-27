@@ -1,7 +1,15 @@
 import { create } from "zustand";
 
 export type DockAreaId = "left" | "right" | "bottom";
-export type DockPanelId = "templates" | "object-library" | "scene-manager" | "properties" | "material-manager" | "timeline";
+export type DockPanelId =
+  | "templates"
+  | "object-library"
+  | "scene-manager"
+  | "material-manager"
+  | "font-manager"
+  | "automation"
+  | "timeline"
+  | "sequencer";
 
 export interface DockStack {
   id: string;
@@ -16,11 +24,22 @@ interface DockState {
   movePanelToArea: (panelId: DockPanelId, areaId: DockAreaId, stackIndex?: number) => void;
   movePanelToStack: (panelId: DockPanelId, areaId: DockAreaId, stackId: string, insertIndex?: number) => void;
   setActivePanel: (areaId: DockAreaId, stackId: string, panelId: DockPanelId) => void;
+  /** Bring a panel to the front of whichever stack contains it. */
+  activatePanel: (panelId: DockPanelId) => void;
   resetDockLayout: () => void;
 }
 
-const allDockPanels: DockPanelId[] = ["templates", "object-library", "scene-manager", "properties", "material-manager", "timeline"];
-const dockLayoutStorageKey = "grapix-dock-layout-v2";
+const allDockPanels: DockPanelId[] = [
+  "templates",
+  "object-library",
+  "scene-manager",
+  "material-manager",
+  "font-manager",
+  "automation",
+  "timeline",
+  "sequencer"
+];
+const dockLayoutStorageKey = "grapix-dock-layout-v3";
 const legacyDockLayoutStorageKey = "grapix-dock-layout-v1";
 
 export const useDockStore = create<DockState>((set) => ({
@@ -78,6 +97,19 @@ export const useDockStore = create<DockState>((set) => ({
 
       return { areas: nextAreas };
     }),
+  activatePanel: (panelId) =>
+    set((state) => {
+      for (const areaId of ["left", "right", "bottom"] as DockAreaId[]) {
+        const stackIndex = state.areas[areaId].findIndex((stack) => stack.panels.includes(panelId));
+        if (stackIndex >= 0) {
+          const nextAreas = cloneLayout(state.areas);
+          nextAreas[areaId][stackIndex].activePanelId = panelId;
+          saveDockLayout(nextAreas);
+          return { areas: nextAreas };
+        }
+      }
+      return { areas: state.areas };
+    }),
   resetDockLayout: () => {
     const defaultAreas = createDefaultDockLayout();
     saveDockLayout(defaultAreas);
@@ -92,24 +124,19 @@ function createDefaultDockLayout(): DockLayout {
         id: "left-browser-stack",
         panels: ["templates", "object-library"],
         activePanelId: "templates"
-      },
-      {
-        id: "left-scene-stack",
-        panels: ["scene-manager"],
-        activePanelId: "scene-manager"
       }
     ],
     right: [
       {
         id: "right-inspector-stack",
-        panels: ["properties", "material-manager"],
-        activePanelId: "properties"
+        panels: ["scene-manager", "material-manager", "font-manager", "automation"],
+        activePanelId: "scene-manager"
       }
     ],
     bottom: [
       {
         id: "bottom-timeline-stack",
-        panels: ["timeline"],
+        panels: ["timeline", "sequencer"],
         activePanelId: "timeline"
       }
     ]
@@ -185,7 +212,11 @@ function mergeMissingDockPanels(layout: DockLayout): DockLayout {
 
   for (const panelId of allDockPanels) {
     if (!visiblePanels.has(panelId)) {
-      const targetArea = panelId === "material-manager" ? "right" : "left";
+      const targetArea: DockAreaId = ["material-manager", "font-manager", "automation"].includes(panelId)
+        ? "right"
+        : ["timeline", "sequencer"].includes(panelId)
+          ? "bottom"
+          : "left";
       nextLayout[targetArea].push({
         id: createStackId(targetArea, panelId, nextLayout[targetArea]),
         panels: [panelId],

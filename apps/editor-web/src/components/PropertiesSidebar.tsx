@@ -1,10 +1,11 @@
-import type { BindingMap, SceneKeyframe, SceneObject, SceneProperty } from "@grapix/shared-types";
-import { KeyRound, Plus, RotateCcw, Trash2 } from "lucide-react";
+import type { BindingMap, SceneObject, SceneProperty } from "@grapix/shared-types";
 import { Inspector } from "./Inspector";
+import { MaterialsTab } from "./MaterialsTab";
 import { useEditorStore } from "../store/editorStore";
 import { useUiStore } from "../store/uiStore";
 
-const tabs = ["Properties", "Animation", "Text", "Data Binding"] as const;
+export const propertyInspectorTabs = ["Properties", "Materials", "Text", "Data Binding"] as const;
+export type PropertyInspectorTab = (typeof propertyInspectorTabs)[number];
 const bindableProperties: SceneProperty[] = [
   "text",
   "src",
@@ -17,6 +18,12 @@ const bindableProperties: SceneProperty[] = [
   "width",
   "height",
   "rotation",
+  "rotationX",
+  "rotationY",
+  "rotationZ",
+  "scaleX",
+  "scaleY",
+  "scaleZ",
   "opacity"
 ];
 
@@ -27,7 +34,7 @@ export function PropertiesSidebar() {
   return (
     <aside className="properties-sidebar">
       <div className="properties-tabs">
-        {tabs.map((tab) => (
+        {propertyInspectorTabs.map((tab) => (
           <button
             className={`properties-tab ${propertiesTab === tab ? "active" : ""}`}
             key={tab}
@@ -36,77 +43,19 @@ export function PropertiesSidebar() {
             {tab}
           </button>
         ))}
-        <button className="panel-icon-button" title="Reset view"><RotateCcw size={14} /></button>
       </div>
       <div className="properties-tab-body">
-        {propertiesTab === "Properties" ? <Inspector /> : null}
-        {propertiesTab === "Animation" ? <AnimationProperties /> : null}
-        {propertiesTab === "Text" ? <TextProperties /> : null}
-        {propertiesTab === "Data Binding" ? <DataBindingProperties /> : null}
+        <PropertyInspectorContent tab={propertiesTab} />
       </div>
-      <section className="output-previews">
-        <div className="output-header">Output Previews</div>
-        <div className="preview-grid">
-          <div className="preview-tile wide">16:9</div>
-          <div className="preview-tile tall">9:16</div>
-          <div className="preview-tile square">1:1</div>
-        </div>
-      </section>
     </aside>
   );
 }
 
-function AnimationProperties() {
-  const scene = useEditorStore((state) => state.scene);
-  const selectedObjectId = useEditorStore((state) => state.selectedObjectId);
-  const addObjectKeyframe = useEditorStore((state) => state.addObjectKeyframe);
-  const updateObjectKeyframe = useEditorStore((state) => state.updateObjectKeyframe);
-  const deleteObjectKeyframe = useEditorStore((state) => state.deleteObjectKeyframe);
-  const updateTimeline = useEditorStore((state) => state.updateTimeline);
-  const currentFrame = useUiStore((state) => state.currentFrame);
-  const setCurrentFrame = useUiStore((state) => state.setCurrentFrame);
-  const selectedObject = scene.objects.find((object) => object.id === selectedObjectId);
-  const selectedKeyframes = scene.timeline.keyframes.filter((keyframe) => keyframe.objectId === selectedObjectId);
-
-  if (!selectedObject) {
-    return <EmptyState>Select an object to animate</EmptyState>;
-  }
-
-  return (
-    <section className="property-tab-panel">
-      <Header title="Animation" subtitle={selectedObject.name} />
-      <div className="field-section two-column">
-        <NumberField label="Frame" value={currentFrame} min={0} max={scene.timeline.durationFrames} onChange={setCurrentFrame} />
-        <NumberField
-          label="Duration"
-          value={scene.timeline.durationFrames}
-          min={1}
-          onChange={(durationFrames) => updateTimeline({ durationFrames })}
-        />
-        <SelectField
-          label="FPS"
-          value={String(scene.timeline.fps)}
-          options={["24", "30", "50", "60"]}
-          onChange={(fps) => updateTimeline({ fps: Number(fps) })}
-        />
-      </div>
-      <button className="wide-action-button" onClick={() => addObjectKeyframe(selectedObject.id, currentFrame)}>
-        <Plus size={14} /> Add Keyframe
-      </button>
-      <div className="keyframe-list">
-        {selectedKeyframes.length === 0 ? <div className="empty-panel compact">No keyframes yet</div> : null}
-        {selectedKeyframes.map((keyframe) => (
-          <KeyframeRow
-            key={keyframe.id}
-            keyframe={keyframe}
-            maxFrame={scene.timeline.durationFrames}
-            onUpdate={updateObjectKeyframe}
-            onDelete={deleteObjectKeyframe}
-          />
-        ))}
-      </div>
-    </section>
-  );
+export function PropertyInspectorContent(props: { tab: PropertyInspectorTab }) {
+  if (props.tab === "Properties") return <Inspector />;
+  if (props.tab === "Materials") return <MaterialsTab />;
+  if (props.tab === "Text") return <TextProperties />;
+  return <DataBindingProperties />;
 }
 
 function TextProperties() {
@@ -194,35 +143,6 @@ function DataBindingProperties() {
   );
 }
 
-function KeyframeRow(props: {
-  keyframe: SceneKeyframe;
-  maxFrame: number;
-  onUpdate: (keyframeId: string, patch: Partial<SceneKeyframe>) => void;
-  onDelete: (keyframeId: string) => void;
-}) {
-  return (
-    <div className="keyframe-row">
-      <KeyRound size={14} />
-      <NumberField
-        label="Frame"
-        value={props.keyframe.frame}
-        min={0}
-        max={props.maxFrame}
-        onChange={(frame) => props.onUpdate(props.keyframe.id, { frame })}
-      />
-      <SelectField
-        label="Ease"
-        value={props.keyframe.easing}
-        options={["linear", "ease-in", "ease-out", "ease-in-out"]}
-        onChange={(easing) => props.onUpdate(props.keyframe.id, { easing })}
-      />
-      <button className="panel-icon-button danger" title="Delete keyframe" onClick={() => props.onDelete(props.keyframe.id)}>
-        <Trash2 size={14} />
-      </button>
-    </div>
-  );
-}
-
 function Header(props: { title: string; subtitle: string }) {
   return (
     <div className="property-tab-header">
@@ -247,6 +167,14 @@ function isPropertySupported(object: SceneObject, property: SceneProperty): bool
 
   if (property === "src") {
     return object.type === "image";
+  }
+
+  if (["rotationX", "rotationY", "rotationZ", "scaleZ"].includes(property)) {
+    return object.type === "mesh";
+  }
+
+  if (property === "rotation" && object.type === "mesh") {
+    return false;
   }
 
   return true;

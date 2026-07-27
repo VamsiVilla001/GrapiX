@@ -18,9 +18,12 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// Only rects render in v1. Every other object type produces an explicit
-/// warning so nobody believes text or images are on air when they are not.
+use super::mesh_prepare::{prepare_meshes, PreparedMesh};
+
+/// SceneDocument v1 now includes native 2D rect/ellipse and depth-tested mesh
+/// paths. Every other object type still produces an explicit warning.
 const SUPPORTED_VERSION: u64 = 1;
+pub const MAX_PREPARED_LIGHTS: usize = 16;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SceneError {
@@ -93,6 +96,70 @@ struct SceneCanvasDto {
     width: f64,
     height: f64,
     background: String,
+    #[serde(default, rename = "backgroundStyle")]
+    background_style: Option<Value>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct Vec2Dto {
+    x: f64,
+    y: f64,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+struct Vec3Dto {
+    x: f64,
+    y: f64,
+    z: f64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LightObjectDto {
+    id: String,
+    light_kind: String,
+    x: f64,
+    y: f64,
+    #[serde(default)]
+    z_depth: f64,
+    #[serde(default = "default_opacity")]
+    opacity: f64,
+    #[serde(default = "default_visible")]
+    visible: bool,
+    #[serde(default = "default_light_color")]
+    color: String,
+    #[serde(default = "default_light_intensity")]
+    intensity: f64,
+    #[serde(default)]
+    range: f64,
+    #[serde(default = "default_light_decay")]
+    decay: f64,
+    #[serde(default = "default_light_cone")]
+    cone_angle_deg: f64,
+    #[serde(default = "default_light_penumbra")]
+    penumbra: f64,
+    #[serde(default)]
+    target: Option<Vec3Dto>,
+}
+
+fn default_light_color() -> String {
+    "#ffffff".to_string()
+}
+
+fn default_light_intensity() -> f64 {
+    1.0
+}
+
+fn default_light_decay() -> f64 {
+    2.0
+}
+
+fn default_light_cone() -> f64 {
+    45.0
+}
+
+fn default_light_penumbra() -> f64 {
+    0.25
 }
 
 /// Base fields shared by every scene object, per `BaseSceneObject` in
@@ -107,12 +174,20 @@ struct RectObjectDto {
     height: f64,
     #[serde(default)]
     rotation: f64,
+    #[serde(default = "default_scale")]
+    scale_x: f64,
+    #[serde(default = "default_scale")]
+    scale_y: f64,
+    #[serde(default)]
+    anchor: Vec2Dto,
     #[serde(default = "default_opacity")]
     opacity: f64,
     #[serde(default = "default_visible")]
     visible: bool,
     #[serde(default)]
     fill: String,
+    #[serde(default)]
+    fill_style: Option<Value>,
     #[serde(default)]
     z_depth: f64,
     #[serde(default)]
@@ -133,6 +208,10 @@ fn default_visible() -> bool {
     true
 }
 
+fn default_scale() -> f64 {
+    1.0
+}
+
 /// A rect ready for uniform building: geometry in scene pixels plus a
 /// linear-light premultiplied fill color (see shader-contract.md).
 #[derive(Debug, Clone)]
@@ -143,9 +222,71 @@ pub struct PreparedRect {
     pub width: f32,
     pub height: f32,
     pub rotation_degrees: f32,
+    pub scale_x: f32,
+    pub scale_y: f32,
+    pub anchor_x: f32,
+    pub anchor_y: f32,
     pub fill_linear_premultiplied: [f32; 4],
+    pub gradient: PreparedGradient,
     /// Shared blend-mode id from packages/render-shaders/layouts.json.
     pub blend_mode: u32,
+    /// 0 = rectangle, 1 = ellipse (shared shader param).
+    pub primitive_kind: u32,
+}
+
+/// Fixed-size native gradient payload shared with the composite quad shader.
+/// Kind: 0 solid, 1 linear, 2 radial. At most eight authored stops are used.
+#[derive(Debug, Clone, Copy)]
+pub struct PreparedGradient {
+    pub kind: u32,
+    pub stop_count: u32,
+    pub spread: u32,
+    pub coordinate_mode: u32,
+    pub geometry: [[f32; 4]; 2],
+    pub positions: [f32; 8],
+    pub colors_linear_premultiplied: [[f32; 4]; 8],
+}
+
+impl Default for PreparedGradient {
+    fn default() -> Self {
+        Self {
+            kind: 0,
+            stop_count: 0,
+            spread: 0,
+            coordinate_mode: 0,
+            geometry: [[0.0; 4]; 2],
+            positions: [0.0; 8],
+            colors_linear_premultiplied: [[0.0; 4]; 8],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreparedLightKind {
+    Directional,
+    Point,
+    Spot,
+}
+
+/// A visible authored scene light ready for the mesh lighting uniform.
+#[derive(Debug, Clone)]
+pub struct PreparedLight {
+    pub object_id: String,
+    pub kind: PreparedLightKind,
+    /// Straight linear-light RGB.
+    pub color_linear: [f32; 3],
+    /// Authored intensity after object opacity, before the editor-compatible
+    /// canvas-unit scale applied to point and spot lights.
+    pub intensity: f32,
+    pub position: [f32; 3],
+    /// Unit vector pointing from the light position toward its target.
+    pub direction: [f32; 3],
+    /// Zero means unlimited, matching Three.js.
+    pub range: f32,
+    pub decay: f32,
+    /// Cosines of the spot light's outer and fully-lit inner half angles.
+    pub spot_outer_cos: f32,
+    pub spot_inner_cos: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -159,11 +300,24 @@ pub struct PreparedScene {
     /// Canvas background as linear-light premultiplied RGBA. Drawn as a
     /// full-canvas quad (matching the editor), not as the clear color.
     pub background_linear_premultiplied: [f32; 4],
+    pub background_gradient: PreparedGradient,
     /// Render-ordered (layerId, zDepth, zIndex).
     pub rects: Vec<PreparedRect>,
+    /// Depth-tested native primitive or imported glTF surfaces.
+    pub meshes: Vec<PreparedMesh>,
+    /// Visible authored lights. An empty list selects the renderer's readable
+    /// synthetic fallback; a non-empty list suppresses that fallback even if
+    /// every authored light has zero intensity, matching the editor.
+    pub lights: Vec<PreparedLight>,
     pub object_count: usize,
     /// Human-readable warnings for everything the v1 renderer does NOT draw.
     pub warnings: Vec<String>,
+    /// Conditions that make a Take unsafe. Preview/warm remains allowed so the
+    /// operator can inspect the report and choose an explicit fallback.
+    pub take_blockers: Vec<String>,
+    /// Canonical source used for revision-safe small patches. It is retained
+    /// in the prepared cache so patch handling performs no disk/network I/O.
+    pub source_document: Value,
 }
 
 /// Parse and prepare a full `SceneDocument` JSON value for rendering.
@@ -185,6 +339,13 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
     }
 
     let mut warnings = Vec::new();
+    let meshes = prepare_meshes(scene_json, &document.objects, &mut warnings);
+    let lights = prepare_lights(
+        &document.objects,
+        document.canvas.width,
+        document.canvas.height,
+        &mut warnings,
+    );
     let mut rects: Vec<(String, f64, f64, PreparedRect)> = Vec::new();
     let mut unsupported_counts: Vec<(String, usize)> = Vec::new();
 
@@ -194,7 +355,11 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
             .and_then(Value::as_str)
             .unwrap_or("<missing type>");
 
-        if object_type != "rect" {
+        if object_type == "mesh" || object_type == "light" {
+            continue;
+        }
+
+        if object_type != "rect" && object_type != "ellipse" {
             match unsupported_counts
                 .iter_mut()
                 .find(|(kind, _)| kind == object_type)
@@ -228,9 +393,11 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
         let mut opacity = rect.opacity;
         let mut blend_mode = 0;
         let mut force_opaque = false;
+        let mut use_authored_color_style = true;
 
         if let Some(binding_value) = rect.material_slots.get("main") {
             if let Some(binding) = parse_material_binding(binding_value) {
+                use_authored_color_style = false;
                 let Some(material) = document
                     .materials
                     .iter()
@@ -339,6 +506,18 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
         if force_opaque {
             fill[3] = 1.0;
         }
+        let fallback_fill = to_linear_premultiplied(fill, opacity as f32);
+        let (fill_linear_premultiplied, gradient) = if use_authored_color_style {
+            prepare_color_value(
+                rect.fill_style.as_ref(),
+                fallback_fill,
+                opacity as f32,
+                &rect.id,
+                &mut warnings,
+            )
+        } else {
+            (fallback_fill, PreparedGradient::default())
+        };
 
         let prepared = PreparedRect {
             object_id: rect.id,
@@ -347,8 +526,14 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
             width: rect.width as f32,
             height: rect.height as f32,
             rotation_degrees: rect.rotation as f32,
-            fill_linear_premultiplied: to_linear_premultiplied(fill, opacity as f32),
+            scale_x: rect.scale_x as f32,
+            scale_y: rect.scale_y as f32,
+            anchor_x: rect.anchor.x as f32,
+            anchor_y: rect.anchor.y as f32,
+            fill_linear_premultiplied,
+            gradient,
             blend_mode,
+            primitive_kind: if object_type == "ellipse" { 1 } else { 0 },
         };
 
         rects.push((rect.layer_id, rect.z_depth, rect.z_index, prepared));
@@ -356,7 +541,7 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
 
     for (kind, count) in &unsupported_counts {
         warnings.push(format!(
-            "{count} object(s) of type {kind:?} are NOT rendered: v1 renders solid-color rects only"
+            "{count} object(s) of type {kind:?} are NOT rendered: native v1 currently renders rects, ellipses, and real 3D meshes"
         ));
     }
 
@@ -379,17 +564,289 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
         [0.0, 0.0, 0.0, 0.0]
     });
 
+    let take_blockers = warnings
+        .iter()
+        .filter(|warning| {
+            let normalized = warning.to_ascii_lowercase();
+            normalized.contains("not rendered")
+                || normalized.contains("skipped")
+                || normalized.contains("missing material")
+        })
+        .cloned()
+        .collect();
+
+    let background_fill = to_linear_premultiplied(background, 1.0);
+    let (background_linear_premultiplied, background_gradient) = prepare_color_value(
+        document.canvas.background_style.as_ref(),
+        background_fill,
+        1.0,
+        "canvas background",
+        &mut warnings,
+    );
+
     Ok(PreparedScene {
         scene_id: document.id,
         name: document.name,
         revision: document.updated_at,
         canvas_width: document.canvas.width as f32,
         canvas_height: document.canvas.height as f32,
-        background_linear_premultiplied: to_linear_premultiplied(background, 1.0),
+        background_linear_premultiplied,
+        background_gradient,
         rects: rects.into_iter().map(|(_, _, _, rect)| rect).collect(),
+        meshes,
+        lights,
         object_count: document.objects.len(),
         warnings,
+        take_blockers,
+        source_document: scene_json.clone(),
     })
+}
+
+fn prepare_lights(
+    objects: &[Value],
+    canvas_width: f64,
+    canvas_height: f64,
+    warnings: &mut Vec<String>,
+) -> Vec<PreparedLight> {
+    let mut lights = Vec::new();
+    for value in objects {
+        if value.get("type").and_then(Value::as_str) != Some("light") {
+            continue;
+        }
+        let light: LightObjectDto = match serde_json::from_value(value.clone()) {
+            Ok(light) => light,
+            Err(error) => {
+                warnings.push(format!("light object skipped: {error}"));
+                continue;
+            }
+        };
+        if !light.visible {
+            continue;
+        }
+        let kind = match light.light_kind.as_str() {
+            "directional" => PreparedLightKind::Directional,
+            "point" => PreparedLightKind::Point,
+            "spot" => PreparedLightKind::Spot,
+            unsupported => {
+                warnings.push(format!(
+                    "light {} uses unsupported kind {unsupported:?} and is not rendered",
+                    light.id
+                ));
+                continue;
+            }
+        };
+        let Some(srgb) = parse_hex_color(&light.color) else {
+            warnings.push(format!(
+                "light {} has invalid color {:?} and is not rendered",
+                light.id, light.color
+            ));
+            continue;
+        };
+        let position = [
+            finite_f64(light.x, canvas_width * 0.5) as f32,
+            finite_f64(light.y, canvas_height * 0.5) as f32,
+            finite_f64(light.z_depth, 0.0) as f32,
+        ];
+        let fallback_target = Vec3Dto {
+            x: canvas_width * 0.5,
+            y: canvas_height * 0.5,
+            z: 0.0,
+        };
+        let target = light.target.unwrap_or(fallback_target);
+        let mut direction = [
+            finite_f64(target.x, fallback_target.x) as f32 - position[0],
+            finite_f64(target.y, fallback_target.y) as f32 - position[1],
+            finite_f64(target.z, fallback_target.z) as f32 - position[2],
+        ];
+        let direction_length = (direction[0] * direction[0]
+            + direction[1] * direction[1]
+            + direction[2] * direction[2])
+            .sqrt();
+        if direction_length > 1e-6 {
+            for component in &mut direction {
+                *component /= direction_length;
+            }
+        } else {
+            direction = [0.0, 0.0, -1.0];
+        }
+
+        let cone_degrees = finite_f64(light.cone_angle_deg, 45.0).clamp(1.0, 179.0);
+        let outer_half_radians = (cone_degrees as f32 * 0.5).to_radians();
+        let penumbra = finite_f64(light.penumbra, 0.25).clamp(0.0, 1.0) as f32;
+        lights.push(PreparedLight {
+            object_id: light.id,
+            kind,
+            color_linear: [
+                srgb_to_linear(srgb[0]),
+                srgb_to_linear(srgb[1]),
+                srgb_to_linear(srgb[2]),
+            ],
+            intensity: (finite_f64(light.intensity, 1.0).max(0.0)
+                * finite_f64(light.opacity, 1.0).clamp(0.0, 1.0)) as f32,
+            position,
+            direction,
+            range: finite_f64(light.range, 0.0).max(0.0) as f32,
+            decay: finite_f64(light.decay, 2.0).max(0.0) as f32,
+            spot_outer_cos: outer_half_radians.cos(),
+            spot_inner_cos: (outer_half_radians * (1.0 - penumbra)).cos(),
+        });
+    }
+    if lights.len() > MAX_PREPARED_LIGHTS {
+        warnings.push(format!(
+            "scene has {} visible authored lights; only the first {MAX_PREPARED_LIGHTS} are rendered by the native Program shader and the remainder are not rendered",
+            lights.len()
+        ));
+        lights.truncate(MAX_PREPARED_LIGHTS);
+    }
+    lights
+}
+
+fn finite_f64(value: f64, fallback: f64) -> f64 {
+    if value.is_finite() {
+        value
+    } else {
+        fallback
+    }
+}
+
+fn prepare_color_value(
+    value: Option<&Value>,
+    fallback: [f32; 4],
+    object_opacity: f32,
+    label: &str,
+    warnings: &mut Vec<String>,
+) -> ([f32; 4], PreparedGradient) {
+    let Some(value) = value else {
+        return (fallback, PreparedGradient::default());
+    };
+    let Some(kind) = value.get("type").and_then(Value::as_str) else {
+        warnings.push(format!(
+            "{label} has a malformed fillStyle; using its legacy fill"
+        ));
+        return (fallback, PreparedGradient::default());
+    };
+    if kind == "none" {
+        return ([0.0; 4], PreparedGradient::default());
+    }
+    if kind == "solid" {
+        let color = value
+            .get("color")
+            .and_then(Value::as_str)
+            .and_then(parse_hex_color);
+        return match color {
+            Some(color) => (
+                to_linear_premultiplied(color, object_opacity),
+                PreparedGradient::default(),
+            ),
+            None => {
+                warnings.push(format!(
+                    "{label} has an invalid solid fillStyle; using its legacy fill"
+                ));
+                (fallback, PreparedGradient::default())
+            }
+        };
+    }
+    if kind != "linear-gradient" && kind != "radial-gradient" {
+        warnings.push(format!(
+            "{label} uses unknown fillStyle type {kind:?}; using its legacy fill"
+        ));
+        return (fallback, PreparedGradient::default());
+    }
+
+    let mut stops: Vec<(f32, [f32; 4])> = value
+        .get("stops")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|stop| {
+            let position = stop.get("position")?.as_f64()?.clamp(0.0, 1.0) as f32;
+            let color = parse_hex_color(stop.get("color")?.as_str()?)?;
+            let opacity = stop
+                .get("opacity")
+                .and_then(Value::as_f64)
+                .unwrap_or(1.0)
+                .clamp(0.0, 1.0) as f32;
+            Some((
+                position,
+                to_linear_premultiplied(color, object_opacity * opacity),
+            ))
+        })
+        .collect();
+    stops.sort_by(|left, right| left.0.total_cmp(&right.0));
+    if stops.len() < 2 {
+        warnings.push(format!(
+            "{label} gradient has fewer than two valid stops; using its legacy fill"
+        ));
+        return (fallback, PreparedGradient::default());
+    }
+    if stops.len() > 8 {
+        warnings.push(format!(
+            "{label} gradient has {} stops; native output uses the first 8",
+            stops.len()
+        ));
+        stops.truncate(8);
+    }
+
+    let number = |name: &str, default: f64| {
+        value
+            .get(name)
+            .and_then(Value::as_f64)
+            .filter(|number| number.is_finite())
+            .unwrap_or(default) as f32
+    };
+    let mut gradient = PreparedGradient {
+        kind: if kind == "linear-gradient" { 1 } else { 2 },
+        stop_count: stops.len() as u32,
+        spread: match value.get("spread").and_then(Value::as_str).unwrap_or("pad") {
+            "repeat" => 1,
+            "reflect" => 2,
+            _ => 0,
+        },
+        coordinate_mode: if value
+            .get("coordinateMode")
+            .and_then(Value::as_str)
+            .unwrap_or("object")
+            == "scene"
+        {
+            1
+        } else {
+            0
+        },
+        ..PreparedGradient::default()
+    };
+    gradient.geometry = if gradient.kind == 1 {
+        [
+            [
+                number("startX", 0.0),
+                number("startY", 0.5),
+                number("endX", 1.0),
+                number("endY", 0.5),
+            ],
+            [0.0; 4],
+        ]
+    } else {
+        let center_x = number("centerX", 0.5);
+        let center_y = number("centerY", 0.5);
+        [
+            [
+                center_x,
+                center_y,
+                number("radiusX", 0.5).abs().max(0.0001),
+                number("radiusY", 0.5).abs().max(0.0001),
+            ],
+            [
+                number("focalX", center_x as f64),
+                number("focalY", center_y as f64),
+                0.0,
+                0.0,
+            ],
+        ]
+    };
+    for (index, (position, color)) in stops.into_iter().enumerate() {
+        gradient.positions[index] = position;
+        gradient.colors_linear_premultiplied[index] = color;
+    }
+    (fallback, gradient)
 }
 
 fn parse_material_binding(value: &Value) -> Option<MaterialBindingRef> {
@@ -542,6 +999,44 @@ mod tests {
     }
 
     #[test]
+    fn prepares_an_analytic_ellipse() {
+        let mut ellipse = rect_object();
+        ellipse["type"] = json!("ellipse");
+        ellipse["id"] = json!("ellipse_1");
+        let scene = prepare_scene(&minimal_scene(vec![ellipse])).expect("scene must prepare");
+        assert_eq!(scene.rects.len(), 1);
+        assert_eq!(scene.rects[0].primitive_kind, 1);
+        assert!(scene.warnings.is_empty());
+    }
+
+    #[test]
+    fn prepares_authored_linear_gradient_for_native_output() {
+        let mut rect = rect_object();
+        rect["fillStyle"] = json!({
+            "type": "linear-gradient",
+            "angle": 0,
+            "startX": 0,
+            "startY": 0.5,
+            "endX": 1,
+            "endY": 0.5,
+            "spread": "reflect",
+            "coordinateMode": "object",
+            "stops": [
+                { "id": "left", "position": 0, "color": "#ff0000", "opacity": 1 },
+                { "id": "right", "position": 1, "color": "#0000ff", "opacity": 0.5 }
+            ]
+        });
+        let scene = prepare_scene(&minimal_scene(vec![rect])).expect("gradient scene must prepare");
+        let gradient = scene.rects[0].gradient;
+        assert_eq!(gradient.kind, 1);
+        assert_eq!(gradient.stop_count, 2);
+        assert_eq!(gradient.spread, 2);
+        assert_eq!(gradient.geometry[0], [0.0, 0.5, 1.0, 0.5]);
+        assert!((gradient.colors_linear_premultiplied[1][3] - 0.5).abs() < 1e-6);
+        assert!(scene.take_blockers.is_empty());
+    }
+
+    #[test]
     fn warns_for_unsupported_types_instead_of_pretending() {
         let mut text = rect_object();
         text["type"] = json!("text");
@@ -667,6 +1162,94 @@ mod tests {
             .warnings
             .iter()
             .any(|warning| warning.contains("editor-preview only")));
+    }
+
+    #[test]
+    fn prepares_visible_authored_lights_without_unsupported_object_warnings() {
+        let directional = json!({
+            "id": "key",
+            "name": "Key",
+            "type": "light",
+            "lightKind": "directional",
+            "x": 100,
+            "y": 200,
+            "zDepth": 800,
+            "opacity": 0.5,
+            "visible": true,
+            "intensity": 2,
+            "color": "#ff8040",
+            "target": { "x": 100, "y": 200, "z": 0 }
+        });
+        let hidden = json!({
+            "id": "hidden",
+            "type": "light",
+            "lightKind": "point",
+            "x": 0,
+            "y": 0,
+            "visible": false,
+            "intensity": 100,
+            "color": "#ffffff"
+        });
+        let prepared =
+            prepare_scene(&minimal_scene(vec![directional, hidden])).expect("lights must prepare");
+        assert_eq!(prepared.lights.len(), 1);
+        let light = &prepared.lights[0];
+        assert_eq!(light.object_id, "key");
+        assert_eq!(light.kind, PreparedLightKind::Directional);
+        assert!((light.intensity - 1.0).abs() < 1e-6);
+        assert_eq!(light.position, [100.0, 200.0, 800.0]);
+        assert!((light.direction[2] + 1.0).abs() < 1e-6);
+        assert!(light.color_linear[0] > light.color_linear[1]);
+        assert!(prepared
+            .warnings
+            .iter()
+            .all(|warning| !warning.contains("object(s) of type \"light\"")));
+    }
+
+    #[test]
+    fn zero_intensity_authored_light_is_retained_to_suppress_fallback_lighting() {
+        let light = json!({
+            "id": "blackout",
+            "type": "light",
+            "lightKind": "point",
+            "x": 960,
+            "y": 540,
+            "zDepth": 500,
+            "visible": true,
+            "opacity": 1,
+            "intensity": 0,
+            "color": "#ffffff",
+            "range": 1000,
+            "decay": 2
+        });
+        let prepared = prepare_scene(&minimal_scene(vec![light])).expect("light must prepare");
+        assert_eq!(prepared.lights.len(), 1);
+        assert_eq!(prepared.lights[0].intensity, 0.0);
+    }
+
+    #[test]
+    fn native_light_budget_is_explicit_and_take_blocking() {
+        let lights = (0..MAX_PREPARED_LIGHTS + 1)
+            .map(|index| {
+                json!({
+                    "id": format!("light_{index}"),
+                    "type": "light",
+                    "lightKind": "directional",
+                    "x": 0,
+                    "y": 0,
+                    "zDepth": 100,
+                    "visible": true,
+                    "intensity": 1,
+                    "color": "#ffffff"
+                })
+            })
+            .collect();
+        let prepared = prepare_scene(&minimal_scene(lights)).expect("lights must prepare");
+        assert_eq!(prepared.lights.len(), MAX_PREPARED_LIGHTS);
+        assert!(prepared
+            .take_blockers
+            .iter()
+            .any(|warning| warning.contains("first 16")));
     }
 
     #[test]

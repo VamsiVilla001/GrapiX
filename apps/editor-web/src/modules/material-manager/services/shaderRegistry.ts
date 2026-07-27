@@ -1,6 +1,7 @@
 import manifest from "@grapix/render-shaders/manifests/shader-manifest.json";
 import solidSource from "@grapix/render-shaders/wgsl/composite_quad.wgsl?raw";
 import texturedSource from "@grapix/render-shaders/wgsl/materials/textured.wgsl?raw";
+import meshPbrSource from "@grapix/render-shaders/wgsl/mesh_pbr.wgsl?raw";
 import {
   validateShaderDefinition,
   type ShaderDefinition
@@ -8,7 +9,8 @@ import {
 
 const sourceByPath: Record<string, string> = {
   "wgsl/composite_quad.wgsl": solidSource,
-  "wgsl/materials/textured.wgsl": texturedSource
+  "wgsl/materials/textured.wgsl": texturedSource,
+  "wgsl/mesh_pbr.wgsl": meshPbrSource
 };
 
 export interface RegisteredShader {

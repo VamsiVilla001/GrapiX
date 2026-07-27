@@ -3,6 +3,7 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
+      "@grapix/renderer-protocol": ["../../packages/renderer-protocol/src"],
       "@grapix/shared-types": ["../../packages/shared-types/src"]
     }
   },

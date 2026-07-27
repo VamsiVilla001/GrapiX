@@ -54,7 +54,19 @@ export function MaterialInspector() {
     const shaderDefinition = (scene.shaders ?? []).find((item) => item.shaderId === material.shaderId);
     const definitions = shaderDefinition?.parameters ?? fallbackDefinitions(material);
     const usage = findMaterialUsage(scene, material.materialId);
-    const texture = material.textureSlots?.[0];
+    const texture = material.textureSlots?.find((slot) => slot.name === "baseTexture") ?? {
+      name: "baseTexture",
+      assetId: undefined,
+      fit: "fill" as const,
+      wrap: "clamp" as const,
+      filtering: "linear" as const,
+      uvScale: [1, 1] as [number, number],
+      uvOffset: [0, 0] as [number, number],
+      uvRotation: 0,
+      uvPivot: [0.5, 0.5] as [number, number],
+      flipX: false,
+      flipY: false
+    };
     const compatibleAssets = scene.assets.filter((item) => ["image", "svg"].includes(item.kind));
     const patchParameter = (name: string, value: MaterialParameterValue) => updateMaterial(material.materialId, {
       parameters: { ...material.parameters, [name]: value },
@@ -72,13 +84,18 @@ export function MaterialInspector() {
       next[index] = value;
       patchParameter(name, next);
     };
+    const patchBaseTexture = (patch: Partial<typeof texture>) => updateMaterial(material.materialId, {
+      textureSlots: [
+        ...(material.textureSlots ?? []).filter((slot) => slot.name !== "baseTexture"),
+        { ...texture, ...patch }
+      ]
+    });
 
     return (
       <section className="material-inspector">
-        <header><strong>Material Inspector</strong><span>{material.type}</span></header>
+        <header><strong>Material Inspector</strong><span>physical surface</span></header>
         {error ? <div className="material-inline-error"><AlertTriangle size={14} />{error}</div> : null}
         <label>Name<input value={material.name} onFocus={() => beginHistory("Rename material")} onBlur={commitHistory} onChange={(event) => updateMaterial(material.materialId, { name: event.target.value })} /></label>
-        <label>Shader<select value={material.shaderId} disabled><option>{shaderDefinition?.name ?? material.shaderId ?? "Unassigned"}</option></select></label>
         <label>Blend mode<select value={material.blendMode ?? "normal"} onChange={(event) => updateMaterial(material.materialId, { blendMode: event.target.value as Material["blendMode"] })}>
           {IMPLEMENTED_BLEND_MODES.map((mode) => (
             <option key={mode} value={mode}>{BLEND_MODE_LABELS[mode]}</option>
@@ -88,17 +105,24 @@ export function MaterialInspector() {
           <option value="straight">Straight</option><option value="premultiplied">Premultiplied</option><option value="opaque">Opaque</option><option value="alpha-test" disabled>Alpha test (planned)</option><option value="alpha-mask" disabled>Alpha mask (planned)</option>
         </select></label>
         <label className="checkbox-field"><input type="checkbox" checked={material.enabled !== false} onChange={(event) => updateMaterial(material.materialId, { enabled: event.target.checked })} />Enabled</label>
-        {texture ? (
-          <fieldset><legend>Texture</legend>
-            <label>Source<select value={texture.assetId ?? ""} onChange={(event) => updateMaterial(material.materialId, { assetId: event.target.value || undefined, readiness: event.target.value ? "READY" : "MISSING", textureSlots: [{ ...texture, assetId: event.target.value || undefined }] })}>
-              <option value="">Missing / none</option>{compatibleAssets.map((item) => <option key={item.assetId} value={item.assetId}>{item.name}{item.status === "MISSING" ? " (missing)" : ""}</option>)}
+        <fieldset><legend>Base colour layer</legend>
+            <label>Image source<select value={texture.assetId ?? ""} onChange={(event) => {
+              const assetId = event.target.value || undefined;
+              updateMaterial(material.materialId, {
+                assetId,
+                readiness: "READY",
+                textureSlots: [
+                  ...(material.textureSlots ?? []).filter((slot) => slot.name !== "baseTexture"),
+                  { ...texture, assetId }
+                ]
+              });
+            }}>
+              <option value="">None (colour only)</option>{compatibleAssets.map((item) => <option key={item.assetId} value={item.assetId}>{item.name}{item.status === "MISSING" ? " (missing)" : ""}</option>)}
             </select></label>
-            <label>Fit<select value={texture.fit} onChange={(event) => updateMaterial(material.materialId, { textureSlots: [{ ...texture, fit: event.target.value as typeof texture.fit }] })}>{["stretch", "fit", "fill", "crop", "tile", "original", "pixel-perfect", "nine-slice"].map((value) => <option key={value} value={value} disabled={value === "tile" || value === "nine-slice"}>{value}{value === "tile" || value === "nine-slice" ? " (planned)" : ""}</option>)}</select></label>
-            <label>Address mode (wrap)<select value={texture.wrap} onChange={(event) => updateMaterial(material.materialId, { textureSlots: [{ ...texture, wrap: event.target.value as typeof texture.wrap }] })}><option value="clamp">Clamp</option><option value="repeat">Repeat</option><option value="mirror-repeat">Mirror repeat</option></select></label>
-            <label>Filtering<select value={texture.filtering} onChange={(event) => updateMaterial(material.materialId, { textureSlots: [{ ...texture, filtering: event.target.value as typeof texture.filtering }] })}><option value="linear">Linear</option><option value="nearest">Nearest</option></select></label>
+            <label>Fit<select value={texture.fit} onChange={(event) => patchBaseTexture({ fit: event.target.value as typeof texture.fit })}>{["stretch", "fit", "fill", "crop", "tile", "original", "pixel-perfect", "nine-slice"].map((value) => <option key={value} value={value} disabled={value === "tile" || value === "nine-slice"}>{value}{value === "tile" || value === "nine-slice" ? " (planned)" : ""}</option>)}</select></label>
+            <label>Address mode (wrap)<select value={texture.wrap} onChange={(event) => patchBaseTexture({ wrap: event.target.value as typeof texture.wrap })}><option value="clamp">Clamp</option><option value="repeat">Repeat</option><option value="mirror-repeat">Mirror repeat</option></select></label>
+            <label>Filtering<select value={texture.filtering} onChange={(event) => patchBaseTexture({ filtering: event.target.value as typeof texture.filtering })}><option value="linear">Linear</option><option value="nearest">Nearest</option></select></label>
           </fieldset>
-        ) : null}
-        {texture ? (
           <fieldset className="texture-coordinates"><legend>Texture coordinates</legend>
             <div className="uv-row">
               <label>Offset X<input type="number" step="0.01" value={uvOffset[0] ?? 0} onFocus={() => beginHistory("UV offset")} onBlur={commitHistory} onChange={(event) => setUvComponent("uvOffset", 0, uvOffset, Number(event.target.value))} /></label>
@@ -111,7 +135,6 @@ export function MaterialInspector() {
             <label>Rotation (deg)<input type="number" step="1" value={uvRotation} onFocus={() => beginHistory("UV rotation")} onBlur={commitHistory} onChange={(event) => patchParameter("uvRotation", Number(event.target.value))} /></label>
             <p className="uv-hint">Scale &gt; 1 tiles the texture; set Address mode to Repeat or Mirror to control how tiles wrap.</p>
           </fieldset>
-        ) : null}
         <fieldset><legend>Exposed parameters</legend>{definitions.map((definition) => <ParameterControl definition={definition} key={definition.name} value={material.parameters?.[definition.name] ?? definition.default} onBegin={() => beginHistory(`Edit ${definition.label ?? definition.name}`)} onCommit={commitHistory} onChange={(value) => patchParameter(definition.name, value)} />)}</fieldset>
         <label>Tags<input value={(material.tags ?? []).join(", ")} onFocus={() => beginHistory("Edit material tags")} onBlur={commitHistory} onChange={(event) => updateMaterial(material.materialId, { tags: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} placeholder="broadcast, team, sponsor" /></label>
         <div className="material-usage"><Link2 size={14} /><strong>Find Usage</strong><span>{usage.objectNames.length ? usage.objectNames.join(", ") : "No primitives"}</span><span>{usage.instanceIds.length} instance(s)</span><span>Shader: {usage.shaderIds.join(", ") || "none"}</span></div>
@@ -147,11 +170,12 @@ export function MaterialInspector() {
         {(asset.status === "MISSING" || asset.status === "ERROR" || asset.status === "UNSUPPORTED") ? <div className="material-inline-error"><AlertTriangle size={14} />{asset.error ?? `Asset is ${asset.status?.toLowerCase()}.`}</div> : null}
         <label>Name<input value={asset.name} onFocus={() => beginHistory("Rename asset")} onBlur={commitHistory} onChange={(event) => updateAsset(asset.assetId, { name: event.target.value })} /></label>
         <Metadata label="Asset ID" value={asset.assetId} /><Metadata label="Source" value={asset.sourcePath ?? asset.source} /><Metadata label="Dimensions" value={asset.width && asset.height ? `${asset.width} × ${asset.height}` : "Unknown"} /><Metadata label="File size" value={asset.sizeBytes ? `${asset.sizeBytes.toLocaleString()} bytes` : "Embedded"} /><Metadata label="Imported" value={asset.importedAt} /><Metadata label="Alpha detected" value={String(asset.hasAlpha ?? "unknown")} />
+        {asset.kind === "model" ? <Metadata label="Material elements" value={asset.modelMaterialNames?.join(", ") || "Model has no named materials"} /> : null}
         <label>Alpha interpretation<select value={asset.alphaMode ?? "unknown"} onChange={(event) => updateAsset(asset.assetId, { alphaMode: event.target.value as typeof asset.alphaMode })}><option value="unknown">Auto / unknown</option><option value="straight">Straight</option><option value="premultiplied">Premultiplied</option><option value="opaque">Opaque</option></select></label>
         <label>Colour space<select value={asset.colorSpace ?? "srgb"} onChange={(event) => updateAsset(asset.assetId, { colorSpace: event.target.value as typeof asset.colorSpace })}><option value="srgb">sRGB</option><option value="linear">Linear</option><option value="display-p3">Display P3</option><option value="unknown">Unknown</option></select></label>
-        <input hidden ref={relinkRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml,image/tiff" onChange={async (event) => { const file = event.target.files?.[0]; if (file) await relinkAsset(asset.assetId, file); event.target.value = ""; }} />
+        <input hidden ref={relinkRef} type="file" accept={asset.kind === "model" ? ".glb,.gltf,model/gltf-binary,model/gltf+json" : "image/png,image/jpeg,image/webp,image/svg+xml,image/tiff"} onChange={async (event) => { const file = event.target.files?.[0]; if (file) await relinkAsset(asset.assetId, file); event.target.value = ""; }} />
         <button className="material-action-button" onClick={() => relinkRef.current?.click()}><RotateCcw size={14} />Relink Asset</button>
-        <div className="material-usage"><Link2 size={14} /><strong>Find Usage</strong><span>{usage.materialIds.length ? `${usage.materialIds.length} material(s): ${usage.materialIds.join(", ")}` : "No materials"}</span><span>{usage.shaderIds.length ? `Shaders: ${usage.shaderIds.join(", ")}` : "No shaders"}</span></div>
+        <div className="material-usage"><Link2 size={14} /><strong>Find Usage</strong><span>{usage.objectIds.length ? `Objects: ${usage.objectIds.join(", ")}` : "No direct object usage"}</span><span>{usage.materialIds.length ? `${usage.materialIds.length} material(s): ${usage.materialIds.join(", ")}` : "No materials"}</span><span>{usage.shaderIds.length ? `Shaders: ${usage.shaderIds.join(", ")}` : "No shaders"}</span></div>
       </section>
     );
   }
@@ -186,11 +210,14 @@ function ParameterControl(props: { definition: MaterialParameterDefinition; valu
 }
 
 function fallbackDefinitions(material?: Material): MaterialParameterDefinition[] {
-  return material?.type === "solid-color"
-    ? [{ name: "baseColor", label: "Base colour", type: "colour", default: "#ffffff", animatable: true, bindable: true }, { name: "opacity", label: "Opacity", type: "float", default: 1, min: 0, max: 1, step: 0.01, animatable: true, bindable: true }]
-    // uvScale/uvOffset/uvRotation are edited in the dedicated Texture
-    // Coordinates panel, not here, to avoid duplicate controls.
-    : [{ name: "tint", label: "Tint", type: "colour", default: "#ffffff", animatable: true, bindable: true }, { name: "opacity", label: "Opacity", type: "float", default: 1, min: 0, max: 1, step: 0.01, animatable: true, bindable: true }];
+  return [
+    { name: "baseColor", label: "Base / diffuse colour", type: "colour", default: String(material?.parameters?.tint ?? "#ffffff"), animatable: true, bindable: true },
+    { name: "opacity", label: "Opacity", type: "float", default: 1, min: 0, max: 1, step: 0.01, animatable: true, bindable: true },
+    { name: "metalness", label: "Metalness", type: "float", default: 0.08, min: 0, max: 1, step: 0.01, animatable: true, bindable: true },
+    { name: "roughness", label: "Roughness", type: "float", default: 0.62, min: 0.04, max: 1, step: 0.01, animatable: true, bindable: true },
+    { name: "emissiveColor", label: "Emissive colour", type: "colour", default: "#000000", animatable: true, bindable: true },
+    { name: "emissiveIntensity", label: "Emissive intensity", type: "float", default: 0, min: 0, max: 10, step: 0.01, animatable: true, bindable: true }
+  ];
 }
 
 function Metadata(props: { label: string; value: string }) {

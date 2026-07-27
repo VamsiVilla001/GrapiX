@@ -78,6 +78,7 @@ mod tests {
             color_format: crate::config::ColorFormat::Bgra8,
             color_space: crate::config::ColorSpace::Srgb,
             ndi_source_name: "Test".to_string(),
+            recording_name: "test-recording".to_string(),
             backend: Some(crate::config::OutputBackend::Null),
         })
         .expect("test config must validate")

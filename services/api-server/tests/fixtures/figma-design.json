@@ -1,0 +1,87 @@
+{
+  "name": "Figma Import Fixture",
+  "lastModified": "2026-07-27T00:00:00Z",
+  "version": "1",
+  "components": {
+    "component-key": {
+      "name": "Score Card",
+      "node_id": "2:1"
+    }
+  },
+  "document": {
+    "id": "0:0",
+    "name": "Document",
+    "type": "DOCUMENT",
+    "children": [
+      {
+        "id": "1:0",
+        "name": "Main Page",
+        "type": "CANVAS",
+        "children": [
+          {
+            "id": "2:1",
+            "name": "Score Card",
+            "type": "COMPONENT",
+            "absoluteBoundingBox": { "x": 20, "y": 30, "width": 400, "height": 180 },
+            "layoutMode": "HORIZONTAL",
+            "itemSpacing": 16,
+            "paddingTop": 12,
+            "paddingRight": 20,
+            "paddingBottom": 12,
+            "paddingLeft": 20,
+            "fills": [
+              {
+                "type": "GRADIENT_LINEAR",
+                "gradientHandlePositions": [
+                  { "x": 0, "y": 0.5 },
+                  { "x": 1, "y": 0.5 },
+                  { "x": 0, "y": 1 }
+                ],
+                "gradientStops": [
+                  { "position": 0, "color": { "r": 0.1, "g": 0.2, "b": 0.9, "a": 1 } },
+                  { "position": 1, "color": { "r": 0.2, "g": 0.9, "b": 0.7, "a": 0.7 } }
+                ]
+              }
+            ],
+            "effects": [
+              {
+                "type": "DROP_SHADOW",
+                "visible": true,
+                "radius": 12,
+                "offset": { "x": 0, "y": 6 },
+                "color": { "r": 0, "g": 0, "b": 0, "a": 0.3 }
+              }
+            ],
+            "children": [
+              {
+                "id": "2:2",
+                "name": "Card Mask",
+                "type": "RECTANGLE",
+                "isMask": true,
+                "absoluteBoundingBox": { "x": 20, "y": 30, "width": 400, "height": 180 },
+                "fills": [{ "type": "SOLID", "color": { "r": 1, "g": 1, "b": 1, "a": 1 } }]
+              },
+              {
+                "id": "2:3",
+                "name": "Team Name",
+                "type": "TEXT",
+                "characters": "GrapiX United",
+                "absoluteBoundingBox": { "x": 48, "y": 74, "width": 260, "height": 48 },
+                "fills": [{ "type": "SOLID", "color": { "r": 1, "g": 1, "b": 1, "a": 1 } }],
+                "style": {
+                  "fontFamily": "Fixture Sans",
+                  "fontWeight": 700,
+                  "fontSize": 36,
+                  "lineHeightPx": 43,
+                  "letterSpacing": 0.5,
+                  "textAlignHorizontal": "LEFT",
+                  "textAlignVertical": "CENTER"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -8,14 +8,14 @@
 
 use glam::Mat4;
 
-use crate::scene::PreparedScene;
+use crate::scene::{PreparedGradient, PreparedScene};
 
 /// Shared shader source, compiled into the binary. The path reaches across
 /// the monorepo on purpose: there must be exactly one copy of this shader.
 pub const COMPOSITE_QUAD_WGSL: &str =
     include_str!("../../../../packages/render-shaders/wgsl/composite_quad.wgsl");
 
-/// Mirrors `QuadUniforms` in composite_quad.wgsl. 96 bytes; layout is a
+/// Mirrors `QuadUniforms` in composite_quad.wgsl. 304 bytes; layout is a
 /// contract with packages/render-shaders/layouts.json.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
@@ -26,6 +26,11 @@ pub struct QuadUniforms {
     pub fill_color: [f32; 4],
     /// x = blend mode id (0 = normal); y/z/w reserved, must be 0.
     pub params: [f32; 4],
+    /// x gradient kind, y stop count, z spread, w coordinate mode.
+    pub gradient_params: [f32; 4],
+    pub gradient_geometry: [[f32; 4]; 2],
+    pub gradient_positions: [[f32; 4]; 2],
+    pub gradient_colors: [[f32; 4]; 8],
 }
 
 pub const QUAD_UNIFORMS_SIZE: usize = std::mem::size_of::<QuadUniforms>();
@@ -34,6 +39,8 @@ pub const QUAD_UNIFORMS_SIZE: usize = std::mem::size_of::<QuadUniforms>();
 pub struct QuadStyle {
     pub fill_linear_premultiplied: [f32; 4],
     pub blend_mode: u32,
+    pub primitive_kind: u32,
+    pub gradient: PreparedGradient,
 }
 
 /// Upper bound on quads per frame in v1 (background + objects). Scenes larger
@@ -43,6 +50,7 @@ pub const MAX_QUADS_PER_FRAME: usize = 1024;
 /// Render target format: BGRA so readback bytes feed NDI BGRA directly, and
 /// `-srgb` so the hardware encodes linear shader output back to sRGB bytes.
 pub const RENDER_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
+pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 /// Number of implemented blend modes, indexed by the shared blend id from
 /// packages/render-shaders/layouts.json: 0 normal, 1 multiply, 2 screen,
@@ -219,7 +227,16 @@ impl QuadPipeline {
                     cull_mode: None,
                     ..Default::default()
                 },
-                depth_stencil: None,
+                // The native compositor pass always owns a depth attachment
+                // so depth-tested meshes can follow 2D content in the same
+                // pass. Quads neither read nor write it.
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: false,
+                    depth_compare: wgpu::CompareFunction::Always,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
                 multisample: wgpu::MultisampleState::default(),
                 multiview: None,
                 cache: None,
@@ -256,9 +273,15 @@ impl QuadPipeline {
             scene.canvas_width,
             scene.canvas_height,
             0.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
             QuadStyle {
                 fill_linear_premultiplied: scene.background_linear_premultiplied,
                 blend_mode: 0,
+                primitive_kind: 0,
+                gradient: scene.background_gradient,
             },
         ));
 
@@ -270,9 +293,15 @@ impl QuadPipeline {
                 rect.width,
                 rect.height,
                 rect.rotation_degrees,
+                rect.scale_x,
+                rect.scale_y,
+                rect.anchor_x,
+                rect.anchor_y,
                 QuadStyle {
                     fill_linear_premultiplied: rect.fill_linear_premultiplied,
                     blend_mode: rect.blend_mode,
+                    primitive_kind: rect.primitive_kind,
+                    gradient: rect.gradient,
                 },
             ));
         }
@@ -328,8 +357,13 @@ pub fn scene_projection(canvas_width: f32, canvas_height: f32) -> Mat4 {
     ])
 }
 
-/// Contract transform: projection * translate(x, y) * rotate_z * scale(w, h),
-/// rotating about the object's top-left corner like the editor (PixiJS pivot).
+/// Contract transform:
+/// projection * translate(x, y) * rotate_z * scale(scale_x, scale_y)
+/// * translate(-anchor_x, -anchor_y) * scale(width, height).
+///
+/// `x/y` is the world-space position of the object-local anchor. Legacy scenes
+/// default to anchor (0,0) and scale (1,1), preserving the old top-left pivot.
+#[allow(clippy::too_many_arguments)]
 pub fn quad_uniforms(
     projection: Mat4,
     x: f32,
@@ -337,16 +371,45 @@ pub fn quad_uniforms(
     width: f32,
     height: f32,
     rotation_degrees: f32,
+    scale_x: f32,
+    scale_y: f32,
+    anchor_x: f32,
+    anchor_y: f32,
     style: QuadStyle,
 ) -> QuadUniforms {
     let model = Mat4::from_translation(glam::vec3(x, y, 0.0))
         * Mat4::from_rotation_z(rotation_degrees.to_radians())
+        * Mat4::from_scale(glam::vec3(scale_x, scale_y, 1.0))
+        * Mat4::from_translation(glam::vec3(-anchor_x, -anchor_y, 0.0))
         * Mat4::from_scale(glam::vec3(width, height, 1.0));
+    let canvas_width = 2.0 / projection.x_axis.x;
+    let canvas_height = -2.0 / projection.y_axis.y;
 
     QuadUniforms {
         transform: (projection * model).to_cols_array(),
         fill_color: style.fill_linear_premultiplied,
-        params: [style.blend_mode as f32, 0.0, 0.0, 0.0],
+        params: [
+            style.blend_mode as f32,
+            style.primitive_kind as f32,
+            canvas_width,
+            canvas_height,
+        ],
+        gradient_params: [
+            style.gradient.kind as f32,
+            style.gradient.stop_count as f32,
+            style.gradient.spread as f32,
+            style.gradient.coordinate_mode as f32,
+        ],
+        gradient_geometry: style.gradient.geometry,
+        gradient_positions: [
+            style.gradient.positions[0..4]
+                .try_into()
+                .expect("four gradient positions"),
+            style.gradient.positions[4..8]
+                .try_into()
+                .expect("four gradient positions"),
+        ],
+        gradient_colors: style.gradient.colors_linear_premultiplied,
     }
 }
 
@@ -355,10 +418,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn uniforms_are_96_bytes() {
+    fn uniforms_are_304_bytes() {
         // The authoritative check against layouts.json lives in
         // tests/layout_contract.rs; this is the fast in-crate guard.
-        assert_eq!(QUAD_UNIFORMS_SIZE, 96);
+        assert_eq!(QUAD_UNIFORMS_SIZE, 304);
         assert_eq!(std::mem::align_of::<QuadUniforms>(), 4);
     }
 
@@ -419,9 +482,15 @@ mod tests {
             480.0,
             270.0,
             0.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
             QuadStyle {
                 fill_linear_premultiplied: [0.0; 4],
                 blend_mode: 0,
+                primitive_kind: 0,
+                gradient: PreparedGradient::default(),
             },
         );
         let transform = Mat4::from_cols_array(&quad.transform);
@@ -434,5 +503,34 @@ mod tests {
         let corner = transform * glam::vec4(1.0, 1.0, 0.0, 1.0);
         assert!((corner.x - 0.5).abs() < 1e-6);
         assert!((corner.y - -0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn quad_transform_scales_and_rotates_around_the_anchor() {
+        let projection = scene_projection(1000.0, 1000.0);
+        let quad = quad_uniforms(
+            projection,
+            500.0,
+            500.0,
+            200.0,
+            100.0,
+            90.0,
+            2.0,
+            0.5,
+            100.0,
+            50.0,
+            QuadStyle {
+                fill_linear_premultiplied: [0.0; 4],
+                blend_mode: 0,
+                primitive_kind: 0,
+                gradient: PreparedGradient::default(),
+            },
+        );
+        let transform = Mat4::from_cols_array(&quad.transform);
+
+        // The local anchor (unit 0.5,0.5) stays exactly at scene (500,500)
+        // regardless of scale and rotation, which maps to clip (0,0).
+        let anchor = transform * glam::vec4(0.5, 0.5, 0.0, 1.0);
+        assert!(anchor.x.abs() < 1e-6 && anchor.y.abs() < 1e-6);
     }
 }

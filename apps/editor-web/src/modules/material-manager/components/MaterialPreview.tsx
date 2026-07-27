@@ -1,16 +1,15 @@
-import type { PrimitiveMaterialBinding, RectSceneObject, SceneDocument } from "@grapix/shared-types";
-import { useMemo, useState } from "react";
+import type { MeshSceneObject, PrimitiveMaterialBinding, SceneDocument } from "@grapix/shared-types";
+import { useMemo } from "react";
 import { GpuSceneStage } from "../../../components/GpuSceneStage";
 import { resolveRenderableObjects } from "../../../rendering/sceneMaterial";
 import { useEditorStore } from "../../../store/editorStore";
 import { useMaterialManagerStore } from "../stores/materialManagerStore";
 
-type PreviewBackground = "checker" | "light" | "dark";
-
 export function MaterialPreview() {
   const scene = useEditorStore((state) => state.scene);
   const selection = useMaterialManagerStore((state) => state.selection);
-  const [background, setBackground] = useState<PreviewBackground>("checker");
+  const background = useMaterialManagerStore((state) => state.previewBackground);
+  const setBackground = useMaterialManagerStore((state) => state.setPreviewBackground);
   const preview = useMemo(() => createPreviewScene(scene, selection), [scene, selection]);
   const asset = selection?.kind === "asset" ? scene.assets.find((item) => item.assetId === selection.id) : undefined;
 
@@ -48,25 +47,34 @@ function createPreviewScene(
     if (!instance) return null;
     binding = { materialId: instance.baseMaterialId, instanceId: instance.materialInstanceId };
   }
-  const object: RectSceneObject = {
-    id: "material_preview_quad",
-    type: "rect",
-    name: "Preview Quad",
-    x: 32,
-    y: 32,
+  const object: MeshSceneObject = {
+    id: "material_preview_surface",
+    type: "mesh",
+    meshKind: "sphere",
+    name: "Material Preview Surface",
+    x: 160,
+    y: 115,
     zDepth: 0,
     zIndex: 0,
     layerId: "preview",
-    width: 256,
-    height: 166,
+    width: 150,
+    height: 150,
+    depth: 150,
     rotation: 0,
+    rotationX: -16,
+    rotationY: 28,
+    rotationZ: 0,
+    scaleX: 1,
+    scaleY: 1,
+    scaleZ: 1,
+    anchor: { x: 75, y: 75 },
+    anchor3d: { x: 75, y: 75, z: 75 },
     opacity: 1,
     visible: true,
     locked: true,
     fill: "#ffffff",
     stroke: "transparent",
     strokeWidth: 0,
-    radius: 10,
     bindings: {},
     materialSlots: { main: binding }
   };

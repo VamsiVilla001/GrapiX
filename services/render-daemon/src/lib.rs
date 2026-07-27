@@ -9,10 +9,13 @@
 //! Structured as a library so integration tests (`tests/`) can exercise the
 //! protocol, scene parsing, and renderer without spawning the binary.
 
+pub mod asset_cache;
 pub mod config;
 pub mod controller;
+pub mod media;
 pub mod output;
 pub mod protocol;
 pub mod renderer;
+pub mod resource;
 pub mod scene;
 pub mod transport;

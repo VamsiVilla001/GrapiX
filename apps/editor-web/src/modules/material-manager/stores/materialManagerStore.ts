@@ -1,8 +1,9 @@
 import { create } from "zustand";
 
 export type MaterialManagerSelectionKind = "material" | "asset" | "shader" | "instance";
-export type MaterialManagerFilter = "all" | "materials" | "images" | "shaders" | "missing" | "in-use";
+export type MaterialManagerFilter = "all" | "materials" | "images" | "models" | "shaders" | "missing" | "in-use";
 export type MaterialManagerView = "grid" | "list";
+export type MaterialPreviewBackground = "checker" | "light" | "dark";
 
 export interface MaterialManagerSelection {
   kind: MaterialManagerSelectionKind;
@@ -14,18 +15,20 @@ interface MaterialManagerState {
   filter: MaterialManagerFilter;
   view: MaterialManagerView;
   thumbnailSize: number;
+  previewBackground: MaterialPreviewBackground;
   selection: MaterialManagerSelection | null;
   multiSelection: MaterialManagerSelection[];
   importing: boolean;
-  contextMenu: { x: number; y: number; selection: MaterialManagerSelection } | null;
+  contextMenu: { x: number; y: number; selection: MaterialManagerSelection | null } | null;
   setSearch: (search: string) => void;
   setFilter: (filter: MaterialManagerFilter) => void;
   setView: (view: MaterialManagerView) => void;
   setThumbnailSize: (thumbnailSize: number) => void;
+  setPreviewBackground: (previewBackground: MaterialPreviewBackground) => void;
   select: (selection: MaterialManagerSelection | null) => void;
   toggleSelection: (selection: MaterialManagerSelection) => void;
   setImporting: (importing: boolean) => void;
-  openContextMenu: (x: number, y: number, selection: MaterialManagerSelection) => void;
+  openContextMenu: (x: number, y: number, selection?: MaterialManagerSelection | null) => void;
   closeContextMenu: () => void;
 }
 
@@ -37,6 +40,7 @@ export const useMaterialManagerStore = create<MaterialManagerState>((set) => ({
   filter: persisted.filter,
   view: persisted.view,
   thumbnailSize: persisted.thumbnailSize,
+  previewBackground: persisted.previewBackground,
   selection: null,
   multiSelection: [],
   importing: false,
@@ -48,6 +52,10 @@ export const useMaterialManagerStore = create<MaterialManagerState>((set) => ({
     ...state,
     thumbnailSize: Math.max(72, Math.min(220, thumbnailSize))
   })),
+  setPreviewBackground: (previewBackground) => set((state) => persist({
+    ...state,
+    previewBackground
+  })),
   select: (selection) => set({ selection, multiSelection: selection ? [selection] : [], contextMenu: null }),
   toggleSelection: (selection) => set((state) => {
     const exists = state.multiSelection.some((item) => item.kind === selection.kind && item.id === selection.id);
@@ -57,18 +65,40 @@ export const useMaterialManagerStore = create<MaterialManagerState>((set) => ({
     return { multiSelection, selection: exists ? multiSelection.at(-1) ?? null : selection, contextMenu: null };
   }),
   setImporting: (importing) => set({ importing }),
-  openContextMenu: (x, y, selection) => set({ contextMenu: { x, y, selection }, selection }),
+  openContextMenu: (x, y, selection = null) => set((state) => {
+    const alreadySelected = selection
+      ? state.multiSelection.some((item) => item.kind === selection.kind && item.id === selection.id)
+      : false;
+    return {
+      contextMenu: { x, y, selection },
+      ...(selection ? {
+        selection,
+        multiSelection: alreadySelected ? state.multiSelection : [selection]
+      } : {
+        selection: state.selection,
+        multiSelection: state.multiSelection
+      })
+    };
+  }),
   closeContextMenu: () => set({ contextMenu: null })
 }));
 
-function readPersistedState(): Pick<MaterialManagerState, "filter" | "view" | "thumbnailSize"> {
-  const fallback: Pick<MaterialManagerState, "filter" | "view" | "thumbnailSize"> = { filter: "all", view: "grid", thumbnailSize: 112 };
+function readPersistedState(): Pick<MaterialManagerState, "filter" | "view" | "thumbnailSize" | "previewBackground"> {
+  const fallback: Pick<MaterialManagerState, "filter" | "view" | "thumbnailSize" | "previewBackground"> = {
+    filter: "all",
+    view: "grid",
+    thumbnailSize: 112,
+    previewBackground: "checker"
+  };
   try {
     const value = JSON.parse(localStorage.getItem(storageKey) ?? "") as Partial<typeof fallback>;
     return {
       filter: isFilter(value.filter) ? value.filter : fallback.filter,
       view: value.view === "list" ? "list" : "grid",
-      thumbnailSize: typeof value.thumbnailSize === "number" ? value.thumbnailSize : fallback.thumbnailSize
+      thumbnailSize: typeof value.thumbnailSize === "number" ? value.thumbnailSize : fallback.thumbnailSize,
+      previewBackground: isPreviewBackground(value.previewBackground)
+        ? value.previewBackground
+        : fallback.previewBackground
     };
   } catch {
     return fallback;
@@ -79,11 +109,16 @@ function persist(state: MaterialManagerState): Partial<MaterialManagerState> {
   localStorage.setItem(storageKey, JSON.stringify({
     filter: state.filter,
     view: state.view,
-    thumbnailSize: state.thumbnailSize
+    thumbnailSize: state.thumbnailSize,
+    previewBackground: state.previewBackground
   }));
   return state;
 }
 
 function isFilter(value: unknown): value is MaterialManagerFilter {
-  return ["all", "materials", "images", "shaders", "missing", "in-use"].includes(String(value));
+  return ["all", "materials", "images", "models", "shaders", "missing", "in-use"].includes(String(value));
+}
+
+function isPreviewBackground(value: unknown): value is MaterialPreviewBackground {
+  return ["checker", "light", "dark"].includes(String(value));
 }

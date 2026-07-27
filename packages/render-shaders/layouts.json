@@ -1,5 +1,5 @@
 {
-  "contractVersion": 1,
+  "contractVersion": 5,
   "shaders": {
     "composite_quad": {
       "file": "wgsl/composite_quad.wgsl",
@@ -15,14 +15,82 @@
         "QuadUniforms": {
           "group": 0,
           "binding": 0,
-          "sizeBytes": 96,
+          "sizeBytes": 304,
           "alignBytes": 16,
           "fields": [
             { "name": "transform", "type": "mat4x4<f32>", "offsetBytes": 0, "sizeBytes": 64, "matrixOrder": "column-major" },
             { "name": "fill_color", "type": "vec4<f32>", "offsetBytes": 64, "sizeBytes": 16 },
-            { "name": "params", "type": "vec4<f32>", "offsetBytes": 80, "sizeBytes": 16 }
+            { "name": "params", "type": "vec4<f32>", "offsetBytes": 80, "sizeBytes": 16 },
+            { "name": "gradient_params", "type": "vec4<f32>", "offsetBytes": 96, "sizeBytes": 16 },
+            { "name": "gradient_geometry", "type": "array<vec4<f32>,2>", "offsetBytes": 112, "sizeBytes": 32 },
+            { "name": "gradient_positions", "type": "array<vec4<f32>,2>", "offsetBytes": 144, "sizeBytes": 32 },
+            { "name": "gradient_colors", "type": "array<vec4<f32>,8>", "offsetBytes": 176, "sizeBytes": 128 }
           ]
         }
+      }
+    },
+    "mesh_pbr": {
+      "file": "wgsl/mesh_pbr.wgsl",
+      "entryPoints": {
+        "vertex": "vs_main",
+        "fragment": "fs_main"
+      },
+      "vertexInput": {
+        "mode": "buffer",
+        "strideBytes": 32,
+        "attributes": [
+          { "location": 0, "name": "position", "format": "float32x3", "offsetBytes": 0 },
+          { "location": 1, "name": "normal", "format": "float32x3", "offsetBytes": 12 },
+          { "location": 2, "name": "uv", "format": "float32x2", "offsetBytes": 24 }
+        ]
+      },
+      "uniforms": {
+        "MeshUniforms": {
+          "group": 0,
+          "binding": 0,
+          "sizeBytes": 272,
+          "alignBytes": 16,
+          "fields": [
+            { "name": "model", "type": "mat4x4<f32>", "offsetBytes": 0, "sizeBytes": 64, "matrixOrder": "column-major" },
+            { "name": "view_projection", "type": "mat4x4<f32>", "offsetBytes": 64, "sizeBytes": 64, "matrixOrder": "column-major" },
+            { "name": "normal_model", "type": "mat4x4<f32>", "offsetBytes": 128, "sizeBytes": 64, "matrixOrder": "column-major" },
+            { "name": "base_color", "type": "vec4<f32>", "offsetBytes": 192, "sizeBytes": 16 },
+            { "name": "material_params", "type": "vec4<f32>", "offsetBytes": 208, "sizeBytes": 16 },
+            { "name": "uv_scale_offset", "type": "vec4<f32>", "offsetBytes": 224, "sizeBytes": 16 },
+            { "name": "uv_rotation_pivot", "type": "vec4<f32>", "offsetBytes": 240, "sizeBytes": 16 },
+            { "name": "emissive", "type": "vec4<f32>", "offsetBytes": 256, "sizeBytes": 16, "note": "xyz straight linear emissive RGB, w non-negative intensity" }
+          ]
+        },
+        "SceneLight": {
+          "sizeBytes": 64,
+          "alignBytes": 16,
+          "fields": [
+            { "name": "color_intensity", "type": "vec4<f32>", "offsetBytes": 0, "sizeBytes": 16 },
+            { "name": "position_kind", "type": "vec4<f32>", "offsetBytes": 16, "sizeBytes": 16 },
+            { "name": "direction_range", "type": "vec4<f32>", "offsetBytes": 32, "sizeBytes": 16 },
+            { "name": "spot_decay", "type": "vec4<f32>", "offsetBytes": 48, "sizeBytes": 16 }
+          ]
+        },
+        "SceneLighting": {
+          "group": 0,
+          "binding": 3,
+          "sizeBytes": 1040,
+          "alignBytes": 16,
+          "fields": [
+            { "name": "params", "type": "vec4<f32>", "offsetBytes": 0, "sizeBytes": 16, "note": "x authored light count, yzw camera world position" },
+            { "name": "lights", "type": "array<SceneLight,16>", "offsetBytes": 16, "sizeBytes": 1024 }
+          ]
+        }
+      },
+      "resources": [
+        { "group": 0, "binding": 1, "name": "base_color_texture", "type": "texture_2d<f32>" },
+        { "group": 0, "binding": 2, "name": "base_color_sampler", "type": "sampler" },
+        { "group": 0, "binding": 3, "name": "scene_lighting", "type": "uniform<SceneLighting>" }
+      ],
+      "depth": {
+        "format": "depth32float",
+        "compare": "less-equal",
+        "write": true
       }
     }
   },

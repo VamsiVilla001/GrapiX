@@ -6,13 +6,16 @@
 //! staging buffer is reused across frames; only the tight copy allocates.
 
 use crate::output::VideoFrame;
-use crate::renderer::pipeline::{QuadPipeline, QuadUniforms, RENDER_FORMAT};
+use crate::renderer::mesh::{MeshFrame, MeshPipeline};
+use crate::renderer::pipeline::{QuadPipeline, QuadUniforms, DEPTH_FORMAT, RENDER_FORMAT};
 
 pub struct FrameTarget {
     width: u32,
     height: u32,
     texture: wgpu::Texture,
     view: wgpu::TextureView,
+    _depth_texture: wgpu::Texture,
+    depth_view: wgpu::TextureView,
     readback_buffer: wgpu::Buffer,
     padded_bytes_per_row: u32,
 }
@@ -41,6 +44,20 @@ impl FrameTarget {
         });
 
         let padded = padded_bytes_per_row(width);
+        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("grapix-offscreen-depth"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
         let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("grapix-frame-readback"),
             size: u64::from(padded) * u64::from(height),
@@ -52,7 +69,9 @@ impl FrameTarget {
             width,
             height,
             view: texture.create_view(&wgpu::TextureViewDescriptor::default()),
+            depth_view: depth_texture.create_view(&wgpu::TextureViewDescriptor::default()),
             texture,
+            _depth_texture: depth_texture,
             readback_buffer,
             padded_bytes_per_row: padded,
         }
@@ -61,12 +80,15 @@ impl FrameTarget {
     /// Render one frame and read it back. Blocking: waits for the GPU, which
     /// is the intended behavior on the dedicated render thread (the frame
     /// clock accounts for it; WebSocket handling runs elsewhere).
+    #[allow(clippy::too_many_arguments)]
     pub fn render_and_read_back(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         pipeline: &QuadPipeline,
         quads: &[QuadUniforms],
+        mesh_pipeline: &MeshPipeline,
+        mesh_frame: Option<&MeshFrame>,
         frame_index: u64,
     ) -> anyhow::Result<VideoFrame> {
         pipeline.upload(queue, quads);
@@ -89,12 +111,22 @@ impl FrameTarget {
                     },
                     depth_slice: None,
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: None,
+                }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
 
             pipeline.draw(&mut pass, quads);
+            if let Some(mesh_frame) = mesh_frame {
+                mesh_pipeline.draw(&mut pass, mesh_frame);
+            }
         }
 
         encoder.copy_texture_to_buffer(

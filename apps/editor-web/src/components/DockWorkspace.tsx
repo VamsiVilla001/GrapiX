@@ -47,7 +47,11 @@ export function DockArea(props: {
             }
 
             dockedItems.push(
-              <Panel id={`${props.areaId}-${stack.id}`} key={stack.id} minSize={12}>
+              <Panel
+                id={`${props.areaId}-${stack.id}`}
+                key={stack.id}
+                minSize={orientation === "horizontal" ? "280px" : "120px"}
+              >
                 <DockStackPanel
                   areaId={props.areaId}
                   childrenForPanel={props.childrenForPanel}
@@ -164,11 +168,15 @@ function titleForPanel(panelId: DockPanelId): string {
     // the user-facing name is Scene Inspector.
     case "scene-manager":
       return "Scene Inspector";
-    case "properties":
-      return "Properties";
     case "material-manager":
       return "Material Manager";
+    case "font-manager":
+      return "Font Manager";
+    case "automation":
+      return "Scene Automation";
     case "timeline":
       return "Timeline";
+    case "sequencer":
+      return "Sequencer";
   }
 }

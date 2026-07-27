@@ -1,20 +1,41 @@
 import {
   findAssetUsageDetails,
   findMaterialUsage,
+  getBindableFaces,
   getMaterialBindingId,
-  isMaterialCompatible,
+  isMaterialCompatibleWithFace,
   type AssetLibraryItem,
   type Material,
   type MaterialInstance,
   type ShaderDefinition
 } from "@grapix/shared-types";
-import { AlertTriangle, Braces, CheckCircle2, FileImage, Link2, Palette } from "lucide-react";
-import { useMemo, type KeyboardEvent, type MouseEvent } from "react";
+import {
+  AlertTriangle,
+  Box,
+  Braces,
+  Check,
+  CheckCircle2,
+  ChevronRight,
+  FileImage,
+  Link2,
+  Palette
+} from "lucide-react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+  type MouseEvent
+} from "react";
+import { createPortal } from "react-dom";
 import { useEditorStore } from "../../../store/editorStore";
 import {
   type MaterialManagerSelection,
   useMaterialManagerStore
 } from "../stores/materialManagerStore";
+import { placeMaterialContextMenu } from "./materialContextMenu";
 
 type LibraryItem =
   | { kind: "material"; id: string; name: string; material: Material }
@@ -22,14 +43,25 @@ type LibraryItem =
   | { kind: "shader"; id: string; name: string; shader: ShaderDefinition }
   | { kind: "instance"; id: string; name: string; instance: MaterialInstance; base?: Material };
 
-export function MaterialLibrary() {
+interface MaterialLibraryProps {
+  importing: boolean;
+  onImportFolder: () => void;
+  onImportImages: () => void;
+  onImportModels: () => void;
+  onImportShaders: () => void;
+}
+
+export function MaterialLibrary(props: MaterialLibraryProps) {
   const scene = useEditorStore((state) => state.scene);
   const selectedObjectId = useEditorStore((state) => state.selectedObjectId);
-  const assignMaterialToObjects = useEditorStore((state) => state.assignMaterialToObjects);
-  const assignMaterialSlot = useEditorStore((state) => state.assignMaterialSlot);
+  const selectedFaceIndices = useEditorStore((state) => state.selectedFaceIndices);
+  const assignMaterialToFaces = useEditorStore((state) => state.assignMaterialToFaces);
+  const assignAssetToFaces = useEditorStore((state) => state.assignAssetToFaces);
+  const addModelObjectFromAsset = useEditorStore((state) => state.addModelObjectFromAsset);
   const updateMaterial = useEditorStore((state) => state.updateMaterial);
   const updateAsset = useEditorStore((state) => state.updateAsset);
   const updateMaterialInstance = useEditorStore((state) => state.updateMaterialInstance);
+  const refreshAssetAvailability = useEditorStore((state) => state.refreshAssetAvailability);
   const deleteMaterial = useEditorStore((state) => state.deleteMaterial);
   const deleteAsset = useEditorStore((state) => state.deleteAsset);
   const deleteMaterialInstance = useEditorStore((state) => state.deleteMaterialInstance);
@@ -42,6 +74,7 @@ export function MaterialLibrary() {
   const select = useMaterialManagerStore((state) => state.select);
   const toggleSelection = useMaterialManagerStore((state) => state.toggleSelection);
   const openContextMenu = useMaterialManagerStore((state) => state.openContextMenu);
+  const [newMaterialDialogOpen, setNewMaterialDialogOpen] = useState(false);
   const items = useMemo(() => createItems(scene, filter, search), [filter, scene, search]);
 
   function choose(item: LibraryItem, event?: MouseEvent) {
@@ -67,6 +100,15 @@ export function MaterialLibrary() {
       if (item.kind === "asset") deleteAsset(item.id);
       if (item.kind === "instance") deleteMaterialInstance(item.id);
     }
+    if (event.key === "F5") {
+      event.preventDefault();
+      void refreshAssetAvailability();
+    }
+    if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+      event.preventDefault();
+      const bounds = event.currentTarget.getBoundingClientRect();
+      openContextMenu(bounds.left + Math.min(28, bounds.width / 2), bounds.top + Math.min(28, bounds.height / 2), toSelection(item));
+    }
     if (["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"].includes(event.key)) {
       event.preventDefault();
       const index = items.findIndex((value) => value.kind === item.kind && value.id === item.id);
@@ -87,6 +129,13 @@ export function MaterialLibrary() {
       style={view === "grid" ? { gridTemplateColumns: `repeat(auto-fill, minmax(${thumbnailSize}px, 1fr))` } : undefined}
       role="listbox"
       aria-label="Materials and assets"
+      title="Right-click to create or import materials and sources"
+      onContextMenu={(event) => {
+        const target = event.target as Element;
+        if (target.closest(".material-library-item")) return;
+        event.preventDefault();
+        openContextMenu(event.clientX, event.clientY, null);
+      }}
     >
       {items.map((item) => {
         const selection = toSelection(item);
@@ -96,19 +145,39 @@ export function MaterialLibrary() {
             aria-selected={selected}
             className={`material-library-item ${selected ? "selected" : ""}`}
             data-material-library-key={`${item.kind}:${item.id}`}
-            draggable={item.kind === "material" || item.kind === "instance"}
+            draggable={item.kind === "material" || item.kind === "instance" || (item.kind === "asset" && ["image", "svg"].includes(item.asset.kind))}
             key={`${item.kind}-${item.id}`}
             onClick={(event) => choose(item, event)}
             onContextMenu={(event) => {
               event.preventDefault();
-              choose(item);
+              event.stopPropagation();
+              if (!selected) choose(item);
               openContextMenu(event.clientX, event.clientY, selection);
             }}
-            onDoubleClick={() => {
-              if (item.kind === "material" && selectedObjectId) assignMaterialToObjects([selectedObjectId], item.id);
-              if (item.kind === "instance" && selectedObjectId) assignMaterialSlot(selectedObjectId, "main", { materialId: item.instance.baseMaterialId, instanceId: item.id });
+            onDoubleClick={(event) => {
+              // XPression semantics: a NORMAL double-click assigns the material
+              // to the object's currently-selected faces; the additive gesture
+              // opens it in the Material Editor (the Material Inspector form) —
+              // double-click must NOT open the editor.
+              if (event.shiftKey) {
+                if (item.kind === "material" || item.kind === "instance") select(toSelection(item));
+                return;
+              }
+              // Passing "" when nothing is selected lets the central binding
+              // action surface the non-blocking "Select a compatible object or
+              // material face first." message instead of silently no-opping.
+              if (item.kind === "material") assignMaterialToFaces(selectedObjectId ?? "", selectedFaceIndices, item.id);
+              else if (item.kind === "instance") assignMaterialToFaces(selectedObjectId ?? "", selectedFaceIndices, { materialId: item.instance.baseMaterialId, instanceId: item.id });
+              else if (item.kind === "asset" && item.asset.kind === "model") addModelObjectFromAsset(item.id);
+              else if (item.kind === "asset") assignAssetToFaces(selectedObjectId ?? "", selectedFaceIndices, item.id);
             }}
             onDragStart={(event) => {
+              if (item.kind === "asset") {
+                if (!["image", "svg"].includes(item.asset.kind)) return;
+                event.dataTransfer.setData("application/x-grapix-asset", item.id);
+                event.dataTransfer.effectAllowed = "copy";
+                return;
+              }
               if (item.kind !== "material" && item.kind !== "instance") return;
               event.dataTransfer.setData("application/x-grapix-material", item.kind === "material" ? item.id : item.instance.baseMaterialId);
               if (item.kind === "instance") event.dataTransfer.setData("application/x-grapix-material-instance", item.id);
@@ -117,7 +186,10 @@ export function MaterialLibrary() {
             onKeyDown={(event) => handleKey(event, item)}
             role="option"
             tabIndex={0}
-            title={item.kind === "material" ? "Drag to a canvas primitive or scene-tree row" : item.name}
+            title={item.kind === "material" ? "Double-click to apply to the selected primitive, or drag onto a canvas primitive"
+              : item.kind === "asset" && ["image", "svg"].includes(item.asset.kind) ? "Double-click to apply to the selected surface, or drag onto a canvas primitive or mesh"
+              : item.kind === "asset" && item.asset.kind === "model" ? "Double-click to add this real 3D model to the current scene"
+              : item.name}
           >
             <Thumbnail item={item} />
             <div className="material-library-label">
@@ -130,62 +202,403 @@ export function MaterialLibrary() {
       })}
       {items.length === 0 ? <div className="material-empty">No assets match the current search and filter.</div> : null}
       <MaterialContextMenu
-        onAssign={(materialId) => selectedObjectId && assignMaterialToObjects([selectedObjectId], materialId)}
-        onDuplicate={duplicateMaterial}
-        onDelete={(materialId, name) => window.confirm(`Delete ${name}?`) && deleteMaterial(materialId)}
+        importing={props.importing}
+        onImportFolder={props.onImportFolder}
+        onImportImages={props.onImportImages}
+        onImportModels={props.onImportModels}
+        onImportShaders={props.onImportShaders}
+        onNewMaterial={() => setNewMaterialDialogOpen(true)}
       />
+      {newMaterialDialogOpen ? <NewMaterialDialog onClose={() => setNewMaterialDialogOpen(false)} /> : null}
     </div>
   );
 }
 
 function MaterialContextMenu(props: {
-  onAssign: (id: string) => void;
-  onDuplicate: (id: string) => unknown;
-  onDelete: (id: string, name: string) => unknown;
+  importing: boolean;
+  onImportFolder: () => void;
+  onImportImages: () => void;
+  onImportModels: () => void;
+  onImportShaders: () => void;
+  onNewMaterial: () => void;
 }) {
   const scene = useEditorStore((state) => state.scene);
   const selectedObjectId = useEditorStore((state) => state.selectedObjectId);
-  const assignMaterialSlot = useEditorStore((state) => state.assignMaterialSlot);
-  const createMaterial = useEditorStore((state) => state.createMaterial);
+  const selectedFaceIndices = useEditorStore((state) => state.selectedFaceIndices);
+  const assignMaterialToFaces = useEditorStore((state) => state.assignMaterialToFaces);
+  const assignAssetToFaces = useEditorStore((state) => state.assignAssetToFaces);
+  const addModelObjectFromAsset = useEditorStore((state) => state.addModelObjectFromAsset);
   const createMaterialInstance = useEditorStore((state) => state.createMaterialInstance);
+  const duplicateMaterial = useEditorStore((state) => state.duplicateMaterial);
+  const deleteMaterial = useEditorStore((state) => state.deleteMaterial);
+  const deleteAllUnusedMaterials = useEditorStore((state) => state.deleteUnusedMaterials);
+  const deleteAsset = useEditorStore((state) => state.deleteAsset);
   const deleteMaterialInstance = useEditorStore((state) => state.deleteMaterialInstance);
+  const updateMaterial = useEditorStore((state) => state.updateMaterial);
+  const updateAsset = useEditorStore((state) => state.updateAsset);
+  const updateMaterialInstance = useEditorStore((state) => state.updateMaterialInstance);
+  const refreshAssetAvailability = useEditorStore((state) => state.refreshAssetAvailability);
   const menu = useMaterialManagerStore((state) => state.contextMenu);
   const close = useMaterialManagerStore((state) => state.closeContextMenu);
   const select = useMaterialManagerStore((state) => state.select);
-  if (!menu) return null;
-  const material = menu.selection.kind === "material"
-    ? scene.materials.find((item) => item.materialId === menu.selection.id)
-    : undefined;
-  const asset = menu.selection.kind === "asset"
-    ? scene.assets.find((item) => item.assetId === menu.selection.id)
-    : undefined;
+  const previewBackground = useMaterialManagerStore((state) => state.previewBackground);
+  const setPreviewBackground = useMaterialManagerStore((state) => state.setPreviewBackground);
+  const setFilter = useMaterialManagerStore((state) => state.setFilter);
+  const setSearch = useMaterialManagerStore((state) => state.setSearch);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
-  return (
-    <div className="material-context-menu" style={{ left: menu.x, top: menu.y }} role="menu" onMouseLeave={close}>
-      {material ? (
-        <>
-          <button disabled={!selectedObjectId} onClick={() => { props.onAssign(material.materialId); close(); }}>Assign to Selected</button>
-          <button onClick={() => { const id = createMaterialInstance(material.materialId); if (id) select({ kind: "instance", id }); close(); }}>Create Material Instance</button>
-          <button onClick={() => { props.onDuplicate(material.materialId); close(); }}>Duplicate</button>
-          <button onClick={() => { select({ kind: "material", id: material.materialId }); close(); }}>Open in Inspector</button>
-          <button className="danger" disabled={Boolean(material.builtIn)} onClick={() => { props.onDelete(material.materialId, material.name); close(); }}>Delete</button>
-        </>
-      ) : null}
-      {menu.selection.kind === "instance" ? (
-        <>
-          <button disabled={!selectedObjectId} onClick={() => {
-            const instance = (scene.materialInstances ?? []).find((item) => item.materialInstanceId === menu.selection.id);
-            if (instance && selectedObjectId) assignMaterialSlot(selectedObjectId, "main", { materialId: instance.baseMaterialId, instanceId: instance.materialInstanceId });
+  useEffect(() => {
+    if (!menu) return undefined;
+
+    function closeFromOutside(event: Event) {
+      if (!menuRef.current?.contains(event.target as Node)) close();
+    }
+
+    function closeFromKeyboard(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") close();
+    }
+
+    window.addEventListener("pointerdown", closeFromOutside, true);
+    window.addEventListener("contextmenu", closeFromOutside, true);
+    window.addEventListener("keydown", closeFromKeyboard);
+    window.addEventListener("blur", close);
+    return () => {
+      window.removeEventListener("pointerdown", closeFromOutside, true);
+      window.removeEventListener("contextmenu", closeFromOutside, true);
+      window.removeEventListener("keydown", closeFromKeyboard);
+      window.removeEventListener("blur", close);
+    };
+  }, [close, menu]);
+
+  if (!menu) return null;
+  const target = menu.selection;
+  const material = target?.kind === "material"
+    ? scene.materials.find((item) => item.materialId === target.id)
+    : undefined;
+  const instance = target?.kind === "instance"
+    ? (scene.materialInstances ?? []).find((item) => item.materialInstanceId === target.id)
+    : undefined;
+  const asset = target?.kind === "asset"
+    ? scene.assets.find((item) => item.assetId === target.id)
+    : undefined;
+  const shader = target?.kind === "shader"
+    ? (scene.shaders ?? []).find((item) => item.shaderId === target.id)
+    : undefined;
+  const targetName = material?.name ?? instance?.name ?? asset?.name ?? shader?.name;
+  const selectedObject = scene.objects.find((item) => item.id === selectedObjectId);
+  const instanceBase = instance
+    ? scene.materials.find((item) => item.materialId === instance.baseMaterialId)
+    : undefined;
+  const linkedAssetMaterial = asset
+    ? scene.materials.find((candidate) =>
+        candidate.assetId === asset.assetId
+        || candidate.textureSlots?.some((slot) => slot.assetId === asset.assetId))
+    : undefined;
+  const assignableMaterial = material ?? instanceBase ?? linkedAssetMaterial;
+  const bindableFaces = selectedObject ? getBindableFaces(selectedObject) : [];
+  const assetCanAssign = Boolean(asset
+    && ["image", "svg"].includes(asset.kind)
+    && !["MISSING", "ERROR", "UNSUPPORTED"].includes(asset.status ?? "READY"));
+  const canAssign = Boolean(
+    selectedObject
+      && selectedFaceIndices.length
+      && (material || instance || assetCanAssign)
+      && selectedFaceIndices.every((faceIndex) =>
+        Boolean(bindableFaces[faceIndex])
+        && (!assignableMaterial || isMaterialCompatibleWithFace(assignableMaterial, selectedObject, faceIndex)))
+  );
+  const materialUsage = material ? findMaterialUsage(scene, material.materialId) : undefined;
+  const assetUsage = asset ? findAssetUsageDetails(scene, asset.assetId) : undefined;
+  const canDelete = Boolean(
+    (material
+      && !material.builtIn
+      && !materialUsage?.objectIds.length
+      && !materialUsage?.instanceIds.length)
+    || (asset
+      && !assetUsage?.materialIds.length
+      && !assetUsage?.shaderIds.length
+      && !assetUsage?.objectIds.length)
+    || instance
+  );
+  const refreshable = Boolean(
+    asset
+      || material?.assetId
+      || material?.textureSlots?.some((slot) => slot.assetId)
+      || instanceBase?.assetId
+      || instanceBase?.textureSlots?.some((slot) => slot.assetId)
+  );
+  const placement = placeMaterialContextMenu(
+    menu.x,
+    menu.y,
+    window.innerWidth,
+    window.innerHeight,
+    248,
+    target ? 430 : 330
+  );
+  const submenuClassName = `material-context-submenu ${placement.openSubmenusLeft ? "opens-left" : ""}`;
+
+  function assignTarget() {
+    if (!selectedObjectId) return;
+    if (material) assignMaterialToFaces(selectedObjectId, selectedFaceIndices, material.materialId);
+    else if (instance) {
+      assignMaterialToFaces(selectedObjectId, selectedFaceIndices, {
+        materialId: instance.baseMaterialId,
+        instanceId: instance.materialInstanceId
+      });
+    } else if (asset && ["image", "svg"].includes(asset.kind)) {
+      assignAssetToFaces(selectedObjectId, selectedFaceIndices, asset.assetId);
+    }
+    close();
+  }
+
+  function renameTarget() {
+    if (!target || !targetName || target.kind === "shader") return;
+    const name = window.prompt(`Rename ${target.kind}`, targetName)?.trim();
+    if (name && material) updateMaterial(material.materialId, { name });
+    if (name && asset) updateAsset(asset.assetId, { name });
+    if (name && instance) updateMaterialInstance(instance.materialInstanceId, { name });
+    close();
+  }
+
+  function deleteTarget() {
+    if (!target || !targetName || target.kind === "shader") return;
+    if (!window.confirm(`Delete ${targetName}?`)) {
+      close();
+      return;
+    }
+    if (material) deleteMaterial(material.materialId);
+    if (asset) deleteAsset(asset.assetId);
+    if (instance) deleteMaterialInstance(instance.materialInstanceId);
+    close();
+  }
+
+  function confirmDeleteUnusedMaterials() {
+    const unused = scene.materials.filter((candidate) => {
+      if (candidate.builtIn) return false;
+      const usage = findMaterialUsage(scene, candidate.materialId);
+      return usage.objectIds.length === 0 && usage.instanceIds.length === 0;
+    });
+    if (!unused.length) {
+      window.alert("There are no unused project materials.");
+      close();
+      return;
+    }
+    if (window.confirm(`Delete ${unused.length} unused project material${unused.length === 1 ? "" : "s"}?`)) {
+      deleteAllUnusedMaterials();
+    }
+    close();
+  }
+
+  function showUsage() {
+    if (!targetName) return;
+    setFilter("in-use");
+    setSearch(targetName);
+    if (target) select(target);
+    close();
+  }
+
+  function runNewAction(action: () => void) {
+    close();
+    action();
+  }
+
+  return createPortal(
+    <div
+      className="material-context-menu"
+      ref={menuRef}
+      style={{ left: placement.left, top: placement.top }}
+      role="menu"
+      aria-label="Material library actions"
+    >
+      <ContextMenuButton
+        disabled={!canAssign}
+        label="Assign To Selection"
+        onClick={assignTarget}
+      />
+      {asset?.kind === "model" ? (
+        <ContextMenuButton
+          label="Add Model To Scene"
+          onClick={() => {
+            addModelObjectFromAsset(asset.assetId);
             close();
-          }}>Assign Instance to Selected</button>
-          <button className="danger" onClick={() => { if (window.confirm("Delete this material instance?")) deleteMaterialInstance(menu.selection.id); close(); }}>Delete Instance</button>
-        </>
+          }}
+        />
       ) : null}
-      {asset && ["image", "svg"].includes(asset.kind) ? (
-        <button onClick={() => { const id = createMaterial("image", asset.assetId); select({ kind: "material", id }); close(); }}>Create Material</button>
+      <ContextMenuSeparator />
+      <div className="material-context-submenu-host">
+        <ContextMenuButton hasSubmenu label="New" />
+        <div className={submenuClassName} role="menu" aria-label="New material or source">
+          <ContextMenuButton label="Material…" onClick={() => runNewAction(props.onNewMaterial)} />
+          <ContextMenuButton disabled={props.importing} label="Image…" onClick={() => runNewAction(props.onImportImages)} />
+          <ContextMenuButton disabled label="Video…" title="Video sources are planned but not enabled in this renderer." />
+          <ContextMenuButton disabled label="Mask" title="Mask materials are planned but not enabled in this renderer." />
+          <ContextMenuButton disabled label="Live Source…" title="Live sources are planned but not enabled in this renderer." />
+          <ContextMenuSeparator />
+          <ContextMenuButton disabled={props.importing} label="3D Model…" onClick={() => runNewAction(props.onImportModels)} />
+          <ContextMenuButton disabled={props.importing} label="Shader…" onClick={() => runNewAction(props.onImportShaders)} />
+          <ContextMenuButton disabled={props.importing} label="Import Folder…" onClick={() => runNewAction(props.onImportFolder)} />
+        </div>
+      </div>
+      <div className="material-context-submenu-host">
+        <ContextMenuButton hasSubmenu label="Preview Background" />
+        <div className={submenuClassName} role="menu" aria-label="Preview background">
+          {(["checker", "light", "dark"] as const).map((background) => (
+            <ContextMenuButton
+              checked={previewBackground === background}
+              key={background}
+              label={background[0].toUpperCase() + background.slice(1)}
+              onClick={() => {
+                setPreviewBackground(background);
+                close();
+              }}
+            />
+          ))}
+        </div>
+      </div>
+      <ContextMenuSeparator />
+      <ContextMenuButton
+        disabled={!target}
+        label={target?.kind === "shader" ? "View Source And Status…" : "Edit…"}
+        onClick={() => {
+          if (target) select(target);
+          close();
+        }}
+      />
+      <ContextMenuButton
+        disabled={!target || target.kind === "shader" || Boolean(material?.builtIn)}
+        label="Rename"
+        onClick={renameTarget}
+      />
+      <ContextMenuButton
+        disabled={!refreshable}
+        label="Refresh Sources"
+        onClick={() => {
+          close();
+          void refreshAssetAvailability();
+        }}
+        title={refreshable ? "Recheck linked asset availability." : "This item has no linked source to refresh."}
+      />
+      {material ? (
+        <ContextMenuButton
+          label="Create Material Instance"
+          onClick={() => {
+            const id = createMaterialInstance(material.materialId);
+            if (id) select({ kind: "instance", id });
+            close();
+          }}
+        />
       ) : null}
-      {menu.selection.kind === "shader" ? <button onClick={() => { select(menu.selection); close(); }}>View Source and Status</button> : null}
-    </div>
+      <ContextMenuButton
+        disabled={!material}
+        label="Duplicate"
+        onClick={() => {
+          if (material) {
+            const id = duplicateMaterial(material.materialId);
+            if (id) select({ kind: "material", id });
+          }
+          close();
+        }}
+      />
+      <ContextMenuSeparator />
+      <ContextMenuButton disabled={!material && !asset} label="Find Usage…" onClick={showUsage} />
+      <ContextMenuButton label="Delete All Unused Materials…" onClick={confirmDeleteUnusedMaterials} />
+      <ContextMenuSeparator />
+      <ContextMenuButton
+        danger
+        disabled={!canDelete}
+        label="Delete…"
+        onClick={deleteTarget}
+        title={target && !canDelete ? "Built-in or referenced items cannot be deleted." : undefined}
+      />
+    </div>,
+    document.body
+  );
+}
+
+interface ContextMenuButtonProps {
+  checked?: boolean;
+  danger?: boolean;
+  disabled?: boolean;
+  hasSubmenu?: boolean;
+  label: string;
+  onClick?: () => void;
+  title?: string;
+}
+
+function ContextMenuButton(props: ContextMenuButtonProps) {
+  return (
+    <button
+      className={`material-context-menu-item ${props.danger ? "danger" : ""}`}
+      disabled={props.disabled}
+      onClick={props.onClick}
+      role="menuitem"
+      title={props.title}
+      type="button"
+    >
+      <span className="material-context-check">{props.checked ? <Check size={13} /> : null}</span>
+      <span className="material-context-label">{props.label}</span>
+      {props.hasSubmenu ? <ChevronRight className="material-context-chevron" size={14} /> : null}
+    </button>
+  );
+}
+
+function ContextMenuSeparator() {
+  return <div className="material-context-separator" role="separator" />;
+}
+
+function NewMaterialDialog({ onClose }: { onClose: () => void }) {
+  const createMaterial = useEditorStore((state) => state.createMaterial);
+  const updateMaterial = useEditorStore((state) => state.updateMaterial);
+  const select = useMaterialManagerStore((state) => state.select);
+  const [name, setName] = useState("New Material");
+  const nameRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    nameRef.current?.focus();
+    nameRef.current?.select();
+    function closeFromKeyboard(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", closeFromKeyboard);
+    return () => window.removeEventListener("keydown", closeFromKeyboard);
+  }, [onClose]);
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    const id = createMaterial();
+    const normalizedName = name.trim();
+    if (normalizedName) updateMaterial(id, { name: normalizedName });
+    select({ kind: "material", id });
+    onClose();
+  }
+
+  return createPortal(
+    <div
+      className="material-dialog-backdrop"
+      onMouseDown={(event) => {
+        if (event.currentTarget === event.target) onClose();
+      }}
+    >
+      <form className="material-create-dialog" onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="new-material-title">
+        <header>
+          <strong id="new-material-title">New Material</strong>
+          <button aria-label="Close" onClick={onClose} type="button">×</button>
+        </header>
+        <label>
+          Name
+          <input ref={nameRef} value={name} onChange={(event) => setName(event.target.value)} />
+        </label>
+        <p className="material-dialog-note">
+          One physical surface material. Add colour or image layers, then shape
+          its response to the scene lights with the surface controls.
+        </p>
+        <footer>
+          <button onClick={onClose} type="button">Cancel</button>
+          <button className="primary" type="submit">Create</button>
+        </footer>
+      </form>
+    </div>,
+    document.body
   );
 }
 
@@ -194,14 +607,20 @@ function Thumbnail({ item }: { item: LibraryItem }) {
     const texture = item.material.textureSlots?.[0];
     return (
       <div className="material-thumb checkerboard">
-        {item.material.type === "solid-color"
-          ? <span className="material-swatch" style={{ background: String(item.material.parameters?.baseColor ?? item.material.color ?? "#fff") }} />
-          : texture ? <Palette size={28} /> : <Palette size={28} />}
+        {texture?.assetId
+          ? <Palette size={28} />
+          : <span className="material-swatch" style={{ background: String(item.material.parameters?.baseColor ?? item.material.parameters?.tint ?? item.material.color ?? "#fff") }} />}
       </div>
     );
   }
   if (item.kind === "asset") {
-    return <div className="material-thumb checkerboard">{["image", "svg"].includes(item.asset.kind) && item.asset.status !== "MISSING" ? <img src={item.asset.thumbnailSource ?? item.asset.source} alt="" /> : <FileImage size={28} />}</div>;
+    return (
+      <div className="material-thumb checkerboard">
+        {["image", "svg"].includes(item.asset.kind) && item.asset.status !== "MISSING"
+          ? <img src={item.asset.thumbnailSource ?? item.asset.source} alt="" />
+          : item.asset.kind === "model" ? <Box size={28} /> : <FileImage size={28} />}
+      </div>
+    );
   }
   if (item.kind === "instance") {
     return <div className="material-thumb checkerboard"><span className="material-swatch" style={{ background: String(item.base?.parameters?.baseColor ?? item.base?.color ?? "#46586d") }} /><Link2 className="instance-thumb-icon" size={20} /></div>;
@@ -219,9 +638,16 @@ function createItems(scene: ReturnType<typeof useEditorStore.getState>["scene"],
   const materials = scene.materials.map((material): LibraryItem => ({ kind: "material", id: material.materialId, name: material.name, material }));
   const instances = (scene.materialInstances ?? []).map((instance): LibraryItem => ({ kind: "instance", id: instance.materialInstanceId, name: instance.name, instance, base: scene.materials.find((material) => material.materialId === instance.baseMaterialId) }));
   const assets = scene.assets.map((asset): LibraryItem => ({ kind: "asset", id: asset.assetId, name: asset.name, asset }));
-  const shaders = (scene.shaders ?? []).map((shader): LibraryItem => ({ kind: "shader", id: shader.shaderId, name: shader.name, shader }));
+  // Hide load-compatibility shader aliases (e.g. the legacy "Basic Lit Mesh",
+  // which is the same WGSL as the Standard Material). Scenes authored before the
+  // unified material still reference them, but showing them would re-introduce
+  // the lit/unlit/PBR split that no longer exists in authoring.
+  const shaders = (scene.shaders ?? [])
+    .filter((shader) => shader.userFacing !== false && !shader.compatibilityAliasFor)
+    .map((shader): LibraryItem => ({ kind: "shader", id: shader.shaderId, name: shader.name, shader }));
   const items = filter === "materials" ? [...materials, ...instances]
     : filter === "images" ? assets.filter((item) => item.kind === "asset" && ["image", "svg"].includes(item.asset.kind))
+      : filter === "models" ? assets.filter((item) => item.kind === "asset" && item.asset.kind === "model")
       : filter === "shaders" ? shaders
         : filter === "missing" ? assets.filter((item) => item.kind === "asset" && ["MISSING", "ERROR", "UNSUPPORTED"].includes(item.asset.status ?? "READY"))
           : filter === "in-use" ? [
@@ -229,7 +655,7 @@ function createItems(scene: ReturnType<typeof useEditorStore.getState>["scene"],
               ...assets.filter((item) => {
                 if (item.kind !== "asset") return false;
                 const usage = findAssetUsageDetails(scene, item.id);
-                return usage.materialIds.length > 0 || usage.shaderIds.length > 0;
+                return usage.materialIds.length > 0 || usage.shaderIds.length > 0 || usage.objectIds.length > 0;
               })
             ]
             : [...materials, ...instances, ...assets, ...shaders];
@@ -241,7 +667,10 @@ function createItems(scene: ReturnType<typeof useEditorStore.getState>["scene"],
 }
 
 function itemMeta(item: LibraryItem, scene: ReturnType<typeof useEditorStore.getState>["scene"]): string {
-  if (item.kind === "material") return `${item.material.type} / ${findMaterialUsage(scene, item.id).objectIds.length} use`;
+  if (item.kind === "material") {
+    const textured = item.material.textureSlots?.some((slot) => Boolean(slot.assetId));
+    return `${textured ? "textured material" : "material"} / ${findMaterialUsage(scene, item.id).objectIds.length} use`;
+  }
   if (item.kind === "instance") return `instance / ${item.base?.name ?? "missing base"}`;
   if (item.kind === "shader") return `${item.shader.validationStatus.toLowerCase()} / WGSL v${item.shader.version}`;
   const size = item.asset.sizeBytes ? `${Math.max(1, Math.round(item.asset.sizeBytes / 1024))} KiB` : "embedded";
@@ -257,9 +686,5 @@ export function selectedMaterialIds(scene: ReturnType<typeof useEditorStore.getS
     const object = scene.objects.find((item) => item.id === id);
     return object ? Object.values(object.materialSlots).map((binding) => getMaterialBindingId(binding)).filter(Boolean) as string[] : [];
   }));
-  return [...ids].filter((id) => {
-    const material = scene.materials.find((item) => item.materialId === id);
-    const object = scene.objects.find((item) => objectIds.includes(item.id));
-    return Boolean(material && object && isMaterialCompatible(material, object.type));
-  });
+  return [...ids].filter((id) => scene.materials.some((material) => material.materialId === id));
 }

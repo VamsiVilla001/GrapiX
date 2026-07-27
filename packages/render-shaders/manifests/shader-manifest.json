@@ -4,12 +4,14 @@
     {
       "shaderId": "grapix.material.solid-colour",
       "name": "Solid Colour",
+      "userFacing": false,
+      "compatibilityAliasFor": "grapix.material.pbr",
       "version": 1,
       "sourcePath": "wgsl/composite_quad.wgsl",
       "vertexEntry": "vs_main",
       "fragmentEntry": "fs_main",
       "textureSlots": [],
-      "supportedPrimitives": ["rect", "ellipse", "text", "image"],
+      "supportedPrimitives": ["rect", "ellipse", "text", "image", "mesh"],
       "parameters": [
         { "name": "baseColor", "label": "Base colour", "type": "colour", "default": "#ffffff", "animatable": true, "bindable": true },
         { "name": "opacity", "label": "Opacity", "type": "float", "default": 1, "min": 0, "max": 1, "step": 0.01, "animatable": true, "bindable": true }
@@ -18,6 +20,8 @@
     {
       "shaderId": "grapix.material.textured",
       "name": "Textured Unlit",
+      "userFacing": false,
+      "compatibilityAliasFor": "grapix.material.pbr",
       "version": 1,
       "sourcePath": "wgsl/materials/textured.wgsl",
       "vertexEntry": "vs_main",
@@ -25,12 +29,51 @@
       "textureSlots": [
         { "name": "baseTexture", "label": "Base texture", "required": true }
       ],
-      "supportedPrimitives": ["rect", "image"],
+      "supportedPrimitives": ["rect", "image", "mesh"],
       "parameters": [
         { "name": "tint", "label": "Tint", "type": "colour", "default": "#ffffff", "animatable": true, "bindable": true },
         { "name": "opacity", "label": "Opacity", "type": "float", "default": 1, "min": 0, "max": 1, "step": 0.01, "animatable": true, "bindable": true },
         { "name": "uvScale", "label": "UV scale", "type": "vector2", "default": [1, 1], "animatable": true },
         { "name": "uvOffset", "label": "UV offset", "type": "vector2", "default": [0, 0], "animatable": true }
+      ]
+    },
+    {
+      "shaderId": "grapix.material.basic-lit",
+      "name": "Basic Lit Mesh",
+      "userFacing": false,
+      "compatibilityAliasFor": "grapix.material.pbr",
+      "version": 1,
+      "sourcePath": "wgsl/mesh_pbr.wgsl",
+      "vertexEntry": "vs_main",
+      "fragmentEntry": "fs_main",
+      "textureSlots": [],
+      "supportedPrimitives": ["mesh"],
+      "parameters": [
+        { "name": "baseColor", "label": "Base colour", "type": "colour", "default": "#ffffff", "animatable": true, "bindable": true },
+        { "name": "opacity", "label": "Opacity", "type": "float", "default": 1, "min": 0, "max": 1, "step": 0.01, "animatable": true, "bindable": true },
+        { "name": "metalness", "label": "Metalness", "type": "float", "default": 0, "min": 0, "max": 1, "step": 0.01, "animatable": true, "bindable": true },
+        { "name": "roughness", "label": "Roughness", "type": "float", "default": 0.82, "min": 0, "max": 1, "step": 0.01, "animatable": true, "bindable": true }
+      ]
+    },
+    {
+      "shaderId": "grapix.material.pbr",
+      "name": "Standard Material",
+      "userFacing": true,
+      "version": 1,
+      "sourcePath": "wgsl/mesh_pbr.wgsl",
+      "vertexEntry": "vs_main",
+      "fragmentEntry": "fs_main",
+      "textureSlots": [
+        { "name": "baseTexture", "label": "Base texture", "required": false }
+      ],
+      "supportedPrimitives": ["rect", "ellipse", "text", "image", "mesh"],
+      "parameters": [
+        { "name": "baseColor", "label": "Base colour", "type": "colour", "default": "#ffffff", "animatable": true, "bindable": true },
+        { "name": "opacity", "label": "Opacity", "type": "float", "default": 1, "min": 0, "max": 1, "step": 0.01, "animatable": true, "bindable": true },
+        { "name": "metalness", "label": "Metalness", "type": "float", "default": 0.08, "min": 0, "max": 1, "step": 0.01, "animatable": true, "bindable": true },
+        { "name": "roughness", "label": "Roughness", "type": "float", "default": 0.62, "min": 0.045, "max": 1, "step": 0.01, "animatable": true, "bindable": true },
+        { "name": "emissiveColor", "label": "Emissive colour", "type": "colour", "default": "#000000", "animatable": true, "bindable": true },
+        { "name": "emissiveIntensity", "label": "Emissive intensity", "type": "float", "default": 0, "min": 0, "max": 10, "step": 0.01, "animatable": true, "bindable": true }
       ]
     }
   ]

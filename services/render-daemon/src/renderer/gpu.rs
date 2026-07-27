@@ -7,6 +7,7 @@ pub struct GpuContext {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub adapter_info: wgpu::AdapterInfo,
+    pub limits: wgpu::Limits,
 }
 
 impl GpuContext {
@@ -23,6 +24,7 @@ impl GpuContext {
             .context("no GPU adapter available for headless rendering")?;
 
         let adapter_info = adapter.get_info();
+        let limits = adapter.limits();
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
@@ -42,6 +44,7 @@ impl GpuContext {
             device,
             queue,
             adapter_info,
+            limits,
         })
     }
 }

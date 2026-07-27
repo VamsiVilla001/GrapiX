@@ -3,11 +3,13 @@
 
 pub mod frame;
 pub mod gpu;
+pub mod mesh;
 pub mod pipeline;
 
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
 
@@ -16,7 +18,7 @@ use crate::output::VideoFrame;
 use crate::scene::PreparedScene;
 
 /// Shared render/output counters, read by status reports.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct RenderStats {
     pub frames_rendered: AtomicU64,
     pub frames_sent: AtomicU64,
@@ -24,12 +26,71 @@ pub struct RenderStats {
     /// Microseconds spent rendering + reading back the latest frame.
     pub last_render_micros: AtomicU64,
     pub last_error: Mutex<Option<String>>,
+    render_micros: Mutex<VecDeque<u64>>,
 }
 
 impl RenderStats {
+    pub fn reset_for_output(&self) {
+        self.frames_rendered.store(0, Ordering::Relaxed);
+        self.frames_sent.store(0, Ordering::Relaxed);
+        self.frames_dropped.store(0, Ordering::Relaxed);
+        self.last_render_micros.store(0, Ordering::Relaxed);
+        *self.last_error.lock().expect("stats mutex poisoned") = None;
+        self.render_micros
+            .lock()
+            .expect("timing mutex poisoned")
+            .clear();
+    }
+
     pub fn record_error(&self, error: impl std::fmt::Display) {
         *self.last_error.lock().expect("stats mutex poisoned") = Some(error.to_string());
     }
+
+    pub fn record_render_duration(&self, duration: Duration) {
+        let micros = duration.as_micros() as u64;
+        self.last_render_micros.store(micros, Ordering::Relaxed);
+        let mut samples = self.render_micros.lock().expect("timing mutex poisoned");
+        if samples.len() == samples.capacity() {
+            samples.pop_front();
+        }
+        samples.push_back(micros);
+    }
+
+    pub fn timing_snapshot(&self) -> RenderTimingSnapshot {
+        let samples = self.render_micros.lock().expect("timing mutex poisoned");
+        if samples.is_empty() {
+            return RenderTimingSnapshot::default();
+        }
+        let average_micros = samples.iter().sum::<u64>() as f64 / samples.len() as f64;
+        let mut sorted: Vec<_> = samples.iter().copied().collect();
+        sorted.sort_unstable();
+        let p99_index = ((sorted.len() - 1) as f64 * 0.99).ceil() as usize;
+        RenderTimingSnapshot {
+            sample_count: samples.len(),
+            average_ms: average_micros / 1000.0,
+            p99_ms: sorted[p99_index] as f64 / 1000.0,
+        }
+    }
+}
+
+impl Default for RenderStats {
+    fn default() -> Self {
+        Self {
+            frames_rendered: AtomicU64::new(0),
+            frames_sent: AtomicU64::new(0),
+            frames_dropped: AtomicU64::new(0),
+            last_render_micros: AtomicU64::new(0),
+            last_error: Mutex::new(None),
+            render_micros: Mutex::new(VecDeque::with_capacity(600)),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct RenderTimingSnapshot {
+    pub sample_count: usize,
+    pub average_ms: f64,
+    pub p99_ms: f64,
 }
 
 /// One-frame render used by tests and diagnostics; not the streaming path.
@@ -40,10 +101,20 @@ pub fn render_single_frame(
     height: u32,
 ) -> anyhow::Result<VideoFrame> {
     let quad_pipeline = pipeline::QuadPipeline::new(&gpu.device);
+    let mesh_pipeline = mesh::MeshPipeline::new(&gpu.device);
     let target = frame::FrameTarget::new(&gpu.device, width, height);
     let quads = pipeline::QuadPipeline::build_frame_quads(scene);
+    let meshes = mesh_pipeline.prepare_frame(&gpu.device, &gpu.queue, scene);
 
-    target.render_and_read_back(&gpu.device, &gpu.queue, &quad_pipeline, &quads, 0)
+    target.render_and_read_back(
+        &gpu.device,
+        &gpu.queue,
+        &quad_pipeline,
+        &quads,
+        &mesh_pipeline,
+        Some(&meshes),
+        0,
+    )
 }
 
 /// Spawn the render thread: renders at the configured rational frame rate and
@@ -68,6 +139,7 @@ pub fn spawn_render_loop(
         .name("grapix-render-loop".to_string())
         .spawn(move || {
             let quad_pipeline = pipeline::QuadPipeline::new(&gpu.device);
+            let mesh_pipeline = mesh::MeshPipeline::new(&gpu.device);
             let target = frame::FrameTarget::new(&gpu.device, config.width, config.height);
             let dump_path = std::env::var("GRAPIX_RENDER_DAEMON_DUMP_FIRST_FRAME").ok();
 
@@ -75,6 +147,8 @@ pub fn spawn_render_loop(
             let mut frame_index: u64 = 0;
             let mut warned_empty = false;
             let mut warned_overflow = false;
+            let mut cached_mesh_scene: Option<Arc<PreparedScene>> = None;
+            let mut cached_mesh_frame: Option<mesh::MeshFrame> = None;
 
             tracing::info!(
                 width = config.width,
@@ -90,6 +164,17 @@ pub fn spawn_render_loop(
                     Some(scene) => {
                         let render_started = Instant::now();
                         let mut quads = pipeline::QuadPipeline::build_frame_quads(scene);
+                        if cached_mesh_scene
+                            .as_ref()
+                            .is_none_or(|cached| !Arc::ptr_eq(cached, scene))
+                        {
+                            cached_mesh_frame = Some(mesh_pipeline.prepare_frame(
+                                &gpu.device,
+                                &gpu.queue,
+                                scene,
+                            ));
+                            cached_mesh_scene = Some(Arc::clone(scene));
+                        }
 
                         if quads.len() > pipeline::MAX_QUADS_PER_FRAME {
                             if !warned_overflow {
@@ -103,12 +188,18 @@ pub fn spawn_render_loop(
                             quads.truncate(pipeline::MAX_QUADS_PER_FRAME);
                         }
 
-                        match target.render_and_read_back(&gpu.device, &gpu.queue, &quad_pipeline, &quads, frame_index)
+                        match target.render_and_read_back(
+                            &gpu.device,
+                            &gpu.queue,
+                            &quad_pipeline,
+                            &quads,
+                            &mesh_pipeline,
+                            cached_mesh_frame.as_ref(),
+                            frame_index,
+                        )
                         {
                             Ok(frame) => {
-                                stats
-                                    .last_render_micros
-                                    .store(render_started.elapsed().as_micros() as u64, Ordering::Relaxed);
+                                stats.record_render_duration(render_started.elapsed());
                                 Some(frame)
                             }
                             Err(error) => {

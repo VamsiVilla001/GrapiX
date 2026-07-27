@@ -206,6 +206,9 @@ pub enum ColorSpace {
 #[serde(rename_all = "lowercase")]
 pub enum OutputBackend {
     Ndi,
+    Recording,
+    Decklink,
+    Aja,
     Null,
 }
 
@@ -221,6 +224,7 @@ pub struct OutputConfig {
     pub color_format: ColorFormat,
     pub color_space: ColorSpace,
     pub ndi_source_name: String,
+    pub recording_name: String,
     pub backend: OutputBackend,
 }
 
@@ -243,6 +247,8 @@ pub struct OutputConfigMessage {
     pub color_space: ColorSpace,
     #[serde(default = "default_ndi_source_name")]
     pub ndi_source_name: String,
+    #[serde(default = "default_recording_name")]
+    pub recording_name: String,
     #[serde(default)]
     pub backend: Option<OutputBackend>,
 }
@@ -265,6 +271,10 @@ fn default_color_space() -> ColorSpace {
 
 fn default_ndi_source_name() -> String {
     "GrapiX Output".to_string()
+}
+
+fn default_recording_name() -> String {
+    "grapix-recording".to_string()
 }
 
 /// Largest dimension the v1 readback path is sized for (covers UHD).
@@ -307,8 +317,12 @@ pub enum ConfigError {
     StraightAlphaUnsupported,
     #[error("ndiSourceName must not be empty")]
     EmptyNdiSourceName,
+    #[error("recordingName must contain only letters, numbers, underscore, or hyphen")]
+    InvalidRecordingName,
     #[error("NDI backend requested but this daemon was compiled without the `ndi` feature; rebuild with `cargo build --features ndi` (requires the NDI SDK)")]
     NdiUnavailable,
+    #[error("{0} output requires its vendor SDK/plugin and is not available in this build")]
+    VendorOutputUnavailable(&'static str),
 }
 
 impl OutputConfig {
@@ -360,6 +374,9 @@ impl OutputConfig {
         if message.ndi_source_name.trim().is_empty() {
             return Err(ConfigError::EmptyNdiSourceName);
         }
+        if !is_safe_recording_name(&message.recording_name) {
+            return Err(ConfigError::InvalidRecordingName);
+        }
 
         let backend = match message.backend {
             Some(backend) => backend,
@@ -375,6 +392,15 @@ impl OutputConfig {
         if backend == OutputBackend::Ndi && !cfg!(feature = "ndi") {
             return Err(ConfigError::NdiUnavailable);
         }
+        match backend {
+            OutputBackend::Decklink => {
+                return Err(ConfigError::VendorOutputUnavailable("DeckLink"));
+            }
+            OutputBackend::Aja => {
+                return Err(ConfigError::VendorOutputUnavailable("AJA"));
+            }
+            _ => {}
+        }
 
         Ok(Self {
             width: message.width,
@@ -388,9 +414,18 @@ impl OutputConfig {
             color_format: message.color_format,
             color_space: message.color_space,
             ndi_source_name: message.ndi_source_name,
+            recording_name: message.recording_name,
             backend,
         })
     }
+}
+
+fn is_safe_recording_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 80
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
 #[cfg(test)]
@@ -408,6 +443,7 @@ mod tests {
             color_format: ColorFormat::Bgra8,
             color_space: ColorSpace::Srgb,
             ndi_source_name: "GrapiX Output".to_string(),
+            recording_name: "test-recording".to_string(),
             backend: Some(OutputBackend::Null),
         }
     }

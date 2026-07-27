@@ -4,12 +4,17 @@ import { useEditorStore } from "../store/editorStore";
 
 export function useSceneAutosave() {
   const scene = useEditorStore((state) => state.scene);
+  const hasActiveScene = useEditorStore((state) => state.hasActiveScene);
   const setSaveStatus = useEditorStore((state) => state.setSaveStatus);
   const firstRun = useRef(true);
 
   useEffect(() => {
     if (firstRun.current) {
       firstRun.current = false;
+      return;
+    }
+
+    if (!hasActiveScene) {
       return;
     }
 
@@ -23,5 +28,5 @@ export function useSceneAutosave() {
     }, 550);
 
     return () => window.clearTimeout(timeoutId);
-  }, [scene, setSaveStatus]);
+  }, [hasActiveScene, scene, setSaveStatus]);
 }

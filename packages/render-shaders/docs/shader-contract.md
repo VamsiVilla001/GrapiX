@@ -54,7 +54,9 @@ For every quad (object) the model transform is composed CPU-side and uploaded
 as one `mat4x4<f32>`:
 
 ```
-transform = projection * translate(x, y) * rotate_z(radians(rotation)) * scale(width, height)
+transform = projection * translate(x, y) * rotate_z(radians(rotation))
+          * scale(scaleX, scaleY) * translate(-anchor.x, -anchor.y)
+          * scale(width, height)
 ```
 
 - Matrices are **column-major** and multiply **column vectors** (`M * v`),
@@ -62,17 +64,85 @@ transform = projection * translate(x, y) * rotate_z(radians(rotation)) * scale(w
 - `rotation` is stored in **degrees** in `SceneDocument` and converted to
   radians. With y-down coordinates a positive angle appears clockwise
   on screen — this matches the editor (PixiJS).
-- Rotation pivots on the object's **top-left corner** (its `x, y` position),
-  because the editor uses PixiJS's default pivot. If the editor ever moves to
-  center pivots, both renderers and this document change together.
+- `anchor` is an object-local point in scene pixels and `x/y` is that anchor's
+  world-space position. This matches PixiJS `pivot` + `position` semantics.
+- Legacy documents omit `anchor` and `scaleX/scaleY`; both renderers default
+  those to `(0,0)` and `(1,1)`, preserving the previous top-left pivot exactly.
 - The shader consumes a unit quad in `[0,1]^2`; `scale(width, height)` sizes it.
+- `QuadUniforms.params.y` is the analytic primitive kind: `0` rectangle,
+  `1` ellipse. Ellipses discard fragments outside the unit-quad circle, so
+  editor and daemon share the same transform/colour/blend contract without a
+  second vertex layout. `params.z/w` remain reserved.
+
+### Native mesh transform and camera
+
+Meshes use real vertex buffers (`position`, `normal`, `uv`) and the
+`MeshUniforms` layout declared in `layouts.json`:
+
+```
+world = translate(x, y, zDepth)
+      * rotateXYZ(rotationX, rotationY, rotationZ)
+      * scale(scaleX, scaleY, scaleZ)
+```
+
+Primitive vertices are authored in object-local scene-pixel units around
+`anchor3d`; imported glTF vertices are transformed by their node hierarchy,
+centered, and uniformly fitted to `width × height × depth` before the object
+transform is applied. A separate inverse-transpose `normal_model` matrix keeps
+lighting correct under non-uniform object scale.
+
+The default editor/Program camera uses a 45° vertical field of view, sits at
+the scene centre at `focalDistance = (height/2)/tan(fov/2)`, points at scene
+centre Z=0, and uses world up `(0,-1,0)` so scene Y remains down. Meshes use a
+`depth32float` attachment with `less-equal` comparison and depth writes.
+
+`MeshUniforms` also carries straight linear base colour, metalness,
+roughness, alpha cutoff, texture presence, UV scale/offset/rotation/pivot,
+and straight linear emissive RGB plus intensity. Texture bindings 1 and 2 are
+the base-colour texture and sampler. The shader multiplies texture and base
+colour, lights in linear space, adds emissive radiance, then premultiplies RGB
+by alpha before fixed-function blending.
+
+### Native physical material and lighting
+
+The canonical native surface wire type is `pbr`. For scene compatibility the
+native preparer accepts `material`, `solid-color`, `image`, `unlit-texture`,
+and `basic-lit` as aliases of the same light-reactive metallic-roughness
+surface. Material type does not opt a normal surface out of scene lighting.
+The legacy `additive-glow` alias is the one temporary self-lit exception; new
+self-lit looks use the material's emissive colour/intensity instead.
+
+Direct light uses an energy-conserving Cook-Torrance BRDF:
+
+- Trowbridge-Reitz GGX normal distribution,
+- Schlick-GGX/Smith geometric visibility,
+- Schlick Fresnel with dielectric `F0 = 0.04`,
+- metallic workflow (`F0 = mix(0.04, baseColor, metalness)`), and
+- Lambert diffuse scaled by `(1 - Fresnel) * (1 - metalness)`.
+
+Perceptual roughness is clamped to `[0.045, 1]` before BRDF evaluation to avoid
+a singular highlight. `SceneLighting.params.x` is the authored light count and
+`.yzw` is the world-space camera position used to form the view vector.
+Directional lights have constant radiance. Point and spot lights retain the
+shared scene-unit attenuation `1 / distance^decay`, the optional smooth range
+cutoff, and the authored spot cone. New physically constrained authoring
+should use the inverse-square default `decay = 2`.
+
+When there are no authored lights, the shader evaluates the same BRDF against
+a synthetic key plus a small environment approximation so an unconfigured
+scene remains readable. The presence of any authored light, including a
+zero-intensity light, suppresses that fallback. Emissive radiance remains
+visible in either case.
 
 ## Colour pipeline
 
 - Scene colors are CSS hex strings (`#rgb`, `#rrggbb`, `#rrggbbaa`) in sRGB.
-- CPU side per color: decode hex → sRGB floats → **linear-light** floats
+- CPU side quad color: decode hex → sRGB floats → **linear-light** floats
   (IEC 61966-2-1 formula) → multiply RGB by final alpha (**premultiply**).
   Final alpha = hex alpha × object `opacity`.
+- Mesh base colour is uploaded as straight linear RGBA because the mesh shader
+  must first multiply it by the sampled linear texture and lighting result; the
+  fragment output is premultiplied before it reaches the same blend contract.
 - Shaders work entirely in linear light.
 - Render targets use an `-srgb` texture format (`bgra8unorm-srgb`), so the
   hardware re-encodes linear → sRGB bytes on store. Readback bytes are
@@ -125,8 +195,15 @@ transform = projection * translate(x, y) * rotate_z(radians(rotation)) * scale(w
   `services/render-daemon/tests/layout_contract.rs`.
 - Dynamic-offset uniform binding is an implementation detail of each renderer
   (the daemon rounds the stride up to the device's
-  `min_uniform_buffer_offset_alignment`); the *contents* of each 96-byte slot
-  are what this contract fixes.
+  `min_uniform_buffer_offset_alignment`); the *contents* of each 304-byte slot
+  are what this contract fixes. The quad payload includes a fixed eight-stop
+  linear/radial gradient block with pad, repeat, and reflect spread plus
+  object- or scene-coordinate evaluation. Mesh material bindings use a standalone
+  272-byte `MeshUniforms` allocation per prepared surface. Mesh draws also
+  share one 1040-byte `SceneLighting` allocation containing at most 16
+  authored lights and the camera position. `MeshUniforms.uv_rotation_pivot.w`
+  is the material-lighting flag: one for every ordinary surface and zero only
+  for an explicit self-lit effect such as the legacy `additive-glow` alias.
 
 ## Render order
 
@@ -140,8 +217,9 @@ editor should switch to a byte-order comparison so both sides match.
 
 ## How each side consumes this package
 
-- **Rust daemon**: `include_str!("../../../packages/render-shaders/wgsl/composite_quad.wgsl")`
-  — the shader is compiled into the binary; `layouts.json` is read by tests.
+- **Rust daemon**: consumes both `composite_quad.wgsl` and `mesh_pbr.wgsl`
+  verbatim with `include_str!`; `layouts.json` is read by cross-language
+  layout tests.
 - **Browser (future)**: import the WGSL with Vite raw imports, e.g.
   `import compositeQuad from "@grapix/render-shaders/wgsl/composite_quad.wgsl?raw"`,
   and validate buffer-writer offsets against
