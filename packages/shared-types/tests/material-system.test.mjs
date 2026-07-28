@@ -501,16 +501,15 @@ test("bindable faces come from the object: continuous-surface primitives expose 
   }
 });
 
-test("box meshes expose six faces and a cylinder exposes a side plus two caps, all starting at 'main'", () => {
+test("box and slab meshes expose their authored material regions, all starting at 'main'", () => {
   const cube = getBindableFaces(mesh("cube", "cube"));
   assert.equal(cube.length, 6);
   assert.equal(cube[0].slotKey, PRIMARY_MATERIAL_SLOT);
   assert.deepEqual(cube.map((f) => f.label), ["Front", "Back", "Left", "Right", "Top", "Bottom"]);
   assert.deepEqual(cube.map((f) => f.slotKey), ["main", "face:back", "face:left", "face:right", "face:top", "face:bottom"]);
-  assert.deepEqual(
-    getBindableFaces(mesh("slab", "slab")).map((face) => face.slotKey),
-    cube.map((face) => face.slotKey)
-  );
+  const slab = getBindableFaces(mesh("slab", "slab"));
+  assert.deepEqual(slab.map((face) => face.label), ["Face", "Bevel", "Extrusion", "Back Bevel", "Back Face"]);
+  assert.deepEqual(slab.map((face) => face.slotKey), ["main", "face:bevel", "face:extrusion", "face:back-bevel", "face:back"]);
 
   const cylinder = getBindableFaces(mesh("cyl", "cylinder"));
   assert.equal(cylinder.length, 3);

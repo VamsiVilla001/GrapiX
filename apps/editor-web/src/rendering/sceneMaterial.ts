@@ -118,6 +118,10 @@ export function applyMaterialSlots<T extends SceneObject>(object: T, scene: Scen
 
   if (typeof color === "string") {
     nextObject.fill = color;
+    // Rich colour values take precedence in the Pixi renderer. Updating only
+    // the legacy fill string leaves an older fillStyle visible and makes a
+    // successfully-bound material appear to do nothing.
+    nextObject.fillStyle = { type: "solid", color };
   }
 
   // Three.js applies each mesh face's material opacity in createMaterial().

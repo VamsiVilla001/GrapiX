@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { sortObjectsForRender } from "../rendering/sceneMaterial";
 import { useEditorStore } from "../store/editorStore";
 import { type TemplateViewMode, useTemplateStore } from "../store/templateStore";
+import { shouldDeleteTemplateFromKeyboard } from "./templateDeleteShortcut";
 
 const contextMenuItems = [
   "New",
@@ -52,6 +53,7 @@ export function TemplatesPanel() {
   const deleteTemplate = useTemplateStore((state) => state.deleteTemplate);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
+  const panelRef = useRef<HTMLElement | null>(null);
   const skipNextTemplateSync = useRef(false);
   const normalizedSearch = searchTerm.trim().toLowerCase();
   const visibleTemplates = useMemo(
@@ -182,7 +184,19 @@ export function TemplatesPanel() {
 
   useEffect(() => {
     function deleteFromKeyboard(event: KeyboardEvent) {
-      if (event.key !== "Delete" || !selectedTemplateId || isEditableElement(event.target)) {
+      if (!shouldDeleteTemplateFromKeyboard({
+        key: event.key,
+        hasSelection: Boolean(selectedTemplateId),
+        targetInsideTemplatesPanel: Boolean(
+          event.target instanceof Node && panelRef.current?.contains(event.target)
+        ),
+        targetIsEditable: isEditableElement(event.target),
+        defaultPrevented: event.defaultPrevented
+      })) {
+        return;
+      }
+
+      if (!selectedTemplateId) {
         return;
       }
 
@@ -221,7 +235,7 @@ export function TemplatesPanel() {
   }
 
   return (
-    <aside className="templates-panel flat-templates-panel">
+    <aside className="templates-panel flat-templates-panel" ref={panelRef}>
       <div className="panel-header-row templates-header-row">
         <strong>TEMPLATES</strong>
         <div className="template-header-actions">

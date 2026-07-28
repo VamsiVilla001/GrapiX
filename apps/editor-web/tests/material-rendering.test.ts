@@ -5,6 +5,8 @@ import {
   resolvePrimitiveMaterial,
   type Material,
   type MeshSceneObject,
+  type RectSceneObject,
+  type SceneObject,
   type SceneDocument
 } from "@grapix/shared-types";
 import {
@@ -49,7 +51,7 @@ function mesh(materialId?: string, opacity = 1): MeshSceneObject {
   };
 }
 
-function scene(material: Material, object = mesh(material.materialId)): SceneDocument {
+function scene(material: Material, object: SceneObject = mesh(material.materialId)): SceneDocument {
   return {
     id: "scene_material_renderer",
     name: "Material Renderer Test",
@@ -135,4 +137,53 @@ test("disabled material bindings preserve a visible unbound mesh fallback", () =
   assert.equal(rendered.faceMaterials, undefined);
   assert.equal(rendered.visible, true);
   assert.equal(describeMeshSurfaceMaterial(undefined, rendered.fill, rendered.opacity).lit, true);
+});
+
+test("2D material assignment replaces both legacy fill and rich fillStyle", () => {
+  const material = createMaterialDefinition("Red");
+  material.parameters = { ...material.parameters, baseColor: "#ff3355" };
+  const object: RectSceneObject = {
+    id: "rect_test",
+    type: "rect",
+    name: "Test Rectangle",
+    x: 10,
+    y: 20,
+    zDepth: 0,
+    zIndex: 0,
+    layerId: "main",
+    width: 300,
+    height: 180,
+    radius: 12,
+    rotation: 0,
+    scaleX: 1,
+    scaleY: 1,
+    scaleZ: 1,
+    anchor: { x: 0, y: 0 },
+    opacity: 1,
+    visible: true,
+    locked: false,
+    fill: "#224466",
+    fillStyle: {
+      type: "linear-gradient",
+      angle: 0,
+      startX: 0,
+      startY: 0,
+      endX: 1,
+      endY: 0,
+      stops: [
+        { id: "start", position: 0, color: "#224466", opacity: 1 },
+        { id: "end", position: 1, color: "#88aacc", opacity: 1 }
+      ],
+      spread: "pad",
+      coordinateMode: "object"
+    },
+    stroke: "transparent",
+    strokeWidth: 0,
+    bindings: {},
+    materialSlots: { main: material.materialId }
+  };
+
+  const rendered = resolveRenderableObjects(scene(material, object))[0];
+  assert.equal(rendered.fill, "#ff3355");
+  assert.deepEqual(rendered.fillStyle, { type: "solid", color: "#ff3355" });
 });

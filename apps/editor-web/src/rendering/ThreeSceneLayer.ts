@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { resolveSceneObjectHierarchy } from "@grapix/shared-types";
+import { normalizeSlabProperties, resolveSceneObjectHierarchy } from "@grapix/shared-types";
 import type {
   CameraSceneObject,
   LightSceneObject,
@@ -10,6 +10,7 @@ import type {
   Vec3
 } from "@grapix/shared-types";
 import type { RenderableSceneObject, ResolvedFaceMaterial } from "./sceneMaterial";
+import { createSlabGeometry } from "./slabGeometry";
 
 const DEFAULT_FOV = 45;
 const MIN_CAMERA_NEAR = 0.01;
@@ -451,6 +452,7 @@ function geometryForObject(object: MeshSceneObject): THREE.BufferGeometry {
       return new THREE.TorusGeometry(0.35, 0.15, 20, 64)
         .scale(object.width, object.height, object.depth / 0.3);
     case "slab":
+      return createSlabGeometry(object);
     case "cube":
     case "model":
     default:
@@ -462,10 +464,23 @@ async function materialsForObject(
   object: Extract<RenderableSceneObject, { type: "mesh" }>,
   loader: THREE.TextureLoader
 ): Promise<THREE.Material | THREE.Material[]> {
+  const objectCullMode = object.meshKind === "slab"
+    ? normalizeSlabProperties(object.slab).culling
+    : undefined;
   const face = (slot: string, fallback: string) =>
-    createMaterial(object.faceMaterials?.[slot], fallback, object.opacity, loader);
+    createMaterial(object.faceMaterials?.[slot], fallback, object.opacity, loader, objectCullMode);
 
-  if (object.meshKind === "cube" || object.meshKind === "slab") {
+  if (object.meshKind === "slab") {
+    return Promise.all([
+      face("main", object.fill),
+      face("face:bevel", adjustHex(object.fill, 18)),
+      face("face:extrusion", adjustHex(object.fill, -12)),
+      face("face:back-bevel", adjustHex(object.fill, -20)),
+      face("face:back", adjustHex(object.fill, -30))
+    ]);
+  }
+
+  if (object.meshKind === "cube") {
     // BoxGeometry groups: +X, -X, +Y, -Y, +Z, -Z. GrapiX world Y points down,
     // so +Y is the visual bottom and -Y is the visual top.
     return Promise.all([
@@ -493,13 +508,15 @@ async function createMaterial(
   face: ResolvedFaceMaterial | undefined,
   fallback: string,
   objectOpacity: number,
-  loader: THREE.TextureLoader
+  loader: THREE.TextureLoader,
+  cullModeOverride?: "back" | "front" | "none"
 ): Promise<THREE.MeshStandardMaterial> {
   const descriptor = describeMeshSurfaceMaterial(face, fallback, objectOpacity);
   const resolved = face?.resolved;
-  const side = descriptor.doubleSided || descriptor.cullMode === "none"
+  const cullMode = cullModeOverride ?? descriptor.cullMode;
+  const side = descriptor.doubleSided || cullMode === "none"
     ? THREE.DoubleSide
-    : descriptor.cullMode === "front"
+    : cullMode === "front"
       ? THREE.BackSide
       : THREE.FrontSide;
   const common = {

@@ -18,6 +18,7 @@ import {
   normalizeMaterialSceneDocument,
   normalizeColorValue,
   normalizePrimitiveMaterialBinding,
+  normalizeSlabProperties,
   resolveSceneObjectHierarchy,
   readAnimatableProperty,
   redoSceneHistory,
@@ -61,6 +62,7 @@ import {
 } from "@grapix/shared-types";
 import { importMaterialAsset } from "../modules/material-manager/services/assetImporter";
 import { builtInShaders } from "../modules/material-manager/services/shaderRegistry";
+import { ensureDefaultStandardMaterial } from "../modules/material-manager/services/defaultMaterial";
 import { assetExistsOnApi } from "../lib/apiClient";
 import { clonePropertyAnimation, removePropertyKeyframe } from "./timelineAnimation";
 
@@ -2208,7 +2210,16 @@ function createLibraryObject(kind: LibraryObjectKind, scene: SceneDocument): Sce
     case "torus":
       return createMeshObject("torus", { name: "Torus", x: scene.canvas.width / 2, y: scene.canvas.height / 2, fill: "#b889ff" });
     case "slab":
-      return createMeshObject("slab", { name: "Slab", x: scene.canvas.width / 2, y: scene.canvas.height / 2, fill: "#8bd1c7", width: 360, height: 92, depth: 42 });
+      return createMeshObject("slab", {
+        name: "Slab",
+        x: scene.canvas.width / 2,
+        y: scene.canvas.height / 2,
+        fill: "#8bd1c7",
+        width: 360,
+        height: 92,
+        depth: 42,
+        slab: normalizeSlabProperties()
+      });
     case "directional-light":
       return createLightObject("directional", {
         name: "Directional Light",
@@ -2492,6 +2503,9 @@ function normalizeScene(scene: SceneDocument): SceneDocument {
         }))
       })),
       materialSlots: object.materialSlots ?? {},
+      ...(object.type === "mesh" && object.meshKind === "slab"
+        ? { slab: normalizeSlabProperties(object.slab) }
+        : {}),
       ...((object.type === "layer" || object.type === "group")
         ? { childIds: Array.isArray(object.childIds) ? object.childIds : [] }
         : {}),
@@ -2575,7 +2589,7 @@ function normalizeScene(scene: SceneDocument): SceneDocument {
     },
     activeCameraId,
     assets: scene.assets ?? [],
-    materials: scene.materials ?? [],
+    materials: ensureDefaultStandardMaterial(scene.materials ?? []),
     materialInstances: scene.materialInstances ?? [],
     shaders: [...authoredShaders, ...builtInShaderDefinitions],
     materialFolders: scene.materialFolders ?? [],

@@ -1278,6 +1278,70 @@ export interface PaintSceneObject extends BaseSceneObject {
   paintBlendMode: BrushBlendMode;
 }
 
+export interface SlabBevelProperties {
+  enabled: boolean;
+  /** Width of the bevel measured inward from the slab outline, in scene pixels. */
+  size: number;
+  /** Z depth occupied by the bevel, in scene pixels. */
+  depth: number;
+}
+
+export interface SlabProperties {
+  /** Corner radius of the slab outline, in scene pixels. */
+  cornerRadius: number;
+  /** Curved-corner tessellation quality. */
+  cornerSegments: number;
+  /** Horizontal displacement between the slab's bottom and top edges. */
+  skew: number;
+  /** Whether texture coordinates follow the skewed outline. */
+  skewTexture: boolean;
+  /** Object-level face culling, matching XPression's slab culling control. */
+  culling: MaterialCullMode;
+  frontBevel: SlabBevelProperties;
+  backBevel: SlabBevelProperties;
+}
+
+export type SlabPropertiesInput = Partial<Omit<SlabProperties, "frontBevel" | "backBevel">> & {
+  frontBevel?: Partial<SlabBevelProperties>;
+  backBevel?: Partial<SlabBevelProperties>;
+};
+
+export const DEFAULT_SLAB_PROPERTIES: SlabProperties = {
+  cornerRadius: 18,
+  cornerSegments: 6,
+  skew: 0,
+  skewTexture: false,
+  culling: "back",
+  frontBevel: {
+    enabled: true,
+    size: 6,
+    depth: 4
+  },
+  backBevel: {
+    enabled: false,
+    size: 6,
+    depth: 4
+  }
+};
+
+export function normalizeSlabProperties(value?: SlabPropertiesInput): SlabProperties {
+  return {
+    cornerRadius: value?.cornerRadius ?? DEFAULT_SLAB_PROPERTIES.cornerRadius,
+    cornerSegments: value?.cornerSegments ?? DEFAULT_SLAB_PROPERTIES.cornerSegments,
+    skew: value?.skew ?? DEFAULT_SLAB_PROPERTIES.skew,
+    skewTexture: value?.skewTexture ?? DEFAULT_SLAB_PROPERTIES.skewTexture,
+    culling: value?.culling ?? DEFAULT_SLAB_PROPERTIES.culling,
+    frontBevel: {
+      ...DEFAULT_SLAB_PROPERTIES.frontBevel,
+      ...value?.frontBevel
+    },
+    backBevel: {
+      ...DEFAULT_SLAB_PROPERTIES.backBevel,
+      ...value?.backBevel
+    }
+  };
+}
+
 /** Axis-aligned bounds of a bezier path from its vertices + tangent handles (approximate; fine for selection/gizmo). */
 export function bezierPathBounds(path: BezierPath): { x: number; y: number; width: number; height: number } {
   if (path.vertices.length === 0) {
@@ -1308,6 +1372,8 @@ export interface MeshSceneObject extends BaseSceneObject {
   type: "mesh";
   meshKind: MeshPrimitiveKind;
   depth: number;
+  /** XPression-style rounded, skewed and independently beveled slab controls. */
+  slab?: SlabProperties;
   src?: string;
   modelAssetId?: string;
   /** Ordered material elements copied from the imported glTF asset metadata. */
@@ -2090,7 +2156,6 @@ export function getBindableFaces(object: SceneObject): MaterialFace[] {
   if (object.type === "mesh") {
     switch (object.meshKind) {
       case "cube":
-      case "slab":
         return buildMaterialFaces([
           [PRIMARY_MATERIAL_SLOT, "Front", "surface"],
           ["face:back", "Back", "surface"],
@@ -2098,6 +2163,14 @@ export function getBindableFaces(object: SceneObject): MaterialFace[] {
           ["face:right", "Right", "surface"],
           ["face:top", "Top", "surface"],
           ["face:bottom", "Bottom", "surface"]
+        ]);
+      case "slab":
+        return buildMaterialFaces([
+          [PRIMARY_MATERIAL_SLOT, "Face", "surface"],
+          ["face:bevel", "Bevel", "surface"],
+          ["face:extrusion", "Extrusion", "surface"],
+          ["face:back-bevel", "Back Bevel", "surface"],
+          ["face:back", "Back Face", "surface"]
         ]);
       case "cylinder":
         return buildMaterialFaces([

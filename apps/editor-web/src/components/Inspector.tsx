@@ -1,4 +1,4 @@
-import { getMaterialBindingId, isMaterialCompatible, isMaterialCompatibleWithFace, type BindingMap, type MaskMode, type SceneObject, type SceneProperty } from "@grapix/shared-types";
+import { getMaterialBindingId, isMaterialCompatible, isMaterialCompatibleWithFace, normalizeSlabProperties, type BindingMap, type MaskMode, type SceneObject, type SceneProperty, type SlabPropertiesInput } from "@grapix/shared-types";
 import { ArrowDown, ArrowUp, Clock3, Copy, Eye, EyeOff, Lock, PenTool, Plus, Trash2, Unlock } from "lucide-react";
 import { ColorValueEditor } from "./ColorValueEditor";
 import { useEditorStore } from "../store/editorStore";
@@ -61,6 +61,28 @@ export function Inspector() {
     updateObjectBindings(object!.id, bindings);
   }
 
+  const slab = object.type === "mesh" && object.meshKind === "slab"
+    ? normalizeSlabProperties(object.slab)
+    : null;
+
+  function patchSlab(patchValue: SlabPropertiesInput) {
+    if (!slab) return;
+    patch({
+      slab: normalizeSlabProperties({
+        ...slab,
+        ...patchValue,
+        frontBevel: {
+          ...slab.frontBevel,
+          ...patchValue.frontBevel
+        },
+        backBevel: {
+          ...slab.backBevel,
+          ...patchValue.backBevel
+        }
+      })
+    } as Partial<SceneObject>);
+  }
+
   return (
     <aside className="inspector">
       <div className="panel-heading">
@@ -115,7 +137,7 @@ export function Inspector() {
         <NumberField label="H" value={object.height} onChange={(value) => patch({ height: value })} />
         {object.type === "mesh" ? (
           <>
-            <NumberField label="Depth" value={object.depth} min={1} onChange={(value) => patch({ depth: value } as Partial<SceneObject>)} />
+            <NumberField label={object.meshKind === "slab" ? "Extrusion" : "Depth"} value={object.depth} min={0.01} onChange={(value) => patch({ depth: value } as Partial<SceneObject>)} />
             <NumberField label="Rotation X" value={object.rotationX ?? 0} onChange={(value) => patch({ rotationX: value } as Partial<SceneObject>)} />
             <NumberField label="Rotation Y" value={object.rotationY ?? 0} onChange={(value) => patch({ rotationY: value } as Partial<SceneObject>)} />
             <NumberField label="Rotation Z" value={object.rotationZ ?? object.rotation} onChange={(value) => patch({ rotationZ: value } as Partial<SceneObject>)} />
@@ -164,6 +186,100 @@ export function Inspector() {
           onChange={(value) => patch({ opacity: value })}
         />
       </section>
+
+      {slab ? (
+        <>
+          <section className="field-section">
+            <h3>Slab Shape</h3>
+            <div className="two-column">
+              <NumberField
+                label="Corner Radius"
+                value={slab.cornerRadius}
+                min={0}
+                onChange={(value) => patchSlab({ cornerRadius: Math.max(0, value) })}
+              />
+              <NumberField
+                label="Corner Quality"
+                value={slab.cornerSegments}
+                min={1}
+                max={32}
+                onChange={(value) => patchSlab({ cornerSegments: Math.max(1, Math.min(32, Math.round(value))) })}
+              />
+              <NumberField
+                label="Skew"
+                value={slab.skew}
+                onChange={(value) => patchSlab({ skew: value })}
+              />
+              <ToggleField
+                label="Skew Texture"
+                value={slab.skewTexture}
+                onChange={(value) => patchSlab({ skewTexture: value })}
+              />
+              <SelectField
+                label="Culling"
+                value={slab.culling}
+                options={["back", "front", "none"]}
+                renderOption={(value) => value === "back"
+                  ? "Cull Back"
+                  : value === "front"
+                    ? "Cull Front"
+                    : "Double Sided"}
+                onChange={(value) => patchSlab({ culling: value as typeof slab.culling })}
+              />
+            </div>
+          </section>
+
+          <section className="field-section">
+            <h3>Front Bevel</h3>
+            <ToggleField
+              label="Enabled"
+              value={slab.frontBevel.enabled}
+              onChange={(enabled) => patchSlab({ frontBevel: { enabled } })}
+            />
+            {slab.frontBevel.enabled ? (
+              <div className="two-column">
+                <NumberField
+                  label="Size"
+                  value={slab.frontBevel.size}
+                  min={0}
+                  onChange={(size) => patchSlab({ frontBevel: { size: Math.max(0, size) } })}
+                />
+                <NumberField
+                  label="Depth"
+                  value={slab.frontBevel.depth}
+                  min={0}
+                  onChange={(depth) => patchSlab({ frontBevel: { depth: Math.max(0, depth) } })}
+                />
+              </div>
+            ) : null}
+          </section>
+
+          <section className="field-section">
+            <h3>Back Bevel</h3>
+            <ToggleField
+              label="Enabled"
+              value={slab.backBevel.enabled}
+              onChange={(enabled) => patchSlab({ backBevel: { enabled } })}
+            />
+            {slab.backBevel.enabled ? (
+              <div className="two-column">
+                <NumberField
+                  label="Size"
+                  value={slab.backBevel.size}
+                  min={0}
+                  onChange={(size) => patchSlab({ backBevel: { size: Math.max(0, size) } })}
+                />
+                <NumberField
+                  label="Depth"
+                  value={slab.backBevel.depth}
+                  min={0}
+                  onChange={(depth) => patchSlab({ backBevel: { depth: Math.max(0, depth) } })}
+                />
+              </div>
+            ) : null}
+          </section>
+        </>
+      ) : null}
 
       <section className="field-section">
         <ColorValueEditor

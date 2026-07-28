@@ -95,10 +95,18 @@ export function MaterialLibrary(props: MaterialLibraryProps) {
       if (name && item.kind === "asset") updateAsset(item.id, { name });
       if (name && item.kind === "instance") updateMaterialInstance(item.id, { name });
     }
-    if (event.key === "Delete" && item.kind !== "shader" && window.confirm(`Delete ${item.name}?`)) {
-      if (item.kind === "material") deleteMaterial(item.id);
-      if (item.kind === "asset") deleteAsset(item.id);
-      if (item.kind === "instance") deleteMaterialInstance(item.id);
+    if (event.key === "Delete") {
+      // TemplatesPanel owns a separate Delete shortcut. Contain this native
+      // event so deleting a library resource can never delete the open scene.
+      event.preventDefault();
+      event.stopPropagation();
+      event.nativeEvent.stopImmediatePropagation();
+      if (item.kind !== "shader" && window.confirm(`Delete ${item.name}?`)) {
+        if (item.kind === "material") deleteMaterial(item.id);
+        if (item.kind === "asset") deleteAsset(item.id);
+        if (item.kind === "instance") deleteMaterialInstance(item.id);
+      }
+      return;
     }
     if (event.key === "F5") {
       event.preventDefault();
@@ -658,7 +666,10 @@ function createItems(scene: ReturnType<typeof useEditorStore.getState>["scene"],
                 return usage.materialIds.length > 0 || usage.shaderIds.length > 0 || usage.objectIds.length > 0;
               })
             ]
-            : [...materials, ...instances, ...assets, ...shaders];
+            // "All" is the authoring library. Shader definitions are
+            // implementation resources and remain available under Shaders,
+            // where they cannot be mistaken for assignable materials.
+            : [...materials, ...instances, ...assets];
   if (!search) return items;
   return items.filter((item) => {
     const tags = item.kind === "material" ? item.material.tags : item.kind === "asset" ? item.asset.tags : [];
