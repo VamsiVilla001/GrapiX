@@ -32,6 +32,11 @@ import {
   parseScriptPermissions,
   type LinkedFontRequest
 } from "./fontManager.js";
+import {
+  resolveRemoteFonts,
+  type ResolveRemoteFontRequest
+} from "./fonts/remoteFontResolver.js";
+import { inspectFontFile } from "./fonts/fontMetadata.js";
 import { buildScenePackage } from "./packageBuilder.js";
 import { recordOperatorAction } from "./audit.js";
 import {
@@ -180,9 +185,8 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
     Body: Buffer;
   }>("/api/fonts/import", async (request, reply) => {
     const fileName = request.query.fileName?.trim();
-    const family = request.query.family?.trim();
-    if (!fileName || !family || !Buffer.isBuffer(request.body)) {
-      return reply.code(400).send({ ok: false, error: "A font file, fileName, and family are required" });
+    if (!fileName || !Buffer.isBuffer(request.body)) {
+      return reply.code(400).send({ ok: false, error: "A font file and fileName are required" });
     }
     const extension = fileName.toLowerCase().split(".").pop() ?? "";
     if (!["otf", "ttf", "woff", "woff2"].includes(extension)) {
@@ -193,12 +197,22 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
       return reply.code(415).send({ ok: false, code: "FONT_VALIDATION_FAILED", errors: validationErrors });
     }
     const mimeType = fontMimeType(extension);
+    let metadata: ReturnType<typeof inspectFontFile>;
+    try {
+      metadata = inspectFontFile(request.body);
+    } catch (error) {
+      return reply.code(415).send({
+        ok: false,
+        code: "FONT_INVALID",
+        error: error instanceof Error ? error.message : "Font metadata could not be read"
+      });
+    }
     const asset = await importAssetBuffer(request.body, fileName, mimeType);
     const font = createFileFontDefinition(asset, {
-      family,
-      displayName: request.query.displayName,
-      weight: request.query.weight ? Number(request.query.weight) : 400,
-      style: request.query.style,
+      family: request.query.family?.trim() || metadata.family,
+      displayName: request.query.displayName || metadata.displayName,
+      weight: request.query.weight ? Number(request.query.weight) : metadata.weight,
+      style: request.query.style || metadata.style,
       license: request.query.license
     });
     return {
@@ -218,6 +232,21 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
       return reply.code(400).send({
         ok: false,
         error: error instanceof Error ? error.message : "Invalid font link"
+      });
+    }
+  });
+
+  app.post<{ Body: ResolveRemoteFontRequest }>("/api/fonts/resolve", async (request, reply) => {
+    try {
+      return {
+        ok: true,
+        ...(await resolveRemoteFonts(request.body))
+      };
+    } catch (error) {
+      return reply.code(422).send({
+        ok: false,
+        code: "FONT_RESOLUTION_FAILED",
+        error: error instanceof Error ? error.message : "Remote font could not be resolved"
       });
     }
   });

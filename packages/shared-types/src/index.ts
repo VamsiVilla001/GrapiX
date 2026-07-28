@@ -534,6 +534,10 @@ export type FontSource =
       kind: "file";
       assetId: string;
       format: "otf" | "ttf" | "woff" | "woff2";
+      /** Original public URL when this face was resolved and cached from CSS. */
+      originalUrl?: string;
+      /** Stylesheet/project URL that declared this cached face. */
+      stylesheetUrl?: string;
     }
   | {
       kind: "css-url";
@@ -544,7 +548,21 @@ export type FontSource =
       kind: "adobe-fonts";
       projectId: string;
       url: string;
+    }
+  | {
+      kind: "direct-url";
+      url: string;
+      format?: "otf" | "ttf" | "woff" | "woff2";
     };
+
+export type FontLoadStatus =
+  | "LOADING"
+  | "READY"
+  | "MISSING"
+  | "INVALID"
+  | "UNSUPPORTED"
+  | "UNVERIFIED"
+  | "ERROR";
 
 export interface FontFaceDefinition {
   faceId: string;
@@ -554,6 +572,8 @@ export interface FontFaceDefinition {
   stretch?: string;
   unicodeRange?: string;
   source: FontSource;
+  status?: FontLoadStatus;
+  errorMessage?: string;
 }
 
 export interface FontDefinition {
@@ -564,7 +584,10 @@ export interface FontDefinition {
   fallbackFamilies: string[];
   embeddingPolicy: "package" | "reference" | "restricted";
   license?: string;
-  status: "READY" | "MISSING" | "UNVERIFIED" | "ERROR";
+  enabled?: boolean;
+  sourceLabel?: string;
+  status: FontLoadStatus;
+  errorMessage?: string;
 }
 
 export type TransitionKind = "cut" | "mix" | "wipe" | "dip" | "push" | "custom";
@@ -1103,14 +1126,18 @@ export interface TextSceneObject extends BaseSceneObject {
   type: "text";
   text: string;
   textLayout?: "point" | "paragraph";
+  autoFit?: "none" | "shrink" | "fit";
   writingMode?: "horizontal-tb" | "vertical-rl" | "vertical-lr";
   verticalAlign?: "top" | "middle" | "bottom";
-  direction?: "ltr" | "rtl";
+  direction?: "auto" | "ltr" | "rtl";
   fontSize: number;
+  /** Stable project-registry reference. fontFamily remains for old projects and fallback. */
+  fontId?: string;
   fontFamily: string;
   fontAssetId?: string;
-  fontWeight: "400" | "500" | "600" | "700" | "800";
-  fontStyle?: "normal" | "italic";
+  fallbackFamilies?: string[];
+  fontWeight: string;
+  fontStyle?: "normal" | "italic" | "oblique";
   textDecoration?: {
     underline?: boolean;
     strikethrough?: boolean;
@@ -2663,10 +2690,10 @@ export function validateFontDefinition(
       try {
         const url = new URL(face.source.url);
         if (url.protocol !== "https:") {
-          errors.push(`Font face ${face.faceId} must use an HTTPS stylesheet URL.`);
+          errors.push(`Font face ${face.faceId} must use an HTTPS URL.`);
         }
-        if (!isTrustedFontCssUrl(url.toString())) {
-          errors.push(`Font face ${face.faceId} uses an unapproved stylesheet host.`);
+        if (url.username || url.password) {
+          errors.push(`Font face ${face.faceId} URL cannot contain credentials.`);
         }
         if (face.source.kind === "adobe-fonts" && url.hostname !== "use.typekit.net") {
           errors.push(`Adobe Fonts face ${face.faceId} must use use.typekit.net.`);
@@ -2692,6 +2719,7 @@ export function buildFontCss(
   const rules: string[] = [];
 
   for (const font of fonts) {
+    if (font.enabled === false) continue;
     for (const face of font.faces) {
       if (face.source.kind === "css-url" || face.source.kind === "adobe-fonts") {
         if (isTrustedFontCssUrl(face.source.url)) {
@@ -2699,11 +2727,16 @@ export function buildFontCss(
         }
         continue;
       }
-      const sourceUrl = resolveAssetUrl(face.source.assetId);
+      const sourceUrl = face.source.kind === "file"
+        ? resolveAssetUrl(face.source.assetId)
+        : face.source.url;
+      const sourceFormat = face.source.kind === "file"
+        ? face.source.format
+        : face.source.format;
       rules.push([
         "@font-face {",
         `  font-family: "${escapeCssString(font.family)}";`,
-        `  src: url("${escapeCssString(sourceUrl)}") format("${face.source.format === "ttf" ? "truetype" : face.source.format === "otf" ? "opentype" : face.source.format}");`,
+        `  src: url("${escapeCssString(sourceUrl)}")${sourceFormat ? ` format("${sourceFormat === "ttf" ? "truetype" : sourceFormat === "otf" ? "opentype" : sourceFormat}")` : ""};`,
         `  font-weight: ${face.weight};`,
         `  font-style: ${face.style};`,
         face.stretch ? `  font-stretch: ${face.stretch};` : "",
@@ -2726,6 +2759,43 @@ export function isTrustedFontCssUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Escape and quote a family name unless it is a CSS generic family. */
+export function cssFontFamily(value: string): string {
+  const family = value.trim();
+  const generic = new Set([
+    "serif", "sans-serif", "monospace", "cursive", "fantasy",
+    "system-ui", "ui-serif", "ui-sans-serif", "ui-monospace", "emoji", "math", "fangsong"
+  ]);
+  return generic.has(family.toLowerCase())
+    ? family
+    : `"${escapeCssString(family)}"`;
+}
+
+export function buildFontFamilyStack(
+  font: Pick<FontDefinition, "family" | "fallbackFamilies"> | undefined,
+  legacyFamily = "sans-serif",
+  objectFallbacks: string[] = []
+): string {
+  const values = font
+    ? [font.family, ...objectFallbacks, ...font.fallbackFamilies]
+    : [legacyFamily, ...objectFallbacks];
+  const seen = new Set<string>();
+  return values
+    .flatMap((value) => value.split(","))
+    .map((value) => value.trim().replace(/^['"]|['"]$/g, ""))
+    .filter((value) => value && !seen.has(value.toLowerCase()) && !!seen.add(value.toLowerCase()))
+    .map(cssFontFamily)
+    .join(", ");
+}
+
+export function fontDefinitionForText(
+  fonts: FontDefinition[],
+  text: Pick<TextSceneObject, "fontId" | "fontFamily">
+): FontDefinition | undefined {
+  return (text.fontId ? fonts.find((font) => font.fontId === text.fontId) : undefined)
+    ?? fonts.find((font) => font.family === text.fontFamily);
 }
 
 function escapeCssString(value: string): string {
@@ -2876,6 +2946,15 @@ export function preflightScenePackage(scene: SceneDocument): ScenePackagePreflig
       });
     }
     fontIds.add(font.fontId);
+    if (font.enabled === false && scene.objects.some((object) =>
+      object.type === "text" && (object.fontId === font.fontId || (!object.fontId && object.fontFamily === font.family))
+    )) {
+      issues.push({
+        severity: "error",
+        code: "FONT_DISABLED_IN_USE",
+        message: `${font.displayName} is disabled but remains assigned to text.`
+      });
+    }
     if (font.status === "MISSING" || font.status === "ERROR") {
       issues.push({
         severity: "error",
@@ -2895,6 +2974,18 @@ export function preflightScenePackage(scene: SceneDocument): ScenePackagePreflig
         severity: "warning",
         code: "FONT_REQUIRES_NETWORK",
         message: `${font.displayName} uses a remote CSS/Adobe Fonts reference. Package a licensed file face for offline Program reliability.`
+      });
+    }
+  }
+
+  for (const object of scene.objects) {
+    if (object.type !== "text" || !object.fontId) continue;
+    if (!(scene.fonts ?? []).some((font) => font.fontId === object.fontId)) {
+      issues.push({
+        severity: "error",
+        code: "TEXT_FONT_MISSING",
+        message: `${object.name} references missing project font ${object.fontId}.`,
+        objectId: object.id
       });
     }
   }

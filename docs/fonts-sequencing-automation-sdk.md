@@ -7,24 +7,34 @@ It never evaluates JavaScript.
 
 ## Font Manager
 
-`SceneDocument.fonts` is a family/face registry. A face can use:
+`SceneDocument.fonts` is the project-wide family/face registry. A face can use:
 
 - a checksummed OTF, TTF, WOFF, or WOFF2 `font` asset embedded in `.gfxpkg`;
-- an allowlisted HTTPS Google Fonts or Bunny Fonts stylesheet reference;
+- Google Fonts, an HTTPS stylesheet/`@import`, or a direct HTTPS font URL;
 - an Adobe Fonts project link normalized to
   `https://use.typekit.net/{projectId}.css`.
 
-The Font Manager generates browser CSS for preview and assigns a family plus,
-for file fonts, `fontAssetId` to text objects. CSS and Adobe sources are
-references, not copied font binaries. They retain their licensing and network
-requirements and receive a package-preflight warning. Arbitrary CSS hosts are
-rejected because a stylesheet can affect more than font faces. On-air profiles should
-use a licensed packaged file or a declared fallback.
+The API parses only inert `@import` and `@font-face` data; it never injects
+remote CSS. It validates public HTTPS destinations, blocks local/private
+network targets and unsafe redirects, applies time/size/face limits, downloads
+supported faces, validates their binary signatures and font metadata, and
+stores them as checksum-deduplicated project assets. Source URL, stylesheet,
+license note, and family metadata are preserved. Adobe/public-host licensing
+is not bypassed; the operator remains responsible for packaging rights.
 
-Native text shaping/rasterization remains an explicit renderer gate. The daemon
-reports `nativeTextRender=false`, `packagedFontFiles=false`, and
-`remoteFontCss=false`; therefore a browser-loaded font is not misrepresented as
-native Program support.
+The editor registers every cached face through `FontFace`, awaits
+`document.fonts.ready`, and publishes a render revision only after measurement
+can be repeated. It exposes face/family loading, ready, missing, invalid,
+unsupported, and error states. Text stores a stable `fontId`, family, arbitrary
+1–1000 weight, style, object fallback stack, and bidi direction. Horizontal
+text uses browser shaping; vertical text uses the browser SVG text engine.
+Neither path splits content into individual characters.
+
+The daemon reports `nativeTextRender=true` and `packagedFontFiles=true`.
+cosmic-text performs native Unicode bidi/OpenType shaping and fallback from the
+same packaged bytes. `remoteFontCss=false` remains correct: the daemon never
+executes or downloads CSS, because the API resolves it to project assets before
+warm/Take.
 
 ## Multiple sequences and timelines
 
@@ -145,6 +155,7 @@ Font/Script Manager import; runtime imports remain forbidden.
 
 - `POST /api/fonts/import`
 - `POST /api/fonts/link`
+- `POST /api/fonts/resolve`
 - `POST /api/import/scene-script`
 - `GET|POST /api/rundowns`
 - `GET /api/rundowns/:rundownId`

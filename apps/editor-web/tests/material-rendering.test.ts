@@ -11,6 +11,7 @@ import {
 } from "@grapix/shared-types";
 import {
   describeMeshSurfaceMaterial,
+  projectMeshBounds,
   type MeshSurfaceMaterialDescriptor
 } from "../src/rendering/ThreeSceneLayer";
 import { resolveRenderableObjects } from "../src/rendering/sceneMaterial";
@@ -186,4 +187,57 @@ test("2D material assignment replaces both legacy fill and rich fillStyle", () =
   const rendered = resolveRenderableObjects(scene(material, object))[0];
   assert.equal(rendered.fill, "#ff3355");
   assert.deepEqual(rendered.fillStyle, { type: "solid", color: "#ff3355" });
+  assert.equal(rendered.faceMaterials?.main.color, "#ff3355");
+  assert.equal(rendered.faceMaterials?.main.resolved.material.materialId, material.materialId);
+});
+
+test("textured canonical material reaches a flat object as one physical surface", () => {
+  const material = createMaterialDefinition("Screen", { baseTextureAssetId: "asset_screen" });
+  const object = {
+    ...mesh(undefined),
+    id: "rect_screen",
+    type: "rect" as const,
+    name: "Screen",
+    width: 640,
+    height: 360,
+    radius: 0,
+    depth: undefined,
+    meshKind: undefined,
+    rotationX: undefined,
+    rotationY: undefined,
+    rotationZ: undefined,
+    anchor3d: undefined,
+    materialSlots: { main: material.materialId }
+  } as unknown as RectSceneObject;
+  const document = scene(material, object);
+  document.assets = [{
+    assetId: "asset_screen",
+    name: "Screen texture",
+    kind: "image",
+    source: "data:image/png;base64,AA==",
+    mimeType: "image/png",
+    importedAt: timestamp,
+    status: "READY"
+  }];
+
+  const rendered = resolveRenderableObjects(document)[0];
+  assert.equal(rendered.materialAssetSource, "data:image/png;base64,AA==");
+  assert.equal(rendered.faceMaterials?.main.assetSource, "data:image/png;base64,AA==");
+  assert.equal(rendered.faceMaterials?.main.resolved.material.type, "pbr");
+});
+
+test("Three.js projection follows GrapiX canvas movement without mirroring either axis", () => {
+  const material = createMaterialDefinition("Projection", "pbr");
+  const object = mesh(material.materialId);
+  const document = scene(material, object);
+  const initial = projectMeshBounds(document, object);
+
+  assert.ok(Math.abs(initial.center.x - object.x) < 0.001);
+  assert.ok(Math.abs(initial.center.y - object.y) < 0.001);
+
+  const moved = { ...object, x: object.x + 125, y: object.y + 80 };
+  document.objects = [moved];
+  const projected = projectMeshBounds(document, moved);
+  assert.ok(Math.abs(projected.center.x - (initial.center.x + 125)) < 0.001);
+  assert.ok(Math.abs(projected.center.y - (initial.center.y + 80)) < 0.001);
 });

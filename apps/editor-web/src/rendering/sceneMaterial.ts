@@ -73,8 +73,8 @@ function resolveFaceMaterial(scene: SceneDocument, object: SceneObject, slotKey:
  * The resulting records include shader parameters and texture sampler/UV
  * metadata so the 3D renderer does not flatten a material into a colour swatch.
  */
-function resolveMeshFaceMaterials(scene: SceneDocument, object: SceneObject): Record<string, ResolvedFaceMaterial> | undefined {
-  if (object.type !== "mesh") {
+function resolveSurfaceMaterials(scene: SceneDocument, object: SceneObject): Record<string, ResolvedFaceMaterial> | undefined {
+  if (!["mesh", "rect", "ellipse", "image"].includes(object.type)) {
     return undefined;
   }
   const entries: Record<string, ResolvedFaceMaterial> = {};
@@ -88,7 +88,7 @@ function resolveMeshFaceMaterials(scene: SceneDocument, object: SceneObject): Re
 }
 
 export function applyMaterialSlots<T extends SceneObject>(object: T, scene: SceneDocument): T & RenderableSceneObject {
-  const faceMaterials = resolveMeshFaceMaterials(scene, object);
+  const faceMaterials = resolveSurfaceMaterials(scene, object);
   const material = findMaterial(scene.materials, object.materialSlots.main);
 
   if (!material) {

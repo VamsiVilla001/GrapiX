@@ -21,11 +21,13 @@
     "ag-psd": "^22.0.1",
     "fast-xml-parser": "^5.9.0",
     "fastify": "^5.10.0",
+    "fontkit": "^2.0.4",
     "jszip": "^3.10.1",
     "pdfjs-dist": "^5.4.624",
     "pngjs": "^7.0.0"
   },
   "devDependencies": {
+    "@types/fontkit": "^2.0.9",
     "@types/node": "^22.5.0",
     "@types/pngjs": "^6.0.5",
     "tsx": "^4.19.0",

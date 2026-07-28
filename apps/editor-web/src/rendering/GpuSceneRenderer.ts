@@ -25,11 +25,14 @@ import {
   type PaintStroke,
   type SceneDocument,
   type SceneObject,
+  buildFontFamilyStack,
+  fontDefinitionForText,
   normalizeColorValue
 } from "@grapix/shared-types";
 import type { PreviewRendererCapabilities } from "./ScenePreviewRenderer";
 import { isVideoSource, type RenderableSceneObject } from "./sceneMaterial";
 import { ThreeSceneLayer } from "./ThreeSceneLayer";
+import { projectFontRegistry } from "../fonts/ProjectFontRegistry";
 
 /** GrapiX texture wrap mode -> Pixi WebGPU/WebGL address mode. */
 function pixiWrapMode(wrap: MaterialTextureSlot["wrap"] | undefined): WRAP_MODE {
@@ -200,7 +203,12 @@ export class GpuSceneRenderer {
     nextRoot.addChild(drawBackground(scene));
 
     for (const object of objects) {
-      if (object.type === "mesh" || object.type === "layer" || object.type === "group") {
+      if (
+        object.type === "mesh"
+        || object.type === "layer"
+        || object.type === "group"
+        || (["rect", "ellipse", "image"].includes(object.type) && Boolean(object.faceMaterials?.main))
+      ) {
         continue;
       }
       if (object.resolvedMaterial && (
@@ -214,7 +222,7 @@ export class GpuSceneRenderer {
       )) {
         continue;
       }
-      const content = await this.createDisplayObject(object);
+      const content = await this.createDisplayObject(object, scene);
 
       if (version !== this.renderVersion) {
         destroyContainer(nextRoot);
@@ -290,14 +298,14 @@ export class GpuSceneRenderer {
     }
   }
 
-  private async createDisplayObject(object: RenderableSceneObject): Promise<Container | Graphics | Text> {
+  private async createDisplayObject(object: RenderableSceneObject, scene: SceneDocument): Promise<Container | Graphics | Text> {
     switch (object.type) {
       case "rect":
         return object.materialAssetSource ? this.drawTexturedQuad(object) : drawRect(object);
       case "ellipse":
         return drawEllipse(object);
       case "text":
-        return drawText(object);
+        return drawText(object, scene);
       case "image":
         return this.drawImageObject(object);
       case "line":
@@ -839,17 +847,22 @@ function drawGroup(object: Extract<SceneObject, { type: "group" }>): Graphics {
   return graphics;
 }
 
-function drawText(object: Extract<SceneObject, { type: "text" }>): Text | Container {
+async function drawText(
+  object: Extract<SceneObject, { type: "text" }>,
+  scene: SceneDocument
+): Promise<Text | Container> {
+  const font = fontDefinitionForText(scene.fonts ?? [], object);
+  const fontFamily = buildFontFamilyStack(font, object.fontFamily, object.fallbackFamilies);
   if (object.writingMode && object.writingMode !== "horizontal-tb") {
-    return drawVerticalText(object);
+    return drawVerticalText(object, fontFamily);
   }
   const text = new Text({
-    text: object.text,
+    text: bidiIsolate(object.text, object.direction),
     style: {
       fill: pixiColorValue(object.fillStyle, object.fill),
-      fontFamily: object.fontFamily,
+      fontFamily,
       fontSize: object.fontSize,
-      fontWeight: object.fontWeight,
+      fontWeight: pixiFontWeight(object.fontWeight),
       fontStyle: object.fontStyle,
       letterSpacing: object.letterSpacing,
       lineHeight: object.lineHeight,
@@ -858,6 +871,12 @@ function drawText(object: Extract<SceneObject, { type: "text" }>): Text | Contai
       wordWrapWidth: object.width
     }
   });
+
+  if (object.autoFit && object.autoFit !== "none" && text.width > 0 && text.height > 0) {
+    const ratio = Math.min(object.width / text.width, object.height / text.height);
+    const scale = object.autoFit === "shrink" ? Math.min(1, ratio) : ratio;
+    if (Number.isFinite(scale) && scale > 0) text.scale.set(scale);
+  }
 
   if (object.align === "center") {
     text.x = object.width / 2;
@@ -869,50 +888,59 @@ function drawText(object: Extract<SceneObject, { type: "text" }>): Text | Contai
     text.anchor.set(1, 0);
   }
 
+  const runtime = font ? projectFontRegistry.get(font.fontId) : undefined;
+  if (font && runtime?.status !== "READY") {
+    const container = new Container();
+    const warning = new Graphics();
+    warning.rect(0, 0, Math.max(object.width, text.width), Math.max(object.height, text.height))
+      .stroke({ color: "#ff496c", width: 2, alpha: 0.9 });
+    container.addChild(text, warning);
+    return container;
+  }
   return text;
 }
 
-function drawVerticalText(object: Extract<SceneObject, { type: "text" }>): Container {
-  const container = new Container();
-  const characters = Array.from(object.text);
-  const advance = Math.max(1, object.lineHeight ?? object.fontSize * 1.2);
-  const columns = Math.max(1, Math.ceil(characters.length / Math.max(1, Math.floor(object.height / advance))));
-  const rowsPerColumn = Math.max(1, Math.ceil(characters.length / columns));
-  const columnAdvance = Math.max(object.fontSize, advance);
-
-  for (let column = 0; column < columns; column += 1) {
-    const start = column * rowsPerColumn;
-    const glyphs = characters.slice(start, start + rowsPerColumn);
-    const contentHeight = glyphs.length * advance;
-    const offsetY = object.verticalAlign === "middle"
-      ? Math.max(0, (object.height - contentHeight) / 2)
-      : object.verticalAlign === "bottom"
-        ? Math.max(0, object.height - contentHeight)
-        : 0;
-    const x = object.writingMode === "vertical-lr"
-      ? column * columnAdvance
-      : object.width - object.fontSize - column * columnAdvance;
-
-    glyphs.forEach((glyph, row) => {
-      const text = new Text({
-        text: glyph,
-        style: {
-          fill: pixiColorValue(object.fillStyle, object.fill),
-          fontFamily: object.fontFamily,
-          fontSize: object.fontSize,
-          fontWeight: object.fontWeight,
-          fontStyle: object.fontStyle,
-          align: "center"
-        }
-      });
-      text.x = x + object.fontSize / 2;
-      text.y = offsetY + row * advance;
-      text.anchor.set(0.5, 0);
-      container.addChild(text);
-    });
+async function drawVerticalText(
+  object: Extract<SceneObject, { type: "text" }>,
+  fontFamily: string
+): Promise<Sprite> {
+  // SVG delegates vertical layout, bidi, ligatures, combining marks, and
+  // fallback shaping to the browser text engine. Never split text into
+  // characters: doing so breaks Arabic/Indic shaping and emoji clusters.
+  const anchor = object.verticalAlign === "middle" ? "middle" : object.verticalAlign === "bottom" ? "end" : "start";
+  const y = object.verticalAlign === "middle" ? object.height / 2 : object.verticalAlign === "bottom" ? object.height : 0;
+  const x = object.writingMode === "vertical-lr" ? 0 : object.width;
+  const color = normalizeColorValue(object.fillStyle, object.fill);
+  const fill = color.type === "solid" ? color.color : object.fill;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.max(1, object.width)}" height="${Math.max(1, object.height)}">
+<text x="${x}" y="${y}" fill="${escapeXml(fill)}" font-family="${escapeXml(fontFamily)}" font-size="${object.fontSize}" font-weight="${escapeXml(object.fontWeight)}" font-style="${object.fontStyle ?? "normal"}" text-anchor="${anchor}" style="writing-mode:${object.writingMode};white-space:pre-wrap;direction:${object.direction ?? "auto"};letter-spacing:${object.letterSpacing ?? 0}px">${escapeXml(object.text)}</text>
+</svg>`;
+  const image = new Image();
+  const source = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+  try {
+    image.src = source;
+    await image.decode();
+    return new Sprite(Texture.from(image));
+  } finally {
+    URL.revokeObjectURL(source);
   }
+}
 
-  return container;
+function bidiIsolate(value: string, direction: "auto" | "ltr" | "rtl" | undefined): string {
+  return direction === "rtl" ? `\u2067${value}\u2069`
+    : direction === "ltr" ? `\u2066${value}\u2069`
+      : value;
+}
+
+function pixiFontWeight(value: string): "100" | "200" | "300" | "400" | "500" | "600" | "700" | "800" | "900" {
+  const weight = Math.max(100, Math.min(900, Math.round((Number(value) || 400) / 100) * 100));
+  return String(weight) as ReturnType<typeof pixiFontWeight>;
+}
+
+function escapeXml(value: string): string {
+  return value.replace(/[<>&"']/g, (character) => ({
+    "<": "&lt;", ">": "&gt;", "&": "&amp;", "\"": "&quot;", "'": "&apos;"
+  })[character]!);
 }
 
 function pixiColorValue(value: ColorValue | string | undefined, fallback: string): string | FillGradient {

@@ -31,6 +31,10 @@ export interface ProjectedMeshBounds {
   center: Vec2;
 }
 
+type ThreeRenderableSceneObject =
+  | Extract<RenderableSceneObject, { type: "mesh" }>
+  | Extract<RenderableSceneObject, { type: "rect" | "ellipse" | "image" }>;
+
 /**
  * Depth-buffered 3D layer used by the editor viewport. Pixi remains the 2D
  * broadcast compositor; real mesh primitives live here so Z translation,
@@ -51,6 +55,12 @@ export class ThreeSceneLayer {
     this.lighting.name = "Scene lighting";
     addThreeChild(this.scene, this.lighting, "3D lighting root");
     addThreeChild(this.scene, this.content, "3D content root");
+    // GrapiX authors canvas coordinates with +Y pointing down. Three.js uses
+    // a right-handed +Y-up world. Reflect the authored scene once at the layer
+    // roots instead of rotating the camera 180 degrees around its view axis
+    // (which also mirrors X and made material-backed Quads move backwards).
+    this.lighting.scale.y = -1;
+    this.content.scale.y = -1;
   }
 
   mount(host: HTMLElement, scene: SceneDocument): void {
@@ -68,15 +78,20 @@ export class ThreeSceneLayer {
     if (this.destroyed) return;
     const version = ++this.renderVersion;
     const next = new THREE.Group();
-    const meshObjects = objects.filter((object): object is Extract<RenderableSceneObject, { type: "mesh" }> =>
-      object.type === "mesh" && object.visible
+    const surfaceObjects = objects.filter((object): object is ThreeRenderableSceneObject =>
+      object.visible && (
+        object.type === "mesh"
+        || (["rect", "ellipse", "image"].includes(object.type) && Boolean(object.faceMaterials?.main))
+      )
     );
     const lightObjects = objects.filter((object): object is Extract<RenderableSceneObject, { type: "light" }> =>
       object.type === "light" && object.visible
     );
 
-    for (const object of meshObjects) {
-      const rendered = await this.createMeshObject(object);
+    for (const object of surfaceObjects) {
+      const rendered = object.type === "mesh"
+        ? await this.createMeshObject(object)
+        : await this.createPlanarObject(object);
       if (version !== this.renderVersion || this.destroyed) {
         disposeObject3d(rendered);
         disposeObject3d(next);
@@ -92,7 +107,7 @@ export class ThreeSceneLayer {
     }
     rebuildSceneLighting(this.lighting, scene, lightObjects);
     this.camera = resolveSceneCamera(scene, objects);
-    if (meshObjects.length > 0) {
+    if (surfaceObjects.length > 0) {
       this.ensureRenderer(scene);
     }
     if (this.renderer) {
@@ -152,6 +167,37 @@ export class ThreeSceneLayer {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     return applyObjectTransform(mesh, object);
+  }
+
+  private async createPlanarObject(
+    object: Extract<RenderableSceneObject, { type: "rect" | "ellipse" | "image" }>
+  ): Promise<THREE.Object3D> {
+    const geometry = object.type === "ellipse"
+      ? new THREE.CircleGeometry(0.5, 64).scale(object.width, object.height, 1)
+      : new THREE.PlaneGeometry(object.width, object.height);
+    const material = await createMaterial(
+      object.faceMaterials?.main,
+      object.fill,
+      object.opacity,
+      this.textureLoader
+    );
+    const surface = new THREE.Mesh(geometry, material);
+    surface.castShadow = true;
+    surface.receiveShadow = true;
+    surface.position.set(
+      object.width / 2 - (object.anchor?.x ?? 0),
+      object.height / 2 - (object.anchor?.y ?? 0),
+      0
+    );
+
+    const root = new THREE.Group();
+    root.name = object.name;
+    root.userData.sceneObjectId = object.id;
+    root.position.set(object.x, object.y, object.zDepth);
+    root.rotation.z = THREE.MathUtils.degToRad(object.rotation ?? 0);
+    root.scale.set(object.scaleX ?? 1, object.scaleY ?? 1, object.scaleZ ?? 1);
+    addThreeChild(root, surface, `physical 2D surface for ${object.id}`);
+    return root;
   }
 
   private async loadModel(object: Extract<RenderableSceneObject, { type: "mesh" }>): Promise<THREE.Object3D | null> {
@@ -228,9 +274,9 @@ function createSyntheticCamera(scene: SceneDocument): THREE.PerspectiveCamera {
   camera.aspect = width / height;
   camera.near = Math.max(1, focalDistance / 2000);
   camera.far = focalDistance + 20_000;
-  camera.position.set(width / 2, height / 2, focalDistance);
-  camera.up.set(0, -1, 0);
-  camera.lookAt(width / 2, height / 2, 0);
+  camera.position.set(width / 2, -height / 2, focalDistance);
+  camera.up.set(0, 1, 0);
+  camera.lookAt(width / 2, -height / 2, 0);
   camera.updateProjectionMatrix();
   camera.updateMatrixWorld(true);
   return camera;
@@ -267,15 +313,21 @@ function resolveSceneCamera(
 
   const position = new THREE.Vector3(
     finiteNumber(active.x, width / 2),
-    finiteNumber(active.y, height / 2),
+    -finiteNumber(active.y, height / 2),
     finiteNumber(active.zDepth, 0)
   );
-  const target = sceneVector(active.target, { x: width / 2, y: height / 2, z: 0 });
+  const authoredTarget = sceneVector(active.target, { x: width / 2, y: height / 2, z: 0 });
+  const target = new THREE.Vector3(authoredTarget.x, -authoredTarget.y, authoredTarget.z);
   if (position.distanceToSquared(target) < 0.000001) {
     target.z = position.z - 1;
   }
   camera.position.copy(position);
-  camera.up.copy(safeCameraUp(position, target, sceneVector(active.up, { x: 0, y: -1, z: 0 })));
+  const authoredUp = sceneVector(active.up, { x: 0, y: -1, z: 0 });
+  camera.up.copy(safeCameraUp(
+    position,
+    target,
+    new THREE.Vector3(authoredUp.x, -authoredUp.y, authoredUp.z)
+  ));
   camera.lookAt(target);
   camera.updateProjectionMatrix();
   camera.updateMatrixWorld(true);
@@ -725,7 +777,8 @@ function projectPoint(
   camera: THREE.Camera,
   point: THREE.Vector3
 ): THREE.Vector3 {
-  const projected = point.project(camera);
+  // Match the Y reflection applied to the Three.js content root.
+  const projected = new THREE.Vector3(point.x, -point.y, point.z).project(camera);
   return new THREE.Vector3(
     (projected.x * 0.5 + 0.5) * scene.canvas.width,
     (-projected.y * 0.5 + 0.5) * scene.canvas.height,

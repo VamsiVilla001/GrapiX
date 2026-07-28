@@ -49,13 +49,14 @@ fn fixture_scene_prepares_for_rendering() {
     assert_eq!(scene.rects[1].object_id, "ellipse_fixture_badge");
     assert_eq!(scene.rects[1].primitive_kind, 1);
 
-    // Text remains unsupported and must produce an explicit warning.
+    // Text is retained as one Unicode shaping run for the native compositor.
     assert_eq!(scene.object_count, 3);
-    assert!(
-        scene.warnings.iter().any(|w| w.contains("\"text\"")),
-        "missing unsupported warning for text: {:?}",
-        scene.warnings
-    );
+    assert_eq!(scene.texts.len(), 1);
+    assert_eq!(scene.texts[0].object_id, "text_fixture_name");
+    assert!(scene
+        .warnings
+        .iter()
+        .all(|warning| !warning.contains("\"text\"")));
 }
 
 #[test]

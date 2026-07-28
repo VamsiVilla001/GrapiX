@@ -16,7 +16,8 @@
 
 use serde::Deserialize;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 
 use super::mesh_prepare::{prepare_meshes, PreparedMesh};
 
@@ -234,6 +235,61 @@ pub struct PreparedRect {
     pub primitive_kind: u32,
 }
 
+#[derive(Debug, Clone)]
+pub struct PreparedFont {
+    pub asset_id: String,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreparedTextStyle {
+    Normal,
+    Italic,
+    Oblique,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreparedTextAlign {
+    Left,
+    Center,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreparedAutoFit {
+    None,
+    Shrink,
+    Fit,
+}
+
+/// Text ready for native Unicode shaping. Font bytes are loaded during scene
+/// preparation, never from the real-time render loop.
+#[derive(Debug, Clone)]
+pub struct PreparedText {
+    pub object_id: String,
+    pub text: String,
+    pub family: String,
+    pub weight: u16,
+    pub style: PreparedTextStyle,
+    pub font_size: f32,
+    pub line_height: f32,
+    pub letter_spacing: f32,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub rotation_degrees: f32,
+    pub scale_x: f32,
+    pub scale_y: f32,
+    pub anchor_x: f32,
+    pub anchor_y: f32,
+    pub color_rgba: [u8; 4],
+    pub wrap: bool,
+    pub auto_fit: PreparedAutoFit,
+    pub align: PreparedTextAlign,
+    pub vertical: bool,
+}
+
 /// Fixed-size native gradient payload shared with the composite quad shader.
 /// Kind: 0 solid, 1 linear, 2 radial. At most eight authored stops are used.
 #[derive(Debug, Clone, Copy)]
@@ -303,6 +359,10 @@ pub struct PreparedScene {
     pub background_gradient: PreparedGradient,
     /// Render-ordered (layerId, zDepth, zIndex).
     pub rects: Vec<PreparedRect>,
+    /// Unicode-shaped native text, composited into the Program frame.
+    pub texts: Vec<PreparedText>,
+    /// Deduplicated packaged project fonts, loaded before rendering.
+    pub fonts: Vec<PreparedFont>,
     /// Depth-tested native primitive or imported glTF surfaces.
     pub meshes: Vec<PreparedMesh>,
     /// Visible authored lights. An empty list selects the renderer's readable
@@ -339,6 +399,15 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
     }
 
     let mut warnings = Vec::new();
+    let mut take_blockers = Vec::new();
+    let fonts = prepare_fonts(scene_json, &mut warnings, &mut take_blockers);
+    let texts = prepare_texts(
+        scene_json,
+        &document.objects,
+        &fonts,
+        &mut warnings,
+        &mut take_blockers,
+    );
     let meshes = prepare_meshes(scene_json, &document.objects, &mut warnings);
     let lights = prepare_lights(
         &document.objects,
@@ -355,7 +424,7 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
             .and_then(Value::as_str)
             .unwrap_or("<missing type>");
 
-        if object_type == "mesh" || object_type == "light" {
+        if object_type == "mesh" || object_type == "light" || object_type == "text" {
             continue;
         }
 
@@ -415,8 +484,23 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
                 }
 
                 if material.material_type != "solid-color" {
+                    if matches!(
+                        material.material_type.as_str(),
+                        "material"
+                            | "basic-lit"
+                            | "pbr"
+                            | "image"
+                            | "unlit-texture"
+                            | "additive-glow"
+                    ) {
+                        // Material-bound flat primitives are prepared as
+                        // physical planes by mesh_prepare so canonical PBR
+                        // parameters, textures, UVs and scene lights reach the
+                        // native viewport. Do not also emit a legacy quad.
+                        continue;
+                    }
                     warnings.push(format!(
-                        "rect {} material {:?} is type {:?} and is NOT rendered by the daemon yet; textured materials remain editor-preview only",
+                        "rect {} material {:?} has unsupported native type {:?} and is not rendered",
                         rect.id, material.name, material.material_type
                     ));
                     continue;
@@ -541,7 +625,7 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
 
     for (kind, count) in &unsupported_counts {
         warnings.push(format!(
-            "{count} object(s) of type {kind:?} are NOT rendered: native v1 currently renders rects, ellipses, and real 3D meshes"
+            "{count} object(s) of type {kind:?} are NOT rendered: native v1 currently renders text, rects, ellipses, and real 3D meshes"
         ));
     }
 
@@ -564,16 +648,17 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
         [0.0, 0.0, 0.0, 0.0]
     });
 
-    let take_blockers = warnings
-        .iter()
-        .filter(|warning| {
-            let normalized = warning.to_ascii_lowercase();
-            normalized.contains("not rendered")
-                || normalized.contains("skipped")
-                || normalized.contains("missing material")
-        })
-        .cloned()
-        .collect();
+    take_blockers.extend(
+        warnings
+            .iter()
+            .filter(|warning| {
+                let normalized = warning.to_ascii_lowercase();
+                normalized.contains("not rendered")
+                    || normalized.contains("skipped")
+                    || normalized.contains("missing material")
+            })
+            .cloned(),
+    );
 
     let background_fill = to_linear_premultiplied(background, 1.0);
     let (background_linear_premultiplied, background_gradient) = prepare_color_value(
@@ -593,6 +678,8 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
         background_linear_premultiplied,
         background_gradient,
         rects: rects.into_iter().map(|(_, _, _, rect)| rect).collect(),
+        texts,
+        fonts,
         meshes,
         lights,
         object_count: document.objects.len(),
@@ -600,6 +687,285 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
         take_blockers,
         source_document: scene_json.clone(),
     })
+}
+
+fn prepare_fonts(
+    scene: &Value,
+    warnings: &mut Vec<String>,
+    blockers: &mut Vec<String>,
+) -> Vec<PreparedFont> {
+    let asset_sources: HashMap<&str, &str> = scene
+        .get("assets")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|asset| asset.get("kind").and_then(Value::as_str) == Some("font"))
+        .filter_map(|asset| {
+            Some((
+                asset.get("assetId")?.as_str()?,
+                asset.get("source")?.as_str()?,
+            ))
+        })
+        .collect();
+    let mut prepared = Vec::new();
+    let mut seen = HashSet::new();
+    for font in scene
+        .get("fonts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if font.get("enabled").and_then(Value::as_bool) == Some(false) {
+            continue;
+        }
+        for face in font
+            .get("faces")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let Some(source) = face.get("source") else {
+                continue;
+            };
+            if source.get("kind").and_then(Value::as_str) != Some("file") {
+                blockers.push(format!(
+                    "font {:?} is a remote reference without packaged bytes",
+                    font.get("displayName")
+                        .and_then(Value::as_str)
+                        .unwrap_or("<unknown>")
+                ));
+                continue;
+            }
+            let Some(asset_id) = source.get("assetId").and_then(Value::as_str) else {
+                continue;
+            };
+            if !seen.insert(asset_id.to_string()) {
+                continue;
+            }
+            let Some(asset_source) = asset_sources.get(asset_id) else {
+                blockers.push(format!("font asset {asset_id} is missing from the scene"));
+                continue;
+            };
+            match load_font_bytes(asset_source) {
+                Ok(bytes) => prepared.push(PreparedFont {
+                    asset_id: asset_id.to_string(),
+                    bytes,
+                }),
+                Err(error) => {
+                    let message = format!("font asset {asset_id} could not be prepared: {error}");
+                    warnings.push(message.clone());
+                    blockers.push(message);
+                }
+            }
+        }
+    }
+    prepared
+}
+
+fn prepare_texts(
+    scene: &Value,
+    objects: &[Value],
+    prepared_fonts: &[PreparedFont],
+    warnings: &mut Vec<String>,
+    blockers: &mut Vec<String>,
+) -> Vec<PreparedText> {
+    let font_definitions = scene.get("fonts").and_then(Value::as_array);
+    let available_assets: HashSet<&str> = prepared_fonts
+        .iter()
+        .map(|font| font.asset_id.as_str())
+        .collect();
+    let mut texts = Vec::new();
+    for value in objects {
+        if value.get("type").and_then(Value::as_str) != Some("text")
+            || value.get("visible").and_then(Value::as_bool) == Some(false)
+        {
+            continue;
+        }
+        let id = value
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or("<unknown>");
+        let requested_id = value.get("fontId").and_then(Value::as_str);
+        let definition = font_definitions.into_iter().flatten().find(|font| {
+            requested_id
+                .is_some_and(|font_id| font.get("fontId").and_then(Value::as_str) == Some(font_id))
+                || (requested_id.is_none()
+                    && font.get("family").and_then(Value::as_str)
+                        == value.get("fontFamily").and_then(Value::as_str))
+        });
+        let packaged_face = definition
+            .and_then(|font| font.get("faces"))
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .find(|face| {
+                face.get("source")
+                    .and_then(|source| source.get("kind"))
+                    .and_then(Value::as_str)
+                    == Some("file")
+            });
+        let asset_id = packaged_face
+            .and_then(|face| face.get("source"))
+            .and_then(|source| source.get("assetId"))
+            .and_then(Value::as_str);
+        if definition.is_some()
+            && !asset_id.is_some_and(|asset_id| available_assets.contains(asset_id))
+        {
+            blockers.push(format!(
+                "text object {id} has no prepared packaged font face"
+            ));
+            continue;
+        }
+        let fill = value
+            .get("fill")
+            .and_then(Value::as_str)
+            .unwrap_or("#ffffff");
+        let Some(color) = parse_hex_color(fill) else {
+            warnings.push(format!(
+                "text object {id} uses unsupported fill {fill:?}; using white"
+            ));
+            continue;
+        };
+        let opacity = value
+            .get("opacity")
+            .and_then(Value::as_f64)
+            .unwrap_or(1.0)
+            .clamp(0.0, 1.0);
+        let alpha = (color[3] as f64 * opacity * 255.0)
+            .round()
+            .clamp(0.0, 255.0) as u8;
+        let number = |name: &str, default: f64| {
+            value.get(name).and_then(Value::as_f64).unwrap_or(default) as f32
+        };
+        let font_size = number("fontSize", 16.0).max(1.0);
+        texts.push(PreparedText {
+            object_id: id.to_string(),
+            text: value
+                .get("text")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            family: definition
+                .and_then(|font| font.get("family"))
+                .and_then(Value::as_str)
+                .or_else(|| value.get("fontFamily").and_then(Value::as_str))
+                .unwrap_or("sans-serif")
+                .to_string(),
+            weight: value
+                .get("fontWeight")
+                .and_then(Value::as_str)
+                .and_then(|weight| weight.parse::<u16>().ok())
+                .unwrap_or(400)
+                .clamp(1, 1000),
+            style: match value
+                .get("fontStyle")
+                .and_then(Value::as_str)
+                .unwrap_or("normal")
+            {
+                "italic" => PreparedTextStyle::Italic,
+                "oblique" => PreparedTextStyle::Oblique,
+                _ => PreparedTextStyle::Normal,
+            },
+            font_size,
+            line_height: number("lineHeight", f64::from(font_size * 1.2)).max(1.0),
+            letter_spacing: number("letterSpacing", 0.0),
+            x: number("x", 0.0),
+            y: number("y", 0.0),
+            width: number("width", 1.0).max(1.0),
+            height: number("height", 1.0).max(1.0),
+            rotation_degrees: number("rotation", 0.0),
+            scale_x: number("scaleX", 1.0),
+            scale_y: number("scaleY", 1.0),
+            anchor_x: value
+                .get("anchor")
+                .and_then(|anchor| anchor.get("x"))
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0) as f32,
+            anchor_y: value
+                .get("anchor")
+                .and_then(|anchor| anchor.get("y"))
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0) as f32,
+            color_rgba: [
+                (color[0] * 255.0).round() as u8,
+                (color[1] * 255.0).round() as u8,
+                (color[2] * 255.0).round() as u8,
+                alpha,
+            ],
+            wrap: value.get("textLayout").and_then(Value::as_str) != Some("point"),
+            auto_fit: match value
+                .get("autoFit")
+                .and_then(Value::as_str)
+                .unwrap_or("none")
+            {
+                "shrink" => PreparedAutoFit::Shrink,
+                "fit" => PreparedAutoFit::Fit,
+                _ => PreparedAutoFit::None,
+            },
+            align: match value.get("align").and_then(Value::as_str).unwrap_or("left") {
+                "center" => PreparedTextAlign::Center,
+                "right" => PreparedTextAlign::Right,
+                _ => PreparedTextAlign::Left,
+            },
+            vertical: value
+                .get("writingMode")
+                .and_then(Value::as_str)
+                .is_some_and(|mode| mode != "horizontal-tb"),
+        });
+    }
+    texts
+}
+
+fn load_font_bytes(source: &str) -> anyhow::Result<Vec<u8>> {
+    const MAX_FONT_BYTES: usize = 30 * 1024 * 1024;
+    if let Some(data) = source.strip_prefix("data:") {
+        let (_, payload) = data
+            .split_once(',')
+            .ok_or_else(|| anyhow::anyhow!("invalid data URL"))?;
+        let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, payload)?;
+        anyhow::ensure!(bytes.len() <= MAX_FONT_BYTES, "font exceeds 30 MiB");
+        return decode_web_font(bytes);
+    }
+    let resolved = if source.starts_with("/api/") {
+        format!("http://127.0.0.1:4100{source}")
+    } else {
+        source.to_string()
+    };
+    let url = reqwest::Url::parse(&resolved)?;
+    anyhow::ensure!(
+        url.scheme() == "http" && matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "::1")),
+        "native font loading only accepts the local GrapiX asset service or packaged data URLs"
+    );
+    let response = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(8))
+        .build()?
+        .get(url)
+        .send()?
+        .error_for_status()?;
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_FONT_BYTES as u64)
+    {
+        anyhow::bail!("font exceeds 30 MiB");
+    }
+    let bytes = response.bytes()?.to_vec();
+    anyhow::ensure!(bytes.len() <= MAX_FONT_BYTES, "font exceeds 30 MiB");
+    decode_web_font(bytes)
+}
+
+fn decode_web_font(bytes: Vec<u8>) -> anyhow::Result<Vec<u8>> {
+    let decoded = match bytes.get(..4) {
+        Some(b"wOFF") => wuff::decompress_woff1(&bytes)
+            .map_err(|error| anyhow::anyhow!("invalid WOFF font: {error:?}"))?,
+        Some(b"wOF2") => wuff::decompress_woff2(&bytes)
+            .map_err(|error| anyhow::anyhow!("invalid WOFF2 font: {error:?}"))?,
+        _ => bytes,
+    };
+    anyhow::ensure!(
+        decoded.len() <= 100 * 1024 * 1024,
+        "decoded font exceeds 100 MiB"
+    );
+    Ok(decoded)
 }
 
 fn prepare_lights(
@@ -1038,21 +1404,45 @@ mod tests {
 
     #[test]
     fn warns_for_unsupported_types_instead_of_pretending() {
-        let mut text = rect_object();
-        text["type"] = json!("text");
-        text["id"] = json!("text_1");
+        let mut image = rect_object();
+        image["type"] = json!("image");
+        image["id"] = json!("image_1");
 
         let scene =
-            prepare_scene(&minimal_scene(vec![rect_object(), text])).expect("scene must prepare");
+            prepare_scene(&minimal_scene(vec![rect_object(), image])).expect("scene must prepare");
         assert_eq!(scene.rects.len(), 1);
         assert!(
             scene
                 .warnings
                 .iter()
-                .any(|w| w.contains("\"text\"") && w.contains("NOT rendered")),
+                .any(|w| w.contains("\"image\"") && w.contains("NOT rendered")),
             "expected an explicit unsupported-type warning, got {:?}",
             scene.warnings
         );
+    }
+
+    #[test]
+    fn prepares_complex_unicode_as_one_shaping_run() {
+        let mut text = rect_object();
+        text["type"] = json!("text");
+        text["id"] = json!("text_unicode");
+        text["text"] = json!("مرحبا नमस्ते 👩🏽‍💻");
+        text["fontFamily"] = json!("sans-serif");
+        text["fontWeight"] = json!("400");
+        text["fontSize"] = json!(42);
+        text["lineHeight"] = json!(50);
+        text["textLayout"] = json!("paragraph");
+        text["align"] = json!("right");
+        text["writingMode"] = json!("horizontal-tb");
+        let prepared =
+            prepare_scene(&minimal_scene(vec![text])).expect("unicode text must prepare");
+        assert_eq!(prepared.texts.len(), 1);
+        assert_eq!(prepared.texts[0].text, "مرحبا नमस्ते 👩🏽‍💻");
+        assert_eq!(prepared.texts[0].align, PreparedTextAlign::Right);
+        assert!(prepared
+            .warnings
+            .iter()
+            .all(|warning| !warning.contains("\"text\"") || !warning.contains("NOT rendered")));
     }
 
     #[test]
@@ -1147,21 +1537,30 @@ mod tests {
     }
 
     #[test]
-    fn reports_textured_materials_as_not_rendered() {
+    fn routes_canonical_flat_materials_to_the_physical_surface_renderer() {
         let mut rect = rect_object();
-        rect["materialSlots"] = json!({ "main": "mat_image" });
+        rect["materialSlots"] = json!({ "main": "mat_pbr" });
         let mut scene = minimal_scene(vec![rect]);
         scene["materials"] = json!([{
-            "materialId": "mat_image", "name": "Image", "type": "image",
-            "dynamic": false, "opacity": 1, "readiness": "READY"
+            "materialId": "mat_pbr", "name": "Standard Material", "type": "pbr",
+            "dynamic": false, "opacity": 1, "readiness": "READY",
+            "parameters": {
+                "baseColor": "#ff3050",
+                "metalness": 0.25,
+                "roughness": 0.4
+            },
+            "textureSlots": []
         }]);
 
-        let prepared = prepare_scene(&scene).expect("scene must prepare with warnings");
+        let prepared = prepare_scene(&scene).expect("scene must prepare");
         assert!(prepared.rects.is_empty());
+        assert_eq!(prepared.meshes.len(), 1);
+        assert_eq!(prepared.meshes[0].object_id, "rect_1");
+        assert!(prepared.meshes[0].surfaces[0].material.lit);
         assert!(prepared
             .warnings
             .iter()
-            .any(|warning| warning.contains("editor-preview only")));
+            .all(|warning| !warning.contains("not rendered")));
     }
 
     #[test]
@@ -1270,5 +1669,11 @@ mod tests {
         assert!((with_alpha[3] - 128.0 / 255.0).abs() < 1e-6);
         assert_eq!(parse_hex_color("red"), None);
         assert_eq!(parse_hex_color("#12345"), None);
+    }
+
+    #[test]
+    fn rejects_malformed_webfont_containers_before_registration() {
+        assert!(decode_web_font(b"wOFF-not-a-font".to_vec()).is_err());
+        assert!(decode_web_font(b"wOF2-not-a-font".to_vec()).is_err());
     }
 }

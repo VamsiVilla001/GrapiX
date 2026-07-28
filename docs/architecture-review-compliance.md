@@ -56,6 +56,14 @@ Status meanings:
 
 ## Requested extension coverage
 
+- **Editor / Playout master workspace:** the approved target separates the
+  authoring Editor from the operator-facing Playout application under one root
+  workspace, with schemas/protocols under Shared. Playout owns published scene
+  versions, rundowns, segments, timecode, Preview/Program control and the
+  native/output runtime; Editor owns source projects and durable
+  **Publish to Playout**. This remains Planned until the current dirty work is
+  checkpointed and the safe phases in
+  [`editor-playout-workspace.md`](editor-playout-workspace.md) pass.
 - **Font Manager:** packaged OTF/TTF/WOFF/WOFF2 faces, HTTPS CSS links, and
   normalized Adobe Fonts project links are modeled, imported, previewed,
   preflighted, and packaged. Native Program text rendering remains a capability

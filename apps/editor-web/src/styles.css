@@ -2282,7 +2282,14 @@
 }
 
 .gpu-stage-surface {
-  background: #05080d;
+  background-color: #74777b;
+  background-image:
+    linear-gradient(45deg, #85888c 25%, transparent 25%),
+    linear-gradient(-45deg, #85888c 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #85888c 75%),
+    linear-gradient(-45deg, transparent 75%, #85888c 75%);
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-size: 16px 16px;
 }
 
 .gpu-render-canvas {
@@ -5330,6 +5337,51 @@ h3 {
   overflow: auto;
 }
 
+.font-manager-panel {
+  container-type: inline-size;
+}
+
+.font-manager-panel button {
+  min-height: 26px;
+  padding: 3px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  background: var(--bg-elevated);
+  cursor: pointer;
+}
+
+.font-manager-panel button:hover:not(:disabled) {
+  border-color: rgba(23, 185, 168, 0.55);
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-elevated));
+}
+
+.font-manager-panel button:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.font-manager-panel input,
+.font-manager-panel select {
+  min-height: 26px;
+  padding: 4px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  outline: none;
+  color: var(--text);
+  background: var(--bg-input);
+}
+
+.font-manager-panel input:focus,
+.font-manager-panel select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent);
+}
+
+.font-manager-panel input::placeholder {
+  color: var(--text-faint);
+}
+
 .automation-toolbar {
   display: flex;
   align-items: center;
@@ -5417,6 +5469,255 @@ h3 {
   color: #15171a;
   font-size: 17px;
   text-align: center;
+}
+
+.font-manager-header,
+.font-card-top,
+.font-card-actions,
+.font-filter-row,
+.font-link-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.font-manager-header {
+  justify-content: space-between;
+}
+
+.font-manager-header > div {
+  display: flex;
+  flex-direction: column;
+}
+
+.font-manager-header span,
+.font-filter-row span {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.font-search {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 150px;
+  padding-left: 7px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.font-search input {
+  width: 100%;
+  border: 0;
+  background: transparent;
+}
+
+.font-import-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.font-source-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.font-source-tabs button.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--text);
+}
+
+.font-import-fields {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 5px;
+}
+
+.font-link-row input {
+  min-width: 0;
+  flex: 1;
+}
+
+.font-filter-row {
+  justify-content: space-between;
+}
+
+.font-family-list {
+  gap: 7px;
+}
+
+.font-family-card {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 9px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-left: 3px solid #758095;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.font-family-card.status-ready {
+  border-left-color: #49c786;
+}
+
+.font-family-card.status-error,
+.font-family-card.status-missing,
+.font-family-card.status-invalid,
+.font-family-card.status-unsupported {
+  border-left-color: #ff496c;
+}
+
+.font-card-top {
+  align-items: stretch;
+}
+
+.font-card-top .font-preview {
+  display: flex;
+  min-height: 48px;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.font-enabled {
+  display: flex;
+  align-items: center;
+}
+
+.font-enabled input {
+  position: absolute;
+  opacity: 0;
+}
+
+.font-enabled:has(input:not(:checked)) {
+  opacity: 0.4;
+}
+
+.font-card-details {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.font-card-details > span,
+.font-fallbacks,
+.font-error {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.font-display-name {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.font-face-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.font-face-pills span,
+.font-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 5px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 9px;
+}
+
+.font-status.status-ready {
+  color: #63d79a;
+}
+
+.font-status:not(.status-ready),
+.font-error {
+  color: #ff708b;
+}
+
+.font-fallbacks {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.font-fallbacks input {
+  min-width: 0;
+  flex: 1;
+}
+
+.font-card-actions {
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+.font-card-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+
+.text-font-controls {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding: 7px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.text-font-controls label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.text-font-controls input,
+.text-font-controls select {
+  width: 100%;
+  min-width: 0;
+}
+
+.text-font-controls .text-font-fallbacks,
+.text-font-controls .font-error {
+  grid-column: 1 / -1;
+}
+
+@container (min-width: 620px) {
+  .font-source-tabs {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .font-import-fields {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .font-family-card {
+    grid-template-columns: minmax(140px, 0.8fr) minmax(220px, 1.5fr) auto;
+  }
+
+  .font-card-actions {
+    flex-direction: column;
+  }
 }
 
 .automation-result {

@@ -144,7 +144,7 @@ exists. Dimensions validate up to 4320 lines (UHD).
 
 ## What renders now
 
-Solid-color **rects and analytic ellipses** render alongside native,
+Solid-color **rects and analytic ellipses**, Unicode-shaped **text**, and native,
 depth-tested **3D meshes**. Mesh support includes tessellated cube/slab,
 sphere, cylinder, and torus primitives plus embedded glTF 2.0/GLB triangle
 geometry. Position Z, XYZ rotation, XYZ scale, anchor3d, perspective, face
@@ -159,10 +159,18 @@ roughness, emissive colour/intensity, alpha test, blend mode, texture
 filtering/wrap, and UV scale/offset/rotation/pivot/flip. Direct lighting uses a
 view-dependent Cook-Torrance GGX BRDF.
 
+Project OTF/TTF/WOFF/WOFF2 bytes are loaded while the scene is prepared and
+registered with cosmic-text. Text uses Unicode bidi, script-aware OpenType
+shaping, combining-mark/emoji cluster handling, system fallback, wrapping,
+alignment, weight, style, rotation, and opacity. The shaped glyph layer is
+composited into native Program frames; it never positions individual
+characters. Remote CSS is resolved and cached as project font assets by the
+API before the daemon sees it.
+
 Everything is decoded while the scene is warmed; the broadcast frame clock
 performs no asset file or network I/O. Unsupported object/material states are
-reported explicitly and unsafe omissions remain Take blockers. Text, image
-objects, shapes, and lines still require their native paths.
+reported explicitly and unsafe omissions remain Take blockers. Image objects,
+shapes, and lines still require their native paths.
 
 ## Shared shaders
 

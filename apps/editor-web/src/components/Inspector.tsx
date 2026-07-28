@@ -1,6 +1,7 @@
 import { getMaterialBindingId, isMaterialCompatible, isMaterialCompatibleWithFace, normalizeSlabProperties, type BindingMap, type MaskMode, type SceneObject, type SceneProperty, type SlabPropertiesInput } from "@grapix/shared-types";
 import { ArrowDown, ArrowUp, Clock3, Copy, Eye, EyeOff, Lock, PenTool, Plus, Trash2, Unlock } from "lucide-react";
 import { ColorValueEditor } from "./ColorValueEditor";
+import { TextFontControls } from "./TextFontControls";
 import { useEditorStore } from "../store/editorStore";
 import { useUiStore } from "../store/uiStore";
 
@@ -322,17 +323,12 @@ export function Inspector() {
 
       {object.type === "text" ? (
         <section className="field-section two-column">
+          <TextFontControls object={object} patch={patch} />
           <NumberField
             label="Font"
             value={object.fontSize}
             min={8}
             onChange={(value) => patch({ fontSize: value } as Partial<SceneObject>)}
-          />
-          <SelectField
-            label="Weight"
-            value={object.fontWeight}
-            options={["400", "500", "600", "700", "800"]}
-            onChange={(value) => patch({ fontWeight: value } as Partial<SceneObject>)}
           />
           <SelectField
             label="Align"
@@ -347,6 +343,12 @@ export function Inspector() {
             onChange={(value) => patch({ textLayout: value } as Partial<SceneObject>)}
           />
           <SelectField
+            label="Auto fit"
+            value={object.autoFit ?? "none"}
+            options={["none", "shrink", "fit"]}
+            onChange={(value) => patch({ autoFit: value } as Partial<SceneObject>)}
+          />
+          <SelectField
             label="Writing"
             value={object.writingMode ?? "horizontal-tb"}
             options={["horizontal-tb", "vertical-rl", "vertical-lr"]}
@@ -357,13 +359,6 @@ export function Inspector() {
             value={object.verticalAlign ?? "top"}
             options={["top", "middle", "bottom"]}
             onChange={(value) => patch({ verticalAlign: value } as Partial<SceneObject>)}
-          />
-          <TextField label="Font family" value={object.fontFamily} onChange={(value) => patch({ fontFamily: value } as Partial<SceneObject>)} />
-          <SelectField
-            label="Style"
-            value={object.fontStyle ?? "normal"}
-            options={["normal", "italic", "oblique"]}
-            onChange={(value) => patch({ fontStyle: value } as Partial<SceneObject>)}
           />
           <NumberField label="Line height" value={object.lineHeight ?? object.fontSize * 1.2} min={1} onChange={(value) => patch({ lineHeight: value } as Partial<SceneObject>)} />
           <NumberField label="Letter space" value={object.letterSpacing ?? 0} onChange={(value) => patch({ letterSpacing: value } as Partial<SceneObject>)} />

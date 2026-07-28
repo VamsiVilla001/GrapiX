@@ -22,8 +22,8 @@ test("stores multi-sequence rundowns and evaluates conditional scene/rundown eve
     headers: { "content-type": "application/octet-stream" },
     payload: fontBytes
   });
-  assert.equal(fontResponse.statusCode, 200);
-  assert.equal(fontResponse.json().font.faces[0].source.kind, "file");
+  assert.equal(fontResponse.statusCode, 415);
+  assert.equal(fontResponse.json().code, "FONT_INVALID");
 
   const adobeResponse = await app.inject({
     method: "POST",

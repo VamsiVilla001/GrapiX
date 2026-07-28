@@ -31,7 +31,7 @@ export function createEmptyTemplateScene(index: number): SceneDocument {
     canvas: {
       width: defaultProfile.width,
       height: defaultProfile.height,
-      background: "#070b12"
+      background: "#77777700"
     },
     dataContext: {},
     assets: [],

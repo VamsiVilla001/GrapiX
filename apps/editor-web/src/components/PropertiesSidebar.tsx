@@ -1,5 +1,6 @@
 import type { BindingMap, SceneObject, SceneProperty } from "@grapix/shared-types";
 import { Inspector } from "./Inspector";
+import { TextFontControls } from "./TextFontControls";
 import { MaterialsTab } from "./MaterialsTab";
 import { useEditorStore } from "../store/editorStore";
 import { useUiStore } from "../store/uiStore";
@@ -79,13 +80,8 @@ function TextProperties() {
         <TextField label="Content" value={object.text} onChange={(text) => patch({ text } as Partial<SceneObject>)} />
       </div>
       <div className="field-section two-column">
+        <TextFontControls compact object={object} patch={patch} />
         <NumberField label="Size" value={object.fontSize} min={8} onChange={(fontSize) => patch({ fontSize } as Partial<SceneObject>)} />
-        <SelectField
-          label="Weight"
-          value={object.fontWeight}
-          options={["400", "500", "600", "700", "800"]}
-          onChange={(fontWeight) => patch({ fontWeight } as Partial<SceneObject>)}
-        />
         <SelectField
           label="Align"
           value={object.align}

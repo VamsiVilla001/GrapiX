@@ -1,5 +1,6 @@
 import type { SceneDocument } from "@grapix/shared-types";
 import { useEffect, useRef, useState } from "react";
+import { projectFontRegistry } from "../fonts/ProjectFontRegistry";
 import { createEditorPreviewRenderer } from "../rendering/PixiPreviewRendererAdapter";
 import type {
   PreviewRendererCapabilities,
@@ -22,6 +23,11 @@ export function GpuSceneStage(props: {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<ScenePreviewRenderer | null>(null);
   const [rendererError, setRendererError] = useState<string | null>(null);
+  const [fontRevision, setFontRevision] = useState(projectFontRegistry.snapshot());
+
+  useEffect(() => projectFontRegistry.subscribe(() => {
+    setFontRevision(projectFontRegistry.snapshot());
+  }), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,7 +86,7 @@ export function GpuSceneStage(props: {
       .catch((error) => {
         setRendererError(error instanceof Error ? error.message : "GPU renderer failed to render");
       });
-  }, [props.objects, props.scene]);
+  }, [fontRevision, props.objects, props.scene]);
 
   return (
     <div className="gpu-stage-surface" ref={hostRef}>

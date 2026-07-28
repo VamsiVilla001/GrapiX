@@ -325,6 +325,20 @@ impl SceneRegistry {
 
 pub fn estimate_prepared_scene_bytes(scene: &PreparedScene) -> u64 {
     let rect_bytes = scene.rects.len() * std::mem::size_of::<PreparedRect>();
+    let text_bytes: usize = scene
+        .texts
+        .iter()
+        .map(|text| {
+            std::mem::size_of::<super::PreparedText>() + text.text.len() + text.family.len()
+        })
+        .sum();
+    let font_bytes: usize = scene
+        .fonts
+        .iter()
+        .map(|font| {
+            std::mem::size_of::<super::PreparedFont>() + font.asset_id.len() + font.bytes.len()
+        })
+        .sum();
     let light_bytes = scene.lights.len() * std::mem::size_of::<super::PreparedLight>();
     let mesh_bytes: usize = scene
         .meshes
@@ -347,6 +361,8 @@ pub fn estimate_prepared_scene_bytes(scene: &PreparedScene) -> u64 {
         .unwrap_or_default();
     (std::mem::size_of::<PreparedScene>()
         + rect_bytes
+        + text_bytes
+        + font_bytes
         + light_bytes
         + mesh_bytes
         + warning_bytes
@@ -367,6 +383,8 @@ mod tests {
             background_linear_premultiplied: [0.0; 4],
             background_gradient: PreparedGradient::default(),
             rects: Vec::new(),
+            texts: Vec::new(),
+            fonts: Vec::new(),
             meshes: Vec::new(),
             lights: Vec::new(),
             object_count: 0,

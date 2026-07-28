@@ -189,6 +189,9 @@ export interface EditorState {
   ) => void;
   updateTimeline: (patch: Partial<SceneTimeline>) => void;
   addFontDefinition: (font: FontDefinition, asset?: AssetLibraryItem) => void;
+  addFontDefinitions: (fonts: FontDefinition[], assets?: AssetLibraryItem[]) => void;
+  updateFontDefinition: (fontId: string, patch: Partial<FontDefinition>) => void;
+  replaceFontDefinition: (fontId: string, font: FontDefinition, assets?: AssetLibraryItem[]) => boolean;
   removeFontDefinition: (fontId: string) => boolean;
   assignFontToSelectedText: (fontId: string) => boolean;
   updateAutomation: (automation: SceneAutomationDefinition) => void;
@@ -962,21 +965,101 @@ export const useEditorStore = create<EditorState>((set, get) => {
         })
       })),
     addFontDefinition: (font, asset) => {
+      get().addFontDefinitions([font], asset ? [asset] : []);
+    },
+    addFontDefinitions: (fonts, importedAssets = []) => {
       const { scene } = get();
-      const assets = asset && !scene.assets.some((item) => item.assetId === asset.assetId)
-        ? [...scene.assets, asset]
-        : scene.assets;
+      const assets = [...scene.assets];
+      for (const asset of importedAssets) {
+        const index = assets.findIndex((item) => item.assetId === asset.assetId);
+        if (index >= 0) assets[index] = asset;
+        else assets.push(asset);
+      }
+      const definitions = [...(scene.fonts ?? [])];
+      for (const incoming of fonts) {
+        const exactIndex = definitions.findIndex((font) => font.fontId === incoming.fontId);
+        const familyIndex = definitions.findIndex((font) => font.family === incoming.family);
+        const index = exactIndex >= 0 ? exactIndex : familyIndex;
+        if (index < 0) {
+          definitions.push(incoming);
+          continue;
+        }
+        const current = definitions[index]!;
+        const faces = [...current.faces];
+        for (const face of incoming.faces) {
+          const faceIndex = faces.findIndex((item) =>
+            item.faceId === face.faceId
+            || (item.weight === face.weight && item.style === face.style && item.stretch === face.stretch)
+          );
+          if (faceIndex >= 0) faces[faceIndex] = face;
+          else faces.push(face);
+        }
+        definitions[index] = {
+          ...current,
+          ...incoming,
+          fontId: current.fontId,
+          displayName: current.displayName || incoming.displayName,
+          fallbackFamilies: current.fallbackFamilies.length ? current.fallbackFamilies : incoming.fallbackFamilies,
+          faces: faces.sort((left, right) => left.weight - right.weight || left.style.localeCompare(right.style))
+        };
+      }
       commitScene({
         ...scene,
         assets,
-        fonts: [...(scene.fonts ?? []).filter((item) => item.fontId !== font.fontId), font]
+        fonts: definitions
       });
+    },
+    updateFontDefinition: (fontId, patch) => {
+      const { scene } = get();
+      commitScene({
+        ...scene,
+        fonts: (scene.fonts ?? []).map((font) => font.fontId === fontId
+          ? { ...font, ...patch, fontId: font.fontId }
+          : font)
+      });
+    },
+    replaceFontDefinition: (fontId, replacement, importedAssets = []) => {
+      const { scene } = get();
+      const current = scene.fonts?.find((font) => font.fontId === fontId);
+      if (!current) return false;
+      const assets = [...scene.assets];
+      for (const asset of importedAssets) {
+        const index = assets.findIndex((item) => item.assetId === asset.assetId);
+        if (index >= 0) assets[index] = asset;
+        else assets.push(asset);
+      }
+      commitScene({
+        ...scene,
+        assets,
+        fonts: (scene.fonts ?? []).map((font) => font.fontId === fontId
+          ? {
+              ...replacement,
+              fontId,
+              displayName: current.displayName,
+              fallbackFamilies: current.fallbackFamilies,
+              enabled: current.enabled ?? true
+            }
+          : font),
+        objects: scene.objects.map((object) =>
+          object.type === "text" && (object.fontId === fontId || (!object.fontId && object.fontFamily === current.family))
+            ? {
+                ...object,
+                fontId,
+                fontFamily: replacement.family,
+                fallbackFamilies: current.fallbackFamilies
+              }
+            : object
+        )
+      });
+      return true;
     },
     removeFontDefinition: (fontId) => {
       const { scene } = get();
       const font = scene.fonts?.find((item) => item.fontId === fontId);
       if (!font) return false;
-      if (scene.objects.some((object) => object.type === "text" && object.fontFamily === font.family)) {
+      if (scene.objects.some((object) =>
+        object.type === "text" && (object.fontId === fontId || (!object.fontId && object.fontFamily === font.family))
+      )) {
         set({ materialActionError: `Font ${font.family} is still assigned to a text object.` });
         return false;
       }
@@ -997,7 +1080,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
         objects: scene.objects.map((item) => item.id === object.id
           ? ({
               ...item,
+              fontId: font.fontId,
               fontFamily: font.family,
+              fallbackFamilies: font.fallbackFamilies,
               fontWeight: nearestSupportedFontWeight(font.faces[0]?.weight ?? 400),
               fontAssetId: fileFace?.source.kind === "file" ? fileFace.source.assetId : undefined
             } as SceneObject)
@@ -1908,7 +1993,10 @@ function createEmptyScene(): SceneDocument {
     canvas: {
       width: 1920,
       height: 1080,
-      background: "#070b12"
+      // Transparent program output reveals the editor-only checkerboard. A
+      // scene background remains an authored object/property, not hidden
+      // viewport chrome baked into every new template.
+      background: "#77777700"
     },
     dataContext: {},
     assets: [],
@@ -2548,9 +2636,10 @@ function normalizeScene(scene: SceneDocument): SceneDocument {
       ...(object.type === "text"
         ? {
             textLayout: object.textLayout ?? "point",
+            autoFit: object.autoFit ?? "none",
             writingMode: object.writingMode ?? "horizontal-tb",
             verticalAlign: object.verticalAlign ?? "top",
-            direction: object.direction ?? "ltr",
+            direction: object.direction ?? "auto",
             fontStyle: object.fontStyle ?? "normal",
             textDecoration: object.textDecoration ?? {},
             lineHeight: object.lineHeight ?? object.fontSize * 1.2,
@@ -2593,7 +2682,15 @@ function normalizeScene(scene: SceneDocument): SceneDocument {
     materialInstances: scene.materialInstances ?? [],
     shaders: [...authoredShaders, ...builtInShaderDefinitions],
     materialFolders: scene.materialFolders ?? [],
-    fonts: scene.fonts ?? [],
+    fonts: (scene.fonts ?? []).map((font) => ({
+      ...font,
+      enabled: font.enabled ?? true,
+      fallbackFamilies: font.fallbackFamilies?.length ? font.fallbackFamilies : ["Arial", "sans-serif"],
+      faces: font.faces.map((face) => ({
+        ...face,
+        status: face.status ?? font.status
+      }))
+    })),
     gradientPresets: scene.gradientPresets ?? [],
     timeline: normalizeTimeline(scene.timeline),
     objects

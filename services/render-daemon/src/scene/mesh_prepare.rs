@@ -248,6 +248,40 @@ struct MeshObjectDto {
     z_index: f64,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PlanarObjectDto {
+    id: String,
+    x: f64,
+    y: f64,
+    #[serde(default)]
+    z_depth: f64,
+    width: f64,
+    height: f64,
+    #[serde(default)]
+    rotation: f64,
+    #[serde(default = "default_scale")]
+    scale_x: f64,
+    #[serde(default = "default_scale")]
+    scale_y: f64,
+    #[serde(default = "default_scale")]
+    scale_z: f64,
+    #[serde(default)]
+    anchor: Vec2Dto,
+    #[serde(default = "default_opacity")]
+    opacity: f64,
+    #[serde(default = "default_visible")]
+    visible: bool,
+    #[serde(default)]
+    fill: String,
+    #[serde(default)]
+    material_slots: HashMap<String, Value>,
+    #[serde(default)]
+    layer_id: String,
+    #[serde(default)]
+    z_index: f64,
+}
+
 #[derive(Default)]
 struct AssetLoadCache {
     bytes: HashMap<String, Result<Vec<u8>, String>>,
@@ -421,6 +455,127 @@ pub fn prepare_meshes(
                 object_id: object.id,
                 model_transform: model.to_cols_array(),
                 surfaces,
+            },
+        ));
+    }
+
+    // Canonical GrapiX materials are physical surfaces regardless of whether
+    // they are assigned to a 3D primitive or a flat broadcast primitive.
+    // Preparing bound rectangles/ellipses as real planes keeps base colour,
+    // texture, UVs, opacity, metalness/roughness, emissive response, and scene
+    // lighting on the same native material path instead of dropping `pbr`
+    // materials in the legacy solid-colour quad path.
+    for value in objects {
+        let primitive_kind = match value.get("type").and_then(Value::as_str) {
+            Some("rect") => "rect",
+            Some("ellipse") => "ellipse",
+            _ => continue,
+        };
+        let planar: PlanarObjectDto = match serde_json::from_value(value.clone()) {
+            Ok(object) => object,
+            Err(error) => {
+                warnings.push(format!("physical {primitive_kind} object skipped: {error}"));
+                continue;
+            }
+        };
+        if !planar.visible || !planar.material_slots.contains_key("main") {
+            continue;
+        }
+        let Some(binding) = planar
+            .material_slots
+            .get("main")
+            .and_then(parse_material_binding)
+        else {
+            continue;
+        };
+        let Some(bound_material) = context
+            .materials
+            .iter()
+            .find(|material| material.material_id == binding.material_id)
+        else {
+            continue;
+        };
+        // Keep the old solid-colour wire type on the established quad path
+        // for backwards-compatible scene fixtures. All current writers emit
+        // canonical `pbr`, which takes the physical plane path below.
+        if bound_material.material_type == "solid-color" {
+            continue;
+        }
+        if planar.width <= 0.0 || planar.height <= 0.0 {
+            warnings.push(format!(
+                "{} {} skipped: dimensions must be positive ({}x{})",
+                primitive_kind, planar.id, planar.width, planar.height
+            ));
+            continue;
+        }
+
+        let adapter = MeshObjectDto {
+            id: planar.id,
+            mesh_kind: primitive_kind.to_string(),
+            x: planar.x,
+            y: planar.y,
+            z_depth: planar.z_depth,
+            width: planar.width,
+            height: planar.height,
+            depth: 0.0,
+            rotation: planar.rotation,
+            rotation_x: 0.0,
+            rotation_y: 0.0,
+            rotation_z: Some(planar.rotation),
+            scale_x: planar.scale_x,
+            scale_y: planar.scale_y,
+            scale_z: planar.scale_z,
+            anchor: planar.anchor,
+            anchor3d: None,
+            opacity: planar.opacity,
+            visible: planar.visible,
+            fill: planar.fill,
+            src: None,
+            model_asset_id: None,
+            material_slots: planar.material_slots,
+            layer_id: planar.layer_id,
+            z_index: planar.z_index,
+        };
+        let material = resolve_surface_material(
+            &context,
+            &assets,
+            &adapter,
+            "main",
+            &adapter.fill,
+            &mut cache,
+            warnings,
+        );
+        let Some(material) = material else {
+            continue;
+        };
+        let surface = if primitive_kind == "ellipse" {
+            ellipse_plane_surface(&adapter)
+        } else {
+            rect_plane_surface(&adapter)
+        };
+        let model = Mat4::from_translation(Vec3::new(
+            adapter.x as f32,
+            adapter.y as f32,
+            adapter.z_depth as f32,
+        )) * Mat4::from_rotation_z((adapter.rotation as f32).to_radians())
+            * Mat4::from_scale(Vec3::new(
+                adapter.scale_x as f32,
+                adapter.scale_y as f32,
+                adapter.scale_z as f32,
+            ));
+        prepared.push((
+            adapter.layer_id,
+            adapter.z_depth,
+            adapter.z_index,
+            PreparedMesh {
+                object_id: adapter.id,
+                model_transform: model.to_cols_array(),
+                surfaces: vec![PreparedMeshSurface {
+                    slot_key: "main".to_string(),
+                    vertices: surface.vertices,
+                    indices: surface.indices,
+                    material,
+                }],
             },
         ));
     }
@@ -803,6 +958,52 @@ fn cube_surfaces(object: &MeshObjectDto) -> Vec<RawSurface> {
             [0.0, 1.0, 0.0],
         ),
     ]
+}
+
+fn rect_plane_surface(object: &MeshObjectDto) -> RawSurface {
+    let x0 = -(object.anchor.x as f32);
+    let x1 = object.width as f32 - object.anchor.x as f32;
+    let y0 = -(object.anchor.y as f32);
+    let y1 = object.height as f32 - object.anchor.y as f32;
+    quad_surface(
+        "main",
+        [[x0, y0, 0.0], [x1, y0, 0.0], [x1, y1, 0.0], [x0, y1, 0.0]],
+        [0.0, 0.0, 1.0],
+    )
+}
+
+fn ellipse_plane_surface(object: &MeshObjectDto) -> RawSurface {
+    const SEGMENTS: u32 = 64;
+    let center = Vec3::new(
+        object.width as f32 * 0.5 - object.anchor.x as f32,
+        object.height as f32 * 0.5 - object.anchor.y as f32,
+        0.0,
+    );
+    let radius_x = object.width as f32 * 0.5;
+    let radius_y = object.height as f32 * 0.5;
+    let normal = Vec3::Z;
+    let mut vertices = vec![vertex(center, normal, [0.5, 0.5])];
+    for segment in 0..=SEGMENTS {
+        let unit = segment as f32 / SEGMENTS as f32;
+        let angle = std::f32::consts::TAU * unit;
+        let u = angle.cos();
+        let v = angle.sin();
+        vertices.push(vertex(
+            center + Vec3::new(u * radius_x, v * radius_y, 0.0),
+            normal,
+            [(u + 1.0) * 0.5, (v + 1.0) * 0.5],
+        ));
+    }
+    let mut indices = Vec::with_capacity((SEGMENTS * 3) as usize);
+    for segment in 0..SEGMENTS {
+        indices.extend_from_slice(&[0, segment + 1, segment + 2]);
+    }
+    RawSurface {
+        slot_key: "main".to_string(),
+        vertices,
+        indices,
+        authored_material: None,
+    }
 }
 
 fn sphere_surfaces(object: &MeshObjectDto) -> Vec<RawSurface> {
@@ -1738,6 +1939,73 @@ mod tests {
             .find(|surface| surface.slot_key == "face:right")
             .unwrap();
         assert_eq!(right.material.texture.as_ref().unwrap().width, 1);
+    }
+
+    #[test]
+    fn canonical_pbr_texture_on_rect_is_prepared_as_a_lit_plane() {
+        let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+        let object = json!({
+            "id": "rect_surface",
+            "name": "Physical Rectangle",
+            "type": "rect",
+            "x": 100,
+            "y": 80,
+            "zDepth": 12,
+            "zIndex": 3,
+            "layerId": "main",
+            "width": 320,
+            "height": 180,
+            "rotation": 15,
+            "scaleX": 1,
+            "scaleY": 1,
+            "scaleZ": 1,
+            "anchor": { "x": 160, "y": 90 },
+            "opacity": 1,
+            "visible": true,
+            "fill": "#ffffff",
+            "materialSlots": { "main": "mat_surface" }
+        });
+        let scene = json!({
+            "assets": [{
+                "assetId": "asset_texture",
+                "source": format!("data:image/png;base64,{png}"),
+                "colorSpace": "srgb"
+            }],
+            "materials": [{
+                "materialId": "mat_surface",
+                "name": "Standard Material",
+                "type": "pbr",
+                "opacity": 1,
+                "parameters": {
+                    "baseColor": "#ffffff",
+                    "metalness": 0.3,
+                    "roughness": 0.45
+                },
+                "textureSlots": [{
+                    "name": "baseTexture",
+                    "assetId": "asset_texture",
+                    "wrap": "repeat",
+                    "filtering": "linear",
+                    "uvScale": [2, 1],
+                    "uvOffset": [0.25, 0],
+                    "uvRotation": 0,
+                    "uvPivot": [0.5, 0.5]
+                }]
+            }],
+            "materialInstances": [],
+            "objects": [object]
+        });
+        let mut warnings = Vec::new();
+        let meshes = prepare_meshes(&scene, scene["objects"].as_array().unwrap(), &mut warnings);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(meshes.len(), 1);
+        let surface = &meshes[0].surfaces[0];
+        assert_eq!(surface.vertices.len(), 4);
+        assert_eq!(surface.indices.len(), 6);
+        assert!(surface.material.lit);
+        assert!(surface.material.texture.is_some());
+        assert_eq!(surface.material.uv_scale, [2.0, 1.0]);
+        assert_eq!(surface.material.wrap, PreparedWrapMode::Repeat);
     }
 
     #[test]

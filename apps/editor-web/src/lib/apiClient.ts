@@ -60,7 +60,7 @@ export interface ApiImportedFont {
 export async function importFontFileToApi(
   file: File,
   options: {
-    family: string;
+    family?: string;
     displayName?: string;
     weight?: number;
     style?: "normal" | "italic" | "oblique";
@@ -69,10 +69,10 @@ export async function importFontFileToApi(
 ): Promise<ApiImportedFont> {
   const query = new URLSearchParams({
     fileName: file.name,
-    family: options.family,
-    weight: String(options.weight ?? 400),
-    style: options.style ?? "normal"
   });
+  if (options.family) query.set("family", options.family);
+  if (options.weight) query.set("weight", String(options.weight));
+  if (options.style) query.set("style", options.style);
   if (options.displayName) query.set("displayName", options.displayName);
   if (options.license) query.set("license", options.license);
   const response = await request<{ ok: true; asset: ApiImportedFont["asset"]; font: FontDefinition }>(
@@ -107,6 +107,33 @@ export async function linkFontOnApi(options: {
     body: JSON.stringify(options)
   });
   return response.font;
+}
+
+export interface ApiResolvedFonts {
+  fonts: FontDefinition[];
+  assets: Array<ApiImportedAsset & { kind: "font" }>;
+  warnings: string[];
+}
+
+export async function resolveRemoteFontsOnApi(options: {
+  source: "css-url" | "adobe-fonts" | "direct-url";
+  url?: string;
+  projectId?: string;
+  family?: string;
+  displayName?: string;
+  license?: string;
+}): Promise<ApiResolvedFonts> {
+  const response = await request<{ ok: true } & ApiResolvedFonts>("/api/fonts/resolve", {
+    method: "POST",
+    body: JSON.stringify(options)
+  });
+  return {
+    ...response,
+    assets: response.assets.map((asset) => ({
+      ...asset,
+      contentUrl: `${apiBaseUrl}${asset.contentUrl}`
+    }))
+  };
 }
 
 export async function importSceneScriptToApi(

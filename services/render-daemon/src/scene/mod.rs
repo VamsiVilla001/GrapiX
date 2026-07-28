@@ -5,8 +5,9 @@ mod lifecycle;
 mod mesh_prepare;
 
 pub use document::{
-    prepare_scene, PreparedGradient, PreparedLight, PreparedLightKind, PreparedRect, PreparedScene,
-    SceneError, MAX_PREPARED_LIGHTS,
+    prepare_scene, PreparedAutoFit, PreparedFont, PreparedGradient, PreparedLight,
+    PreparedLightKind, PreparedRect, PreparedScene, PreparedText, PreparedTextAlign,
+    PreparedTextStyle, SceneError, MAX_PREPARED_LIGHTS,
 };
 pub use lifecycle::{
     estimate_prepared_scene_bytes, SceneLifecycle, SceneLifecycleStatus, SceneRegistry,

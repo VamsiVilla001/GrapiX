@@ -541,6 +541,8 @@ mod tests {
             background_linear_premultiplied: [0.0; 4],
             background_gradient: crate::scene::PreparedGradient::default(),
             rects: Vec::new(),
+            texts: Vec::new(),
+            fonts: Vec::new(),
             meshes: Vec::new(),
             lights: Vec::new(),
             object_count: 0,

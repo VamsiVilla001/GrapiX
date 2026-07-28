@@ -248,6 +248,7 @@ export function ToolOptionsBar() {
   const selectedObjectId = useEditorStore((state) => state.selectedObjectId);
   const selected = useEditorStore((state) => state.scene.objects.find((object) => object.id === state.selectedObjectId));
   const sceneObjects = useEditorStore((state) => state.scene.objects);
+  const projectFonts = useEditorStore((state) => state.scene.fonts ?? []);
   const updateObject = useEditorStore((state) => state.updateObject);
   const beginHistory = useEditorStore((state) => state.beginHistory);
   const commitHistory = useEditorStore((state) => state.commitHistory);
@@ -347,15 +348,29 @@ export function ToolOptionsBar() {
       ) : null}
       {activeTool === "horizontal-type" || activeTool === "vertical-type" ? (
         <>
-          <label>Font <input value={selected?.type === "text" ? selected.fontFamily : "Inter"} onChange={(event) => {
-            if (selectedObjectId && selected?.type === "text") updateObject(selectedObjectId, { fontFamily: event.target.value });
-          }} /></label>
+          <label>Font <select value={selected?.type === "text" ? selected.fontId ?? "" : ""} onChange={(event) => {
+            const font = projectFonts.find((item) => item.fontId === event.target.value);
+            if (selectedObjectId && selected?.type === "text" && font) {
+              const face = font.faces[0];
+              updateObject(selectedObjectId, {
+                fontId: font.fontId,
+                fontFamily: font.family,
+                fallbackFamilies: font.fallbackFamilies,
+                fontWeight: String(face?.weight ?? 400),
+                fontStyle: face?.style ?? "normal",
+                fontAssetId: face?.source.kind === "file" ? face.source.assetId : undefined
+              });
+            }
+          }}>
+            <option value="">System / unmanaged</option>
+            {projectFonts.map((font) => <option disabled={font.enabled === false} key={font.fontId} value={font.fontId}>{font.displayName}</option>)}
+          </select></label>
           <label>Size <input min={1} type="number" value={selected?.type === "text" ? selected.fontSize : 48} onChange={(event) => {
             if (selectedObjectId && selected?.type === "text") updateObject(selectedObjectId, { fontSize: event.target.valueAsNumber });
           }} /></label>
           <label>Weight <select value={selected?.type === "text" ? selected.fontWeight : "700"} onChange={(event) => {
-            if (selectedObjectId && selected?.type === "text") updateObject(selectedObjectId, { fontWeight: event.target.value as "400" | "500" | "600" | "700" | "800" });
-          }}><option>400</option><option>500</option><option>600</option><option>700</option><option>800</option></select></label>
+            if (selectedObjectId && selected?.type === "text") updateObject(selectedObjectId, { fontWeight: event.target.value });
+          }}><option>100</option><option>200</option><option>300</option><option>400</option><option>500</option><option>600</option><option>700</option><option>800</option><option>900</option></select></label>
           <span>Fill {foreground.type === "solid" ? foreground.color : foreground.type}</span>
         </>
       ) : null}

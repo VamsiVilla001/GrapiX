@@ -803,6 +803,7 @@ impl RendererCapabilities {
             rendered_object_types: vec![
                 "rect".to_string(),
                 "ellipse".to_string(),
+                "text".to_string(),
                 "mesh".to_string(),
             ],
             output_backends: {
@@ -813,8 +814,8 @@ impl RendererCapabilities {
                 backends
             },
             supported_transitions: vec!["cut".to_string()],
-            native_text_render: false,
-            packaged_font_files: false,
+            native_text_render: true,
+            packaged_font_files: true,
             remote_font_css: false,
             scene_automation_execution: false,
             scene_script_execution: false,
@@ -1148,11 +1149,11 @@ mod tests {
         assert!(json.contains(r#""previewProgramChannels":true"#));
         assert!(json.contains(r#""scenePatching":true"#));
         assert!(json.contains(r#""supportedTransitions":["cut"]"#));
-        assert!(json.contains(r#""nativeTextRender":false"#));
-        assert!(json.contains(r#""packagedFontFiles":false"#));
+        assert!(json.contains(r#""nativeTextRender":true"#));
+        assert!(json.contains(r#""packagedFontFiles":true"#));
         assert!(json.contains(r#""sceneAutomationExecution":false"#));
         assert!(json.contains(r#""sceneScriptExecution":false"#));
-        assert!(json.contains(r#""renderedObjectTypes":["rect","ellipse","mesh"]"#));
+        assert!(json.contains(r#""renderedObjectTypes":["rect","ellipse","text","mesh"]"#));
         assert!(json.contains(r#""native3dRender":true"#));
     }
 

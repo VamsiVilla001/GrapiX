@@ -3,7 +3,8 @@
 Last consolidated: **2026-07-28**  
 Repository: `D:\Project KK\Personal projects\GrapiX`  
 Current branch: `Basic-v0.1`  
-Current committed baseline: `7f9fe44 feat: establish GrapiX Basic v0.1`
+Current baseline: **Basic v0.1 checkpoint**; use `git log -1` for its immutable
+commit hash.
 
 This is the durable handoff memory for GrapiX. It records product intent,
 architecture boundaries, module ownership, completed work, current local work,
@@ -68,6 +69,17 @@ Important user requirements, preserved as closely as possible:
   required parts of the target.
 - The reviewed architecture contains 35 pointers. Every pointer must remain
   tracked; hardware-dependent work must not be falsely marked complete.
+- GrapiX must become a master workspace containing two independent product
+  applications: `Editor/` and `Playout/`, with reusable contracts under
+  `Shared/`.
+- The complete existing application must first be preserved as Editor without
+  feature loss. Playout is then built as a professional operator-facing scene
+  library, rundown, sequencer, Preview and Program control application.
+- Editor must provide a durable **Publish to Playout** workflow that validates,
+  packages and versions every scene dependency and receives structured publish
+  progress and acknowledgement.
+- Playout must continue from previously published scenes when Editor is closed
+  or disconnected and must own rundown/timecode/operator state independently.
 
 ## Locked architecture decisions
 
@@ -100,6 +112,59 @@ Tauri 2 desktop supervisor
   shader compilation, or unbounded allocation.
 - Unsupported renderer features are reported explicitly. Silent fake fallback
   is not acceptable for on-air paths.
+
+### Editor / Playout master workspace
+
+**Approved target; not yet physically migrated:**
+
+```text
+GrapiX/
+├── Editor/
+├── Playout/
+├── Shared/
+└── package.json
+```
+
+- Editor owns authoring, project/source assets, validation and publishing.
+- Playout owns published scene versions, the scene library, rundowns, segments,
+  page recall, operator data, timecode/automation, Preview/Program control,
+  control APIs and output operations.
+- Shared owns scene, protocol, rundown, transition, package, shader, SDK and
+  common utility contracts and cannot depend on applications.
+- The Rust/wgpu daemon belongs to the Playout runtime boundary in the final
+  structure and remains authoritative for Program output.
+- Editor and Playout are independently buildable/runnable Tauri-capable
+  applications with separate storage and recovery state.
+- Durable package publication uses HTTP(S) for `.gfxpkg` transfer and a
+  persistent authenticated WebSocket for health, progress, acknowledgements,
+  library events and control events.
+- Publishing uses request/sequence IDs, idempotency, duplicate rejection,
+  monotonic scene versions, checksum verification and atomic promotion.
+- A newly published scene revision never mutates an already online prepared
+  version in place.
+
+The complete specification, including scene library metadata, rundown items,
+segments, operator actions, Preview/Program statuses, transition/layer
+resolution, timecode, live data, control API, reliability and phased migration,
+is in
+[`docs/editor-playout-workspace.md`](docs/editor-playout-workspace.md).
+
+Migration order:
+
+1. Stabilize, verify and checkpoint current uncommitted work.
+2. Add root Editor/Playout/Shared workspace scaffolding and compatibility
+   scripts.
+3. Mechanically move the existing application into Editor with no redesign.
+4. Extract current shared packages into Shared with compatibility exports.
+5. Create Playout shell, storage, scene library, rundowns and segments.
+6. Implement Publish to Playout with reconnect/version/idempotency tests.
+7. Move native daemon ownership to Playout and expose independent continuous
+   Preview plus protected Program.
+8. Add timecode, automation, layer conflict handling, T1 transitions and the
+   external control API.
+9. Complete crash/offline recovery, soak and output/hardware certification.
+
+Do not perform a repository-wide move before step 1 has a recoverable commit.
 
 ### Editor rendering
 
@@ -225,6 +290,20 @@ Important rendering modules:
 - `slabGeometry.ts` — XPression-style generated Slab mesh.
 - `RendererClient.ts` — renderer-control client boundary, separate from editor
   preview.
+
+### Future `Editor/`, `Playout/`, and `Shared/`
+
+The existing modules above describe the current layout. Their approved future
+ownership is:
+
+- `Editor/` — current desktop shells, `editor-web`, project API, authoring tests
+  and Publish to Playout.
+- `Playout/` — new operator desktop/web UI, playout control service, published
+  scene store, rundown/segment runtime, native daemon and output plugins.
+- `Shared/` — current shared-types, renderer-protocol, render-shaders,
+  grapix-sdk and future rundown/transition/package/common packages.
+
+This is Planned architecture until the safe migration phases pass.
 
 ### `packages/shared-types`
 
@@ -554,6 +633,14 @@ Implemented behavior includes:
   `texture.source`.
 - Material-assigned 2D objects now update both legacy `fill` and active
   `fillStyle`; rich fill styles no longer hide successful material assignment.
+- Canonical Standard Material bindings on rect/ellipse/image objects now enter
+  the same Three.js physical-surface path as meshes in the editor. Pixi no
+  longer paints a duplicate flattened copy over the physical surface.
+- The native daemon now prepares canonical PBR-bound rects and ellipses as lit
+  planes, retaining base textures, UVs, opacity, metalness/roughness, emissive
+  values, blend mode, and authored scene-light response.
+- The viewport uses an editor-only neutral grey checkerboard beneath transparent
+  Program pixels. New empty scenes/templates default to transparent output.
 
 ## Material system knowledge
 
@@ -768,9 +855,25 @@ Scene font registry supports:
 - allowlisted HTTPS CSS sources
 - normalized Adobe Fonts project links
 
-Remote CSS/Adobe sources remain explicit network/licensing dependencies and
-receive offline-reliability warnings. Native packaged-font shaping/rasterization
-is not yet certified.
+The professional project Font Manager now accepts multi-file OTF/TTF/WOFF/
+WOFF2 families, Google Fonts, public CSS/`@import`, Adobe project links, and
+direct font URLs. The API parses inert font rules, safely resolves public HTTPS
+resources, validates and checksum-deduplicates face bytes, preserves source and
+license metadata, and packages them for offline Program use.
+
+The editor owns one `ProjectFontRegistry`: every face is registered with
+`FontFace`, loading is awaited before final measurement/render, runtime
+loading/ready/missing/invalid/unsupported/error states are visible, and loaded
+fonts force a viewport rerender. Text stores a stable `fontId`, per-object
+fallback stack, weight/style, and bidi direction. Browser horizontal and
+vertical paths use shaping engines and never split complex text into
+characters.
+
+The Rust daemon now advertises native text and packaged-font support. Font
+bytes load during scene preparation; cosmic-text performs Unicode bidi,
+OpenType shaping, combining-mark/emoji handling, fallback, wrap, alignment,
+weight, and style before glyphs are composited into Program frames. The daemon
+still does not execute remote CSS; the API resolves it to packaged faces first.
 
 ### Rundowns and multiple sequences
 
@@ -889,6 +992,19 @@ Package preflight checks:
 
 Project data lives under ignored `data/`. Do not commit local runtime asset
 cache or tokens.
+
+### Publish to Playout
+
+Editor publication to Playout is distinct from saving an authoring project:
+
+- Editor builds and preflights a complete versioned `.gfxpkg`.
+- Playout revalidates checksums/capabilities, stores it in staging and atomically
+  promotes the published version into its scene library.
+- Scene identity and revision are preserved across updates.
+- Playout reports progress, warnings, failures and final acknowledgement.
+- Playout retains previously published versions needed by rundowns or Program.
+- Local and remote endpoints require explicit configuration; remote operation
+  adds authentication, TLS, replay protection and audit.
 
 ## Native output status
 
@@ -1039,44 +1155,49 @@ The required completion order remains:
 - Added Slab corner, skew, texture-skew, front/back bevel, culling, extrusion,
   and five material regions.
 
-## Current uncommitted local work
+### 2026-07-28 — unified material-to-viewport contract
 
-The branch is based on pushed commit `7f9fe44`, but the following latest fixes
-are currently uncommitted and must be preserved:
+- Removed the native contract mismatch where current `pbr` materials assigned
+  to flat objects were rejected by the legacy `solid-color`-only quad path.
+- Flat Standard Material surfaces now use real physical planes in both editor
+  and native renderers, including texture decode/sampling and authored lights.
+- CanvasStage passes the evaluated scene—not the unevaluated authoring scene—to
+  the preview renderer, keeping timeline/material/camera state synchronized.
+- Added the grey transparency checkerboard and transparent empty-scene default.
+- Live daemon verification prepared a canonical PBR rect as one mesh surface
+  with no warnings or Take blockers.
 
-- `apps/editor-web/src/components/Inspector.tsx`
-  - Slab property controls.
-- `apps/editor-web/src/components/TemplatesPanel.tsx`
-  - scoped scene Delete shortcut.
-- `apps/editor-web/src/components/templateDeleteShortcut.ts`
-  - pure shortcut guard.
-- `apps/editor-web/src/modules/material-manager/components/MaterialLibrary.tsx`
-  - Delete containment and clean All-library contents.
-- `apps/editor-web/src/modules/material-manager/services/defaultMaterial.ts`
-  - real Standard Material injection.
-- `apps/editor-web/src/rendering/sceneMaterial.ts`
-  - fill and fillStyle material application.
-- `apps/editor-web/src/rendering/ThreeSceneLayer.ts`
-  - custom Slab geometry/material/culling use.
-- `apps/editor-web/src/rendering/slabGeometry.ts`
-  - generated Slab mesh.
-- `apps/editor-web/src/store/editorStore.ts`
-  - Standard Material and Slab normalization.
-- `packages/shared-types/src/index.ts`
-  - Slab schema/defaults/five faces.
-- related editor/shared regression tests.
-- this `memory.md`.
+## Basic v0.1 checkpoint scope
 
-Do not reset, checkout, or discard these files. Commit/push only when the user
-asks.
+The Basic v0.1 checkpoint consolidates the previously local editor, native
+renderer, material, font, camera, Slab, and architecture work into one durable
+baseline:
+
+- a unified Standard Material contract from authoring through editor preview to
+  the native renderer, including physically lit flat planes and texture sampling;
+- scoped material/template deletion, real default material normalization, and
+  regression tests for the destructive shortcut bug;
+- XPression-style generated Slab geometry, five material regions, bevel/skew/
+  extrusion/culling controls, and matching shared scene schema;
+- authored camera and light consumption in the editor and native renderer,
+  including real-GPU camera verification;
+- the Font Manager pipeline for uploaded and CSS/Adobe-linked fonts, API
+  validation/metadata, project font registration, and native text layout/render;
+- grey transparency checkerboard behavior and synchronized evaluated scene state;
+- the approved Editor/Playout/Shared target architecture, migration order,
+  publishing boundary, rundown ownership, and 35-point compliance updates.
 
 ## Last verification evidence
 
-After the material and Slab changes:
+After the material, Slab, font, and unified surface changes:
 
-- editor tests: **25/25 passed**
-- shared-types tests: **38/38 passed**
-- editor production build: passed
+- editor tests: **27/27 passed**
+- API tests: **18/18 passed**
+- shared-types tests: **40/40 passed**
+- native daemon tests: **84 unit + 3 certification + 4 GPU smoke + 4 layout
+  contract + 2 scene contract passed**
+- all workspace tests: passed
+- full production build: passed
 - full workspace `npm run typecheck`: passed
 - Tauri Rust `cargo check`: passed
 - `git diff --check`: passed apart from Windows line-ending warnings
@@ -1088,6 +1209,11 @@ After the material and Slab changes:
     Skew Texture, Front Bevel, Back Bevel, Extrusion, and Culling
   - Slab Materials exposed Face, Bevel, Extrusion, Back Bevel, Back Face
   - editing Skew kept the scene rendered and selected
+  - transparent new scenes reveal the neutral grey checkerboard
+  - assigning Standard Material to a flat Background creates a Three.js
+    physical surface without a viewport renderer error
+  - the running native daemon reported the canonical PBR rect as `meshCount: 1`,
+    `warnings: []`, and `takeReady: true`
 
 Useful gates:
 
@@ -1136,9 +1262,22 @@ The Tauri shell reuses already-running services when possible.
 
 ## Known gaps and next priorities
 
+### Editor / Playout workspace migration
+
+- Finish and checkpoint the current dirty Editor/native-renderer/font work.
+- Scaffold the master `Editor/`, `Playout/`, `Shared/` workspaces without moving
+  source yet.
+- Move existing source mechanically into Editor and restore every build/test/dev
+  command before feature work.
+- Extract shared contracts with compatibility exports.
+- Build Playout scene library, rundown/segment persistence and autosave.
+- Implement Publish to Playout and its reconnect/idempotency/version tests.
+- Add independent native Preview and Program operator control.
+- Add page recall, timecode, automation, layer conflict and transition runtime.
+- Add Playout restart/offline/on-air-state reconciliation tests.
+
 ### Highest renderer gaps
 
-- Native text shaping/rasterization and packaged-font parity.
 - Native general 2D image, shape, line, paint, mask, and effect coverage.
 - Native video codec and hardware decode.
 - Continuous native Preview output independent of Program.
@@ -1175,6 +1314,9 @@ The Tauri shell reuses already-running services when possible.
 - [`README.md`](README.md) — repository entry point and commands.
 - [`docs/project-memory.md`](docs/project-memory.md) — older detailed build log.
 - [`docs/architecture.md`](docs/architecture.md) — product architecture.
+- [`docs/editor-playout-workspace.md`](docs/editor-playout-workspace.md) —
+  approved Editor/Playout master workspace, publishing, rundown and migration
+  architecture.
 - [`docs/architecture-review-compliance.md`](docs/architecture-review-compliance.md)
   — 35-point acceptance ledger.
 - [`docs/renderer-control-architecture.md`](docs/renderer-control-architecture.md)
@@ -1218,3 +1360,7 @@ The Tauri shell reuses already-running services when possible.
     verification for rendering/UI changes.
 13. Update this memory when architecture, module ownership, status, or major
     verified work changes.
+14. Before moving repository paths or starting Playout, read
+    `docs/editor-playout-workspace.md`; perform its Phase 0 checkpoint first.
+15. Keep Playout independent from Editor lifecycle and never let Editor become
+    authoritative for on-air Program state.

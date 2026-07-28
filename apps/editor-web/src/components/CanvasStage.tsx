@@ -1,6 +1,8 @@
 import {
   createSceneId,
+  buildFontFamilyStack,
   evaluateSceneAtFrame,
+  fontDefinitionForText,
   getBindableFaces,
   isMaterialCompatibleWithFace,
   type BezierPath,
@@ -1037,7 +1039,7 @@ export function CanvasStage() {
             }
           }}
         >
-          <GpuSceneStage scene={scene} objects={displayObjects} onCapabilities={setCapabilities} />
+          <GpuSceneStage scene={evaluatedScene} objects={displayObjects} onCapabilities={setCapabilities} />
           <svg
             className={`stage-interaction-overlay ${activeTool === "pen" ? "pen-mode" : ""}`}
             viewBox={`0 0 ${scene.canvas.width} ${scene.canvas.height}`}
@@ -1382,12 +1384,18 @@ export function CanvasStage() {
                 width: `${editingText.width / scene.canvas.width * 100}%`,
                 height: `${editingText.height / scene.canvas.height * 100}%`,
                 color: editingText.fill,
-                fontFamily: editingText.fontFamily,
+                fontFamily: buildFontFamilyStack(
+                  fontDefinitionForText(scene.fonts ?? [], editingText),
+                  editingText.fontFamily,
+                  editingText.fallbackFamilies
+                ),
                 fontSize: `${editingText.fontSize * zoom / 100}px`,
                 fontWeight: editingText.fontWeight,
+                fontStyle: editingText.fontStyle,
+                direction: editingText.direction === "auto" ? undefined : editingText.direction,
                 writingMode: editingText.writingMode === "horizontal-tb"
                   ? "horizontal-tb"
-                  : "vertical-rl"
+                  : editingText.writingMode
               }}
               value={editingText.text}
             />

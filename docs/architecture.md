@@ -1,14 +1,43 @@
 # GrapiX Architecture
 
-GrapiX follows a hybrid broadcast graphics architecture.
+GrapiX follows a hybrid broadcast graphics architecture with two independent
+product applications inside one master workspace.
 
 ```text
-Web Editor + Sequencer
-        -> Shared Scene / Timeline / Binding Model
-        -> Published Scene Package
-        -> Native Render Daemon
-        -> NDI / SDI / Preview Output
+Editor
+  -> Shared Scene / Timeline / Binding / Protocol Model
+  -> Versioned Published Scene Package
+  -> Playout
+       -> Rundown / Preview / Program control
+       -> Native Rust/wgpu Render Daemon
+       -> NDI / Recording / future SDI
 ```
+
+## Approved Editor / Playout workspace
+
+The approved target is:
+
+```text
+GrapiX/
+├── Editor/
+├── Playout/
+├── Shared/
+└── package.json
+```
+
+- Editor owns authoring, project/source assets, validation and publishing.
+- Playout owns published scene versions, scene library, rundowns, segments,
+  timecode, automation, operator data, Preview/Program control and output.
+- Shared owns scene, protocol, package, rundown, transition, shader and SDK
+  contracts and cannot depend on either application.
+- The native daemon is authoritative for Program rendering and remains alive
+  independently of Editor.
+- Editor and Playout must be independently buildable and runnable.
+
+This is an approved target, not a completed physical migration. The complete
+ownership model, publishing protocol, rundown/transition scope and safe phased
+migration are specified in
+[`editor-playout-workspace.md`](editor-playout-workspace.md).
 
 ## First Build Target
 
@@ -28,18 +57,48 @@ The first working target is now ingestion-first, then the Web Editor MVP:
 - Preview bound data.
 - Save and load scene JSON.
 
-## Monorepo Shape
+## Current repository shape
 
 ```text
 apps/
+  desktop-tauri/
+  desktop-electron/
   editor-web/
 
 packages/
   shared-types/
+  renderer-protocol/
+  render-shaders/
+  grapix-sdk/
+
+services/
+  api-server/
+  render-daemon/
 
 docs/
   architecture.md
-  project-memory.md
+  editor-playout-workspace.md
 ```
 
-The fuller target from the architecture note includes future `sequencer-web`, `desktop-shell`, backend services, native render daemon, output plugins, and asset pipeline tools.
+The current layout remains in place until the active uncommitted work is
+stabilized and the Phase 0 migration checkpoint is committed. Folder movement
+must preserve history and must not be mixed with feature redesign.
+
+## Communication planes
+
+- REST/HTTP(S) handles project operations and durable `.gfxpkg` publication.
+- Persistent authenticated WebSocket handles connection health, publish
+  progress, acknowledgements, library events and Playout control events.
+- Renderer protocol v2 controls the long-lived native daemon.
+- Every mutable command uses versions, request/sequence IDs, acknowledgements
+  and duplicate protection.
+
+## Governing documents
+
+- [`editor-playout-workspace.md`](editor-playout-workspace.md) — Editor/Playout
+  master workspace and operator-product target.
+- [`architecture-review-compliance.md`](architecture-review-compliance.md) —
+  35-point production-readiness ledger.
+- [`renderer-control-architecture.md`](renderer-control-architecture.md) —
+  native renderer control/process boundary.
+- [`scene-document-v1.md`](scene-document-v1.md) — durable scene compatibility.

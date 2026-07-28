@@ -5,6 +5,7 @@ pub mod frame;
 pub mod gpu;
 pub mod mesh;
 pub mod pipeline;
+pub mod text;
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -106,7 +107,7 @@ pub fn render_single_frame(
     let quads = pipeline::QuadPipeline::build_frame_quads(scene);
     let meshes = mesh_pipeline.prepare_frame(&gpu.device, &gpu.queue, scene);
 
-    target.render_and_read_back(
+    let mut frame = target.render_and_read_back(
         &gpu.device,
         &gpu.queue,
         &quad_pipeline,
@@ -114,7 +115,9 @@ pub fn render_single_frame(
         &mesh_pipeline,
         Some(&meshes),
         0,
-    )
+    )?;
+    text::NativeTextRenderer::new().composite(&mut frame, scene);
+    Ok(frame)
 }
 
 /// Spawn the render thread: renders at the configured rational frame rate and
@@ -141,6 +144,7 @@ pub fn spawn_render_loop(
             let quad_pipeline = pipeline::QuadPipeline::new(&gpu.device);
             let mesh_pipeline = mesh::MeshPipeline::new(&gpu.device);
             let target = frame::FrameTarget::new(&gpu.device, config.width, config.height);
+            let mut text_renderer = text::NativeTextRenderer::new();
             let dump_path = std::env::var("GRAPIX_RENDER_DAEMON_DUMP_FIRST_FRAME").ok();
 
             let start = Instant::now();
@@ -198,7 +202,8 @@ pub fn spawn_render_loop(
                             frame_index,
                         )
                         {
-                            Ok(frame) => {
+                            Ok(mut frame) => {
+                                text_renderer.composite(&mut frame, scene);
                                 stats.record_render_duration(render_started.elapsed());
                                 Some(frame)
                             }
