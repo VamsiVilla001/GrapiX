@@ -1,10 +1,12 @@
 //! Scene ingestion: `SceneDocument` JSON -> renderer-ready state.
 
+mod camera;
 mod diagnostics;
 mod document;
 mod lifecycle;
 mod mesh_prepare;
 
+pub use camera::{PreparedCamera, PreparedCameraKind};
 pub use diagnostics::{DiagnosticSeverity, DiagnosticSink, SceneDiagnostic};
 pub use document::{
     prepare_scene, PreparedGradient, PreparedLight, PreparedLightKind, PreparedRect, PreparedScene,

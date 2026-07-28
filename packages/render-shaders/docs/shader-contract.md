@@ -96,6 +96,42 @@ the scene centre at `focalDistance = (height/2)/tan(fov/2)`, points at scene
 centre Z=0, and uses world up `(0,-1,0)` so scene Y remains down. Meshes use a
 `depth32float` attachment with `less-equal` comparison and depth writes.
 
+### Authored cameras
+
+When the scene selects a static, unparented, unbound, visible camera through
+`activeCameraId`, both renderers frame meshes through it instead of the default
+above. The daemon builds the projection right-handed with clip-space Z in
+`[0,1]` (wgpu); the editor's `WebGLRenderer` uses `[-1,+1]`. NDC x/y are
+algebraically identical and both depth remaps are monotonic, so fragment
+ordering is unaffected.
+
+- `fov` is **vertical**, in degrees, clamped to `[1,179]`.
+- `zoom` folds into the projection, not the view: `y_scale = zoom / tan(fov/2)`.
+  It is precomputed rather than folded back into an effective fov, because that
+  inversion loses relative precision for `zoom < 1`.
+- Orthographic half-extents are the **canvas** size over zoom, independent of
+  camera distance.
+- Aspect always comes from the scene canvas, never the output resolution.
+- `far` is used verbatim; it is never capped, because capping would clip
+  geometry the editor shows. A `far/near` ratio above 1e6 is reported as
+  `camera.depth-range.imprecise` (severity `degraded`) since a 32-bit depth
+  buffer may not separate near-coplanar meshes at that range.
+
+Cameras affect the **mesh path only**, matching the editor, whose camera lives
+solely in the Three.js layer while the Pixi 2D layer places objects
+unprojected. Two consequences are pre-existing product defects, shared by both
+renderers, that this contract currently preserves rather than fixes:
+
+1. **2D/3D divergence under a non-default camera.** A rect and a mesh authored
+   at the same scene position no longer align once a camera moves or zooms.
+2. **X mirror.** The mesh view matrix uses up `(0,-1,0)`, so its right vector is
+   `(-1,0,0)`, while the 2D quad projection uses `clip_x = 2x/w - 1`. Scene +X
+   therefore runs left for meshes and right for quads. Pinned by
+   `mesh_path_is_mirrored_in_x_relative_to_the_2d_quad_path`. Note
+   `docs/3d-engine-architecture.md` specifies the opposite convention, which no
+   code implements. Correcting either issue is a cross-renderer change; fixing
+   one renderer alone would break parity.
+
 `MeshUniforms` also carries straight linear base colour, metalness,
 roughness, alpha cutoff, texture presence, UV scale/offset/rotation/pivot,
 and straight linear emissive RGB plus intensity. Texture bindings 1 and 2 are

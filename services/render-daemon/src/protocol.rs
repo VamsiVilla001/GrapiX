@@ -785,6 +785,13 @@ pub struct RendererCapabilities {
     pub native_video_decode: bool,
     pub gltf_import_validation: bool,
     pub native_3d_render: bool,
+    /// Whether authored scene cameras drive the Program view-projection.
+    ///
+    /// Describes only what is actually implemented: a static, unparented,
+    /// unbound, visible camera. A parented, animated or data-bound camera is
+    /// still refused with a Take-blocking diagnostic, so this flag does NOT
+    /// promise full camera parity.
+    pub native_active_camera: bool,
 }
 
 impl RendererCapabilities {
@@ -822,6 +829,7 @@ impl RendererCapabilities {
             native_video_decode: false,
             gltf_import_validation: true,
             native_3d_render: true,
+            native_active_camera: true,
         }
     }
 }

@@ -1,14 +1,15 @@
 //! Depth-tested native mesh rendering.
 
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Vec3, Vec4};
 use wgpu::util::DeviceExt;
 
 use crate::renderer::pipeline::{
     blend_state_for_id, BLEND_PIPELINE_COUNT, DEPTH_FORMAT, RENDER_FORMAT,
 };
 use crate::scene::{
-    PreparedCullMode, PreparedFilterMode, PreparedLightKind, PreparedMesh, PreparedMeshSurface,
-    PreparedMeshVertex, PreparedScene, PreparedTexture, PreparedWrapMode, MAX_PREPARED_LIGHTS,
+    PreparedCamera, PreparedCameraKind, PreparedCullMode, PreparedFilterMode, PreparedLightKind,
+    PreparedMesh, PreparedMeshSurface, PreparedMeshVertex, PreparedScene, PreparedTexture,
+    PreparedWrapMode, MAX_PREPARED_LIGHTS,
 };
 
 pub const MESH_PBR_WGSL: &str =
@@ -419,10 +420,34 @@ fn build_scene_lighting_uniforms(scene: &PreparedScene) -> SceneLightingUniforms
 }
 
 fn scene_view_projection(scene: &PreparedScene) -> Mat4 {
+    match &scene.camera {
+        Some(camera) => authored_view_projection(scene, camera),
+        None => synthetic_view_projection(scene),
+    }
+}
+
+fn scene_camera_position(scene: &PreparedScene) -> Vec3 {
+    match &scene.camera {
+        Some(camera) => Vec3::from_array(camera.position),
+        None => synthetic_camera_position(scene),
+    }
+}
+
+/// The pre-camera viewpoint, preserved EXACTLY.
+///
+/// Deliberately not refactored to share code with `authored_view_projection`:
+/// every scene without an honoured camera must render bit-identically to
+/// before this path existed, and shared arithmetic is how a rounding change
+/// would leak into that guarantee.
+///
+/// Note it calls `synthetic_camera_position` directly, never the dispatching
+/// `scene_camera_position` -- otherwise near/far would be derived from an
+/// authored eye while the rest of the matrix stayed synthetic.
+fn synthetic_view_projection(scene: &PreparedScene) -> Mat4 {
     let width = scene.canvas_width.max(1.0);
     let height = scene.canvas_height.max(1.0);
     let fov = 45.0_f32.to_radians();
-    let camera_position = scene_camera_position(scene);
+    let camera_position = synthetic_camera_position(scene);
     let focal_distance = camera_position.z;
     let near = (focal_distance / 2000.0).max(1.0);
     let far = focal_distance + 20_000.0;
@@ -435,12 +460,72 @@ fn scene_view_projection(scene: &PreparedScene) -> Mat4 {
     projection * view
 }
 
-fn scene_camera_position(scene: &PreparedScene) -> Vec3 {
+fn synthetic_camera_position(scene: &PreparedScene) -> Vec3 {
     let width = scene.canvas_width.max(1.0);
     let height = scene.canvas_height.max(1.0);
     let fov = 45.0_f32.to_radians();
     let focal_distance = (height * 0.5) / (fov * 0.5).tan();
     Vec3::new(width * 0.5, height * 0.5, focal_distance)
+}
+
+/// Frame through the scene's authored camera, matching the editor's
+/// `resolveSceneCamera`.
+///
+/// Right-handed with clip-space Z in [0,1], which is what wgpu requires --
+/// never the `*_gl` constructors (OpenGL [-1,1]) and never `*_lh`. The editor
+/// renders through `THREE.WebGLRenderer`, whose depth range is [-1,+1]; NDC x/y
+/// are algebraically identical between the two and both depth remaps are
+/// monotonic, so fragment ORDERING against the daemon's `LessEqual` depth
+/// attachment is unchanged.
+fn authored_view_projection(scene: &PreparedScene, camera: &PreparedCamera) -> Mat4 {
+    // `camera.up` is guaranteed unit and non-parallel to the view direction by
+    // `safe_camera_up`, which keeps this out of look_at's degenerate case.
+    let view = Mat4::look_at_rh(
+        Vec3::from_array(camera.position),
+        Vec3::from_array(camera.target),
+        Vec3::from_array(camera.up),
+    );
+
+    let projection = match camera.kind {
+        PreparedCameraKind::Perspective { y_scale, .. } => {
+            // Column layout copied from glam::Mat4::perspective_rh so the
+            // RH / [0,1] convention is preserved exactly, but with the
+            // y-scale supplied directly instead of recomputed from a
+            // zoom-folded fov. Folding zoom back into an effective fov drives
+            // fov/2 toward pi/2 for any zoom < 1, precisely where the
+            // cos(fov/2) term loses relative precision -- up to ~1.3px of
+            // framing drift across a 1920-wide canvas at the clamp bounds.
+            let aspect = scene.canvas_width.max(1.0) / scene.canvas_height.max(1.0);
+            let h = y_scale;
+            let w = h / aspect;
+            let r = camera.far / (camera.near - camera.far);
+            Mat4::from_cols(
+                Vec4::new(w, 0.0, 0.0, 0.0),
+                Vec4::new(0.0, h, 0.0, 0.0),
+                Vec4::new(0.0, 0.0, r, -1.0),
+                Vec4::new(0.0, 0.0, r * camera.near, 0.0),
+            )
+        }
+        PreparedCameraKind::Orthographic {
+            half_width,
+            half_height,
+        } => {
+            // glam signature is (left, right, BOTTOM, top, near, far). Three's
+            // OrthographicCamera takes (left, right, TOP, bottom, ...), so
+            // copying that call order here would invert Y for orthographic
+            // cameras only.
+            Mat4::orthographic_rh(
+                -half_width,
+                half_width,
+                -half_height,
+                half_height,
+                camera.near,
+                camera.far,
+            )
+        }
+    };
+
+    projection * view
 }
 
 fn create_texture(
@@ -544,6 +629,7 @@ mod tests {
             meshes: Vec::new(),
             lights: Vec::new(),
             object_count: 0,
+            camera: None,
             diagnostics: Vec::new(),
             warnings: Vec::new(),
             take_blockers: Vec::new(),
@@ -553,6 +639,242 @@ mod tests {
         let ndc = projected / projected.w;
         assert!(ndc.x.abs() < 1e-5);
         assert!(ndc.y.abs() < 1e-5);
+    }
+
+    fn scene_with_camera(camera: Option<PreparedCamera>) -> PreparedScene {
+        PreparedScene {
+            scene_id: "camera".to_string(),
+            name: "camera".to_string(),
+            revision: "1".to_string(),
+            canvas_width: 1920.0,
+            canvas_height: 1080.0,
+            background_linear_premultiplied: [0.0; 4],
+            background_gradient: crate::scene::PreparedGradient::default(),
+            rects: Vec::new(),
+            meshes: Vec::new(),
+            lights: Vec::new(),
+            object_count: 0,
+            camera,
+            diagnostics: Vec::new(),
+            warnings: Vec::new(),
+            take_blockers: Vec::new(),
+            source_document: serde_json::json!({}),
+        }
+    }
+
+    /// BACK-COMPAT GUARD. Every scene without an honoured camera must render
+    /// exactly as it did before the authored-camera path existed.
+    ///
+    /// The older assertion only checked that the canvas centre lands at the
+    /// clip origin, which is invariant under an X mirror, an fov change and a
+    /// near/far change. This pins all 16 floats against the literal expression
+    /// chain so a future refactor of the fallback fails loudly.
+    #[test]
+    fn synthetic_fallback_matrix_is_unchanged_in_every_element() {
+        let scene = scene_with_camera(None);
+
+        let focal = (1080.0_f32 * 0.5) / (45.0_f32.to_radians() * 0.5).tan();
+        let expected = Mat4::perspective_rh(
+            45.0_f32.to_radians(),
+            1920.0 / 1080.0,
+            (focal / 2000.0).max(1.0),
+            focal + 20_000.0,
+        ) * Mat4::look_at_rh(
+            Vec3::new(960.0, 540.0, focal),
+            Vec3::new(960.0, 540.0, 0.0),
+            Vec3::new(0.0, -1.0, 0.0),
+        );
+
+        let actual = scene_view_projection(&scene);
+        for (index, (a, e)) in actual
+            .to_cols_array()
+            .iter()
+            .zip(expected.to_cols_array().iter())
+            .enumerate()
+        {
+            assert_eq!(
+                a, e,
+                "synthetic matrix element {index} drifted: {a} vs {e}. The no-camera path must \
+                 stay bit-identical."
+            );
+        }
+
+        // And the eye must come from the synthetic derivation, not a dispatch
+        // that could pick up an authored z.
+        assert_eq!(
+            scene_camera_position(&scene),
+            Vec3::new(960.0, 540.0, focal)
+        );
+    }
+
+    /// PARITY. An authored camera placed at the synthetic pose must reproduce
+    /// the synthetic matrix. This is what proves the authored path's
+    /// conventions -- handedness, y-scale, clip-Z range -- agree with the path
+    /// that has always been correct, rather than merely looking plausible.
+    #[test]
+    fn an_authored_camera_at_the_synthetic_pose_reproduces_the_synthetic_matrix() {
+        let focal = (1080.0_f32 * 0.5) / (45.0_f32.to_radians() * 0.5).tan();
+        let authored = PreparedCamera {
+            object_id: "cam_1".to_string(),
+            kind: PreparedCameraKind::Perspective {
+                fov_radians: 45.0_f32.to_radians(),
+                // zoom 1 / tan(fov/2)
+                y_scale: 1.0 / (45.0_f32.to_radians() * 0.5).tan(),
+            },
+            zoom: 1.0,
+            near: (focal / 2000.0).max(1.0),
+            far: focal + 20_000.0,
+            position: [960.0, 540.0, focal],
+            target: [960.0, 540.0, 0.0],
+            up: [0.0, -1.0, 0.0],
+        };
+
+        let synthetic = scene_view_projection(&scene_with_camera(None));
+        let authored_matrix = scene_view_projection(&scene_with_camera(Some(authored)));
+
+        for (index, (a, s)) in authored_matrix
+            .to_cols_array()
+            .iter()
+            .zip(synthetic.to_cols_array().iter())
+            .enumerate()
+        {
+            assert!(
+                (a - s).abs() < 1e-5,
+                "authored element {index} diverged from synthetic: {a} vs {s}"
+            );
+        }
+    }
+
+    /// ARGUMENT-ORDER GUARD. `Mat4::orthographic_rh` takes
+    /// (left, right, BOTTOM, top, ...) while `THREE.OrthographicCamera` takes
+    /// (left, right, TOP, bottom, ...). Copying the Three call order inverts Y
+    /// for orthographic cameras only, and nothing else in the suite would
+    /// notice.
+    #[test]
+    fn orthographic_camera_does_not_flip_y() {
+        let camera = PreparedCamera {
+            object_id: "cam_ortho".to_string(),
+            kind: PreparedCameraKind::Orthographic {
+                half_width: 960.0,
+                half_height: 540.0,
+            },
+            zoom: 1.0,
+            near: 1.0,
+            far: 21_000.0,
+            position: [960.0, 540.0, 1000.0],
+            target: [960.0, 540.0, 0.0],
+            up: [0.0, -1.0, 0.0],
+        };
+        let matrix = scene_view_projection(&scene_with_camera(Some(camera)));
+
+        // Scene y=200 is ABOVE centre. With the Y-down up vector that must land
+        // at positive NDC y, exactly as the 2D quad path does (clip_y = 1-2y/h).
+        let projected = matrix * Vec4::new(960.0, 200.0, 0.0, 1.0);
+        let ndc = projected / projected.w;
+        assert!(
+            ndc.y > 0.0,
+            "scene y=200 must land above centre; got {} (Y is flipped -- check the \
+             orthographic_rh argument order)",
+            ndc.y
+        );
+
+        // Orthographic framing is canvas-sized, so the canvas edge lands on the
+        // NDC edge regardless of camera distance.
+        let edge = matrix * Vec4::new(960.0, 1080.0, 0.0, 1.0);
+        let edge_ndc = edge / edge.w;
+        assert!(
+            (edge_ndc.y + 1.0).abs() < 1e-4,
+            "canvas bottom must map to ndc y=-1, got {}",
+            edge_ndc.y
+        );
+    }
+
+    /// Characterisation test for a REAL DEFECT, not a desired behaviour.
+    ///
+    /// The mesh path frames with `look_at_rh(eye, centre, up = (0,-1,0))`
+    /// (see scene_view_projection). glam builds the camera right vector as
+    /// `s = f.cross(up)`; with `f = (0,0,-1)` and `up = (0,-1,0)` that is
+    /// `(-1,0,0)`. So scene +X runs to the LEFT of the frame for meshes.
+    ///
+    /// The 2D quad path uses `clip_x = 2x/w - 1`
+    /// (pipeline::scene_projection), where scene +X runs to the RIGHT.
+    ///
+    /// The two paths are therefore mirrored in X, so a mesh and a rect
+    /// authored at the same scene X render on opposite sides of the frame.
+    /// Y is consistent between them.
+    ///
+    /// This is pinned rather than fixed because the editor's Three.js layer
+    /// uses the same `up = (0,-1,0)`, and Three's `Matrix4.lookAt` computes
+    /// the identical basis -- so the mirror is symmetric across both
+    /// renderers. Correcting it daemon-side alone would break editor/Program
+    /// parity, which is worse than the current consistent-but-wrong state.
+    /// Fixing it is a cross-renderer change.
+    #[test]
+    fn mesh_path_is_mirrored_in_x_relative_to_the_2d_quad_path() {
+        let scene = PreparedScene {
+            scene_id: "mirror".to_string(),
+            name: "mirror".to_string(),
+            revision: "1".to_string(),
+            canvas_width: 1920.0,
+            canvas_height: 1080.0,
+            background_linear_premultiplied: [0.0; 4],
+            background_gradient: crate::scene::PreparedGradient::default(),
+            rects: Vec::new(),
+            meshes: Vec::new(),
+            lights: Vec::new(),
+            object_count: 0,
+            camera: None,
+            diagnostics: Vec::new(),
+            warnings: Vec::new(),
+            take_blockers: Vec::new(),
+            source_document: serde_json::json!({}),
+        };
+
+        // A point well left of centre in scene space, and above centre.
+        let scene_point = glam::Vec4::new(100.0, 200.0, 0.0, 1.0);
+
+        let mesh_projected = scene_view_projection(&scene) * scene_point;
+        let mesh_ndc = mesh_projected / mesh_projected.w;
+
+        let quad_projected =
+            crate::renderer::pipeline::scene_projection(1920.0, 1080.0) * scene_point;
+        let quad_ndc = quad_projected / quad_projected.w;
+
+        // The 2D path puts scene x=100 on the left: 2*100/1920 - 1 = -0.8958.
+        assert!(
+            quad_ndc.x < 0.0,
+            "2D quad path should place scene x=100 left of centre, got {}",
+            quad_ndc.x
+        );
+
+        // The mesh path puts the SAME point on the right. This is the bug.
+        assert!(
+            mesh_ndc.x > 0.0,
+            "mesh path should (defectively) place scene x=100 right of centre, got {}",
+            mesh_ndc.x
+        );
+
+        // The relationship is an exact negation, not merely a sign flip: the
+        // synthetic camera's focal distance is derived from the same canvas so
+        // the perspective divide reproduces the quad path's scale. That makes
+        // the defect unambiguous -- the mesh lands exactly as far right as the
+        // rect lands left.
+        assert!(
+            (mesh_ndc.x + quad_ndc.x).abs() < 1e-3,
+            "X mirror should be an exact negation; mesh {} vs quad {}",
+            mesh_ndc.x,
+            quad_ndc.x
+        );
+
+        // Y must NOT be mirrored. glam's u = s.cross(f) works out to (0,-1,0),
+        // which matches the quad path's clip_y = 1 - 2y/h, so Y agrees to
+        // within the perspective divide.
+        assert!(
+            (mesh_ndc.y - quad_ndc.y).abs() < 1e-3,
+            "Y must agree between the paths; mesh {} vs quad {}",
+            mesh_ndc.y,
+            quad_ndc.y
+        );
     }
 
     #[test]

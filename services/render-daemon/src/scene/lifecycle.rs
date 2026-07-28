@@ -372,6 +372,7 @@ mod tests {
             meshes: Vec::new(),
             lights: Vec::new(),
             object_count: 0,
+            camera: None,
             warnings: Vec::new(),
             diagnostics: Vec::new(),
             take_blockers: Vec::new(),

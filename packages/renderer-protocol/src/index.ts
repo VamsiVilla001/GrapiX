@@ -53,6 +53,16 @@ export interface RendererCapabilities {
   nativeVideoDecode: boolean;
   gltfImportValidation: boolean;
   native3dRender: boolean;
+  /**
+   * Whether authored scene cameras drive the Program view-projection.
+   *
+   * Describes only what is implemented: a static, unparented, unbound, visible
+   * camera. Parented, animated and data-bound cameras are still refused with a
+   * Take-blocking diagnostic, so this does NOT promise full camera parity.
+   *
+   * Optional because a daemon predating the feature omits the field.
+   */
+  nativeActiveCamera?: boolean;
 }
 
 export interface RendererOutputConfig {

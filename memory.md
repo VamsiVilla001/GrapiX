@@ -348,6 +348,9 @@ Main module ownership:
 - `config.rs` — environment and runtime configuration.
 - `protocol.rs` — Rust protocol v2 envelopes and validation.
 - `controller.rs` — command handling, renderer/output state.
+- `scene/camera.rs` — authored active-camera resolution: replicates the
+  editor's `normalizeScene` camera repair then `resolveSceneCamera`, and decides
+  whether a camera can be honoured natively.
 - `scene/diagnostics.rs` — typed scene diagnostics: stable codes, explicit
   severity, and severity-derived Take blocking.
 - `scene/document.rs` — Rust SceneDocument consumption.
@@ -1090,6 +1093,74 @@ The required completion order remains:
   `takes: 0, samples: 0`. This is a pre-existing budget artifact, not a
   regression. Use `GRAPIX_SOAK_MINUTES=0.6` or higher for a meaningful run.
 
+### 2026-07-28 — native authored-camera framing
+
+- The daemon now frames meshes through the scene's authored active camera.
+  Perspective and orthographic, position/target/up, fov, zoom, near/far. Design
+  was produced and adversarially reviewed before implementation; two of three
+  reviewers rejected the first spec outright.
+- **The repair replication is the load-bearing part.** `normalizeScene` rewrites
+  a camera with `zDepth === 0` and no authored `target` to
+  `sceneFocalDistance = (canvas.height/2)/tan(22.5°)`
+  (editorStore.ts:2477-2479, :2639-2641). Reading `zDepth` literally would put
+  the camera on its own target and make `look_at_rh` degenerate — while the
+  scene reported itself Take-ready, which is worse than the honest refusal it
+  replaced. The daemon also replicates the `activeCameraId` auto-assign to the
+  first visible camera (editorStore.ts:2575-2577).
+- **Why replicate rather than normalize at the persistence boundary:**
+  `POST /api/render-daemon/scenes/:sceneId/load` hands the RAW persisted
+  document to the daemon (api-server/src/index.ts:757-763) and the API server
+  performs no camera normalization at all. The daemon must handle documents it
+  did not normalize. Consolidating the repair into shared normalization remains
+  a recommended FOLLOW-UP, not a substitute.
+- Deviation from the reviewed spec, verified against source: for a **missing**
+  `far`, `normalizeScene` sets 20000 before `resolveSceneCamera` clamps, so the
+  editor yields 20000, not `fallbackFar`. Those differ on any canvas over
+  2000px (4K: 20000 vs 38400). The daemon applies the normalize default first.
+- Second deviation: the spec refused any camera in an animated **scene**. Scoped
+  to the camera instead (its own `animation` map, or timeline keyframes naming
+  its `objectId`) — a scene whose other objects animate is a pre-existing native
+  limitation unrelated to framing, and refusing on it would leave nearly every
+  real broadcast scene on the synthetic viewpoint.
+- Still refused, each with a Take-blocking diagnostic:
+  `camera.parented.unsupported` (no hierarchy resolution, which also covers
+  inherited visibility), `camera.animated.unsupported`,
+  `camera.bound.unsupported`, `camera.kind.unsupported`,
+  `camera.values.unrepresentable`. An invisible or absent camera is `info`, not
+  a blocker, because both renderers then use the synthetic viewpoint.
+- `camera.depth-range.imprecise` (`degraded`, non-blocking) when `far/near` >
+  1e6. `far` is never capped: capping would clip geometry Preview shows, a worse
+  divergence than z-fighting.
+- Numerical care: `zoom` is folded into a precomputed `y_scale` rather than an
+  effective fov, because inverting through `atan` loses relative precision for
+  `zoom < 1` (up to ~1.3px of framing drift at the clamp bounds). The synthetic
+  fallback still calls `Mat4::perspective_rh` unchanged and is pinned
+  element-by-element.
+- Protocol, both sides in one commit: `native_active_camera` /
+  `nativeActiveCamera`, optional in TypeScript. It promises only the static
+  unparented case, never full parity.
+- **Two pre-existing product defects found and pinned, not fixed.** (1) The mesh
+  path is X-mirrored relative to the 2D quad path — scene x=100 on a 1920 canvas
+  lands at NDC −0.8958 for quads and +0.8959 for meshes, an exact negation. The
+  editor shares the mirror because Three's `Matrix4.lookAt` derives the same
+  basis from the same `up`, so fixing one renderer alone would break parity.
+  (2) 2D and 3D content desynchronise under any non-default camera, since the
+  camera applies to meshes only in both renderers. Both are cross-renderer
+  changes. No existing GPU smoke test could catch either: they all sample the
+  frame centre or count pixels, and are mirror-symmetric.
+- Verified: render-daemon 105 lib + 13 integration, clippy and
+  `cargo fmt --check` clean, shared-types 38/38, editor 25/25, api-server 16/16,
+  full typecheck including Tauri `cargo check`, `certify:e2e` pass with 0 dropped
+  frames. Render timing was measured against the stashed baseline to confirm the
+  change is performance-neutral (16.9ms vs 19.0ms average, same range, more
+  frames completed with the change).
+- **Not verified: live side-by-side.** Rule 12 wants visual confirmation for
+  rendering changes and there is still no record that the editor's
+  authored-camera path was ever visually checked, nor any cross-renderer parity
+  harness in the repo. The element-wise test that an authored camera at the
+  synthetic pose reproduces the synthetic matrix is the strongest available
+  substitute.
+
 ## Current local work
 
 The Slab / default-Standard-Material / scoped-delete work that this file
@@ -1173,10 +1244,17 @@ The Tauri shell reuses already-running services when possible.
 - Native general 2D image, shape, line, paint, mask, and effect coverage.
 - Native video codec and hardware decode.
 - Continuous native Preview output independent of Program.
-- Native active-camera and resolved hierarchy/timeline parity. As of
-  2026-07-28 the gap is *reported* (`camera.active.unsupported`, `invalid`
-  severity, blocks Take) but not closed: the daemon still has no
-  `CameraObjectDto` and frames with a fixed 45-degree synthetic camera.
+- Native active-camera parity is CLOSED for the static, unparented, unbound,
+  visible case as of 2026-07-28. Still open and still Take-blocking:
+  hierarchy-parented cameras, animated cameras, data-bound cameras.
+- Cross-renderer defects now documented and pinned but NOT fixed: the mesh path
+  is X-mirrored relative to the 2D quad path, and 2D/3D content desynchronises
+  under any non-default camera. Both need a coordinated change across the Pixi,
+  Three and wgpu paths plus `docs/3d-engine-architecture.md`, which currently
+  specifies a convention no code implements.
+- No cross-renderer parity harness exists. Nothing executable compares editor
+  output to daemon output; the "tolerance-based parity tests" in
+  docs/3d-engine-architecture.md remain an intent.
 - Transparent 3D ordering/depth-mode parity.
 - Shadows and full glTF animation/skinning/morph support.
 - Unified 2D/3D interleaving if stacked canvases become insufficient.

@@ -18,6 +18,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 
+use super::camera::{resolve_active_camera, PreparedCamera, CAMERA_OBJECT_TYPE};
 use super::diagnostics::{DiagnosticSeverity, DiagnosticSink, SceneDiagnostic};
 use super::mesh_prepare::{prepare_meshes, PreparedMesh};
 
@@ -25,7 +26,6 @@ use super::mesh_prepare::{prepare_meshes, PreparedMesh};
 /// paths. Every other object type still produces an explicit warning.
 const SUPPORTED_VERSION: u64 = 1;
 pub const MAX_PREPARED_LIGHTS: usize = 16;
-const CAMERA_OBJECT_TYPE: &str = "camera";
 
 #[derive(Debug, thiserror::Error)]
 pub enum SceneError {
@@ -52,6 +52,12 @@ struct SceneDocumentDto {
     material_instances: Vec<MaterialInstanceDto>,
     #[serde(default)]
     updated_at: String,
+    /// Consumed by camera resolution. It lives in the typed DTO rather than
+    /// being read from raw JSON so that a TypeScript rename is caught by the
+    /// fixture drift test instead of silently degrading every camera to the
+    /// synthetic viewpoint.
+    #[serde(default)]
+    active_camera_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -312,6 +318,9 @@ pub struct PreparedScene {
     /// every authored light has zero intensity, matching the editor.
     pub lights: Vec<PreparedLight>,
     pub object_count: usize,
+    /// The resolved authored camera, or `None` when the renderer must use its
+    /// synthetic viewpoint. Affects the MESH path only, matching the editor.
+    pub camera: Option<PreparedCamera>,
     /// Typed diagnostics with stable codes and explicit severities. This is
     /// the authoritative report; `warnings` and `take_blockers` are derived
     /// views kept for wire compatibility.
@@ -346,7 +355,14 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
     }
 
     let mut warnings = DiagnosticSink::new();
-    report_camera_support(scene_json, &document.objects, &mut warnings);
+    let camera = resolve_active_camera(
+        document.active_camera_id.as_deref(),
+        scene_json,
+        &document.objects,
+        document.canvas.width,
+        document.canvas.height,
+        &mut warnings,
+    );
     let meshes = prepare_meshes(scene_json, &document.objects, &mut warnings);
     let lights = prepare_lights(
         &document.objects,
@@ -559,7 +575,7 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
         // `camera` is intentionally not reported here. A camera is not content
         // that failed to draw -- it is a viewpoint. Saying "1 camera is NOT
         // rendered" understates the impact, because an unhonoured camera
-        // mis-frames every *other* object too. report_camera_support handles
+        // mis-frames every *other* object too. resolve_active_camera handles
         // it at Invalid severity.
         if kind == CAMERA_OBJECT_TYPE {
             continue;
@@ -616,87 +632,12 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
         meshes,
         lights,
         object_count: document.objects.len(),
+        camera,
         diagnostics,
         warnings: warning_messages,
         take_blockers,
         source_document: scene_json.clone(),
     })
-}
-
-/// Report the gap between authored cameras and the native renderer's fixed
-/// viewpoint.
-///
-/// `renderer::mesh::scene_view_projection` synthesises a 45-degree perspective
-/// camera from the canvas size and never reads `activeCameraId`. When the
-/// scene selects a camera, that synthetic viewpoint is simply the wrong one,
-/// and the consequence is not confined to the camera object: every mesh in the
-/// frame is positioned by the wrong view-projection matrix. Preview and
-/// Program therefore disagree about the whole image, which is exactly the
-/// silent divergence Program output must never ship. Hence `Invalid` rather
-/// than `Omitted`.
-fn report_camera_support(scene_json: &Value, objects: &[Value], warnings: &mut DiagnosticSink) {
-    let cameras: Vec<&Value> = objects
-        .iter()
-        .filter(|object| object.get("type").and_then(Value::as_str) == Some(CAMERA_OBJECT_TYPE))
-        .collect();
-
-    if cameras.is_empty() {
-        return;
-    }
-
-    let active_id = scene_json
-        .get("activeCameraId")
-        .and_then(Value::as_str)
-        .filter(|id| !id.is_empty());
-
-    let active_camera = active_id.and_then(|id| {
-        cameras.iter().copied().find(|camera| {
-            camera.get("id").and_then(Value::as_str) == Some(id)
-                && camera
-                    .get("visible")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(true)
-        })
-    });
-
-    match active_camera {
-        Some(camera) => {
-            let id = camera
-                .get("id")
-                .and_then(Value::as_str)
-                .unwrap_or("<unknown>");
-            let name = camera
-                .get("name")
-                .and_then(Value::as_str)
-                .unwrap_or("<unnamed>");
-            warnings.emit_for_object(
-                "camera.active.unsupported",
-                DiagnosticSeverity::Invalid,
-                format!(
-                    "scene selects camera {id:?} ({name:?}) as active, but the native renderer \
-                     ignores authored cameras and frames every object with a fixed 45-degree \
-                     perspective derived from the canvas size. Program framing will not match \
-                     Preview, so the whole frame is untrustworthy -- not just this object"
-                ),
-                id,
-                CAMERA_OBJECT_TYPE,
-            );
-        }
-        None => {
-            // Cameras exist but none is active, so the synthetic viewpoint is
-            // the same one the editor falls back to. Nothing is mis-framed;
-            // the camera objects simply are not drawn as gizmos.
-            warnings.emit(
-                "camera.inactive.not-rendered",
-                DiagnosticSeverity::Info,
-                format!(
-                    "{} camera object(s) are present but none is active; the native renderer \
-                     uses its default viewpoint and does not draw camera gizmos",
-                    cameras.len()
-                ),
-            );
-        }
-    }
 }
 
 fn prepare_lights(
@@ -1137,29 +1078,38 @@ mod tests {
         })
     }
 
+    /// Replaces the first half of the retired
+    /// `an_active_camera_invalidates_the_whole_frame_not_just_the_camera`.
+    /// A camera the daemon genuinely cannot reproduce must still invalidate the
+    /// whole frame, because an unhonoured camera mis-frames every other object.
     #[test]
-    fn an_active_camera_invalidates_the_whole_frame_not_just_the_camera() {
-        let mut scene_json = minimal_scene(vec![rect_object(), camera_object("cam_1")]);
+    fn a_container_parented_active_camera_still_invalidates_the_whole_frame() {
+        let mut layer = rect_object();
+        layer["id"] = json!("layer_1");
+        layer["type"] = json!("layer");
+        layer["childIds"] = json!(["cam_1"]);
+
+        let mut scene_json = minimal_scene(vec![rect_object(), camera_object("cam_1"), layer]);
         scene_json["activeCameraId"] = json!("cam_1");
 
         let scene = prepare_scene(&scene_json).expect("scene must prepare");
 
+        assert!(
+            scene.camera.is_none(),
+            "a parented camera must not be honoured -- the daemon resolves no hierarchy"
+        );
+
         let camera_diagnostic = scene
             .diagnostics
             .iter()
-            .find(|d| d.code == "camera.active.unsupported")
-            .expect("an active authored camera must be reported");
+            .find(|d| d.code == "camera.parented.unsupported")
+            .expect("a parented active camera must be reported");
 
-        assert_eq!(
-            camera_diagnostic.severity,
-            DiagnosticSeverity::Invalid,
-            "an unhonoured camera mis-frames every object, so it invalidates \
-             the frame rather than omitting one object"
-        );
+        assert_eq!(camera_diagnostic.severity, DiagnosticSeverity::Invalid);
         assert_eq!(camera_diagnostic.object_id.as_deref(), Some("cam_1"));
         assert!(
             !scene.take_blockers.is_empty(),
-            "Take must be blocked while Program framing cannot match Preview"
+            "Take must stay blocked while Program framing cannot match Preview"
         );
 
         // The generic "object of type X is NOT rendered" line would understate
@@ -1174,23 +1124,278 @@ mod tests {
         );
     }
 
+    /// Replaces the second half of the retired test: the case that is now
+    /// genuinely supported must be honoured silently and must NOT block Take.
     #[test]
-    fn an_inactive_camera_is_informational_and_does_not_block_take() {
-        // No activeCameraId: the native default viewpoint is also what the
-        // editor falls back to, so nothing is mis-framed.
-        let scene = prepare_scene(&minimal_scene(vec![rect_object(), camera_object("cam_1")]))
-            .expect("scene must prepare");
+    fn a_plain_active_camera_is_honoured_and_does_not_block_take() {
+        let mut scene_json = minimal_scene(vec![rect_object(), camera_object("cam_1")]);
+        scene_json["activeCameraId"] = json!("cam_1");
 
-        let camera_diagnostic = scene
+        let scene = prepare_scene(&scene_json).expect("scene must prepare");
+
+        let camera = scene
+            .camera
+            .as_ref()
+            .expect("a plain visible active camera must be honoured");
+        assert_eq!(camera.object_id, "cam_1");
+
+        assert!(
+            scene.take_blockers.is_empty(),
+            "an honoured camera frames faithfully, so nothing blocks Take; got {:?}",
+            scene.take_blockers
+        );
+        assert!(
+            !scene
+                .diagnostics
+                .iter()
+                .any(|d| d.code.starts_with("camera.") && d.severity.blocks_take()),
+            "no blocking camera diagnostic may survive, got {:?}",
+            scene.warnings
+        );
+    }
+
+    /// `camera_object()` authors `zDepth: 0` with no `target`, which is exactly
+    /// the shape `normalizeScene` repairs to the scene focal distance
+    /// (editorStore.ts:2477-2479). If the daemon took the 0 literally the
+    /// camera would sit on its own target and `look_at` would degenerate, so
+    /// this pins the repair with the real number.
+    #[test]
+    fn a_zero_z_depth_camera_is_repaired_to_the_scene_focal_distance() {
+        let mut scene_json = minimal_scene(vec![camera_object("cam_1")]);
+        scene_json["activeCameraId"] = json!("cam_1");
+
+        let scene = prepare_scene(&scene_json).expect("scene must prepare");
+        let camera = scene.camera.as_ref().expect("camera must be honoured");
+
+        // (1080 / 2) / tan(22.5 deg) = 1303.5375
+        let expected = (1080.0_f64 / 2.0) / (22.5_f64.to_radians()).tan();
+        assert!(
+            ((camera.position[2] as f64) - expected).abs() < 0.01,
+            "expected focal distance {expected}, got {}",
+            camera.position[2]
+        );
+        assert!(
+            camera.position[2] > 1.0,
+            "a repaired camera must never sit on the canvas plane"
+        );
+    }
+
+    /// An invisible camera is NOT an error: the editor requires `visible`
+    /// truthy and otherwise falls through to its synthetic camera, so the two
+    /// renderers agree and nothing is mis-framed.
+    #[test]
+    fn an_invisible_camera_falls_back_like_the_editor_and_does_not_block_take() {
+        let mut camera = camera_object("cam_1");
+        camera["visible"] = json!(false);
+        let mut scene_json = minimal_scene(vec![rect_object(), camera]);
+        scene_json["activeCameraId"] = json!("cam_1");
+
+        let scene = prepare_scene(&scene_json).expect("scene must prepare");
+
+        assert!(
+            scene.camera.is_none(),
+            "an invisible camera is not honoured"
+        );
+        let diagnostic = scene
             .diagnostics
             .iter()
             .find(|d| d.code == "camera.inactive.not-rendered")
-            .expect("present-but-inactive cameras must still be reported");
-
-        assert_eq!(camera_diagnostic.severity, DiagnosticSeverity::Info);
+            .expect("an invisible camera must still be reported");
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Info);
         assert!(
             scene.take_blockers.is_empty(),
-            "an inactive camera changes nothing about the frame, got {:?}",
+            "both renderers use the synthetic camera here, got {:?}",
+            scene.take_blockers
+        );
+    }
+
+    /// `normalizeScene` auto-assigns the first VISIBLE camera when no
+    /// `activeCameraId` is set (editorStore.ts:2575-2577). The daemon must
+    /// replicate that, because it receives raw persisted documents that never
+    /// passed through the editor store. Without this, such a scene would frame
+    /// through the camera in Preview and synthetically in Program while
+    /// reporting only Info -- an unreported whole-frame divergence.
+    #[test]
+    fn a_visible_camera_is_auto_assigned_when_no_active_id_is_set() {
+        let scene = prepare_scene(&minimal_scene(vec![rect_object(), camera_object("cam_1")]))
+            .expect("scene must prepare");
+
+        let camera = scene
+            .camera
+            .as_ref()
+            .expect("the first visible camera must be auto-assigned, matching normalizeScene");
+        assert_eq!(camera.object_id, "cam_1");
+    }
+
+    /// An animated camera cannot be honoured: the daemon evaluates no timeline,
+    /// so it would freeze at the authored values while Preview moves.
+    #[test]
+    fn an_animated_active_camera_still_invalidates_the_whole_frame() {
+        let mut camera = camera_object("cam_1");
+        camera["animation"] = json!({ "x": { "keyframes": [] } });
+        let mut scene_json = minimal_scene(vec![camera]);
+        scene_json["activeCameraId"] = json!("cam_1");
+
+        let scene = prepare_scene(&scene_json).expect("scene must prepare");
+
+        assert!(scene.camera.is_none());
+        let diagnostic = scene
+            .diagnostics
+            .iter()
+            .find(|d| d.code == "camera.animated.unsupported")
+            .expect("an animated camera must be reported");
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Invalid);
+        assert!(!scene.take_blockers.is_empty());
+    }
+
+    /// Timeline keyframes are attributed per object, so only keyframes naming
+    /// THIS camera may refuse it. A scene whose other objects animate is a
+    /// pre-existing native limitation unrelated to framing.
+    #[test]
+    fn timeline_keyframes_for_other_objects_do_not_refuse_the_camera() {
+        let mut scene_json = minimal_scene(vec![rect_object(), camera_object("cam_1")]);
+        scene_json["activeCameraId"] = json!("cam_1");
+        scene_json["timeline"]["keyframes"] = json!([
+            { "id": "k1", "objectId": "rect_1", "frame": 0, "properties": {} }
+        ]);
+
+        let scene = prepare_scene(&scene_json).expect("scene must prepare");
+        assert!(
+            scene.camera.is_some(),
+            "another object's keyframes say nothing about the camera"
+        );
+
+        scene_json["timeline"]["keyframes"] = json!([
+            { "id": "k1", "objectId": "cam_1", "frame": 0, "properties": {} }
+        ]);
+        let animated = prepare_scene(&scene_json).expect("scene must prepare");
+        assert!(
+            animated.camera.is_none(),
+            "a keyframe naming the camera must refuse it"
+        );
+        assert!(animated
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "camera.animated.unsupported"));
+    }
+
+    /// An unrecognised `cameraKind` must fail closed rather than silently
+    /// falling back to perspective.
+    #[test]
+    fn an_unknown_camera_kind_fails_closed() {
+        let mut camera = camera_object("cam_1");
+        camera["cameraKind"] = json!("fisheye");
+        let mut scene_json = minimal_scene(vec![camera]);
+        scene_json["activeCameraId"] = json!("cam_1");
+
+        let scene = prepare_scene(&scene_json).expect("scene must prepare");
+        assert!(scene.camera.is_none());
+        assert!(scene
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "camera.kind.unsupported" && d.severity.blocks_take()));
+    }
+
+    /// An orthographic camera's frustum is the canvas size divided by zoom, and
+    /// does not depend on camera distance.
+    #[test]
+    fn an_orthographic_camera_resolves_canvas_sized_half_extents() {
+        let mut camera = camera_object("cam_1");
+        camera["cameraKind"] = json!("orthographic");
+        camera["zoom"] = json!(2.0);
+        let mut scene_json = minimal_scene(vec![camera]);
+        scene_json["activeCameraId"] = json!("cam_1");
+
+        let scene = prepare_scene(&scene_json).expect("scene must prepare");
+        let camera = scene.camera.as_ref().expect("camera must be honoured");
+
+        match camera.kind {
+            crate::scene::PreparedCameraKind::Orthographic {
+                half_width,
+                half_height,
+            } => {
+                assert!((half_width - 480.0).abs() < 1e-3, "1920/2/2 = 480");
+                assert!((half_height - 270.0).abs() < 1e-3, "1080/2/2 = 270");
+            }
+            other => panic!("expected an orthographic camera, got {other:?}"),
+        }
+        assert_eq!(camera.zoom, 2.0);
+    }
+
+    /// `zoom` folds into the projection, and is stored pre-folded as `y_scale`
+    /// so the render thread never has to invert it back through an `atan`.
+    #[test]
+    fn perspective_zoom_folds_into_the_projection_y_scale() {
+        let mut camera = camera_object("cam_1");
+        camera["fov"] = json!(45.0);
+        camera["zoom"] = json!(2.0);
+        let mut scene_json = minimal_scene(vec![camera]);
+        scene_json["activeCameraId"] = json!("cam_1");
+
+        let scene = prepare_scene(&scene_json).expect("scene must prepare");
+        let camera = scene.camera.as_ref().expect("camera must be honoured");
+
+        match camera.kind {
+            crate::scene::PreparedCameraKind::Perspective {
+                fov_radians,
+                y_scale,
+            } => {
+                let expected_fov = 45.0_f64.to_radians();
+                assert!(((fov_radians as f64) - expected_fov).abs() < 1e-6);
+                // y_scale = zoom / tan(fov/2) = 2 / tan(22.5 deg) = 4.828427
+                let expected = 2.0 / (22.5_f64.to_radians()).tan();
+                assert!(
+                    ((y_scale as f64) - expected).abs() < 1e-4,
+                    "expected y_scale {expected}, got {y_scale}"
+                );
+            }
+            other => panic!("expected a perspective camera, got {other:?}"),
+        }
+    }
+
+    /// A camera with a data binding cannot be honoured: live data would move it
+    /// in the editor while the daemon resolves no bindings.
+    #[test]
+    fn a_data_bound_camera_still_invalidates_the_whole_frame() {
+        let mut camera = camera_object("cam_1");
+        camera["bindings"] = json!({ "x": "team.cameraX" });
+        let mut scene_json = minimal_scene(vec![camera]);
+        scene_json["activeCameraId"] = json!("cam_1");
+
+        let scene = prepare_scene(&scene_json).expect("scene must prepare");
+        assert!(scene.camera.is_none());
+        assert!(scene
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "camera.bound.unsupported" && d.severity.blocks_take()));
+    }
+
+    /// An extreme depth range degrades depth precision but omits nothing, so it
+    /// must warn without blocking Take. The authored `far` is used verbatim
+    /// because clamping it would clip geometry the editor shows.
+    #[test]
+    fn an_extreme_depth_range_degrades_without_blocking_take() {
+        let mut camera = camera_object("cam_1");
+        camera["near"] = json!(0.01);
+        camera["far"] = json!(1.0e9);
+        let mut scene_json = minimal_scene(vec![camera]);
+        scene_json["activeCameraId"] = json!("cam_1");
+
+        let scene = prepare_scene(&scene_json).expect("scene must prepare");
+        assert!(
+            scene.camera.is_some(),
+            "the camera is still faithfully framed"
+        );
+
+        let diagnostic = scene
+            .diagnostics
+            .iter()
+            .find(|d| d.code == "camera.depth-range.imprecise")
+            .expect("an extreme depth range must be reported");
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Degraded);
+        assert!(
+            scene.take_blockers.is_empty(),
+            "depth imprecision omits no content, got {:?}",
             scene.take_blockers
         );
     }
