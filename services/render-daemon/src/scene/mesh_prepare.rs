@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 
 use base64::Engine;
 use glam::{EulerRot, Mat3, Mat4, Vec3, Vec4};
+
+use super::diagnostics::DiagnosticSink;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -285,7 +287,7 @@ fn default_uv_pivot() -> [f64; 2] {
 pub fn prepare_meshes(
     scene_json: &Value,
     objects: &[Value],
-    warnings: &mut Vec<String>,
+    warnings: &mut DiagnosticSink,
 ) -> Vec<PreparedMesh> {
     let context: MeshSceneContext = match serde_json::from_value(scene_json.clone()) {
         Ok(context) => context,
@@ -441,7 +443,7 @@ fn resolve_surface_material(
     slot_key: &str,
     fallback: &str,
     cache: &mut AssetLoadCache,
-    warnings: &mut Vec<String>,
+    warnings: &mut DiagnosticSink,
 ) -> Option<PreparedMeshMaterial> {
     let Some(binding_value) = object.material_slots.get(slot_key) else {
         return fallback_material(fallback, object.opacity as f32);
@@ -979,7 +981,7 @@ fn import_model_surfaces(
     object: &MeshObjectDto,
     assets: &HashMap<String, &AssetDto>,
     cache: &mut AssetLoadCache,
-    warnings: &mut Vec<String>,
+    warnings: &mut DiagnosticSink,
 ) -> Option<Vec<RawSurface>> {
     let asset = object
         .model_asset_id
@@ -1660,7 +1662,7 @@ mod tests {
     #[test]
     fn cube_has_six_real_triangle_surfaces() {
         let object = mesh_object("cube");
-        let mut warnings = Vec::new();
+        let mut warnings = DiagnosticSink::new();
         let meshes = prepare_meshes(&scene_with(object.clone()), &[object], &mut warnings);
         assert!(warnings.is_empty(), "{warnings:?}");
         assert_eq!(meshes.len(), 1);
@@ -1679,7 +1681,7 @@ mod tests {
     fn sphere_cylinder_and_torus_are_tessellated_not_symbols() {
         for kind in ["sphere", "cylinder", "torus"] {
             let object = mesh_object(kind);
-            let mut warnings = Vec::new();
+            let mut warnings = DiagnosticSink::new();
             let meshes = prepare_meshes(&scene_with(object.clone()), &[object], &mut warnings);
             assert!(warnings.is_empty(), "{kind}: {warnings:?}");
             let triangle_count = meshes[0]
@@ -1729,7 +1731,7 @@ mod tests {
             "materialInstances": [],
             "objects": [object]
         });
-        let mut warnings = Vec::new();
+        let mut warnings = DiagnosticSink::new();
         let meshes = prepare_meshes(&scene, scene["objects"].as_array().unwrap(), &mut warnings);
         assert!(warnings.is_empty(), "{warnings:?}");
         let right = meshes[0]
@@ -1784,7 +1786,7 @@ mod tests {
             "materialInstances": [],
             "objects": [object]
         });
-        let mut warnings = Vec::new();
+        let mut warnings = DiagnosticSink::new();
         let meshes = prepare_meshes(&scene, scene["objects"].as_array().unwrap(), &mut warnings);
         assert!(warnings.is_empty(), "{warnings:?}");
         assert_eq!(meshes[0].surfaces.len(), 2);
@@ -1827,7 +1829,7 @@ mod tests {
                 "materialInstances": [],
                 "objects": [object]
             });
-            let mut warnings = Vec::new();
+            let mut warnings = DiagnosticSink::new();
             let meshes =
                 prepare_meshes(&scene, scene["objects"].as_array().unwrap(), &mut warnings);
             assert!(warnings.is_empty(), "{material_type}: {warnings:?}");
@@ -1859,7 +1861,7 @@ mod tests {
             "materialInstances": [],
             "objects": [object]
         });
-        let mut warnings = Vec::new();
+        let mut warnings = DiagnosticSink::new();
         let meshes = prepare_meshes(&scene, scene["objects"].as_array().unwrap(), &mut warnings);
         assert!(warnings.is_empty(), "{warnings:?}");
         assert_eq!(meshes[0].surfaces.len(), 6);
@@ -1891,7 +1893,7 @@ mod tests {
             "materialInstances": [],
             "objects": [object]
         });
-        let mut warnings = Vec::new();
+        let mut warnings = DiagnosticSink::new();
         let meshes = prepare_meshes(&scene, scene["objects"].as_array().unwrap(), &mut warnings);
         assert!(warnings.is_empty(), "{warnings:?}");
         let color = meshes[0]

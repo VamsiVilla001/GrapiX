@@ -3,7 +3,9 @@
 Last consolidated: **2026-07-28**  
 Repository: `D:\Project KK\Personal projects\GrapiX`  
 Current branch: `Basic-v0.1`  
-Current committed baseline: `7f9fe44 feat: establish GrapiX Basic v0.1`
+Current committed baseline: `eb74493 feat(editor): XPression-style Slab
+geometry, default Standard Material, scoped deletes` (local; `origin/Basic-v0.1`
+is still at `7f9fe44`)
 
 This is the durable handoff memory for GrapiX. It records product intent,
 architecture boundaries, module ownership, completed work, current local work,
@@ -346,6 +348,8 @@ Main module ownership:
 - `config.rs` — environment and runtime configuration.
 - `protocol.rs` — Rust protocol v2 envelopes and validation.
 - `controller.rs` — command handling, renderer/output state.
+- `scene/diagnostics.rs` — typed scene diagnostics: stable codes, explicit
+  severity, and severity-derived Take blocking.
 - `scene/document.rs` — Rust SceneDocument consumption.
 - `scene/lifecycle.rs` — registry and residency state.
 - `scene/mesh_prepare.rs` — off-thread mesh/material/texture preparation.
@@ -1039,36 +1043,63 @@ The required completion order remains:
 - Added Slab corner, skew, texture-skew, front/back bevel, culling, extrusion,
   and five material regions.
 
-## Current uncommitted local work
+### 2026-07-28 — typed native diagnostics and honest camera reporting
 
-The branch is based on pushed commit `7f9fe44`, but the following latest fixes
-are currently uncommitted and must be preserved:
+- Scene preparation now produces typed `SceneDiagnostic` values (stable dotted
+  `code`, explicit `severity`, optional object attribution) instead of only
+  free-text warnings. `warnings` and `take_blockers` are derived views and
+  remain on the wire unchanged.
+- Severity vocabulary: `info` (rendered as authored), `degraded` (rendered at
+  lower fidelity, nothing missing), `omitted` (authored content absent),
+  `invalid` (the whole frame misrepresents the scene). `omitted` and worse
+  block Take.
+- **Fixed a real over-block.** Take-readiness was decided by substring-matching
+  warning prose for `"not rendered"` / `"skipped"` / `"missing material"`. The
+  cosmetic warning `"rounded corners are not rendered yet (drawn sharp)"`
+  matched, so **any rect with a corner radius blocked Take** even though the
+  rect was fully present. Severity now decides; wording cannot.
+- The same rule under-blocked in the other direction: a warning phrased
+  `"ignored"` or `"falls back to"` matched nothing and silently allowed Take.
+- **Cameras are now reported honestly.** The daemon never deserialized
+  `activeCameraId`; `renderer::mesh::scene_view_projection` synthesises a fixed
+  45-degree camera from canvas size. Previously this surfaced only as
+  `"1 object(s) of type \"camera\" are NOT rendered"`, which understates the
+  impact: an unhonoured camera mis-frames every *other* object too. An active
+  authored camera now emits `camera.active.unsupported` at `invalid` severity
+  and blocks Take; cameras present but inactive emit
+  `camera.inactive.not-rendered` at `info` and do not.
+- Unmigrated warning sites still compile and keep their previous
+  classification: `DiagnosticSink::push` is shaped like `Vec::<String>::push`
+  and applies the historical substring rule, so the migration cannot silently
+  downgrade a real blocker while it is in progress.
+- Protocol updated on both sides in one change (rule 7): Rust `SceneStatus` /
+  `LifecycleSceneStatus` and TypeScript `RendererSceneStatus` gained
+  `diagnostics`. The field is optional in TypeScript so an older daemon that
+  omits it still typechecks. The Fastify bridge forwards replies opaquely, so
+  no bridge change was required.
+- Verified: render-daemon 91 lib + 13 integration tests, clippy and
+  `cargo fmt --check` clean, shared-types 38/38, editor 25/25, api-server
+  16/16, full workspace typecheck including Tauri `cargo check`, and
+  `certify:e2e` at 84 takes / 1686 frames rendered / 0 dropped.
+- **Native camera parity itself is still not implemented** — this change makes
+  the gap loud, it does not close it. A `CameraObjectDto` following the
+  existing `LightObjectDto` pattern remains the next step.
+- **Gotcha:** `npm run certify:e2e` defaults to `GRAPIX_SOAK_MINUTES=0.05`
+  (3 seconds), but 80-scene setup alone takes ~8 seconds, so the timed loop
+  runs zero iterations and the gate reports `pass: false` with
+  `takes: 0, samples: 0`. This is a pre-existing budget artifact, not a
+  regression. Use `GRAPIX_SOAK_MINUTES=0.6` or higher for a meaningful run.
 
-- `apps/editor-web/src/components/Inspector.tsx`
-  - Slab property controls.
-- `apps/editor-web/src/components/TemplatesPanel.tsx`
-  - scoped scene Delete shortcut.
-- `apps/editor-web/src/components/templateDeleteShortcut.ts`
-  - pure shortcut guard.
-- `apps/editor-web/src/modules/material-manager/components/MaterialLibrary.tsx`
-  - Delete containment and clean All-library contents.
-- `apps/editor-web/src/modules/material-manager/services/defaultMaterial.ts`
-  - real Standard Material injection.
-- `apps/editor-web/src/rendering/sceneMaterial.ts`
-  - fill and fillStyle material application.
-- `apps/editor-web/src/rendering/ThreeSceneLayer.ts`
-  - custom Slab geometry/material/culling use.
-- `apps/editor-web/src/rendering/slabGeometry.ts`
-  - generated Slab mesh.
-- `apps/editor-web/src/store/editorStore.ts`
-  - Standard Material and Slab normalization.
-- `packages/shared-types/src/index.ts`
-  - Slab schema/defaults/five faces.
-- related editor/shared regression tests.
-- this `memory.md`.
+## Current local work
 
-Do not reset, checkout, or discard these files. Commit/push only when the user
-asks.
+The Slab / default-Standard-Material / scoped-delete work that this file
+previously listed as uncommitted is now committed as `eb74493` on
+`Basic-v0.1`. It has **not** been pushed; `origin/Basic-v0.1` is still at
+`7f9fe44`. Push only when the user asks.
+
+The typed-diagnostics work described in the 2026-07-28 chronology entry lives
+on branch `claude/pull-latest-code-5c4e4e` in the
+`.claude/worktrees/pull-latest-code-5c4e4e` worktree, branched from `eb74493`.
 
 ## Last verification evidence
 
@@ -1142,7 +1173,10 @@ The Tauri shell reuses already-running services when possible.
 - Native general 2D image, shape, line, paint, mask, and effect coverage.
 - Native video codec and hardware decode.
 - Continuous native Preview output independent of Program.
-- Native active-camera and resolved hierarchy/timeline parity.
+- Native active-camera and resolved hierarchy/timeline parity. As of
+  2026-07-28 the gap is *reported* (`camera.active.unsupported`, `invalid`
+  severity, blocks Take) but not closed: the daemon still has no
+  `CameraObjectDto` and frames with a fixed 45-degree synthetic camera.
 - Transparent 3D ordering/depth-mode parity.
 - Shadows and full glTF animation/skinning/morph support.
 - Unified 2D/3D interleaving if stacked canvases become insufficient.

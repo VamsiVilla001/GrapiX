@@ -249,6 +249,48 @@ export interface RendererErrorReply {
   sequence?: number;
 }
 
+/**
+ * How badly a scene diagnostic affects the rendered frame.
+ *
+ * Ordered from harmless to untrustworthy. `omitted` and `invalid` block Take;
+ * `info` and `degraded` do not. Mirrors `DiagnosticSeverity` in
+ * `services/render-daemon/src/scene/diagnostics.rs`.
+ */
+export const RENDERER_DIAGNOSTIC_SEVERITIES = [
+  /** Rendered exactly as authored. */
+  "info",
+  /** Rendered with reduced fidelity; nothing authored is missing. */
+  "degraded",
+  /** Specific authored content is absent from the frame. */
+  "omitted",
+  /** The frame as a whole does not represent the scene. */
+  "invalid"
+] as const;
+export type RendererDiagnosticSeverity =
+  (typeof RENDERER_DIAGNOSTIC_SEVERITIES)[number];
+
+/** Severities at or above which a scene is unsafe to Take. */
+export const RENDERER_TAKE_BLOCKING_SEVERITIES: readonly RendererDiagnosticSeverity[] =
+  ["omitted", "invalid"];
+
+export function blocksTake(severity: RendererDiagnosticSeverity): boolean {
+  return RENDERER_TAKE_BLOCKING_SEVERITIES.includes(severity);
+}
+
+/**
+ * One machine-readable statement about how the native renderer handled a
+ * scene. Match on `code`, never on `message` — the message is operator-facing
+ * prose and is free to be reworded.
+ */
+export interface RendererSceneDiagnostic {
+  /** Stable dotted identifier, e.g. `camera.active.unsupported`. */
+  code: string;
+  severity: RendererDiagnosticSeverity;
+  message: string;
+  objectId?: string;
+  objectType?: string;
+}
+
 export interface RendererSceneStatus {
   id: string;
   name: string;
@@ -256,6 +298,13 @@ export interface RendererSceneStatus {
   objectCount: number;
   rectCount: number;
   meshCount: number;
+  /**
+   * Typed report from the native renderer. Authoritative; `warnings` and
+   * `takeBlockers` are derived string views retained for compatibility.
+   *
+   * Optional because a daemon predating typed diagnostics omits the field.
+   */
+  diagnostics?: RendererSceneDiagnostic[];
   warnings: string[];
   takeReady: boolean;
   takeBlockers: string[];

@@ -1,9 +1,11 @@
 //! Scene ingestion: `SceneDocument` JSON -> renderer-ready state.
 
+mod diagnostics;
 mod document;
 mod lifecycle;
 mod mesh_prepare;
 
+pub use diagnostics::{DiagnosticSeverity, DiagnosticSink, SceneDiagnostic};
 pub use document::{
     prepare_scene, PreparedGradient, PreparedLight, PreparedLightKind, PreparedRect, PreparedScene,
     SceneError, MAX_PREPARED_LIGHTS,

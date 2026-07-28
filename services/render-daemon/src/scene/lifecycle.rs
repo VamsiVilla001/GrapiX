@@ -8,7 +8,7 @@ use serde::Serialize;
 
 #[cfg(test)]
 use super::PreparedGradient;
-use super::{PreparedMeshVertex, PreparedRect, PreparedScene};
+use super::{PreparedMeshVertex, PreparedRect, PreparedScene, SceneDiagnostic};
 
 pub const DEFAULT_MAX_WARM_SCENES: usize = 3;
 pub const DEFAULT_MAX_PREPARED_CACHE_BYTES: u64 = 768 * 1024 * 1024;
@@ -35,6 +35,7 @@ pub struct SceneLifecycleStatus {
     pub object_count: usize,
     pub rect_count: usize,
     pub mesh_count: usize,
+    pub diagnostics: Vec<SceneDiagnostic>,
     pub warnings: Vec<String>,
     pub take_blockers: Vec<String>,
     pub estimated_bytes: u64,
@@ -237,6 +238,7 @@ impl SceneRegistry {
                 object_count: entry.scene.object_count,
                 rect_count: entry.scene.rects.len(),
                 mesh_count: entry.scene.meshes.len(),
+                diagnostics: entry.scene.diagnostics.clone(),
                 warnings: entry.scene.warnings.clone(),
                 take_blockers: entry.scene.take_blockers.clone(),
                 estimated_bytes: entry.estimated_bytes,
@@ -371,6 +373,7 @@ mod tests {
             lights: Vec::new(),
             object_count: 0,
             warnings: Vec::new(),
+            diagnostics: Vec::new(),
             take_blockers: Vec::new(),
             source_document: serde_json::json!({
                 "id": id,

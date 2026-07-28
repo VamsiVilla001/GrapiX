@@ -863,6 +863,9 @@ pub struct SceneStatus {
     pub object_count: usize,
     pub rect_count: usize,
     pub mesh_count: usize,
+    /// Typed report with stable codes and explicit severities. `warnings` and
+    /// `take_blockers` remain as derived string views for older controllers.
+    pub diagnostics: Vec<crate::scene::SceneDiagnostic>,
     pub warnings: Vec<String>,
     pub take_ready: bool,
     pub take_blockers: Vec<String>,
@@ -878,6 +881,7 @@ pub struct LifecycleSceneStatus {
     pub object_count: usize,
     pub rect_count: usize,
     pub mesh_count: usize,
+    pub diagnostics: Vec<crate::scene::SceneDiagnostic>,
     pub warnings: Vec<String>,
     pub take_ready: bool,
     pub take_blockers: Vec<String>,

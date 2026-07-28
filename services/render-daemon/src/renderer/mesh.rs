@@ -544,6 +544,7 @@ mod tests {
             meshes: Vec::new(),
             lights: Vec::new(),
             object_count: 0,
+            diagnostics: Vec::new(),
             warnings: Vec::new(),
             take_blockers: Vec::new(),
             source_document: serde_json::json!({}),

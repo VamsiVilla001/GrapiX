@@ -18,12 +18,14 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 
+use super::diagnostics::{DiagnosticSeverity, DiagnosticSink, SceneDiagnostic};
 use super::mesh_prepare::{prepare_meshes, PreparedMesh};
 
 /// SceneDocument v1 now includes native 2D rect/ellipse and depth-tested mesh
 /// paths. Every other object type still produces an explicit warning.
 const SUPPORTED_VERSION: u64 = 1;
 pub const MAX_PREPARED_LIGHTS: usize = 16;
+const CAMERA_OBJECT_TYPE: &str = "camera";
 
 #[derive(Debug, thiserror::Error)]
 pub enum SceneError {
@@ -310,9 +312,14 @@ pub struct PreparedScene {
     /// every authored light has zero intensity, matching the editor.
     pub lights: Vec<PreparedLight>,
     pub object_count: usize,
-    /// Human-readable warnings for everything the v1 renderer does NOT draw.
+    /// Typed diagnostics with stable codes and explicit severities. This is
+    /// the authoritative report; `warnings` and `take_blockers` are derived
+    /// views kept for wire compatibility.
+    pub diagnostics: Vec<SceneDiagnostic>,
+    /// Human-readable messages for every diagnostic, in emission order.
     pub warnings: Vec<String>,
-    /// Conditions that make a Take unsafe. Preview/warm remains allowed so the
+    /// Messages for the diagnostics severe enough to make a Take unsafe
+    /// (severity `omitted` or worse). Preview/warm remains allowed so the
     /// operator can inspect the report and choose an explicit fallback.
     pub take_blockers: Vec<String>,
     /// Canonical source used for revision-safe small patches. It is retained
@@ -338,7 +345,8 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
         });
     }
 
-    let mut warnings = Vec::new();
+    let mut warnings = DiagnosticSink::new();
+    report_camera_support(scene_json, &document.objects, &mut warnings);
     let meshes = prepare_meshes(scene_json, &document.objects, &mut warnings);
     let lights = prepare_lights(
         &document.objects,
@@ -383,10 +391,18 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
         }
 
         if rect.radius > 0.0 {
-            warnings.push(format!(
-                "rect {} has radius {}; rounded corners are not rendered yet (drawn sharp)",
-                rect.id, rect.radius
-            ));
+            // Degraded, not Omitted: the rect is fully present in the frame,
+            // only its corner treatment is wrong. This must not block Take.
+            warnings.emit_for_object(
+                "rect.radius.unsupported",
+                DiagnosticSeverity::Degraded,
+                format!(
+                    "rect {} has radius {}; rounded corners are not rendered yet (drawn sharp)",
+                    rect.id, rect.radius
+                ),
+                rect.id.clone(),
+                object_type,
+            );
         }
 
         let mut fill_source = rect.fill.clone();
@@ -540,9 +556,22 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
     }
 
     for (kind, count) in &unsupported_counts {
-        warnings.push(format!(
-            "{count} object(s) of type {kind:?} are NOT rendered: native v1 currently renders rects, ellipses, and real 3D meshes"
-        ));
+        // `camera` is intentionally not reported here. A camera is not content
+        // that failed to draw -- it is a viewpoint. Saying "1 camera is NOT
+        // rendered" understates the impact, because an unhonoured camera
+        // mis-frames every *other* object too. report_camera_support handles
+        // it at Invalid severity.
+        if kind == CAMERA_OBJECT_TYPE {
+            continue;
+        }
+
+        warnings.emit(
+            "object.type.unsupported",
+            DiagnosticSeverity::Omitted,
+            format!(
+                "{count} object(s) of type {kind:?} are NOT rendered: native v1 currently renders rects, ellipses, and real 3D meshes"
+            ),
+        );
     }
 
     // Same ordering rule as apps/editor-web/src/rendering/sceneMaterial.ts.
@@ -564,17 +593,6 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
         [0.0, 0.0, 0.0, 0.0]
     });
 
-    let take_blockers = warnings
-        .iter()
-        .filter(|warning| {
-            let normalized = warning.to_ascii_lowercase();
-            normalized.contains("not rendered")
-                || normalized.contains("skipped")
-                || normalized.contains("missing material")
-        })
-        .cloned()
-        .collect();
-
     let background_fill = to_linear_premultiplied(background, 1.0);
     let (background_linear_premultiplied, background_gradient) = prepare_color_value(
         document.canvas.background_style.as_ref(),
@@ -583,6 +601,8 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
         "canvas background",
         &mut warnings,
     );
+
+    let (diagnostics, warning_messages, take_blockers) = warnings.into_parts();
 
     Ok(PreparedScene {
         scene_id: document.id,
@@ -596,17 +616,94 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
         meshes,
         lights,
         object_count: document.objects.len(),
-        warnings,
+        diagnostics,
+        warnings: warning_messages,
         take_blockers,
         source_document: scene_json.clone(),
     })
+}
+
+/// Report the gap between authored cameras and the native renderer's fixed
+/// viewpoint.
+///
+/// `renderer::mesh::scene_view_projection` synthesises a 45-degree perspective
+/// camera from the canvas size and never reads `activeCameraId`. When the
+/// scene selects a camera, that synthetic viewpoint is simply the wrong one,
+/// and the consequence is not confined to the camera object: every mesh in the
+/// frame is positioned by the wrong view-projection matrix. Preview and
+/// Program therefore disagree about the whole image, which is exactly the
+/// silent divergence Program output must never ship. Hence `Invalid` rather
+/// than `Omitted`.
+fn report_camera_support(scene_json: &Value, objects: &[Value], warnings: &mut DiagnosticSink) {
+    let cameras: Vec<&Value> = objects
+        .iter()
+        .filter(|object| object.get("type").and_then(Value::as_str) == Some(CAMERA_OBJECT_TYPE))
+        .collect();
+
+    if cameras.is_empty() {
+        return;
+    }
+
+    let active_id = scene_json
+        .get("activeCameraId")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty());
+
+    let active_camera = active_id.and_then(|id| {
+        cameras.iter().copied().find(|camera| {
+            camera.get("id").and_then(Value::as_str) == Some(id)
+                && camera
+                    .get("visible")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true)
+        })
+    });
+
+    match active_camera {
+        Some(camera) => {
+            let id = camera
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or("<unknown>");
+            let name = camera
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("<unnamed>");
+            warnings.emit_for_object(
+                "camera.active.unsupported",
+                DiagnosticSeverity::Invalid,
+                format!(
+                    "scene selects camera {id:?} ({name:?}) as active, but the native renderer \
+                     ignores authored cameras and frames every object with a fixed 45-degree \
+                     perspective derived from the canvas size. Program framing will not match \
+                     Preview, so the whole frame is untrustworthy -- not just this object"
+                ),
+                id,
+                CAMERA_OBJECT_TYPE,
+            );
+        }
+        None => {
+            // Cameras exist but none is active, so the synthetic viewpoint is
+            // the same one the editor falls back to. Nothing is mis-framed;
+            // the camera objects simply are not drawn as gizmos.
+            warnings.emit(
+                "camera.inactive.not-rendered",
+                DiagnosticSeverity::Info,
+                format!(
+                    "{} camera object(s) are present but none is active; the native renderer \
+                     uses its default viewpoint and does not draw camera gizmos",
+                    cameras.len()
+                ),
+            );
+        }
+    }
 }
 
 fn prepare_lights(
     objects: &[Value],
     canvas_width: f64,
     canvas_height: f64,
-    warnings: &mut Vec<String>,
+    warnings: &mut DiagnosticSink,
 ) -> Vec<PreparedLight> {
     let mut lights = Vec::new();
     for value in objects {
@@ -714,7 +811,7 @@ fn prepare_color_value(
     fallback: [f32; 4],
     object_opacity: f32,
     label: &str,
-    warnings: &mut Vec<String>,
+    warnings: &mut DiagnosticSink,
 ) -> ([f32; 4], PreparedGradient) {
     let Some(value) = value else {
         return (fallback, PreparedGradient::default());
@@ -1007,6 +1104,135 @@ mod tests {
         assert_eq!(scene.rects.len(), 1);
         assert_eq!(scene.rects[0].primitive_kind, 1);
         assert!(scene.warnings.is_empty());
+    }
+
+    #[test]
+    fn rounded_rect_is_a_cosmetic_degradation_not_a_take_blocker() {
+        let mut rounded = rect_object();
+        rounded["radius"] = json!(12);
+
+        let scene = prepare_scene(&minimal_scene(vec![rounded])).expect("scene must prepare");
+
+        assert_eq!(scene.rects.len(), 1, "the rect still renders, just sharp");
+        assert!(
+            scene.warnings.iter().any(|w| w.contains("rounded corners")),
+            "the degradation must still be reported, got {:?}",
+            scene.warnings
+        );
+        assert!(
+            scene.take_blockers.is_empty(),
+            "drawing a rect with sharp corners degrades fidelity but omits no content; \
+             it must not block Take, got {:?}",
+            scene.take_blockers
+        );
+    }
+
+    fn camera_object(id: &str) -> Value {
+        json!({
+            "id": id, "name": "Beauty Cam", "type": "camera",
+            "x": 0, "y": 0, "zDepth": 0, "zIndex": 0, "layerId": "main",
+            "width": 0, "height": 0, "rotation": 0, "opacity": 1,
+            "visible": true, "locked": false,
+            "bindings": {}, "materialSlots": {}
+        })
+    }
+
+    #[test]
+    fn an_active_camera_invalidates_the_whole_frame_not_just_the_camera() {
+        let mut scene_json = minimal_scene(vec![rect_object(), camera_object("cam_1")]);
+        scene_json["activeCameraId"] = json!("cam_1");
+
+        let scene = prepare_scene(&scene_json).expect("scene must prepare");
+
+        let camera_diagnostic = scene
+            .diagnostics
+            .iter()
+            .find(|d| d.code == "camera.active.unsupported")
+            .expect("an active authored camera must be reported");
+
+        assert_eq!(
+            camera_diagnostic.severity,
+            DiagnosticSeverity::Invalid,
+            "an unhonoured camera mis-frames every object, so it invalidates \
+             the frame rather than omitting one object"
+        );
+        assert_eq!(camera_diagnostic.object_id.as_deref(), Some("cam_1"));
+        assert!(
+            !scene.take_blockers.is_empty(),
+            "Take must be blocked while Program framing cannot match Preview"
+        );
+
+        // The generic "object of type X is NOT rendered" line would understate
+        // this, so it must not also be emitted for the camera.
+        assert!(
+            !scene
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "object.type.unsupported" && d.message.contains("camera")),
+            "camera must not be double-reported as ordinary undrawn content, got {:?}",
+            scene.warnings
+        );
+    }
+
+    #[test]
+    fn an_inactive_camera_is_informational_and_does_not_block_take() {
+        // No activeCameraId: the native default viewpoint is also what the
+        // editor falls back to, so nothing is mis-framed.
+        let scene = prepare_scene(&minimal_scene(vec![rect_object(), camera_object("cam_1")]))
+            .expect("scene must prepare");
+
+        let camera_diagnostic = scene
+            .diagnostics
+            .iter()
+            .find(|d| d.code == "camera.inactive.not-rendered")
+            .expect("present-but-inactive cameras must still be reported");
+
+        assert_eq!(camera_diagnostic.severity, DiagnosticSeverity::Info);
+        assert!(
+            scene.take_blockers.is_empty(),
+            "an inactive camera changes nothing about the frame, got {:?}",
+            scene.take_blockers
+        );
+    }
+
+    #[test]
+    fn a_scene_with_no_cameras_reports_nothing_about_cameras() {
+        let scene = prepare_scene(&minimal_scene(vec![rect_object()])).expect("scene must prepare");
+        assert!(!scene
+            .diagnostics
+            .iter()
+            .any(|d| d.code.starts_with("camera.")));
+    }
+
+    #[test]
+    fn every_diagnostic_carries_a_stable_code_and_matches_the_derived_views() {
+        let mut rounded = rect_object();
+        rounded["radius"] = json!(8);
+        let mut text = rect_object();
+        text["type"] = json!("text");
+        text["id"] = json!("text_1");
+
+        let scene = prepare_scene(&minimal_scene(vec![rounded, text])).expect("scene must prepare");
+
+        assert!(!scene.diagnostics.is_empty());
+        assert_eq!(
+            scene.warnings.len(),
+            scene.diagnostics.len(),
+            "warnings is a plain projection of diagnostics"
+        );
+        assert_eq!(
+            scene.take_blockers.len(),
+            scene
+                .diagnostics
+                .iter()
+                .filter(|d| d.severity.blocks_take())
+                .count(),
+            "take_blockers is derived from severity, not from message wording"
+        );
+        assert!(
+            scene.diagnostics.iter().all(|d| !d.code.is_empty()),
+            "every diagnostic needs a machine-readable code"
+        );
     }
 
     #[test]
