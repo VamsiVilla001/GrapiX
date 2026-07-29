@@ -1,7 +1,7 @@
 //! Cross-language shader-layout contract test.
 //!
 //! Asserts the Rust `QuadUniforms` struct matches the machine-readable layout
-//! in `packages/render-shaders/layouts.json` byte for byte. The browser
+//! in `Shared/render-shaders/layouts.json` byte for byte. The browser
 //! WebGPU renderer must run the equivalent check against the same file, so
 //! the two renderers cannot drift apart silently.
 
@@ -16,7 +16,7 @@ use grapix_render_daemon::renderer::pipeline::{QuadUniforms, QUAD_UNIFORMS_SIZE}
 fn load_layouts() -> serde_json::Value {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../packages/render-shaders/layouts.json"
+        "/../../Shared/render-shaders/layouts.json"
     );
     let raw = std::fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("failed to read shared layouts.json at {path}: {error}"));
@@ -164,7 +164,7 @@ fn declared_wgsl_file_exists_and_declares_the_struct() {
             .as_str()
             .expect("file");
         let path = format!(
-            "{}/../../packages/render-shaders/{file}",
+            "{}/../../Shared/render-shaders/{file}",
             env!("CARGO_MANIFEST_DIR")
         );
         let source = std::fs::read_to_string(&path)

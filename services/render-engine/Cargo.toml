@@ -1,0 +1,50 @@
+[package]
+name = "grapix-render-engine"
+version = "0.2.0"
+edition = "2021"
+rust-version = "1.87"
+description = "GrapiX standalone render engine: an independent, headless-capable, tile-based real-time broadcast graphics renderer."
+publish = false
+
+[[bin]]
+name = "grapix-render-engine"
+path = "src/main.rs"
+
+[features]
+default = []
+# Output adapters that need a vendor SDK are gated. The engine builds, runs, and
+# passes its tests without any of them; the null and recording adapters are
+# always available. Enabling a feature makes the adapter *compilable*, never
+# "certified" — see docs/render-engine-assessment.md.
+ndi = ["grapix-render-core/ndi"]
+
+[dependencies]
+# The proven native rendering core, reused rather than rewritten. This is the
+# existing services/render-daemon crate: 10,541 lines of tested scene parsing,
+# mesh preparation, text shaping, pipeline caching, asset caching, and output
+# adapters. The engine adds the virtual canvas, tiling, render graph, protocol
+# v3, configuration, capabilities, preview, and diagnostics on top.
+grapix-render-core = { package = "grapix-render-daemon", path = "../render-daemon" }
+
+anyhow = "1"
+base64 = "0.22"
+bytemuck = { version = "1", features = ["derive"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+getrandom = "0.3"
+glam = "0.29"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "io-util", "fs"] }
+tokio-tungstenite = "0.26"
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Pinned to the same verified major as the render core. wgpu majors change APIs
+# frequently; upgrade deliberately and together, never incidentally.
+wgpu = "26"
+
+[dev-dependencies]
+tempfile = "3"

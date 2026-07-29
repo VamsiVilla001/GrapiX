@@ -1,7 +1,7 @@
 //! Quad compositing pipeline built on the shared shader contract.
 //!
 //! The WGSL source and the byte layout of [`QuadUniforms`] are owned by
-//! `packages/render-shaders` (see docs/shader-contract.md there). The
+//! `Shared/render-shaders` (see docs/shader-contract.md there). The
 //! `tests/layout_contract.rs` integration test asserts this struct matches
 //! `layouts.json` exactly, so Rust and the future browser WebGPU renderer
 //! cannot silently diverge.
@@ -13,10 +13,10 @@ use crate::scene::{PreparedGradient, PreparedScene};
 /// Shared shader source, compiled into the binary. The path reaches across
 /// the monorepo on purpose: there must be exactly one copy of this shader.
 pub const COMPOSITE_QUAD_WGSL: &str =
-    include_str!("../../../../packages/render-shaders/wgsl/composite_quad.wgsl");
+    include_str!("../../../../Shared/render-shaders/wgsl/composite_quad.wgsl");
 
 /// Mirrors `QuadUniforms` in composite_quad.wgsl. 304 bytes; layout is a
-/// contract with packages/render-shaders/layouts.json.
+/// contract with Shared/render-shaders/layouts.json.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct QuadUniforms {
@@ -53,7 +53,7 @@ pub const RENDER_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSr
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 /// Number of implemented blend modes, indexed by the shared blend id from
-/// packages/render-shaders/layouts.json: 0 normal, 1 multiply, 2 screen,
+/// Shared/render-shaders/layouts.json: 0 normal, 1 multiply, 2 screen,
 /// 3 add, 4 darken, 5 lighten.
 pub const BLEND_PIPELINE_COUNT: usize = 6;
 

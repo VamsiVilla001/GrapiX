@@ -4,8 +4,14 @@
   "version": "0.1.0",
   "description": "GrapiX broadcast graphics editor, sequencer, and renderer platform.",
   "workspaces": [
-    "apps/*",
-    "packages/*",
+    "Editor",
+    "Editor/apps/*",
+    "Editor/services/*",
+    "Playout",
+    "Playout/apps/*",
+    "Playout/services/*",
+    "Shared",
+    "Shared/*",
     "services/*"
   ],
   "scripts": {
@@ -16,19 +22,41 @@
     "dev:web": "npm run dev -w @grapix/editor-web",
     "dev:api": "npm run dev -w @grapix/api-server",
     "dev:daemon": "cargo run --manifest-path services/render-daemon/Cargo.toml",
+    "dev:editor": "npm run dev -w @grapix/editor-workspace",
+    "dev:playout": "npm run dev -w @grapix/playout-workspace",
+    "build:editor": "npm run build -w @grapix/editor-workspace",
+    "build:playout": "npm run build -w @grapix/playout-workspace",
+    "build:shared": "npm run build -w @grapix/shared-workspace",
+    "test:editor": "npm run verify -w @grapix/editor-workspace",
+    "test:playout": "npm run verify -w @grapix/playout-workspace",
+    "test:shared": "npm run verify -w @grapix/shared-workspace",
+    "check:boundaries": "node tools/architecture/check-workspace-boundaries.mjs",
+    "build:contracts": "npm run build -w @grapix/shared-types && npm run build -w @grapix/stage-model && npm run build -w @grapix/surface-model && npm run build -w @grapix/tile-system && npm run build -w @grapix/scene-model && npm run build -w @grapix/animation-engine && npm run build -w @grapix/asset-manager && npm run build -w @grapix/output-contracts && npm run build -w @grapix/renderer-contracts && npm run build -w @grapix/shader-library && npm run build -w @grapix/render-protocol",
+    "test:contracts": "npm test -w @grapix/stage-model && npm test -w @grapix/surface-model && npm test -w @grapix/tile-system && npm test -w @grapix/scene-model && npm test -w @grapix/animation-engine && npm test -w @grapix/asset-manager && npm test -w @grapix/output-contracts && npm test -w @grapix/renderer-contracts && npm test -w @grapix/shader-library && npm test -w @grapix/render-protocol",
+    "dev:engine": "cargo run --manifest-path services/render-engine/Cargo.toml -- --config services/render-engine/engine.toml",
+    "test:engine": "cargo test --manifest-path services/render-engine/Cargo.toml",
+    "check:engine": "cargo check --manifest-path services/render-engine/Cargo.toml --all-targets",
     "test:daemon": "cargo test --manifest-path services/render-daemon/Cargo.toml",
     "certify:control": "cargo test --manifest-path services/render-daemon/Cargo.toml --test certification_project",
     "certify:e2e": "npm run build -w @grapix/shared-types && npm run build -w @grapix/sdk && npm run build -w @grapix/renderer-protocol && npm run build -w @grapix/api-server && cargo build --manifest-path services/render-daemon/Cargo.toml && node tools/certification/run-local-e2e.mjs",
     "certify:soak": "node tools/certification/run-soak.mjs",
     "test:materials": "npm test -w @grapix/shared-types && cargo test --manifest-path services/render-daemon/Cargo.toml --no-default-features",
     "start": "npm run start -w @grapix/desktop-electron",
-    "build": "npm run build -w @grapix/shared-types && npm run build -w @grapix/sdk && npm run build -w @grapix/renderer-protocol && npm run build -w @grapix/api-server && npm run build -w @grapix/editor-web && npm run build -w @grapix/desktop-electron",
-    "typecheck": "npm run build -w @grapix/shared-types && npm run build -w @grapix/sdk && npm run build -w @grapix/renderer-protocol && npm run typecheck -w @grapix/api-server && npm run typecheck -w @grapix/editor-web && npm run typecheck -w @grapix/desktop-electron && npm run check -w @grapix/desktop-tauri"
+    "build": "npm run build:contracts && npm run build -w @grapix/sdk && npm run build -w @grapix/renderer-protocol && npm run build -w @grapix/api-server && npm run build -w @grapix/editor-web && npm run build -w @grapix/desktop-electron && npm run build -w @grapix/playout-control && npm run build -w @grapix/playout-web",
+    "typecheck": "npm run build:contracts && npm run build -w @grapix/sdk && npm run build -w @grapix/renderer-protocol && npm run typecheck -w @grapix/api-server && npm run typecheck -w @grapix/editor-web && npm run typecheck -w @grapix/desktop-electron && npm run check -w @grapix/desktop-tauri && npm run typecheck -w @grapix/playout-control && npm run typecheck -w @grapix/playout-web",
+    "certify:engine": "node tools/certification/run-engine-e2e.mjs",
+    "certify:playout-engine": "node tools/certification/run-playout-engine-e2e.mjs",
+    "certify:publish-rundown": "node tools/certification/run-publish-rundown-e2e.mjs",
+    "certify:ipc": "node tools/certification/run-ipc-e2e.mjs",
+    "certify:parity": "node tools/certification/run-pixel-parity.mjs",
+    "dev:playout-desktop": "npm run dev -w @grapix/playout-desktop"
   },
   "engines": {
     "node": ">=22.12.0"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.11.4"
+    "@tauri-apps/cli": "^2.11.4",
+    "@vitejs/plugin-react": "^6.0.3",
+    "vite": "^8.1.4"
   }
 }

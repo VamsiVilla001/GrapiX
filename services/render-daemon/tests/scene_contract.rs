@@ -1,7 +1,7 @@
 //! TypeScript <-> Rust `SceneDocument` contract test.
 //!
 //! The fixture JSON is emitted from the TypeScript source of truth
-//! (`packages/shared-types/src/fixtures.ts`, compile-time checked against the
+//! (`Shared/shared-types/src/fixtures.ts`, compile-time checked against the
 //! real `SceneDocument` type) via `npm run fixtures:emit -w @grapix/shared-types`.
 //! If shared-types changes shape, regenerating the fixture makes this test
 //! fail loudly instead of the daemon misreading scenes at runtime.
@@ -11,7 +11,7 @@ use grapix_render_daemon::scene::prepare_scene;
 fn load_fixture() -> serde_json::Value {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../packages/shared-types/fixtures/scene-document.v1.json"
+        "/../../Shared/shared-types/fixtures/scene-document.v1.json"
     );
     let raw = std::fs::read_to_string(path).unwrap_or_else(|error| {
         panic!(

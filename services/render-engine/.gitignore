@@ -1,0 +1,7 @@
+# Cargo build output.
+/target/
+
+# The engine's content-addressed asset cache and persisted state. Written at runtime by the
+# engine and by tests that use the default configuration (whose cache-directory is relative
+# to the crate). Verified content, not source: it is rebuilt from whatever a client uploads.
+/cache/

@@ -9,3 +9,7 @@ coverage/
 data/
 target/
 .codex-run/
+.codex/
+
+# Pixel-parity captures and diff images: evidence from a run, not source.
+artifacts/

@@ -60,6 +60,10 @@ The first working target is now ingestion-first, then the Web Editor MVP:
 ## Current repository shape
 
 ```text
+Editor/                    # v0.2 compatibility/ownership workspace
+Playout/                   # v0.2 compatibility/ownership workspace
+Shared/                    # v0.2 compatibility/ownership workspace
+
 apps/
   desktop-tauri/
   desktop-electron/
@@ -80,9 +84,15 @@ docs/
   editor-playout-workspace.md
 ```
 
-The current layout remains in place until the active uncommitted work is
-stabilized and the Phase 0 migration checkpoint is committed. Folder movement
-must preserve history and must not be mixed with feature redesign.
+Basic v0.1 was stabilized and committed at `a387f5c`. Migration Phase 1 is now
+implemented: the three target ownership roots are registered npm workspaces,
+root compatibility commands remain available, each domain has independent
+build/verification entry points, and `npm run check:boundaries` enforces the
+initial dependency direction.
+
+The existing source layout remains in place until the Phase 2 mechanical Editor
+move. Folder movement must preserve history and must not be mixed with feature
+redesign.
 
 ## Communication planes
 

@@ -2012,7 +2012,9 @@ mod tests {
     fn imported_gltf_material_element_accepts_an_independent_texture_override() {
         let fixture_path = concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../api-server/tests/fixtures/two-material-triangles.gltf"
+            // The project API moved under Editor/ in the Phase 2 migration; the fixture
+            // travelled with it.
+            "/../../Editor/services/project-api/tests/fixtures/two-material-triangles.gltf"
         );
         let model_bytes = std::fs::read(fixture_path).expect("glTF fixture must exist");
         let model_base64 = base64::engine::general_purpose::STANDARD.encode(model_bytes);

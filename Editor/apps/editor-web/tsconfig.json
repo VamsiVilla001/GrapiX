@@ -1,0 +1,11 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@grapix/renderer-protocol": ["../../../Shared/renderer-protocol/src"],
+      "@grapix/shared-types": ["../../../Shared/shared-types/src"]
+    }
+  },
+  "include": ["src", "vite.config.ts"]
+}

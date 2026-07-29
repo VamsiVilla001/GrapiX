@@ -1,0 +1,169 @@
+# GrapiX Render Engine configuration
+#
+#   grapix-render-engine --config engine.toml
+#
+# Precedence: CLI argument > environment variable > TOML file > built-in default.
+# Every value below may be omitted; the documented default applies.
+#
+# This file is the *local development* profile: loopback only, headless, null and
+# recording outputs. See the deployment examples at the bottom for the other modes.
+
+[identity]
+name = "GrapiX Render Engine (local)"
+# Omit to generate once and persist under <assets.cache-directory>/state/engine-id.
+# Pin it for a node that must act as a stable primary or backup — an engine that
+# changes identity on restart cannot be failed over to.
+# engine-id = "engine_studio_a"
+
+[network]
+bind-address = "127.0.0.1"
+websocket-port = 4400
+# Local IPC for an embedded engine supervised by the desktop shell. A named pipe
+# on Windows, a socket path elsewhere.
+# ipc-endpoint = "\\\\.\\pipe\\grapix-render-engine"
+allowed-origins = []
+# Clients permitted to connect. Empty means any that presents a valid token.
+client-allowlist = []
+# TLS is terminated at a reverse proxy today; the transport is ready for in-process
+# TLS but does not yet do it. See docs/render-engine-migration.md phase G.
+# tls-certificate-path = "certs/engine.crt"
+# tls-private-key-path = "certs/engine.key"
+
+[auth]
+# A loopback engine may run without a token. Any non-loopback bind-address forces
+# this on, and the engine refuses to start without one — silently exposing an
+# unauthenticated renderer to a venue network is the one mistake no default may
+# permit.
+required = false
+# Prefer token-file over token: an inline secret ends up in version control.
+# token-file = "../../data/render-engine.token"
+
+[gpu]
+# No window, no surface. Required on a server; correct almost everywhere.
+headless = true
+# Substring matched against adapter names, e.g. "RTX". Omit for automatic.
+# preferred-gpu = "RTX"
+# vulkan | dx12 | metal | gl. Omit for automatic.
+# preferred-backend = "vulkan"
+# Advisory: wgpu cannot enforce a VRAM ceiling, so this bounds our own caches and
+# is reported as the GPU memory estimate during capability negotiation.
+memory-budget-bytes = 2147483648
+require-discrete-gpu = false
+
+[stage]
+# The logical limit the architecture commits to. Declaring a canvas this large
+# allocates nothing: a 50,000 x 50,000 RGBA8 image would be 10 GB, and the engine
+# never materialises one. Only tiles become render targets.
+max-logical-canvas-width = 50000
+max-logical-canvas-height = 50000
+
+# Tile size. 512, 1024, 2048, and 4096 are the presets; any size from 64 to 8192
+# is accepted. Tile plus overscan must fit the GPU's maximum texture dimension,
+# which the engine checks and reports.
+default-tile-width = 1024
+default-tile-height = 1024
+
+# Logical padding rendered outside each tile so filters have neighbouring pixels
+# to sample. The ring is sampled and then discarded during compositing, which is
+# what makes the composite seam-free. It is not free: 1024 + 2*32 is 1088, which
+# is 13% more memory per tile.
+default-overscan = 32
+
+tile-cache-budget-bytes = 536870912
+max-resident-tiles = 256
+max-active-scenes = 8
+max-surfaces = 64
+max-outputs = 8
+
+[preview]
+# Hard pixel ceiling for one preview image. The engine refuses a request over this
+# rather than allocating: an operator preview must never be a full-resolution
+# render of a huge stage.
+max-pixels = 2073600
+default-encoding = "jpeg"
+default-quality = 80
+max-streams = 4
+max-stream-fps = 30
+
+[assets]
+# Directories assets may be read from. A remote client supplies a *relative* path
+# resolved inside one of these and nothing else, re-checked after canonicalisation
+# so a symlink cannot escape. This is the boundary that stops a client naming
+# /etc/passwd.
+roots = ["../../data/assets"]
+cache-directory = "../../data/render-engine-cache"
+max-upload-bytes = 2147483648
+max-chunk-bytes = 4194304
+cpu-cache-budget-bytes = 1073741824
+gpu-cache-budget-bytes = 1073741824
+disk-cache-budget-bytes = 8589934592
+# Off by default: an engine that fetches arbitrary URLs is a proxy sitting inside
+# the production network.
+allow-http-fetch = false
+http-allowlist = []
+
+[security]
+max-message-bytes = 8388608
+rate-limit-burst = 64
+rate-limit-per-second = 32
+max-connections = 8
+audit-log-enabled = true
+# audit-log-path = "../../data/render-engine-audit.jsonl"
+shader-allowlist-only = true
+
+[diagnostics]
+enabled = true
+# The per-tile table can be thousands of rows on a large stage, so it is opt-in.
+include-tile-detail = false
+log-level = "info"
+heartbeat-interval-ms = 2000
+heartbeat-timeout-ms = 8000
+
+[outputs]
+# Adapters this engine will instantiate. A client cannot conjure an output whose
+# adapter is not listed here, which is what stops a remote client putting something
+# on air that the deployment did not sanction.
+#
+#   null       discards frames. Development and CI.
+#   virtual    headless render of the on-air graphic at full Program resolution.
+#              Never leaves the machine. Lets an operator confirm a take produces
+#              the frame they expect, through the real render path, with no risk of
+#              reaching air.
+#   recording  deterministic raw BGRA capture to disk. Not live.
+#   ndi        live. Needs `--features ndi` and the NDI SDK 6.x.
+#   decklink   live. Declared but not implemented; reports itself unavailable.
+#   aja        live. Declared but not implemented; reports itself unavailable.
+#
+# Only `ndi`, `decklink` and `aja` are live. Everything else is safe by construction.
+enabled-adapters = ["null", "virtual", "recording"]
+
+# ---------------------------------------------------------------------------
+# Deployment examples
+# ---------------------------------------------------------------------------
+#
+# Local embedded engine, supervised by the desktop shell:
+#   grapix-render-engine --config engine.toml \
+#     --ipc '\\.\pipe\grapix-render-engine'
+#
+# Local external process that survives editor restarts:
+#   grapix-render-engine --config engine.toml --port 4400
+#
+# Remote network engine (a token is mandatory; put TLS in front of it):
+#   grapix-render-engine --config engine.toml \
+#     --bind 0.0.0.0 --port 4400 --token-file /etc/grapix/engine.token
+#
+# Dedicated GPU workstation, adapter pinned:
+#   grapix-render-engine --config engine.toml \
+#     --bind 0.0.0.0 --preferred-gpu RTX --preferred-backend vulkan
+#
+# Headless server:
+#   GRAPIX_ENGINE_TOKEN_FILE=/etc/grapix/engine.token \
+#   grapix-render-engine --config engine.toml --bind 0.0.0.0 --headless true
+#
+# Three render nodes from one file, each with its own identity and port:
+#   grapix-render-engine --config engine.toml --engine-id node_left   --port 4401
+#   grapix-render-engine --config engine.toml --engine-id node_centre --port 4402
+#   grapix-render-engine --config engine.toml --engine-id node_right  --port 4403
+#
+# Confirm what the precedence chain actually produced, without a GPU:
+#   grapix-render-engine --config engine.toml --print-config

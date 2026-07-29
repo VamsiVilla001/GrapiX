@@ -1,0 +1,11 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "types": ["vite/client"],
+    "paths": {
+      "@grapix/shared-types": ["../../../Shared/shared-types/src"]
+    }
+  },
+  "include": ["src", "vite.config.ts"]
+}

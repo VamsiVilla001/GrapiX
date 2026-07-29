@@ -322,7 +322,7 @@ async fn renders_imported_gltf_triangle_material_elements() {
 
     let fixture_path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../api-server/tests/fixtures/two-material-triangles.gltf"
+        "/../../Editor/services/project-api/tests/fixtures/two-material-triangles.gltf"
     );
     let fixture = std::fs::read(fixture_path).expect("glTF test fixture must exist");
     let encoded = base64::engine::general_purpose::STANDARD.encode(fixture);

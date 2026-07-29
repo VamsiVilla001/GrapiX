@@ -12,7 +12,7 @@ use crate::scene::{
 };
 
 pub const MESH_PBR_WGSL: &str =
-    include_str!("../../../../packages/render-shaders/wgsl/mesh_pbr.wgsl");
+    include_str!("../../../../Shared/render-shaders/wgsl/mesh_pbr.wgsl");
 pub const MAX_SCENE_LIGHTS: usize = MAX_PREPARED_LIGHTS;
 const PUNCTUAL_LIGHT_SCENE_SCALE: f32 = 0.04;
 #[repr(C)]

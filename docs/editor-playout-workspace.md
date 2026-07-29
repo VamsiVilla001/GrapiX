@@ -374,20 +374,47 @@ state is ambiguous.
 
 Do not perform this as one unverified directory move.
 
-### Phase 0 — Stabilize the current branch
+### Phase 0 — Stabilize the current branch — Complete
 
-- Finish and verify current uncommitted Editor/native-renderer/font work.
-- Update architecture status.
-- Create a recoverable commit before moving paths.
-- Record current development, build, package and certification commands.
+- Completed on 2026-07-28 in Basic v0.1 commit `a387f5c`.
+- Editor/native-renderer/font work passed workspace typechecks/tests, native
+  daemon tests (including real GPU smoke), and production builds.
+- Current development, build, package and certification commands are recorded
+  in `memory.md`.
 
-### Phase 1 — Add the master workspace scaffold
+### Phase 1 — Add the master workspace scaffold — Complete
 
-- Add root `Editor`, `Playout` and `Shared` workspace entries.
-- Keep compatibility scripts at the root.
-- Add dependency-boundary checks.
+- Root `Editor`, `Playout` and `Shared` workspace entries are registered.
+- Basic v0.1 compatibility commands remain at the root.
+- Independent domain commands are available as `dev:editor`, `dev:playout`,
+  `build:editor`, `build:playout`, `build:shared`, `test:editor`,
+  `test:playout`, and `test:shared`.
+- `npm run check:boundaries` enforces Editor ↔ Playout isolation and prevents
+  Shared from depending on either application.
+- Existing source remains in place intentionally until Phase 2.
 
-### Phase 2 — Mechanical Editor preservation move
+### Phase 2 — Mechanical Editor preservation move — Complete
+
+Completed 2026-07-29 with `git mv`, so history follows every file:
+
+| Was | Now |
+| --- | --- |
+| `apps/editor-web` | `Editor/apps/editor-web` |
+| `apps/desktop-tauri` | `Editor/apps/desktop-tauri` |
+| `apps/desktop-electron` | `Editor/apps/desktop-electron` |
+| `services/api-server` | `Editor/services/project-api` |
+
+npm package names are unchanged, so nothing that imports `@grapix/api-server` or
+`@grapix/editor-web` had to change. What did change is every path that climbs to the
+repository root, because each workspace is now one level deeper: tsconfig `extends` and
+`paths`, the Tauri config's `frontendDist` and `beforeDevCommand`, the Electron main
+process's root resolution, the desktop shell's `workspace_root()` and sidecar staging, and
+two Rust test fixtures that read from the project API's test data.
+
+The Tauri build cache had to be cleared: its generated permission files embed absolute
+paths, so a stale cache fails the build with a missing-file error that names the *old*
+location. Only the generated output was removed, not the 4.5 GB of compiled dependencies.
+
 
 - Move current source, assets, configs and tests into `Editor` with history.
 - Fix workspace paths, Vite/Tauri/Electron config, Rust manifests, scripts,
@@ -395,17 +422,76 @@ Do not perform this as one unverified directory move.
 - Do not redesign features during the move.
 - Require behavioral parity and all existing tests before continuing.
 
-### Phase 3 — Extract Shared packages
+### What the move actually broke, and how it was caught
+
+Every one of these was a silent failure — nothing refused to compile:
+
+| Fault | How it showed |
+| --- | --- |
+| The project API's data root walked three levels up from its own file, which used to reach the repository root and now reached `Editor/`. | `GET /api/scenes` returned **zero** scenes while a hundred sat in `data/scenes`. Caught by probing the running API rather than by any test. |
+| Two Rust test fixtures read from the project API's test data by relative path. | Two GPU tests failed with `NotFound`. |
+| The desktop shell's `workspace_root()` and sidecar staging walked to the repository root. | Would have made the supervisor look for services in the wrong place and start none — no error, just nothing running. |
+| The desktop shell's own npm scripts reached the renderer domain by relative path. | `npm run dev:editor` failed with `manifest path does not exist`. |
+| The Tauri build cache embeds absolute paths in generated permission files. | Build failed naming the *old* path, which is a confusing way to learn the cache is stale. |
+
+The lesson the plan already stated and this confirmed: a move like this is only done when the
+running system has been probed, not when the compiler is happy. Nothing here would have been
+found by a typecheck.
+
+### Phase 3 — Extract Shared packages — Complete
+
+Completed 2026-07-29. All fourteen packages moved from `packages/` to `Shared/`, and
+`packages/` no longer exists. Package names are unchanged.
+
+`Shared/<name>` is the same depth as `packages/<name>` was, so every `extends` inside a
+package stayed valid — the changes were all *references from outside*: two tsconfig path
+maps, two Rust `include_str!` calls that compile the WGSL sources into the renderer, one test
+fixture path, and the workspace globs. The `include_str!` pair is worth noting because a
+mistake there is a build failure rather than a silent one, which is the good kind.
+
+Shared builds, typechecks and tests all thirteen contract packages with test suites
+(**445 tests**), and `check:boundaries` enforces that none of them depends on Editor or
+Playout.
+
 
 - Move schemas/protocols/shaders/SDK/package-format modules into `Shared`.
 - Keep package names and compatibility exports during migration.
 - Enforce Shared → no application dependency.
 
-### Phase 4 — Create the Playout foundation
+### Phase 4 — Create the Playout foundation — In progress
 
-- Add Playout Tauri/web shell, persistent storage and connection status.
-- Implement published scene library, rundown/segment persistence and autosave.
-- Move the native render daemon under Playout runtime ownership.
+- **Implemented:** independent React/Vite operator shell, persistent control
+  service and visible renderer connection status.
+- **Implemented:** immutable monotonic published scene versions plus atomic
+  rundown/segment persistence and autosave.
+- **Implemented:** Playout-owned renderer protocol client with Cue-to-Preview
+  and cut-to-Program state transitions.
+- **Implemented:** one `dev:playout` supervisor for the web UI, control service
+  and existing native daemon.
+- **Implemented 2026-07-29:** the dedicated Playout Tauri 2 desktop shell at
+  `Playout/apps/desktop-tauri` (`@grapix/playout-desktop`). It supervises the render engine
+  on 4400 and the control service on 4300, **adopts** either if it is already running rather
+  than replacing it, and on window close stops only what it started — an adopted engine may
+  be on air, and closing an operator window must never take a show off air. It deliberately
+  does not start the protocol v2 daemon: two renderers competing for one GPU is the opposite
+  of holding a frame deadline.
+- **Deliberately not done — the native daemon stays at `services/`.** The original sketch put
+  it under Playout, which predates the engine separation. The same crate is now the engine's
+  core library (`grapix-render-core`), so moving it into Playout would put the engine's core
+  inside the Playout product and break "keep the engine deployable independently" — a newer
+  and stronger constraint than the sketch it contradicts. `services/` therefore holds the
+  renderer domain: `render-daemon` (the core plus the v2 binary) and `render-engine`. Playout
+  consumes both as *running processes over a protocol*, never as source, which is exactly the
+  boundary the split was for.
+- Audited 2026-07-29: `Playout/apps/playout-web`, `Playout/services/playout-control` and
+  `Playout/tools` exist with real source. `Playout/apps/desktop-tauri` does not exist yet.
+  `Playout/output/{ndi,decklink,aja}` does not exist either, and on present evidence should
+  not: the output adapters live in `services/render-engine/src/outputs.rs`, because the
+  engine owns Program and its outputs, and Playout controls them over protocol v3 rather
+  than hosting them. That is a deliberate divergence from the original sketch.
+- **Remaining:** package upload/promotion, rundown editing depth, output
+  configuration, offline reconciliation and the later transition/automation
+  phases.
 
 ### Phase 5 — Implement Publish to Playout
 
@@ -451,5 +537,6 @@ The migration is accepted only when:
 
 Future agents, including Claude, must read this document together with
 `memory.md` and `docs/architecture-review-compliance.md` before moving folders
-or creating the Playout application. The next implementation step is Phase 0,
-not an immediate unverified repository-wide move.
+or creating the Playout application. Phase 0 and Phase 1 are complete. The next
+implementation step is the gated Phase 2 mechanical Editor preservation move,
+not feature redesign or an unverified repository-wide move.

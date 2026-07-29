@@ -182,7 +182,7 @@ pub enum ScanMode {
 #[serde(rename_all = "lowercase")]
 pub enum AlphaMode {
     /// The shader contract renders premultiplied; see
-    /// packages/render-shaders/docs/shader-contract.md.
+    /// Shared/render-shaders/docs/shader-contract.md.
     Premultiplied,
     /// Straight alpha would require an un-premultiply pass; rejected in v1.
     Straight,

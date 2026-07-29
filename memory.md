@@ -1,8 +1,8 @@
 # GrapiX Project Memory
 
-Last consolidated: **2026-07-28**  
+Last consolidated: **2026-07-29**  
 Repository: `D:\Project KK\Personal projects\GrapiX`  
-Current branch: `Basic-v0.1`  
+Current branch: `Basic-v0.2`
 Current baseline: **Basic v0.1 checkpoint**; use `git log -1` for its immutable
 commit hash.
 
@@ -115,7 +115,8 @@ Tauri 2 desktop supervisor
 
 ### Editor / Playout master workspace
 
-**Approved target; not yet physically migrated:**
+**Approved target; Phase 1 scaffold implemented, source not yet physically
+migrated:**
 
 ```text
 GrapiX/
@@ -151,9 +152,10 @@ is in
 
 Migration order:
 
-1. Stabilize, verify and checkpoint current uncommitted work.
-2. Add root Editor/Playout/Shared workspace scaffolding and compatibility
-   scripts.
+1. **Complete:** stabilize, verify and checkpoint Basic v0.1 at `a387f5c`.
+2. **Complete:** add root Editor/Playout/Shared workspace scaffolding,
+   compatibility scripts, independent build/test entry points, and the
+   dependency-boundary gate.
 3. Mechanically move the existing application into Editor with no redesign.
 4. Extract current shared packages into Shared with compatibility exports.
 5. Create Playout shell, storage, scene library, rundowns and segments.
@@ -995,6 +997,14 @@ cache or tokens.
 
 ### Publish to Playout
 
+**Implemented path (2026-07-29):** `File > Publish to Playout` posts the
+`SceneDocument`, a viewport thumbnail, and the project colour space to
+`POST /api/playout/scenes`. Playout stores it as a new immutable version, the scene
+manager shows it with its thumbnail, and cards drag into a rundown. Certified by
+`npm run certify:publish-rundown` (21 checks). The `.gfxpkg` route below remains the
+design for the packaged, checksum-revalidated transfer and is still what
+`File > Export Package…` produces; the direct publish is the live path.
+
 Editor publication to Playout is distinct from saving an authoring project:
 
 - Editor builds and preflights a complete versioned `.gfxpkg`.
@@ -1167,6 +1177,99 @@ The required completion order remains:
 - Live daemon verification prepared a canonical PBR rect as one mesh surface
   with no warnings or Take blockers.
 
+### 2026-07-28 — Basic v0.1 checkpoint and v0.2 workspace scaffold
+
+- Committed the fully verified Basic v0.1 baseline as `a387f5c`.
+- Created `Basic-v0.2` from that exact checkpoint.
+- Added first-class `Editor/`, `Playout/`, and `Shared/` npm workspaces without
+  prematurely moving working source.
+- Added independent Editor, Playout, and Shared build/verification entry points
+  while retaining every Basic v0.1 root compatibility command.
+- Added `npm run check:boundaries` to reject forbidden Editor ↔ Playout and
+  Shared → application dependencies.
+- Verified all three new workspace build entry points.
+
+### 2026-07-28 — Playout foundation vertical slice
+
+- Added shared published-scene, Playout rundown/segment/item, transition and
+  runtime status contracts.
+- Added `Playout/services/playout-control` with atomic file-backed persistence,
+  immutable monotonic scene versions, rundown revision/autosave, connection
+  health, and a Playout-owned renderer protocol client.
+- Added Cue-to-Preview and cut-to-Program runtime state transitions while
+  keeping Preview and Program independent.
+- Added `Playout/apps/playout-web`, a professional operator surface with scene
+  library, segmented rundown, Preview/Program monitors, connection state,
+  timecode display and protected Cue/Take controls.
+- Added `npm run dev:playout` supervision for Playout web, control and native
+  daemon, plus independent build/typecheck/test commands.
+- Live verification confirmed all three processes, authenticated renderer
+  heartbeat, persisted Main Rundown restoration and the full-window operator
+  layout.
+
+### 2026-07-28 — standalone render engine separation
+
+Separated the rendering engine into an independent application, in the same
+relationship to Editor and Playout as Viz Engine is to Viz Artist and Viz Trio.
+The driving requirement was a logical stage of at least 50,000 × 50,000, which
+cannot be one GPU texture on any hardware.
+
+Assessment first, in
+[`docs/render-engine-assessment.md`](docs/render-engine-assessment.md): the
+existing `SceneCanvas` was a single flat `width`/`height` pair, so stage size,
+render size and output size were the *same number* everywhere in the repository,
+and `RendererPatch` had exactly three operations. Protocol v2 had no `messageId`,
+so duplicate suppression was impossible, and no `engineId`, so multi-engine
+routing was impossible.
+
+**Eleven new contract packages** under `packages/`, all pure TypeScript with no
+DOM or GPU access:
+
+- `stage-model` — virtual canvas in f64 up to 50,000², origin anchors, regions,
+  viewports, cameras, outputs, output mappings, render scale, pixel aspect,
+  physical measurements, tiling config, validation against engine capabilities.
+- `surface-model` — LED/curved/projection/ribbon/scoreboard/multi-monitor/
+  stadium/virtual-production/irregular surfaces, bezel compensation, warp, edge
+  blend, colour profiles, and the stage↔surface↔device mapping maths.
+- `tile-system` — tile grid, object→tile incremental index, selection by
+  viewport/output/preview/export/dirtiness, filter overscan, LRU eviction, and
+  seam-free composite verification.
+- `render-protocol` — protocol v3 with all six message groups, engine state
+  machine, capability negotiation, dedupe, ordering, retry, `EngineConnection`,
+  WebSocket transport, and a multi-engine registry with failover selection.
+- `scene-model` — revision-gated incremental patches, ordered ingestion with
+  duplicate/gap/conflict detection, and state-separation enforcement.
+- `animation-engine` — exact rational frame clock, frame-based playback with
+  continue and pause points, frame-accurate transitions, determinism
+  fingerprinting.
+- `asset-manager`, `output-contracts`, `renderer-contracts`, `shader-library`.
+
+**`services/render-engine`** — an independently buildable, configurable and
+deployable `grapix-render-engine` binary. It reuses `services/render-daemon` as
+`grapix-render-core` by path dependency, so roughly ten thousand lines of tested
+scene parsing, mesh preparation, text shaping, pipeline caching and output
+adapters are reused unchanged and the daemon's 97 tests stay green.
+
+Key decisions worth not relitigating:
+
+- **The precision rule.** Absolute stage coordinates are never handed to the GPU.
+  The tile origin is subtracted in f64 first, then narrowed to f32. At 50,000 the
+  f32 spacing is 0.0039 px; after rebasing it is ~6e-5. Asserted by tests
+  requiring at least a 32× improvement, in both TypeScript and Rust.
+- **Tile rendering reuses the core pipeline** by rebasing the scene *document*
+  into tile-local coordinates in f64 and setting its canvas to the tile's padded
+  bounds. Rebasing at document level rather than uniform level is required
+  because `PreparedScene` stores positions as f32 — by the time a coordinate
+  reaches a transform it has already lost precision.
+- **Seam-freedom is proven, not claimed.** Every tile draws every object it
+  overlaps with the same world transform; only the inner rectangle is
+  composited. `verify_seamless_coverage` asserts exact tiling with no gap and no
+  overlap over a full 625-tile 50,000² stage.
+- **A non-loopback bind with no token refuses to start**, with exit code 1.
+- Editor and Playout share one `EngineConnection` implementation. The Editor
+  wrapper deliberately omits `takeOnline`; the Playout wrapper deliberately
+  omits every content mutation.
+
 ## Basic v0.1 checkpoint scope
 
 The Basic v0.1 checkpoint consolidates the previously local editor, native
@@ -1215,14 +1318,50 @@ After the material, Slab, font, and unified surface changes:
   - the running native daemon reported the canonical PBR rect as `meshCount: 1`,
     `warnings: []`, and `takeReady: true`
 
+After the standalone render engine separation (2026-07-28), all re-verified:
+
+- new contract packages: **339 passed** — stage-model 29, surface-model 20,
+  tile-system 45, scene-model 28, animation-engine 35, asset-manager 31,
+  output-contracts 10, renderer-contracts 12, shader-library 25,
+  render-protocol 102
+- render engine Rust tests: **114 passed** — stage precision 20, tile system 27,
+  config and security 39, live protocol server 28
+- native daemon tests: **97 passed**, unchanged by the engine work
+- editor tests: **45/45 passed** (27 pre-existing plus 18 for the engine client,
+  renderer preference policy and diagnostic overlay)
+- API tests: **18/18 passed**; shared-types **40/40 passed**
+- `npm run check:boundaries`: passed
+- full workspace `npm run typecheck`: passed
+- full production build: passed
+- `cargo check --all-targets` on the engine: clean
+- live CLI verification of the engine binary:
+  - `--help` and `--version` work
+  - `--print-config` resolves the whole precedence chain with no GPU present
+  - file → env → CLI precedence confirmed: port 4300 → 4999 → 5555
+  - `--bind 0.0.0.0` with no token refused to start with exit code 1
+  - an unknown flag is a hard error, not a silent default
+
+Two real bugs were caught by these tests rather than by review:
+
+- `retryDelayMs` with `jitterRatio: 1` produced delays above `maxDelayMs`. Jitter
+  is now subtractive, so the cap is a true ceiling.
+- The Rust `MessageDeduplicator` expired an entry recorded at t=0 on its first
+  lookup, because `saturating_sub` clamped the cutoff to zero. It now compares
+  ages. The TypeScript twin was unaffected because its arithmetic can go
+  negative — exactly the divergence parallel implementations exist to surface.
+
 Useful gates:
 
 ```bash
 npm run typecheck
+npm run check:boundaries
+npm run test:contracts
 npm test -w @grapix/editor-web
 npm test -w @grapix/shared-types
 npm test -w @grapix/api-server
 npm run test:daemon
+npm run test:engine
+npm run check:engine
 npm run certify:control
 npm run certify:e2e
 ```
@@ -1264,17 +1403,231 @@ The Tauri shell reuses already-running services when possible.
 
 ### Editor / Playout workspace migration
 
-- Finish and checkpoint the current dirty Editor/native-renderer/font work.
-- Scaffold the master `Editor/`, `Playout/`, `Shared/` workspaces without moving
-  source yet.
+- **Complete:** checkpoint the Editor/native-renderer/font work as Basic v0.1.
+- **Complete:** scaffold the master `Editor/`, `Playout/`, `Shared/` workspaces
+  with compatibility commands and an executable dependency-boundary gate.
+- **In progress:** independent Playout foundation now includes the web operator,
+  durable control service, scene versions, rundowns/segments, autosave,
+  connection health and Preview/Program Cue/Take.
 - Move existing source mechanically into Editor and restore every build/test/dev
-  command before feature work.
+  command before moving legacy paths.
+- Add the Playout Tauri shell, package publishing/promotion, deeper rundown
+  editing and restart/on-air reconciliation.
 - Extract shared contracts with compatibility exports.
 - Build Playout scene library, rundown/segment persistence and autosave.
 - Implement Publish to Playout and its reconnect/idempotency/version tests.
 - Add independent native Preview and Program operator control.
 - Add page recall, timecode, automation, layer conflict and transition runtime.
 - Add Playout restart/offline/on-air-state reconciliation tests.
+
+### 2026-07-29 — outputs, Program clock, publish to Playout
+
+- Project resolution and colour space settings governing every scene
+  (`packages/shared-types/src/project.ts`, `ProjectSettingsDialog`), square pixels
+  fixed at PAR 1, even dimensions for 4:2:0.
+- Output adapters: live (`ndi`, `decklink`, `aja`) versus not live (`null`, `virtual`,
+  `recording`), with an `enabled-adapters` allowlist. The virtual output is a headless
+  render of the on-air graphic that never leaves the machine.
+- `ProgramClock` renders Program at rate and feeds every running output;
+  `playout.takeOnline` starts them and says what reached air.
+- `ProgramRenderer` keeps pipelines, target and prepared scene across frames:
+  482 ms per frame to 5.6 ms, 50.0 fps sustained.
+- `File > Publish to Playout` with a real viewport thumbnail; published metadata
+  carries resolution, colour space and the exact rational rate.
+- Playout scene manager drag-and-drop into the rundown, and `PlayoutRuntime` drives
+  the standalone engine for cue and take.
+- Four live-path bugs fixed with regression tests: heartbeat liveness, supervisor
+  reachability, `reply.outputs` dispatch, stale Program scene cache on data update.
+- Gates: engine Rust **217**, render-daemon **97**, render-protocol **139**,
+  shared-types **62**, editor **45**, api **18**, playout **3**;
+  `certify:engine` **52/52**, `certify:playout-engine` **32/32**,
+  `certify:publish-rundown` **21/21**, `certify:ipc` **11/11**,
+  `certify:parity` **8/8 with the browser capture skipped**; boundaries, full
+  typecheck and production build all passing.
+
+### Standalone render engine — status and remaining work
+
+The engine **listens, renders, holds Program at rate, and feeds outputs**, and is
+wired into both applications. Verified live
+on an NVIDIA RTX 3070 Ti (Vulkan, `maxTextureDimension2d` 32768) by two
+certification gates that drive the real Rust engine over protocol v3:
+
+- `npm run certify:engine` — 27/27. The real TypeScript `EngineConnection` against
+  the running engine: capability negotiation, a 50,000 x 10,000 stage, scene load
+  and prepare over 125 tiles, playout gating, a 960x192 scaled preview of the full
+  stage in ~550 ms, refusal of a full-resolution huge preview, duplicate
+  suppression.
+- `npm run certify:playout-engine` — 32/32. Publish, load, prepare, cue, take to
+  Program, data update, clear, unload — all through Playout's HTTP API — plus the
+  whole output path: adapter listing with live/unavailable reasons, refusal of an
+  adapter the deployment did not enable, a virtual output configured and started by
+  the take, real frames from the Program clock, and outputs stopped by a clear.
+- `npm run certify:publish-rundown` — 21/21. The designer-to-operator path:
+  the Editor publishes with a thumbnail, the scene appears in the manager with its
+  resolution, colour space and exact rational rate, it is placed in a rundown pinned
+  to its version, and a Take from the rundown drives the standalone engine, which
+  starts the outputs.
+
+Everything the protocol declares is now implemented. What remains genuinely outside
+this checkout is hardware and a browser:
+
+- **Live output hardware.** NDI compiles behind `--features ndi`; DeckLink and AJA are
+  declared and report themselves unavailable with a reason. None has been run against a
+  device, and `hardware_certified` is false for all three.
+- **Browser-side pixel capture.** The parity harness proves the native side exactly
+  (tile composite pixel-identical to single pass, far edge identical to near edge) and
+  compares a browser capture when one is on disk, but there is no browser automation in
+  this repository, so it reports SKIP rather than a pass. See `docs/pixel-parity.md`.
+- **HTTP asset fetching.** The allowlist is enforced and the refusal names it; the fetch
+  itself is not implemented, so an allowlisted host is still refused with a reason.
+- **Decode-on-preload.** `asset.preload` reports readiness; decode and GPU upload happen
+  during scene preparation, and the reply says so rather than implying otherwise.
+- **Raw and WebRTC preview encodings.** JPEG and PNG are implemented; the others are
+  refused explicitly rather than substituted.
+- **Live output hardware.** The adapter layer, the allowlist, the Program clock and
+  the virtual output are implemented and certified. NDI compiles behind
+  `--features ndi` and still reports `hardwareCertified: false`; DeckLink and AJA are
+  declared and report themselves unavailable with a reason. None has been run against
+  a device.
+- **Phase L, out of scope:** interlaced output, warp and edge-blend maths, WebRTC
+  preview, distributed orchestration.
+
+**Outputs — implemented (2026-07-29).** Two kinds, and the difference is never
+implied by a name: live (`ndi`, `decklink`, `aja`) and not live (`null`, `virtual`,
+`recording`). `is_live()` is reported per output and per adapter and the Playout panel
+colours from that field alone. `outputs.enabled-adapters` is an allowlist so a remote
+client cannot instantiate a live output the deployment did not sanction; the default
+set contains nothing live. An unavailable live adapter refuses to configure rather than
+accepting and discarding frames. `playout.takeOnline` starts every configured output
+and says which reached air, which are headless, and — the case that matters most —
+when nothing is rendering anywhere. `takeOffline` and `clear` stop them.
+
+**The virtual output** is a headless render of the on-air graphic at full Program
+resolution that never leaves the machine, retaining exactly one frame for inspection.
+It exists so a take can be confirmed through the real render path with no risk of
+going live, which is why it is in the default adapter set.
+
+**Program performance.** `ProgramClock` computes absolute deadlines from the frame
+number (never accumulated, so 60000/1001 cannot drift) and drops late frames rather
+than catching up. Measured 1920x1080 at 50 fps on the RTX 3070 Ti, debug build:
+**5.6 ms average per frame against a 20 ms budget, 50.0 fps sustained**. Getting there
+required `ProgramRenderer`: the first version called the core's `render_single_frame`,
+which compiles both shader pipelines and allocates a render target per call — 482 ms
+per frame, 9,304 dropped in three minutes. Pipelines, target, text renderer, prepared
+scene and mesh frame are now kept across frames and rebuilt only when what they depend
+on changes.
+
+**Asset synchronisation — implemented (2026-07-29).** `services/render-engine/src/assets.rs`.
+Content addressed by SHA-256, so a logo shared by twenty scenes transfers once and a scene
+republished unchanged transfers nothing. Uploads are chunked, resumable (the progress reply
+names the missing indices), and verified before publication — a digest mismatch discards the
+whole transfer, because half a JPEG decodes to something rather than failing. Written to a
+temporary file and renamed, so a crash cannot leave a truncated file in a cache whose names
+claim verification. Reference counted per scene: releasing an asset a loaded scene needs is
+refused unless forced, and scene preparation reports missing assets as take blockers, so a
+scene cannot go on air with a hole where its logo should be.
+
+**Incremental scene patches — implemented (2026-07-29).** `services/render-engine/src/patch.rs`,
+the Rust counterpart to `packages/scene-model/src/patch.ts` with an identical operation set.
+Revision-gated and atomic: operations apply to a clone and the clone replaces the document
+only if every one succeeded. Reports which objects it touched, so a moved rectangle dirties
+the tiles it left and entered rather than the whole scene. `certify:engine` applies a patch
+built by the shared TypeScript helper and asserts the two implementations agree.
+
+**Preview streaming — implemented (2026-07-29).** `services/render-engine/src/stream.rs`.
+Frames are addressed to the subscribing client, not broadcast: a JPEG of an Editor's viewport
+has no business arriving at Playout. Bounded by `preview.max-stream-fps`, skipping ticks it
+cannot serve rather than queueing, and streams die with their client so a reconnecting Editor
+cannot accumulate them. Making it usable required the same caching fix as Program: previews
+also rebuilt both pipelines per call, which delivered about two frames a second against a
+target of eight. `SceneRenderer` is now shared by Program and Preview as separate instances —
+sharing one would resize the on-air target to serve a thumbnail.
+
+**Local IPC transport — implemented (2026-07-29).** `services/render-engine/src/ipc.rs` and
+`packages/render-protocol/src/ipc-transport.ts`. Named pipe on Windows, socket file elsewhere.
+Four-byte big-endian length prefix then UTF-8 JSON: newline framing would break the first time
+a scene's text contained a newline. Both transports call the same `process_frame`, so the size
+limit, rate limit, authentication, ordering and dedupe rules cannot drift between two ways of
+reaching the same engine. `certify:ipc` starts its own engine and proves the whole path,
+including that a second client can connect after the first leaves — on Windows each pipe
+instance serves one client, and getting that wrong makes the endpoint work exactly once.
+
+**Pixel parity — implemented (2026-07-29).** `tools/certification/pixel-parity.mjs` (the
+comparison, with 20 unit tests) and `run-pixel-parity.mjs` (the harness). Previews can now be
+requested as lossless PNG, and `forceTiled` renders a region by the tile-composite route
+without drawing on it, so the two paths can be compared exactly. Results on the RTX 3070 Ti:
+the tile composite is **pixel-identical** to a single pass over the same region (0 of 540,000
+pixels differ), and content at x=49,000 renders identically to the same content at x=0. That
+turns the seam-free and precision claims from algorithmic arguments into photographic ones.
+The browser half needs a browser; the harness compares a capture when one is present and
+reports SKIP — never a pass — when it is not.
+
+**Publish to Playout — implemented (2026-07-29).** `File > Publish to Playout` in the
+Editor saves, captures a thumbnail from the live viewport (Pixi `extract` on the scene
+root, so no overlay can leak in), and posts the document plus the project colour space
+to `POST /api/playout/scenes`. `PublishedSceneMetadata` now carries `canvasWidth`,
+`canvasHeight`, `colorSpace` and the exact rational rate, so Playout can configure an
+output from the published scene without opening the document. The Playout scene manager
+shows the thumbnail, cards drag into the rundown (drop on a segment appends, drop on a
+row inserts above it, rows reorder across segments), and `PlayoutRuntime` prefers the
+standalone engine for cue and take — reporting which renderer carried it in
+`activeRenderer` — so a Take from the rundown is what starts the outputs.
+
+Four more real bugs were found by running the live path, each with a regression test:
+
+6. **Heartbeats never confirmed liveness.** Nothing called `recordReceived`, so
+   `lastReceivedMs` stayed at construction time and *every* connection timed out
+   `timeoutMs` after it opened, reconnected, and died again. Playout looked like it
+   had an unstable engine while the engine was answering every heartbeat. Any inbound
+   frame now counts as liveness, and a heartbeat ack measures latency (which had
+   always reported 0).
+7. **The supervisor treated `preparing` as a lost connection.** `connected` was
+   `isEngineOperational(state)`, so a normal prepare tore down a healthy socket and
+   commands failed with "not connected". Reachability and readiness are now separate
+   questions: `isEngineReachable` for the link, `requiresReconnect` for when to retry.
+8. **`reply.outputs` was missing from the client's dispatch switch.** The engine
+   answered `output.list` immediately and the caller still waited out the full 15 s
+   reply timeout. Replies are now matched by `reply.` prefix, so a reply type added on
+   the engine side cannot strand a caller.
+9. **A data update left the Program renderer rendering stale values.** `playout.update`
+   does not bump the revision, which is what the prepared-scene cache is keyed on. The
+   cache is now invalidated explicitly on update, load, full sync and unload.
+
+Five real bugs were found by the live gates rather than by review, and each has a
+regression test:
+
+1. **Reply/event `messageId` collision.** Replies were numbered from the
+   connection's outbound sequence and events from the engine's event sequence, both
+   starting at 1, so the first reply and first event both claimed `<engine>-1` and
+   the client's deduplicator silently dropped one. Ids are now namespaced `r`/`e`.
+2. **Dedupe before ordering wedged the connection.** A retransmit reuses its
+   `messageId` but carries a fresh sequence; because dedupe short-circuited first,
+   that sequence was never consumed and every later message looked early. The
+   connection wedged permanently on the first retransmission. Sequence handling now
+   runs before deduplication.
+3. **Previews rendered tile-by-tile.** A 960x192 preview of a 50,000-wide stage was
+   rendering 125 separate tile passes with a pipeline build each, burning a minute
+   of GPU time. Tiling exists to work around the texture limit; when the scaled
+   output fits one texture the engine now does a single rebased pass (~550 ms).
+4. **A heartbeat could kill Playout.** `EngineConnection.tick` runs from a
+   `setInterval`; when the socket had gone half-open the send threw, the exception
+   escaped the interval callback, and the whole playout-control process died —
+   taking Program with it. `tick` now never throws, treats a failed send as a lost
+   connection, and the controller guards the interval as defence in depth.
+5. **Each reconnect leaked a connection.** `PlayoutEngineController.connect` did not
+   close the previous `EngineConnection`, so every retry left a socket and a retry
+   loop alive; the engine accumulated phantom clients. `connect` now disconnects
+   first, and `autoReconnect` is off on the connection because the supervisor owns
+   reconnection — only it can re-run hello, authenticate and capabilities, and two
+   independent retry loops fought each other.
+
+Verified by killing the engine mid-session: playout-control survived, reported
+`state: error`, and reconnected unaided once the engine came back.
+
+Cross-language contract drift was also caught: the Rust capability and stage
+structs serialised snake_case while the TypeScript contract expects camelCase, so
+no client could ever have read them. Both are now `rename_all = "camelCase"`, and
+`hardwareCertified` was missing from the TypeScript adapter type.
 
 ### Highest renderer gaps
 
@@ -1319,6 +1672,18 @@ The Tauri shell reuses already-running services when possible.
   architecture.
 - [`docs/architecture-review-compliance.md`](docs/architecture-review-compliance.md)
   — 35-point acceptance ledger.
+- [`docs/render-engine-assessment.md`](docs/render-engine-assessment.md) — what the
+  repository contained before the engine separation, what is reused, and the
+  fifteen required architecture changes.
+- [`docs/render-engine-architecture.md`](docs/render-engine-architecture.md) —
+  target architecture: deployment modes, virtual canvas, tile rendering, stage
+  versus output resolution, surface mapping, protocol v3, frame clock.
+- [`docs/render-engine-migration.md`](docs/render-engine-migration.md) — phased
+  migration plan and the gate for each phase.
+- [`services/render-engine/README.md`](services/render-engine/README.md) — engine
+  operation, precision rule, seam proof, honesty rules, and current status.
+- [`services/render-engine/engine.toml`](services/render-engine/engine.toml) —
+  annotated configuration reference and deployment examples.
 - [`docs/renderer-control-architecture.md`](docs/renderer-control-architecture.md)
   — control/process boundaries.
 - [`docs/render-daemon-architecture.md`](docs/render-daemon-architecture.md)
@@ -1361,6 +1726,75 @@ The Tauri shell reuses already-running services when possible.
 13. Update this memory when architecture, module ownership, status, or major
     verified work changes.
 14. Before moving repository paths or starting Playout, read
-    `docs/editor-playout-workspace.md`; perform its Phase 0 checkpoint first.
+    `docs/editor-playout-workspace.md`; Phase 0 and Phase 1 are complete, so
+    continue at the gated Phase 2 mechanical Editor move.
 15. Keep Playout independent from Editor lifecycle and never let Editor become
     authoritative for on-air Program state.
+16. Never represent a large stage as one GPU texture. A 50,000 × 50,000 RGBA8
+    target is 10 GB and three times over the texture limit of typical hardware.
+    Only tiles become render targets.
+17. Never hand absolute stage coordinates to the GPU. Subtract the tile or
+    viewport origin in f64 first, then narrow to f32. Both `stage-model` and the
+    engine's `stage.rs` enforce this, and tests assert the improvement — do not
+    add a path that bypasses them.
+18. `packages/tile-system` and `services/render-engine/src/tile.rs` are parallel
+    implementations of one specification. Change them together; the two test
+    suites exist to catch the divergences that follow from not doing so.
+19. Keep the Editor's engine wrapper free of `takeOnline` and the Playout wrapper
+    free of content mutation. The command surfaces enforce the authority split by
+    omission, which is stronger than a comment.
+20. Do not weaken the engine's path restriction. A remote client supplies a
+    relative, traversal-free path resolved inside a configured root, re-checked
+    after canonicalisation. A syntax check alone cannot see a symlink.
+21. A non-loopback engine bind with no configured token must keep refusing to
+    start. Do not turn that into a warning.
+22. Only the cut transition is implemented. Refuse anything else rather than
+    substituting a cut, and never set `hardware_certified` from a compile-time
+    feature flag.
+23. The render engine listens on 4400 and is wired into both applications.
+    Asset sync, incremental patches, preview streaming and renderer restart are
+    still refused with an explicit code — keep them refused rather than stubbed,
+    and keep `docs/render-engine-migration.md` honest about which is which.
+24. Replies and events must never share a `messageId`, and sequence handling must
+    run before deduplication. Both were real faults that wedged a live connection;
+    `protocol_server.rs` has a regression test for each.
+25. A preview whose scaled output fits one texture must use the single-pass path.
+    Rendering it tile-by-tile costs a pipeline build per tile and turns a
+    thumbnail into a minute of GPU time.
+26. Ports: 4100 api, 4200 daemon, 4300 playout-control, 4400-4403 engine and
+    render nodes, 5173/5174 web. Do not reuse one.
+27. `is_live()` is the only thing that may decide whether an output is described as
+    live, in the engine, the API and the UI. Never infer it from an adapter name, and
+    never let an unavailable live adapter accept frames — an output that swallows
+    Program shows the operator a healthy row and the audience nothing.
+28. `outputs.enabled-adapters` is a security boundary, not a convenience. The default
+    set must stay free of live adapters, and a client must not be able to instantiate
+    one that is not listed.
+29. Nothing that can be built once may be built per Program frame. Pipelines, render
+    target, prepared scene and mesh frame live in `ProgramRenderer`; building them per
+    frame cost 482 ms a frame. If a cache is added there, invalidate it on update,
+    load, full sync and unload — `playout.update` does not bump the revision.
+30. Any inbound frame proves the engine is alive. Do not narrow heartbeat liveness back
+    to heartbeat replies only, and keep reachability (`isEngineReachable`) separate
+    from readiness (`isEngineOperational`) — conflating them made every prepare tear
+    down a working socket.
+31. Match replies by their `reply.` prefix. An enumerated switch is how `reply.outputs`
+    came to hang every `output.list` call for 15 s.
+32. Asset bytes are verified before they are cached, and written to a temporary file then
+    renamed. Do not relax either: a truncated file in a content-addressed cache carries a
+    name that claims it was verified.
+33. An asset a loaded scene declares is a take blocker until its bytes arrive. Do not let a
+    scene prepare as ready with a missing asset — the operator would find out from a hole in
+    the picture.
+34. Preview streams are addressed to one client. Never broadcast frames; Playout does not
+    want the Editor's viewport, and at 30fps it is real bandwidth.
+35. Both transports must keep calling the same `process_frame`. A second copy of the
+    reliability chain would drift, and the drift would be a security difference between two
+    ways of reaching the same engine.
+36. `forceTiled` and `showTileDebug` are different things. One renders by the other route,
+    the other draws on the image. Only the first is usable for comparison.
+37. The parity harness reports SKIP, not PASS, when there is no browser capture. Do not make
+    it pass by default — the whole point is knowing which half was actually proven.
+38. Publishing is additive. Every publish is a new version and rundown items pin the
+    version they were built against; do not make a rundown follow the latest publish
+    by default.

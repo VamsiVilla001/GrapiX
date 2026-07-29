@@ -1,0 +1,16 @@
+{
+  "name": "@grapix/playout-workspace",
+  "version": "0.2.0",
+  "private": true,
+  "description": "GrapiX independent playout workspace bootstrap.",
+  "scripts": {
+    "dev": "node tools/dev.mjs",
+    "dev:web": "npm --prefix .. run dev -w @grapix/playout-web",
+    "dev:control": "npm --prefix .. run dev -w @grapix/playout-control",
+    "dev:daemon": "cargo run --manifest-path ../services/render-daemon/Cargo.toml",
+    "build": "npm --prefix .. run build -w @grapix/shared-workspace && npm --prefix .. run build -w @grapix/playout-control && npm --prefix .. run build -w @grapix/playout-web && cargo build --manifest-path ../services/render-daemon/Cargo.toml",
+    "typecheck": "npm --prefix .. run build -w @grapix/shared-workspace && npm --prefix .. run typecheck -w @grapix/playout-control && npm --prefix .. run typecheck -w @grapix/playout-web && npm --prefix .. run check -w @grapix/playout-desktop",
+    "verify": "npm --prefix .. run build -w @grapix/shared-workspace && npm --prefix .. test -w @grapix/playout-control && npm --prefix .. run build -w @grapix/playout-web && cargo test --manifest-path ../services/render-daemon/Cargo.toml && npm --prefix .. test -w @grapix/playout-desktop",
+    "dev:desktop": "npm --prefix .. run dev -w @grapix/playout-desktop"
+  }
+}

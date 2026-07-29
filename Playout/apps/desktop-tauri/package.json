@@ -1,0 +1,16 @@
+{
+  "name": "@grapix/playout-desktop",
+  "version": "0.2.0",
+  "private": true,
+  "description": "GrapiX Playout desktop shell (Tauri 2 + WebView2). Supervises the render engine and the control service.",
+  "scripts": {
+    "dev": "npm --prefix ../../.. run build -w @grapix/playout-control && cargo build --manifest-path ../../../services/render-engine/Cargo.toml && tauri dev",
+    "build": "npm --prefix ../../.. run build -w @grapix/playout-control && cargo build --release --manifest-path ../../../services/render-engine/Cargo.toml && tauri build",
+    "check": "cargo check --manifest-path src-tauri/Cargo.toml",
+    "test": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.9.2"
+  }
+}

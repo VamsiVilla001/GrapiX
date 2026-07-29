@@ -4,10 +4,10 @@
 //! the repository has no JSON Schema for `SceneDocument` and no schema
 //! generation from TypeScript, so this is a **versioned Rust DTO layer with
 //! contract tests** — option 3 of the preferred integration order. The structs
-//! below mirror `packages/shared-types/src/index.ts` for the fields the
+//! below mirror `Shared/shared-types/src/index.ts` for the fields the
 //! renderer consumes; drift is caught by tests/scene_contract.rs, which parses
 //! the fixture JSON emitted from the TypeScript source of truth
-//! (`packages/shared-types/fixtures/scene-document.v1.json`).
+//! (`Shared/shared-types/fixtures/scene-document.v1.json`).
 //!
 //! Deserialization is deliberately tolerant of *unknown* fields (the editor
 //! may add fields the daemon does not use yet) but strict about the fields it
@@ -229,7 +229,7 @@ pub struct PreparedRect {
     pub anchor_y: f32,
     pub fill_linear_premultiplied: [f32; 4],
     pub gradient: PreparedGradient,
-    /// Shared blend-mode id from packages/render-shaders/layouts.json.
+    /// Shared blend-mode id from Shared/render-shaders/layouts.json.
     pub blend_mode: u32,
     /// 0 = rectangle, 1 = ellipse (shared shader param).
     pub primitive_kind: u32,
@@ -543,7 +543,7 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
                 .unwrap_or(material.opacity);
                 opacity *= material_opacity;
 
-                // Shared blend ids from packages/render-shaders/layouts.json.
+                // Shared blend ids from Shared/render-shaders/layouts.json.
                 // Only the modes implemented in BOTH renderers are accepted;
                 // anything else is skipped with a warning rather than silently
                 // falling back to normal.

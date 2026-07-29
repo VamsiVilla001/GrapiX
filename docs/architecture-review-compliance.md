@@ -61,9 +61,10 @@ Status meanings:
   workspace, with schemas/protocols under Shared. Playout owns published scene
   versions, rundowns, segments, timecode, Preview/Program control and the
   native/output runtime; Editor owns source projects and durable
-  **Publish to Playout**. This remains Planned until the current dirty work is
-  checkpointed and the safe phases in
-  [`editor-playout-workspace.md`](editor-playout-workspace.md) pass.
+  **Publish to Playout**. The verified Basic v0.1 checkpoint and Phase 1
+  workspace/boundary scaffold are implemented; the physical Editor move,
+  Playout application, and publishing runtime remain phased work governed by
+  [`editor-playout-workspace.md`](editor-playout-workspace.md).
 - **Font Manager:** packaged OTF/TTF/WOFF/WOFF2 faces, HTTPS CSS links, and
   normalized Adobe Fonts project links are modeled, imported, previewed,
   preflighted, and packaged. Native Program text rendering remains a capability

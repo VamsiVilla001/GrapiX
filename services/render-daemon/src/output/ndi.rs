@@ -11,7 +11,7 @@
 //! machine with the SDK before relying on it on air. In particular, confirm
 //! NDI's expected alpha semantics for BGRA sources against the SDK
 //! documentation (the daemon produces premultiplied alpha; see
-//! packages/render-shaders/docs/shader-contract.md).
+//! Shared/render-shaders/docs/shader-contract.md).
 
 use grafton_ndi::{PixelFormat, Sender, SenderOptions, VideoFrame as NdiVideoFrame, NDI};
 
