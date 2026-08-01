@@ -202,7 +202,7 @@ impl OutputSink for VirtualSink {
         "virtual"
     }
     fn name(&self) -> &'static str {
-        "Virtual output (headless, never live)"
+        "Windowed virtual output (never live)"
     }
 
     /// Never live. This is the load-bearing property of the whole adapter.
@@ -218,7 +218,7 @@ impl OutputSink for VirtualSink {
     fn configure(&mut self, format: &OutputFormat) -> Result<Vec<String>, String> {
         self.format = format.clone();
         Ok(vec![
-            "virtual output renders headlessly; no frames leave this machine".to_string(),
+            "windowed virtual output stays on this machine; no frames are transmitted".to_string(),
         ])
     }
 

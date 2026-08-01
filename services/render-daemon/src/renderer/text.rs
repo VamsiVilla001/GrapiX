@@ -12,6 +12,7 @@ use cosmic_text::{
 use crate::output::VideoFrame;
 use crate::scene::{
     PreparedAutoFit, PreparedScene, PreparedText, PreparedTextAlign, PreparedTextStyle,
+    PreparedTextVerticalAlign,
 };
 
 pub struct NativeTextRenderer {
@@ -30,8 +31,22 @@ impl NativeTextRenderer {
     }
 
     pub fn composite(&mut self, frame: &mut VideoFrame, scene: &PreparedScene) {
+        self.composite_texts(frame, scene, &scene.texts);
+    }
+
+    /// Same, but from an explicit text list rather than the scene's own.
+    ///
+    /// The render engine samples animation per frame and composites patched text geometry.
+    /// Fonts still come from the scene, and `sync_fonts` remains keyed on its revision, so a
+    /// moving caption does not reload a font file every frame.
+    pub fn composite_texts(
+        &mut self,
+        frame: &mut VideoFrame,
+        scene: &PreparedScene,
+        texts: &[PreparedText],
+    ) {
         self.sync_fonts(scene);
-        for text in &scene.texts {
+        for text in texts {
             self.composite_text(frame, scene, text);
         }
     }
@@ -102,16 +117,16 @@ impl NativeTextRenderer {
             line.set_align(Some(align));
         }
         borrowed.shape_until_scroll(false);
+        let (measured_width, mut measured_height) =
+            borrowed
+                .layout_runs()
+                .fold((0.0_f32, 0.0_f32), |size, run| {
+                    (
+                        size.0.max(run.line_w),
+                        size.1.max(run.line_top + run.line_height),
+                    )
+                });
         if text.auto_fit != PreparedAutoFit::None {
-            let (measured_width, measured_height) =
-                borrowed
-                    .layout_runs()
-                    .fold((0.0_f32, 0.0_f32), |size, run| {
-                        (
-                            size.0.max(run.line_w),
-                            size.1.max(run.line_top + run.line_height),
-                        )
-                    });
             if measured_width > 0.0 && measured_height > 0.0 {
                 let ratio = (layout_width / measured_width).min(layout_height / measured_height);
                 let scale = if text.auto_fit == PreparedAutoFit::Shrink {
@@ -125,12 +140,27 @@ impl NativeTextRenderer {
                         metrics.line_height * scale,
                     ));
                     borrowed.shape_until_scroll(false);
+                    measured_height = borrowed
+                        .layout_runs()
+                        .map(|run| run.line_top + run.line_height)
+                        .fold(0.0_f32, f32::max);
                 }
             }
         }
 
+        let vertical_offset = if text.vertical {
+            0.0
+        } else {
+            match text.vertical_align {
+                PreparedTextVerticalAlign::Middle => (layout_height - measured_height) * 0.5,
+                PreparedTextVerticalAlign::Bottom => layout_height - measured_height,
+                PreparedTextVerticalAlign::Top => 0.0,
+            }
+            .max(0.0)
+        };
+
         let origin_x = text.x * global_x;
-        let origin_y = text.y * global_y;
+        let origin_y = text.y * global_y + vertical_offset;
         let pivot_x = text.anchor_x * object_x.abs();
         let pivot_y = text.anchor_y * object_y.abs();
         let radians = text.rotation_degrees.to_radians();

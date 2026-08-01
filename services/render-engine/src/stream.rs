@@ -42,6 +42,8 @@ pub struct PreviewStream {
     pub channel: String,
     pub source: serde_json::Value,
     pub encoding: String,
+    /// Fill or key. A key stream lets an operator watch the matte a downstream keyer cuts.
+    pub view: crate::preview::PreviewView,
     pub quality: u8,
     pub target_fps: f64,
     pub show_tile_debug: bool,
@@ -103,8 +105,10 @@ impl PreviewStreamer {
             }
 
             if next_wait_ms > 0 {
-                tokio::time::sleep(std::time::Duration::from_millis(next_wait_ms.min(IDLE_POLL_MS)))
-                    .await;
+                tokio::time::sleep(std::time::Duration::from_millis(
+                    next_wait_ms.min(IDLE_POLL_MS),
+                ))
+                .await;
                 continue;
             }
 

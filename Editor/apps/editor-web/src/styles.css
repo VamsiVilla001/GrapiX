@@ -802,23 +802,23 @@
   white-space: nowrap;
 }
 
-.program-health {
+.service-health {
   padding: 2px 7px;
   border: 1px solid var(--border);
   border-radius: 3px;
 }
 
-.program-health.healthy {
+.service-health.healthy {
   color: #7ee2b8;
   border-color: rgba(126, 226, 184, 0.38);
 }
 
-.program-health.degraded {
+.service-health.degraded {
   color: #f3c969;
   border-color: rgba(243, 201, 105, 0.38);
 }
 
-.program-health.fallback {
+.service-health.fallback {
   color: #ff8f8f;
   border-color: rgba(255, 96, 96, 0.52);
   background: rgba(120, 18, 18, 0.22);
@@ -2633,6 +2633,66 @@
   background: var(--bg-input);
 }
 
+/* ---------------------------------------------------------------------------
+   Per-type inspector sections
+
+   A parity note sits under the controls it qualifies, never at the top of the
+   panel: the point is to be read beside the field it is about, so an operator
+   knows before authoring which renderer honours it.
+   --------------------------------------------------------------------------- */
+
+.inspector-parity-note {
+  margin: 6px 0 0;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
+.inspector-point-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) minmax(0, 1fr) 24px;
+  align-items: end;
+  gap: 6px;
+  padding: 3px 0;
+}
+
+.inspector-point-index {
+  padding-bottom: 5px;
+  color: var(--text-faint);
+  font-size: 10px;
+  text-align: right;
+}
+
+.inspector-stroke-row {
+  padding: 6px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.inspector-stroke-row h4 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.inspector-stroke-row .inspector-section-heading span {
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+.inspector-control-section h4 {
+  margin: 8px 0 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary, #8a949e);
+}
+
+.field :disabled,
+.field input:disabled,
+.field select:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .container-child-row {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) auto;
@@ -2730,6 +2790,39 @@
   min-width: 0;
   min-height: 0;
   overflow: auto;
+}
+
+/*
+ * Object Inspector: its own dock panel now, rather than tabs riding along inside the object
+ * tree. Rows are header / tab strip / scrolling body so the strip stays put while properties
+ * scroll — an operator changing one value should not lose the tabs.
+ */
+.object-inspector {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+}
+
+.object-inspector-header {
+  padding: 6px 10px;
+  border-bottom: 1px solid #25323c;
+  background: #131c24;
+  color: #8fa6b6;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.object-inspector-empty {
+  display: grid;
+  place-items: center;
+  padding: 24px 14px;
+  color: #6c7f8d;
+  font-size: 11px;
+  text-align: center;
 }
 
 .property-tab-panel {
@@ -3238,6 +3331,25 @@ button {
 .tool-options-bar button {
   padding: 0 7px;
   cursor: pointer;
+}
+
+/* The pen's two swatches, dimmed when their half is switched off, so the bar shows what the next
+   path will be painted with rather than only naming it. */
+.tool-option-swatch {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.tool-option-swatch i {
+  display: block;
+  width: 11px;
+  height: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 2px;
+}
+
+.tool-options-bar .tool-option-warning {
+  color: #f0c674;
 }
 
 .tool-options-bar input {
@@ -3836,6 +3948,51 @@ h3 {
 .binding-row input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(53, 201, 220, 0.18);
+}
+
+.field-animation-controls {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  min-width: 0;
+}
+
+.field-animation-controls.animated {
+  grid-template-columns: 24px 24px minmax(0, 1fr);
+}
+
+.field-animation-controls .field-stopwatch,
+.field-animation-controls .field-key-toggle {
+  display: grid;
+  width: 24px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-right: 0;
+  border-radius: var(--r-sm) 0 0 var(--r-sm);
+  place-items: center;
+  color: var(--text-faint);
+  background: var(--bg-input);
+}
+
+.field-animation-controls .field-key-toggle {
+  border-radius: 0;
+}
+
+.field-animation-controls .field-stopwatch.active {
+  color: var(--accent);
+}
+
+.field-animation-controls .field-key-toggle.on {
+  color: var(--gold);
+}
+
+.field-animation-controls .field-key-toggle.on svg {
+  fill: currentColor;
+}
+
+.field-animation-controls input {
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
 }
 
 .color-field input {
@@ -5774,7 +5931,7 @@ h3 {
 
 .scene-inspector-panel {
   display: grid;
-  grid-template-rows: 34px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -6125,6 +6282,27 @@ h3 {
   justify-content: center;
   color: var(--text-faint);
   font-size: 9px;
+}
+
+.alpha-mask-material-control input {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  padding: 0 3px;
+  border: 0;
+  outline: 0;
+  color: #f5b942;
+  background: transparent;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 9px;
+  text-align: right;
+  appearance: textfield;
+}
+
+.alpha-mask-material-control input:focus {
+  color: #fff;
+  background: #0d131b;
+  box-shadow: inset 0 0 0 1px #f5b942;
 }
 
 .scene-object-tree-cell {
@@ -7045,6 +7223,43 @@ h3 {
   border-color: #6b5410;
 }
 
+/* ---------------------------------------------------------------------------
+   Convert Dimensions dialog
+
+   Reuses the Project Settings layout, because it is the same decision at a
+   different scope. What it adds is the content question: each mode states its
+   consequence beside the radio, so the choice is made with the trade-off in
+   view rather than from the label alone.
+   --------------------------------------------------------------------------- */
+
+.convert-lock-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 6px;
+  font-size: 12px;
+  color: var(--text-secondary, #8a949e);
+}
+
+.convert-mode-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 5px 0;
+  cursor: pointer;
+}
+
+.convert-mode-row input { margin-top: 3px; accent-color: var(--accent); }
+.convert-mode-row span { display: flex; flex-direction: column; gap: 3px; }
+.convert-mode-row strong { font-size: 12px; font-weight: 600; }
+
+.convert-mode-row small {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary, #8a949e);
+}
+
 .project-mismatch-list {
   margin: 0;
   padding-left: 18px;
@@ -7061,3 +7276,66 @@ h3 {
 
 .project-issues-error { color: #ff8f96; }
 .project-issues-warning { color: #fbbf24; }
+
+/* Broadcast deployment picker: every row is an immutable scene candidate. */
+.publish-playout-dialog {
+  width: min(620px, calc(100vw - 40px));
+  max-height: min(720px, calc(100vh - 40px));
+}
+
+.publish-scene-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 90px;
+  max-height: 430px;
+  overflow: auto;
+}
+
+.publish-scene-list > label {
+  display: grid;
+  grid-template-columns: 18px 54px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.025);
+  cursor: pointer;
+}
+
+.publish-scene-list > label.selected {
+  border-color: var(--accent);
+  background: rgba(23, 185, 168, 0.12);
+}
+
+.material-create-dialog .publish-scene-list input {
+  width: auto;
+  margin: 0;
+}
+
+.publish-scene-list strong,
+.publish-scene-list small {
+  display: block;
+}
+
+.publish-scene-list small {
+  margin-top: 2px;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.publish-scene-id {
+  color: var(--accent);
+  font: 700 12px/1 Consolas, monospace;
+}
+
+.publish-playout-error {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(225, 83, 91, 0.45);
+  border-radius: 4px;
+  color: #ffb6ba;
+  background: rgba(155, 35, 43, 0.16);
+  font-size: 11px;
+}

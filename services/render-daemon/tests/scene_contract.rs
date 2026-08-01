@@ -6,7 +6,7 @@
 //! If shared-types changes shape, regenerating the fixture makes this test
 //! fail loudly instead of the daemon misreading scenes at runtime.
 
-use grapix_render_daemon::scene::prepare_scene;
+use grapix_render_core::scene::prepare_scene;
 
 fn load_fixture() -> serde_json::Value {
     let path = concat!(

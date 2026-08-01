@@ -217,6 +217,12 @@ function parityScene(sceneId, offsetX) {
 async function capture(region, options = {}) {
   const reply = await client.request("preview.request", {
     channel: "preview",
+    // Named explicitly rather than relying on the channel's selection. The engine used to fall
+    // back to an arbitrary scene in HashMap order when nothing was cued and now refuses instead,
+    // which is right for an operator's confidence monitor and means this harness has to say which
+    // scene it is measuring. It loads two (`scene_near`, `scene_far`) and compares them, so the
+    // selection was never a safe thing to leave implicit here anyway.
+    sceneId: options.sceneId ?? "scene_near",
     source: {
       type: "rect",
       x: region.x,
@@ -404,7 +410,10 @@ await client.request(
   { sceneId: "scene_far", sceneRevision: 1 }
 );
 
-const farCapture = await capture({ x: FAR_OFFSET, y: 0, width: 900, height: 600 });
+const farCapture = await capture(
+  { x: FAR_OFFSET, y: 0, width: 900, height: 600 },
+  { sceneId: "scene_far" }
+);
 
 check(
   "the far-edge capture reports its logical origin at the far edge",

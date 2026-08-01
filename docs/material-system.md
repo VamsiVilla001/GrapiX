@@ -7,14 +7,14 @@ assets, or code.
 
 ## Ownership and modules
 
-- `packages/shared-types` owns serializable asset, shader, material, material
+- `Shared/shared-types` owns serializable asset, shader, material, material
   instance, binding, validation, usage, migration, and resolution types.
-- `packages/render-shaders` owns WGSL and the byte/blend contract. A browser or
+- `Shared/render-shaders` owns WGSL and the byte/blend contract. A browser or
   Rust host must consume these files; it must not maintain a second shader copy.
-- `services/api-server` owns imported binary storage and metadata sidecars.
-- `apps/editor-web/src/modules/material-manager` owns library UI state,
+- `Editor/services/project-api` owns imported binary storage and metadata sidecars.
+- `Editor/apps/editor-web/src/modules/material-manager` owns library UI state,
   importing, the dock panel, preview, inspector, and shader registry.
-- `apps/editor-web/src/rendering` resolves a document into preview objects and
+- `Editor/apps/editor-web/src/rendering` resolves a document into preview objects and
   reuses the existing Pixi GPU renderer and texture cache.
 - `services/render-daemon` consumes the same scene bindings and shared WGSL.
 
@@ -102,7 +102,7 @@ disabled prepared categories rather than controls that pretend to work.
 
 ## Shared WGSL and shader manifests
 
-`packages/render-shaders/manifests/shader-manifest.json` describes the built-in
+`Shared/render-shaders/manifests/shader-manifest.json` describes the built-in
 solid-colour, textured-unlit, Basic Lit mesh, and PBR mesh shaders. The editor validates IDs, entry points,
 supported primitives, duplicate slots/parameters, source size, entry-point
 presence, and balanced braces before exposing a shader. Imported WGSL is stored
@@ -118,7 +118,7 @@ line/column diagnostics are not yet implemented.
 
 To add a shader:
 
-1. add one WGSL source under `packages/render-shaders/wgsl`;
+1. add one WGSL source under `Shared/render-shaders/wgsl`;
 2. add its manifest entry and uniform layout contract;
 3. register the shared source path in `shaderRegistry.ts`;
 4. implement or reuse one host pipeline in both browser WebGPU and Rust wgpu;
@@ -150,7 +150,7 @@ daemon), implemented as fixed-function GPU blending using Adobe's standard
 blend-mode math where it is expressible without a shader compositing pass:
 **Normal, Additive (Linear Dodge), Multiply, Screen, Darken, Lighten**. The
 exact per-mode colour/alpha equations are the contract in
-`packages/render-shaders/layouts.json`; both renderers mirror PixiJS's
+`Shared/render-shaders/layouts.json`; both renderers mirror PixiJS's
 premultiplied blend equations so preview and program output match.
 
 - `IMPLEMENTED_BLEND_MODES` in `@grapix/shared-types` is the single source of
@@ -195,8 +195,26 @@ times across the quad; the address mode controls how the extra copies wrap.
 Verified in-app: UV scale 3 + repeat wrap renders an exact 3x3 tile grid, and
 UV rotation rotates the tiled pattern. Sampler settings are per-asset in the
 editor today (the texture source is shared by URL); true per-material samplers
-need a WebGPU bind group and are tracked with the daemon texture work. `tile`
-and `nine-slice` fit modes remain unimplemented and are refused with a warning.
+need a WebGPU bind group and are tracked with the daemon texture work.
+
+**Fit modes.** `stretch`, `fill` and `crop` are implemented; `fit`, `original`,
+`pixel-perfect`, `tile` and `nine-slice` are refused with a warning and are
+disabled in the inspector. Fit is one definition for the whole product -
+`resolveTextureFit` in `Shared/shared-types` and `resolve_texture_fit` in
+`services/render-daemon/src/scene/mesh_prepare.rs`, pinned to the same numbers by
+tests on both sides - because Preview and Program must sample the same rectangle
+of the same texture. `fill`/`crop` are a centred cover crop: the texture keeps
+its own aspect ratio and the overflowing axis is cropped, which is where an
+image's resolution finally reaches the picture. Before this, every mode
+silently rendered as `stretch`, so a 256x128 texture was squashed onto a
+360x210 quad and the authored fit mode did nothing. The excluded modes all need
+something the material pipeline cannot express yet: `fit`, `original` and
+`pixel-perfect` draw the texture smaller than the surface and so need a
+transparent border (sampling outside [0,1] smears under clamp and repeats under
+repeat), and `tile`/`nine-slice` need extra geometry. A cover crop needs
+neither, which is exactly why it is portable. Fit applies to a planar surface
+and to a mesh's `main` face, whose extent is the object's width x height; bevel,
+extrusion and side faces get no fit rather than a wrong crop.
 
 The Rust daemon resolves base material, instance, primitive/mesh-surface
 overrides, opacity, alpha interpretation, and all six shared blend modes. Its

@@ -5,8 +5,8 @@
 #![recursion_limit = "256"]
 
 use base64::Engine;
-use grapix_render_daemon::renderer::{gpu::GpuContext, render_single_frame};
-use grapix_render_daemon::scene::prepare_scene;
+use grapix_render_core::renderer::{gpu::GpuContext, render_single_frame};
+use grapix_render_core::scene::prepare_scene;
 use image::ImageEncoder;
 
 #[tokio::test]
@@ -75,6 +75,85 @@ async fn renders_a_rect_offscreen() {
     assert!(
         (outside[2] as i32 - 0x10).abs() <= 2,
         "background red drifted: {outside:?}"
+    );
+}
+
+#[tokio::test]
+async fn materialized_rect_keeps_authored_left_to_right_coordinates() {
+    let gpu = match GpuContext::new().await {
+        Ok(gpu) => gpu,
+        Err(error) => {
+            eprintln!("SKIPPED material orientation smoke: no GPU adapter available ({error})");
+            return;
+        }
+    };
+    let scene_json = serde_json::json!({
+        "id": "material_orientation",
+        "name": "Material orientation",
+        "version": 1,
+        "canvas": { "width": 64, "height": 36, "background": "#103050" },
+        "assets": [],
+        "materials": [{
+            "materialId": "mat_red",
+            "name": "Red emissive",
+            "type": "pbr",
+            "opacity": 1,
+            "parameters": {
+                "baseColor": "#000000",
+                "metalness": 0,
+                "roughness": 0.6,
+                "emissiveColor": "#ff0000",
+                "emissiveIntensity": 1
+            }
+        }],
+        "materialInstances": [],
+        "objects": [{
+            "id": "rect_left",
+            "name": "Left",
+            "type": "rect",
+            "x": 4,
+            "y": 8,
+            "zDepth": 0,
+            "zIndex": 0,
+            "layerId": "main",
+            "width": 16,
+            "height": 20,
+            "rotation": 0,
+            "scaleX": 1,
+            "scaleY": 1,
+            "scaleZ": 1,
+            "anchor": { "x": 0, "y": 0 },
+            "opacity": 1,
+            "visible": true,
+            "locked": false,
+            "fill": "#ffffff",
+            "stroke": "#000000",
+            "strokeWidth": 0,
+            "bindings": {},
+            "materialSlots": { "main": "mat_red" },
+            "radius": 0
+        }],
+        "timeline": { "fps": 50, "durationFrames": 100, "keyframes": [] },
+        "updatedAt": "2026-07-30T00:00:00.000Z"
+    });
+
+    let scene = prepare_scene(&scene_json).expect("materialized rect scene must prepare");
+    assert_eq!(scene.meshes.len(), 1);
+    let frame =
+        render_single_frame(&gpu, &scene, 64, 36).expect("materialized rect frame must render");
+
+    let authored_left = pixel(&frame.data, 64, 8, 18);
+    assert!(
+        authored_left[2] > authored_left[1].saturating_add(100)
+            && authored_left[2] > authored_left[0].saturating_add(100),
+        "authored left rect was not on the left: {authored_left:?}"
+    );
+    let opposite_side = pixel(&frame.data, 64, 56, 18);
+    assert!(
+        (opposite_side[0] as i32 - 0x50).abs() <= 2
+            && (opposite_side[1] as i32 - 0x30).abs() <= 2
+            && (opposite_side[2] as i32 - 0x10).abs() <= 2,
+        "materialized rect was mirrored to the right: {opposite_side:?}"
     );
 }
 

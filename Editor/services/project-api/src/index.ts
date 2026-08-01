@@ -1,14 +1,11 @@
 import cors from "@fastify/cors";
-import type { RendererQualityProfile } from "@grapix/renderer-protocol";
 import { GrapixSequenceEngine } from "@grapix/sdk";
 import {
   preflightScenePackage,
-  type GrapixAutomationAction,
   type GrapixTriggerEvent,
   type DesignImportOptions,
   type FigmaDesignImportSource,
   type RundownDocument,
-  type RendererPatch,
   type SceneDocument
 } from "@grapix/shared-types";
 import Fastify, { type FastifyInstance } from "fastify";
@@ -39,12 +36,6 @@ import {
 import { inspectFontFile } from "./fonts/fontMetadata.js";
 import { buildScenePackage } from "./packageBuilder.js";
 import { recordOperatorAction } from "./audit.js";
-import {
-  RenderDaemonClient,
-  RenderDaemonRequestError,
-  RenderDaemonUnavailableError,
-  type RenderDaemonOutputConfig
-} from "./renderDaemon.js";
 import {
   ensureStorage,
   importAssetBuffer,
@@ -559,23 +550,7 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
       return reply.code(404).send({ ok: false, error: "Scene not found" });
     }
 
-    const patch: RendererPatch = {
-      type: "PATCH_DATA_CONTEXT",
-      sceneId: scene.id,
-      path: patchPath,
-      value: request.body.value
-    };
-    let rendererSync: { synced: boolean; reason?: string } = { synced: true };
-    try {
-      await renderDaemon.patchScene(patch, previousRevision, scene.updatedAt);
-    } catch (error) {
-      rendererSync = {
-        synced: false,
-        reason: error instanceof Error ? error.message : "render daemon patch failed"
-      };
-    }
-
-    return { ok: true, scene, rendererSync };
+    return { ok: true, scene };
   });
 
   app.patch<{
@@ -651,19 +626,17 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
     };
   });
 
-  // --- Render daemon bridge (optional service) -----------------------------
-  // The Rust render daemon (services/render-daemon) is optional in this
-  // phase: these routes answer 503 when it is not running and never affect
-  // the rest of the API. See services/render-daemon/README.md.
-
-  const renderDaemon = new RenderDaemonClient();
+  // --- Scene automation (evaluation only) ----------------------------------
+  // The Editor evaluates automation so an author can see what a trigger would
+  // do. It never executes it: Cue, Take, Continue, Clear and output control
+  // belong to Playout, and the engine rejects them from an Editor role. See
+  // docs/architecture.md, invariant 4.
 
   app.post<{
     Params: { rundownId: string };
     Body: {
       event: GrapixTriggerEvent;
       sceneData?: Record<string, unknown>;
-      execute?: boolean;
     };
   }>("/api/rundowns/:rundownId/events", async (request, reply) => {
     const rundown = await readRundown(request.params.rundownId);
@@ -685,15 +658,12 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
       });
     }
     const evaluation = engine.process(event, request.body.sceneData ?? {});
-    const execution = request.body.execute
-      ? await executeAutomationActions(evaluation.actions, renderDaemon)
-      : [];
-    return { ok: true, evaluation, execution, dryRun: !request.body.execute };
+    return { ok: true, evaluation, dryRun: true };
   });
 
   app.post<{
     Params: { sceneId: string };
-    Body: { event: GrapixTriggerEvent; execute?: boolean };
+    Body: { event: GrapixTriggerEvent };
   }>("/api/scenes/:sceneId/events", async (request, reply) => {
     const scene = await readScene(request.params.sceneId);
     if (!scene) return reply.code(404).send({ ok: false, error: "Scene not found" });
@@ -733,129 +703,8 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
       });
     }
     const evaluation = engine.process(event, scene.dataContext);
-    const execution = request.body.execute
-      ? await executeAutomationActions(evaluation.actions, renderDaemon)
-      : [];
-    return { ok: true, evaluation, execution, dryRun: !request.body.execute };
+    return { ok: true, evaluation, dryRun: true };
   });
-
-  app.addHook("onClose", async () => {
-    renderDaemon.close();
-  });
-
-  const withDaemon = async (reply: { code: (status: number) => { send: (body: unknown) => unknown } }, action: () => Promise<unknown>) => {
-    try {
-      return { ok: true, reply: await action() };
-    } catch (error) {
-      if (error instanceof RenderDaemonUnavailableError) {
-        return reply.code(503).send({ ok: false, error: error.message });
-      }
-
-      if (error instanceof RenderDaemonRequestError) {
-        return reply.code(422).send({ ok: false, code: error.code, error: error.message });
-      }
-
-      throw error;
-    }
-  };
-
-  app.get("/api/render-daemon/status", async (request, reply) =>
-    withDaemon(reply, () => renderDaemon.getStatus())
-  );
-
-  app.get("/api/render-daemon/capabilities", async (request, reply) =>
-    withDaemon(reply, () => renderDaemon.getCapabilities())
-  );
-
-  app.get("/api/render-daemon/heartbeat", async (request, reply) =>
-    withDaemon(reply, () => renderDaemon.heartbeat())
-  );
-
-  app.post<{ Body: { profile: RendererQualityProfile } }>(
-    "/api/render-daemon/resource-profile",
-    async (request, reply) =>
-      withDaemon(reply, () => renderDaemon.setQualityProfile(request.body.profile))
-  );
-
-  app.post<{ Body: SceneDocument }>("/api/render-daemon/scene", async (request, reply) =>
-    withDaemon(reply, () => renderDaemon.loadScene(request.body))
-  );
-
-  app.post<{ Params: { sceneId: string } }>(
-    "/api/render-daemon/scenes/:sceneId/load",
-    async (request, reply) => {
-      const scene = await readScene(request.params.sceneId);
-
-      if (!scene) {
-        return reply.code(404).send({ ok: false, error: "Scene not found" });
-      }
-
-      return withDaemon(reply, () => renderDaemon.loadScene(scene));
-    }
-  );
-
-  app.post<{ Params: { sceneId: string } }>(
-    "/api/render-daemon/scenes/:sceneId/warm",
-    async (request, reply) => {
-      const scene = await readScene(request.params.sceneId);
-      if (!scene) {
-        return reply.code(404).send({ ok: false, error: "Scene not found" });
-      }
-      return withDaemon(reply, () => renderDaemon.warmScene(scene));
-    }
-  );
-
-  app.post<{ Params: { sceneId: string } }>(
-    "/api/render-daemon/scenes/:sceneId/preview",
-    async (request, reply) => {
-      const scene = await readScene(request.params.sceneId);
-      if (!scene) {
-        return reply.code(404).send({ ok: false, error: "Scene not found" });
-      }
-      return withDaemon(reply, async () => {
-        await renderDaemon.warmScene(scene);
-        return renderDaemon.setPreview(scene.id, scene.updatedAt);
-      });
-    }
-  );
-
-  app.post<{ Params: { sceneId: string } }>(
-    "/api/render-daemon/scenes/:sceneId/take",
-    async (request, reply) => {
-      const scene = await readScene(request.params.sceneId);
-      if (!scene) {
-        return reply.code(404).send({ ok: false, error: "Scene not found" });
-      }
-      return withDaemon(reply, async () => {
-        await renderDaemon.warmScene(scene);
-        return renderDaemon.take(scene.id, scene.updatedAt);
-      });
-    }
-  );
-
-  app.post<{ Params: { sceneId: string } }>(
-    "/api/render-daemon/scenes/:sceneId/release",
-    async (request, reply) => {
-      const scene = await readScene(request.params.sceneId);
-      if (!scene) {
-        return reply.code(404).send({ ok: false, error: "Scene not found" });
-      }
-      return withDaemon(reply, () => renderDaemon.releaseScene(scene.id, scene.updatedAt));
-    }
-  );
-
-  app.post<{ Body: RenderDaemonOutputConfig }>(
-    "/api/render-daemon/output/configure",
-    async (request, reply) => withDaemon(reply, () => renderDaemon.configureOutput(request.body))
-  );
-
-  app.post("/api/render-daemon/output/start", async (request, reply) =>
-    withDaemon(reply, () => renderDaemon.startOutput())
-  );
-
-  app.post("/api/render-daemon/output/stop", async (request, reply) =>
-    withDaemon(reply, () => renderDaemon.stopOutput())
-  );
 
   await ensureStorage();
 
@@ -919,118 +768,6 @@ function setDataPath(
   }
   current[segments[segments.length - 1]] = value;
   return clone;
-}
-
-interface AutomationExecutionResult {
-  action: GrapixAutomationAction;
-  status: "completed" | "deferred" | "failed";
-  detail?: string;
-}
-
-async function executeAutomationActions(
-  actions: GrapixAutomationAction[],
-  renderDaemon: RenderDaemonClient
-): Promise<AutomationExecutionResult[]> {
-  const results: AutomationExecutionResult[] = [];
-  for (const action of actions.slice(0, 128)) {
-    try {
-      switch (action.type) {
-        case "warm-scene": {
-          const scene = await requireAutomationScene(action.sceneId);
-          await renderDaemon.warmScene(scene);
-          results.push({ action, status: "completed" });
-          break;
-        }
-        case "preview-scene": {
-          const scene = await requireAutomationScene(action.sceneId);
-          await renderDaemon.warmScene(scene);
-          await renderDaemon.setPreview(scene.id, scene.updatedAt);
-          results.push({ action, status: "completed" });
-          break;
-        }
-        case "take-scene": {
-          if (action.transitionId) {
-            results.push({
-              action,
-              status: "deferred",
-              detail: "The native daemon currently certifies cut only; transitionId remains an explicit future render-compositor gate."
-            });
-            break;
-          }
-          const scene = await requireAutomationScene(action.sceneId);
-          await renderDaemon.warmScene(scene);
-          await renderDaemon.take(scene.id, scene.updatedAt);
-          results.push({ action, status: "completed" });
-          break;
-        }
-        case "release-scene": {
-          const scene = await requireAutomationScene(action.sceneId);
-          await renderDaemon.releaseScene(scene.id, scene.updatedAt);
-          results.push({ action, status: "completed" });
-          break;
-        }
-        case "patch-data": {
-          let previousRevision = "";
-          const scene = await updateScene(action.sceneId, (current) => {
-            previousRevision = current.updatedAt;
-            return {
-              ...current,
-              dataContext: setDataPath(current.dataContext, action.path, action.value),
-              updatedAt: new Date().toISOString()
-            };
-          });
-          if (!scene) throw new Error(`scene ${action.sceneId} was not found`);
-          try {
-            await renderDaemon.patchScene({
-              type: "PATCH_DATA_CONTEXT",
-              sceneId: scene.id,
-              path: action.path,
-              value: action.value
-            }, previousRevision, scene.updatedAt);
-            results.push({ action, status: "completed" });
-          } catch (error) {
-            results.push({
-              action,
-              status: "completed",
-              detail: `Persisted; renderer sync deferred: ${error instanceof Error ? error.message : "daemon unavailable"}`
-            });
-          }
-          break;
-        }
-        case "emit-event":
-          results.push({ action, status: "completed", detail: "Event returned to the caller for fan-out." });
-          break;
-        case "start-timeline":
-        case "pause-timeline":
-          results.push({
-            action,
-            status: "deferred",
-            detail: "Timeline-control protocol commands are modeled but not yet implemented by the native playback clock."
-          });
-          break;
-        case "goto-cue":
-          results.push({
-            action,
-            status: "deferred",
-            detail: "Cue navigation is maintained by the sequencer client; the API does not invent rundown cursor ownership."
-          });
-          break;
-      }
-    } catch (error) {
-      results.push({
-        action,
-        status: "failed",
-        detail: error instanceof Error ? error.message : "automation action failed"
-      });
-    }
-  }
-  return results;
-}
-
-async function requireAutomationScene(sceneId: string): Promise<SceneDocument> {
-  const scene = await readScene(sceneId);
-  if (!scene) throw new Error(`scene ${sceneId} was not found`);
-  return scene;
 }
 
 function normalizeTriggerEvent(value: unknown): GrapixTriggerEvent {
@@ -1158,8 +895,7 @@ function isMutation(method: string): boolean {
 
 function isAllowedShowControl(url: string): boolean {
   const path = url.split("?")[0];
-  return path.startsWith("/api/render-daemon/")
-    || /^\/api\/scenes\/[a-zA-Z0-9_-]+\/(?:data-patches|events)$/.test(path)
+  return /^\/api\/scenes\/[a-zA-Z0-9_-]+\/(?:data-patches|events)$/.test(path)
     || /^\/api\/rundowns\/[a-zA-Z0-9_-]+\/events$/.test(path);
 }
 

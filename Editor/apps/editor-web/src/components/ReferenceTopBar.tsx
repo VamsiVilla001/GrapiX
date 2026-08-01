@@ -1,13 +1,18 @@
 import { ChevronDown, Redo2, RotateCcw, Undo2 } from "lucide-react";
-import { publishSavedSceneOnApi, saveSceneToApi } from "../lib/apiClient";
+import { useState } from "react";
+import { saveSceneToApi } from "../lib/apiClient";
 import { useDockStore } from "../store/dockStore";
 import { useEditorStore } from "../store/editorStore";
+import { useTemplateStore } from "../store/templateStore";
 import { useUiStore } from "../store/uiStore";
+import { PublishToPlayoutDialog } from "./PublishToPlayoutDialog";
 
 export function ReferenceTopBar() {
+  const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const scene = useEditorStore((state) => state.scene);
   const hasActiveScene = useEditorStore((state) => state.hasActiveScene);
   const setSaveStatus = useEditorStore((state) => state.setSaveStatus);
+  const hasTemplates = useTemplateStore((state) => state.templates.length > 0);
   const zoom = useUiStore((state) => state.zoom);
   const setZoom = useUiStore((state) => state.setZoom);
   const resetDockLayout = useDockStore((state) => state.resetDockLayout);
@@ -27,18 +32,9 @@ export function ReferenceTopBar() {
     }
   }
 
-  async function publishScene() {
-    if (!hasActiveScene) return;
-    try {
-      await saveSceneToApi(scene);
-      const result = await publishSavedSceneOnApi(scene.id);
-      window.alert(result.package ? `Published ${result.package.fileName}` : "Publish blocked by preflight.");
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : "Publish failed");
-    }
-  }
 
   return (
+    <>
     <header className="reference-topbar">
       <div className="topbar-left">
         <div className="product-stack-mark" aria-hidden="true" />
@@ -63,8 +59,10 @@ export function ReferenceTopBar() {
 
       <div className="topbar-right">
         <button className="save-button" disabled={!hasActiveScene} onClick={() => void saveScene()}>Save</button>
-        <button className="publish-button" disabled={!hasActiveScene} onClick={() => void publishScene()}>Publish <ChevronDown size={13} /></button>
+        <button className="publish-button" disabled={!hasTemplates} onClick={() => setPublishDialogOpen(true)}>Publish <ChevronDown size={13} /></button>
       </div>
     </header>
+      {publishDialogOpen ? <PublishToPlayoutDialog onClose={() => setPublishDialogOpen(false)} /> : null}
+    </>
   );
 }

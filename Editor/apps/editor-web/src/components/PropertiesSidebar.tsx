@@ -2,31 +2,13 @@ import type { BindingMap, SceneObject, SceneProperty } from "@grapix/shared-type
 import { Inspector } from "./Inspector";
 import { TextFontControls } from "./TextFontControls";
 import { MaterialsTab } from "./MaterialsTab";
+import { ColorField, NumberField, SelectField, TextField } from "./inspectorFields";
 import { useEditorStore } from "../store/editorStore";
+import { bindablePropertiesFor } from "../store/objectPropertySupport";
 import { useUiStore } from "../store/uiStore";
 
 export const propertyInspectorTabs = ["Properties", "Materials", "Text", "Data Binding"] as const;
 export type PropertyInspectorTab = (typeof propertyInspectorTabs)[number];
-const bindableProperties: SceneProperty[] = [
-  "text",
-  "src",
-  "fill",
-  "stroke",
-  "visible",
-  "x",
-  "y",
-  "zDepth",
-  "width",
-  "height",
-  "rotation",
-  "rotationX",
-  "rotationY",
-  "rotationZ",
-  "scaleX",
-  "scaleY",
-  "scaleZ",
-  "opacity"
-];
 
 export function PropertiesSidebar() {
   const propertiesTab = useUiStore((state) => state.propertiesTab);
@@ -121,8 +103,7 @@ function DataBindingProperties() {
     <section className="property-tab-panel">
       <Header title="Data Binding" subtitle={object.name} />
       <div className="field-section binding-section">
-        {bindableProperties
-          .filter((property) => isPropertySupported(object, property))
+        {bindablePropertiesFor(object)
           .map((property) => (
             <label className="binding-row" key={property}>
               <span>{property}</span>
@@ -156,93 +137,3 @@ function EmptyState(props: { children: string }) {
   );
 }
 
-function isPropertySupported(object: SceneObject, property: SceneProperty): boolean {
-  if (property === "text") {
-    return object.type === "text";
-  }
-
-  if (property === "src") {
-    return object.type === "image";
-  }
-
-  if (["rotationX", "rotationY", "rotationZ", "scaleZ"].includes(property)) {
-    return object.type === "mesh";
-  }
-
-  if (property === "rotation" && object.type === "mesh") {
-    return false;
-  }
-
-  return true;
-}
-
-function TextField(props: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="field">
-      <span>{props.label}</span>
-      <input value={props.value} onChange={(event) => props.onChange(event.target.value)} />
-    </label>
-  );
-}
-
-function NumberField(props: {
-  label: string;
-  value: number;
-  min?: number;
-  max?: number;
-  step?: number;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <label className="field">
-      <span>{props.label}</span>
-      <input
-        type="number"
-        min={props.min}
-        max={props.max}
-        step={props.step ?? 1}
-        value={props.value}
-        onChange={(event) => props.onChange(Number(event.target.value))}
-      />
-    </label>
-  );
-}
-
-function ColorField(props: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  const safeColor = props.value.startsWith("#") ? props.value : "#ffffff";
-
-  return (
-    <label className="field color-field">
-      <span>{props.label}</span>
-      <input type="color" value={safeColor} onChange={(event) => props.onChange(event.target.value)} />
-    </label>
-  );
-}
-
-function SelectField<T extends string>(props: {
-  label: string;
-  value: T;
-  options: readonly T[];
-  onChange: (value: T) => void;
-}) {
-  return (
-    <label className="field">
-      <span>{props.label}</span>
-      <select value={props.value} onChange={(event) => props.onChange(event.target.value as T)}>
-        {props.options.map((option) => (
-          <option value={option} key={option}>
-            {option}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}

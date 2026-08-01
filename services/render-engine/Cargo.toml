@@ -15,16 +15,19 @@ default = []
 # Output adapters that need a vendor SDK are gated. The engine builds, runs, and
 # passes its tests without any of them; the null and recording adapters are
 # always available. Enabling a feature makes the adapter *compilable*, never
-# "certified" — see docs/render-engine-assessment.md.
+# "certified" — see docs/local-v1-system-design.md.
 ndi = ["grapix-render-core/ndi"]
 
 [dependencies]
-# The proven native rendering core, reused rather than rewritten. This is the
-# existing services/render-daemon crate: 10,541 lines of tested scene parsing,
-# mesh preparation, text shaping, pipeline caching, asset caching, and output
-# adapters. The engine adds the virtual canvas, tiling, render graph, protocol
-# v3, configuration, capabilities, preview, and diagnostics on top.
-grapix-render-core = { package = "grapix-render-daemon", path = "../render-daemon" }
+# The proven native rendering core, reused rather than rewritten: scene parsing, mesh
+# preparation, text shaping, pipeline caching and output adapters. The engine adds the virtual
+# canvas, tiling, render graph, protocol v3, configuration, capabilities, preview and
+# diagnostics on top.
+#
+# The directory is still `render-daemon` so git history stays attached to those files; the
+# retired protocol-v2 daemon binary that gave it that name was removed 2026-07-29, so no
+# package alias is needed any more.
+grapix-render-core = { path = "../render-daemon" }
 
 anyhow = "1"
 base64 = "0.22"

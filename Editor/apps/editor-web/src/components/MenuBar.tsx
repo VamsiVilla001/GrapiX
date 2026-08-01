@@ -1,15 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { publishSavedSceneOnApi, saveSceneToApi } from "../lib/apiClient";
-import { publishSceneToPlayout } from "../lib/playoutPublisher";
 import { captureParityFrame } from "../rendering/parityCapture";
 import { useDockStore, type DockPanelId } from "../store/dockStore";
 import { useEditorStore, type LibraryObjectKind } from "../store/editorStore";
-import { useProjectStore } from "../store/projectStore";
 import { useTemplateStore } from "../store/templateStore";
 import { useUiStore } from "../store/uiStore";
 import { ProjectSettingsDialog } from "./ProjectSettingsDialog";
 import { ProjectViewportDialog } from "./ProjectViewportDialog";
 import { ImportDesignDialog } from "./ImportDesignDialog";
+import { PublishToPlayoutDialog } from "./PublishToPlayoutDialog";
 
 interface MenuItem {
   label?: string;
@@ -35,6 +34,7 @@ export function MenuBar() {
   const [viewportDialogOpen, setViewportDialogOpen] = useState(false);
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
   const [designImportOpen, setDesignImportOpen] = useState(false);
+  const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const barRef = useRef<HTMLDivElement>(null);
 
   const scene = useEditorStore((state) => state.scene);
@@ -51,9 +51,7 @@ export function MenuBar() {
   const addLibraryObject = useEditorStore((state) => state.addLibraryObject);
   const refreshAssetAvailability = useEditorStore((state) => state.refreshAssetAvailability);
   const addNewTemplate = useTemplateStore((state) => state.addNewTemplate);
-  // Publishing carries the project colour space so Playout can configure an output
-  // that matches what the scene was designed in.
-  const projectSettings = useProjectStore((state) => state.settings);
+  const templates = useTemplateStore((state) => state.templates);
 
   const resetDockLayout = useDockStore((state) => state.resetDockLayout);
   const activatePanel = useDockStore((state) => state.activatePanel);
@@ -86,38 +84,6 @@ export function MenuBar() {
     }
   }
 
-  /**
-   * Publish to Playout.
-   *
-   * Saved first, so what an operator holds and what the Editor has on disk are the same
-   * document. Playout keeps every publish as its own version, so this is additive: a
-   * rundown pinned to an older version keeps rendering it.
-   */
-  async function publishToPlayout() {
-    if (!hasActiveScene) return;
-    try {
-      setSaveStatus("saving");
-      await saveSceneToApi(scene);
-      setSaveStatus("saved");
-
-      const result = await publishSceneToPlayout(scene, {
-        colorSpace: projectSettings.colorSpace
-      });
-
-      window.alert(
-        `Published "${result.published.name}" to Playout as version ${result.published.version}.`
-          + (result.hasThumbnail
-            ? ""
-            : "\n\nNo thumbnail could be captured, so the scene manager will show a placeholder.")
-      );
-    } catch (error) {
-      window.alert(
-        error instanceof Error
-          ? `Publish to Playout failed: ${error.message}`
-          : "Publish to Playout failed"
-      );
-    }
-  }
 
   /**
    * Save the viewport as a lossless PNG for pixel-parity comparison.
@@ -183,7 +149,7 @@ export function MenuBar() {
         { label: "Import Design File…", onSelect: () => setDesignImportOpen(true) },
         { separator: true },
         { label: "Save", disabled: !hasActiveScene, onSelect: () => void save() },
-        { label: "Publish to Playout", disabled: !hasActiveScene, onSelect: () => void publishToPlayout() },
+        { label: "Publish to Playout…", disabled: templates.length === 0, onSelect: () => setPublishDialogOpen(true) },
         { label: "Export Package…", disabled: !hasActiveScene, onSelect: () => void publish() },
         { separator: true },
         { label: "Reload", onSelect: () => window.location.reload() },
@@ -246,7 +212,8 @@ export function MenuBar() {
       label: "Display",
       items: [
         { label: "Object Library", onSelect: showPanel("object-library") },
-        { label: "Scene Inspector / Properties", onSelect: showPanel("scene-manager") },
+        { label: "Object Manager", onSelect: showPanel("scene-manager") },
+        { label: "Object Inspector", onSelect: showPanel("object-inspector") },
         { label: "Material Manager", onSelect: showPanel("material-manager") },
         { label: "Font Manager", onSelect: showPanel("font-manager") },
         { label: "Scene Automation", onSelect: showPanel("automation") },
@@ -309,6 +276,7 @@ export function MenuBar() {
     {projectSettingsOpen ? <ProjectSettingsDialog onClose={() => setProjectSettingsOpen(false)} /> : null}
     {viewportDialogOpen ? <ProjectViewportDialog onClose={() => setViewportDialogOpen(false)} /> : null}
     {designImportOpen ? <ImportDesignDialog onClose={() => setDesignImportOpen(false)} /> : null}
+    {publishDialogOpen ? <PublishToPlayoutDialog onClose={() => setPublishDialogOpen(false)} /> : null}
     </>
   );
 }

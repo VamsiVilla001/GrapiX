@@ -1,9 +1,9 @@
 [package]
-name = "grapix-render-daemon"
+name = "grapix-render-core"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.87"
-description = "GrapiX broadcast render daemon: receives SceneDocument JSON over a local WebSocket, renders with wgpu, and outputs frames over NDI."
+description = "GrapiX render core: parses SceneDocument JSON, prepares meshes, materials and shaped text, renders headlessly with wgpu, and hands frames to an output adapter. Library only; consumed by services/render-engine."
 publish = false
 
 [features]
@@ -16,18 +16,16 @@ ndi = ["dep:grafton-ndi"]
 anyhow = "1"
 base64 = "0.22"
 bytemuck = { version = "1", features = ["derive"] }
-futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
-getrandom = "0.3"
 glam = "0.29"
 gltf = { version = "1.4", features = ["import", "utils"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
-tokio-tungstenite = "0.26"
+# `sync` and `time` only: the render core uses them for shared state and pacing. The
+# multi-thread runtime, macros, net and signal handling went with the retired daemon binary.
+tokio = { version = "1", features = ["sync", "time"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Pinned to a verified major. wgpu majors change APIs frequently; upgrade
 # deliberately together with the browser WebGPU renderer, not incidentally.
 wgpu = "26"
@@ -37,3 +35,9 @@ grafton-ndi = { version = "1.0", optional = true }
 cosmic-text = "0.14.2"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 wuff = "0.2.8"
+
+[dev-dependencies]
+# The library needs only `sync` and `time`. `#[tokio::test]` in `tests/gpu_smoke.rs` needs a
+# runtime and the attribute macro, and declaring them here keeps them out of what
+# `services/render-engine` compiles when it consumes this crate.
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

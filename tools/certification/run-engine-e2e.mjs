@@ -387,10 +387,14 @@ try {
 check("a patch that fails part way is refused whole", partialPatchRefused);
 
 const afterPartial = await client.request("engine.getStatus", {});
+// By id, not `scenes[0]`: the engine reports every loaded scene and their order is not part of
+// the protocol, so index 0 was whichever scene happened to serialise first and this check read a
+// revision belonging to a different scene entirely.
+const patchedScene = afterPartial.payload?.scenes?.find((entry) => entry.sceneId === scene.id);
 check(
   "the engine stayed on the revision it had before the failed patch",
-  afterPartial.payload?.scenes?.[0]?.revision === 2,
-  `revision=${afterPartial.payload?.scenes?.[0]?.revision}`
+  patchedScene?.revision === 2,
+  `revision=${patchedScene?.revision} for ${scene.id}`
 );
 
 console.log("\n— playout gating —");
@@ -541,11 +545,18 @@ check(
 );
 
 const streamStatus = await client.request("engine.getStatus", {});
+// Found by id, not by index: this engine is shared, and a running Playout station holds
+// its own Preview and Program monitor streams. Asserting on `[0]` passed only for as long
+// as nothing else streamed.
+const ownStream = (streamStatus.payload?.previewStreams ?? []).find(
+  (stream) => stream.streamId === "stream_e2e"
+);
 check(
   "status reports the running stream and its frame count",
-  streamStatus.payload?.previewStreams?.[0]?.streamId === "stream_e2e"
-    && streamStatus.payload.previewStreams[0].framesSent > 0,
-  `sent=${streamStatus.payload?.previewStreams?.[0]?.framesSent} skipped=${streamStatus.payload?.previewStreams?.[0]?.framesSkipped}`
+  ownStream !== undefined && ownStream.framesSent > 0,
+  ownStream
+    ? `sent=${ownStream.framesSent} skipped=${ownStream.framesSkipped}`
+    : `stream_e2e absent; running=${JSON.stringify((streamStatus.payload?.previewStreams ?? []).map((s) => s.streamId))}`
 );
 
 const streamStop = await client.request("preview.streamStop", { streamId: "stream_e2e" });

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "grapix-editor": {
+      "command": "node",
+      "args": ["Editor/services/editor-mcp/dist/index.js"],
+      "env": {}
+    }
+  }
+}

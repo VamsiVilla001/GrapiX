@@ -33,7 +33,9 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::config::EngineConfig;
 use crate::engine::Engine;
 use crate::protocol::{self, now_ms, Envelope, ErrorCode, ProtocolError, RequestType};
-use crate::security::{tokens_match, MessageDeduplicator, RateLimiter, SequenceTracker, SequenceVerdict};
+use crate::security::{
+    tokens_match, MessageDeduplicator, RateLimiter, SequenceTracker, SequenceVerdict,
+};
 
 /// Subprotocol the client must offer, so a stray browser tab cannot connect.
 const ENGINE_SUBPROTOCOL: &str = "grapix-engine-v3";
@@ -161,20 +163,21 @@ async fn handle_connection(
     let handshake_security = Arc::clone(&security);
     let peer_for_callback = peer.clone();
 
-    let callback = move |request: &Request, mut response: Response| -> Result<Response, ErrorResponse> {
-        match validate_handshake(request, &handshake_security, &peer_for_callback) {
-            Ok(()) => {
-                // Echo the subprotocol, which tungstenite requires for the client
-                // to accept the connection.
-                response.headers_mut().insert(
-                    "Sec-WebSocket-Protocol",
-                    ENGINE_SUBPROTOCOL.parse().expect("static header value"),
-                );
-                Ok(response)
+    let callback =
+        move |request: &Request, mut response: Response| -> Result<Response, ErrorResponse> {
+            match validate_handshake(request, &handshake_security, &peer_for_callback) {
+                Ok(()) => {
+                    // Echo the subprotocol, which tungstenite requires for the client
+                    // to accept the connection.
+                    response.headers_mut().insert(
+                        "Sec-WebSocket-Protocol",
+                        ENGINE_SUBPROTOCOL.parse().expect("static header value"),
+                    );
+                    Ok(response)
+                }
+                Err(rejection) => Err(handshake_error(rejection.status(), rejection.message())),
             }
-            Err(rejection) => Err(handshake_error(rejection.status(), rejection.message())),
-        }
-    };
+        };
 
     let websocket = tokio_tungstenite::accept_hdr_async(stream, callback)
         .await

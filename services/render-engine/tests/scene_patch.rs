@@ -300,7 +300,10 @@ fn a_material_slot_can_be_set_and_cleared() {
         }]),
     )
     .expect("apply");
-    assert_eq!(object(&document, "rect_1")["materialSlots"]["face"], "mat_steel");
+    assert_eq!(
+        object(&document, "rect_1")["materialSlots"]["face"],
+        "mat_steel"
+    );
 
     apply_patch(
         &mut document,

@@ -2,11 +2,13 @@ import {
   findAssetUsageDetails,
   findMaterialUsage,
   IMPLEMENTED_BLEND_MODES,
+  IMPLEMENTED_TEXTURE_FIT_MODES,
   parameterDefaults,
   type Material,
   type MaterialBlendMode,
   type MaterialParameterDefinition,
-  type MaterialParameterValue
+  type MaterialParameterValue,
+  type TextureFitMode
 } from "@grapix/shared-types";
 import { AlertTriangle, Link2, RotateCcw } from "lucide-react";
 import { useRef } from "react";
@@ -119,7 +121,12 @@ export function MaterialInspector() {
             }}>
               <option value="">None (colour only)</option>{compatibleAssets.map((item) => <option key={item.assetId} value={item.assetId}>{item.name}{item.status === "MISSING" ? " (missing)" : ""}</option>)}
             </select></label>
-            <label>Fit<select value={texture.fit} onChange={(event) => patchBaseTexture({ fit: event.target.value as typeof texture.fit })}>{["stretch", "fit", "fill", "crop", "tile", "original", "pixel-perfect", "nine-slice"].map((value) => <option key={value} value={value} disabled={value === "tile" || value === "nine-slice"}>{value}{value === "tile" || value === "nine-slice" ? " (planned)" : ""}</option>)}</select></label>
+            {/* Only the implemented modes are selectable: offering a mode that silently renders as
+                stretch is how an operator ends up trusting a crop that never happens. */}
+            <label>Fit<select value={texture.fit} onChange={(event) => patchBaseTexture({ fit: event.target.value as typeof texture.fit })}>{["stretch", "fit", "fill", "crop", "tile", "original", "pixel-perfect", "nine-slice"].map((value) => {
+              const planned = !IMPLEMENTED_TEXTURE_FIT_MODES.includes(value as TextureFitMode);
+              return <option key={value} value={value} disabled={planned}>{value}{planned ? " (planned)" : ""}</option>;
+            })}</select></label>
             <label>Address mode (wrap)<select value={texture.wrap} onChange={(event) => patchBaseTexture({ wrap: event.target.value as typeof texture.wrap })}><option value="clamp">Clamp</option><option value="repeat">Repeat</option><option value="mirror-repeat">Mirror repeat</option></select></label>
             <label>Filtering<select value={texture.filtering} onChange={(event) => patchBaseTexture({ filtering: event.target.value as typeof texture.filtering })}><option value="linear">Linear</option><option value="nearest">Nearest</option></select></label>
           </fieldset>

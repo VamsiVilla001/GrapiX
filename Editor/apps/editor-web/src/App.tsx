@@ -1,5 +1,5 @@
 import { Group, Panel, Separator, type Layout } from "react-resizable-panels";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { CanvasStage } from "./components/CanvasStage";
 import { AutomationPanel } from "./components/AutomationPanel";
 import { RenderEnginePanel } from "./components/RenderEnginePanel";
@@ -8,7 +8,8 @@ import { MenuBar } from "./components/MenuBar";
 import { FontManagerPanel } from "./components/FontManagerPanel";
 import { ObjectLibrary } from "./components/ObjectLibrary";
 import { ReferenceTopBar } from "./components/ReferenceTopBar";
-import { SceneInspector } from "./components/SceneInspector";
+import { ObjectManager } from "./components/ObjectManager";
+import { ObjectInspector } from "./modules/object-inspector/components/ObjectInspector";
 import { SequencerPanel } from "./components/SequencerPanel";
 import { StatusBar } from "./components/StatusBar";
 import { TemplatesPanel } from "./components/TemplatesPanel";
@@ -18,18 +19,47 @@ import { useSceneAutosave } from "./hooks/useSceneAutosave";
 import { useSceneFonts } from "./hooks/useSceneFonts";
 import type { DockPanelId } from "./store/dockStore";
 import { useEditorStore } from "./store/editorStore";
+import { useTemplateStore } from "./store/templateStore";
 
 export function App() {
   useSceneAutosave();
   useSceneFonts();
+  const scene = useEditorStore((state) => state.scene);
+  const openedTemplateId = useTemplateStore((state) => state.openedTemplateId);
+  const selectedTemplate = useTemplateStore((state) =>
+    state.templates.find((template) => template.templateId === state.selectedTemplateId) ?? null
+  );
+  const openTemplateEditor = useTemplateStore((state) => state.openTemplateEditor);
+  const updateTemplateScene = useTemplateStore((state) => state.updateTemplateScene);
   const sceneId = useEditorStore((state) => state.scene.id);
   const hasActiveScene = useEditorStore((state) => state.hasActiveScene);
   const refreshAssetAvailability = useEditorStore((state) => state.refreshAssetAvailability);
+  const loadScene = useEditorStore((state) => state.loadScene);
+  const restoredInitialTemplate = useRef(false);
+
+  // Restore the selected template after a desktop/web restart. The catalogue is persistent,
+  // but the editor store is intentionally transient; without this hand-off Object Manager,
+  // Timeline and every animation stopwatch opened against an empty placeholder scene.
+  useEffect(() => {
+    if (restoredInitialTemplate.current) return;
+    restoredInitialTemplate.current = true;
+    if (hasActiveScene || !selectedTemplate) return;
+    openTemplateEditor(selectedTemplate.templateId);
+    loadScene(selectedTemplate.scene);
+  }, [hasActiveScene, loadScene, openTemplateEditor, selectedTemplate]);
 
   useEffect(() => {
     if (!hasActiveScene) return;
     void refreshAssetAvailability();
   }, [hasActiveScene, refreshAssetAvailability, sceneId]);
+
+  // The template catalogue must track the editor even when its dock panel is hidden.
+  // Keeping this effect in TemplatesPanel made the stored scene stale as soon as the user
+  // switched panels, which then published different content from the viewport.
+  useEffect(() => {
+    if (!hasActiveScene || !openedTemplateId) return;
+    updateTemplateScene(openedTemplateId, scene);
+  }, [hasActiveScene, openedTemplateId, scene, updateTemplateScene]);
 
   return (
     <div className="app-shell reference-editor-shell">
@@ -84,7 +114,9 @@ function renderDockPanel(panelId: DockPanelId) {
     case "object-library":
       return <ObjectLibrary />;
     case "scene-manager":
-      return <SceneInspector />;
+      return <ObjectManager />;
+    case "object-inspector":
+      return <ObjectInspector />;
     case "material-manager":
       return <MaterialManagerPanel />;
     case "font-manager":

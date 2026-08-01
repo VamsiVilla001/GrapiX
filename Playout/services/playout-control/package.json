@@ -16,7 +16,6 @@
     "@fastify/cors": "^11.3.0",
     "@grapix/animation-engine": "0.1.0",
     "@grapix/render-protocol": "0.1.0",
-    "@grapix/renderer-protocol": "0.1.0",
     "@grapix/scene-model": "0.1.0",
     "@grapix/shared-types": "0.1.0",
     "@grapix/stage-model": "0.1.0",

@@ -2,13 +2,14 @@
   "name": "@grapix/editor-workspace",
   "version": "0.2.0",
   "private": true,
-  "description": "GrapiX authoring application: the editor UI, its desktop shells and the project API.",
+  "description": "GrapiX authoring application: the editor UI, its desktop shells, the project API and the MCP server.",
   "scripts": {
     "dev": "npm --prefix .. run dev -w @grapix/desktop-tauri",
     "dev:web": "npm --prefix .. run dev -w @grapix/editor-web",
     "dev:api": "npm --prefix .. run dev -w @grapix/api-server",
-    "build": "npm --prefix .. run build:shared && npm --prefix .. run build -w @grapix/api-server && npm --prefix .. run build -w @grapix/editor-web && npm --prefix .. run build -w @grapix/desktop-electron",
-    "typecheck": "npm --prefix .. run build:shared && npm --prefix .. run typecheck -w @grapix/api-server && npm --prefix .. run typecheck -w @grapix/editor-web && npm --prefix .. run typecheck -w @grapix/desktop-electron && npm --prefix .. run check -w @grapix/desktop-tauri",
-    "verify": "npm --prefix .. test -w @grapix/api-server && npm --prefix .. test -w @grapix/editor-web && npm --prefix .. test -w @grapix/desktop-tauri"
+    "dev:mcp": "npm --prefix .. run dev -w @grapix/editor-mcp",
+    "build": "npm --prefix .. run build:shared && npm --prefix .. run build -w @grapix/api-server && npm --prefix .. run build -w @grapix/editor-mcp && npm --prefix .. run build -w @grapix/editor-web && npm --prefix .. run build -w @grapix/desktop-electron",
+    "typecheck": "npm --prefix .. run build:shared && npm --prefix .. run typecheck -w @grapix/api-server && npm --prefix .. run typecheck -w @grapix/editor-mcp && npm --prefix .. run typecheck -w @grapix/editor-web && npm --prefix .. run typecheck -w @grapix/desktop-electron && npm --prefix .. run check -w @grapix/desktop-tauri",
+    "verify": "npm --prefix .. test -w @grapix/api-server && npm --prefix .. test -w @grapix/editor-mcp && npm --prefix .. test -w @grapix/editor-web && npm --prefix .. test -w @grapix/desktop-tauri"
   }
 }

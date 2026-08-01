@@ -5,6 +5,7 @@ export type DockPanelId =
   | "templates"
   | "object-library"
   | "scene-manager"
+  | "object-inspector"
   | "material-manager"
   | "font-manager"
   | "automation"
@@ -34,6 +35,7 @@ const allDockPanels: DockPanelId[] = [
   "templates",
   "object-library",
   "scene-manager",
+  "object-inspector",
   "material-manager",
   "font-manager",
   "automation",
@@ -133,6 +135,7 @@ function createDefaultDockLayout(): DockLayout {
         id: "right-inspector-stack",
         panels: [
           "scene-manager",
+          "object-inspector",
           "material-manager",
           "font-manager",
           "automation",

@@ -26,7 +26,16 @@ use tokio::sync::Mutex;
 use crate::engine::Engine;
 
 /// How long the loop waits before re-checking when nothing is on air.
-const IDLE_POLL_MS: u64 = 250;
+///
+/// Short, because this is the delay between a take and the animation starting: the playhead
+/// cannot advance until the loop notices there is something on air. At 250ms an "in"
+/// animation began a quarter of a second late, which on a 20-frame move is a third of the
+/// motion missed. 40ms is two frames at 50fps and costs 25 short lock checks a second on a
+/// machine doing nothing — cheaper than the alternative of waking this loop from the take
+/// path, which would couple the protocol handler to the clock.
+///
+/// This only ever applies with no running output. Real air keeps the loop hot.
+const IDLE_POLL_MS: u64 = 40;
 
 pub struct ProgramClock {
     engine: Arc<Mutex<Engine>>,
@@ -50,14 +59,24 @@ impl ProgramClock {
         loop {
             // Is there anything to do? Checked under a short-lived lock so the
             // protocol server is never blocked waiting on the clock.
-            let (active, rate) = {
+            //
+            // A scene on air is enough — a running output is not required. The playhead has
+            // to advance so the operator's Preview and Program monitors animate before any
+            // SDI or NDI output exists; without that, taking a scene online showed a frozen
+            // first frame and the animation appeared never to play.
+            let (delivering, has_scene, rate) = {
                 let guard = self.engine.lock().await;
-                (guard.has_running_outputs(), guard.program_frame_rate())
+                (
+                    guard.has_running_outputs(),
+                    guard.has_program_scene(),
+                    guard.program_frame_rate(),
+                )
             };
+            let active = delivering || has_scene;
 
             if !active {
                 if running {
-                    tracing::info!(frames = frame, "program clock idle: no running outputs");
+                    tracing::info!(frames = frame, "program clock idle: nothing on air");
                     running = false;
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(IDLE_POLL_MS)).await;
@@ -73,6 +92,7 @@ impl ProgramClock {
                 consecutive_failures = 0;
                 tracing::info!(
                     frame_rate = format!("{}/{}", rate.numerator, rate.denominator),
+                    delivering,
                     "program clock started"
                 );
             }
@@ -97,15 +117,34 @@ impl ProgramClock {
                 tracing::debug!(dropped, target, "program clock skipped late frames");
             }
 
-            let engine = Arc::clone(&self.engine);
-            let render = tokio::task::spawn_blocking(move || {
-                // `blocking_lock` is correct here: this closure is already off the
-                // async runtime, so it is not holding up any other task.
-                let mut guard = engine.blocking_lock();
+            // Frames really elapsed since the last tick, so a dropped frame moves the
+            // animation on by the time that passed instead of playing it in slow motion.
+            let elapsed_frames = target.saturating_sub(frame);
+
+            // Advancing the playhead is a counter increment, so it happens under a short
+            // async lock. Sending it through `spawn_blocking` would cost a thread-pool round
+            // trip fifty times a second on a machine with nothing transmitting.
+            {
+                let mut guard = self.engine.lock().await;
                 guard.note_dropped_program_frames(dropped);
-                guard.render_program_frame(target)
-            })
-            .await;
+                guard.advance_program_playhead(elapsed_frames);
+            }
+
+            // GPU work, and only when something is actually transmitting. The monitors get
+            // their pixels from the preview streamer, which renders on its own schedule off
+            // the same advancing playhead.
+            let render = if delivering {
+                let engine = Arc::clone(&self.engine);
+                tokio::task::spawn_blocking(move || {
+                    // `blocking_lock` is correct here: this closure is already off the
+                    // async runtime, so it is not holding up any other task.
+                    let mut guard = engine.blocking_lock();
+                    guard.render_program_frame(target)
+                })
+                .await
+            } else {
+                Ok(Ok(0))
+            };
 
             frame = target;
 

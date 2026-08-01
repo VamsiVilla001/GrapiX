@@ -6,8 +6,8 @@
 
 use grapix_render_engine::stage::{
     f32_error, local_f32_error, EngineStageLimits, FrameRate, OriginAnchor, Point, Rect, Size,
-    StageDocument, StageOrigin, SurfacePlacement, TilingConfig, VirtualCanvas, Viewport,
-    ViewportSource, MAX_LOGICAL_CANVAS_DIMENSION,
+    StageDocument, StageOrigin, SurfacePlacement, TilingConfig, Viewport, ViewportSource,
+    VirtualCanvas, MAX_LOGICAL_CANVAS_DIMENSION,
 };
 
 fn limits() -> EngineStageLimits {
@@ -39,13 +39,20 @@ fn supports_a_50000_square_canvas_without_allocating_anything() {
 #[test]
 fn canvas_dimensions_clamp_to_the_documented_range() {
     assert_eq!(
-        VirtualCanvas::new(120_000.0, 1080.0).normalized().logical_width,
+        VirtualCanvas::new(120_000.0, 1080.0)
+            .normalized()
+            .logical_width,
         50_000.0
     );
     // Nonsense falls back to a documented default rather than propagating.
-    assert_eq!(VirtualCanvas::new(0.0, 1080.0).normalized().logical_width, 1920.0);
     assert_eq!(
-        VirtualCanvas::new(f64::NAN, 1080.0).normalized().logical_width,
+        VirtualCanvas::new(0.0, 1080.0).normalized().logical_width,
+        1920.0
+    );
+    assert_eq!(
+        VirtualCanvas::new(f64::NAN, 1080.0)
+            .normalized()
+            .logical_width,
         1920.0
     );
     assert_eq!(
@@ -150,7 +157,10 @@ fn rect_intersection_treats_touching_edges_as_disjoint() {
 
     let overlapping = Rect::new(99.0, 0.0, 100.0, 100.0);
     assert!(left.intersects(&overlapping));
-    assert_eq!(left.intersect(&overlapping), Rect::new(99.0, 0.0, 1.0, 100.0));
+    assert_eq!(
+        left.intersect(&overlapping),
+        Rect::new(99.0, 0.0, 1.0, 100.0)
+    );
 }
 
 // ---------------------------------------------------------------------------

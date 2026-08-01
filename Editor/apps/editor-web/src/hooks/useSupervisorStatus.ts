@@ -2,22 +2,33 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 
+/** Mirrors `SupervisorSnapshot` in Editor/apps/desktop-tauri/src-tauri/src/supervisor.rs. */
+export type ProcessState =
+  | "idle"
+  | "starting"
+  | "online"
+  | "adopted"
+  | "lost"
+  | "failed";
+
+export interface ProcessStatus {
+  label: string;
+  address: string;
+  state: ProcessState;
+  detail?: string | null;
+  /** True when the desktop shell owns the process and stops it on close. */
+  supervised: boolean;
+}
+
 export interface SupervisorStatus {
-  apiHealthy: boolean;
-  rendererHealthy: boolean;
-  outputHealthy: boolean;
-  fallbackActive: boolean;
-  fallbackReason?: string | null;
-  restartCount: number;
-  consecutiveFailures: number;
-  lastHeartbeatAtMs?: number | null;
-  lastFrameCount?: number | null;
-  programSceneId?: string | null;
-  outputState?: string | null;
-  rendererLastError?: string | null;
-  gpuAdapter?: string | null;
-  gpuBackend?: string | null;
-  maxTextureDimension?: number | null;
+  /** The Editor's own project/asset service. */
+  api: ProcessStatus;
+  /**
+   * The render engine. Ensured, never owned: Program outlives the Editor window, so the
+   * shell starts an engine when none is running and then leaves it alone.
+   */
+  engine: ProcessStatus;
+  ready: boolean;
   certificationWarning: string;
 }
 

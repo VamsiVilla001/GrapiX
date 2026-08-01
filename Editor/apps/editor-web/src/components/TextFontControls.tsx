@@ -1,4 +1,4 @@
-import { fontDefinitionForText, type SceneObject, type TextSceneObject } from "@grapix/shared-types";
+import { fontDefinitionForText, type FontDefinition, type SceneObject, type TextSceneObject } from "@grapix/shared-types";
 import { CircleAlert } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { projectFontRegistry } from "../fonts/ProjectFontRegistry";
@@ -69,7 +69,7 @@ export function TextFontControls(props: {
         Weight
         <select
           value={props.object.fontWeight}
-          onChange={(event) => props.patch({ fontWeight: event.target.value } as Partial<SceneObject>)}
+          onChange={(event) => props.patch(fontFacePatch(selected, Number(event.target.value), props.object.fontStyle ?? "normal") as Partial<SceneObject>)}
         >
           {!weights.includes(props.object.fontWeight) ? <option>{props.object.fontWeight}</option> : null}
           {weights.map((weight) => <option key={weight}>{weight}</option>)}
@@ -79,7 +79,7 @@ export function TextFontControls(props: {
         Style
         <select
           value={props.object.fontStyle ?? "normal"}
-          onChange={(event) => props.patch({ fontStyle: event.target.value } as Partial<SceneObject>)}
+          onChange={(event) => props.patch(fontFacePatch(selected, Number(props.object.fontWeight), event.target.value) as Partial<SceneObject>)}
         >
           {styles.map((style) => <option key={style}>{style}</option>)}
         </select>
@@ -109,6 +109,22 @@ export function TextFontControls(props: {
       ) : null}
     </div>
   );
+}
+
+function fontFacePatch(
+  font: FontDefinition | undefined,
+  weight: number,
+  style: string
+): Pick<TextSceneObject, "fontWeight" | "fontStyle" | "fontAssetId"> {
+  const face = font?.faces.find((candidate) => candidate.weight === weight && candidate.style === style)
+    ?? font?.faces.find((candidate) => candidate.weight === weight)
+    ?? font?.faces.find((candidate) => candidate.style === style)
+    ?? font?.faces[0];
+  return {
+    fontWeight: String(face?.weight ?? weight),
+    fontStyle: face?.style ?? (style === "italic" || style === "oblique" ? style : "normal"),
+    fontAssetId: face?.source.kind === "file" ? face.source.assetId : undefined
+  };
 }
 
 function uniqueFamilies(value: string): string[] {

@@ -742,9 +742,10 @@ pub fn parse_cli(args: &[String]) -> Result<CliOptions, ConfigError> {
             "--bind" => options.bind = Some(take_value(argument)?),
             "--port" => {
                 let value = take_value(argument)?;
-                options.port = Some(value.parse().map_err(|_| {
-                    ConfigError::InvalidValue(value.clone(), "--port".to_string())
-                })?);
+                options.port =
+                    Some(value.parse().map_err(|_| {
+                        ConfigError::InvalidValue(value.clone(), "--port".to_string())
+                    })?);
             }
             "--ipc" => options.ipc = Some(take_value(argument)?),
             "--engine-id" => options.engine_id = Some(take_value(argument)?),

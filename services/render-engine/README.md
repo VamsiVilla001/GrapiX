@@ -123,13 +123,13 @@ started together:
 
 | Port | Service |
 | --- | --- |
-| 4100 | `services/api-server` |
-| 4200 | `services/render-daemon` (protocol v2) |
+| 4100 | `Editor/services/project-api` |
+| 4200 | `services/render-daemon` — retired protocol v2 binary, launched by nothing |
 | 4300 | `Playout/services/playout-control` |
 | **4400–4403** | **render engine, and additional render nodes** |
 | 5173 / 5174 | editor web / playout web |
 
-A test in `packages/render-protocol` asserts the range stays clear of the others.
+A test in `Shared/render-protocol` asserts the range stays clear of the others.
 
 ## Configuration
 
@@ -228,21 +228,56 @@ Verified live on an NVIDIA RTX 3070 Ti (Vulkan, max texture 32768):
 
 ```bash
 npm run dev:engine              # then, in another shell:
-npm run certify:engine          # 27/27 — real TS client against this engine
-npm run certify:playout-engine  # 18/18 — publish/prepare/cue/take via Playout HTTP
+npm run certify:engine          # real TS client against this engine
+npm run certify:playout-engine  # publish/prepare/cue/take via Playout HTTP
+npm run certify:monitors        # engine frames reaching the operator UI over HTTP
 ```
+
+Those harnesses share one engine and assert on live revisions, tile counts and running
+streams, so run each against a freshly started engine. Back to back against a shared one
+they interfere and report failures that are the harness's fault, not the engine's. They also
+each load scenes without always unloading them, and the engine caps active scenes at 8 — once
+that fills, later runs fail with `ENGINE_BUSY` for reasons that have nothing to do with what
+they are testing.
 
 Not implemented, and **refused with an explicit error code** rather than
 acknowledged and ignored — see
-[`docs/render-engine-migration.md`](../../docs/render-engine-migration.md):
+[`docs/local-v1-system-design.md`](../../docs/local-v1-system-design.md):
 
 | Message | Refusal |
 | --- | --- |
 | `asset.*` | `CAPABILITY_UNSUPPORTED` — put assets under a configured asset root |
 | `scene.applyPatch` | `RESYNC_REQUIRED` — use `scene.fullSync` |
-| `preview.streamStart` / `streamStop` / `setViewport` | `CAPABILITY_UNSUPPORTED` — use `preview.request` |
 | `engine.restartRenderer` | `CAPABILITY_UNSUPPORTED` — restart the process |
 
-Also outstanding: the IPC transport (WebSocket works today), browser-versus-native
-pixel comparison, and phase L — NDI/DeckLink/AJA, interlaced output, warp and
-edge-blend maths, and distributed orchestration.
+`preview.streamStart` / `streamStop` / `setViewport` **are implemented** and carry Preview
+and Program to both the Editor viewport and the Playout operator monitors. They refuse
+narrowly rather than wholesale: a non-JPEG encoding, a source over the pixel budget, and
+more than `preview.max_streams` (4) concurrent streams each come back as
+`CAPABILITY_UNSUPPORTED`. A stream is bounded by `preview.max_stream_fps` (30) and skips a
+tick it cannot serve, so no monitor can push Program past its deadline.
+
+Both `preview.request` and `preview.streamStart` take `view: "fill" | "key"` (absent means
+fill; an unknown value is refused, never defaulted). The key is the alpha written to all
+three channels as greyscale luminance — white opaque, black transparent, grey partial —
+which is how broadcast monitors a matte, since SDI carries no alpha and fill and key travel
+as separate signals. It is a render mode rather than an encoding, so a key is an ordinary
+greyscale JPEG: correct for shaped and straight fill alike, because premultiplication
+scales the colour and never the alpha.
+
+The Program clock advances the on-air scene's **playhead**, and `engine.getStatus` reports it
+per scene as `frame`. This is what makes an animation visible: a preview stream renders the
+scene's own frame, so while the clock kept its counter private every monitor sat frozen on
+whatever Cue or Take last set — the renderer animated correctly and nothing showed it.
+
+The playhead advances whenever a scene is on air, **not** only when an output is running: an
+operator confirms a graphic on the monitors before any SDI or NDI output exists. It advances
+by the frames that really elapsed, so a dropped frame moves the animation on by the time that
+passed instead of playing it in slow motion. `playout.takeOnline` rewinds to frame 0 so an
+"in" animation replays on every take, and `playout.cue` deliberately does *not* rewind a
+scene that is already on Program — Preview and Program can name the same loaded scene and
+share one playhead.
+
+Also outstanding: browser-versus-native pixel comparison, NDI/DeckLink/AJA
+hardware certification, interlaced output, warp and edge-blend maths, and
+distributed orchestration (V2).

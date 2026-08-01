@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use grapix_render_daemon::scene::{prepare_scene, SceneRegistry};
+use grapix_render_core::scene::{prepare_scene, SceneRegistry};
 use serde_json::{json, Value};
 
 const GROUPS: &[(&str, usize)] = &[

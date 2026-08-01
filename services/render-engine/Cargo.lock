@@ -757,15 +757,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "grapix-render-daemon"
+name = "grapix-render-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
  "bytemuck",
  "cosmic-text",
- "futures-util",
- "getrandom 0.3.4",
  "glam",
  "gltf",
  "grafton-ndi",
@@ -775,9 +773,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.19",
  "tokio",
- "tokio-tungstenite",
  "tracing",
- "tracing-subscriber",
  "wgpu",
  "wuff",
 ]
@@ -792,7 +788,7 @@ dependencies = [
  "futures-util",
  "getrandom 0.3.4",
  "glam",
- "grapix-render-daemon",
+ "grapix-render-core",
  "image",
  "serde",
  "serde_json",

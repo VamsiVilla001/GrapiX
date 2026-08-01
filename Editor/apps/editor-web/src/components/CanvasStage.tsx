@@ -29,6 +29,7 @@ import {
   sampleColorValue,
   smoothBrushPoints
 } from "../tools/designToolMath";
+import { sampleRenderedSceneColor } from "../rendering/thumbnailCapture";
 
 type TransformAxis = "free" | "x" | "y" | "z" | "uniform";
 
@@ -39,6 +40,7 @@ interface TransformDragState {
   startPointer: Vec2;
   startPivot: Vec2;
   startObject: SceneObject;
+  startObjects: SceneObject[];
   startAngle: number;
 }
 
@@ -98,6 +100,7 @@ export function CanvasStage() {
   const currentFrame = useUiStore((state) => state.currentFrame);
   const activeTool = useUiStore((state) => state.activeTool);
   const penTarget = useUiStore((state) => state.penTarget);
+  const penOptions = useUiStore((state) => state.penOptions);
   const selectedPathObjectIds = useUiStore((state) => state.selectedPathObjectIds);
   const setSelectedPaths = useUiStore((state) => state.setSelectedPaths);
   const selectedAnchorIndices = useUiStore((state) => state.selectedAnchorIndices);
@@ -111,6 +114,7 @@ export function CanvasStage() {
   const eyedropperOptions = useUiStore((state) => state.eyedropperOptions);
   const foregroundColor = useUiStore((state) => state.foregroundColor);
   const setForegroundColor = useUiStore((state) => state.setForegroundColor);
+  const typeOptions = useUiStore((state) => state.typeOptions);
   const [drag, setDrag] = useState<TransformDragState | null>(null);
   const [capabilities, setCapabilities] = useState<PreviewRendererCapabilities | null>(null);
   const [materialDropTarget, setMaterialDropTarget] = useState<{ objectId: string; compatible: boolean } | null>(null);
@@ -310,11 +314,14 @@ export function CanvasStage() {
     selectObject(object.id);
 
     if (activeTool === "path-selection" || activeTool === "direct-selection") {
+      const alreadySelected = selectedPathObjectIds.includes(object.id);
       const nextPaths = event.shiftKey
-        ? selectedPathObjectIds.includes(object.id)
+        ? alreadySelected
           ? selectedPathObjectIds.filter((id) => id !== object.id)
           : [...selectedPathObjectIds, object.id]
-        : [object.id];
+        : alreadySelected
+          ? selectedPathObjectIds
+          : [object.id];
       setSelectedPaths(nextPaths);
       if (activeTool === "path-selection" && !object.locked) {
         beginTransformDrag(event, object, "move", "free");
@@ -327,8 +334,8 @@ export function CanvasStage() {
       return;
     }
 
-    if (activeTool === "move" || activeTool === "rotate") {
-      beginTransformDrag(event, object, activeTool, "free");
+    if (activeTool === "select" || activeTool === "move" || activeTool === "rotate") {
+      beginTransformDrag(event, object, activeTool === "select" ? "move" : activeTool, "free");
     }
   }
 
@@ -352,6 +359,12 @@ export function CanvasStage() {
     const startPivot = displayObject.type === "mesh"
       ? projectMeshBounds(evaluatedScene, displayObject).center
       : { x: source.x, y: source.y };
+    const startObjects = kind === "move"
+      && axis === "free"
+      && activeTool === "path-selection"
+      && selectedPathObjectIds.includes(source.id)
+      ? scene.objects.filter((object) => selectedPathObjectIds.includes(object.id) && !object.locked)
+      : [source];
     setDrag({
       kind,
       axis,
@@ -359,6 +372,7 @@ export function CanvasStage() {
       startPointer: point,
       startPivot,
       startObject: source,
+      startObjects,
       startAngle: Math.atan2(point.y - startPivot.y, point.x - startPivot.x)
     });
   }
@@ -371,6 +385,15 @@ export function CanvasStage() {
 
     if (drag.kind === "move") {
       const delta = { x: point.x - drag.startPointer.x, y: point.y - drag.startPointer.y };
+      if (drag.axis === "free" && drag.startObjects.length > 1) {
+        for (const startObject of drag.startObjects) {
+          updateObject(startObject.id, {
+            x: snapValue(startObject.x + delta.x, snapping),
+            y: snapValue(startObject.y + delta.y, snapping)
+          });
+        }
+        return;
+      }
       if (drag.axis === "z" && supportsDepthPosition(object)) {
         updateObject(drag.objectId, {
           zDepth: snapValue(object.zDepth - delta.y, snapping)
@@ -414,8 +437,8 @@ export function CanvasStage() {
     }
 
     if (drag.kind === "scale") {
-      const startVector = worldVectorInObjectAxes(object, drag.startPointer);
-      const nextVector = worldVectorInObjectAxes(object, point);
+      const startVector = worldVectorInObjectAxes(object, drag.startPointer, drag.startPivot);
+      const nextVector = worldVectorInObjectAxes(object, point, drag.startPivot);
       const startScaleX = object.scaleX ?? 1;
       const startScaleY = object.scaleY ?? 1;
       if (drag.axis === "z" && supportsDepthScale(object)) {
@@ -552,7 +575,7 @@ export function CanvasStage() {
       return;
     }
     beginHistory("pen start");
-    const id = createPenShape(point);
+    const id = createPenShape(point, penOptions);
     setPenObjectId(id);
     setPenDrag({ index: 0, kind: "create-tangent" });
   }
@@ -611,7 +634,7 @@ export function CanvasStage() {
     }
 
     if (activeTool === "eyedropper") {
-      sampleEyedropper(point, event.clientX, event.clientY, true);
+      void sampleEyedropper(point, event.clientX, event.clientY, true);
       return true;
     }
 
@@ -653,7 +676,7 @@ export function CanvasStage() {
       return true;
     }
     if (activeTool === "eyedropper") {
-      sampleEyedropper(point, event.clientX, event.clientY, false);
+      void sampleEyedropper(point, event.clientX, event.clientY, false);
       return true;
     }
     return false;
@@ -675,6 +698,26 @@ export function CanvasStage() {
           width >= 4 || height >= 4 ? { x: Math.max(1, width), y: Math.max(1, height) } : null,
           activeTool === "vertical-type" ? "vertical-rl" : "horizontal-tb"
         );
+        const projectFont = (scene.fonts ?? []).find((font) => font.fontId === typeOptions.fontId);
+        const face = projectFont
+          ? [...projectFont.faces].sort((left, right) => {
+              const targetWeight = Number(typeOptions.fontWeight) || 400;
+              const leftScore = Math.abs(left.weight - targetWeight) + (left.style === typeOptions.fontStyle ? 0 : 1_000);
+              const rightScore = Math.abs(right.weight - targetWeight) + (right.style === typeOptions.fontStyle ? 0 : 1_000);
+              return leftScore - rightScore;
+            })[0]
+          : undefined;
+        updateObject(id, {
+          fill: sampleColorValue(foregroundColor, { x: 0.5, y: 0.5 }),
+          fillStyle: foregroundColor,
+          fontId: projectFont?.fontId,
+          fontFamily: projectFont?.family ?? "Inter, Arial, sans-serif",
+          fallbackFamilies: projectFont?.fallbackFamilies ?? ["Arial", "sans-serif"],
+          fontSize: typeOptions.fontSize,
+          fontWeight: typeOptions.fontWeight,
+          fontStyle: typeOptions.fontStyle,
+          fontAssetId: face?.source.kind === "file" ? face.source.assetId : undefined
+        });
         commitHistory();
         setEditingTextId(id);
       }
@@ -806,13 +849,18 @@ export function CanvasStage() {
         selection.kind,
         { x: selection.feather, y: selection.feather }
       );
+      if (id) {
+        updateMask(host.id, id, {
+          mode: selection.operation === "new" ? "add" : selection.operation
+        });
+      }
       commitHistory();
       setSelectedMaskId(id);
       return;
     }
     if (marqueeOptions.mode === "region") return;
 
-    const matches = scene.objects
+    const matches = displayObjects
       .filter((object) => objectIntersectsMarquee(object, selection, marqueeOptions.objectContainment))
       .map((object) => object.id);
     let next = matches;
@@ -823,23 +871,39 @@ export function CanvasStage() {
     selectObject(next.at(-1) ?? null);
   }
 
-  function sampleEyedropper(point: Vec2, clientX: number, clientY: number, apply: boolean) {
-    const object = materialAtPointer(clientX, clientY, () => true);
-    if (!object) {
-      setEyedropperPreview({ point, color: scene.canvas.background });
-      if (apply) setForegroundColor({ type: "solid", color: scene.canvas.background });
-      return;
-    }
-    const local = worldToLocal(object, point);
-    const source = object.fillStyle ?? object.fill;
-    const normalizedPoint = {
-      x: object.width ? local.x / object.width : 0,
-      y: object.height ? local.y / object.height : 0
-    };
-    const color = sampleColorValue(source, normalizedPoint);
+  async function sampleEyedropper(point: Vec2, clientX: number, clientY: number, apply: boolean) {
+    const object = materialAtPointer(
+      clientX,
+      clientY,
+      (candidate) => eyedropperOptions.source === "composited"
+        || candidate.id === selectedDisplayObject?.id
+    );
+    const local = object ? worldToLocal(object, point) : point;
+    const source = object?.fillStyle ?? object?.fill ?? scene.canvas.background;
+    const colorPoint = typeof source !== "string"
+      && source?.type !== "none"
+      && source?.type !== "solid"
+      && source.coordinateMode === "scene"
+      ? point
+      : object
+        ? {
+            x: object.width ? local.x / object.width : 0,
+            y: object.height ? local.y / object.height : 0
+          }
+        : point;
+    let color = sampleColorValue(source, colorPoint);
     setEyedropperPreview({ point, color });
     if (!apply) return;
-    const copied = eyedropperOptions.copyGradient && object.fillStyle
+
+    if (eyedropperOptions.source === "composited") {
+      color = await sampleRenderedSceneColor(
+        point,
+        { x: scene.canvas.width, y: scene.canvas.height },
+        eyedropperOptions.sampleSize
+      ) ?? color;
+      setEyedropperPreview({ point, color });
+    }
+    const copied = eyedropperOptions.copyGradient && object?.fillStyle
       ? object.fillStyle
       : { type: "solid" as const, color };
     setForegroundColor(copied);
@@ -1217,9 +1281,17 @@ export function CanvasStage() {
                         fill={isFirst ? "#f5b942" : "#ffffff"}
                         stroke="#1a2634"
                         strokeWidth={2}
-                        style={{ cursor: "move" }}
+                        style={{ cursor: isFirst && penObjectId === penShape.id ? "default" : "move" }}
                         onPointerDown={(event) => {
                           event.stopPropagation();
+                          if (isFirst && penObjectId === penShape.id && penShape.path.vertices.length >= 2) {
+                            beginHistory("pen close");
+                            closeShapePath(penShape.id);
+                            commitHistory();
+                            setPenObjectId(null);
+                            setPenDrag(null);
+                            return;
+                          }
                           beginHistory("move vertex");
                           setPenObjectId(penShape.id);
                           setPenDrag({ index, kind: "vertex" });
@@ -1376,8 +1448,15 @@ export function CanvasStage() {
               aria-label={`Edit ${editingText.name}`}
               autoFocus
               className="viewport-text-editor"
-              onBlur={() => setEditingTextId(null)}
+              onFocus={() => beginHistory("edit text")}
+              onBlur={() => {
+                commitHistory();
+                setEditingTextId(null);
+              }}
               onChange={(event) => updateObject(editingText.id, { text: event.target.value })}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") event.currentTarget.blur();
+              }}
               style={{
                 left: `${editingText.x / scene.canvas.width * 100}%`,
                 top: `${editingText.y / scene.canvas.height * 100}%`,
@@ -1392,6 +1471,12 @@ export function CanvasStage() {
                 fontSize: `${editingText.fontSize * zoom / 100}px`,
                 fontWeight: editingText.fontWeight,
                 fontStyle: editingText.fontStyle,
+                lineHeight: (editingText.lineHeight ?? 1.2) <= 4
+                  ? editingText.lineHeight ?? 1.2
+                  : `${(editingText.lineHeight ?? editingText.fontSize * 1.2) * zoom / 100}px`,
+                letterSpacing: `${(editingText.letterSpacing ?? 0) * zoom / 100}px`,
+                textAlign: editingText.align,
+                opacity: editingText.opacity,
                 direction: editingText.direction === "auto" ? undefined : editingText.direction,
                 writingMode: editingText.writingMode === "horizontal-tb"
                   ? "horizontal-tb"
@@ -1852,8 +1937,8 @@ function localVectorToWorld(object: SceneObject, vector: Vec2): Vec2 {
   }, object.rotation);
 }
 
-function worldVectorInObjectAxes(object: SceneObject, point: Vec2): Vec2 {
-  return rotateVector({ x: point.x - object.x, y: point.y - object.y }, -object.rotation);
+function worldVectorInObjectAxes(object: SceneObject, point: Vec2, pivot = { x: object.x, y: object.y }): Vec2 {
+  return rotateVector({ x: point.x - pivot.x, y: point.y - pivot.y }, -object.rotation);
 }
 
 function rotateVector(vector: Vec2, degrees: number): Vec2 {

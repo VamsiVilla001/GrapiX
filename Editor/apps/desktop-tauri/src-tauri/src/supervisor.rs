@@ -1,138 +1,196 @@
-use std::collections::VecDeque;
-use std::env;
+//! Editor desktop supervisor.
+//!
+//! Starts what the Editor needs and, deliberately, nothing more. What it supervises:
+//!
+//! | Process | Port | Ownership |
+//! | --- | --- | --- |
+//! | `project-api` | 4100 | owned: the Editor's own project/asset service |
+//! | `grapix-render-engine` | 4400 | *ensured*, never owned |
+//!
+//! The engine is ensured rather than owned. `docs/architecture.md` invariant 5 is that
+//! Program, its frame clock and its outputs continue when the Editor closes, so this
+//! supervisor starts an engine when none is running and then leaves it alone — including on
+//! window close, and including an engine it started itself. An Editor window is not allowed
+//! to take a show off air by being shut.
+//!
+//! What it deliberately does **not** do, and used to:
+//!
+//! - supervise the protocol v2 render daemon on 4200 (retired: `architecture.md`, repository
+//!   ownership — no packaged application launches or connects to protocol v2);
+//! - restart the renderer, restore a Program scene or reconfigure and restart outputs. That
+//!   is the Engine Host's durable-recovery path, and Program authority belongs to Playout
+//!   (invariants 3 and 4). A shell that re-took a scene on air from a cached guess is exactly
+//!   the failure mode the journal-and-verify recovery model exists to prevent.
+
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
 const API_ADDRESS: &str = "127.0.0.1:4100";
-const DAEMON_ADDRESS: &str = "127.0.0.1:4200";
-const POLL_INTERVAL: Duration = Duration::from_secs(2);
-const FAILURE_THRESHOLD: u32 = 3;
-const MAX_RESTARTS_PER_WINDOW: usize = 3;
-const RESTART_WINDOW: Duration = Duration::from_secs(60);
+const ENGINE_ADDRESS: &str = "127.0.0.1:4400";
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+/// How long a process is given to answer before it is reported as failed.
+const STARTUP_GRACE: Duration = Duration::from_secs(45);
+/// Health poll interval. Two seconds is frequent enough for a status strip and cheap.
+const POLL_INTERVAL: Duration = Duration::from_secs(2);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProcessState {
+    /// Not started yet.
+    Idle,
+    /// Started by this supervisor, not answering yet.
+    Starting,
+    /// Started by this supervisor and answering.
+    Online,
+    /// Already running when this supervisor looked. Never stopped by it.
+    Adopted,
+    /// Was answering and stopped.
+    Lost,
+    /// Could not be started, or never answered within the startup grace.
+    Failed,
+}
+
+impl ProcessState {
+    fn is_up(self) -> bool {
+        matches!(self, ProcessState::Online | ProcessState::Adopted)
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessSnapshot {
+    pub label: String,
+    pub address: String,
+    pub state: ProcessState,
+    pub detail: Option<String>,
+    /// True when this supervisor owns the process and will stop it on close.
+    pub supervised: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SupervisorSnapshot {
-    pub api_healthy: bool,
-    pub renderer_healthy: bool,
-    pub output_healthy: bool,
-    pub fallback_active: bool,
-    pub fallback_reason: Option<String>,
-    pub restart_count: u64,
-    pub consecutive_failures: u32,
-    pub last_heartbeat_at_ms: Option<u64>,
-    pub last_frame_count: Option<u64>,
-    pub program_scene_id: Option<String>,
-    pub output_state: Option<String>,
-    pub renderer_last_error: Option<String>,
-    pub gpu_adapter: Option<String>,
-    pub gpu_backend: Option<String>,
-    pub max_texture_dimension: Option<u64>,
+    pub api: ProcessSnapshot,
+    pub engine: ProcessSnapshot,
+    pub ready: bool,
+    /// Stated on every build on purpose. Repository tests cannot certify a GPU and output
+    /// combination, so no build may imply that they did.
     pub certification_warning: String,
 }
 
-impl Default for SupervisorSnapshot {
-    fn default() -> Self {
+const CERTIFICATION_WARNING: &str =
+    "Hardware/output combination has not completed GrapiX certification.";
+
+struct ProcessSlot {
+    label: &'static str,
+    address: &'static str,
+    child: Option<Child>,
+    state: ProcessState,
+    detail: Option<String>,
+}
+
+impl ProcessSlot {
+    fn new(label: &'static str, address: &'static str) -> Self {
         Self {
-            api_healthy: false,
-            renderer_healthy: false,
-            output_healthy: false,
-            fallback_active: false,
-            fallback_reason: None,
-            restart_count: 0,
-            consecutive_failures: 0,
-            last_heartbeat_at_ms: None,
-            last_frame_count: None,
-            program_scene_id: None,
-            output_state: None,
-            renderer_last_error: None,
-            gpu_adapter: None,
-            gpu_backend: None,
-            max_texture_dimension: None,
-            certification_warning:
-                "Hardware/output combination has not completed GrapiX certification.".to_string(),
+            label,
+            address,
+            child: None,
+            state: ProcessState::Idle,
+            detail: None,
+        }
+    }
+
+    fn snapshot(&self) -> ProcessSnapshot {
+        ProcessSnapshot {
+            label: self.label.to_string(),
+            address: self.address.to_string(),
+            state: self.state,
+            detail: self.detail.clone(),
+            supervised: self.child.is_some(),
         }
     }
 }
 
-#[derive(Clone)]
-struct RuntimeRecovery {
-    program_scene_id: Option<String>,
-    output_config: Option<Value>,
-    output_was_running: bool,
+struct Inner {
+    api: ProcessSlot,
+    engine: ProcessSlot,
+    stopping: bool,
 }
 
-struct SupervisorInner {
-    api_child: Option<Child>,
-    daemon_child: Option<Child>,
-    snapshot: SupervisorSnapshot,
-    recovery: RuntimeRecovery,
-    restart_times: VecDeque<Instant>,
-    last_observed_frames: Option<u64>,
-    stalled_frame_polls: u32,
+impl Inner {
+    fn snapshot(&self) -> SupervisorSnapshot {
+        SupervisorSnapshot {
+            api: self.api.snapshot(),
+            engine: self.engine.snapshot(),
+            ready: self.api.state.is_up() && self.engine.state.is_up(),
+            certification_warning: CERTIFICATION_WARNING.to_string(),
+        }
+    }
 }
 
 pub struct DesktopSupervisor {
     root: PathBuf,
-    inner: Arc<Mutex<SupervisorInner>>,
-    shutdown: Arc<AtomicBool>,
+    inner: Arc<Mutex<Inner>>,
 }
 
 impl DesktopSupervisor {
+    /// Start what is missing and watch everything.
     pub fn start(root: PathBuf, app: AppHandle) -> Self {
-        let api_child = spawn_api(&root);
-        let daemon_child = spawn_daemon(&root);
-        let inner = Arc::new(Mutex::new(SupervisorInner {
-            api_child,
-            daemon_child,
-            snapshot: SupervisorSnapshot::default(),
-            recovery: RuntimeRecovery {
-                program_scene_id: None,
-                output_config: None,
-                output_was_running: false,
-            },
-            restart_times: VecDeque::new(),
-            last_observed_frames: None,
-            stalled_frame_polls: 0,
+        let inner = Arc::new(Mutex::new(Inner {
+            api: ProcessSlot::new("Project service", API_ADDRESS),
+            engine: ProcessSlot::new("Render engine", ENGINE_ADDRESS),
+            stopping: false,
         }));
-        let shutdown = Arc::new(AtomicBool::new(false));
 
-        spawn_watchdog(root.clone(), Arc::clone(&inner), Arc::clone(&shutdown), app);
+        let supervisor = Self {
+            root: root.clone(),
+            inner: Arc::clone(&inner),
+        };
 
-        Self {
-            root,
-            inner,
-            shutdown,
-        }
+        thread::spawn(move || {
+            // The engine first: the editor's engine client connects on start-up, and the
+            // other order means it spends its first seconds retrying.
+            ensure_engine(&root, &inner);
+            start_api(&root, &inner);
+            watch(&inner, &app);
+        });
+
+        supervisor
     }
 
     pub fn snapshot(&self) -> SupervisorSnapshot {
         self.inner
             .lock()
-            .map(|inner| inner.snapshot.clone())
+            .map(|inner| inner.snapshot())
             .unwrap_or_else(|_| SupervisorSnapshot {
-                fallback_active: true,
-                fallback_reason: Some("supervisor state lock was poisoned".to_string()),
-                ..SupervisorSnapshot::default()
+                api: ProcessSlot::new("Project service", API_ADDRESS).snapshot(),
+                engine: ProcessSlot::new("Render engine", ENGINE_ADDRESS).snapshot(),
+                ready: false,
+                certification_warning: CERTIFICATION_WARNING.to_string(),
             })
     }
 
+    /// Stop the Editor's own service. The engine is left running, always.
     pub fn shutdown(&self) {
-        if self.shutdown.swap(true, Ordering::Relaxed) {
+        let Ok(mut inner) = self.inner.lock() else {
             return;
-        }
-        if let Ok(mut inner) = self.inner.lock() {
-            stop_child(&mut inner.daemon_child);
-            stop_child(&mut inner.api_child);
+        };
+        inner.stopping = true;
+        stop_owned(&mut inner.api);
+
+        // Not a bug and not laziness: an engine may be rendering Program. Closing an Editor
+        // window must never stop it, whoever started it.
+        if inner.engine.child.is_some() {
+            println!("[grapix] leaving the render engine running: Program outlives the Editor");
+            inner.engine.child = None;
         }
     }
 
@@ -142,442 +200,269 @@ impl DesktopSupervisor {
     }
 }
 
-fn spawn_watchdog(
-    root: PathBuf,
-    inner: Arc<Mutex<SupervisorInner>>,
-    shutdown: Arc<AtomicBool>,
-    app: AppHandle,
-) {
-    std::thread::Builder::new()
-        .name("grapix-supervisor".to_string())
-        .spawn(move || {
-            while !shutdown.load(Ordering::Relaxed) {
-                supervise_once(&root, &inner);
-                let snapshot = inner
-                    .lock()
-                    .map(|state| state.snapshot.clone())
-                    .unwrap_or_default();
-                let _ = app.emit("grapix-supervisor-status", &snapshot);
-                std::thread::sleep(POLL_INTERVAL);
-            }
-        })
-        .expect("failed to spawn GrapiX supervisor watchdog");
+/// Stop one slot, if this supervisor owns it.
+fn stop_owned(slot: &mut ProcessSlot) {
+    if let Some(child) = slot.child.as_mut() {
+        let _ = child.kill();
+        let _ = child.wait();
+        println!("[grapix] stopped {}", slot.label);
+    } else if slot.state == ProcessState::Adopted {
+        println!(
+            "[grapix] leaving {} running: this supervisor did not start it",
+            slot.label
+        );
+    }
+    slot.child = None;
 }
 
-fn supervise_once(root: &Path, shared: &Arc<Mutex<SupervisorInner>>) {
-    let api_healthy = http_request("GET", "/health", None)
-        .map(|response| response.status == 200)
-        .unwrap_or(false);
+// ---------------------------------------------------------------------------
+// Starting
+// ---------------------------------------------------------------------------
 
-    if !api_healthy {
-        if let Ok(mut inner) = shared.lock() {
-            inner.snapshot.api_healthy = false;
-            inner.snapshot.renderer_healthy = false;
-            inner.snapshot.output_healthy = false;
-            inner.snapshot.consecutive_failures =
-                inner.snapshot.consecutive_failures.saturating_add(1);
-            if inner.snapshot.consecutive_failures >= FAILURE_THRESHOLD
-                && (inner.api_child.is_some() || !port_open(API_ADDRESS))
-            {
-                stop_child(&mut inner.api_child);
-                inner.api_child = spawn_api(root);
-                inner.snapshot.fallback_active = true;
-                inner.snapshot.fallback_reason =
-                    Some("project service unavailable; restart requested".to_string());
-            }
-        }
+fn ensure_engine(root: &Path, inner: &Arc<Mutex<Inner>>) {
+    if port_open(ENGINE_ADDRESS) {
+        adopt(inner, |inner| &mut inner.engine, "already running on :4400");
         return;
     }
 
-    let renderer_response = http_request("GET", "/api/render-daemon/status", None);
-    let renderer_status = renderer_response
-        .as_ref()
-        .ok()
-        .filter(|response| response.status == 200)
-        .and_then(|response| serde_json::from_str::<Value>(&response.body).ok());
-
-    let mut should_restart = false;
-    if let Ok(mut inner) = shared.lock() {
-        inner.snapshot.api_healthy = true;
-        match renderer_status {
-            Some(status) => {
-                // Fastify wraps daemon replies as { ok, reply }. Accept a raw
-                // status too so the watchdog remains compatible with direct
-                // diagnostic fixtures.
-                let status = status.get("reply").unwrap_or(&status);
-                let frames = status
-                    .pointer("/output/framesRendered")
-                    .and_then(Value::as_u64);
-                let output_state = status
-                    .pointer("/output/state")
-                    .and_then(Value::as_str)
-                    .map(str::to_string);
-                let output_running = output_state.as_deref() == Some("running");
-
-                if output_running && frames == inner.last_observed_frames {
-                    inner.stalled_frame_polls = inner.stalled_frame_polls.saturating_add(1);
-                } else {
-                    inner.stalled_frame_polls = 0;
-                }
-                inner.last_observed_frames = frames;
-
-                inner.snapshot.renderer_healthy = true;
-                inner.snapshot.output_healthy = !output_running
-                    || (inner.stalled_frame_polls < FAILURE_THRESHOLD
-                        && status
-                            .pointer("/output/lastError")
-                            .and_then(Value::as_str)
-                            .is_none());
-                inner.snapshot.last_heartbeat_at_ms = Some(now_epoch_ms());
-                inner.snapshot.last_frame_count = frames;
-                inner.snapshot.program_scene_id = status
-                    .get("programSceneId")
-                    .and_then(Value::as_str)
-                    .map(str::to_string);
-                inner.snapshot.output_state = output_state;
-                inner.snapshot.renderer_last_error = status
-                    .pointer("/output/lastError")
-                    .and_then(Value::as_str)
-                    .map(str::to_string);
-                inner.snapshot.gpu_adapter = status
-                    .pointer("/gpu/adapter")
-                    .and_then(Value::as_str)
-                    .map(str::to_string);
-                inner.snapshot.gpu_backend = status
-                    .pointer("/gpu/backend")
-                    .and_then(Value::as_str)
-                    .map(str::to_string);
-                inner.snapshot.max_texture_dimension = status
-                    .pointer("/gpu/maxTextureDimension2d")
-                    .and_then(Value::as_u64);
-                inner.snapshot.consecutive_failures = 0;
-
-                inner.recovery = RuntimeRecovery {
-                    program_scene_id: inner.snapshot.program_scene_id.clone(),
-                    output_config: status.pointer("/output/config").cloned(),
-                    output_was_running: output_running,
-                };
-
-                if inner.stalled_frame_polls >= FAILURE_THRESHOLD {
-                    inner.snapshot.fallback_active = true;
-                    inner.snapshot.fallback_reason =
-                        Some("Program frame counter stopped advancing".to_string());
-                    should_restart = true;
-                } else {
-                    inner.snapshot.fallback_active = false;
-                    inner.snapshot.fallback_reason = None;
-                }
-            }
-            None => {
-                inner.snapshot.renderer_healthy = false;
-                inner.snapshot.output_healthy = false;
-                inner.snapshot.consecutive_failures =
-                    inner.snapshot.consecutive_failures.saturating_add(1);
-                should_restart = inner.snapshot.consecutive_failures >= FAILURE_THRESHOLD;
-                if should_restart {
-                    inner.snapshot.fallback_active = true;
-                    inner.snapshot.fallback_reason = Some("renderer heartbeat failed".to_string());
-                }
-            }
-        }
-    }
-
-    if should_restart {
-        restart_renderer(root, shared);
-    }
-}
-
-fn restart_renderer(root: &Path, shared: &Arc<Mutex<SupervisorInner>>) {
-    let recovery = {
-        let Ok(mut inner) = shared.lock() else {
-            return;
-        };
-        let now = Instant::now();
-        while inner
-            .restart_times
-            .front()
-            .is_some_and(|started| now.duration_since(*started) > RESTART_WINDOW)
-        {
-            inner.restart_times.pop_front();
-        }
-        if inner.restart_times.len() >= MAX_RESTARTS_PER_WINDOW {
-            inner.snapshot.fallback_active = true;
-            inner.snapshot.fallback_reason = Some(format!(
-                "renderer restart limit reached ({MAX_RESTARTS_PER_WINDOW} per {}s)",
-                RESTART_WINDOW.as_secs()
-            ));
-            return;
-        }
-        inner.restart_times.push_back(now);
-        inner.snapshot.restart_count = inner.snapshot.restart_count.saturating_add(1);
-        stop_child(&mut inner.daemon_child);
-        inner.recovery.clone()
+    let configured = std::env::var_os("GRAPIX_RENDER_ENGINE_BIN").map(PathBuf::from);
+    let candidates = [
+        configured,
+        adjacent_binary("grapix-render-engine"),
+        Some(engine_binary(root, "debug")),
+        Some(engine_binary(root, "release")),
+    ];
+    let Some(executable) = candidates.into_iter().flatten().find(|path| path.is_file()) else {
+        fail(
+            inner,
+            |inner| &mut inner.engine,
+            "binary not found; run `cargo build --manifest-path services/render-engine/Cargo.toml`",
+        );
+        return;
     };
 
-    wait_for_port_to_close(DAEMON_ADDRESS, Duration::from_secs(2));
-    let new_child = spawn_daemon(root);
-    if let Ok(mut inner) = shared.lock() {
-        inner.daemon_child = new_child;
+    let config = root
+        .join("services")
+        .join("render-engine")
+        .join("engine.toml");
+    let mut command = Command::new(executable);
+    command.current_dir(root);
+    if config.is_file() {
+        command.arg("--config").arg(config);
     }
 
-    if !wait_for_renderer_health(Duration::from_secs(15)) {
-        if let Ok(mut inner) = shared.lock() {
-            inner.snapshot.fallback_active = true;
-            inner.snapshot.fallback_reason =
-                Some("renderer did not recover after restart".to_string());
-        }
+    spawn(inner, |inner| &mut inner.engine, command);
+}
+
+fn start_api(root: &Path, inner: &Arc<Mutex<Inner>>) {
+    if port_open(API_ADDRESS) {
+        adopt(inner, |inner| &mut inner.api, "already running on :4100");
         return;
     }
 
-    let restored = restore_runtime(&recovery);
-    if let Ok(mut inner) = shared.lock() {
-        inner.snapshot.renderer_healthy = true;
-        inner.snapshot.consecutive_failures = 0;
-        inner.stalled_frame_polls = 0;
-        inner.snapshot.fallback_active = !restored;
-        inner.snapshot.fallback_reason = if restored {
-            None
-        } else {
-            Some("renderer restarted but Program restoration failed".to_string())
-        };
-    }
-}
-
-fn restore_runtime(recovery: &RuntimeRecovery) -> bool {
-    let fallback_scene = env::var("GRAPIX_SAFE_FALLBACK_SCENE_ID").ok();
-    let scene_id = recovery
-        .program_scene_id
-        .as_deref()
-        .or(fallback_scene.as_deref());
-
-    if let Some(scene_id) = scene_id {
-        if !is_safe_scene_id(scene_id)
-            || http_request(
-                "POST",
-                &format!("/api/render-daemon/scenes/{scene_id}/take"),
-                Some("{}"),
-            )
-            .map(|response| response.status != 200)
-            .unwrap_or(true)
-        {
-            return false;
-        }
-    }
-
-    if let Some(config) = recovery.output_config.as_ref() {
-        let configure = json!({
-            "width": config.get("width"),
-            "height": config.get("height"),
-            "frameRateNumerator": config.pointer("/frameRate/numerator"),
-            "frameRateDenominator": config.pointer("/frameRate/denominator"),
-            "scanMode": config.get("scanMode"),
-            "alphaMode": config.get("alphaMode"),
-            "colorFormat": config.get("colorFormat"),
-            "colorSpace": config.get("colorSpace"),
-            "ndiSourceName": config.get("ndiSourceName"),
-            "recordingName": config.get("recordingName"),
-            "backend": config.get("backend")
-        });
-        if http_request(
-            "POST",
-            "/api/render-daemon/output/configure",
-            Some(&configure.to_string()),
-        )
-        .map(|response| response.status != 200)
-        .unwrap_or(true)
-        {
-            return false;
-        }
-    }
-
-    if recovery.output_was_running {
-        return http_request("POST", "/api/render-daemon/output/start", Some("{}"))
-            .map(|response| response.status == 200)
-            .unwrap_or(false);
-    }
-    true
-}
-
-fn spawn_api(root: &Path) -> Option<Child> {
-    if port_open(API_ADDRESS) {
-        println!("[grapix] API already online on :4100 — reusing it");
-        return None;
-    }
-    // The project API moved to Editor/services/project-api in the Phase 2 migration; the
-    // npm package is still @grapix/api-server.
-    let api_entry = root
+    // The project API moved to Editor/services/project-api in the Phase 2 migration; the npm
+    // package is still @grapix/api-server.
+    let entry = root
         .join("Editor")
         .join("services")
         .join("project-api")
         .join("dist")
         .join("index.js");
-    if !api_entry.exists() {
-        eprintln!(
-            "[grapix] API entry not found at {api_entry:?}; run `npm run build -w @grapix/api-server`"
+    if !entry.is_file() {
+        fail(
+            inner,
+            |inner| &mut inner.api,
+            "build output not found; run `npm run build -w @grapix/api-server`",
         );
-        return None;
-    }
-    spawn_command(Command::new("node").arg(api_entry).current_dir(root), "API")
-}
-
-fn spawn_daemon(root: &Path) -> Option<Child> {
-    if port_open(DAEMON_ADDRESS) {
-        println!("[grapix] render daemon already online on :4200 — reusing it");
-        return None;
+        return;
     }
 
-    let configured = env::var_os("GRAPIX_RENDER_DAEMON_BIN").map(PathBuf::from);
-    let debug_binary = root
-        .join("services")
-        .join("render-daemon")
-        .join("target")
-        .join("debug")
-        .join(binary_name("grapix-render-daemon"));
-    let release_binary = root
-        .join("services")
-        .join("render-daemon")
-        .join("target")
-        .join("release")
-        .join(binary_name("grapix-render-daemon"));
-    let adjacent_binary = env::current_exe().ok().and_then(|path| {
-        path.parent()
-            .map(|parent| parent.join(binary_name("grapix-render-daemon")))
-    });
-    let executable = configured
-        .filter(|path| path.is_file())
-        .or_else(|| adjacent_binary.filter(|path| path.is_file()))
-        .or_else(|| debug_binary.is_file().then_some(debug_binary))
-        .or_else(|| release_binary.is_file().then_some(release_binary));
-
-    let Some(executable) = executable else {
-        eprintln!(
-            "[grapix] render daemon binary not found; run `cargo build --manifest-path services/render-daemon/Cargo.toml` or set GRAPIX_RENDER_DAEMON_BIN"
-        );
-        return None;
-    };
-
-    spawn_command(Command::new(executable).current_dir(root), "render daemon")
+    let mut command = Command::new("node");
+    command.arg(entry).current_dir(root);
+    spawn(inner, |inner| &mut inner.api, command);
 }
 
-fn spawn_command(command: &mut Command, label: &str) -> Option<Child> {
+fn engine_binary(root: &Path, profile: &str) -> PathBuf {
+    root.join("services")
+        .join("render-engine")
+        .join("target")
+        .join(profile)
+        .join(binary_name("grapix-render-engine"))
+}
+
+/// A binary shipped beside the bundled application, which is where a packaged build finds it.
+fn adjacent_binary(name: &str) -> Option<PathBuf> {
+    std::env::current_exe()
+        .ok()?
+        .parent()
+        .map(|parent| parent.join(binary_name(name)))
+}
+
+fn binary_name(stem: &str) -> String {
+    if cfg!(windows) {
+        format!("{stem}.exe")
+    } else {
+        stem.to_string()
+    }
+}
+
+fn spawn(
+    inner: &Arc<Mutex<Inner>>,
+    select: impl Fn(&mut Inner) -> &mut ProcessSlot,
+    mut command: Command,
+) {
+    // Inherited output on purpose: whoever is debugging a start-up failure needs the
+    // process's own words, not a supervisor's summary of them.
+    command.stdin(Stdio::null());
+
     match command.spawn() {
         Ok(child) => {
-            println!("[grapix] {label} started (pid {})", child.id());
-            Some(child)
+            let Ok(mut guard) = inner.lock() else { return };
+            let slot = select(&mut guard);
+            println!("[grapix] started {}", slot.label);
+            slot.child = Some(child);
+            slot.state = ProcessState::Starting;
+            slot.detail = None;
         }
         Err(error) => {
-            eprintln!("[grapix] failed to start {label}: {error}");
-            None
+            let Ok(mut guard) = inner.lock() else { return };
+            let slot = select(&mut guard);
+            eprintln!("[grapix] could not start {}: {error}", slot.label);
+            slot.state = ProcessState::Failed;
+            slot.detail = Some(error.to_string());
         }
     }
 }
 
-fn stop_child(child: &mut Option<Child>) {
-    if let Some(mut process) = child.take() {
-        let _ = process.kill();
-        let _ = process.wait();
-    }
+fn adopt(
+    inner: &Arc<Mutex<Inner>>,
+    select: impl Fn(&mut Inner) -> &mut ProcessSlot,
+    detail: &str,
+) {
+    let Ok(mut guard) = inner.lock() else { return };
+    let slot = select(&mut guard);
+    println!("[grapix] adopting {}: {detail}", slot.label);
+    slot.state = ProcessState::Adopted;
+    slot.detail = Some(detail.to_string());
 }
 
-fn wait_for_port_to_close(address: &str, timeout: Duration) {
-    let started = Instant::now();
-    while started.elapsed() < timeout && port_open(address) {
-        std::thread::sleep(Duration::from_millis(100));
-    }
+fn fail(inner: &Arc<Mutex<Inner>>, select: impl Fn(&mut Inner) -> &mut ProcessSlot, detail: &str) {
+    let Ok(mut guard) = inner.lock() else { return };
+    let slot = select(&mut guard);
+    eprintln!("[grapix] {} unavailable: {detail}", slot.label);
+    slot.state = ProcessState::Failed;
+    slot.detail = Some(detail.to_string());
 }
 
-fn wait_for_renderer_health(timeout: Duration) -> bool {
+// ---------------------------------------------------------------------------
+// Watching
+// ---------------------------------------------------------------------------
+
+fn watch(inner: &Arc<Mutex<Inner>>, app: &AppHandle) {
     let started = Instant::now();
-    while started.elapsed() < timeout {
-        if http_request("GET", "/api/render-daemon/heartbeat", None)
-            .map(|response| response.status == 200)
-            .unwrap_or(false)
-        {
-            return true;
+    let mut previous: Option<String> = None;
+
+    loop {
+        match inner.lock() {
+            Ok(guard) if guard.stopping => return,
+            Ok(_) => {}
+            Err(_) => return,
         }
-        std::thread::sleep(Duration::from_millis(250));
+
+        // The API answers HTTP, so ask it: a hung Fastify still holds its port. The engine
+        // speaks protocol v3 over WebSocket, and a real hello handshake belongs to the
+        // editor's engine client, not to a status strip — a reachable port is what this
+        // supervisor can honestly claim.
+        let api_up = api_health();
+        let engine_up = port_open(ENGINE_ADDRESS);
+
+        let snapshot = {
+            let Ok(mut guard) = inner.lock() else { return };
+            let within_grace = started.elapsed() < STARTUP_GRACE;
+            update(&mut guard.api, api_up, within_grace);
+            update(&mut guard.engine, engine_up, within_grace);
+            guard.snapshot()
+        };
+
+        // Emitted only on change: an event every two seconds forever would be noise, and the
+        // UI polls the command for its initial state anyway.
+        let fingerprint = format!(
+            "{:?}/{:?}/{}",
+            snapshot.api.state, snapshot.engine.state, snapshot.ready
+        );
+        if previous.as_deref() != Some(fingerprint.as_str()) {
+            let _ = app.emit("grapix-supervisor-status", &snapshot);
+            previous = Some(fingerprint);
+        }
+
+        thread::sleep(POLL_INTERVAL);
     }
-    false
+}
+
+fn update(slot: &mut ProcessSlot, up: bool, within_grace: bool) {
+    match (slot.state, up) {
+        (ProcessState::Adopted, true) => {}
+        (_, true) => {
+            if slot.state != ProcessState::Online {
+                println!("[grapix] {} online", slot.label);
+            }
+            slot.state = ProcessState::Online;
+            slot.detail = None;
+        }
+        (ProcessState::Online, false) => {
+            eprintln!("[grapix] {} stopped answering", slot.label);
+            slot.state = ProcessState::Lost;
+            slot.detail = Some("stopped answering on its port".to_string());
+        }
+        (ProcessState::Adopted, false) => {
+            slot.state = ProcessState::Lost;
+            slot.detail = Some("the process this supervisor adopted has gone".to_string());
+        }
+        (ProcessState::Starting, false) if !within_grace => {
+            slot.state = ProcessState::Failed;
+            slot.detail = Some("did not answer within the startup grace".to_string());
+        }
+        _ => {}
+    }
 }
 
 fn port_open(address: &str) -> bool {
-    address
-        .parse::<SocketAddr>()
-        .ok()
-        .and_then(|address| TcpStream::connect_timeout(&address, Duration::from_millis(300)).ok())
-        .is_some()
+    let Ok(mut candidates) = address.to_socket_addrs() else {
+        return false;
+    };
+    let Some(target) = candidates.next() else {
+        return false;
+    };
+    TcpStream::connect_timeout(&target, Duration::from_millis(300)).is_ok()
 }
 
-struct HttpResponse {
-    status: u16,
-    body: String,
+fn api_health() -> bool {
+    http_get(API_ADDRESS, "/health").is_some_and(|status| status == 200)
 }
 
-fn http_request(method: &str, path: &str, body: Option<&str>) -> Result<HttpResponse, String> {
-    let address: SocketAddr = API_ADDRESS
-        .parse()
-        .map_err(|error| format!("invalid API address: {error}"))?;
-    let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(750))
-        .map_err(|error| format!("API connect failed: {error}"))?;
-    stream
-        .set_read_timeout(Some(Duration::from_secs(2)))
-        .map_err(|error| error.to_string())?;
-    stream
-        .set_write_timeout(Some(Duration::from_secs(2)))
-        .map_err(|error| error.to_string())?;
-    let body = body.unwrap_or("");
-    let request = format!(
-        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:4100\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
-        body.len()
-    );
-    stream
-        .write_all(request.as_bytes())
-        .map_err(|error| error.to_string())?;
+/// Minimal HTTP status probe. A dependency would be a larger surface than one request.
+fn http_get(address: &str, path: &str) -> Option<u16> {
+    let target: SocketAddr = address.parse().ok()?;
+    let mut stream = TcpStream::connect_timeout(&target, Duration::from_millis(750)).ok()?;
+    stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
+    stream.set_write_timeout(Some(Duration::from_secs(2))).ok()?;
+
+    let request =
+        format!("GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n");
+    stream.write_all(request.as_bytes()).ok()?;
+
     let mut response = String::new();
-    stream
-        .read_to_string(&mut response)
-        .map_err(|error| error.to_string())?;
-    parse_http_response(&response)
+    stream.read_to_string(&mut response).ok()?;
+    parse_status(&response)
 }
 
-fn parse_http_response(raw: &str) -> Result<HttpResponse, String> {
-    let (headers, body) = raw
-        .split_once("\r\n\r\n")
-        .ok_or_else(|| "malformed HTTP response".to_string())?;
-    let status = headers
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|status| status.parse::<u16>().ok())
-        .ok_or_else(|| "HTTP response has no status".to_string())?;
-    Ok(HttpResponse {
-        status,
-        body: body.to_string(),
-    })
-}
-
-fn is_safe_scene_id(scene_id: &str) -> bool {
-    !scene_id.is_empty()
-        && scene_id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-}
-
-fn now_epoch_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .try_into()
-        .unwrap_or(u64::MAX)
-}
-
-fn binary_name(base: &str) -> String {
-    if cfg!(windows) {
-        format!("{base}.exe")
-    } else {
-        base.to_string()
-    }
+fn parse_status(raw: &str) -> Option<u16> {
+    raw.lines()
+        .next()?
+        .split_whitespace()
+        .nth(1)?
+        .parse::<u16>()
+        .ok()
 }
 
 #[cfg(test)]
@@ -585,19 +470,50 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_minimal_http_response() {
-        let response =
-            parse_http_response("HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\n{\"ok\":true}")
-                .expect("response must parse");
-        assert_eq!(response.status, 200);
-        assert_eq!(response.body, "{\"ok\":true}");
+    fn parses_a_status_line() {
+        assert_eq!(
+            parse_status("HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\n{\"ok\":true}"),
+            Some(200)
+        );
+        assert_eq!(parse_status("HTTP/1.1 503 Service Unavailable\r\n\r\n"), Some(503));
+        assert_eq!(parse_status("not http"), None);
     }
 
     #[test]
-    fn scene_ids_used_in_recovery_cannot_escape_the_route() {
-        assert!(is_safe_scene_id("lower_third-01"));
-        assert!(!is_safe_scene_id("../secrets"));
-        assert!(!is_safe_scene_id("scene/name"));
-        assert!(!is_safe_scene_id(""));
+    fn only_online_and_adopted_count_as_up() {
+        assert!(ProcessState::Online.is_up());
+        assert!(ProcessState::Adopted.is_up());
+        assert!(!ProcessState::Starting.is_up());
+        assert!(!ProcessState::Lost.is_up());
+        assert!(!ProcessState::Failed.is_up());
+        assert!(!ProcessState::Idle.is_up());
+    }
+
+    #[test]
+    fn an_adopted_slot_is_never_owned_and_so_is_never_stopped() {
+        let mut slot = ProcessSlot::new("Render engine", ENGINE_ADDRESS);
+        slot.state = ProcessState::Adopted;
+        assert!(!slot.snapshot().supervised);
+        stop_owned(&mut slot);
+        assert_eq!(slot.state, ProcessState::Adopted);
+    }
+
+    #[test]
+    fn a_lost_process_is_reported_rather_than_restarted() {
+        let mut slot = ProcessSlot::new("Project service", API_ADDRESS);
+        slot.state = ProcessState::Online;
+        update(&mut slot, false, false);
+        assert_eq!(slot.state, ProcessState::Lost);
+        assert!(slot.detail.is_some());
+    }
+
+    #[test]
+    fn a_starting_process_is_given_the_grace_before_it_fails() {
+        let mut slot = ProcessSlot::new("Render engine", ENGINE_ADDRESS);
+        slot.state = ProcessState::Starting;
+        update(&mut slot, false, true);
+        assert_eq!(slot.state, ProcessState::Starting);
+        update(&mut slot, false, false);
+        assert_eq!(slot.state, ProcessState::Failed);
     }
 }

@@ -31,7 +31,7 @@ export interface ParityCaptureResult {
 export async function captureParityFrame(
   maxDimension = 4096
 ): Promise<ParityCaptureResult | null> {
-  const captured = await captureSceneThumbnail(maxDimension);
+  const captured = await captureSceneThumbnail({ maxDimension });
   if (!captured) return null;
 
   const fileName = `parity-browser-${captured.width}x${captured.height}.png`;

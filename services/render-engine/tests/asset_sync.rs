@@ -28,10 +28,8 @@ fn digest(bytes: &[u8]) -> String {
 
 /// A store with its own cache directory, so tests cannot see each other's content.
 fn store(name: &str) -> (AssetStore, PathBuf) {
-    let directory = std::env::temp_dir().join(format!(
-        "grapix-asset-test-{}-{name}",
-        std::process::id()
-    ));
+    let directory =
+        std::env::temp_dir().join(format!("grapix-asset-test-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&directory);
     std::fs::create_dir_all(&directory).expect("cache directory");
 
@@ -52,7 +50,10 @@ fn store(name: &str) -> (AssetStore, PathBuf) {
 #[test]
 fn a_digest_must_be_lower_case_hex_of_the_right_length() {
     assert!(is_valid_sha256(&"a".repeat(64)));
-    assert!(!is_valid_sha256(&"A".repeat(64)), "upper case would break the cache path");
+    assert!(
+        !is_valid_sha256(&"A".repeat(64)),
+        "upper case would break the cache path"
+    );
     assert!(!is_valid_sha256(&"a".repeat(63)));
     assert!(!is_valid_sha256("not a digest"));
 }
@@ -62,7 +63,9 @@ fn the_cache_path_is_sharded_by_the_first_two_characters() {
     let path = content_path(&PathBuf::from("cache"), &format!("ab{}", "c".repeat(62)));
     // A flat directory with a hundred thousand entries is slow to list everywhere.
     assert!(path.to_string_lossy().contains("ab"));
-    assert!(path.to_string_lossy().ends_with(&format!("ab{}", "c".repeat(62))));
+    assert!(path
+        .to_string_lossy()
+        .ends_with(&format!("ab{}", "c".repeat(62))));
 }
 
 #[test]
@@ -142,7 +145,15 @@ fn chunks_can_arrive_out_of_order() {
     let bytes: Vec<u8> = (0..100u8).collect();
     let sha = digest(&bytes);
     store
-        .register("asset_1", &sha, "application/octet-stream", 100, AssetTransport::Upload, "", 0)
+        .register(
+            "asset_1",
+            &sha,
+            "application/octet-stream",
+            100,
+            AssetTransport::Upload,
+            "",
+            0,
+        )
         .expect("register");
 
     let chunks: Vec<&[u8]> = bytes.chunks(64).collect();
@@ -167,7 +178,15 @@ fn corrupt_bytes_never_reach_the_cache() {
     let honest: Vec<u8> = vec![1, 2, 3, 4, 5];
     let sha = digest(&honest);
     store
-        .register("asset_1", &sha, "image/png", 5, AssetTransport::Upload, "", 0)
+        .register(
+            "asset_1",
+            &sha,
+            "image/png",
+            5,
+            AssetTransport::Upload,
+            "",
+            0,
+        )
         .expect("register");
 
     let tampered = vec![9, 9, 9, 9, 9];
@@ -180,8 +199,15 @@ fn corrupt_bytes_never_reach_the_cache() {
 
     let record = store.record("asset_1").expect("record");
     assert_eq!(record.fetch_state, AssetFetchState::Failed);
-    assert!(record.cache_path.is_none(), "the bytes must not be published");
-    assert!(!content_path(&PathBuf::from(record.cache_path.clone().unwrap_or_default()), &sha).exists());
+    assert!(
+        record.cache_path.is_none(),
+        "the bytes must not be published"
+    );
+    assert!(!content_path(
+        &PathBuf::from(record.cache_path.clone().unwrap_or_default()),
+        &sha
+    )
+    .exists());
     assert_eq!(store.checksum_failures, 1);
 }
 
@@ -191,7 +217,15 @@ fn a_chunk_larger_than_the_limit_is_refused() {
     let bytes = vec![7u8; 200];
     let sha = digest(&bytes);
     store
-        .register("asset_1", &sha, "image/png", 200, AssetTransport::Upload, "", 0)
+        .register(
+            "asset_1",
+            &sha,
+            "image/png",
+            200,
+            AssetTransport::Upload,
+            "",
+            0,
+        )
         .expect("register");
 
     // The chunk limit is what bounds the memory one message can consume.
@@ -235,7 +269,15 @@ fn a_transfer_whose_shape_changes_mid_flight_is_restarted_not_reassembled() {
     let bytes = vec![3u8; 100];
     let sha = digest(&bytes);
     store
-        .register("asset_1", &sha, "image/png", 100, AssetTransport::Upload, "", 0)
+        .register(
+            "asset_1",
+            &sha,
+            "image/png",
+            100,
+            AssetTransport::Upload,
+            "",
+            0,
+        )
         .expect("register");
 
     store
@@ -247,7 +289,10 @@ fn a_transfer_whose_shape_changes_mid_flight_is_restarted_not_reassembled() {
         .accept_chunk("asset_1", &sha, 1, 4, 100, &bytes[50..], 0)
         .expect_err("must refuse");
     assert_eq!(error, AssetRejection::SessionMismatch);
-    assert!(store.upload_in_progress("asset_1").is_none(), "the session is discarded");
+    assert!(
+        store.upload_in_progress("asset_1").is_none(),
+        "the session is discarded"
+    );
 }
 
 #[test]
@@ -256,7 +301,15 @@ fn a_retransmitted_chunk_is_not_counted_twice() {
     let bytes = vec![5u8; 100];
     let sha = digest(&bytes);
     store
-        .register("asset_1", &sha, "image/png", 100, AssetTransport::Upload, "", 0)
+        .register(
+            "asset_1",
+            &sha,
+            "image/png",
+            100,
+            AssetTransport::Upload,
+            "",
+            0,
+        )
         .expect("register");
 
     store
@@ -278,7 +331,15 @@ fn identical_content_is_not_transferred_twice() {
     let sha = digest(&bytes);
 
     store
-        .register("asset_1", &sha, "image/png", 30, AssetTransport::Upload, "", 0)
+        .register(
+            "asset_1",
+            &sha,
+            "image/png",
+            30,
+            AssetTransport::Upload,
+            "",
+            0,
+        )
         .expect("register");
     store
         .accept_chunk("asset_1", &sha, 0, 1, 30, &bytes, 0)
@@ -286,7 +347,15 @@ fn identical_content_is_not_transferred_twice() {
 
     // A different asset id, the same bytes.
     let second = store
-        .register("asset_2", &sha, "image/png", 30, AssetTransport::Upload, "", 0)
+        .register(
+            "asset_2",
+            &sha,
+            "image/png",
+            30,
+            AssetTransport::Upload,
+            "",
+            0,
+        )
         .expect("register");
     assert!(second.is_ready(), "already cached, so nothing to transfer");
     assert_eq!(store.deduplicated_uploads, 1);
@@ -302,7 +371,15 @@ fn validation_detects_content_that_changed_after_it_was_cached() {
     let bytes = vec![8u8; 40];
     let sha = digest(&bytes);
     store
-        .register("asset_1", &sha, "image/png", 40, AssetTransport::Upload, "", 0)
+        .register(
+            "asset_1",
+            &sha,
+            "image/png",
+            40,
+            AssetTransport::Upload,
+            "",
+            0,
+        )
         .expect("register");
     store
         .accept_chunk("asset_1", &sha, 0, 1, 40, &bytes, 0)
@@ -330,7 +407,15 @@ fn validating_an_asset_with_no_bytes_says_so_rather_than_failing() {
     let (mut store, _directory) = store("validate-absent");
     let bytes = vec![1u8; 10];
     store
-        .register("asset_1", &digest(&bytes), "image/png", 10, AssetTransport::Upload, "", 0)
+        .register(
+            "asset_1",
+            &digest(&bytes),
+            "image/png",
+            10,
+            AssetTransport::Upload,
+            "",
+            0,
+        )
         .expect("register");
 
     let validation = store.validate("asset_1").expect("validate");
@@ -348,7 +433,15 @@ fn an_asset_a_scene_needs_cannot_be_released() {
     let bytes = vec![2u8; 20];
     let sha = digest(&bytes);
     store
-        .register("asset_1", &sha, "image/png", 20, AssetTransport::Upload, "", 0)
+        .register(
+            "asset_1",
+            &sha,
+            "image/png",
+            20,
+            AssetTransport::Upload,
+            "",
+            0,
+        )
         .expect("register");
     store
         .accept_chunk("asset_1", &sha, 0, 1, 20, &bytes, 0)
@@ -378,7 +471,15 @@ fn unloading_a_scene_releases_its_hold_on_assets() {
     let bytes = vec![4u8; 20];
     let sha = digest(&bytes);
     store
-        .register("asset_1", &sha, "image/png", 20, AssetTransport::Upload, "", 0)
+        .register(
+            "asset_1",
+            &sha,
+            "image/png",
+            20,
+            AssetTransport::Upload,
+            "",
+            0,
+        )
         .expect("register");
     store
         .accept_chunk("asset_1", &sha, 0, 1, 20, &bytes, 0)
@@ -399,13 +500,29 @@ fn shared_content_survives_releasing_one_of_its_holders() {
     let bytes = vec![6u8; 25];
     let sha = digest(&bytes);
     store
-        .register("asset_1", &sha, "image/png", 25, AssetTransport::Upload, "", 0)
+        .register(
+            "asset_1",
+            &sha,
+            "image/png",
+            25,
+            AssetTransport::Upload,
+            "",
+            0,
+        )
         .expect("register");
     store
         .accept_chunk("asset_1", &sha, 0, 1, 25, &bytes, 0)
         .expect("upload");
     store
-        .register("asset_2", &sha, "image/png", 25, AssetTransport::Upload, "", 0)
+        .register(
+            "asset_2",
+            &sha,
+            "image/png",
+            25,
+            AssetTransport::Upload,
+            "",
+            0,
+        )
         .expect("register the same content under a second id");
 
     let path = store.record("asset_2").unwrap().cache_path.clone().unwrap();
@@ -556,8 +673,15 @@ fn eviction_candidates_are_unreferenced_and_coldest_first() {
     store.reference("scene_1", &["asset_hot".to_string()], 4000);
 
     let candidates = store.eviction_candidates();
-    assert!(!candidates.contains(&"asset_hot".to_string()), "{candidates:?}");
-    assert_eq!(candidates.first(), Some(&"asset_cold".to_string()), "{candidates:?}");
+    assert!(
+        !candidates.contains(&"asset_hot".to_string()),
+        "{candidates:?}"
+    );
+    assert_eq!(
+        candidates.first(),
+        Some(&"asset_cold".to_string()),
+        "{candidates:?}"
+    );
 }
 
 #[test]
@@ -566,7 +690,15 @@ fn nothing_is_offered_for_eviction_while_under_budget() {
     let bytes = vec![1u8; 60];
     let sha = digest(&bytes);
     store
-        .register("asset_1", &sha, "image/png", 60, AssetTransport::Upload, "", 0)
+        .register(
+            "asset_1",
+            &sha,
+            "image/png",
+            60,
+            AssetTransport::Upload,
+            "",
+            0,
+        )
         .expect("register");
     store
         .accept_chunk("asset_1", &sha, 0, 1, 60, &bytes, 0)
@@ -581,7 +713,15 @@ fn the_summary_reports_transfers_in_flight() {
     let bytes = vec![3u8; 100];
     let sha = digest(&bytes);
     store
-        .register("asset_1", &sha, "image/png", 100, AssetTransport::Upload, "", 0)
+        .register(
+            "asset_1",
+            &sha,
+            "image/png",
+            100,
+            AssetTransport::Upload,
+            "",
+            0,
+        )
         .expect("register");
     store
         .accept_chunk("asset_1", &sha, 0, 2, 100, &bytes[..50], 0)

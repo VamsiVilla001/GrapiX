@@ -1,35 +1,26 @@
-import { getMaterialBindingId, isMaterialCompatible, isMaterialCompatibleWithFace, normalizeSlabProperties, type BindingMap, type MaskMode, type SceneObject, type SceneProperty, type SlabPropertiesInput } from "@grapix/shared-types";
-import { ArrowDown, ArrowUp, Clock3, Copy, Eye, EyeOff, Lock, PenTool, Plus, Trash2, Unlock } from "lucide-react";
+import { useEffect, useState } from "react";
+import { getMaterialBindingId, isMaterialCompatible, isMaterialCompatibleWithFace, normalizeSlabProperties, sampleChannel, type AnimatableProperty, type BindingMap, type MaskMode, type SceneObject, type SceneProperty, type SlabPropertiesInput } from "@grapix/shared-types";
+import { ArrowDown, ArrowUp, Clock3, Copy, Diamond, Eye, EyeOff, Lock, PenTool, Plus, Trash2, Unlock } from "lucide-react";
 import { ColorValueEditor } from "./ColorValueEditor";
+import { ObjectTypeProperties } from "./ObjectTypeProperties";
 import { TextFontControls } from "./TextFontControls";
+import {
+  ColorField,
+  NumberField,
+  ParityNote,
+  SelectField,
+  TextField,
+  ToggleField
+} from "./inspectorFields";
 import { useEditorStore } from "../store/editorStore";
+import { bindablePropertiesFor } from "../store/objectPropertySupport";
 import { useUiStore } from "../store/uiStore";
-
-const bindableProperties: SceneProperty[] = [
-  "text",
-  "src",
-  "fill",
-  "stroke",
-  "visible",
-  "x",
-  "y",
-  "zDepth",
-  "width",
-  "height",
-  "rotation",
-  "rotationX",
-  "rotationY",
-  "rotationZ",
-  "scaleX",
-  "scaleY",
-  "scaleZ",
-  "opacity"
-];
 
 export function Inspector() {
   const scene = useEditorStore((state) => state.scene);
   const selectedObjectId = useEditorStore((state) => state.selectedObjectId);
   const updateObject = useEditorStore((state) => state.updateObject);
+  const renameObject = useEditorStore((state) => state.renameObject);
   const setActiveCameraId = useEditorStore((state) => state.setActiveCameraId);
   const setContainerChild = useEditorStore((state) => state.setContainerChild);
   const updateObjectBindings = useEditorStore((state) => state.updateObjectBindings);
@@ -107,7 +98,14 @@ export function Inspector() {
       </div>
 
       <section className="field-section">
-        <TextField label="Name" value={object.name} onChange={(value) => patch({ name: value })} />
+        <ObjectNameField
+          object={object}
+          onRename={(name) => {
+            if (renameObject(object.id, name)) return true;
+            window.alert(`"${name.trim() || name}" is already used by another object. Object names must be unique.`);
+            return false;
+          }}
+        />
         <SelectField
           label="Main Material"
           value={getMaterialBindingId(object.materialSlots.main) ?? ""}
@@ -130,21 +128,21 @@ export function Inspector() {
       </section>
 
       <section className="field-section two-column">
-        <NumberField label="X" value={object.x} onChange={(value) => patch({ x: value })} />
-        <NumberField label="Y" value={object.y} onChange={(value) => patch({ y: value })} />
-        <NumberField label="Position Z" value={object.zDepth} onChange={(value) => patch({ zDepth: value })} />
+        <AnimatedNumberField label="X" object={object} property="x" value={object.x} />
+        <AnimatedNumberField label="Y" object={object} property="y" value={object.y} />
+        <AnimatedNumberField label="Position Z" object={object} property="zDepth" value={object.zDepth} />
         <TextField label="Layer" value={object.layerId} onChange={(value) => patch({ layerId: value || "main" })} />
         <NumberField label="W" value={object.width} onChange={(value) => patch({ width: value })} />
         <NumberField label="H" value={object.height} onChange={(value) => patch({ height: value })} />
         {object.type === "mesh" ? (
           <>
             <NumberField label={object.meshKind === "slab" ? "Extrusion" : "Depth"} value={object.depth} min={0.01} onChange={(value) => patch({ depth: value } as Partial<SceneObject>)} />
-            <NumberField label="Rotation X" value={object.rotationX ?? 0} onChange={(value) => patch({ rotationX: value } as Partial<SceneObject>)} />
-            <NumberField label="Rotation Y" value={object.rotationY ?? 0} onChange={(value) => patch({ rotationY: value } as Partial<SceneObject>)} />
-            <NumberField label="Rotation Z" value={object.rotationZ ?? object.rotation} onChange={(value) => patch({ rotationZ: value } as Partial<SceneObject>)} />
-            <NumberField label="Scale X" value={object.scaleX ?? 1} step={0.05} onChange={(value) => patch({ scaleX: value })} />
-            <NumberField label="Scale Y" value={object.scaleY ?? 1} step={0.05} onChange={(value) => patch({ scaleY: value })} />
-            <NumberField label="Scale Z" value={object.scaleZ ?? 1} step={0.05} onChange={(value) => patch({ scaleZ: value } as Partial<SceneObject>)} />
+            <AnimatedNumberField label="Rotation X" object={object} property="rotationX" value={object.rotationX ?? 0} />
+            <AnimatedNumberField label="Rotation Y" object={object} property="rotationY" value={object.rotationY ?? 0} />
+            <AnimatedNumberField label="Rotation Z" object={object} property="rotationZ" value={object.rotationZ ?? object.rotation} />
+            <AnimatedNumberField label="Scale X" object={object} property="scaleX" step={0.05} value={object.scaleX ?? 1} />
+            <AnimatedNumberField label="Scale Y" object={object} property="scaleY" step={0.05} value={object.scaleY ?? 1} />
+            <AnimatedNumberField label="Scale Z" object={object} property="scaleZ" step={0.05} value={object.scaleZ ?? 1} />
             <NumberField
               label="Anchor X"
               value={object.anchor3d?.x ?? object.width / 2}
@@ -163,9 +161,9 @@ export function Inspector() {
           </>
         ) : (
           <>
-            <NumberField label="Rotate" value={object.rotation} onChange={(value) => patch({ rotation: value })} />
-            <NumberField label="Scale X" value={object.scaleX ?? 1} step={0.05} onChange={(value) => patch({ scaleX: value })} />
-            <NumberField label="Scale Y" value={object.scaleY ?? 1} step={0.05} onChange={(value) => patch({ scaleY: value })} />
+            <AnimatedNumberField label="Rotate" object={object} property="rotation" value={object.rotation} />
+            <AnimatedNumberField label="Scale X" object={object} property="scaleX" step={0.05} value={object.scaleX ?? 1} />
+            <AnimatedNumberField label="Scale Y" object={object} property="scaleY" step={0.05} value={object.scaleY ?? 1} />
             <NumberField
               label="Anchor X"
               value={object.anchor?.x ?? 0}
@@ -178,13 +176,14 @@ export function Inspector() {
             />
           </>
         )}
-        <NumberField
+        <AnimatedNumberField
           label="Opacity"
-          value={object.opacity}
-          step={0.05}
-          min={0}
           max={1}
-          onChange={(value) => patch({ opacity: value })}
+          min={0}
+          object={object}
+          property="opacity"
+          step={0.05}
+          value={object.opacity}
         />
       </section>
 
@@ -309,17 +308,7 @@ export function Inspector() {
         </div>
       </section>
 
-      {object.type === "shape" ? (
-        <section className="field-section two-column">
-          <ToggleField label="Fill on" value={object.fillEnabled} onChange={(value) => patch({ fillEnabled: value } as Partial<SceneObject>)} />
-          <ToggleField label="Stroke on" value={object.strokeEnabled} onChange={(value) => patch({ strokeEnabled: value } as Partial<SceneObject>)} />
-          <ToggleField
-            label="Closed"
-            value={object.path.closed}
-            onChange={(value) => patch({ path: { ...object.path, closed: value } } as Partial<SceneObject>)}
-          />
-        </section>
-      ) : null}
+      <ObjectTypeProperties object={object} />
 
       {object.type === "text" ? (
         <section className="field-section two-column">
@@ -364,6 +353,46 @@ export function Inspector() {
           <NumberField label="Letter space" value={object.letterSpacing ?? 0} onChange={(value) => patch({ letterSpacing: value } as Partial<SceneObject>)} />
           <NumberField label="Word space" value={object.wordSpacing ?? 0} onChange={(value) => patch({ wordSpacing: value } as Partial<SceneObject>)} />
           <NumberField label="Paragraph space" value={object.paragraphSpacing ?? 0} min={0} onChange={(value) => patch({ paragraphSpacing: value } as Partial<SceneObject>)} />
+        </section>
+      ) : null}
+
+      {object.type === "text" ? (
+        <section className="field-section inspector-control-section">
+          <h3>Decoration and flow</h3>
+          <div className="two-column">
+            <ToggleField
+              label="Underline"
+              value={object.textDecoration?.underline ?? false}
+              onChange={(underline) => patch({
+                textDecoration: { ...object.textDecoration, underline }
+              } as Partial<SceneObject>)}
+            />
+            <ToggleField
+              label="Strikethrough"
+              value={object.textDecoration?.strikethrough ?? false}
+              onChange={(strikethrough) => patch({
+                textDecoration: { ...object.textDecoration, strikethrough }
+              } as Partial<SceneObject>)}
+            />
+            <NumberField
+              disabled
+              label="First-line indent"
+              value={object.textIndent ?? 0}
+              onChange={(textIndent) => patch({ textIndent } as Partial<SceneObject>)}
+            />
+            <SelectField
+              disabled
+              label="Overflow"
+              value={object.overflow ?? "visible"}
+              options={["visible", "hidden", "clip"] as const}
+              onChange={(overflow) => patch({ overflow } as Partial<SceneObject>)}
+            />
+          </div>
+          <ParityNote>
+            Underline and strikethrough are drawn by the Editor viewport; the render engine's text
+            renderer does not draw them yet, so a decorated caption will look different on Program.
+            Indent and overflow are disabled because neither renderer honours them.
+          </ParityNote>
         </section>
       ) : null}
 
@@ -582,8 +611,7 @@ export function Inspector() {
 
       <section className="field-section binding-section">
         <h3>Bindings</h3>
-        {bindableProperties
-          .filter((property) => isPropertySupported(object, property))
+        {bindablePropertiesFor(object)
           .map((property) => (
             <label className="binding-row" key={property}>
               <span>{property}</span>
@@ -749,111 +777,102 @@ function MaskClock(props: { active: boolean; onClick: () => void }) {
   );
 }
 
-function isPropertySupported(object: SceneObject, property: SceneProperty): boolean {
-  if (property === "text") {
-    return object.type === "text";
-  }
-
-  if (property === "src") {
-    return object.type === "image";
-  }
-
-  if (["rotationX", "rotationY", "rotationZ", "scaleZ"].includes(property)) {
-    return ["mesh", "layer", "group"].includes(object.type);
-  }
-
-  if (property === "rotation" && object.type === "mesh") {
-    return false;
-  }
-
-  return true;
-}
-
-function TextField(props: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
+function ObjectNameField(props: {
+  object: SceneObject;
+  onRename: (name: string) => boolean;
 }) {
+  const [draft, setDraft] = useState(props.object.name);
+
+  useEffect(() => setDraft(props.object.name), [props.object.id, props.object.name]);
+
+  function commit() {
+    const nextName = draft.trim();
+    if (nextName === props.object.name) {
+      setDraft(props.object.name);
+      return;
+    }
+    if (!props.onRename(nextName)) setDraft(props.object.name);
+  }
+
   return (
     <label className="field">
-      <span>{props.label}</span>
-      <input value={props.value} onChange={(event) => props.onChange(event.target.value)} />
+      <span>Name</span>
+      <input
+        aria-label="Object name"
+        value={draft}
+        onBlur={commit}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+          if (event.key === "Escape") {
+            setDraft(props.object.name);
+            event.currentTarget.blur();
+          }
+        }}
+      />
     </label>
   );
 }
 
-function NumberField(props: {
+function AnimatedNumberField(props: {
   label: string;
+  object: SceneObject;
+  property: AnimatableProperty;
   value: number;
   min?: number;
   max?: number;
   step?: number;
-  onChange: (value: number) => void;
 }) {
+  const currentFrame = useUiStore((state) => state.currentFrame);
+  const setAnimationEnabled = useEditorStore((state) => state.setPropertyAnimationEnabled);
+  const setAnimatedValue = useEditorStore((state) => state.setAnimatedPropertyValue);
+  const addKeyframe = useEditorStore((state) => state.addPropertyKeyframe);
+  const deleteKeyframe = useEditorStore((state) => state.deletePropertyKeyframe);
+  const channel = props.object.animation?.[props.property];
+  const currentKey = channel?.keys.find((key) => key.frame === currentFrame);
+  const value = channel ? sampleChannel(channel, currentFrame) : props.value;
+
   return (
-    <label className="field">
+    <label className={`field animated-number-field ${channel ? "animated" : ""}`}>
       <span>{props.label}</span>
-      <input
-        type="number"
-        min={props.min}
-        max={props.max}
-        step={props.step ?? 1}
-        value={props.value}
-        onChange={(event) => props.onChange(Number(event.target.value))}
-      />
+      <span className={`field-animation-controls ${channel ? "animated" : ""}`}>
+        <button
+          aria-label={`${channel ? "Disable" : "Enable"} ${props.label} animation`}
+          className={`field-stopwatch ${channel ? "active" : ""}`}
+          onClick={() => setAnimationEnabled(props.object.id, props.property, !channel, currentFrame)}
+          title={channel ? "Disable property animation" : "Enable animation and add a key at the playhead"}
+          type="button"
+        >
+          <Clock3 size={12} />
+        </button>
+        {channel ? (
+          <button
+            aria-label={`${currentKey ? "Remove" : "Add"} ${props.label} keyframe at frame ${currentFrame}`}
+            className={`field-key-toggle ${currentKey ? "on" : ""}`}
+            onClick={() => currentKey
+              ? deleteKeyframe(props.object.id, props.property, currentKey.id)
+              : addKeyframe(props.object.id, props.property, currentFrame)}
+            title={currentKey ? "Remove keyframe at the playhead" : "Add keyframe at the playhead"}
+            type="button"
+          >
+            <Diamond size={10} />
+          </button>
+        ) : null}
+        <input
+          max={props.max}
+          min={props.min}
+          onChange={(event) => setAnimatedValue(
+            props.object.id,
+            props.property,
+            Number(event.target.value),
+            currentFrame
+          )}
+          step={props.step ?? 1}
+          type="number"
+          value={value}
+        />
+      </span>
     </label>
   );
 }
 
-function ToggleField(props: {
-  label: string;
-  value: boolean;
-  onChange: (value: boolean) => void;
-}) {
-  return (
-    <label className="field toggle-field">
-      <span>{props.label}</span>
-      <input type="checkbox" checked={props.value} onChange={(event) => props.onChange(event.target.checked)} />
-    </label>
-  );
-}
-
-function ColorField(props: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  const safeColor = props.value.startsWith("#") ? props.value : "#ffffff";
-
-  return (
-    <label className="field color-field">
-      <span>{props.label}</span>
-      <input
-        type="color"
-        value={safeColor}
-        onChange={(event) => props.onChange(event.target.value)}
-      />
-    </label>
-  );
-}
-
-function SelectField<T extends string>(props: {
-  label: string;
-  value: T;
-  options: T[];
-  renderOption?: (value: T) => string;
-  onChange: (value: T) => void;
-}) {
-  return (
-    <label className="field">
-      <span>{props.label}</span>
-      <select value={props.value} onChange={(event) => props.onChange(event.target.value as T)}>
-        {props.options.map((option) => (
-          <option value={option} key={option}>
-            {props.renderOption ? props.renderOption(option) : option}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}

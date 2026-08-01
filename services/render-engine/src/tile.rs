@@ -142,7 +142,12 @@ impl TileGrid {
     }
 
     /// Pixel dimensions of a tile's render target.
-    pub fn tile_render_size(&self, coord: TileCoord, render_scale: f64, overscan: f64) -> (u32, u32) {
+    pub fn tile_render_size(
+        &self,
+        coord: TileCoord,
+        render_scale: f64,
+        overscan: f64,
+    ) -> (u32, u32) {
         let bounds = self.tile_render_bounds(coord, overscan);
         (
             ((bounds.width * render_scale).ceil() as u32).max(1),
@@ -356,12 +361,27 @@ pub const GAUSSIAN_SIGMA_RADIUS_FACTOR: f64 = 3.0;
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum FilterOverscan {
-    GaussianBlur { sigma: f64 },
-    BoxBlur { radius: f64 },
-    DropShadow { sigma: f64, offset_x: f64, offset_y: f64 },
-    Glow { sigma: f64, spread: f64 },
-    Outline { width: f64 },
-    Custom { extent: f64 },
+    GaussianBlur {
+        sigma: f64,
+    },
+    BoxBlur {
+        radius: f64,
+    },
+    DropShadow {
+        sigma: f64,
+        offset_x: f64,
+        offset_y: f64,
+    },
+    Glow {
+        sigma: f64,
+        spread: f64,
+    },
+    Outline {
+        width: f64,
+    },
+    Custom {
+        extent: f64,
+    },
 }
 
 impl FilterOverscan {
@@ -449,7 +469,12 @@ impl TileObjectIndex {
     }
 
     /// Insert or move an object, reporting exactly which tiles changed membership.
-    pub fn upsert(&mut self, object_id: &str, bounds: Rect, filters: &[FilterOverscan]) -> IndexDelta {
+    pub fn upsert(
+        &mut self,
+        object_id: &str,
+        bounds: Rect,
+        filters: &[FilterOverscan],
+    ) -> IndexDelta {
         let filter_extent = filter_stack_extent(filters);
         self.upsert_with_extent(object_id, bounds, filter_extent)
     }
@@ -807,7 +832,10 @@ impl TileManager {
     }
 
     pub fn is_dirty(&self, tile_id: &str) -> bool {
-        self.tiles.get(tile_id).map(|tile| tile.dirty).unwrap_or(true)
+        self.tiles
+            .get(tile_id)
+            .map(|tile| tile.dirty)
+            .unwrap_or(true)
     }
 
     // -- Selection ------------------------------------------------------------
@@ -1108,9 +1136,11 @@ impl TileManager {
             last_used_tick: self.tick,
             output_refs: Vec::new(),
             required_overscan,
-            estimated_bytes: self
-                .grid
-                .tile_byte_estimate(coord, self.render_scale, required_overscan),
+            estimated_bytes: self.grid.tile_byte_estimate(
+                coord,
+                self.render_scale,
+                required_overscan,
+            ),
             failure_reason: None,
         };
 
@@ -1134,9 +1164,9 @@ impl TileManager {
         let changed = (tile.required_overscan - required_overscan).abs() > f64::EPSILON;
 
         let render_bounds = self.grid.tile_render_bounds(coord, required_overscan);
-        let estimated_bytes = self
-            .grid
-            .tile_byte_estimate(coord, self.render_scale, required_overscan);
+        let estimated_bytes =
+            self.grid
+                .tile_byte_estimate(coord, self.render_scale, required_overscan);
 
         if let Some(tile) = self.tiles.get_mut(tile_id) {
             tile.active_object_ids = objects;
@@ -1250,10 +1280,8 @@ pub fn plan_tile_composite(
         }
 
         // Offset within the tile's own content, then shifted past the overscan ring.
-        let within_tile = logical_rect.to_local(Point::new(
-            tile.logical_bounds.x,
-            tile.logical_bounds.y,
-        ));
+        let within_tile =
+            logical_rect.to_local(Point::new(tile.logical_bounds.x, tile.logical_bounds.y));
         let overscan_offset = tile.required_overscan * render_scale;
 
         let source_in_tile = Rect::new(

@@ -176,8 +176,12 @@ test("local discovery only ever considers loopback", () => {
 });
 
 test("the engine port range does not collide with the other GrapiX services", () => {
-  // 4100 api-server, 4200 render-daemon, 4300 playout-control, 5173/5174 web.
-  // A default that collided would make a local all-services run fail to start.
+  // 4100 project-api, 4300 playout-control, 5173/5174 web. A default that collided would
+  // make a local all-services run fail to start.
+  //
+  // 4200 stays in this set although nothing listens there any more: it belonged to the
+  // protocol v2 daemon, whose binary was deleted on 2026-07-29. Keeping it reserved means an
+  // engine default can never land on the port a second renderer used to own.
   const taken = new Set([4100, 4200, 4300, 5173, 5174]);
   for (const port of DEFAULT_LOCAL_ENGINE_PORTS) {
     assert.ok(!taken.has(port), `engine port ${port} collides with an existing service`);

@@ -241,3 +241,41 @@ test("Three.js projection follows GrapiX canvas movement without mirroring eithe
   assert.ok(Math.abs(projected.center.x - (initial.center.x + 125)) < 0.001);
   assert.ok(Math.abs(projected.center.y - (initial.center.y + 80)) < 0.001);
 });
+
+test("a Z rotation turns the same way on screen as it does on the canvas", () => {
+  // The editor's 3D layer converts canvas Y (down-positive) to three.js world Y by negating it.
+  // Negating an axis reverses rotations about the other two, so X and Z rotations have to be
+  // negated alongside it. This is invisible on an unrotated object, which is why it needs a test:
+  // the previous approach reflected the whole content root, got the reversal for free, and
+  // silently mirrored every texture and triangle winding as the price.
+  const material = createMaterialDefinition("Rotation", "pbr");
+  const flat = {
+    ...mesh(material.materialId),
+    // A wide, shallow slab so a Z rotation changes the bounds unmistakably.
+    width: 400,
+    height: 40,
+    depth: 40,
+    rotationX: 0,
+    rotationY: 0,
+    rotationZ: 0
+  };
+  const document = scene(material, flat);
+
+  const unrotated = projectMeshBounds(document, flat);
+  assert.ok(unrotated.width > unrotated.height, "the slab starts wider than it is tall");
+
+  const quarter = { ...flat, rotationZ: 90 };
+  document.objects = [quarter];
+  const turned = projectMeshBounds(document, quarter);
+  assert.ok(turned.height > turned.width, "a quarter turn makes the slab taller than it is wide");
+
+  // Direction, which is what a sign error breaks. On the canvas Y grows downward, so a positive
+  // rotation must extend the slab further down the screen than its unrotated extent.
+  const tilted = { ...flat, rotationZ: 20 };
+  document.objects = [tilted];
+  const tiltedBounds = projectMeshBounds(document, tilted);
+  assert.ok(
+    tiltedBounds.y + tiltedBounds.height > unrotated.y + unrotated.height,
+    "a positive canvas rotation must extend the slab downward, not upward"
+  );
+});

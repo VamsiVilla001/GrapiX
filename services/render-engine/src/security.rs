@@ -68,15 +68,13 @@ pub fn check_path_syntax(candidate: &str) -> Result<(), PathRejection> {
     }
 
     // `file:`, `http:`, `\\?\`, and `C:` all land here.
-    let scheme_like = candidate
-        .split_once(':')
-        .is_some_and(|(prefix, _)| {
-            !prefix.is_empty()
-                && prefix.chars().next().is_some_and(char::is_alphabetic)
-                && prefix
-                    .chars()
-                    .all(|c| c.is_alphanumeric() || c == '+' || c == '.' || c == '-')
-        });
+    let scheme_like = candidate.split_once(':').is_some_and(|(prefix, _)| {
+        !prefix.is_empty()
+            && prefix.chars().next().is_some_and(char::is_alphabetic)
+            && prefix
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '+' || c == '.' || c == '-')
+    });
     if scheme_like {
         return Err(PathRejection::UrlScheme);
     }
@@ -496,7 +494,11 @@ fn append_line(path: &Path, line: &str) {
         let _ = std::fs::create_dir_all(parent);
     }
 
-    match std::fs::OpenOptions::new().create(true).append(true).open(path) {
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
         Ok(mut file) => {
             // A failed audit write must not take the renderer down, but it must be
             // visible: an audit log that silently stops is worse than none.

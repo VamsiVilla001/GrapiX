@@ -273,7 +273,10 @@ pub fn apply_patch(document: &mut Value, patch: &ScenePatch) -> Result<PatchOutc
         ));
     }
 
-    let current_revision = document.get("revision").and_then(Value::as_u64).unwrap_or(0);
+    let current_revision = document
+        .get("revision")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
     if patch.base_revision != current_revision {
         return Err(PatchError::new(
             PatchFailure::RevisionMismatch,
@@ -475,7 +478,9 @@ fn apply_operation(
                     return Err(PatchError::at(
                         PatchFailure::UnknownObject,
                         index,
-                        format!("layer.reorder names {object_id}, which this scene does not contain"),
+                        format!(
+                            "layer.reorder names {object_id}, which this scene does not contain"
+                        ),
                     ));
                 };
                 reordered.push(objects[position].clone());

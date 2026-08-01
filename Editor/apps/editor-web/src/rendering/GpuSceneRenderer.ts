@@ -16,6 +16,7 @@ import {
 } from "pixi.js";
 import {
   IMPLEMENTED_BLEND_MODES,
+  IMPLEMENTED_TEXTURE_FIT_MODES,
   IMPLEMENTED_MASK_MODES,
   type BezierPath,
   type ColorValue,
@@ -117,7 +118,7 @@ function applyTextureSampler(texture: Texture, slot: MaterialTextureSlot | undef
 /**
  * Material blend mode -> PixiJS blend mode. Adobe's darken/lighten are
  * per-channel min/max, which Pixi exposes as the fixed-function "min"/"max"
- * modes. The daemon mirrors Pixi's exact blend equations per
+ * modes. The engine mirrors Pixi's exact blend equations per
  * Shared/render-shaders/layouts.json, so this mapping is the preview half
  * of that contract. Unimplemented modes never reach this function — the
  * render guard skips those objects with a warning.
@@ -215,10 +216,9 @@ export class GpuSceneRenderer {
         object.resolvedMaterial.material.enabled === false
         || !IMPLEMENTED_BLEND_MODES.includes(object.resolvedMaterial.blendMode)
         || !["opaque", "straight", "premultiplied"].includes(object.resolvedMaterial.alphaMode)
-        // wrap (clamp/repeat/mirror) and filtering (linear/nearest) are now
-        // applied via the texture sampler + TilingSprite path; only tile and
-        // nine-slice fit modes remain unimplemented and are skipped.
-        || object.resolvedMaterial.textureSlots.some((slot) => ["tile", "nine-slice"].includes(slot.fit))
+        // Fit modes outside IMPLEMENTED_TEXTURE_FIT_MODES need a transparent border or extra
+        // geometry, which this path cannot express, so they are skipped rather than stretched.
+        || object.resolvedMaterial.textureSlots.some((slot) => !IMPLEMENTED_TEXTURE_FIT_MODES.includes(slot.fit))
       )) {
         continue;
       }
@@ -288,9 +288,23 @@ export class GpuSceneRenderer {
       // Render once first: the extract runs outside the ticker, and an un-rendered
       // frame reads back as empty.
       this.app.renderer.render(this.app.stage);
-      const canvas = this.app.renderer.extract.canvas(this.root) as HTMLCanvasElement;
-      if (!canvas.width || !canvas.height) return null;
-      return canvas;
+      const pixiCanvas = this.app.renderer.extract.canvas(this.root) as HTMLCanvasElement;
+      if (!pixiCanvas.width || !pixiCanvas.height) return null;
+
+      const threeCanvas = this.threeLayer.captureFrame();
+      if (!threeCanvas) return pixiCanvas;
+
+      // Materialized planar objects and meshes live on the transparent Three.js layer,
+      // not in Pixi's root. A Pixi-only read-back therefore produced an empty thumbnail
+      // for fully materialized scenes even though the viewport was correct.
+      const composite = document.createElement("canvas");
+      composite.width = pixiCanvas.width;
+      composite.height = pixiCanvas.height;
+      const context = composite.getContext("2d");
+      if (!context) return pixiCanvas;
+      context.drawImage(pixiCanvas, 0, 0);
+      context.drawImage(threeCanvas, 0, 0, composite.width, composite.height);
+      return composite;
     } catch {
       // A lost context or an unsupported extract path is not worth an exception here.
       return null;
@@ -705,7 +719,7 @@ function applyObjectMasks(
     })];
   }
   wrapper.addChild(maskGraphics);
-  wrapper.mask = maskGraphics;
+  wrapper.setMask({ mask: maskGraphics, inverse: false, channel: "alpha" });
   return wrapper;
 }
 
@@ -880,10 +894,13 @@ async function drawText(
   if (object.writingMode && object.writingMode !== "horizontal-tb") {
     return drawVerticalText(object, fontFamily);
   }
+  const stroke = normalizeColorValue(object.strokeStyle, object.stroke);
+  const hasStroke = object.strokeWidth > 0 && !isTransparentColor(stroke);
   const text = new Text({
     text: bidiIsolate(object.text, object.direction),
     style: {
       fill: pixiColorValue(object.fillStyle, object.fill),
+      ...(hasStroke ? { stroke: pixiStroke(stroke, object.stroke, object.strokeWidth) } : {}),
       fontFamily,
       fontSize: object.fontSize,
       fontWeight: pixiFontWeight(object.fontWeight),
@@ -912,6 +929,12 @@ async function drawText(
     text.anchor.set(1, 0);
   }
 
+  if (object.verticalAlign === "middle") {
+    text.y = (object.height - text.height) / 2;
+  } else if (object.verticalAlign === "bottom") {
+    text.y = object.height - text.height;
+  }
+
   const runtime = font ? projectFontRegistry.get(font.fontId) : undefined;
   if (font && runtime?.status !== "READY") {
     const container = new Container();
@@ -936,8 +959,16 @@ async function drawVerticalText(
   const x = object.writingMode === "vertical-lr" ? 0 : object.width;
   const color = normalizeColorValue(object.fillStyle, object.fill);
   const fill = color.type === "solid" ? color.color : object.fill;
+  const stroke = normalizeColorValue(object.strokeStyle, object.stroke);
+  const strokeAttributes = object.strokeWidth > 0 && !isTransparentColor(stroke)
+    ? ` stroke="${escapeXml(stroke.type === "solid" ? stroke.color : object.stroke)}" stroke-width="${object.strokeWidth}" paint-order="stroke"`
+    : "";
+  const decoration = [
+    object.textDecoration?.underline ? "underline" : "",
+    object.textDecoration?.strikethrough ? "line-through" : ""
+  ].filter(Boolean).join(" ") || "none";
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.max(1, object.width)}" height="${Math.max(1, object.height)}">
-<text x="${x}" y="${y}" fill="${escapeXml(fill)}" font-family="${escapeXml(fontFamily)}" font-size="${object.fontSize}" font-weight="${escapeXml(object.fontWeight)}" font-style="${object.fontStyle ?? "normal"}" text-anchor="${anchor}" style="writing-mode:${object.writingMode};white-space:pre-wrap;direction:${object.direction ?? "auto"};letter-spacing:${object.letterSpacing ?? 0}px">${escapeXml(object.text)}</text>
+<text x="${x}" y="${y}" fill="${escapeXml(fill)}"${strokeAttributes} font-family="${escapeXml(fontFamily)}" font-size="${object.fontSize}" font-weight="${escapeXml(object.fontWeight)}" font-style="${object.fontStyle ?? "normal"}" text-anchor="${anchor}" style="writing-mode:${object.writingMode};white-space:pre-wrap;direction:${object.direction ?? "auto"};letter-spacing:${object.letterSpacing ?? 0}px;word-spacing:${object.wordSpacing ?? 0}px;text-decoration:${decoration}">${escapeXml(object.text)}</text>
 </svg>`;
   const image = new Image();
   const source = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
@@ -965,6 +996,15 @@ function escapeXml(value: string): string {
   return value.replace(/[<>&"']/g, (character) => ({
     "<": "&lt;", ">": "&gt;", "&": "&amp;", "\"": "&quot;", "'": "&apos;"
   })[character]!);
+}
+
+function isTransparentColor(value: ColorValue): boolean {
+  return value.type === "none"
+    || (value.type === "solid" && (
+      value.color === "transparent"
+      || /^#[0-9a-f]{6}00$/i.test(value.color)
+      || value.color === "#0000"
+    ));
 }
 
 function pixiColorValue(value: ColorValue | string | undefined, fallback: string): string | FillGradient {

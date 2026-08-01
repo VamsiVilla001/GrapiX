@@ -342,7 +342,7 @@ impl RequestType {
             GetStatus | GetDiagnostics | GetCapabilities | SetConfiguration | RestartRenderer => {
                 "engine"
             }
-            OutputList | OutputConfigure | OutputStart | OutputStop | OutputRemove => "output"
+            OutputList | OutputConfigure | OutputStart | OutputStop | OutputRemove => "output",
         }
     }
 
@@ -410,7 +410,9 @@ pub fn decode(raw: &str, max_bytes: u64) -> Result<Envelope, ProtocolError> {
             ErrorCode::ProtocolVersionMismatch,
             format!(
                 "expected protocol version {PROTOCOL_VERSION}, received {}",
-                version.map(|v| v.to_string()).unwrap_or_else(|| "none".to_string())
+                version
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "none".to_string())
             ),
         ));
     }

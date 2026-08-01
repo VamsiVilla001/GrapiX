@@ -6,9 +6,9 @@
  * session because Program must keep rendering when the Editor closes — that is the
  * whole point of separating the engine out.
  *
- * The v2 `NativeRendererClient` keeps running alongside this. It is the verified
- * path today, so the v3 engine path is added beside it and switched over
- * deliberately rather than by replacing something that works.
+ * This is the only renderer connection. The protocol v2 `NativeRendererClient` that once ran
+ * alongside it is gone, and so is the daemon it spoke to, which is why a missing engine is
+ * reported and retried rather than worked around: there is nothing to fall back to.
  */
 
 import {

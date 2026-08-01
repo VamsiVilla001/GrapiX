@@ -17,7 +17,7 @@ use tokio_tungstenite::tungstenite::Message;
 
 use grapix_render_engine::capabilities::{EngineCapabilities, EngineState};
 use grapix_render_engine::config::EngineConfig;
-use grapix_render_engine::engine::Engine;
+use grapix_render_engine::engine::{Channel, Engine};
 use grapix_render_engine::protocol::PROTOCOL_VERSION;
 
 const TOKEN: &str = "0123456789abcdef0123456789abcdef";
@@ -125,7 +125,10 @@ fn base_config(port: u16, auth: bool) -> EngineConfig {
     // addressed, so a shared one would make one test's upload appear as another's
     // "already cached" - and would carry over between runs, which is worse.
     config.assets.cache_directory = std::env::temp_dir()
-        .join(format!("grapix-protocol-test-{}-{port}", std::process::id()))
+        .join(format!(
+            "grapix-protocol-test-{}-{port}",
+            std::process::id()
+        ))
         .to_string_lossy()
         .to_string();
     config.validate().expect("test config must validate");
@@ -141,7 +144,9 @@ async fn free_port() -> u16 {
 }
 
 struct Client {
-    socket: tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    socket: tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
     sequence: u64,
     message_id: u64,
     /// Every inbound messageId, in arrival order, including events the request
@@ -192,8 +197,7 @@ impl Client {
         self.message_id += 1;
 
         let sequence = force_sequence.unwrap_or(self.sequence);
-        let message_id =
-            force_message_id.unwrap_or_else(|| format!("test-{}", self.message_id));
+        let message_id = force_message_id.unwrap_or_else(|| format!("test-{}", self.message_id));
         let request_id = format!("req-{}", self.message_id);
 
         let envelope = json!({
@@ -241,7 +245,13 @@ impl Client {
     }
 
     /// Send without waiting, for ordering tests.
-    async fn send_raw(&mut self, message_type: &str, payload: Value, sequence: u64, message_id: &str) {
+    async fn send_raw(
+        &mut self,
+        message_type: &str,
+        payload: Value,
+        sequence: u64,
+        message_id: &str,
+    ) {
         let envelope = json!({
             "protocolVersion": PROTOCOL_VERSION,
             "messageId": message_id,
@@ -283,7 +293,9 @@ impl Client {
     async fn next_reply(&mut self) -> Option<Value> {
         for _ in 0..16 {
             let frame = self.socket.next().await?;
-            let Message::Text(text) = frame.ok()? else { continue };
+            let Message::Text(text) = frame.ok()? else {
+                continue;
+            };
             let value: Value = serde_json::from_str(&text).ok()?;
             self.record(&value);
             if value
@@ -313,7 +325,10 @@ async fn start(auth: bool) -> (u16, Arc<Mutex<Engine>>) {
 
     // Wait for the listener rather than sleeping a fixed time.
     for _ in 0..200 {
-        if tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
+        if tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .is_ok()
+        {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -404,7 +419,9 @@ async fn an_authenticating_engine_refuses_a_client_with_no_token() {
         "a tokenless client must be refused at the handshake"
     );
     assert!(
-        Client::connect(port, Some("wrong-token-wrong-token")).await.is_err(),
+        Client::connect(port, Some("wrong-token-wrong-token"))
+            .await
+            .is_err(),
         "a wrong token must be refused at the handshake"
     );
 
@@ -434,7 +451,10 @@ async fn a_heartbeat_echoes_the_client_clock_for_latency_measurement() {
     client.request("connection.hello", hello_payload()).await;
 
     let reply = client
-        .request("connection.heartbeat", json!({ "sentAtMs": 1_700_000_000_123u64 }))
+        .request(
+            "connection.heartbeat",
+            json!({ "sentAtMs": 1_700_000_000_123u64 }),
+        )
         .await;
 
     assert_eq!(reply["type"], "reply.ack");
@@ -540,7 +560,10 @@ async fn loading_more_scenes_than_configured_is_refused() {
         let _ = grapix_render_engine::transport::serve(config, served).await;
     });
     for _ in 0..200 {
-        if tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
+        if tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .is_ok()
+        {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -758,10 +781,16 @@ async fn a_scene_on_program_cannot_be_unloaded_without_force() {
         .request("scene.unload", json!({ "sceneId": "scene_1" }))
         .await;
     assert_eq!(refused["payload"]["code"], "OUTPUT_ERROR");
-    assert!(refused["payload"]["message"].as_str().unwrap().contains("force"));
+    assert!(refused["payload"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("force"));
 
     let forced = client
-        .request("scene.unload", json!({ "sceneId": "scene_1", "force": true }))
+        .request(
+            "scene.unload",
+            json!({ "sceneId": "scene_1", "force": true }),
+        )
         .await;
     assert_eq!(forced["type"], "reply.ack");
 }
@@ -845,7 +874,10 @@ async fn the_connection_keeps_working_after_a_retransmission() {
 
     // The connection must still answer. Before the fix this timed out.
     let after = client.request("engine.getStatus", json!({})).await;
-    assert_eq!(after["type"], "reply.status", "connection wedged after a retransmit");
+    assert_eq!(
+        after["type"], "reply.status",
+        "connection wedged after a retransmit"
+    );
 
     // And no spurious gap was recorded.
     assert_eq!(engine.lock().await.sequence_gaps, 0);
@@ -879,14 +911,22 @@ async fn replies_and_events_never_share_a_message_id() {
     for _ in 0..20 {
         let frame =
             tokio::time::timeout(std::time::Duration::from_millis(60), client.socket.next()).await;
-        let Ok(Some(Ok(Message::Text(text)))) = frame else { break };
+        let Ok(Some(Ok(Message::Text(text)))) = frame else {
+            break;
+        };
         let value: Value = serde_json::from_str(&text).expect("json");
         client.record(&value);
     }
 
     // Both streams must have been exercised, or the test proves nothing.
-    assert!(client.seen_events > 0, "the run should have produced events");
-    assert!(client.seen_replies > 0, "the run should have produced replies");
+    assert!(
+        client.seen_events > 0,
+        "the run should have produced events"
+    );
+    assert!(
+        client.seen_replies > 0,
+        "the run should have produced replies"
+    );
 
     let unique: std::collections::HashSet<&String> = client.seen_ids.iter().collect();
     assert_eq!(
@@ -932,7 +972,9 @@ async fn a_sequence_gap_demands_a_resync_rather_than_guessing() {
 
     let mut saw_gap = false;
     for _ in 0..40 {
-        let Some(reply) = client.next_reply().await else { break };
+        let Some(reply) = client.next_reply().await else {
+            break;
+        };
         if reply["payload"]["code"] == "SEQUENCE_GAP" {
             saw_gap = true;
             assert!(reply["payload"]["message"]
@@ -944,7 +986,10 @@ async fn a_sequence_gap_demands_a_resync_rather_than_guessing() {
         }
     }
 
-    assert!(saw_gap, "a sequence gap must be reported, never guessed past");
+    assert!(
+        saw_gap,
+        "a sequence gap must be reported, never guessed past"
+    );
     assert!(engine.lock().await.sequence_gaps > 0);
 }
 
@@ -960,7 +1005,10 @@ async fn an_oversized_frame_is_refused_before_it_is_parsed() {
         let _ = grapix_render_engine::transport::serve(config, served).await;
     });
     for _ in 0..200 {
-        if tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
+        if tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .is_ok()
+        {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -968,10 +1016,7 @@ async fn an_oversized_frame_is_refused_before_it_is_parsed() {
 
     let mut client = Client::connect(port, None).await.expect("connect");
     let reply = client
-        .request(
-            "scene.load",
-            json!({ "padding": "x".repeat(8192) }),
-        )
+        .request("scene.load", json!({ "padding": "x".repeat(8192) }))
         .await;
 
     assert_eq!(reply["payload"]["code"], "MESSAGE_TOO_LARGE");
@@ -1088,7 +1133,10 @@ async fn unimplemented_message_groups_are_refused_explicitly() {
         )
         .await;
     assert_eq!(raw_stream["payload"]["code"], "CAPABILITY_UNSUPPORTED");
-    assert!(!raw_stream["payload"]["message"].as_str().unwrap().is_empty());
+    assert!(!raw_stream["payload"]["message"]
+        .as_str()
+        .unwrap()
+        .is_empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -1462,7 +1510,6 @@ async fn an_upload_that_arrives_a_second_time_costs_nothing() {
     );
 }
 
-
 #[tokio::test]
 async fn a_patch_is_applied_and_reports_what_it_invalidated() {
     let (port, engine) = start(false).await;
@@ -1687,10 +1734,12 @@ async fn diagnostics_include_the_tile_table_only_when_asked() {
         .request("engine.getDiagnostics", json!({ "includeTiles": true }))
         .await;
     assert!(full["payload"]["tileDetail"].is_array());
-    assert!(full["payload"]["gpuLimits"]["maxTextureDimension2d"]
-        .as_u64()
-        .unwrap()
-        > 0);
+    assert!(
+        full["payload"]["gpuLimits"]["maxTextureDimension2d"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
     assert!(full["payload"]["assetRoots"].is_array());
     assert!(full["payload"]["stateHistory"].is_array());
 }
@@ -1781,7 +1830,10 @@ async fn the_output_list_says_which_adapters_are_live_and_why_one_is_unavailable
     let decklink = adapter_named(payload, "decklink");
     assert_eq!(decklink["live"], true);
     assert_eq!(decklink["available"], false);
-    assert!(decklink["unavailableReason"].as_str().unwrap().contains("SDK"));
+    assert!(decklink["unavailableReason"]
+        .as_str()
+        .unwrap()
+        .contains("SDK"));
 }
 
 #[tokio::test]
@@ -1853,7 +1905,10 @@ async fn taking_a_scene_online_starts_the_outputs_and_taking_it_offline_stops_th
 
     // Configured but not started: taking the scene online is what starts it.
     let before = client.request("output.list", json!({})).await;
-    assert_eq!(output_named(&before["payload"], "out_virtual")["state"], "configured");
+    assert_eq!(
+        output_named(&before["payload"], "out_virtual")["state"],
+        "configured"
+    );
 
     // No GPU in these tests, so the scene cannot prepare; the override is the
     // documented operator path and is what exercises the take.
@@ -1874,7 +1929,9 @@ async fn taking_a_scene_online_starts_the_outputs_and_taking_it_offline_stops_th
 
     // The reply must distinguish what is on air from what is merely rendering.
     assert!(
-        warnings.iter().any(|w| w.contains("headlessly") && w.contains("not live")),
+        warnings
+            .iter()
+            .any(|w| w.contains("headlessly") && w.contains("not live")),
         "{warnings:?}"
     );
     assert!(
@@ -1891,7 +1948,10 @@ async fn taking_a_scene_online_starts_the_outputs_and_taking_it_offline_stops_th
 
     {
         let guard = engine.lock().await;
-        assert!(guard.has_running_outputs(), "the program clock needs this true");
+        assert!(
+            guard.has_running_outputs(),
+            "the program clock needs this true"
+        );
     }
 
     // Off air means nothing transmits: a still-running output would keep pushing the
@@ -1902,7 +1962,10 @@ async fn taking_a_scene_online_starts_the_outputs_and_taking_it_offline_stops_th
     assert_eq!(offline["payload"]["outputsStopped"], 1);
 
     let after = client.request("output.list", json!({})).await;
-    assert_eq!(output_named(&after["payload"], "out_virtual")["state"], "configured");
+    assert_eq!(
+        output_named(&after["payload"], "out_virtual")["state"],
+        "configured"
+    );
     assert!(!engine.lock().await.has_running_outputs());
 }
 
@@ -2124,7 +2187,10 @@ async fn a_preview_stream_registers_and_reports_its_cadence() {
     assert!(engine.lock().await.has_preview_streams());
 
     let status = client.request("engine.getStatus", json!({})).await;
-    assert_eq!(status["payload"]["previewStreams"][0]["streamId"], "stream_1");
+    assert_eq!(
+        status["payload"]["previewStreams"][0]["streamId"],
+        "stream_1"
+    );
 
     let stopped = client
         .request("preview.streamStop", json!({ "streamId": "stream_1" }))
@@ -2160,7 +2226,9 @@ async fn a_stream_rate_above_the_engine_ceiling_is_clamped_and_says_so() {
     assert_eq!(reply["payload"]["targetFps"], 30.0);
     let warnings = reply["payload"]["warnings"].as_array().unwrap();
     assert!(
-        warnings.iter().any(|w| w.as_str().unwrap().contains("clamped")),
+        warnings
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("clamped")),
         "{warnings:?}"
     );
 }
@@ -2262,7 +2330,10 @@ async fn there_is_a_limit_on_concurrent_streams() {
         )
         .await;
     assert_eq!(refused["payload"]["code"], "CAPABILITY_UNSUPPORTED");
-    assert!(refused["payload"]["message"].as_str().unwrap().contains("4"));
+    assert!(refused["payload"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("4"));
 }
 
 #[tokio::test]
@@ -2398,7 +2469,9 @@ async fn a_renderer_restart_rebuilds_state_and_is_honest_about_what_it_cannot_do
         .collect();
     // The important honesty: this is not a device recovery and must not be sold as one.
     assert!(
-        warnings.iter().any(|w| w.contains("does not re-acquire the device")),
+        warnings
+            .iter()
+            .any(|w| w.contains("does not re-acquire the device")),
         "{warnings:?}"
     );
     assert!(
@@ -2408,7 +2481,10 @@ async fn a_renderer_restart_rebuilds_state_and_is_honest_about_what_it_cannot_do
 
     // A scene must be prepared again before it can be taken: its GPU resources are gone.
     let status = client.request("engine.getStatus", json!({})).await;
-    assert_eq!(status["payload"]["scenes"][0]["preparationState"], "loading");
+    assert_eq!(
+        status["payload"]["scenes"][0]["preparationState"],
+        "loading"
+    );
     assert_eq!(status["payload"]["rendererRestarts"], 1);
 
     let take = client
@@ -2417,4 +2493,202 @@ async fn a_renderer_restart_rebuilds_state_and_is_honest_about_what_it_cannot_do
     assert_eq!(take["payload"]["code"], "SCENE_NOT_PREPARED");
 
     assert_eq!(engine.lock().await.state(), EngineState::Ready);
+}
+// ---------------------------------------------------------------------------
+// Animation playhead
+// ---------------------------------------------------------------------------
+//
+// Program and Preview used to sample one scene frame. Program now advances its stored frame,
+// while Preview derives an independent playhead from Cue time at the authored rational rate.
+// The tests below protect both halves: animation advances with no output, and cueing the same
+// scene never rewinds what is already on air.
+
+/// Read a scene's playhead the way a diagnostic client would.
+async fn playhead(client: &mut Client, scene_id: &str) -> u64 {
+    let status = client.request("engine.getStatus", json!({})).await;
+    let scenes = status["payload"]["scenes"]
+        .as_array()
+        .expect("scenes")
+        .clone();
+    scenes
+        .iter()
+        .find(|scene| scene["sceneId"] == scene_id)
+        .and_then(|scene| scene["frame"].as_u64())
+        .expect("scene reports a frame")
+}
+
+#[tokio::test]
+async fn preview_and_program_have_independent_animation_playheads() {
+    let (port, engine) = start(false).await;
+    let mut client = Client::connect(port, None).await.expect("connect");
+    client.request("connection.hello", hello_payload()).await;
+    client
+        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
+        .await;
+
+    // Preview starts where Cue asks and advances on its authored clock without touching
+    // Program's frame. This remains true even when no output is configured.
+    client
+        .request(
+            "playout.cue",
+            json!({ "sceneId": "scene_1", "channel": "preview", "startFrame": 30 }),
+        )
+        .await;
+    assert_eq!(playhead(&mut client, "scene_1").await, 0);
+    assert!(
+        engine
+            .lock()
+            .await
+            .channel_frame(Channel::Preview, "scene_1")
+            >= 30
+    );
+
+    // A take starts Program's "in" animation at frame zero. Preview owning a separate
+    // playhead prevents this from either freezing Preview or inheriting its frame 30.
+    let take = client
+        .request(
+            "playout.takeOnline",
+            json!({ "sceneId": "scene_1", "overrideUnprepared": true }),
+        )
+        .await;
+    assert_eq!(take["type"], "reply.ack", "{take}");
+    assert_eq!(playhead(&mut client, "scene_1").await, 0);
+}
+
+#[tokio::test]
+async fn a_cued_preview_advances_without_program_or_outputs() {
+    let (port, engine) = start(false).await;
+    let mut client = Client::connect(port, None).await.expect("connect");
+    client.request("connection.hello", hello_payload()).await;
+    client
+        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
+        .await;
+    client
+        .request(
+            "playout.cue",
+            json!({ "sceneId": "scene_1", "channel": "preview" }),
+        )
+        .await;
+
+    tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+    assert!(
+        engine
+            .lock()
+            .await
+            .channel_frame(Channel::Preview, "scene_1")
+            >= 2,
+        "the 50 fps preview clock should advance independently of stream delivery"
+    );
+}
+
+#[tokio::test]
+async fn the_program_playhead_advances_without_any_output() {
+    let (port, engine) = start(false).await;
+    let mut client = Client::connect(port, None).await.expect("connect");
+    client.request("connection.hello", hello_payload()).await;
+    client
+        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
+        .await;
+    client
+        .request(
+            "playout.takeOnline",
+            json!({ "sceneId": "scene_1", "overrideUnprepared": true }),
+        )
+        .await;
+
+    assert_eq!(playhead(&mut client, "scene_1").await, 0);
+    assert!(
+        !engine.lock().await.has_running_outputs(),
+        "this test is only meaningful with nothing transmitting"
+    );
+
+    // Deliberately independent of outputs: an operator confirms a graphic on the monitors
+    // before any SDI or NDI output exists, so the animation has to run regardless.
+    engine.lock().await.advance_program_playhead(7);
+    assert_eq!(playhead(&mut client, "scene_1").await, 7);
+
+    // Elapsed frames, not an absolute frame number, so a dropped frame moves the animation
+    // on by the time that really passed instead of playing it in slow motion.
+    engine.lock().await.advance_program_playhead(3);
+    assert_eq!(playhead(&mut client, "scene_1").await, 10);
+}
+
+#[tokio::test]
+async fn cueing_a_scene_that_is_already_on_air_does_not_rewind_program() {
+    let (port, engine) = start(false).await;
+    let mut client = Client::connect(port, None).await.expect("connect");
+    client.request("connection.hello", hello_payload()).await;
+    client
+        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
+        .await;
+    client
+        .request(
+            "playout.takeOnline",
+            json!({ "sceneId": "scene_1", "overrideUnprepared": true }),
+        )
+        .await;
+    engine.lock().await.advance_program_playhead(12);
+    assert_eq!(playhead(&mut client, "scene_1").await, 12);
+
+    // Preview and Program can name the same loaded scene, but their playheads are independent.
+    // Cue must restart Preview without yanking live Program back to the start.
+    let cued = client
+        .request(
+            "playout.cue",
+            json!({ "sceneId": "scene_1", "channel": "preview" }),
+        )
+        .await;
+    assert_eq!(cued["type"], "reply.ack", "{cued}");
+    assert_eq!(
+        playhead(&mut client, "scene_1").await,
+        12,
+        "cueing the on-air scene rewound Program"
+    );
+}
+
+#[tokio::test]
+async fn advancing_the_playhead_with_nothing_on_air_does_nothing() {
+    let (port, engine) = start(false).await;
+    let mut client = Client::connect(port, None).await.expect("connect");
+    client.request("connection.hello", hello_payload()).await;
+    client
+        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
+        .await;
+
+    // Loaded but never taken: an idle engine must not animate a scene nobody put on air.
+    engine.lock().await.advance_program_playhead(25);
+    assert_eq!(playhead(&mut client, "scene_1").await, 0);
+
+    // And a zero advance is a no-op rather than a scene lookup.
+    client
+        .request(
+            "playout.takeOnline",
+            json!({ "sceneId": "scene_1", "overrideUnprepared": true }),
+        )
+        .await;
+    engine.lock().await.advance_program_playhead(0);
+    assert_eq!(playhead(&mut client, "scene_1").await, 0);
+}
+
+#[tokio::test]
+async fn stopping_a_scene_returns_its_playhead_to_the_start() {
+    let (port, engine) = start(false).await;
+    let mut client = Client::connect(port, None).await.expect("connect");
+    client.request("connection.hello", hello_payload()).await;
+    client
+        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
+        .await;
+    client
+        .request(
+            "playout.takeOnline",
+            json!({ "sceneId": "scene_1", "overrideUnprepared": true }),
+        )
+        .await;
+    engine.lock().await.advance_program_playhead(18);
+    assert_eq!(playhead(&mut client, "scene_1").await, 18);
+
+    client
+        .request("playout.stop", json!({ "sceneId": "scene_1" }))
+        .await;
+    assert_eq!(playhead(&mut client, "scene_1").await, 0);
 }

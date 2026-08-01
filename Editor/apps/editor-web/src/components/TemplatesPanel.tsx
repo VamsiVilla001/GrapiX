@@ -1,9 +1,11 @@
 import type { SceneObject, TemplateScene } from "@grapix/shared-types";
 import { Check, ChevronDown, Filter, Grid2X2, List, Plus, Search, Star, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { convertSceneDimensions, type CanvasConversionMode } from "../lib/convertSceneDimensions";
 import { sortObjectsForRender } from "../rendering/sceneMaterial";
 import { useEditorStore } from "../store/editorStore";
 import { type TemplateViewMode, useTemplateStore } from "../store/templateStore";
+import { ConvertDimensionsDialog } from "./ConvertDimensionsDialog";
 import { shouldDeleteTemplateFromKeyboard } from "./templateDeleteShortcut";
 
 const contextMenuItems = [
@@ -51,15 +53,21 @@ export function TemplatesPanel() {
   const renameTemplate = useTemplateStore((state) => state.renameTemplate);
   const changeTemplateId = useTemplateStore((state) => state.changeTemplateId);
   const deleteTemplate = useTemplateStore((state) => state.deleteTemplate);
+  const convertCanvasDimensions = useEditorStore((state) => state.convertCanvasDimensions);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [convertTemplateId, setConvertTemplateId] = useState<string | null>(null);
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const panelRef = useRef<HTMLElement | null>(null);
-  const skipNextTemplateSync = useRef(false);
   const normalizedSearch = searchTerm.trim().toLowerCase();
   const visibleTemplates = useMemo(
     () => templates.filter((template) => templateMatchesSearch(template, normalizedSearch)),
     [normalizedSearch, templates]
   );
+  // Resolved from the live catalogue rather than captured when the dialog opened, so the dialog
+  // reads the current canvas even if the editor changed it while the dialog was up.
+  const convertTemplate = convertTemplateId
+    ? templates.find((template) => template.templateId === convertTemplateId) ?? null
+    : null;
 
   useEffect(() => {
     if (!contextMenu) {
@@ -91,22 +99,9 @@ export function TemplatesPanel() {
     };
   }, [viewMenuOpen]);
 
-  useEffect(() => {
-    if (!openedTemplateId) {
-      return;
-    }
-
-    if (skipNextTemplateSync.current) {
-      skipNextTemplateSync.current = false;
-      return;
-    }
-
-    updateTemplateScene(openedTemplateId, scene);
-  }, [openedTemplateId, scene, updateTemplateScene]);
 
   function createAndOpenTemplate() {
     const template = addNewTemplate();
-    skipNextTemplateSync.current = true;
     loadScene(template.scene);
   }
 
@@ -163,6 +158,9 @@ export function TemplatesPanel() {
         }
         break;
       }
+      case "Convert Dimensions...":
+        setConvertTemplateId(templateId);
+        break;
       case "Export Scene...":
         exportTemplateScene(template);
         break;
@@ -172,7 +170,6 @@ export function TemplatesPanel() {
       case "To Sequencer":
       case "Edit Script Events...":
       case "Edit Visual Logic...":
-      case "Convert Dimensions...":
       case "Detach from Parent":
       case "Regenerate All Thumbnails...":
         window.alert(`${item} is reserved for the next template tooling pass.`);
@@ -180,6 +177,29 @@ export function TemplatesPanel() {
     }
 
     setContextMenu(null);
+  }
+
+  /**
+   * Convert one template's canvas.
+   *
+   * The open template goes through the editor store, not straight into the catalogue: App keeps
+   * the catalogue in step with the editor, so a direct catalogue write would be overwritten by the
+   * next sync with the pre-conversion scene. Converting through the store also makes the change
+   * visible in the viewport and undoable.
+   */
+  function convertTemplateDimensions(
+    templateId: string,
+    request: { width: number; height: number; mode: CanvasConversionMode }
+  ) {
+    const template = templates.find((entry) => entry.templateId === templateId);
+    if (!template) return;
+
+    if (openedTemplateId === templateId) {
+      convertCanvasDimensions(request);
+      return;
+    }
+
+    updateTemplateScene(templateId, convertSceneDimensions(template.scene, request));
   }
 
   useEffect(() => {
@@ -314,7 +334,6 @@ export function TemplatesPanel() {
             selected={selectedTemplateId === template.templateId}
             onSelect={() => selectTemplate(template.templateId)}
             onOpen={() => {
-              skipNextTemplateSync.current = true;
               openTemplateEditor(template.templateId);
               loadScene(template.scene);
             }}
@@ -325,6 +344,13 @@ export function TemplatesPanel() {
           />
         ))}
       </div>
+      {convertTemplate ? (
+        <ConvertDimensionsDialog
+          template={convertTemplate}
+          onApply={(request) => convertTemplateDimensions(convertTemplate.templateId, request)}
+          onClose={() => setConvertTemplateId(null)}
+        />
+      ) : null}
       {contextMenu ? (
         <div className="template-context-menu" role="menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
           {contextMenuItems.map((item) => (

@@ -318,6 +318,21 @@ export const PREVIEW_ENCODINGS = ["jpeg", "png", "raw-bgra", "webrtc", "shared-m
 export type PreviewEncoding = (typeof PREVIEW_ENCODINGS)[number];
 
 /**
+ * What representation of a channel a preview shows.
+ *
+ * Broadcast does not carry transparency as an alpha channel — SDI has none — so a graphics
+ * engine emits **fill** (the colour) and **key** (a greyscale matte) as two signals and the
+ * downstream keyer recombines them. Operators verify a graphic by looking at the key as a
+ * greyscale picture: white opaque, black transparent, grey for the feathered shadows and
+ * anti-aliased edges a clipped key destroys.
+ *
+ * A render mode, therefore, not a codec concern: a key is greyscale, which JPEG carries
+ * fine. An alpha-capable codec would deliver a design-tool checkerboard no operator uses.
+ */
+export const PREVIEW_VIEWS = ["fill", "key"] as const;
+export type PreviewView = (typeof PREVIEW_VIEWS)[number];
+
+/**
  * What part of the stage a preview covers.
  *
  * There is deliberately no "whole stage at full resolution" option. A
@@ -336,6 +351,8 @@ export interface PreviewRequestPayload {
   channel: EngineChannel;
   source: PreviewSource;
   encoding: PreviewEncoding;
+  /** Fill or key. Absent means fill; an unknown value is refused, never defaulted. */
+  view?: PreviewView;
   /** 1-100 for lossy encodings. Ignored otherwise. */
   quality?: number;
   /** Frame to render. Absent means the channel's current frame. */
@@ -357,6 +374,8 @@ export interface PreviewStreamStartPayload {
   channel: EngineChannel;
   source: PreviewSource;
   encoding: PreviewEncoding;
+  /** Fill or key for every frame of the stream. Absent means fill. */
+  view?: PreviewView;
   /** Target frames per second for the stream. The engine may deliver fewer. */
   targetFps: number;
   quality?: number;
@@ -375,6 +394,8 @@ export interface PreviewReplyPayload {
   channel: EngineChannel;
   streamId?: string;
   encoding: PreviewEncoding;
+  /** Which representation this frame is. Absent on engines predating the key view. */
+  view?: PreviewView;
   width: number;
   height: number;
   frame: number;

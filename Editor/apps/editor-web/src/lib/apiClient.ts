@@ -418,19 +418,15 @@ export async function patchDataValueOnApi(
   path: string,
   value: unknown,
   expectedRevision?: string
-): Promise<{ scene: SceneDocument; rendererSync: { synced: boolean; reason?: string } }> {
-  const response = await request<{
-    ok: boolean;
-    scene: SceneDocument;
-    rendererSync: { synced: boolean; reason?: string };
-  }>(`/api/scenes/${sceneId}/data-patches`, {
-    method: "PATCH",
-    body: JSON.stringify({ path, value, expectedRevision })
-  });
-  return {
-    scene: response.scene,
-    rendererSync: response.rendererSync
-  };
+): Promise<SceneDocument> {
+  const response = await request<{ ok: boolean; scene: SceneDocument }>(
+    `/api/scenes/${sceneId}/data-patches`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ path, value, expectedRevision })
+    }
+  );
+  return response.scene;
 }
 
 export async function patchTimelineOnApi(sceneId: string, timeline: SceneTimeline): Promise<SceneDocument> {

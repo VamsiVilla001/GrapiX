@@ -55,6 +55,11 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
+                // Auxiliary virtual-output windows are disposable confidence views. Closing
+                // one must not stop the control service or disturb the main operator window.
+                if window.label() != "main" {
+                    return;
+                }
                 if let Some(supervisor) = window.app_handle().try_state::<PlayoutSupervisor>() {
                     // Stops only what this shell started. An adopted engine may be on air.
                     supervisor.shutdown();

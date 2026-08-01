@@ -6,9 +6,9 @@
 
 use grapix_render_engine::stage::{Rect, TilingConfig, VirtualCanvas};
 use grapix_render_engine::tile::{
-    filter_stack_extent, object_rect_in_tile, parse_tile_id, plan_tile_composite, tile_local_origin,
-    tile_source_rect, verify_seamless_coverage, FilterOverscan, TileCoord, TileGrid, TileManager,
-    TileSelectionRequest,
+    filter_stack_extent, object_rect_in_tile, parse_tile_id, plan_tile_composite,
+    tile_local_origin, tile_source_rect, verify_seamless_coverage, FilterOverscan, TileCoord,
+    TileGrid, TileManager, TileSelectionRequest,
 };
 
 fn grid(width: f64, height: f64, tile: u32, overscan: u32) -> TileGrid {
@@ -90,11 +90,20 @@ fn the_grid_is_a_partition() {
     let g = grid(8192.0, 8192.0, 2048, 0);
 
     // Exactly one tile wide, ending on the boundary.
-    assert_eq!(g.column_range(&Rect::new(0.0, 0.0, 2048.0, 10.0)), Some((0, 0)));
+    assert_eq!(
+        g.column_range(&Rect::new(0.0, 0.0, 2048.0, 10.0)),
+        Some((0, 0))
+    );
     // One unit past the boundary reaches the second column.
-    assert_eq!(g.column_range(&Rect::new(0.0, 0.0, 2049.0, 10.0)), Some((0, 1)));
+    assert_eq!(
+        g.column_range(&Rect::new(0.0, 0.0, 2049.0, 10.0)),
+        Some((0, 1))
+    );
     // Starting exactly on a boundary belongs to the new tile.
-    assert_eq!(g.column_range(&Rect::new(2048.0, 0.0, 10.0, 10.0)), Some((1, 1)));
+    assert_eq!(
+        g.column_range(&Rect::new(2048.0, 0.0, 10.0, 10.0)),
+        Some((1, 1))
+    );
     // A zero-area rect touches nothing.
     assert_eq!(g.column_range(&Rect::new(100.0, 0.0, 0.0, 10.0)), None);
 }
@@ -102,8 +111,12 @@ fn the_grid_is_a_partition() {
 #[test]
 fn rectangles_off_the_grid_select_no_tiles() {
     let g = grid(4096.0, 4096.0, 2048, 0);
-    assert!(g.tiles_for_rect(&Rect::new(-1000.0, -1000.0, 500.0, 500.0)).is_empty());
-    assert!(g.tiles_for_rect(&Rect::new(10_000.0, 10_000.0, 100.0, 100.0)).is_empty());
+    assert!(g
+        .tiles_for_rect(&Rect::new(-1000.0, -1000.0, 500.0, 500.0))
+        .is_empty());
+    assert!(g
+        .tiles_for_rect(&Rect::new(10_000.0, 10_000.0, 100.0, 100.0))
+        .is_empty());
 
     // Partly off the grid clamps to valid tiles.
     assert_eq!(
@@ -133,7 +146,10 @@ fn overscan_expands_the_render_bounds_and_is_not_clipped_to_the_stage() {
         g.tile_render_bounds(TileCoord::new(0, 0), 32.0),
         Rect::new(-32.0, -32.0, 2112.0, 2112.0)
     );
-    assert_eq!(g.tile_render_size(TileCoord::new(0, 0), 1.0, 32.0), (2112, 2112));
+    assert_eq!(
+        g.tile_render_size(TileCoord::new(0, 0), 1.0, 32.0),
+        (2112, 2112)
+    );
 
     // Explicit zero overscan gives the bare tile.
     assert_eq!(
@@ -288,7 +304,11 @@ fn moving_an_object_dirties_only_the_tiles_it_left_and_entered() {
         include_clean: true,
         ..Default::default()
     });
-    let ids: Vec<String> = m.tracked_tiles().iter().map(|t| t.tile_id.clone()).collect();
+    let ids: Vec<String> = m
+        .tracked_tiles()
+        .iter()
+        .map(|t| t.tile_id.clone())
+        .collect();
     for id in &ids {
         m.begin_render(&[id.clone()]);
         m.complete_render(id, 0);
@@ -341,7 +361,10 @@ fn a_failed_tile_stays_dirty_so_the_next_frame_retries() {
 
     let tile = m.get("t:0:0").expect("tile");
     assert!(tile.dirty);
-    assert_eq!(tile.failure_reason.as_deref(), Some("shader compilation failed"));
+    assert_eq!(
+        tile.failure_reason.as_deref(),
+        Some("shader compilation failed")
+    );
 
     let retry = m.select_tiles(&TileSelectionRequest {
         frame: 1,
@@ -551,7 +574,11 @@ fn a_missing_tile_is_reported_rather_than_silently_omitted() {
         m.complete_render(id, 0);
     }
 
-    let tiles: Vec<_> = selection.required.iter().filter_map(|id| m.get(id)).collect();
+    let tiles: Vec<_> = selection
+        .required
+        .iter()
+        .filter_map(|id| m.get(id))
+        .collect();
     let plan = plan_tile_composite(target, &tiles, 1.0, true);
 
     assert_eq!(plan.ops.len(), 3);
@@ -582,7 +609,10 @@ fn the_composite_reads_past_the_overscan_ring_never_into_it() {
     // ...but only the inner rectangle may reach an output.
     assert_eq!(tile.logical_bounds, Rect::new(0.0, 0.0, 2048.0, 2048.0));
     // The read starts exactly at the overscan offset.
-    assert_eq!(tile_source_rect(tile, 1.0), Rect::new(48.0, 48.0, 2048.0, 2048.0));
+    assert_eq!(
+        tile_source_rect(tile, 1.0),
+        Rect::new(48.0, 48.0, 2048.0, 2048.0)
+    );
 }
 
 #[test]

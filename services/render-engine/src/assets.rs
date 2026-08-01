@@ -99,7 +99,13 @@ pub struct UploadSession {
 }
 
 impl UploadSession {
-    fn new(asset_id: String, sha256: String, chunk_count: u32, total_bytes: u64, now_ms: u64) -> Self {
+    fn new(
+        asset_id: String,
+        sha256: String,
+        chunk_count: u32,
+        total_bytes: u64,
+        now_ms: u64,
+    ) -> Self {
         Self {
             asset_id,
             sha256,
@@ -283,7 +289,10 @@ impl AssetStore {
     }
 
     pub fn ready_count(&self) -> usize {
-        self.records.values().filter(|record| record.is_ready()).count()
+        self.records
+            .values()
+            .filter(|record| record.is_ready())
+            .count()
     }
 
     pub fn failed_count(&self) -> usize {
@@ -325,8 +334,10 @@ impl AssetStore {
 
         match transport {
             AssetTransport::EngineLocal => {
-                let resolved = crate::security::resolve_asset_path(uri, &self.roots)
-                    .map_err(|rejection| AssetRejection::PathRefused(rejection.message().to_string()))?;
+                let resolved =
+                    crate::security::resolve_asset_path(uri, &self.roots).map_err(|rejection| {
+                        AssetRejection::PathRefused(rejection.message().to_string())
+                    })?;
                 cache_path = Some(resolved.to_string_lossy().to_string());
                 state = AssetFetchState::Cached;
             }
@@ -430,18 +441,15 @@ impl AssetStore {
             return Err(AssetRejection::ChunkIndexOutOfRange);
         }
 
-        let session = self
-            .uploads
-            .entry(asset_id.to_string())
-            .or_insert_with(|| {
-                UploadSession::new(
-                    asset_id.to_string(),
-                    sha256.to_string(),
-                    chunk_count,
-                    total_bytes,
-                    now_ms,
-                )
-            });
+        let session = self.uploads.entry(asset_id.to_string()).or_insert_with(|| {
+            UploadSession::new(
+                asset_id.to_string(),
+                sha256.to_string(),
+                chunk_count,
+                total_bytes,
+                now_ms,
+            )
+        });
 
         // A transfer whose shape changed mid-flight cannot be reassembled coherently.
         if session.chunk_count != chunk_count
@@ -520,8 +528,9 @@ impl AssetStore {
 
         let path = content_path(&self.cache_directory, sha256);
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|error| AssetRejection::Io(format!("could not create the asset cache: {error}")))?;
+            std::fs::create_dir_all(parent).map_err(|error| {
+                AssetRejection::Io(format!("could not create the asset cache: {error}"))
+            })?;
         }
         // Written to a temporary file and renamed, so a crash mid-write cannot leave a
         // truncated file in a content-addressed cache — where its name would claim it was
@@ -622,7 +631,10 @@ impl AssetStore {
             message: if matches {
                 "verified".to_string()
             } else {
-                format!("content hashes to {digest}, not the declared {}", record.sha256)
+                format!(
+                    "content hashes to {digest}, not the declared {}",
+                    record.sha256
+                )
             },
         })
     }
@@ -687,10 +699,7 @@ impl AssetStore {
 
             // The cached bytes are only removed when nothing else shares the digest. That
             // is the point of content addressing: two assets can be the same content.
-            let still_needed = self
-                .records
-                .values()
-                .any(|other| other.sha256 == sha256);
+            let still_needed = self.records.values().any(|other| other.sha256 == sha256);
             if !still_needed {
                 let path = content_path(&self.cache_directory, &sha256);
                 if std::fs::remove_file(&path).is_ok() {

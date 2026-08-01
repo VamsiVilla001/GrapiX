@@ -5,7 +5,7 @@
  *
  * - **Live** — NDI or SDI. Frames reaching one of these are in front of an audience.
  *   Marked in red, and an uncertified live adapter says so before it is used.
- * - **Virtual** — a headless render of the on-air graphic at full Program resolution.
+ * - **Virtual** — a local window of the on-air graphic at full Program resolution.
  *   Nothing leaves the machine. It exists so a take can be confirmed with no risk.
  *
  * `live` always comes from the engine's own report. It is never derived from an
@@ -17,7 +17,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Radio, Plus, Play, Square, Trash2, EyeOff, RefreshCw } from "lucide-react";
+import { Radio, Plus, Play, Square, Trash2, EyeOff, RefreshCw, ExternalLink, Monitor } from "lucide-react";
 
 import {
   playoutApi,
@@ -25,6 +25,7 @@ import {
   type EngineOutputView,
   type EngineOutputsView
 } from "./api";
+import { openVirtualOutputWindow } from "./VirtualOutputWindow";
 
 interface OutputsPanelProps {
   /** False when the engine is unreachable; the panel then explains rather than fails. */
@@ -205,8 +206,9 @@ export function OutputsPanel({ engineConnected, programFormat }: OutputsPanelPro
             )}
           {selectedAdapter?.available && !selectedAdapter.live && (
             <p className="outputs-note">
-              Headless: frames are rendered at full Program resolution and never leave
-              this machine.
+              {selectedAdapter.adapterId === "virtual"
+                ? "Windowed: Program is shown locally at full resolution and never transmitted."
+                : "Non-live: frames never reach a broadcast output."}
             </p>
           )}
 
@@ -269,8 +271,9 @@ export function OutputsPanel({ engineConnected, programFormat }: OutputsPanelPro
               onClick={() =>
                 void run("configure", async () => {
                   const rate = FRAME_RATES[rateIndex]!;
+                  const configuredOutputId = outputId.trim();
                   const result = await playoutApi.configureOutput({
-                    outputId: outputId.trim(),
+                    outputId: configuredOutputId,
                     adapterId,
                     width,
                     height,
@@ -280,6 +283,9 @@ export function OutputsPanel({ engineConnected, programFormat }: OutputsPanelPro
                     },
                     colorSpace: programFormat.colorSpace
                   });
+                  if (adapterId === "virtual" && "__TAURI_INTERNALS__" in window) {
+                    await openVirtualOutputWindow(configuredOutputId);
+                  }
                   setAdding(false);
                   return result;
                 })
@@ -308,7 +314,7 @@ export function OutputsPanel({ engineConnected, programFormat }: OutputsPanelPro
         {view?.outputs.length === 0 && (
           <li className="outputs-empty">
             No output is configured. A take will render nowhere until one exists —
-            add a virtual output to confirm a take without going live.
+            add a windowed virtual output to confirm a take without going live.
           </li>
         )}
       </ul>
@@ -326,18 +332,23 @@ function OutputRow({
   onAction: (action: "start" | "stop" | "remove") => void;
 }) {
   const running = output.state === "running";
+  const windowed = output.adapterId === "virtual";
 
   return (
-    <li className={`output-row ${output.live ? "live" : "headless"} ${output.state}`}>
+    <li className={`output-row ${output.live ? "live" : windowed ? "windowed" : "headless"} ${output.state}`}>
       <div className="output-identity">
-        <span className={output.live ? "output-badge live" : "output-badge headless"}>
+        <span className={output.live ? "output-badge live" : windowed ? "output-badge windowed" : "output-badge headless"}>
           {output.live ? (
             <>
               <Radio size={11} /> LIVE
             </>
+          ) : windowed ? (
+            <>
+              <Monitor size={11} /> WINDOWED
+            </>
           ) : (
             <>
-              <EyeOff size={11} /> HEADLESS
+              <EyeOff size={11} /> NON-LIVE
             </>
           )}
         </span>
@@ -366,6 +377,27 @@ function OutputRow({
       {output.lastError && <p className="outputs-error">{output.lastError}</p>}
 
       <div className="output-actions">
+        {windowed ? (
+          <button
+            className="small-button"
+            onClick={() => {
+              void openVirtualOutputWindow(output.outputId)
+                .then((opened) => {
+                  if (!opened) {
+                    window.alert(
+                      "The windowed virtual output was blocked. Allow popups for GrapiX and try again."
+                    );
+                  }
+                })
+                .catch((openError: unknown) => {
+                  window.alert(errorMessage(openError));
+                });
+            }}
+            title="Open the local Program output window"
+          >
+            <ExternalLink size={12} /> Open window
+          </button>
+        ) : null}
         {running ? (
           <button className="small-button" disabled={busy} onClick={() => onAction("stop")}>
             <Square size={12} /> Stop

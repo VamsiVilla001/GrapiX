@@ -31,11 +31,16 @@ interface TemplateState {
   deleteTemplate: (templateId: string) => void;
 }
 
-const seedCatalog = createSeedTemplateCatalog();
+const TEMPLATE_STORAGE_KEY = "grapix-template-catalog-v1";
+const persistedCatalog = readTemplateCatalog();
+const seedCatalog = persistedCatalog ?? createSeedTemplateCatalog();
 
 export const useTemplateStore = create<TemplateState>((set, get) => ({
   templates: seedCatalog.templates,
-  selectedTemplateId: seedCatalog.templates[0]?.templateId ?? null,
+  selectedTemplateId:
+    persistedCatalog?.selectedTemplateId
+      ?? seedCatalog.templates[0]?.templateId
+      ?? null,
   openedTemplateId: null,
   searchTerm: "",
   viewMode: readTemplateViewMode(),
@@ -174,6 +179,18 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
     })
 }));
 
+// Templates are project work, not disposable panel state. Persist every catalogue mutation
+// so deleting test scenes, switching panels or restarting the Editor cannot resurrect or
+// discard them. The open editor is intentionally not restored until its scene is loaded.
+if (typeof window !== "undefined") {
+  useTemplateStore.subscribe((state) => {
+    localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify({
+      templates: state.templates,
+      selectedTemplateId: state.selectedTemplateId
+    }));
+  });
+}
+
 function getNextNumericSceneId(templates: TemplateScene[]): number {
   const highestId = templates.reduce((highest, template) => {
     const numericId = Number(template.sceneId);
@@ -192,6 +209,27 @@ function normalizeNumericSceneId(value: string, fallback: string): string {
   }
 
   return formatNumericSceneId(Number(digits));
+}
+
+function readTemplateCatalog(): {
+  templates: TemplateScene[];
+  selectedTemplateId: string | null;
+} | null {
+  if (typeof localStorage === "undefined") return null;
+  try {
+    const parsed = JSON.parse(localStorage.getItem(TEMPLATE_STORAGE_KEY) ?? "null") as {
+      templates?: unknown;
+      selectedTemplateId?: unknown;
+    } | null;
+    if (!parsed || !Array.isArray(parsed.templates)) return null;
+    return {
+      templates: parsed.templates as TemplateScene[],
+      selectedTemplateId:
+        typeof parsed.selectedTemplateId === "string" ? parsed.selectedTemplateId : null
+    };
+  } catch {
+    return null;
+  }
 }
 
 function readTemplateViewMode(): TemplateViewMode {

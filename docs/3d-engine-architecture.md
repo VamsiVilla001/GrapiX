@@ -23,12 +23,12 @@ Path animation — highest priority) and **Track 3E** (3D engine), sharing one n
 
 GrapiX today is a **2D compositor**. What exists:
 
-- **Editor renderer** — PixiJS 8, 2D only (`apps/editor-web/src/rendering/GpuSceneRenderer.ts`). Objects get `x`, `y`, and a single 2D `rotation`; `zDepth`/`zIndex` are paint-sort order, not depth. No view/projection matrix, no perspective.
+- **Editor renderer** — PixiJS 8, 2D only (`Editor/apps/editor-web/src/rendering/GpuSceneRenderer.ts`). Objects get `x`, `y`, and a single 2D `rotation`; `zDepth`/`zIndex` are paint-sort order, not depth. No view/projection matrix, no perspective.
 - **"3D" primitives** (cube/cylinder/torus/slab) — flat 2D symbols; Phase 2 paints their visible faces per bound material but the geometry is fake isometric.
 - **Lights** (point/directional/spot) — gizmo icons (`drawLight`); `LightSceneObject.intensity` exists but nothing consumes it. Lights illuminate nothing.
 - **Cameras** (perspective/ortho) — gizmo icons (`drawCamera`); `CameraSceneObject.fov`/`zoom` exist but no view transform is applied. Viewport "zoom" is CSS scale of the stage.
 - **Rust daemon** — wgpu, but `scene_projection` is a 2D **orthographic** map with quads at `z=0`; it draws **only `rect`** and warns on everything else (`services/render-daemon/src/scene/document.rs`).
-- **Shared shader contract** — `packages/render-shaders` (`layouts.json` byte contract + WGSL + `shader-contract.md`) is the drift guard between the two renderers. Currently 2D quad + textured + blend modes only.
+- **Shared shader contract** — `Shared/render-shaders` (`layouts.json` byte contract + WGSL + `shader-contract.md`) is the drift guard between the two renderers. Currently 2D quad + textured + blend modes only.
 - **Animation** — the shared evaluator samples numeric, colour, anchor and
   matched-vertex bézier-path keys, and `CanvasStage` renders
   `evaluateSceneAtFrame(scene, currentFrame)`. The current scalar snapshot
@@ -45,7 +45,7 @@ GrapiX today is a **2D compositor**. What exists:
 
 The existing docs already anticipate 3D: `rendering-engine.md` ("real Three.js/WebGPU scene layer") and `render-daemon-architecture.md` ("browser WebGPU preview later" consuming the shared WGSL).
 
-Data-model skeleton already present (`packages/shared-types/src/index.ts`): `MeshSceneObject{ meshKind, depth, src }`, `LightSceneObject{ lightKind, intensity, color }`, `CameraSceneObject{ cameraKind, fov, zoom }`. None of it is rendered in 3D.
+Data-model skeleton already present (`Shared/shared-types/src/index.ts`): `MeshSceneObject{ meshKind, depth, src }`, `LightSceneObject{ lightKind, intensity, color }`, `CameraSceneObject{ cameraKind, fov, zoom }`. None of it is rendered in 3D.
 
 ---
 
@@ -98,7 +98,7 @@ interface is designed so B1a→B1b→B2 are swaps, not rewrites.
 
 ---
 
-## 4. Data-model changes (`packages/shared-types`)
+## 4. Data-model changes (`Shared/shared-types`)
 
 All additions are **optional with back-compat defaults** so existing 2D scenes (z=0, `rotation`=rotationZ) load unchanged; migration in `normalizeMaterialSceneDocument`/`normalizeScene`.
 
@@ -113,7 +113,7 @@ All additions are **optional with back-compat defaults** so existing 2D scenes (
 - **`CameraSceneObject`:** add `near?`, `far?`, `target?: {x,y,z}`, `up?`, and a scene-level **active camera** id (`SceneDocument.activeCameraId?`).
 - **Materials:** extend `basic-lit`/`pbr` params — `metalness`, `roughness`, `emissive`, `normalScale`; normal/emissive/roughness texture slots (the texture-slot model already exists).
 - **Mesh/model:** `MeshSceneObject.modelAssetId?` (glTF/glb asset); imported sub-materials become **bindable faces** via the existing `getBindableFaces` seam (fulfils the Phase 1 model placeholder).
-- **Contract + fixtures:** extend `packages/render-shaders` with a **3D contract** (camera model, light equations, BRDF, tone-map, colour space) and re-emit `fixtures/scene-document.v1.json`; bump `SUPPORTED_VERSION` if the shape changes materially.
+- **Contract + fixtures:** extend `Shared/render-shaders` with a **3D contract** (camera model, light equations, BRDF, tone-map, colour space) and re-emit `fixtures/scene-document.v1.json`; bump `SUPPORTED_VERSION` if the shape changes materially.
 
 ---
 
@@ -133,7 +133,7 @@ SceneDocument (shared-types, now with 3D transforms/lights/cameras/models)
                                         light UBO, lit WGSL per the render-shaders 3D contract, glTF (gltf crate)
 ```
 
-**Parity strategy:** the daemon is authoritative. `packages/render-shaders/docs/shader-contract.md` gains a 3D section (camera projection, light falloff, BRDF, tone-map, sRGB). three.js is configured to match it as closely as its pipeline allows (linear workflow, ACES/none tone-map to match, matched light units). Parity is validated by rendering the same scene in both and comparing within tolerance — same philosophy as the current `blend_states_match_pixi_equations` test, but tolerance-based for lighting.
+**Parity strategy:** the daemon is authoritative. `Shared/render-shaders/docs/shader-contract.md` gains a 3D section (camera projection, light falloff, BRDF, tone-map, sRGB). three.js is configured to match it as closely as its pipeline allows (linear workflow, ACES/none tone-map to match, matched light units). Parity is validated by rendering the same scene in both and comparing within tolerance — same philosophy as the current `blend_states_match_pixi_equations` test, but tolerance-based for lighting.
 
 ### 5.1 `SceneRenderer` interface (the swap seam)
 
@@ -159,6 +159,20 @@ For B1a the stage mounts both and stacks their canvases.
 
 - **2D authoring stays y-down** (canvas/PixiJS: origin top-left, +y down, px units) — unchanged for every existing scene.
 - **The 3D renderer converts** at the boundary: scene (x, y, z) → three.js (x, −y, z) with a matched projection so a z=0 object lands exactly where the 2D renderer would draw it. One documented conversion, applied in `Renderer3DThree` and mirrored in the daemon.
+  - **Negate the position; never reflect a parent.** `(x, −y, z)` per object is not
+    interchangeable with `scale.y = −1` on a shared parent, even though both put objects in the
+    same place. Reflecting a parent mirrors its children's *geometry*: UVs flip, so every texture
+    renders upside down, and triangle winding inverts, so under back-face culling the surface
+    either shows its back face or disappears. The editor's `ThreeSceneLayer` shipped
+    `content.scale.y = −1` and a material-assigned quad showed its texture rotated 180 degrees;
+    restoring the documented per-position negation fixed it. The camera-rotation trick that
+    reflection replaced had the same defect for the same reason. Lighting *may* be reflected at its
+    root, because a light has no geometry - only a position and a direction.
+  - Negating Y reverses rotations about the other two axes, so `rotationX` and `rotationZ` are
+    negated with it and `rotationY` is not. A parent reflection got that for free; doing the
+    conversion honestly means doing it explicitly, and it is invisible until something is rotated.
+    `projectMeshBounds` composes the identical transform, because selection handles are drawn from
+    it and must land on the object.
 - **A 2D object in a 3D scene** is a plane at its z (default 0), facing the camera's near plane — so mixed scenes are coherent and B2 (2D-as-planes) is a natural extension.
 - **`rotation` is rotationZ**; `rotationX`/`rotationY` default 0. Existing 2D scenes are unchanged (pure z-rotation at z=0).
 
@@ -308,7 +322,7 @@ is independently shippable, typechecks, has tests, and is verified live (editor
 pixel-extraction + daemon headless render), matching the Phase 0–2 workflow.
 
 ### Shared foundation (do first — both tracks need it)
-- **AN-1 — Animation engine.** Typed `Animatable<T>` per property, interpolator registry (number/vec/colour), `evaluateSceneAtFrame`, and wire `CanvasStage` playback→render (§A). Migrate the current scalar keyframes. Deliverable: existing transform/opacity keyframes actually animate in the viewport (they don't today). Files: `packages/shared-types` (animation model + evaluator + tests), `editorStore` (per-property keyframe actions), `CanvasStage`, `TimelinePanel`.
+- **AN-1 — Animation engine.** Typed `Animatable<T>` per property, interpolator registry (number/vec/colour), `evaluateSceneAtFrame`, and wire `CanvasStage` playback→render (§A). Migrate the current scalar keyframes. Deliverable: existing transform/opacity keyframes actually animate in the viewport (they don't today). Files: `Shared/shared-types` (animation model + evaluator + tests), `editorStore` (per-property keyframe actions), `CanvasStage`, `TimelinePanel`.
 
 ### Track S — Shapes / Pen tool / Path animation (HEADLINE, 2D-only)
 - **S-1 — Shape object + bézier path rendering.** `ShapeSceneObject` + `BezierPath` (§B.1–B.2); render fill/stroke via Pixi `GraphicsPath`; subsume `line`. Static shapes first. Tests: path→geometry, pixel-extraction of a filled/stroked bézier.
@@ -317,8 +331,8 @@ pixel-extraction + daemon headless render), matching the Phase 0–2 workflow.
 - **S-4 — Shape operators + masks.** Gradients, repeater, merge/boolean, round corners; mask paths (add/subtract/intersect, feather) reusing the same path model.
 
 ### Track 3E — 3D engine
-- **3E-0 — Spike & de-risk.** three.js layer behind the `SceneRenderer` interface; one **lit 3D cube** under a **perspective camera** with **one directional + one point light** actually shading it; composited into the Pixi stage (B1a). No data-model change yet (hard-coded demo scene). Deliverable: go/no-go on A1 + B1a, measured. Files: new `apps/editor-web/src/rendering/three/*`, compositing hook in `GpuSceneStage`.
-- **3E-1 — 3D data model.** Transform3D, light/camera/material/model fields, `activeCameraId`, migration + fixtures + tests (`packages/shared-types`). No renderer change beyond reading defaults.
+- **3E-0 — Spike & de-risk.** three.js layer behind the `SceneRenderer` interface; one **lit 3D cube** under a **perspective camera** with **one directional + one point light** actually shading it; composited into the Pixi stage (B1a). No data-model change yet (hard-coded demo scene). Deliverable: go/no-go on A1 + B1a, measured. Files: new `Editor/apps/editor-web/src/rendering/three/*`, compositing hook in `GpuSceneStage`.
+- **3E-1 — 3D data model.** Transform3D, light/camera/material/model fields, `activeCameraId`, migration + fixtures + tests (`Shared/shared-types`). No renderer change beyond reading defaults.
 - **3E-2 — Editor 3D scene + active camera.** Renderer3D mirrors the SceneDocument: real meshes for cube/cylinder/torus/sphere/slab, active-camera view/projection, depth composite with 2D. 3D transform gizmos (move/rotate/scale) and viewport camera nav. Inspector: 3D transform panel. Files: `rendering/three/*`, `editorStore` (3D transform actions, `setActiveCamera`), `Inspector`, `PropertiesSidebar`.
 - **3E-3 — Real lighting.** Point/directional/spot illuminate meshes; light gizmos reflect real params; `basic-lit`/`pbr` materials shaded per the contract; optional shadow maps (sub-slice). Inspector: light property panel.
 - **3E-4 — Animated glTF/GLB import.** `GLTFLoader` (+ optional Draco); clips driven from the timeline via `mixer.setTime(frame/fps)` (§C); node/skeletal/morph animation; PBR materials; imported sub-materials exposed as **bindable faces** (completes test case #7 visually and the Phase 1 model placeholder). glb stored content-hashed; Material Manager shows model assets.

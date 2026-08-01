@@ -1,11 +1,11 @@
 import type {
-  PlayoutRundownDocument,
+  PlayoutTakeList,
   PublishedSceneMetadata,
   PublishedSceneVersion,
   SceneDocument
 } from "@grapix/shared-types";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readFile, readdir, rename, unlink } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rename, rm, unlink } from "node:fs/promises";
 import path from "node:path";
 
 export interface PublishSceneOptions {
@@ -24,6 +24,38 @@ export interface PublishSceneOptions {
 interface LibraryIndex {
   version: 1;
   scenes: PublishedSceneMetadata[];
+  /**
+   * Highest Take ID ever issued, so a removed one is never handed to another scene.
+   *
+   * Optional because indexes written before removal existed do not carry it; absent means
+   * "derive from the scenes present", which is correct for a library nothing has been removed
+   * from yet.
+   */
+  highestTakeId?: number;
+}
+
+/** What a successful removal took away, so the caller can report it precisely. */
+export interface SceneRemoval {
+  sceneId: string;
+  /** The Take ID that is now unused. It is never reassigned to another scene. */
+  takeId: number | null;
+  versionsRemoved: number;
+}
+
+/**
+ * A refusal to delete a broadcast asset, carrying a reason the HTTP layer can map to a status.
+ *
+ * Distinct from a generic error because "on air" and "still referenced" are normal operator
+ * conditions, not faults, and they must not read as a server failure.
+ */
+export class SceneRemovalRefused extends Error {
+  constructor(
+    message: string,
+    readonly reason: "NOT_FOUND" | "ON_AIR" | "REFERENCED"
+  ) {
+    super(message);
+    this.name = "SceneRemovalRefused";
+  }
 }
 
 export class PlayoutStore {
@@ -34,8 +66,32 @@ export class PlayoutStore {
   async ensure(): Promise<void> {
     await Promise.all([
       mkdir(this.sceneRoot(), { recursive: true }),
-      mkdir(this.rundownRoot(), { recursive: true })
+      mkdir(this.takeListRoot(), { recursive: true })
     ]);
+  }
+
+  /**
+   * The next Scene Manager Take ID. Monotonic: a number is never reused.
+   *
+   * Take IDs start at 101, the way an XPression operator expects: three digits, and a gap
+   * below so a show can reserve low numbers.
+   *
+   * This used to fill gaps left by deleted scenes, on the reasoning that operators memorise
+   * these numbers so they should stay short. That reasoning was written when nothing could
+   * delete a scene, and it points the other way once something can: an operator who memorised
+   * "take 102" and finds a *different* graphic on it has been handed a trap, and they find out
+   * on air. Climbing costs a fourth digit after several hundred removals; reuse costs the wrong
+   * graphic once.
+   *
+   * The high-water mark is persisted rather than derived from the live scenes, because
+   * deriving it is exactly what made a removed number reappear.
+   */
+  private nextTakeId(index: LibraryIndex): number {
+    const used = index.scenes
+      .map((entry) => entry.takeId)
+      .filter((value): value is number => Number.isSafeInteger(value));
+    const highest = Math.max(100, index.highestTakeId ?? 100, ...used);
+    return highest + 1;
   }
 
   async publishScene(
@@ -49,6 +105,11 @@ export class PlayoutStore {
       const previousVersions = index.scenes.filter((entry) => entry.sceneId === scene.id);
       const version =
         previousVersions.reduce((maximum, entry) => Math.max(maximum, entry.version), 0) + 1;
+      // Stable across republishes: an operator who rehearsed "take 104" must still get this
+      // scene after a designer publishes v7 mid-show.
+      const takeId =
+        previousVersions.find((entry) => Number.isSafeInteger(entry.takeId))?.takeId
+        ?? this.nextTakeId(index);
       const now = new Date().toISOString();
       const packageChecksum = createHash("sha256")
         .update(JSON.stringify(scene))
@@ -69,6 +130,7 @@ export class PlayoutStore {
         canvasHeight: scene.canvas.height,
         colorSpace: options.colorSpace,
         defaultTransition: options.defaultTransition ?? "cut",
+        takeId,
         tags: [...new Set(options.tags ?? [])],
         category: options.category,
         sourceEditorId: options.sourceEditorId,
@@ -85,6 +147,9 @@ export class PlayoutStore {
 
       await atomicWriteJson(this.sceneVersionPath(scene.id, version), published);
       index.scenes.push(metadata);
+      // Raise the high-water mark so this number is never issued again, even after the scene
+      // it belongs to is removed.
+      index.highestTakeId = Math.max(index.highestTakeId ?? 100, takeId);
       index.scenes.sort(
         (left, right) =>
           left.sceneId.localeCompare(right.sceneId) || right.version - left.version
@@ -122,27 +187,98 @@ export class PlayoutStore {
     }
   }
 
-  async listRundowns(): Promise<PlayoutRundownDocument[]> {
+  /** Find a published scene by its Scene Manager Take ID. */
+  async readSceneByTakeId(takeId: number): Promise<PublishedSceneVersion | null> {
+    const index = await this.readLibraryIndex();
+    const matches = index.scenes.filter((entry) => entry.takeId === takeId);
+    if (matches.length === 0) {
+      return null;
+    }
+    const latest = matches.reduce((best, entry) => (entry.version > best.version ? entry : best));
+    return this.readScene(latest.sceneId, latest.version);
+  }
+
+  /**
+   * Remove every published version of a scene.
+   *
+   * Deleting a broadcast asset is not a tidy-up, it is a way to make a Take ID stop working
+   * mid-show, so this refuses rather than asks. The caller supplies what is currently on air
+   * because the store does not track channels; the runtime does.
+   *
+   * Take IDs of other scenes are never touched. They are assigned on first publish and
+   * operators memorise them, so renumbering to close a gap would be worse than the gap.
+   */
+  async removeScene(
+    sceneId: string,
+    guards: { onAirSceneIds?: readonly string[] } = {}
+  ): Promise<SceneRemoval> {
+    assertStorageId(sceneId, "sceneId");
+
+    return this.serializeMutation(async () => {
+      const index = await this.readLibraryIndex();
+      const versions = index.scenes.filter((entry) => entry.sceneId === sceneId);
+      if (versions.length === 0) {
+        throw new SceneRemovalRefused(`no published scene ${sceneId}`, "NOT_FOUND");
+      }
+
+      if (guards.onAirSceneIds?.includes(sceneId)) {
+        throw new SceneRemovalRefused(
+          `scene ${sceneId} is on air; take it off Program and Preview first`,
+          "ON_AIR"
+        );
+      }
+
+      // A take list entry is an operator's recall path. Removing the scene under it would turn
+      // a Take In into a missing-asset error at exactly the wrong moment.
+      const referencing: string[] = [];
+      for (const takeList of await this.listTakeLists()) {
+        if (takeList.archived) continue;
+        if (takeList.entries.some((entry) => entry.sceneId === sceneId)) {
+          referencing.push(takeList.takeListId);
+        }
+      }
+      if (referencing.length > 0) {
+        throw new SceneRemovalRefused(
+          `scene ${sceneId} is referenced by take list(s) ${referencing.join(", ")}; remove those entries first`,
+          "REFERENCED"
+        );
+      }
+
+      const takeId = versions[0]?.takeId ?? null;
+      // The whole per-scene directory, not each version file: leaving an empty directory behind
+      // makes the store look like it still holds the scene to anything reading the filesystem.
+      await rm(path.dirname(this.sceneVersionPath(sceneId, 1)), {
+        recursive: true,
+        force: true
+      });
+      index.scenes = index.scenes.filter((entry) => entry.sceneId !== sceneId);
+      await atomicWriteJson(this.libraryIndexPath(), index);
+
+      return { sceneId, takeId, versionsRemoved: versions.length };
+    });
+  }
+
+  async listTakeLists(): Promise<PlayoutTakeList[]> {
     await this.ensure();
-    const files = await readdir(this.rundownRoot());
-    const rundowns = await Promise.all(
+    const files = await readdir(this.takeListRoot());
+    const lists = await Promise.all(
       files
         .filter((file) => file.endsWith(".json"))
         .map(async (file) =>
           JSON.parse(
-            await readFile(path.join(this.rundownRoot(), file), "utf8")
-          ) as PlayoutRundownDocument
+            await readFile(path.join(this.takeListRoot(), file), "utf8")
+          ) as PlayoutTakeList
         )
     );
-    return rundowns.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    return lists.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
 
-  async readRundown(rundownId: string): Promise<PlayoutRundownDocument | null> {
-    assertStorageId(rundownId, "rundownId");
+  async readTakeList(takeListId: string): Promise<PlayoutTakeList | null> {
+    assertStorageId(takeListId, "takeListId");
     try {
       return JSON.parse(
-        await readFile(this.rundownPath(rundownId), "utf8")
-      ) as PlayoutRundownDocument;
+        await readFile(this.takeListPath(takeListId), "utf8")
+      ) as PlayoutTakeList;
     } catch (error) {
       if (isMissingFile(error)) {
         return null;
@@ -151,58 +287,78 @@ export class PlayoutStore {
     }
   }
 
-  async saveRundown(
-    rundown: PlayoutRundownDocument
-  ): Promise<PlayoutRundownDocument> {
-    assertRundown(rundown);
+  /**
+   * Autosave a take list.
+   *
+   * No revision counter: a take list is operator working state, not a published artifact.
+   * The immutable, versioned things are the published scenes it points at.
+   */
+  async saveTakeList(takeList: PlayoutTakeList): Promise<PlayoutTakeList> {
+    assertTakeList(takeList);
     return this.serializeMutation(async () => {
       await this.ensure();
-      const current = await this.readRundown(rundown.rundownId);
-      const next: PlayoutRundownDocument = {
-        ...structuredClone(rundown),
-        revision: (current?.revision ?? 0) + 1,
+      const next: PlayoutTakeList = {
+        ...structuredClone(takeList),
         updatedAt: new Date().toISOString()
       };
-      await atomicWriteJson(this.rundownPath(next.rundownId), next);
+      await atomicWriteJson(this.takeListPath(next.takeListId), next);
       return next;
     });
   }
 
-  async createRundown(name = "Untitled Rundown"): Promise<PlayoutRundownDocument> {
+  async createTakeList(name = "Untitled Take List"): Promise<PlayoutTakeList> {
     const now = new Date().toISOString();
-    return this.saveRundown({
-      rundownId: `rundown_${randomUUID()}`,
-      name: name.trim() || "Untitled Rundown",
+    return this.saveTakeList({
+      takeListId: `takelist_${randomUUID()}`,
+      name: name.trim() || "Untitled Take List",
       version: 1,
-      revision: 0,
-      items: [],
-      segments: [
-        {
-          segmentId: `segment_${randomUUID()}`,
-          name: "Main",
-          color: "#4077b8",
-          notes: "",
-          collapsed: false,
-          locked: false
-        }
-      ],
+      cursorEntryId: null,
+      entries: [],
       archived: false,
       createdAt: now,
       updatedAt: now
     });
   }
 
+  /**
+   * Read the library index, assigning a Take ID to anything published before the field
+   * existed.
+   *
+   * `PublishedSceneMetadata.takeId` is not optional, so a version missing one violates the
+   * contract and surfaces in the Scene Manager as "take undefined". Backfilled per scene id —
+   * every version of a scene shares its Take ID — and in place, so the repair happens once
+   * rather than on every read.
+   */
   private async readLibraryIndex(): Promise<LibraryIndex> {
+    let index: LibraryIndex;
     try {
-      return JSON.parse(
-        await readFile(this.libraryIndexPath(), "utf8")
-      ) as LibraryIndex;
+      index = JSON.parse(await readFile(this.libraryIndexPath(), "utf8")) as LibraryIndex;
     } catch (error) {
       if (isMissingFile(error)) {
         return { version: 1, scenes: [] };
       }
       throw error;
     }
+
+    const missing = index.scenes.filter((entry) => !Number.isSafeInteger(entry.takeId));
+    if (missing.length === 0) {
+      return index;
+    }
+
+    const assigned = new Map<string, number>();
+    for (const entry of index.scenes) {
+      if (Number.isSafeInteger(entry.takeId)) {
+        assigned.set(entry.sceneId, entry.takeId);
+      }
+    }
+    for (const entry of missing) {
+      const takeId = assigned.get(entry.sceneId) ?? this.nextTakeId(index);
+      assigned.set(entry.sceneId, takeId);
+      entry.takeId = takeId;
+    }
+
+    await atomicWriteJson(this.libraryIndexPath(), index);
+    return index;
   }
 
   private serializeMutation<T>(operation: () => Promise<T>): Promise<T> {
@@ -218,8 +374,8 @@ export class PlayoutStore {
     return path.join(this.root, "library", "scenes");
   }
 
-  private rundownRoot(): string {
-    return path.join(this.root, "rundowns");
+  private takeListRoot(): string {
+    return path.join(this.root, "take-lists");
   }
 
   private libraryIndexPath(): string {
@@ -234,9 +390,9 @@ export class PlayoutStore {
     return path.join(this.sceneRoot(), sceneId, `v${version}.json`);
   }
 
-  private rundownPath(rundownId: string): string {
-    assertStorageId(rundownId, "rundownId");
-    return path.join(this.rundownRoot(), `${rundownId}.json`);
+  private takeListPath(takeListId: string): string {
+    assertStorageId(takeListId, "takeListId");
+    return path.join(this.takeListRoot(), `${takeListId}.json`);
   }
 }
 
@@ -255,25 +411,29 @@ function assertScene(scene: SceneDocument): void {
   }
 }
 
-function assertRundown(rundown: PlayoutRundownDocument): void {
-  assertStorageId(rundown.rundownId, "rundownId");
-  if (rundown.version !== 1 || !rundown.name.trim()) {
-    throw new Error("invalid PlayoutRundownDocument");
+function assertTakeList(takeList: PlayoutTakeList): void {
+  assertStorageId(takeList.takeListId, "takeListId");
+  if (takeList.version !== 1 || !takeList.name.trim()) {
+    throw new Error("invalid PlayoutTakeList");
   }
-  const segmentIds = new Set(rundown.segments.map((segment) => segment.segmentId));
-  if (segmentIds.size !== rundown.segments.length) {
-    throw new Error("rundown contains duplicate segment IDs");
+
+  const entryIds = new Set<string>();
+  for (const entry of takeList.entries) {
+    assertStorageId(entry.entryId, "entryId");
+    assertStorageId(entry.sceneId, "entry.sceneId");
+    if (entryIds.has(entry.entryId)) {
+      throw new Error("take list contains duplicate entry IDs");
+    }
+    if (!Number.isSafeInteger(entry.sceneVersion) || entry.sceneVersion <= 0) {
+      throw new Error(`take list entry ${entry.entryId} has an invalid scene version`);
+    }
+    entryIds.add(entry.entryId);
   }
-  const itemIds = new Set<string>();
-  for (const item of rundown.items) {
-    assertStorageId(item.itemId, "itemId");
-    if (itemIds.has(item.itemId)) {
-      throw new Error("rundown contains duplicate item IDs");
-    }
-    if (!segmentIds.has(item.segmentId)) {
-      throw new Error(`rundown item ${item.itemId} references a missing segment`);
-    }
-    itemIds.add(item.itemId);
+
+  // A cursor pointing at an entry that does not exist would leave Take In with nothing to
+  // operate on while the UI showed a highlighted row.
+  if (takeList.cursorEntryId !== null && !entryIds.has(takeList.cursorEntryId)) {
+    throw new Error("take list cursor references a missing entry");
   }
 }
 

@@ -1,11 +1,18 @@
-# Real-time broadcast architecture compliance
+# Real-time broadcast architecture compliance (historical ledger)
+
+> **V1 authority note (2026-07-29):** this ledger audits a 35-section external
+> review written **before** the three-product Editor/Playout/Render Engine split.
+> The forward-looking gates are now [`architecture.md`](architecture.md) ("V1
+> acceptance gates") and [`local-v1-system-design.md`](local-v1-system-design.md)
+> (§12 acceptance tests). Keep this ledger for the external review trail; where a
+> row below disagrees with those two documents, they win.
 
 Source review: `C:\Users\CG\Downloads\GrapiX_Real_Time_Broadcast_Architecture_Review.md`
 (2,015 lines, 35 numbered sections).
 
-This is the acceptance ledger for the migration. A section is **complete** only
-when its required behavior exists and has proportionate verification. Design
-documentation or an interface alone is not counted as runtime completion.
+A section is **complete** only when its required behavior exists and has
+proportionate verification. Design documentation or an interface alone is not
+counted as runtime completion.
 
 Status meanings:
 
@@ -20,13 +27,13 @@ Status meanings:
 |---:|---|---|---|---|
 | 1 | Executive decision | Editor is retained while Program output is isolated in a native process. | Partial | Tauri supervises an isolated Rust/wgpu Program daemon. Native real-3D mesh output now exists; text, general 2D image, and media coverage remain below the production target. |
 | 2 | Scope | The 70–80 scene, video, 3D, AE, live-data, output, reliability, and hardware concerns have explicit tests or gates. | Partial | All areas now have implementation, a harness, or an explicit external gate. Full decoder/output/hardware execution remains. |
-| 3 | Current architecture | Repository documentation reflects the actual Tauri/React/Fastify/Rust layout. | Complete | `README.md`, `docs/rendering-engine.md`, and `docs/renderer-control-architecture.md`. |
-| 4 | Suitability score | Web preview is never represented as certified Program output. | Complete | `ScenePreviewRenderer` and `RendererClient` are separate contracts. Documentation states current limitations. |
+| 3 | Current architecture | Repository documentation reflects the actual workspace layout. | Complete | `README.md`, [`architecture.md`](architecture.md), [`docs/README.md`](README.md). |
+| 4 | Suitability score | Web preview is never represented as certified Program output. | Partial | The Editor holds no Program or output authority and its protocol v2 client is gone. The browser viewport is still a second rasterizer, which M2 replaces with a native Editor Render View; see [`rendering-engine.md`](rendering-engine.md). |
 | 5 | Scene count/lifecycle | Implement UNLOADED, METADATA_ONLY, LOADING, WARM, PREVIEW, PROGRAM, EVICTABLE, FAILED; 1 Program, 1 Preview, bounded warm LRU. | Partial | All states are modeled; Program/Preview are protected and the warm LRU is bounded/tested across the 80-scene harness. Transient metadata/loading/failed states are not yet observable during asynchronous preparation. |
-| 6 | In-editor renderer risk | UI stalls/crashes cannot interrupt Program. | Partial | Daemon survives controller disconnect; Tauri watches API/frames/output and restarts/restores independently. Certified recovery timing/process-priority evidence remains. |
+| 6 | In-editor renderer risk | UI stalls/crashes cannot interrupt Program. | Partial | The engine survives client disconnect, and the Editor desktop shell now *ensures* the engine rather than owning it — closing the Editor cannot stop Program. Verified restart plus journalled Program restore inside the engine (M3) remains. |
 | 7 | Target architecture | Supervisor, editor, project service, contracts, asset pipeline, native daemon, and output plugins have enforced boundaries. | Partial | Boundaries now exist for every module, including native asset/media managers, real-3D warm preparation/rendering, and output trait. Vendor media/output implementations remain gated. |
 | 8 | Module responsibilities | Each module owns only the reviewed state and work. | Partial | Editor/project/daemon/supervisor ownership is enforced; asset/media lifecycle lives in native modules. Decoder/proxy/model workers remain validation-stage rather than full workers. |
-| 9 | Repository structure | Dependency direction is explicit and shared contracts do not depend on applications. | Partial | `packages/renderer-protocol`, `packages/shared-types`, and `packages/render-shaders` exist. Asset/media/output contract packages remain to be extracted. |
+| 9 | Repository structure | Dependency direction is explicit and shared contracts do not depend on applications. | Complete | Thirteen contract packages under `Shared/`, and `npm run check:boundaries` fails on a cross-domain manifest dependency, a cross-domain relative import, or any dependency on a retired package. |
 | 10 | Communication protocol | REST for project operations; renderer transport has capabilities, version, request ID, sequence, timestamp, scene/revision, expected state, acknowledgements, events, and stale rejection. | Partial | Protocol v2 implements the complete safety envelope, capabilities, heartbeat, acknowledgements, server-pushed events and stale/revision/state rejection. WebSocket remains the transport instead of named-pipe/gRPC. |
 | 11 | Scene state ownership | Frontend owns editor state; backend owns persisted revisions; daemon owns loaded resources, Preview, Program, playback, and output. | Partial | Project service assigns atomic monotonic revisions; daemon owns loaded resources/channels/output. Native playback commands/clock sampling remain. |
 | 12 | Renderer design | Native Rust/wgpu renderer, shared shader rules, adapter seam, explicit unsupported-feature errors. | Partial | Headless wgpu renders rects/ellipses plus depth-tested, textured primitive and imported glTF meshes with shared WGSL and pixel smoke tests. Native text, general 2D images/shapes, video, and effects remain explicit gaps. |
@@ -40,7 +47,7 @@ Status meanings:
 | 20 | Material architecture | One material/binding truth shared by inspector, manager, preview, package and daemon with readiness states. | Partial | Central material/face-slot model now drives editor and native 3D solid-unlit, textured-unlit, Basic Lit and PBR surfaces with all-face/per-face assignment, sampler/UV parameters, light classification and shared blend IDs. Custom shaders, video materials, opaque sampled-alpha parity, transparent native depth ordering, and the native 2D sprite/text paths remain. |
 | 21 | Package format | Strict versioned `.gfxpkg` with manifest, scene, materials, assets, bindings, metadata, checksums, dependencies, capabilities and preflight. | Complete | `.gfxpkg` v2 embeds local assets plus optional `fonts.json`/`automation.json`, declares renderer/features/fonts/shaders/codecs/memory/fallbacks, writes SHA-256 for every file, reopens/verifies final ZIP bytes, and rejects tampering in tests. |
 | 22 | Backend storage | Atomic temp+rename writes, revisions, backups/recovery, hashes, logs; optional SQLite metadata. | Complete | Scene/package/asset writes are temp+fsync+rename, revisions monotonic, prior scenes backed up with explicit recovery, hashes/reference indexes maintained, and operator actions logged. SQLite is optional in the review. |
-| 23 | Reliability/crash recovery | Supervisor monitors heartbeat/frame/API/output, restarts daemon, restores Program, and activates safe fallback with structured logs. | Partial | Tauri watchdog monitors the correctly unwrapped daemon reply, bounds restarts, restores Program/output and exposes fallback/GPU/certification status. Crash-injection/on-air fallback timing remains uncertified. |
+| 23 | Reliability/crash recovery | The renderer is restarted and Program restored after a crash, with structured logs. | Pending | Deliberately removed from the Editor desktop shell: an authoring window that re-took a scene on air from a cached guess is the failure mode the journal-and-verify model exists to prevent (invariants 3–5). The Engine Host journal, atomic snapshot and first-frame restore are milestone M3 and do not exist yet. |
 | 24 | Data updates | Small typed patches update data/object properties without full scene reload; patches are revision/sequence safe and batched at frame boundaries. | Partial | `scene.patch` is typed, revision/sequence safe, rate-limited and uses the watch channel’s latest-value/frame-boundary behavior. Conditional scene/rundown triggers can now emit the same typed data actions. Preparation still rebuilds the prepared scene instead of updating only affected bindings. |
 | 25 | Resource controls | EDITOR_PREVIEW, PROGRAM_HD, PROGRAM_UHD and SAFE_MODE govern resolution, cache, effects, decoder and GPU budgets while preserving Program. | Partial | Five profiles govern output, prepared/CPU/GPU cache, texture, decoder, 3D, render-target, shadow/effect/diagnostic and background-work limits; active channels are protected. Live RAM/VRAM enforcement remains. |
 | 26 | Keep current architecture | React, TypeScript, npm workspaces, shared scene/material/package direction and Fastify service remain. | Complete | Preserved by the migration. |
@@ -99,24 +106,41 @@ evidence rather than code alone.
 
 ## Current automated evidence
 
-- Shared scene/material/animation/font/automation contracts: 32 tests.
-- Editor material renderer classification/opacity/fallback contract: 4 tests.
-- GrapiX JavaScript SDK and sequence engine: 3 tests.
-- Renderer protocol v2: 6 TypeScript contract tests plus Rust protocol tests.
-- Project service: 10 font/script/rundown/importer/package integrity tests.
-- Native daemon: 91 tests across unit, real GPU smoke, shader-layout,
-  scene-contract and the 3-test 80-scene certification suite.
-- Tauri supervisor: 2 unit tests.
-- Root production build and TypeScript/Tauri typecheck pass.
-- Isolated API↔Rust-daemon E2E: 80 scenes, a conditional rundown action, live
-  patches, Takes, null output, more than 100 rendered frames and 0 dropped
-  frames in the short control runs.
-- Runtime npm dependency audit: 0 known vulnerabilities.
+Measured on 2026-07-29 after the restructure, by running each suite:
 
-Use `npm run certify:control` for the deterministic 80-scene lifecycle gate and
-`npm run certify:e2e` for the isolated short API↔daemon gate.
-`npm run certify:soak` runs against an already supervised stack and defaults to
-one minute; set `GRAPIX_SOAK_MINUTES=480` or `1440` for the reviewed 8/24-hour
-run. None of these commands by itself certifies NDI, a decoder, a vendor output
-card, or a hardware tier; use `docs/hardware-certification-template.md` for
-those runs.
+| Suite | Command | Tests |
+| --- | --- | --- |
+| Shared contracts (12 packages) | `npm run test:shared` | 439 |
+| Editor: project service | `npm test -w @grapix/api-server` | 18 |
+| Editor: web viewport | `npm test -w @grapix/editor-web` | 45 |
+| Editor: desktop supervisor (Rust) | `npm test -w @grapix/desktop-tauri` | 5 |
+| Playout: control service | `npm test -w @grapix/playout-control` | 5 |
+| Render core (Rust, incl. GPU smoke) | `npm run test:core` | 97 |
+| Render engine (Rust) | `npm run test:engine` | 217 |
+| **Total** | `npm test`, `npm run test:core`, `npm run test:engine` | **826** |
+
+Also passing: `npm run typecheck` across every workspace, and
+`npm run check:boundaries`.
+
+Certification harnesses, none of which certifies NDI, a decoder, a vendor output
+card or a hardware tier on its own:
+
+- `npm run certify:render-core` — the deterministic 80-scene lifecycle gate.
+- `npm run certify:engine` — real protocol-v3 TypeScript client against the engine.
+- `npm run certify:playout-engine` — publish, prepare, cue, take and clear over
+  Playout HTTP.
+- `npm run certify:publish-takelist` — Editor publish through to air.
+- `npm run certify:ipc` — local IPC transport with its own engine.
+- `npm run certify:parity` — pixel parity; see [`pixel-parity.md`](pixel-parity.md).
+- `npm run certify:materials` — shared fixtures plus the no-default-features build.
+
+**Gap, stated rather than papered over:** the 8/24-hour soak harness has been
+deleted. It drove the Editor project service and the retired protocol v2 daemon,
+including Take and output verbs the Editor is no longer permitted to issue, so a
+green run proved a runtime that will not ship. The soak gate in
+[`architecture.md`](architecture.md) is therefore **unmet and has no harness**; a
+replacement must drive the engine over protocol v3 with Playout as the only
+controller.
+
+Use [`hardware-certification-template.md`](hardware-certification-template.md) for
+hardware and vendor-output runs.

@@ -96,7 +96,10 @@ fn the_virtual_output_is_never_live_and_always_available() {
 
     // These three properties are the entire contract of the adapter.
     assert!(!sink.is_live(), "the virtual output must never be live");
-    assert!(sink.available(), "it needs no SDK, so it is always available");
+    assert!(
+        sink.available(),
+        "it needs no SDK, so it is always available"
+    );
     assert_eq!(sink.unavailable_reason(), None);
 
     // No hardware is involved, so there is nothing to certify against.
@@ -113,7 +116,9 @@ fn the_virtual_output_accepts_frames_and_says_nothing_leaves_the_machine() {
 
     let warnings = instance.configure(format()).expect("configure");
     assert!(
-        warnings.iter().any(|w| w.contains("no frames leave this machine")),
+        warnings
+            .iter()
+            .any(|w| w.contains("no frames leave this machine")),
         "the operator must be told this is headless: {warnings:?}"
     );
 
@@ -122,7 +127,10 @@ fn the_virtual_output_accepts_frames_and_says_nothing_leaves_the_machine() {
     assert!(!instance.is_live());
 
     for index in 0..5 {
-        assert!(instance.send(&frame(index)), "frame {index} should be accepted");
+        assert!(
+            instance.send(&frame(index)),
+            "frame {index} should be accepted"
+        );
     }
 
     let status = instance.status();
@@ -161,7 +169,10 @@ fn virtual_frame_retention_can_be_turned_off() {
     sink.start().expect("start");
     sink.send(&frame(1)).expect("send");
 
-    assert!(sink.last_frame().is_none(), "retention off means nothing is kept");
+    assert!(
+        sink.last_frame().is_none(),
+        "retention off means nothing is kept"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -221,7 +232,9 @@ fn an_output_must_be_configured_before_it_can_start() {
     );
 
     assert_eq!(instance.state, OutputState::Idle);
-    let error = instance.start().expect_err("must refuse to start unconfigured");
+    let error = instance
+        .start()
+        .expect_err("must refuse to start unconfigured");
     assert!(error.contains("must be configured"));
 
     instance.configure(format()).expect("configure");
@@ -293,10 +306,8 @@ fn a_failing_send_records_the_error_without_propagating_it() {
 
 #[test]
 fn recording_writes_frames_and_stops_at_its_bound() {
-    let directory = std::env::temp_dir().join(format!(
-        "grapix-recording-test-{}",
-        std::process::id()
-    ));
+    let directory =
+        std::env::temp_dir().join(format!("grapix-recording-test-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&directory);
 
     let mut instance = OutputInstance::new(
@@ -365,8 +376,7 @@ fn output_format_round_trips_through_camel_case_json() {
 #[test]
 fn a_missing_frame_rate_falls_back_rather_than_failing() {
     let parsed: OutputFormat =
-        serde_json::from_value(serde_json::json!({ "width": 1280, "height": 720 }))
-            .expect("parse");
+        serde_json::from_value(serde_json::json!({ "width": 1280, "height": 720 })).expect("parse");
 
     assert_eq!(parsed.frame_rate.numerator, 50);
     assert_eq!(parsed.frame_rate.denominator, 1);

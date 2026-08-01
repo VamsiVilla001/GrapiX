@@ -4,7 +4,8 @@ Shared WGSL shaders and byte-layout contract for GrapiX renderers.
 
 Consumed by:
 
-- `services/render-daemon` — the Rust/wgpu broadcast render daemon (today).
+- `services/render-engine` — the native Rust/wgpu engine, through its
+  `grapix-render-core` library at `services/render-daemon` (today).
 - The browser WebGPU preview described in `docs/rendering-engine.md` (future).
 
 Contents:

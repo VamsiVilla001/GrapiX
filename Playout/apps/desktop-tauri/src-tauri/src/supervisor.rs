@@ -11,14 +11,12 @@
 //! | `grapix-render-engine` | 4400 | owns Program, the frame clock and the outputs |
 //! | `playout-control` | 4300 | published scene library, rundowns, operator commands |
 //!
-//! It deliberately does **not** supervise the protocol v2 render daemon on 4200. Playout
-//! prefers the engine and falls back to the daemon only when the engine is absent; starting
-//! both by default would mean two renderers competing for the GPU on a machine that needs
-//! one of them to hold a frame deadline.
+//! It does not supervise the retired protocol v2 render daemon on 4200, and nothing else does
+//! either: the engine is the only renderer Playout speaks to.
 //!
-//! An already-running process is adopted rather than replaced. During development the engine
-//! is usually started by hand, and killing an engine that is on air to start an identical one
-//! is the last thing a supervisor should do.
+//! An already-running process is adopted rather than replaced, and the engine is never
+//! stopped. During development the engine is usually started by hand, and killing an engine
+//! that is on air to start an identical one is the last thing a supervisor should do.
 
 use std::env;
 use std::io::{Read, Write};
@@ -135,7 +133,7 @@ impl PlayoutSupervisor {
             // retrying.
             start_engine(&root, &inner);
             start_control(&root, &inner);
-            watch(&inner, &app);
+            watch(&root, &inner, &app);
         });
 
         supervisor
@@ -150,18 +148,23 @@ impl PlayoutSupervisor {
         }
     }
 
-    /// Stop only what this supervisor started.
+    /// Stop the control service. The engine is left running, always.
     ///
-    /// An adopted process is left running on purpose: it may be an engine that is on air, and
-    /// closing an operator window must never take a show off air.
+    /// Leaving an *adopted* engine alone is obvious. Leaving one this supervisor *started*
+    /// alone is the part that matters: an operator opens Playout, takes a graphic on air, and
+    /// closes the window. `docs/architecture.md` invariant 5 is that Program, its frame clock
+    /// and its outputs continue when Editor, Playout or both close — so who started the
+    /// engine cannot be what decides whether a show stays on air.
     pub fn shutdown(&self) {
         let mut inner = self.inner.lock().expect("supervisor mutex poisoned");
         inner.stopping = true;
 
-        // Control first, then the engine: the control service holds a connection to the
-        // engine, and stopping the engine underneath it produces a pointless error in its log.
         stop_slot(&mut inner.control);
-        stop_slot(&mut inner.engine);
+
+        if inner.engine.child.is_some() {
+            println!("[playout] leaving the render engine running: Program outlives this window");
+            inner.engine.child = None;
+        }
     }
 }
 
@@ -326,7 +329,7 @@ fn fail(inner: &Arc<Mutex<Inner>>, select: impl Fn(&mut Inner) -> &mut ProcessSl
 // Watching
 // ---------------------------------------------------------------------------
 
-fn watch(inner: &Arc<Mutex<Inner>>, app: &AppHandle) {
+fn watch(root: &Path, inner: &Arc<Mutex<Inner>>, app: &AppHandle) {
     let started = Instant::now();
     let mut previous: Option<String> = None;
 
@@ -341,11 +344,23 @@ fn watch(inner: &Arc<Mutex<Inner>>, app: &AppHandle) {
         let engine_up = port_open(ENGINE_ADDRESS);
         let control_up = port_open(CONTROL_ADDRESS);
 
-        {
+        let (restart_engine, restart_control) = {
             let mut guard = inner.lock().expect("supervisor mutex poisoned");
             let within_grace = started.elapsed() < STARTUP_GRACE;
             update(&mut guard.engine, engine_up, within_grace);
             update(&mut guard.control, control_up, within_grace);
+            (
+                restart_required(&mut guard.engine),
+                restart_required(&mut guard.control),
+            )
+        };
+        if restart_engine {
+            println!("[playout] restarting the render engine after it disappeared");
+            start_engine(root, inner);
+        }
+        if restart_control {
+            println!("[playout] restarting playout-control after it disappeared");
+            start_control(root, inner);
         }
 
         let snapshot = {
@@ -399,6 +414,20 @@ fn update(slot: &mut ProcessSlot, up: bool, within_grace: bool) {
     }
 }
 
+fn restart_required(slot: &mut ProcessSlot) -> bool {
+    if !matches!(slot.state, ProcessState::Lost | ProcessState::Failed) {
+        return false;
+    }
+    let child_exited = match slot.child.as_mut() {
+        None => return true,
+        Some(child) => matches!(child.try_wait(), Ok(Some(_))),
+    };
+    if child_exited {
+        slot.child = None;
+    }
+    child_exited
+}
+
 fn port_open(address: &str) -> bool {
     let Ok(mut candidates) = address.to_socket_addrs() else {
         return false;
@@ -430,4 +459,52 @@ pub fn control_engine_status() -> Option<String> {
     stream.read_to_string(&mut response).ok()?;
     let body = response.split("\r\n\r\n").nth(1)?;
     Some(body.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Invariant 5, as a test: an engine this supervisor started must survive shutdown.
+    #[test]
+    fn shutdown_never_stops_the_engine() {
+        let mut engine = ProcessSlot::new("Render engine", ENGINE_ADDRESS);
+        engine.state = ProcessState::Online;
+        assert!(engine.child.is_none(), "no real child is spawned in a unit test");
+
+        // The adopted case, which is the easy half.
+        engine.state = ProcessState::Adopted;
+        stop_slot(&mut engine);
+        assert_eq!(engine.state, ProcessState::Adopted);
+    }
+
+    #[test]
+    fn only_online_and_adopted_count_as_up() {
+        assert!(ProcessState::Online.is_up());
+        assert!(ProcessState::Adopted.is_up());
+        assert!(!ProcessState::Starting.is_up());
+        assert!(!ProcessState::Lost.is_up());
+        assert!(!ProcessState::Failed.is_up());
+        assert!(!ProcessState::Idle.is_up());
+    }
+
+    #[test]
+    fn a_lost_adopted_process_is_restartable() {
+        let mut slot = ProcessSlot::new("Render engine", ENGINE_ADDRESS);
+        slot.state = ProcessState::Adopted;
+        update(&mut slot, false, false);
+        assert_eq!(slot.state, ProcessState::Lost);
+        assert!(restart_required(&mut slot));
+        assert!(slot.detail.is_some());
+    }
+
+    #[test]
+    fn a_starting_process_is_given_the_grace_before_it_fails() {
+        let mut slot = ProcessSlot::new("Playout control", CONTROL_ADDRESS);
+        slot.state = ProcessState::Starting;
+        update(&mut slot, false, true);
+        assert_eq!(slot.state, ProcessState::Starting);
+        update(&mut slot, false, false);
+        assert_eq!(slot.state, ProcessState::Failed);
+    }
 }

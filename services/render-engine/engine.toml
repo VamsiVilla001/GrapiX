@@ -25,7 +25,7 @@ allowed-origins = []
 # Clients permitted to connect. Empty means any that presents a valid token.
 client-allowlist = []
 # TLS is terminated at a reverse proxy today; the transport is ready for in-process
-# TLS but does not yet do it. See docs/render-engine-migration.md phase G.
+# TLS but does not yet do it. TLS/mTLS is V2; see docs/architecture.md.
 # tls-certificate-path = "certs/engine.crt"
 # tls-private-key-path = "certs/engine.key"
 

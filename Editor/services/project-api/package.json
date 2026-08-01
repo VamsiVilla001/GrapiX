@@ -14,7 +14,6 @@
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",
-    "@grapix/renderer-protocol": "0.1.0",
     "@grapix/sdk": "0.1.0",
     "@grapix/shared-types": "0.1.0",
     "@napi-rs/canvas": "^0.1.80",

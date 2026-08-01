@@ -1,42 +1,51 @@
-# GrapiX Rendering Engine
+# GrapiX Editor viewport (browser preview)
+
+> **V1 authority note (2026-07-29):** this document describes the **Editor's
+> browser viewport as it exists today**, not the target. [`architecture.md`](architecture.md)
+> is authoritative: the native Render Engine is the only implementation that
+> rasterizes production scene pixels, and milestone M2 replaces this browser
+> path with a native Editor Render View. Until then the viewport below is what
+> an author actually sees, and its divergence from Program is a known risk
+> rather than an accepted design.
 
 Material architecture, shared WGSL rules, alpha/blend behavior, and current
 renderer support are documented in [material-system.md](./material-system.md).
 
-## Current Direction
-
-GrapiX uses a web-authored, native-output desktop architecture:
+## What the viewport is today
 
 ```text
-Tauri desktop supervisor
-  -> React editor UI
-     -> ScenePreviewRenderer -> PixiJS editor preview
-     -> RendererClient -> Fastify bridge
-  -> Shared SceneDocument v1
-  -> Rust/wgpu render daemon -> Program output
+React editor UI
+  -> ScenePreviewRenderer -> PixiJS 2D preview  (rects, ellipses, text, images)
+  -> ThreeSceneLayer      -> depth-tested 3D meshes, cameras, lights
+  -> SVG overlay          -> hit testing, selection, dragging
+  -> engineClient         -> protocol v3 -> render engine (panel, diagnostics)
+  -> SceneDocument v1     -> durable content source of truth
 ```
 
-The editor viewport now separates rendering from editing:
-
 - PixiJS/WebGL is contained behind `PixiPreviewRendererAdapter` and renders
-  editor preview pixels, images, SVG textures, video textures, text, and shapes.
-- A lightweight SVG overlay handles editor interactions such as hit testing, selection, and dragging.
+  preview pixels, images, SVG textures, video textures, text and shapes.
+- A lightweight SVG overlay handles interactions, so the renderer is never
+  polluted with editor-only handles, hit zones and selection UX.
 - `SceneDocument` v1 remains the durable content source of truth.
-- The native daemon, not the browser preview, is authoritative for Program
-  state and output.
+- The engine, never the browser preview, is authoritative for Program state and
+  output. The Editor holds no Program or output authority at all.
 
-See [renderer-control-architecture.md](./renderer-control-architecture.md) and
-[scene-document-v1.md](./scene-document-v1.md) for the process and contract
-boundaries.
+## Why it is built this way, and why it is temporary
 
-## Why This Architecture
+WebGL is a practical *preview* backend: stable, GPU accelerated and compatible
+with the existing 2D authoring workload. Pixi supplies texture caching, batched
+drawing, SVG rasterization via browser image decode, text rendering and video
+textures.
 
-- WebGL is a practical editor-preview backend because it is stable, GPU
-  accelerated, and compatible with the existing 2D authoring workload.
-- PixiJS provides texture caching, batched drawing, accelerated sprites, SVG rasterization via browser image decode, text rendering, and video texture support.
-- Keeping interactions in an overlay prevents the renderer from being polluted with editor-only handles, hit zones, and selection UX.
-- The preview boundary can move to OffscreenCanvas, a Web Worker, WebGPU, or a
-  3D adapter without replacing editor feature components.
+What it cannot do is guarantee that authored pixels match Program. Two renderers
+reading the same JSON drift — different blending, colour math and transform
+rounding — which is why the shared WGSL contract exists and why M2 moves
+authoring onto the native renderer through a Render View. The preview boundary is
+kept behind one interface precisely so that swap is not a feature rewrite.
+
+See [scene-document-v1.md](./scene-document-v1.md) for the durable content
+contract and [render-engine-architecture.md](./render-engine-architecture.md)
+for the native renderer this path is converging on.
 
 ## Current Capabilities
 
@@ -69,25 +78,29 @@ boundaries.
   instances, opacity, tint, UV scale/offset, and Normal/Add blending.
 - The viewport reports GPU backend and max texture size in the stage toolbar.
 
-## Next Rendering Steps
+## What is deliberately not planned here
 
-- Add renderer diagnostics panel: FPS, draw calls, texture count, VRAM estimate, dropped frames.
-- Add render-quality profile controls: preview, program, UHD, and low-latency.
-- Add lifecycle-managed scene warming before Preview and Take.
-- Add texture eviction and media lifecycle policies.
-- Add shader/filter support for broadcast effects.
-- Port the editor's active-camera, shadow, and hierarchy-resolved camera/light
-  transforms to the authoritative native mesh path.
-- Move rendering to OffscreenCanvas where supported.
-- Add WebGPU backend exploration behind the same renderer interface.
-- Add Preview/Program channels and warm-scene LRU to the existing native
-  renderer/output bridge.
+Items that once sat on this document's roadmap now belong to the engine, because
+the Editor is not getting a second production renderer: render-quality profiles,
+scene warming, texture eviction and media lifecycle, broadcast effect shaders,
+Preview/Program channels and the warm-scene LRU are all engine concerns and are
+specified in [render-engine-architecture.md](./render-engine-architecture.md).
+
+What remains genuinely viewport work, until the native Render View lands:
+
+- viewport diagnostics an author can act on — FPS, draw calls, texture count;
+- OffscreenCanvas where supported, to keep interaction responsive;
+- keeping the Pixi and Three layers behind one `SceneRenderer` interface so the
+  Render View replaces them without touching feature components.
 
 ## Native Program 3D path
 
-The Rust daemon now renders actual triangle geometry with a depth attachment
-and perspective camera. It natively tessellates cube/slab, sphere, cylinder,
-and torus primitives, imports embedded glTF/GLB triangle primitives, preserves
+The render core renders actual triangle geometry with a depth attachment and
+perspective camera. It natively tessellates cube/slab, sphere, cylinder and
+torus primitives, imports embedded glTF/GLB triangle primitives, preserves
 authored glTF PBR base materials, and applies GrapiX whole-model or
-per-material-element overrides. Image textures are decoded during scene warm
-and uploaded into sRGB/linear GPU textures before the frame clock begins.
+per-material-element overrides. Image textures are decoded during scene warm and
+uploaded into sRGB/linear GPU textures before the frame clock begins.
+
+Editor-versus-Program parity for that path is measured, not assumed — see
+[pixel-parity.md](./pixel-parity.md).

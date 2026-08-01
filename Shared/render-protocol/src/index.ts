@@ -4,7 +4,7 @@
  * The only way the Editor and Playout may talk to a render engine. Neither ever
  * touches a renderer object; both send messages defined here.
  *
- * What v3 adds over `@grapix/renderer-protocol` v2, which stays supported:
+ * What v3 adds over the retired protocol v2, whose TypeScript client has been removed:
  *
  *   messageId    duplicate suppression, so a retransmit is safe
  *   engineId     routing when several engines are connected

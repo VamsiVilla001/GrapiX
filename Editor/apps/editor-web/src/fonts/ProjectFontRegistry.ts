@@ -130,7 +130,12 @@ export class ProjectFontRegistry {
         browserFace = undefined;
       }
       if (!browserFace) {
-        browserFace = new FontFace(face.family, `url("${escapeCssUrl(url)}")`, {
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`Font asset ${assetId} returned HTTP ${response.status}`);
+        }
+        const bytes = await response.arrayBuffer();
+        browserFace = new FontFace(face.family, bytes, {
           weight: String(face.weight),
           style: face.style,
           stretch: face.stretch,
@@ -184,9 +189,6 @@ function strongestFailure(statuses: FontLoadStatus[]): FontLoadStatus {
   return "ERROR";
 }
 
-function escapeCssUrl(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/[\r\n\f]/g, "");
-}
 
 function describeLoadError(error: unknown): string {
   if (error instanceof DOMException && error.name === "NetworkError") {

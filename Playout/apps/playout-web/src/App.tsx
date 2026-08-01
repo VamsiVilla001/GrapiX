@@ -1,19 +1,20 @@
 import type {
-  PlayoutRundownDocument,
-  PlayoutRundownItem,
   PlayoutRuntimeStatus,
+  PlayoutTakeEntry,
+  PlayoutTakeList,
   PublishedSceneMetadata,
   SceneDocument
 } from "@grapix/shared-types";
 import {
-  ChevronDown,
-  ChevronUp,
+  ArrowDown,
+  ArrowUp,
   CircleAlert,
   Clapperboard,
   Clock3,
   Cpu,
   Database,
   FileInput,
+  Hash,
   Library,
   ListVideo,
   MonitorPlay,
@@ -26,6 +27,7 @@ import {
   Settings2,
   SkipForward,
   Square,
+  Trash2,
   Wifi,
   WifiOff
 } from "lucide-react";
@@ -37,44 +39,54 @@ import {
   useMemo,
   useState
 } from "react";
-import { playoutApi, type EngineHealthView } from "./api";
+import {
+  isProgramExplicitlyCleared,
+  monitorStreamUrl,
+  playoutApi,
+  subscribeToPlayoutEvents,
+  type EngineHealthView
+} from "./api";
 import { OutputsPanel } from "./OutputsPanel";
 
 const emptyRuntime: PlayoutRuntimeStatus = {
   rendererConnection: "disconnected",
-  previewItemId: null,
-  programItemId: null,
-  itemStates: {},
+  previewRef: null,
+  programRef: null,
+  takeStates: {},
   lastError: null,
   updatedAt: new Date(0).toISOString()
 };
 
+/**
+ * Reference a Scene Manager recall is tracked under.
+ *
+ * Mirrors `targetRef` in the control service. A direct recall has no take-list entry, so it
+ * cannot borrow one — otherwise the Take List would highlight a row that is not on air.
+ */
+function sceneRef(takeId: number): string {
+  return `scene:take-${takeId}`;
+}
+
+type OperatorAction = "cue" | "take" | "take-out" | "continue";
+
 export function App() {
   const [library, setLibrary] = useState<PublishedSceneMetadata[]>([]);
-  const [rundown, setRundown] = useState<PlayoutRundownDocument | null>(null);
+  /** True while the control service's event stream is attached. */
+  const [liveLink, setLiveLink] = useState(false);
+  const [takeList, setTakeList] = useState<PlayoutTakeList | null>(null);
   const [runtime, setRuntime] = useState<PlayoutRuntimeStatus>(emptyRuntime);
-  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
-  const [selectedSceneKey, setSelectedSceneKey] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [busyAction, setBusyAction] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [engine, setEngine] = useState<EngineHealthView | null>(null);
   const [clock, setClock] = useState(new Date());
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [busyAction, setBusyAction] = useState<OperatorAction | null>(null);
 
-  /**
-   * What is being dragged, and where it would land.
-   *
-   * Held in state rather than read from the drag event because Firefox does not expose
-   * `dataTransfer` data during `dragover`, so the drop indicator could not be drawn
-   * from the event alone.
-   */
-  const [drag, setDrag] = useState<
-    | { kind: "scene"; sceneKey: string }
-    | { kind: "item"; itemId: string }
-    | null
-  >(null);
-  const [dropTarget, setDropTarget] = useState<
-    { segmentId: string; beforeItemId: string | null } | null
-  >(null);
+  /** Scene Manager selection, by Take ID. */
+  const [selectedTakeId, setSelectedTakeId] = useState<number | null>(null);
+  /** Take List selection, by entry id. */
+  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
+  /** The recall field an operator types a Take ID into. */
+  const [recall, setRecall] = useState("");
 
   const refreshLibrary = useCallback(async () => {
     setLibrary(await playoutApi.listScenes());
@@ -92,268 +104,251 @@ export function App() {
     }
   }, []);
 
-  const [engine, setEngine] = useState<EngineHealthView | null>(null);
-
   /**
    * Poll the render engine's health.
    *
-   * Failure is normal — the engine may not be running — so it degrades to a null
-   * view rather than surfacing an error banner.
+   * Failure is normal — the engine may not be running — so it degrades to a null view rather
+   * than surfacing an error banner. Memoised because the effect below depends on it; as a
+   * plain function it got a new identity every render and re-opened the event stream.
    */
-  async function refreshEngine() {
+  const refreshEngine = useCallback(async () => {
     try {
       setEngine(await playoutApi.engine());
     } catch {
       setEngine(null);
     }
-  }
+  }, []);
+
+  const refreshTakeList = useCallback(async () => {
+    const lists = await playoutApi.listTakeLists();
+    const active = lists.find((list) => !list.archived) ?? (await playoutApi.createTakeList("Main"));
+    setTakeList(active);
+    return active;
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const [scenes, rundowns] = await Promise.all([
-          playoutApi.listScenes(),
-          playoutApi.listRundowns()
-        ]);
+        const [scenes, active] = await Promise.all([playoutApi.listScenes(), refreshTakeList()]);
         if (cancelled) return;
         setLibrary(scenes);
-        const active =
-          rundowns.find((candidate) => !candidate.archived) ??
-          (await playoutApi.createRundown("Main Rundown"));
-        if (cancelled) return;
-        setRundown(active);
-        setSelectedItemId(active.activeItemId ?? active.items[0]?.itemId ?? null);
+        setSelectedEntryId(active.cursorEntryId ?? active.entries[0]?.entryId ?? null);
       } catch (loadError) {
         if (!cancelled) setError(errorMessage(loadError));
       }
     })();
+
     void refreshStatus();
-    // Fetch once immediately as well, so the operator strip is populated on the
-    // first paint rather than three seconds later.
     void refreshEngine();
+
+    // The live link. A scene published from the Editor appears the moment it lands rather
+    // than when someone remembers to press refresh. Polling stays as the floor: if the
+    // stream drops, this degrades to the previous behaviour instead of freezing.
+    const detachEvents = subscribeToPlayoutEvents(
+      (kind) => {
+        if (kind === "library.changed") void refreshLibrary();
+        if (kind === "sequence.changed") void refreshTakeList();
+        if (kind === "runtime.changed") void refreshStatus();
+      },
+      setLiveLink
+    );
+
     const statusTimer = window.setInterval(refreshStatus, 3000);
     const engineTimer = window.setInterval(refreshEngine, 3000);
     const clockTimer = window.setInterval(() => setClock(new Date()), 250);
     return () => {
       cancelled = true;
+      detachEvents();
       window.clearInterval(statusTimer);
       window.clearInterval(engineTimer);
       window.clearInterval(clockTimer);
     };
-  }, [refreshStatus]);
-
-  const filteredLibrary = useMemo(() => {
-    const query = search.trim().toLocaleLowerCase();
-    return library.filter((scene, index, all) => {
-      const isLatest =
-        all.findIndex((candidate) => candidate.sceneId === scene.sceneId) === index;
-      return (
-        isLatest &&
-        (!query ||
-          scene.name.toLocaleLowerCase().includes(query) ||
-          scene.tags.some((tag) => tag.toLocaleLowerCase().includes(query)))
-      );
-    });
-  }, [library, search]);
-
-  const selectedItem =
-    rundown?.items.find((item) => item.itemId === selectedItemId) ?? null;
-  const selectedScene =
-    library.find(
-      (scene) =>
-        `${scene.sceneId}:${scene.version}` === selectedSceneKey
-    ) ?? null;
-  const previewItem =
-    rundown?.items.find((item) => item.itemId === runtime.previewItemId) ?? null;
-  const programItem =
-    rundown?.items.find((item) => item.itemId === runtime.programItemId) ?? null;
+  }, [refreshEngine, refreshLibrary, refreshStatus, refreshTakeList]);
 
   /**
-   * The format an output should use, taken from the scene on Program when there is
-   * one, then the selected scene, then the HD default.
+   * The Scene Manager list: one row per scene at its newest version.
    *
-   * Published metadata carries the resolution the project settings produced, so this
-   * follows a project change without Playout knowing about project settings at all.
-   * A scene published before that field existed reports nothing, and the operator
-   * sees the default and can change it rather than being told a wrong number.
+   * Older versions stay in the library and a pinned take-list entry still resolves to them,
+   * but an operator recalling by Take ID means "the current one".
+   */
+  const sceneManager = useMemo(() => {
+    const newest = new Map<string, PublishedSceneMetadata>();
+    for (const scene of library) {
+      const held = newest.get(scene.sceneId);
+      if (!held || scene.version > held.version) newest.set(scene.sceneId, scene);
+    }
+    const query = search.trim().toLocaleLowerCase();
+    return [...newest.values()]
+      .filter(
+        (scene) =>
+          !query ||
+          String(scene.takeId).includes(query) ||
+          scene.name.toLocaleLowerCase().includes(query) ||
+          (scene.category ?? "").toLocaleLowerCase().includes(query) ||
+          scene.tags.some((tag) => tag.toLocaleLowerCase().includes(query))
+      )
+      .sort((left, right) => left.takeId - right.takeId);
+  }, [library, search]);
+
+  const selectedScene = sceneManager.find((scene) => scene.takeId === selectedTakeId) ?? null;
+  const entries = takeList?.entries ?? [];
+  const selectedEntry = entries.find((entry) => entry.entryId === selectedEntryId) ?? null;
+  const connected = runtime.rendererConnection === "connected";
+
+  const describeRef = useCallback(
+    (ref: string | null): { name: string; detail: string } | null => {
+      if (!ref) return null;
+      const entry = entries.find((candidate) => candidate.entryId === ref);
+      if (entry) {
+        return { name: entry.name, detail: `${entry.sceneId} · v${entry.sceneVersion}` };
+      }
+      const takeId = Number(ref.replace("scene:take-", ""));
+      const scene = library.find((candidate) => candidate.takeId === takeId);
+      return scene
+        ? { name: scene.name, detail: `take ${scene.takeId} · v${scene.version}` }
+        : { name: ref, detail: "no longer in the library" };
+    },
+    [entries, library]
+  );
+
+  const previewSlate = describeRef(runtime.previewRef);
+  const programSlate = describeRef(runtime.programRef);
+  const programExplicitlyCleared = isProgramExplicitlyCleared(runtime);
+
+  /**
+   * The format an output should be configured at.
+   *
+   * Taken from the scene the operator is about to air — or the newest published scene when
+   * nothing is selected — because a published scene carries the project's resolution and
+   * rational rate. The fallback is HD/50p rather than nothing, so the Add Output dialog always
+   * opens with a sane format instead of zeroes.
    */
   const programFormat = useMemo(() => {
-    const onAirSceneId = programItem?.sceneId ?? selectedItem?.sceneId;
-    const published =
-      library.find((scene) => scene.sceneId === onAirSceneId) ?? library[0];
+    const onAir = runtime.programRef;
+    const entry = onAir ? entries.find((candidate) => candidate.entryId === onAir) : undefined;
+    const scene =
+      (entry
+        ? library.find((candidate) => candidate.sceneId === entry.sceneId)
+        : onAir
+          ? library.find(
+              (candidate) => candidate.takeId === Number(onAir.replace("scene:take-", ""))
+            )
+          : undefined) ?? selectedScene ?? library[0];
 
     return {
-      width: published?.canvasWidth ?? 1920,
-      height: published?.canvasHeight ?? 1080,
+      width: scene?.canvasWidth ?? 1920,
+      height: scene?.canvasHeight ?? 1080,
       frameRate: {
-        numerator: published?.frameRateNumerator ?? 50,
-        denominator: published?.frameRateDenominator ?? 1
+        numerator: scene?.frameRateNumerator ?? 50,
+        denominator: scene?.frameRateDenominator ?? 1
       },
-      colorSpace: published?.colorSpace ?? "rec709"
+      colorSpace: scene?.colorSpace ?? "rec709"
     };
-  }, [library, programItem, selectedItem]);
+  }, [entries, library, runtime.programRef, selectedScene]);
 
-  async function persistRundown(next: PlayoutRundownDocument) {
-    setRundown(next);
-    try {
-      const saved = await playoutApi.saveRundown(next);
-      setRundown((current) =>
-        current?.rundownId === saved.rundownId ? saved : current
-      );
+  const run = useCallback(
+    async (action: OperatorAction, body: () => Promise<PlayoutRuntimeStatus | void>) => {
+      setBusyAction(action);
       setError(null);
+      try {
+        const status = await body();
+        if (status) setRuntime(status);
+      } catch (actionError) {
+        setError(errorMessage(actionError));
+        await refreshStatus();
+      } finally {
+        setBusyAction(null);
+      }
+    },
+    [refreshStatus]
+  );
+
+  /** Recall a Take ID straight to air — the Scene Manager's whole point. */
+  const recallTakeId = useCallback(
+    async (takeId: number, action: "cue" | "take") => {
+      await run(action, () =>
+        action === "cue"
+          ? playoutApi.cueSceneByTakeId(takeId)
+          : playoutApi.takeSceneByTakeId(takeId)
+      );
+    },
+    [run]
+  );
+
+  async function saveList(next: PlayoutTakeList) {
+    try {
+      setTakeList(await playoutApi.saveTakeList(next));
     } catch (saveError) {
-      setError(`Autosave failed: ${errorMessage(saveError)}`);
+      setError(errorMessage(saveError));
     }
   }
 
-  /**
-   * Put a published scene into the rundown.
-   *
-   * `segmentId` and `beforeItemId` come from a drop; without them the item is appended
-   * to the first segment, which is what the button and double-click do.
-   *
-   * The version is pinned rather than following the latest publish: an operator who
-   * built a rundown against v3 must not have v4 appear underneath them mid-show. Which
-   * version is in use is shown on the row.
-   */
-  async function addSceneToRundown(
-    scene: PublishedSceneMetadata,
-    placement?: { segmentId?: string; beforeItemId?: string | null }
-  ) {
-    if (!rundown) return;
-    const segmentId = placement?.segmentId ?? rundown.segments[0]?.segmentId;
-    if (!segmentId) {
-      setError("Create a rundown segment before adding scenes.");
-      return;
-    }
-    const item: PlayoutRundownItem = {
-      itemId: `item_${crypto.randomUUID()}`,
+  async function appendScene(scene: PublishedSceneMetadata) {
+    if (!takeList) return;
+    const entry: PlayoutTakeEntry = {
+      entryId: `entry_${crypto.randomUUID()}`,
       sceneId: scene.sceneId,
       sceneVersion: scene.version,
-      versionPolicy: "pinned",
+      versionPolicy: "latest",
       name: scene.name,
-      pageNumber: String(100 + rundown.items.length),
-      segmentId,
       layer: "Overlay",
-      channel: "A",
-      output: "Program",
-      transitionIn: {
-        type: scene.defaultTransition,
-        durationFrames: scene.defaultTransition === "cut" ? 0 : 12,
-        delayFrames: 0
-      },
+      transitionIn: { type: scene.defaultTransition, durationFrames: 0, delayFrames: 0 },
       transitionOut: { type: "cut", durationFrames: 0, delayFrames: 0 },
       instanceData: {},
       notes: "",
-      color: "#3d75ae",
-      cuePolicy: "manual",
-      automationEnabled: false,
+      color: "#4077b8",
       completed: false
     };
-    const items = [...rundown.items];
-    const beforeIndex = placement?.beforeItemId
-      ? items.findIndex((candidate) => candidate.itemId === placement.beforeItemId)
-      : -1;
-    if (beforeIndex >= 0) {
-      items.splice(beforeIndex, 0, item);
-    } else {
-      items.push(item);
-    }
-
-    setSelectedItemId(item.itemId);
-    await persistRundown({ ...rundown, activeItemId: item.itemId, items });
+    const next: PlayoutTakeList = {
+      ...takeList,
+      entries: [...takeList.entries, entry],
+      cursorEntryId: takeList.cursorEntryId ?? entry.entryId
+    };
+    setSelectedEntryId(entry.entryId);
+    await saveList(next);
   }
 
-  /**
-   * Move an existing item, by drag.
-   *
-   * A rundown is one ordered list with items tagged by segment, so a cross-segment drag
-   * changes both the position and the segment in a single write — otherwise the row
-   * would briefly appear in the wrong block.
-   */
-  async function moveItemTo(
-    itemId: string,
-    target: { segmentId: string; beforeItemId: string | null }
-  ) {
-    if (!rundown) return;
-    const index = rundown.items.findIndex((item) => item.itemId === itemId);
-    if (index < 0 || target.beforeItemId === itemId) return;
-
-    const items = [...rundown.items];
-    const [moved] = items.splice(index, 1);
-    if (!moved) return;
-
-    const placed = { ...moved, segmentId: target.segmentId };
-    const beforeIndex = target.beforeItemId
-      ? items.findIndex((candidate) => candidate.itemId === target.beforeItemId)
-      : -1;
-    if (beforeIndex >= 0) {
-      items.splice(beforeIndex, 0, placed);
-    } else {
-      // Dropped on the segment itself: put it at the end of that segment rather than
-      // the end of the whole rundown.
-      const lastInSegment = items.reduce(
-        (last, candidate, candidateIndex) =>
-          candidate.segmentId === target.segmentId ? candidateIndex : last,
-        -1
-      );
-      items.splice(lastInSegment + 1, 0, placed);
-    }
-
-    await persistRundown({ ...rundown, items });
+  async function moveEntry(entryId: string, delta: -1 | 1) {
+    if (!takeList) return;
+    const index = takeList.entries.findIndex((entry) => entry.entryId === entryId);
+    const target = index + delta;
+    if (index < 0 || target < 0 || target >= takeList.entries.length) return;
+    const reordered = [...takeList.entries];
+    const [moved] = reordered.splice(index, 1);
+    reordered.splice(target, 0, moved);
+    await saveList({ ...takeList, entries: reordered });
   }
 
-  /** Resolve a dropped library payload back to its published scene. */
-  function sceneFromDragKey(sceneKey: string): PublishedSceneMetadata | undefined {
-    return library.find((scene) => `${scene.sceneId}:${scene.version}` === sceneKey);
+  async function removeEntry(entryId: string) {
+    if (!takeList) return;
+    const entries = takeList.entries.filter((entry) => entry.entryId !== entryId);
+    await saveList({
+      ...takeList,
+      entries,
+      // The cursor cannot point at something that is gone.
+      cursorEntryId:
+        takeList.cursorEntryId === entryId
+          ? entries[0]?.entryId ?? null
+          : takeList.cursorEntryId
+    });
+    if (selectedEntryId === entryId) setSelectedEntryId(null);
   }
 
-  /** Apply whatever is being dragged to a drop location. */
-  async function handleDrop(target: { segmentId: string; beforeItemId: string | null }) {
-    const payload = drag;
-    setDrag(null);
-    setDropTarget(null);
-    if (!payload) return;
-
-    if (payload.kind === "scene") {
-      const scene = sceneFromDragKey(payload.sceneKey);
-      if (!scene) {
-        setError("That published scene is no longer in the library.");
-        return;
-      }
-      await addSceneToRundown(scene, target);
+  async function removeSelectedScene() {
+    if (!selectedScene) return;
+    if (!window.confirm(
+      `Remove "${selectedScene.name}" and all of its published versions from Playout?`
+    )) {
       return;
     }
 
-    await moveItemTo(payload.itemId, target);
-  }
-
-  async function moveItem(itemId: string, direction: -1 | 1) {
-    if (!rundown) return;
-    const index = rundown.items.findIndex((item) => item.itemId === itemId);
-    const target = index + direction;
-    if (index < 0 || target < 0 || target >= rundown.items.length) return;
-    const items = [...rundown.items];
-    [items[index], items[target]] = [items[target], items[index]];
-    await persistRundown({ ...rundown, items });
-  }
-
-  async function execute(action: "cue" | "take") {
-    if (!rundown || !selectedItem) return;
-    setBusyAction(action);
     try {
-      const status =
-        action === "cue"
-          ? await playoutApi.cue(rundown.rundownId, selectedItem.itemId)
-          : await playoutApi.take(rundown.rundownId, selectedItem.itemId);
-      setRuntime(status);
-      setError(null);
-    } catch (actionError) {
-      setError(errorMessage(actionError));
-      await refreshStatus();
-    } finally {
-      setBusyAction(null);
+      await playoutApi.removeScene(selectedScene.sceneId);
+      setSelectedTakeId(null);
+      await refreshLibrary();
+    } catch (removeError) {
+      setError(errorMessage(removeError));
     }
   }
 
@@ -361,21 +356,30 @@ export function App() {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    setBusyAction("import");
     try {
       const scene = JSON.parse(await file.text()) as SceneDocument;
-      const published = await playoutApi.publishScene(scene);
+      await playoutApi.publishScene(scene);
       await refreshLibrary();
-      setSelectedSceneKey(`${published.sceneId}:${published.version}`);
-      setError(null);
     } catch (importError) {
-      setError(`Scene import failed: ${errorMessage(importError)}`);
-    } finally {
-      setBusyAction(null);
+      setError(errorMessage(importError));
     }
   }
 
-  const connected = runtime.rendererConnection === "connected";
+  function submitRecall(event: React.FormEvent) {
+    event.preventDefault();
+    const takeId = Number(recall.trim());
+    if (!Number.isSafeInteger(takeId)) {
+      setError(`"${recall}" is not a take ID`);
+      return;
+    }
+    if (!library.some((scene) => scene.takeId === takeId)) {
+      setError(`No published scene has take ID ${takeId}`);
+      return;
+    }
+    setSelectedTakeId(takeId);
+    setRecall("");
+    void recallTakeId(takeId, "take");
+  }
 
   return (
     <main className="playout-shell">
@@ -395,12 +399,14 @@ export function App() {
           />
           <StatusPill
             good={engine?.takeReady === true}
-            icon={
-              engine?.connected ? <Cpu size={13} /> : <WifiOff size={13} />
-            }
+            icon={engine?.connected ? <Cpu size={13} /> : <WifiOff size={13} />}
             label={engineLabel(engine)}
           />
-          <StatusPill good icon={<Database size={13} />} label="Autosave active" />
+          <StatusPill
+            good={liveLink}
+            icon={liveLink ? <Database size={13} /> : <WifiOff size={13} />}
+            label={liveLink ? "Editor link live" : "Editor link polling"}
+          />
           <div className="timecode">
             <Clock3 size={14} />
             {formatClock(clock)}
@@ -420,20 +426,20 @@ export function App() {
       )}
 
       <section className="workspace">
+        {/*
+          The Scene Manager is the primary surface, as in XPression: every published scene with
+          a Take ID, and a recall field that puts one on air without any list at all.
+        */}
         <Panel
           className="library-panel"
-          title="Published Scenes"
+          title="Scene Manager"
           icon={<Library size={15} />}
           actions={
             <>
               <label className="small-button import-button">
                 <FileInput size={13} />
                 Import
-                <input
-                  type="file"
-                  accept=".json,application/json"
-                  onChange={importScene}
-                />
+                <input type="file" accept=".json,application/json" onChange={importScene} />
               </label>
               <button className="icon-button" onClick={refreshLibrary} title="Refresh library">
                 <RefreshCw size={14} />
@@ -441,38 +447,43 @@ export function App() {
             </>
           }
         >
+          <form className="recall-box" onSubmit={submitRecall}>
+            <Hash size={14} />
+            <input
+              value={recall}
+              onChange={(event) => setRecall(event.target.value)}
+              placeholder="Take ID to air"
+              inputMode="numeric"
+              aria-label="Recall a scene by take ID"
+            />
+            <button className="small-button" type="submit" disabled={!connected}>
+              Take
+            </button>
+          </form>
+
           <div className="search-box">
             <Search size={14} />
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search scenes or tags"
+              placeholder="Search take ID, name, category or tag"
             />
           </div>
+
           <div className="library-list">
-            {filteredLibrary.map((scene) => {
-              const key = `${scene.sceneId}:${scene.version}`;
+            {sceneManager.map((scene) => {
+              const onAir = runtime.programRef === sceneRef(scene.takeId);
               return (
                 <button
-                  key={key}
-                  className={`scene-card ${selectedSceneKey === key ? "selected" : ""} ${
-                    drag?.kind === "scene" && drag.sceneKey === key ? "dragging" : ""
+                  key={scene.sceneId}
+                  className={`scene-card ${selectedTakeId === scene.takeId ? "selected" : ""} ${
+                    onAir ? "on-air" : ""
                   }`}
-                  draggable
-                  onDragStart={(event) => {
-                    setDrag({ kind: "scene", sceneKey: key });
-                    event.dataTransfer.effectAllowed = "copy";
-                    // A plain-text fallback so the drag is not rejected outright by
-                    // browsers that require some data to be set.
-                    event.dataTransfer.setData("text/plain", key);
-                  }}
-                  onDragEnd={() => {
-                    setDrag(null);
-                    setDropTarget(null);
-                  }}
-                  onClick={() => setSelectedSceneKey(key)}
-                  onDoubleClick={() => addSceneToRundown(scene)}
+                  onClick={() => setSelectedTakeId(scene.takeId)}
+                  onDoubleClick={() => void recallTakeId(scene.takeId, "take")}
+                  title="Double-click to take straight to air"
                 >
+                  <span className="take-id">{scene.takeId}</span>
                   <div
                     className="scene-thumbnail checkerboard"
                     style={
@@ -488,6 +499,7 @@ export function App() {
                     <small>
                       v{scene.version} · {scene.durationFrames}f ·{" "}
                       {scene.frameRateNumerator / scene.frameRateDenominator} fps
+                      {scene.category ? ` · ${scene.category}` : ""}
                     </small>
                   </span>
                   <span className={`readiness ${scene.assetReadiness}`}>
@@ -496,198 +508,147 @@ export function App() {
                 </button>
               );
             })}
-            {filteredLibrary.length === 0 && (
+            {sceneManager.length === 0 && (
               <EmptyState
                 icon={<Library size={28} />}
                 title="No published scenes"
-                detail="Import a GrapiX SceneDocument JSON to seed the offline Playout library."
+                detail="Publish from the Editor, or import a GrapiX SceneDocument JSON."
               />
             )}
           </div>
-          <button
-            className="primary-button add-to-rundown"
-            disabled={!selectedScene}
-            onClick={() => selectedScene && addSceneToRundown(selectedScene)}
-          >
-            <Plus size={15} />
-            Add to rundown
-          </button>
+
+          <div className="library-actions">
+            <button
+              className="primary-button"
+              disabled={!selectedScene || !connected || busyAction !== null}
+              onClick={() => selectedScene && void recallTakeId(selectedScene.takeId, "take")}
+            >
+              <Play size={15} />
+              Take to air
+            </button>
+            <button
+              className="small-button"
+              disabled={!selectedScene}
+              onClick={() => selectedScene && void appendScene(selectedScene)}
+            >
+              <Plus size={14} />
+              Add to take list
+            </button>
+            <button
+              className="small-button danger"
+              disabled={!selectedScene}
+              onClick={() => void removeSelectedScene()}
+              title="Remove every published version; on-air or take-list scenes are protected"
+            >
+              <Trash2 size={14} />
+              Remove
+            </button>
+          </div>
         </Panel>
 
+        {/* The ordered list, for a scripted show. Optional: the Scene Manager stands alone. */}
         <Panel
           className="rundown-panel"
-          title={rundown?.name ?? "Rundown"}
+          title={takeList?.name ?? "Take List"}
           icon={<ListVideo size={15} />}
-          actions={
-            <span className="revision-label">
-              rev {rundown?.revision ?? 0}
-            </span>
-          }
+          actions={<span className="revision-label">{entries.length} takes</span>}
         >
-          <div className="rundown-columns">
-            <span>Pg</span>
-            <span>Item</span>
+          <div className="rundown-columns take-list-columns">
+            <span>#</span>
+            <span>Take</span>
             <span>Layer</span>
             <span>Status</span>
             <span />
           </div>
           <div className="rundown-scroll">
-            {rundown?.segments.map((segment) => (
-              <div
-                className={[
-                  "segment",
-                  drag ? "drop-active" : "",
-                  dropTarget?.segmentId === segment.segmentId && dropTarget.beforeItemId === null
-                    ? "drop-here"
-                    : ""
-                ].join(" ")}
-                key={segment.segmentId}
-                onDragOver={(event) => {
-                  if (!drag) return;
-                  // Without preventDefault the browser refuses the drop entirely.
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = drag.kind === "scene" ? "copy" : "move";
-                  setDropTarget({ segmentId: segment.segmentId, beforeItemId: null });
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  void handleDrop({ segmentId: segment.segmentId, beforeItemId: null });
-                }}
-              >
-                <div className="segment-header">
-                  <span
-                    className="segment-color"
-                    style={{ background: segment.color }}
-                  />
-                  <ChevronDown size={13} />
-                  <strong>{segment.name}</strong>
-                  <small>
-                    {
-                      rundown.items.filter(
-                        (item) => item.segmentId === segment.segmentId
-                      ).length
-                    }{" "}
-                    items
-                  </small>
+            {entries.map((entry, index) => {
+              const state = runtime.takeStates[entry.entryId] ?? "NOT_LOADED";
+              return (
+                <div
+                  key={entry.entryId}
+                  className={[
+                    "take-row",
+                    selectedEntryId === entry.entryId ? "selected" : "",
+                    takeList?.cursorEntryId === entry.entryId ? "cursor" : "",
+                    runtime.programRef === entry.entryId ? "online" : "",
+                    runtime.previewRef === entry.entryId ? "preview" : ""
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  onClick={() => setSelectedEntryId(entry.entryId)}
+                >
+                  <span className="page-number">{index + 1}</span>
+                  <span className="item-name">
+                    <strong>{entry.name}</strong>
+                    <small>
+                      {entry.sceneId} · v{entry.sceneVersion} ·{" "}
+                      {entry.versionPolicy === "pinned" ? "pinned" : "latest"}
+                    </small>
+                  </span>
+                  <span className="layer-name">{entry.layer}</span>
+                  <span className={`take-state ${state.toLowerCase()}`}>
+                    {state.replace(/_/g, " ")}
+                  </span>
+                  <span className="row-actions">
+                    <button
+                      className="icon-button"
+                      title="Move up"
+                      disabled={index === 0}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void moveEntry(entry.entryId, -1);
+                      }}
+                    >
+                      <ArrowUp size={13} />
+                    </button>
+                    <button
+                      className="icon-button"
+                      title="Move down"
+                      disabled={index === entries.length - 1}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void moveEntry(entry.entryId, 1);
+                      }}
+                    >
+                      <ArrowDown size={13} />
+                    </button>
+                    <button
+                      className="icon-button"
+                      title="Remove from take list"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void removeEntry(entry.entryId);
+                      }}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </span>
                 </div>
-                {rundown.items
-                  .filter((item) => item.segmentId === segment.segmentId)
-                  .map((item, index, items) => {
-                    const state = runtime.itemStates[item.itemId] ?? "NOT_LOADED";
-                    const isProgram = runtime.programItemId === item.itemId;
-                    const isPreview = runtime.previewItemId === item.itemId;
-                    return (
-                      <button
-                        className={[
-                          "rundown-row",
-                          selectedItemId === item.itemId ? "selected" : "",
-                          isProgram ? "program" : "",
-                          isPreview ? "preview" : "",
-                          drag?.kind === "item" && drag.itemId === item.itemId ? "dragging" : "",
-                          dropTarget?.beforeItemId === item.itemId ? "drop-before" : ""
-                        ].join(" ")}
-                        key={item.itemId}
-                        // The item on Program is deliberately still draggable: moving a
-                        // row does not change what is on air, only its place in the
-                        // running order.
-                        draggable
-                        onDragStart={(event) => {
-                          setDrag({ kind: "item", itemId: item.itemId });
-                          event.dataTransfer.effectAllowed = "move";
-                          event.dataTransfer.setData("text/plain", item.itemId);
-                        }}
-                        onDragEnd={() => {
-                          setDrag(null);
-                          setDropTarget(null);
-                        }}
-                        onDragOver={(event) => {
-                          if (!drag) return;
-                          event.preventDefault();
-                          event.stopPropagation();
-                          event.dataTransfer.dropEffect =
-                            drag.kind === "scene" ? "copy" : "move";
-                          setDropTarget({
-                            segmentId: segment.segmentId,
-                            beforeItemId: item.itemId
-                          });
-                        }}
-                        onDrop={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          void handleDrop({
-                            segmentId: segment.segmentId,
-                            beforeItemId: item.itemId
-                          });
-                        }}
-                        onClick={() => setSelectedItemId(item.itemId)}
-                      >
-                        <span className="page-number">{item.pageNumber ?? "—"}</span>
-                        <span className="item-name">
-                          <strong>{item.name}</strong>
-                          <small>
-                            {item.sceneId} · v{item.sceneVersion}
-                          </small>
-                        </span>
-                        <span className="layer-name">{item.layer}</span>
-                        <span className={`state-tag state-${state.toLowerCase()}`}>
-                          {state.replaceAll("_", " ")}
-                        </span>
-                        <span className="row-actions">
-                          <span
-                            role="button"
-                            tabIndex={0}
-                            className={index === 0 ? "disabled" : ""}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void moveItem(item.itemId, -1);
-                            }}
-                          >
-                            <ChevronUp size={13} />
-                          </span>
-                          <span
-                            role="button"
-                            tabIndex={0}
-                            className={index === items.length - 1 ? "disabled" : ""}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void moveItem(item.itemId, 1);
-                            }}
-                          >
-                            <ChevronDown size={13} />
-                          </span>
-                        </span>
-                      </button>
-                    );
-                  })}
-              </div>
-            ))}
-            {rundown?.items.length === 0 && (
+              );
+            })}
+            {entries.length === 0 && (
               <EmptyState
                 icon={<ListVideo size={30} />}
-                title="Rundown is empty"
-                detail="Select a published scene and add it to the active segment."
+                title="Take list is empty"
+                detail="The Scene Manager can put any scene on air by Take ID. Add takes here only for a scripted running order."
               />
             )}
           </div>
         </Panel>
 
         <section className="output-stack">
-          <OutputMonitor
-            kind="preview"
-            title="PREVIEW"
-            item={previewItem}
-            connected={connected}
-          />
+          <OutputMonitor kind="preview" title="PREVIEW" slate={previewSlate} connected={connected} />
           <OutputMonitor
             kind="program"
             title="PROGRAM"
-            item={programItem}
+            slate={programSlate}
             connected={connected}
+            explicitlyCleared={programExplicitlyCleared}
           />
           {/*
-            Output configuration lives beside Program because that is where the
-            consequence is. The engine reports which outputs are live; the panel never
-            infers it from an adapter name.
+            Output configuration lives beside Program because that is where the consequence is.
+            The engine reports which outputs are live; the panel never infers it from an
+            adapter name.
           */}
           <OutputsPanel
             engineConnected={engine?.connected === true}
@@ -698,19 +659,27 @@ export function App() {
 
       <footer className="transport">
         <div className="selected-summary">
-          <span className="eyebrow">Selected item</span>
-          <strong>{selectedItem?.name ?? "No rundown item selected"}</strong>
+          <span className="eyebrow">Selected</span>
+          <strong>
+            {selectedEntry?.name ?? selectedScene?.name ?? "Nothing selected"}
+          </strong>
           <small>
-            {selectedItem
-              ? `Page ${selectedItem.pageNumber ?? "—"} · ${selectedItem.layer} · ${selectedItem.transitionIn.type}`
-              : "Choose an item before operating Preview or Program"}
+            {selectedEntry
+              ? `Take list · ${selectedEntry.layer} · ${selectedEntry.transitionIn.type}`
+              : selectedScene
+                ? `Scene Manager · take ${selectedScene.takeId} · v${selectedScene.version}`
+                : "Pick a scene or a take before operating Preview or Program"}
           </small>
         </div>
         <div className="transport-controls">
           <button
             className="control-button cue"
-            disabled={!selectedItem || busyAction !== null}
-            onClick={() => execute("cue")}
+            disabled={(!selectedEntry && !selectedScene) || busyAction !== null}
+            onClick={() =>
+              selectedEntry && takeList
+                ? void run("cue", () => playoutApi.cueEntry(takeList.takeListId, selectedEntry.entryId))
+                : selectedScene && void recallTakeId(selectedScene.takeId, "cue")
+            }
           >
             <MonitorPlay size={18} />
             <span>
@@ -720,8 +689,14 @@ export function App() {
           </button>
           <button
             className="control-button take"
-            disabled={!selectedItem || busyAction !== null || !connected}
-            onClick={() => execute("take")}
+            disabled={(!selectedEntry && !selectedScene) || busyAction !== null || !connected}
+            onClick={() =>
+              selectedEntry && takeList
+                ? void run("take", () =>
+                    playoutApi.takeEntry(takeList.takeListId, selectedEntry.entryId)
+                  )
+                : selectedScene && void recallTakeId(selectedScene.takeId, "take")
+            }
           >
             <Play size={19} fill="currentColor" />
             <span>
@@ -729,14 +704,32 @@ export function App() {
               Online
             </span>
           </button>
-          <button className="control-button neutral" disabled>
+          <button
+            className="control-button neutral"
+            disabled={!takeList || entries.length === 0 || busyAction !== null}
+            onClick={() =>
+              takeList &&
+              void run("continue", async () => {
+                const { takeList: advanced, status } = await playoutApi.continueTakeList(
+                  takeList.takeListId
+                );
+                setTakeList(advanced);
+                setSelectedEntryId(advanced.cursorEntryId);
+                return status;
+              })
+            }
+          >
             <SkipForward size={18} />
             <span>
               <small>NEXT</small>
               Continue
             </span>
           </button>
-          <button className="control-button danger" disabled>
+          <button
+            className="control-button danger"
+            disabled={!runtime.programRef || busyAction !== null}
+            onClick={() => void run("take-out", () => playoutApi.takeOut())}
+          >
             <Square size={17} fill="currentColor" />
             <span>
               <small>OUT</small>
@@ -745,10 +738,10 @@ export function App() {
           </button>
         </div>
         <div className="output-summary">
-          <Radio size={17} className={programItem ? "on-air" : ""} />
+          <Radio size={17} className={runtime.programRef ? "on-air" : ""} />
           <span>
             <small>PROGRAM</small>
-            {programItem?.name ?? "Clear"}
+            {programSlate?.name ?? "Clear"}
           </span>
         </div>
       </footer>
@@ -818,17 +811,58 @@ function EmptyState({
   );
 }
 
+/**
+ * A channel monitor.
+ *
+ * The slate is the *background layer*, not an alternative branch: the picture is painted
+ * on top of it. Any gap — no engine, nothing cued, a stream that has not delivered its
+ * first frame — shows through as the slate without a state machine deciding which to
+ * render. Program is what an operator trusts; it must never show a blank box because a
+ * flag disagreed with reality.
+ *
+ * Gated on the engine connection alone, deliberately *not* on whether Playout remembers
+ * something being on the channel. That record lives in the control service's memory and
+ * is empty after a restart, while the engine keeps rendering — so gating on it would
+ * blank a monitor over a live Program. The engine is the authority on what is on a
+ * channel, and the picture arriving is the proof.
+ *
+ * **FILL / KEY** is the broadcast way to check a graphic. Fill is the colour; key is the
+ * greyscale matte the downstream keyer cuts — white opaque, black transparent, grey for the
+ * feathered shadows and anti-aliased edges a clipped key destroys. SDI carries no alpha, so
+ * these are separate signals in a real plant, and the engine renders each on request. This
+ * is why the monitor needs no alpha-capable codec: a key is just a greyscale picture.
+ *
+ * One MJPEG connection, held open. The control service owns retries and starts the engine
+ * stream on the first viewer, so a monitor opened before anything is cued begins painting
+ * when a scene is taken — with no reconnect here and no reload by the operator. A panel
+ * nobody is looking at costs no GPU work, because the last viewer leaving stops the stream.
+ */
 function OutputMonitor({
   kind,
   title,
-  item,
-  connected
+  slate,
+  connected,
+  explicitlyCleared = false
 }: {
   kind: "preview" | "program";
   title: string;
-  item: PlayoutRundownItem | null;
+  slate: { name: string; detail: string } | null;
   connected: boolean;
+  explicitlyCleared?: boolean;
 }) {
+  const [view, setView] = useState<"fill" | "key">("fill");
+  const [painting, setPainting] = useState(false);
+
+  useEffect(() => {
+    if (!connected) setPainting(false);
+  }, [connected]);
+
+  // Switching view is a different render, so the picture is not valid until the new stream
+  // delivers. Letting the old one show would label a fill as a key.
+  useEffect(() => {
+    setPainting(false);
+  }, [view]);
+
   return (
     <section className={`output-monitor ${kind}`}>
       <header>
@@ -836,28 +870,68 @@ function OutputMonitor({
           <span className="output-light" />
           {title}
         </span>
-        <span>{connected ? "NATIVE" : "OFFLINE"}</span>
+        <span className="monitor-header-right">
+          <span className="monitor-view-toggle">
+            {(["fill", "key"] as const).map((candidate) => (
+              <button
+                key={candidate}
+                type="button"
+                className={view === candidate ? "active" : ""}
+                onClick={() => setView(candidate)}
+                title={
+                  candidate === "fill"
+                    ? "Fill: the colour an audience sees"
+                    : "Key: the greyscale matte the downstream keyer cuts"
+                }
+              >
+                {candidate.toUpperCase()}
+              </button>
+            ))}
+          </span>
+          <span>{explicitlyCleared ? "CLEAR" : painting ? "LIVE" : connected ? "NATIVE" : "OFFLINE"}</span>
+        </span>
       </header>
       <div className="monitor-screen checkerboard">
-        {item ? (
+        {slate ? (
           <div className="monitor-slate">
             <Clapperboard size={30} />
-            <strong>{item.name}</strong>
-            <small>
-              {item.sceneId} · v{item.sceneVersion}
-            </small>
+            <strong>{slate.name}</strong>
+            <small>{slate.detail}</small>
           </div>
         ) : (
           <div className="monitor-slate muted">
             <Server size={28} />
-            <strong>No scene assigned</strong>
+            <strong>{painting ? "On air from the engine" : "No scene assigned"}</strong>
             <small>{connected ? "Channel is clear" : "Renderer disconnected"}</small>
           </div>
         )}
+        {connected ? (
+          <img
+            // One element, reused. A `key` here would remount on every view change, and
+            // Chromium does *not* close an MJPEG connection when its `<img>` is detached —
+            // the stranded stream keeps rendering server-side and spends one of the engine's
+            // four stream slots. Assigning a new `src` on the same element aborts the
+            // previous load, which is what actually releases it.
+            className={`monitor-frames${painting ? " painting" : ""}`}
+            src={monitorStreamUrl(kind, view)}
+            alt={`${title} ${view}`}
+            onLoad={() => setPainting(true)}
+            onError={() => setPainting(false)}
+          />
+        ) : null}
+        {explicitlyCleared ? <div className="monitor-clear-cover" aria-hidden="true" /> : null}
       </div>
       <footer>
-        <span>{item?.layer ?? "—"}</span>
-        <span>{item?.pageNumber ? `PAGE ${item.pageNumber}` : "NO PAGE"}</span>
+        <span>{slate?.detail ?? "—"}</span>
+        <span>
+          {explicitlyCleared
+            ? "CLEAR"
+            : painting
+              ? `${title} · ${view.toUpperCase()}`
+              : slate
+                ? title
+                : "CLEAR"}
+        </span>
       </footer>
     </section>
   );
@@ -866,8 +940,8 @@ function OutputMonitor({
 /**
  * One-line engine summary for the operator strip.
  *
- * Leads with the problem when there is one: an operator needs to see "engine
- * offline" before they see a GPU name.
+ * Leads with the problem when there is one: an operator needs to see "engine offline" before
+ * they see a GPU name.
  */
 function engineLabel(engine: EngineHealthView | null): string {
   if (!engine) return "Engine unreachable";

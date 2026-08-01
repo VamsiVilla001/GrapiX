@@ -278,7 +278,10 @@ async fn start(name: &str, auth: bool) -> (String, Arc<Mutex<Engine>>) {
         let _ = ipc::serve(served_config, served_engine).await;
     });
 
-    (config.network.ipc_endpoint.clone().expect("endpoint"), engine)
+    (
+        config.network.ipc_endpoint.clone().expect("endpoint"),
+        engine,
+    )
 }
 
 #[tokio::test]
@@ -364,7 +367,9 @@ async fn a_scene_loads_and_commands_work_over_ipc() {
         "updatedAt": "2026-01-01T00:00:00.000Z"
     });
 
-    let loaded = client.request("scene.load", json!({ "scene": scene })).await;
+    let loaded = client
+        .request("scene.load", json!({ "scene": scene }))
+        .await;
     assert!(
         loaded["type"] == "reply.ack" || loaded["type"] == "reply.scenePrepared",
         "{loaded}"

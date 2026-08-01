@@ -16,7 +16,6 @@
     "@grapix/render-protocol": "0.1.0",
     "@grapix/render-shaders": "0.1.0",
     "@grapix/renderer-contracts": "0.1.0",
-    "@grapix/renderer-protocol": "0.1.0",
     "@grapix/scene-model": "0.1.0",
     "@grapix/shared-types": "0.1.0",
     "@grapix/stage-model": "0.1.0",

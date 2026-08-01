@@ -1,8 +1,13 @@
 # GrapiX Standalone Render Engine — Target Architecture
 
-Companion to [`render-engine-assessment.md`](render-engine-assessment.md) (what
-exists) and [`render-engine-migration.md`](render-engine-migration.md) (how we
-get there).
+> **V1 authority note (2026-07-29):** [`architecture.md`](architecture.md) is
+> authoritative for local V1 product boundaries, lifecycle, client rendering,
+> Render View extensions, recovery and backup behavior. This document retains
+> the detailed virtual-canvas, tile, surface, protocol and frame-clock design.
+> Remote and distributed deployment modes described here are V2.
+
+Current state, trade-offs and the M1–M4 implementation plan live in
+[`local-v1-system-design.md`](local-v1-system-design.md).
 
 This document defines the target architecture: process separation, contracts,
 the virtual canvas, the tile renderer, the stage/surface model, and the engine
@@ -37,13 +42,21 @@ Hard rules:
 
 ## 2. Deployment modes
 
+Local V1 standardises on a persistent single-instance Engine Host, a supervised
+native worker and authenticated protocol-v3 WebSocket on
+`ws://127.0.0.1:4400`. Editor and Playout may ensure the host is running but
+must never stop it when their windows close.
+
+The remaining rows are capability targets for V2, not alternate V1 runtime
+paths.
+
 One binary, `grapix-render-engine`, covers every mode. Mode is configuration,
 not a code path.
 
 | Mode | Transport | Notes |
 | --- | --- | --- |
-| Local embedded | IPC (named pipe / UDS) | Started and supervised by the desktop shell. |
-| Local external process | IPC or `ws://127.0.0.1` | Survives editor restarts. |
+| Local V1 | `ws://127.0.0.1:4400` | Persistent Engine Host; survives Editor and Playout restarts. |
+| Local IPC | IPC (named pipe / UDS) | Supported infrastructure, not the V1 application path. |
 | Remote network engine | `ws://` or `wss://` | Requires auth token; TLS-ready. |
 | Dedicated GPU engine | `wss://` | `preferred_gpu` pins the adapter. |
 | Headless server engine | `wss://` | `headless = true`, no window, no surface. |
@@ -60,32 +73,40 @@ Precedence: **CLI argument > environment variable > TOML file > built-in default
 ## 3. Package and service layout
 
 ```text
-packages/
-  shared-types/         existing — SceneDocument, objects, materials, animation
-  scene-model/          NEW — scene separation, revisions, incremental patches
-  renderer-contracts/   NEW — RendererBackend, RenderGraph, SceneRuntime, …
-  render-protocol/      NEW — engine protocol v3 + EngineConnection client
-  shader-library/       NEW — metadata/validation over packages/render-shaders
-  animation-engine/     NEW — rational broadcast frame clock + frame evaluation
-  asset-manager/        NEW — asset state machine, content addressing, upload
-  stage-model/          NEW — virtual canvas, regions, viewports, cameras
-  surface-model/        NEW — physical display surfaces and output mapping
-  tile-system/          NEW — tile grid, culling, dirty tracking, overscan
-  output-contracts/     NEW — output adapter descriptors, formats
-  renderer-protocol/    existing — protocol v2, retained for compatibility
-  render-shaders/       existing — WGSL sources and byte layouts
-  grapix-sdk/           existing
+Shared/
+  shared-types/         SceneDocument, objects, materials, animation
+  scene-model/          scene separation, revisions, incremental patches
+  renderer-contracts/   RendererBackend, RenderGraph, SceneRuntime, …
+  render-protocol/      engine protocol v3 + EngineConnection client
+  shader-library/       metadata/validation over Shared/render-shaders
+  animation-engine/     rational broadcast frame clock + frame evaluation
+  asset-manager/        asset state machine, content addressing, upload
+  stage-model/          virtual canvas, regions, viewports, cameras
+  surface-model/        physical display surfaces and output mapping
+  tile-system/          tile grid, culling, dirty tracking, overscan
+  output-contracts/     output adapter descriptors, formats
+  render-shaders/       WGSL sources and byte layouts
+  grapix-sdk/           scene automation authoring contracts
 
-apps/
-  editor-web/           existing React editor (Pixi + Three + SVG overlay)
-  desktop-electron/     existing fallback shell
-  desktop-tauri/        existing primary shell
+Editor/
+  apps/editor-web/          React editor (Pixi + Three + SVG overlay today)
+  apps/desktop-tauri/       primary shell
+  apps/desktop-electron/    fallback shell
+  services/project-api/     project/asset/package service
+
+Playout/
+  apps/playout-web/         operator UI
+  apps/desktop-tauri/       primary shell
+  services/playout-control/ library, rundowns, operator commands
 
 services/
-  api-server/           existing project/asset/package service
-  render-daemon/        existing native renderer — becomes the engine's core lib
-  render-engine/        NEW standalone engine binary
+  render-daemon/        render core library (grapix-render-core); its own
+                        protocol v2 binary is retired and launched by nothing
+  render-engine/        the standalone engine binary
 ```
+
+Protocol v2's TypeScript client has been removed; `Shared/render-protocol` is
+the only engine client contract.
 
 `services/render-engine` depends on the existing daemon crate under the alias
 `grapix-render-core`. That reuses 10,541 lines of tested scene parsing, mesh
@@ -371,9 +392,9 @@ so the browser preview and the engine are held to the same shape:
 `SurfaceMapper`, `PreviewProvider`.
 
 `SceneDocument` stores none of these. It stores no PixiJS objects, no React
-components, no DOM elements, no wgpu resources. Adapters convert SceneDocument
-into PixiJS display objects (browser), wgpu render nodes (engine), preview
-representations, and output render passes.
+components, no DOM elements and no wgpu resources. The native engine adapter is
+the production scene rasterizer for Editor, Playout Preview and Program.
+Browser code renders only UI and interaction overlays.
 
 ## 11. Broadcast frame clock
 
@@ -403,10 +424,20 @@ makes the same frame reproducible across engines.
 
 | Channel | Authority | Quality |
 | --- | --- | --- |
-| Editor | local browser renderer | interactive |
+| Editor | native Editor Render View extension | interactive, adaptive |
 | Engine Preview | engine | independent from Program |
 | Program | engine, changed only by Playout commands | authoritative |
 | Auxiliary | engine | per-output |
+
+Editor and Playout Render Views are specialised sessions over the same native
+render-core. They vary viewport, cadence, metadata and priority without forking
+material, font, lighting, 3D or animation semantics.
+
+A view session may preserve a cached last-good frame while the worker recovers,
+but that cache is never a fresh Program source. A separately isolated Playout
+standby worker may take Program only after exact journal/checksum agreement,
+first-frame validation and transfer of a fenced output lease. An Editor Render
+View is never Program-eligible.
 
 Preview never sends the full stage. `RequestPreview` must name one of: a scaled
 whole-stage view, a viewport, a region, a surface, or a tile set. The engine

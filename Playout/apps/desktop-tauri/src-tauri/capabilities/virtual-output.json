@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "virtual-output",
+  "description": "Allows a windowed virtual Program output to manage its own native window.",
+  "windows": [
+    "virtual-output-*"
+  ],
+  "permissions": [
+    "core:window:allow-close",
+    "core:window:allow-is-fullscreen",
+    "core:window:allow-minimize",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-is-always-on-top",
+    "core:window:allow-set-always-on-top"
+  ]
+}

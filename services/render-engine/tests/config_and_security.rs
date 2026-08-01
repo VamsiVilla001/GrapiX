@@ -160,7 +160,9 @@ fn the_bundled_engine_toml_loads_and_validates() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("engine.toml");
     let mut loaded = EngineConfig::from_file(&path).expect("bundled engine.toml must parse");
 
-    let warnings = loaded.validate().expect("bundled engine.toml must validate");
+    let warnings = loaded
+        .validate()
+        .expect("bundled engine.toml must validate");
     assert_eq!(loaded.network.websocket_port, DEFAULT_PORT);
     assert_eq!(loaded.stage.max_logical_canvas_width, 50_000.0);
     assert!(loaded.gpu.headless);
@@ -186,8 +188,8 @@ fn unknown_cli_arguments_are_a_hard_error() {
         .expect_err("must reject an unknown flag");
     assert!(error.to_string().contains("unknown argument"));
 
-    let missing = config::parse_cli(&["--port".to_string()])
-        .expect_err("must reject a flag with no value");
+    let missing =
+        config::parse_cli(&["--port".to_string()]).expect_err("must reject a flag with no value");
     assert!(missing.to_string().contains("requires a value"));
 
     let unparseable = config::parse_cli(&["--port".to_string(), "http".to_string()])
@@ -238,13 +240,11 @@ fn cli_parses_every_documented_flag() {
 #[test]
 fn boolean_flags_and_env_accept_the_usual_spellings() {
     for value in ["true", "1", "yes", "on"] {
-        let cli =
-            config::parse_cli(&["--headless".to_string(), value.to_string()]).expect("parse");
+        let cli = config::parse_cli(&["--headless".to_string(), value.to_string()]).expect("parse");
         assert_eq!(cli.headless, Some(true), "{value} should be true");
     }
     for value in ["false", "0", "no", "off"] {
-        let cli =
-            config::parse_cli(&["--headless".to_string(), value.to_string()]).expect("parse");
+        let cli = config::parse_cli(&["--headless".to_string(), value.to_string()]).expect("parse");
         assert_eq!(cli.headless, Some(false), "{value} should be false");
     }
 
@@ -308,10 +308,15 @@ fn a_remote_bind_forces_authentication_on() {
 
     let warnings = engine_config.validate().expect("validate");
 
-    assert!(engine_config.auth.required, "a remote bind must force auth on");
+    assert!(
+        engine_config.auth.required,
+        "a remote bind must force auth on"
+    );
     // TLS and an empty allowlist are warnings: they are real risks but there are
     // legitimate deployments (a proxy in front, a trusted VLAN) where they are fine.
-    assert!(warnings.iter().any(|warning| warning.contains("without TLS")));
+    assert!(warnings
+        .iter()
+        .any(|warning| warning.contains("without TLS")));
     assert!(warnings
         .iter()
         .any(|warning| warning.contains("client-allowlist is empty")));
@@ -356,7 +361,9 @@ fn no_asset_roots_is_an_error_because_no_asset_could_resolve() {
     let mut engine_config = EngineConfig::default();
     engine_config.assets.roots.clear();
 
-    let error = engine_config.validate().expect_err("must refuse empty roots");
+    let error = engine_config
+        .validate()
+        .expect_err("must refuse empty roots");
     assert!(error.to_string().contains("at least one directory"));
 }
 
@@ -386,13 +393,18 @@ fn http_fetching_with_an_empty_allowlist_warns() {
 #[test]
 fn declared_but_unimplemented_adapters_warn() {
     let mut engine_config = EngineConfig::default();
-    engine_config.outputs.enabled_adapters =
-        vec!["null".to_string(), "decklink".to_string(), "aja".to_string()];
+    engine_config.outputs.enabled_adapters = vec![
+        "null".to_string(),
+        "decklink".to_string(),
+        "aja".to_string(),
+    ];
 
     let warnings = engine_config.validate().expect("validate");
     assert!(warnings.iter().any(|w| w.contains("decklink")));
     assert!(warnings.iter().any(|w| w.contains("aja")));
-    assert!(warnings.iter().any(|w| w.contains("report itself unavailable")));
+    assert!(warnings
+        .iter()
+        .any(|w| w.contains("report itself unavailable")));
 }
 
 #[test]
@@ -441,7 +453,10 @@ fn the_effective_config_round_trips_through_toml() {
 
     assert_eq!(reparsed.identity.name, "Round trip");
     assert_eq!(reparsed.stage.default_tile_width, 2048);
-    assert_eq!(reparsed.network.websocket_port, original.network.websocket_port);
+    assert_eq!(
+        reparsed.network.websocket_port,
+        original.network.websocket_port
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -472,8 +487,8 @@ fn a_remote_client_can_never_name_an_arbitrary_filesystem_path() {
     ];
 
     for (candidate, expected) in cases {
-        let rejection = check_path_syntax(candidate)
-            .expect_err(&format!("{candidate:?} must be rejected"));
+        let rejection =
+            check_path_syntax(candidate).expect_err(&format!("{candidate:?} must be rejected"));
         assert_eq!(rejection, *expected, "wrong reason for {candidate:?}");
         // Every rejection has an operator-readable explanation.
         assert!(!rejection.message().is_empty());
@@ -522,8 +537,7 @@ fn resolution_searches_every_configured_root() {
     fs::create_dir_all(&second).expect("create second");
     fs::write(second.join("only-here.png"), b"png").expect("write asset");
 
-    let resolved =
-        resolve_asset_path("only-here.png", &[first, second.clone()]).expect("resolve");
+    let resolved = resolve_asset_path("only-here.png", &[first, second.clone()]).expect("resolve");
     assert!(resolved.starts_with(second.canonicalize().expect("canonicalise")));
 }
 
@@ -673,7 +687,10 @@ fn token_comparison_is_length_independent_and_correct() {
     assert!(tokens_match("", ""));
 
     // A correct prefix must not compare equal, and must not leak how much matched.
-    assert!(!tokens_match(VALID_TOKEN, &VALID_TOKEN[..VALID_TOKEN.len() - 1]));
+    assert!(!tokens_match(
+        VALID_TOKEN,
+        &VALID_TOKEN[..VALID_TOKEN.len() - 1]
+    ));
     assert!(!tokens_match(VALID_TOKEN, &format!("{VALID_TOKEN}x")));
 }
 

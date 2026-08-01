@@ -72,7 +72,7 @@ raster is required.
 
 ## Tests
 
-Fixture coverage lives in `services/api-server/tests/design-import.test.mjs` and
+Fixture coverage lives in `Editor/services/project-api/tests/design-import.test.mjs` and
 includes PSD, SVG-compatible AI, SVG, and exported Figma JSON. The tests cover
 nested layers, editable text, vector geometry, extracted images, masks,
 clipping, gradients/alpha stops, effects, components, missing fonts, option

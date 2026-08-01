@@ -1,6 +1,10 @@
 import { useEditorStore } from "../store/editorStore";
 import { useUiStore } from "../store/uiStore";
-import { useSupervisorStatus } from "../hooks/useSupervisorStatus";
+import {
+  useSupervisorStatus,
+  type ProcessState,
+  type ProcessStatus
+} from "../hooks/useSupervisorStatus";
 import { useApiHealth } from "../hooks/useApiHealth";
 
 export function StatusBar() {
@@ -23,22 +27,10 @@ export function StatusBar() {
       <span>{hasActiveScene ? `${scene.timeline.fps}fps` : "—"}</span>
       <span>Zoom: {zoom}%</span>
       {supervisor ? (
-        <span
-          className={`program-health ${
-            supervisor.fallbackActive
-              ? "fallback"
-              : supervisor.rendererHealthy && supervisor.outputHealthy
-                ? "healthy"
-                : "degraded"
-          }`}
-          title={supervisor.fallbackReason ?? supervisor.rendererLastError ?? "Native Program renderer health"}
-        >
-          {supervisor.fallbackActive
-            ? `Program fallback: ${supervisor.fallbackReason ?? "active"}`
-            : supervisor.rendererHealthy
-              ? `Program ${supervisor.outputState ?? "ready"} · frame ${supervisor.lastFrameCount ?? 0}`
-              : "Program renderer starting"}
-        </span>
+        <>
+          <ServiceChip process={supervisor.api} />
+          <ServiceChip process={supervisor.engine} />
+        </>
       ) : null}
       {apiHealth?.showMode === "read-only" ? (
         <span className="show-mode-lock" title="Project and asset editing is locked; playout controls and live-data patches remain available.">
@@ -46,10 +38,7 @@ export function StatusBar() {
         </span>
       ) : null}
       {supervisor ? (
-        <span
-          className="certification-warning"
-          title={`${supervisor.certificationWarning} ${supervisor.gpuAdapter ?? "GPU unknown"} · ${supervisor.gpuBackend ?? "backend unknown"}`}
-        >
+        <span className="certification-warning" title={supervisor.certificationWarning}>
           Hardware: uncertified
         </span>
       ) : null}
@@ -72,4 +61,29 @@ function saveStatusLabel(status: "local" | "saving" | "saved" | "error", error: 
   }
 
   return "Autosave: Local draft";
+}
+
+/**
+ * One process chip. It reports what the desktop shell can actually observe — reachability and
+ * ownership — and nothing about Program: Program state belongs to Playout and the engine, and
+ * a shell that guessed at it would give an operator a second, wrong truth.
+ */
+function ServiceChip({ process }: { process: ProcessStatus }) {
+  const ownership = process.supervised ? "started by this Editor" : "not started by this Editor";
+  return (
+    <span
+      className={`service-health ${serviceTone(process.state)}`}
+      title={`${process.label} on ${process.address} — ${process.state}, ${ownership}${
+        process.detail ? `: ${process.detail}` : ""
+      }`}
+    >
+      {process.label}: {process.state}
+    </span>
+  );
+}
+
+function serviceTone(state: ProcessState): "healthy" | "degraded" | "fallback" {
+  if (state === "online" || state === "adopted") return "healthy";
+  if (state === "lost" || state === "failed") return "fallback";
+  return "degraded";
 }

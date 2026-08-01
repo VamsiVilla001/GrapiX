@@ -83,9 +83,51 @@ pub struct PreparedMeshSurface {
     pub material: PreparedMeshMaterial,
 }
 
+/// A mesh's authored transform, before it is baked into a matrix.
+///
+/// Retained on `PreparedMesh` so the render engine can recompose the model matrix per frame
+/// from animated values. Without it only the baked matrix survives preparation, and recovering
+/// Euler angles from a matrix is ambiguous — so an animated mesh would have to be re-prepared
+/// every frame, which is the 482 ms path.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MeshTransform {
+    pub x: f32,
+    pub y: f32,
+    /// `zDepth`. For a mesh this is a real Z translation, not just paint order.
+    pub z: f32,
+    /// Degrees, applied in XYZ order.
+    pub rotation_x: f32,
+    pub rotation_y: f32,
+    pub rotation_z: f32,
+    pub scale_x: f32,
+    pub scale_y: f32,
+    pub scale_z: f32,
+}
+
+impl MeshTransform {
+    /// The one composition: translate, then rotate XYZ, then scale.
+    ///
+    /// Preparation and per-frame animation both call this. Two copies of this formula would
+    /// drift, and the symptom would be an animated mesh sitting somewhere slightly different
+    /// from the same mesh at rest — the kind of thing nobody notices until it is on air.
+    pub fn to_matrix(self) -> [f32; 16] {
+        (Mat4::from_translation(Vec3::new(self.x, self.y, self.z))
+            * Mat4::from_euler(
+                EulerRot::XYZ,
+                self.rotation_x.to_radians(),
+                self.rotation_y.to_radians(),
+                self.rotation_z.to_radians(),
+            )
+            * Mat4::from_scale(Vec3::new(self.scale_x, self.scale_y, self.scale_z)))
+        .to_cols_array()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PreparedMesh {
     pub object_id: String,
+    /// The authored components, so animation can recompose without re-preparing.
+    pub transform: MeshTransform,
     pub model_transform: [f32; 16],
     pub surfaces: Vec<PreparedMeshSurface>,
 }
@@ -153,6 +195,8 @@ struct TextureSlotDto {
     asset_id: Option<String>,
     #[serde(default)]
     wrap: Option<String>,
+    #[serde(default)]
+    fit: Option<String>,
     #[serde(default)]
     filtering: Option<String>,
     #[serde(default = "default_uv_scale")]
@@ -308,6 +352,48 @@ fn default_scale() -> f64 {
     1.0
 }
 
+/// Fit modes that resolve to a pure UV scale/offset, mirroring
+/// `IMPLEMENTED_TEXTURE_FIT_MODES` in `Shared/shared-types`.
+///
+/// This list and [`resolve_texture_fit`] MUST stay identical to the TypeScript definition: the
+/// editor preview and Program are the same pixels by contract, so a fit mode honoured on one side
+/// and stretched on the other is a parity break, not a cosmetic difference.
+const IMPLEMENTED_TEXTURE_FIT_MODES: [&str; 3] = ["stretch", "fill", "crop"];
+
+/// The UV scale/offset that makes `mode` respect the texture's own resolution on `surface`.
+///
+/// Returns the identity for `stretch` and for any mode the renderers cannot honour, so an
+/// unimplemented mode keeps the previous behaviour instead of inventing a crop.
+fn resolve_texture_fit(
+    mode: &str,
+    surface_width: f32,
+    surface_height: f32,
+    texture_width: f32,
+    texture_height: f32,
+) -> ([f32; 2], [f32; 2]) {
+    let identity = ([1.0, 1.0], [0.0, 0.0]);
+    let extents = [surface_width, surface_height, texture_width, texture_height];
+    if mode == "stretch"
+        || !IMPLEMENTED_TEXTURE_FIT_MODES.contains(&mode)
+        || !extents
+            .iter()
+            .all(|value| value.is_finite() && *value > 0.0)
+    {
+        return identity;
+    }
+
+    // Cover: scale until the texture covers both axes, then centre the crop. The wider-aspect
+    // side overflows, so it is the one sampled short.
+    let surface_aspect = surface_width / surface_height;
+    let texture_aspect = texture_width / texture_height;
+    let repeat = if texture_aspect > surface_aspect {
+        [surface_aspect / texture_aspect, 1.0]
+    } else {
+        [1.0, texture_aspect / surface_aspect]
+    };
+    (repeat, [(1.0 - repeat[0]) / 2.0, (1.0 - repeat[1]) / 2.0])
+}
+
 fn default_uv_scale() -> [f64; 2] {
     [1.0, 1.0]
 }
@@ -431,21 +517,18 @@ pub fn prepare_meshes(
             continue;
         }
 
-        let rotation_z = object.rotation_z.unwrap_or(object.rotation);
-        let model = Mat4::from_translation(Vec3::new(
-            object.x as f32,
-            object.y as f32,
-            object.z_depth as f32,
-        )) * Mat4::from_euler(
-            EulerRot::XYZ,
-            (object.rotation_x as f32).to_radians(),
-            (object.rotation_y as f32).to_radians(),
-            (rotation_z as f32).to_radians(),
-        ) * Mat4::from_scale(Vec3::new(
-            object.scale_x as f32,
-            object.scale_y as f32,
-            object.scale_z as f32,
-        ));
+        let transform = MeshTransform {
+            x: object.x as f32,
+            y: object.y as f32,
+            z: object.z_depth as f32,
+            rotation_x: object.rotation_x as f32,
+            rotation_y: object.rotation_y as f32,
+            // `rotationZ` is the 3D name; `rotation` is the 2D one. Same degree of freedom.
+            rotation_z: object.rotation_z.unwrap_or(object.rotation) as f32,
+            scale_x: object.scale_x as f32,
+            scale_y: object.scale_y as f32,
+            scale_z: object.scale_z as f32,
+        };
 
         prepared.push((
             object.layer_id,
@@ -453,7 +536,8 @@ pub fn prepare_meshes(
             object.z_index,
             PreparedMesh {
                 object_id: object.id,
-                model_transform: model.to_cols_array(),
+                model_transform: transform.to_matrix(),
+                transform,
                 surfaces,
             },
         ));
@@ -553,23 +637,26 @@ pub fn prepare_meshes(
         } else {
             rect_plane_surface(&adapter)
         };
-        let model = Mat4::from_translation(Vec3::new(
-            adapter.x as f32,
-            adapter.y as f32,
-            adapter.z_depth as f32,
-        )) * Mat4::from_rotation_z((adapter.rotation as f32).to_radians())
-            * Mat4::from_scale(Vec3::new(
-                adapter.scale_x as f32,
-                adapter.scale_y as f32,
-                adapter.scale_z as f32,
-            ));
+        // A flat broadcast primitive promoted to a mesh: Z rotation only, no X/Y tilt.
+        let transform = MeshTransform {
+            x: adapter.x as f32,
+            y: adapter.y as f32,
+            z: adapter.z_depth as f32,
+            rotation_x: 0.0,
+            rotation_y: 0.0,
+            rotation_z: adapter.rotation as f32,
+            scale_x: adapter.scale_x as f32,
+            scale_y: adapter.scale_y as f32,
+            scale_z: adapter.scale_z as f32,
+        };
         prepared.push((
             adapter.layer_id,
             adapter.z_depth,
             adapter.z_index,
             PreparedMesh {
                 object_id: adapter.id,
-                model_transform: model.to_cols_array(),
+                model_transform: transform.to_matrix(),
+                transform,
                 surfaces: vec![PreparedMeshSurface {
                     slot_key: "main".to_string(),
                     vertices: surface.vertices,
@@ -806,13 +893,42 @@ fn resolve_surface_material(
         &material.parameters,
     )
     .unwrap_or(texture_slot.uv_rotation);
+    // The fit mode decides which rectangle of the texture the surface samples, which is where the
+    // image's own resolution matters. "main" is the primary front face, whose extent is the
+    // object's width x height; bevel, extrusion and side faces are sized from depth and bevel
+    // geometry, so they get no fit rather than a plausible-looking wrong crop. This mirrors
+    // `applyTextureCoordinates` in the editor's ThreeSceneLayer exactly.
+    let (fit_repeat, fit_offset) = match (slot_key, texture.as_ref()) {
+        ("main", Some(texture)) => resolve_texture_fit(
+            texture_slot.fit.as_deref().unwrap_or("stretch"),
+            object.width as f32,
+            object.height as f32,
+            texture.width as f32,
+            texture.height as f32,
+        ),
+        _ => ([1.0, 1.0], [0.0, 0.0]),
+    };
+    // Authored scale narrows the fitted rectangle rather than replacing it, so a fit crop and a
+    // deliberate UV zoom compose instead of one discarding the other.
     let uv_scale = [
-        uv_scale_parameter[0] as f32 * if texture_slot.flip_x { -1.0 } else { 1.0 },
-        uv_scale_parameter[1] as f32 * if texture_slot.flip_y { -1.0 } else { 1.0 },
+        uv_scale_parameter[0] as f32 * fit_repeat[0] * if texture_slot.flip_x { -1.0 } else { 1.0 },
+        uv_scale_parameter[1] as f32 * fit_repeat[1] * if texture_slot.flip_y { -1.0 } else { 1.0 },
     ];
     let uv_offset = [
-        uv_offset[0] as f32 + if texture_slot.flip_x { 1.0 } else { 0.0 },
-        uv_offset[1] as f32 + if texture_slot.flip_y { 1.0 } else { 0.0 },
+        fit_offset[0]
+            + uv_offset[0] as f32
+            + if texture_slot.flip_x {
+                fit_repeat[0]
+            } else {
+                0.0
+            },
+        fit_offset[1]
+            + uv_offset[1] as f32
+            + if texture_slot.flip_y {
+                fit_repeat[1]
+            } else {
+                0.0
+            },
     ];
 
     let blend_mode = match blend_mode_id(material.blend_mode.as_deref().unwrap_or("normal")) {
@@ -1649,6 +1765,8 @@ fn default_texture_slot() -> TextureSlotDto {
         name: "baseTexture".to_string(),
         asset_id: None,
         wrap: Some("clamp".to_string()),
+        // A material with no authored slot has no fit intent; stretch is the historical default.
+        fit: Some("stretch".to_string()),
         filtering: Some("linear".to_string()),
         uv_scale: [1.0, 1.0],
         uv_offset: [0.0, 0.0],
@@ -2172,5 +2290,86 @@ mod tests {
             .material
             .base_color_linear;
         assert_eq!(color, [0.0, 1.0, 0.0, 1.0]);
+    }
+
+    /// These are the exact values asserted by
+    /// `Shared/shared-types/tests/material-system.test.mjs`. If this test and that one ever
+    /// disagree, Preview and Program are sampling different rectangles of the same texture.
+    #[test]
+    fn cover_fit_matches_the_shared_typescript_definition() {
+        // A 256x128 texture on a 360x210 surface: height fills, width is cropped and centred.
+        let (repeat, offset) = resolve_texture_fit("fill", 360.0, 210.0, 256.0, 128.0);
+        let expected_x = (360.0f32 / 210.0) / (256.0 / 128.0);
+        assert!(
+            (repeat[0] - expected_x).abs() < 1e-6,
+            "repeat.x was {}",
+            repeat[0]
+        );
+        assert_eq!(repeat[1], 1.0);
+        assert!((offset[0] - (1.0 - expected_x) / 2.0).abs() < 1e-6);
+        assert_eq!(offset[1], 0.0);
+
+        // A texture taller than the surface crops the other axis instead.
+        let (repeat, offset) = resolve_texture_fit("fill", 400.0, 100.0, 100.0, 400.0);
+        assert_eq!(repeat[0], 1.0);
+        assert!(repeat[1] < 1.0);
+        assert!((offset[1] - (1.0 - repeat[1]) / 2.0).abs() < 1e-6);
+
+        // Matching aspects are left alone by every implemented mode.
+        for mode in IMPLEMENTED_TEXTURE_FIT_MODES {
+            let (repeat, offset) = resolve_texture_fit(mode, 512.0, 512.0, 256.0, 256.0);
+            assert_eq!(repeat, [1.0, 1.0], "{mode} altered a matching aspect");
+            assert_eq!(offset, [0.0, 0.0], "{mode} offset a matching aspect");
+        }
+    }
+
+    #[test]
+    fn cover_fit_never_samples_outside_the_texture() {
+        // What makes cover portable: the sampled rectangle stays inside [0,1], so clamp and repeat
+        // wrap cannot disagree. The excluded modes are excluded because they break this.
+        for (sw, sh, tw, th) in [
+            (360.0, 210.0, 256.0, 128.0),
+            (100.0, 900.0, 1920.0, 1080.0),
+            (640.0, 640.0, 1.0, 4096.0),
+        ] {
+            let (repeat, offset) = resolve_texture_fit("fill", sw, sh, tw, th);
+            for axis in 0..2 {
+                assert!(repeat[axis] > 0.0 && repeat[axis] <= 1.0);
+                assert!(offset[axis] >= 0.0);
+                assert!(offset[axis] + repeat[axis] <= 1.0 + 1e-6);
+            }
+        }
+    }
+
+    #[test]
+    fn unimplemented_and_degenerate_fits_resolve_to_identity() {
+        // Unimplemented modes must keep the previous behaviour rather than invent a crop, and a
+        // zero or non-finite extent must not divide by zero.
+        for mode in [
+            "stretch",
+            "fit",
+            "original",
+            "pixel-perfect",
+            "tile",
+            "nine-slice",
+        ] {
+            assert_eq!(
+                resolve_texture_fit(mode, 360.0, 210.0, 256.0, 128.0),
+                ([1.0, 1.0], [0.0, 0.0]),
+                "{mode} must be the identity"
+            );
+        }
+        for (sw, sh, tw, th) in [
+            (0.0, 210.0, 256.0, 128.0),
+            (360.0, 210.0, 0.0, 128.0),
+            (360.0, 210.0, 256.0, f32::NAN),
+            (360.0, 210.0, f32::INFINITY, 128.0),
+            (-360.0, 210.0, 256.0, 128.0),
+        ] {
+            assert_eq!(
+                resolve_texture_fit("fill", sw, sh, tw, th),
+                ([1.0, 1.0], [0.0, 0.0])
+            );
+        }
     }
 }

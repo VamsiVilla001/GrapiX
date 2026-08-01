@@ -70,6 +70,9 @@ pub struct SceneRenderer {
     scene_key: Option<SceneKey>,
     prepared: Option<Arc<PreparedScene>>,
     mesh_frame: Option<mesh::MeshFrame>,
+    /// Sampled every frame. Invalidated with the prepared scene, because it is read out of
+    /// the same document.
+    animation: Arc<crate::animation::SceneAnimation>,
 
     /// True once a quad-budget overflow has been reported, so it is said once.
     warned_overflow: bool,
@@ -86,6 +89,7 @@ impl SceneRenderer {
             scene_key: None,
             prepared: None,
             mesh_frame: None,
+            animation: Arc::new(crate::animation::SceneAnimation::default()),
             warned_overflow: false,
         }
     }
@@ -111,7 +115,12 @@ impl SceneRenderer {
     ///
     /// Exposed so the caller can avoid cloning the scene document on every frame: the
     /// document is only needed when it is going to be re-prepared, which is rare.
-    pub fn needs_prepare(&self, scene_id: &str, revision: u64, bounds: (f64, f64, f64, f64)) -> bool {
+    pub fn needs_prepare(
+        &self,
+        scene_id: &str,
+        revision: u64,
+        bounds: (f64, f64, f64, f64),
+    ) -> bool {
         match &self.scene_key {
             None => true,
             Some(key) => {
@@ -123,7 +132,9 @@ impl SceneRenderer {
     /// Render one Program frame.
     ///
     /// `prepare` is only called when the key changed; it is passed as a closure so the
-    /// caller keeps ownership of the rebase and the engine's error reporting.
+    /// caller keeps ownership of the rebase and the engine's error reporting. It returns the
+    /// prepared scene **and** the animation read from the same document, so the two can never
+    /// disagree about which revision they describe.
     pub fn render(
         &mut self,
         gpu: &GpuContext,
@@ -131,28 +142,65 @@ impl SceneRenderer {
         revision: u64,
         bounds: (f64, f64, f64, f64),
         frame_index: u64,
-        prepare: impl FnOnce() -> Result<PreparedScene, String>,
+        prepare: impl FnOnce() -> Result<(PreparedScene, crate::animation::SceneAnimation), String>,
     ) -> Result<VideoFrame, String> {
         let key = SceneKey::new(scene_id, revision, bounds);
 
         if self.scene_key.as_ref() != Some(&key) || self.prepared.is_none() {
-            let prepared = Arc::new(prepare()?);
+            let (prepared, animation) = prepare()?;
+            let prepared = Arc::new(prepared);
             // The mesh frame is derived from the prepared scene, so it is invalidated
             // by exactly the same change.
-            self.mesh_frame = Some(
-                self.mesh_pipeline
-                    .prepare_frame(&gpu.device, &gpu.queue, &prepared),
-            );
+            self.mesh_frame = Some(self.mesh_pipeline.prepare_frame(
+                &gpu.device,
+                &gpu.queue,
+                &prepared,
+            ));
+            if !animation.is_empty() {
+                tracing::info!(
+                    scene_id,
+                    animated_objects = animation.animated_object_count(),
+                    "scene carries animation; Program will sample it per frame"
+                );
+            }
             self.prepared = Some(prepared);
+            self.animation = Arc::new(animation);
             self.scene_key = Some(key);
         }
 
         let prepared = self
             .prepared
             .as_ref()
-            .expect("prepared scene is set above");
+            .expect("prepared scene is set above")
+            .clone();
+        let animation = Arc::clone(&self.animation);
 
-        let mut quads = pipeline::QuadPipeline::build_frame_quads(prepared);
+        // A still scene builds quads straight from the prepared objects. An animated one
+        // patches copies of the animatable numeric fields first: cheap arithmetic over small
+        // structs, and specifically NOT a re-prepare, which costs hundreds of milliseconds.
+        let origin = (bounds.0 as f32, bounds.1 as f32);
+        let animated_rects = (!animation.is_empty()).then(|| {
+            let mut rects = prepared.rects.clone();
+            let mut texts = prepared.texts.clone();
+            animation.apply(frame_index, origin, &mut rects, &mut texts);
+            (rects, texts)
+        });
+
+        // Meshes are not quads: their transform is a per-draw uniform, so an animated mesh is
+        // updated in place on the cached mesh frame. Before this, a mesh animated in the Editor
+        // (three.js reads the object every frame) and sat still on Program — the same scene
+        // rendering differently in the two places, with nothing to indicate it.
+        if !animation.is_empty() {
+            if let Some(mesh_frame) = self.mesh_frame.as_mut() {
+                let transforms = animation.mesh_transforms(frame_index, origin, &prepared.meshes);
+                mesh_frame.update_model_transforms(&gpu.queue, &transforms);
+            }
+        }
+
+        let mut quads = match &animated_rects {
+            Some((rects, _)) => pipeline::QuadPipeline::build_frame_quads_from(&prepared, rects),
+            None => pipeline::QuadPipeline::build_frame_quads(&prepared),
+        };
         if quads.len() > pipeline::MAX_QUADS_PER_FRAME {
             if !self.warned_overflow {
                 tracing::warn!(
@@ -178,7 +226,12 @@ impl SceneRenderer {
             )
             .map_err(|error| format!("render failed: {error}"))?;
 
-        self.text_renderer.composite(&mut video, prepared);
+        match &animated_rects {
+            Some((_, texts)) => self
+                .text_renderer
+                .composite_texts(&mut video, &prepared, texts),
+            None => self.text_renderer.composite(&mut video, &prepared),
+        }
         video.frame_index = frame_index;
         Ok(video)
     }

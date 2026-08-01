@@ -23,9 +23,9 @@ use grapix_render_core::renderer::gpu::GpuContext;
 
 use crate::capabilities::{EngineCapabilities, EngineState, EngineStateMachine};
 use crate::config::EngineConfig;
+use crate::outputs::{self, OutputFormat, OutputInstance, OutputStatus};
 use crate::preview::{self, PreviewOutcome};
 use crate::protocol::{now_ms, Envelope, ErrorCode, ProtocolError, RequestType};
-use crate::outputs::{self, OutputFormat, OutputInstance, OutputStatus};
 use crate::render::TileSceneBuilder;
 use crate::security::{AuditEntry, AuditLog};
 use crate::stage::{Rect, StageDocument, TilingConfig};
@@ -131,6 +131,10 @@ pub struct Engine {
     scenes: HashMap<String, LoadedScene>,
     program_scene_id: Option<String>,
     preview_scene_id: Option<String>,
+    /// Preview owns a playhead independent from Program. Sharing `LoadedScene::frame`
+    /// made Cue either freeze Preview or rewind a scene that was already on air.
+    preview_start_frame: u64,
+    preview_started_at: Option<Instant>,
     outputs: Vec<OutputInstance>,
     /// The asset store: content-addressed cache, uploads in flight, reference counts.
     assets: crate::assets::AssetStore,
@@ -224,6 +228,8 @@ impl Engine {
             scenes: HashMap::new(),
             program_scene_id: None,
             preview_scene_id: None,
+            preview_start_frame: 0,
+            preview_started_at: None,
             outputs: Vec::new(),
             assets,
             preview_streams: std::collections::BTreeMap::new(),
@@ -508,16 +514,17 @@ impl Engine {
     // -----------------------------------------------------------------------
 
     fn handle_stage_load(&mut self, payload: &Value) -> Result<(String, Value), ProtocolError> {
-        let stage_value = payload
-            .get("stage")
-            .ok_or_else(|| ProtocolError::new(ErrorCode::InvalidPayload, "stage.load needs a stage"))?;
-
-        let stage: StageDocument = serde_json::from_value(stage_value.clone()).map_err(|error| {
-            ProtocolError::new(
-                ErrorCode::InvalidPayload,
-                format!("stage document could not be parsed: {error}"),
-            )
+        let stage_value = payload.get("stage").ok_or_else(|| {
+            ProtocolError::new(ErrorCode::InvalidPayload, "stage.load needs a stage")
         })?;
+
+        let stage: StageDocument =
+            serde_json::from_value(stage_value.clone()).map_err(|error| {
+                ProtocolError::new(
+                    ErrorCode::InvalidPayload,
+                    format!("stage document could not be parsed: {error}"),
+                )
+            })?;
         let stage = stage.normalized();
 
         let validation = stage.validate(&self.capabilities.stage_limits());
@@ -602,7 +609,8 @@ impl Engine {
             .ok_or_else(|| ProtocolError::new(ErrorCode::InvalidPayload, "scene needs an id"))?
             .to_string();
 
-        if !full_sync && self.scenes.len() >= self.config.stage.max_active_scenes as usize
+        if !full_sync
+            && self.scenes.len() >= self.config.stage.max_active_scenes as usize
             && !self.scenes.contains_key(&scene_id)
         {
             return Err(ProtocolError::new(
@@ -663,7 +671,11 @@ impl Engine {
 
         let builder = TileSceneBuilder::new(scene_value.clone(), revision.to_string());
 
-        let previous_frame = self.scenes.get(&scene_id).map(|scene| scene.frame).unwrap_or(0);
+        let previous_frame = self
+            .scenes
+            .get(&scene_id)
+            .map(|scene| scene.frame)
+            .unwrap_or(0);
 
         let loaded = LoadedScene {
             scene_id: scene_id.clone(),
@@ -752,10 +764,9 @@ impl Engine {
             .unwrap_or_default();
         let missing_assets = self.assets.reference(scene_id, &declared_assets, now_ms());
 
-        let scene = self
-            .scenes
-            .get_mut(scene_id)
-            .ok_or_else(|| ProtocolError::new(ErrorCode::SceneNotFound, format!("no scene {scene_id}")))?;
+        let scene = self.scenes.get_mut(scene_id).ok_or_else(|| {
+            ProtocolError::new(ErrorCode::SceneNotFound, format!("no scene {scene_id}"))
+        })?;
 
         let selection = scene.tiles.select_tiles(&TileSelectionRequest {
             frame: scene.frame,
@@ -905,8 +916,8 @@ impl Engine {
             .get("patch")
             .ok_or_else(|| ProtocolError::new(ErrorCode::InvalidPayload, "needs a patch"))?;
 
-        let patch: crate::patch::ScenePatch = serde_json::from_value(patch_value.clone())
-            .map_err(|error| {
+        let patch: crate::patch::ScenePatch =
+            serde_json::from_value(patch_value.clone()).map_err(|error| {
                 ProtocolError::new(
                     ErrorCode::InvalidPayload,
                     // Naming the operation set is what lets a client tell "I sent a typo"
@@ -932,11 +943,13 @@ impl Engine {
 
         // Bounds before the patch, so a moved object can dirty the tiles it left as
         // well as the ones it entered.
-        let bounds_before: std::collections::HashMap<String, (crate::stage::Rect, Vec<crate::tile::FilterOverscan>)> =
-            scene_object_bounds(self.scenes[&scene_id].source_document())
-                .into_iter()
-                .map(|(id, rect, filters)| (id, (rect, filters)))
-                .collect();
+        let bounds_before: std::collections::HashMap<
+            String,
+            (crate::stage::Rect, Vec<crate::tile::FilterOverscan>),
+        > = scene_object_bounds(self.scenes[&scene_id].source_document())
+            .into_iter()
+            .map(|(id, rect, filters)| (id, (rect, filters)))
+            .collect();
 
         let mut document = self.scenes[&scene_id].source_document().clone();
         let outcome = match crate::patch::apply_patch(&mut document, &patch) {
@@ -966,11 +979,13 @@ impl Engine {
         };
 
         // Bounds after, for the objects the patch touched.
-        let bounds_after: std::collections::HashMap<String, (crate::stage::Rect, Vec<crate::tile::FilterOverscan>)> =
-            scene_object_bounds(&document)
-                .into_iter()
-                .map(|(id, rect, filters)| (id, (rect, filters)))
-                .collect();
+        let bounds_after: std::collections::HashMap<
+            String,
+            (crate::stage::Rect, Vec<crate::tile::FilterOverscan>),
+        > = scene_object_bounds(&document)
+            .into_iter()
+            .map(|(id, rect, filters)| (id, (rect, filters)))
+            .collect();
 
         let revision = outcome.revision;
         let object_count = document
@@ -1080,7 +1095,10 @@ impl Engine {
     fn handle_scene_unload(&mut self, payload: &Value) -> Result<(String, Value), ProtocolError> {
         let scene_id = require_str(payload, "sceneId")?.to_string();
 
-        let force = payload.get("force").and_then(Value::as_bool).unwrap_or(false);
+        let force = payload
+            .get("force")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
 
         // Unloading what is on Program puts black on air.
         if self.program_scene_id.as_deref() == Some(scene_id.as_str()) && !force {
@@ -1127,11 +1145,6 @@ impl Engine {
         self.require_scene(&scene_id)?;
         self.check_revision(payload, &scene_id)?;
 
-        if let Some(scene) = self.scenes.get_mut(&scene_id) {
-            scene.frame = start_frame.unwrap_or(0);
-            scene.last_used_ms = now_ms();
-        }
-
         match channel {
             Channel::Program => {
                 // Cue never puts anything on air; that is what Take is for.
@@ -1141,7 +1154,14 @@ impl Engine {
                 ));
             }
             Channel::Preview | Channel::Auxiliary => {
+                // Preview owns an independent playhead. Cue always starts the previewed copy
+                // from the requested frame, even when the same scene is already on Program.
+                self.preview_start_frame = start_frame.unwrap_or(0);
+                self.preview_started_at = Some(Instant::now());
                 self.preview_scene_id = Some(scene_id.clone());
+                if let Some(scene) = self.scenes.get_mut(&scene_id) {
+                    scene.last_used_ms = now_ms();
+                }
             }
         }
 
@@ -1242,6 +1262,11 @@ impl Engine {
 
         self.program_scene_id = Some(scene_id.clone());
         if let Some(scene) = self.scenes.get_mut(&scene_id) {
+            // Back to the top. A take is what starts an "in" animation, so a scene taken a
+            // second time must play from frame 0 rather than resuming wherever its last run
+            // left the playhead — an operator re-taking a lower third has to see it animate
+            // in again, not appear already finished.
+            scene.frame = 0;
             scene.last_used_ms = now_ms();
         }
         self.transition(EngineState::OnAir, "scene taken to program");
@@ -1378,6 +1403,8 @@ impl Engine {
             }
             Channel::Preview | Channel::Auxiliary => {
                 self.preview_scene_id = None;
+                self.preview_start_frame = 0;
+                self.preview_started_at = None;
             }
         }
 
@@ -1410,6 +1437,8 @@ impl Engine {
             }
             Channel::Preview | Channel::Auxiliary => {
                 self.preview_scene_id = Some(incoming.clone());
+                self.preview_start_frame = 0;
+                self.preview_started_at = Some(Instant::now());
             }
         }
 
@@ -1456,19 +1485,35 @@ impl Engine {
             .and_then(Channel::parse)
             .unwrap_or(Channel::Preview);
 
-        let scene_id = match channel {
-            Channel::Program => self.program_scene_id.clone(),
-            _ => self
-                .preview_scene_id
-                .clone()
-                .or_else(|| self.scenes.keys().next().cloned()),
-        }
-        .ok_or_else(|| {
-            ProtocolError::new(
-                ErrorCode::SceneNotFound,
-                format!("no scene is selected on {}", channel.as_str()),
-            )
-        })?;
+        // An explicit sceneId wins: a diagnostic or parity client asks for the scene it means,
+        // and before this was honoured such a request silently rendered a different one.
+        let requested = payload
+            .get("sceneId")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string);
+
+        let scene_id = match requested {
+            Some(scene_id) => scene_id,
+            // Otherwise the channel's own selection, and nothing else. This used to fall back
+            // to `self.scenes.keys().next()` — an arbitrary scene in HashMap order — so a
+            // preview with nothing cued showed the operator a scene they had not selected,
+            // and which one depended on hash ordering. A refusal is actionable; a confident
+            // wrong picture on a confidence monitor is not.
+            None => match channel {
+                Channel::Program => self.program_scene_id.clone(),
+                _ => self.preview_scene_id.clone(),
+            }
+            .ok_or_else(|| {
+                ProtocolError::new(
+                    ErrorCode::SceneNotFound,
+                    format!(
+                        "no scene is selected on {}; cue one or pass an explicit sceneId",
+                        channel.as_str()
+                    ),
+                )
+            })?,
+        };
 
         let stage = self.stage_for_scene(&scene_id)?;
         let source = payload.get("source").unwrap_or(&Value::Null);
@@ -1494,12 +1539,17 @@ impl Engine {
             .unwrap_or(&self.config.preview.default_encoding)
             .to_string();
 
+        // Fill or key. Broadcast splits transparency into a separate greyscale key signal
+        // rather than carrying an alpha channel, and operators check a graphic by looking at
+        // that key, so the engine renders it rather than asking a client to derive it.
+        let view = preview::PreviewView::parse(payload.get("view").and_then(Value::as_str))?;
+
         let resolved = preview::resolve_source(&stage, source, self.config.preview.max_pixels)?;
 
         let frame = payload
             .get("frame")
             .and_then(Value::as_u64)
-            .unwrap_or_else(|| self.scenes.get(&scene_id).map(|s| s.frame).unwrap_or(0));
+            .unwrap_or_else(|| self.channel_frame(channel, &scene_id));
 
         let max_texture_dimension = self.capabilities.limits.max_texture_dimension_2d;
 
@@ -1524,10 +1574,9 @@ impl Engine {
         // renderer must be reachable while the scene is mutably borrowed.
         let (cached_renderer, scene) = {
             let renderer = self.preview_renderer.as_mut().expect("set above");
-            let scene = self
-                .scenes
-                .get_mut(&scene_id)
-                .ok_or_else(|| ProtocolError::new(ErrorCode::SceneNotFound, format!("no scene {scene_id}")))?;
+            let scene = self.scenes.get_mut(&scene_id).ok_or_else(|| {
+                ProtocolError::new(ErrorCode::SceneNotFound, format!("no scene {scene_id}"))
+            })?;
             (Some(renderer), scene)
         };
 
@@ -1538,6 +1587,7 @@ impl Engine {
             frame,
             quality,
             &encoding,
+            view,
             show_tile_debug,
             force_tiled,
             max_texture_dimension,
@@ -1554,6 +1604,7 @@ impl Engine {
             json!({
                 "channel": channel.as_str(),
                 "encoding": encoding,
+                "view": view.as_str(),
                 // Which route rendered it. Reported rather than inferred from the request:
                 // a parity comparison that captured the same path twice would prove nothing
                 // while looking like a pass.
@@ -1584,9 +1635,6 @@ impl Engine {
         ))
     }
 
-
-
-
     // -----------------------------------------------------------------------
     // Assets
     // -----------------------------------------------------------------------
@@ -1603,7 +1651,10 @@ impl Engine {
             .get("mimeType")
             .and_then(Value::as_str)
             .unwrap_or("application/octet-stream");
-        let size_bytes = payload.get("sizeBytes").and_then(Value::as_u64).unwrap_or(0);
+        let size_bytes = payload
+            .get("sizeBytes")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
 
         let transport: crate::assets::AssetTransport = payload
             .get("transport")
@@ -1623,7 +1674,15 @@ impl Engine {
 
         let record = self
             .assets
-            .register(&asset_id, &sha256, mime_type, size_bytes, transport, uri, now_ms())
+            .register(
+                &asset_id,
+                &sha256,
+                mime_type,
+                size_bytes,
+                transport,
+                uri,
+                now_ms(),
+            )
             .map_err(asset_error)?;
 
         tracing::debug!(
@@ -1664,7 +1723,10 @@ impl Engine {
             .ok_or_else(|| {
                 ProtocolError::new(ErrorCode::InvalidPayload, "asset.upload needs chunkCount")
             })? as u32;
-        let total_bytes = payload.get("totalBytes").and_then(Value::as_u64).unwrap_or(0);
+        let total_bytes = payload
+            .get("totalBytes")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
 
         let encoded = require_str(payload, "data")?;
         let bytes = base64_decode(encoded).map_err(|error| {
@@ -1795,7 +1857,10 @@ impl Engine {
                     .collect()
             })
             .unwrap_or_default();
-        let force = payload.get("force").and_then(Value::as_bool).unwrap_or(false);
+        let force = payload
+            .get("force")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
 
         if asset_ids.is_empty() {
             return Err(ProtocolError::new(
@@ -1903,9 +1968,13 @@ impl Engine {
             .and_then(Value::as_str)
             .unwrap_or("jpeg")
             .to_string();
+        // Streams stay JPEG. Alpha does not belong in a monitor codec: broadcast carries
+        // transparency as a separate greyscale **key** signal, not as an alpha channel (SDI
+        // has no alpha at all), and operators monitor the key as a greyscale picture. So a
+        // key view is a render mode — see `view` below — not a reason to pay a PNG deflate
+        // on every frame. Refused rather than substituted: a client expecting raw frames and
+        // handed JPEG decodes garbage.
         if encoding != "jpeg" {
-            // Refused rather than substituted: a client expecting raw frames and given
-            // JPEG would decode garbage.
             return Err(ProtocolError::new(
                 ErrorCode::CapabilityUnsupported,
                 format!(
@@ -1913,6 +1982,8 @@ impl Engine {
                 ),
             ));
         }
+
+        let view = preview::PreviewView::parse(payload.get("view").and_then(Value::as_str))?;
 
         let requested_fps = payload
             .get("targetFps")
@@ -1944,6 +2015,7 @@ impl Engine {
             channel: channel.as_str().to_string(),
             source,
             encoding,
+            view,
             quality,
             target_fps,
             show_tile_debug: payload
@@ -2003,7 +2075,10 @@ impl Engine {
             ));
         }
 
-        let stream = self.preview_streams.remove(&stream_id).expect("checked above");
+        let stream = self
+            .preview_streams
+            .remove(&stream_id)
+            .expect("checked above");
         tracing::info!(%stream_id, frames = stream.frames_sent, "preview stream stopped");
 
         Ok((
@@ -2029,7 +2104,10 @@ impl Engine {
     ) -> Result<(String, Value), ProtocolError> {
         let stream_id = require_str(payload, "streamId")?.to_string();
         let source = payload.get("source").cloned().ok_or_else(|| {
-            ProtocolError::new(ErrorCode::InvalidPayload, "preview.setViewport needs a source")
+            ProtocolError::new(
+                ErrorCode::InvalidPayload,
+                "preview.setViewport needs a source",
+            )
         })?;
 
         let Some(existing) = self.preview_streams.get(&stream_id) else {
@@ -2145,10 +2223,7 @@ impl Engine {
     }
 
     /// Render one stream's frame, advancing its schedule.
-    fn render_stream_frame(
-        &mut self,
-        stream_id: &str,
-    ) -> Result<Option<(String, Value)>, String> {
+    fn render_stream_frame(&mut self, stream_id: &str) -> Result<Option<(String, Value)>, String> {
         let Some(stream) = self.preview_streams.get(stream_id).cloned() else {
             return Ok(None);
         };
@@ -2196,6 +2271,7 @@ impl Engine {
         // The whole reason streaming is viable: the pipelines, target and prepared scene
         // survive between frames. Building them per frame cost ~500ms, which delivered
         // about two frames a second against a target of eight.
+        let frame = self.channel_frame(channel, &scene_id);
         let (cached_renderer, scene) = {
             let renderer = self.preview_renderer.as_mut().expect("set above");
             let scene = self
@@ -2204,7 +2280,6 @@ impl Engine {
                 .ok_or_else(|| format!("no scene {scene_id}"))?;
             (Some(renderer), scene)
         };
-        let frame = scene.frame;
         let revision = scene.revision;
 
         let outcome = preview::render_preview(
@@ -2216,6 +2291,7 @@ impl Engine {
             // Streams are jpeg only: a stream of PNGs at 30fps is bandwidth spent on
             // precision nobody is measuring.
             "jpeg",
+            stream.view,
             stream.show_tile_debug,
             false,
             max_texture_dimension,
@@ -2237,6 +2313,7 @@ impl Engine {
                 "channel": stream.channel,
                 "streamId": stream.stream_id,
                 "encoding": "jpeg",
+                "view": stream.view.as_str(),
                 "width": outcome.width,
                 "height": outcome.height,
                 "frame": frame,
@@ -2412,7 +2489,10 @@ impl Engine {
         json!({ "outputs": statuses, "availableAdapters": adapters })
     }
 
-    fn handle_output_configure(&mut self, payload: &Value) -> Result<(String, Value), ProtocolError> {
+    fn handle_output_configure(
+        &mut self,
+        payload: &Value,
+    ) -> Result<(String, Value), ProtocolError> {
         let output_id = require_str(payload, "outputId")?.to_string();
         let adapter_id = require_str(payload, "adapterId")?.to_string();
 
@@ -2613,7 +2693,6 @@ impl Engine {
         ))
     }
 
-
     /// Start every configured output, because something has just gone on air.
     ///
     /// Returns operator-facing notes. Two things must be unmistakable in them: which
@@ -2737,6 +2816,35 @@ impl Engine {
         self.outputs.iter().any(OutputInstance::is_running)
     }
 
+    /// Is there a scene whose animation should be running?
+    ///
+    /// Deliberately independent of outputs. An operator has to be able to confirm a
+    /// graphic on the Preview and Program monitors *before* an SDI or NDI output exists,
+    /// so the playhead runs whenever something is on air, not only when it transmits.
+    pub fn has_program_scene(&self) -> bool {
+        self.program_scene_id.is_some()
+    }
+
+    /// Advance the Program playhead by the frames that have actually elapsed.
+    ///
+    /// Program output and its monitor sample `LoadedScene::frame`; the dedicated Preview
+    /// playhead is independent so cueing can restart Preview without touching air.
+    ///
+    /// `elapsed` rather than an absolute frame number, so each scene's animation is timed
+    /// from its own take rather than from engine start, and a dropped frame advances the
+    /// animation by the time that really passed instead of playing it in slow motion.
+    pub fn advance_program_playhead(&mut self, elapsed: u64) {
+        if elapsed == 0 {
+            return;
+        }
+        let Some(scene_id) = self.program_scene_id.clone() else {
+            return;
+        };
+        if let Some(scene) = self.scenes.get_mut(&scene_id) {
+            scene.frame = scene.frame.saturating_add(elapsed);
+        }
+    }
+
     /// Render one Program frame and hand it to every running output.
     ///
     /// Called from the Program clock. Renders once and shares the frame, so adding a
@@ -2814,29 +2922,22 @@ impl Engine {
         renderer.resize(&gpu, format.width, format.height);
 
         let origin = crate::stage::Point::new(bounds.x, bounds.y);
-        let video = renderer.render(
-            &gpu,
-            &scene_id,
-            revision,
-            bounds_tuple,
-            frame,
-            || {
-                // Only runs when the scene or the stage bounds actually changed, which
-                // is exactly when the document above was cloned.
-                let document = document.ok_or_else(|| {
-                    "program scene needs re-preparing but the document was not captured"
-                        .to_string()
-                })?;
-                let rebased = crate::render::rebase_scene_json(
-                    &document,
-                    origin,
-                    bounds.width,
-                    bounds.height,
-                );
-                grapix_render_core::scene::prepare_scene(&rebased)
-                    .map_err(|error| format!("program scene preparation failed: {error}"))
-            },
-        )?;
+        let video = renderer.render(&gpu, &scene_id, revision, bounds_tuple, frame, || {
+            // Only runs when the scene or the stage bounds actually changed, which
+            // is exactly when the document above was cloned.
+            let document = document.ok_or_else(|| {
+                "program scene needs re-preparing but the document was not captured".to_string()
+            })?;
+            // Animation is read from the ORIGINAL document, not the rebased one: the
+            // rebase shifts object positions but not their animation channels, so the
+            // renderer shifts sampled X/Y by the same origin instead.
+            let animation = crate::animation::SceneAnimation::from_document(&document);
+            let rebased =
+                crate::render::rebase_scene_json(&document, origin, bounds.width, bounds.height);
+            let prepared = grapix_render_core::scene::prepare_scene(&rebased)
+                .map_err(|error| format!("program scene preparation failed: {error}"))?;
+            Ok((prepared, animation))
+        })?;
 
         self.frames_rendered += 1;
         self.last_render_micros = started.elapsed().as_micros() as u64;
@@ -2867,7 +2968,6 @@ impl Engine {
         Ok(delivered)
     }
 
-
     /// Record frames the Program clock skipped because a render overran.
     ///
     /// Dropping is the correct response — catching up would play the show in slow
@@ -2889,7 +2989,11 @@ impl Engine {
         let message = format!("program render failed ({consecutive} consecutive): {error}");
 
         if consecutive >= 4 {
-            if !self.errors.iter().any(|existing| existing.starts_with("program render failed")) {
+            if !self
+                .errors
+                .iter()
+                .any(|existing| existing.starts_with("program render failed"))
+            {
                 self.errors.push(message);
             }
             self.transition(EngineState::Warning, "program frames are failing");
@@ -2902,13 +3006,74 @@ impl Engine {
             .retain(|existing| !existing.starts_with("program render failed"));
     }
 
-    /// The Program frame rate, taken from the first running output.
+    /// The Program frame rate. A running output is authoritative; before an output exists,
+    /// use the on-air scene's authored rate so Preview and Program animation timing agree.
     pub fn program_frame_rate(&self) -> crate::stage::FrameRate {
         self.outputs
             .iter()
             .find(|o| o.is_running())
             .map(|o| o.format.frame_rate)
+            .or_else(|| {
+                self.program_scene_id
+                    .as_deref()
+                    .and_then(|scene_id| self.scene_frame_rate(scene_id))
+            })
             .unwrap_or_default()
+    }
+
+    /// Current animation frame for a channel.
+    ///
+    /// Preview is derived from elapsed monotonic time at the scene's authored rational rate.
+    /// This keeps motion correct even when the MJPEG monitor is capped below Program fps:
+    /// stream cadence controls how often a sample is sent, not how quickly animation runs.
+    pub fn channel_frame(&self, channel: Channel, scene_id: &str) -> u64 {
+        if channel == Channel::Program {
+            return self
+                .scenes
+                .get(scene_id)
+                .map(|scene| scene.frame)
+                .unwrap_or(0);
+        }
+
+        let elapsed_ns = self
+            .preview_started_at
+            .map(|started| started.elapsed().as_nanos())
+            .unwrap_or(0);
+        let rate = self.scene_frame_rate(scene_id).unwrap_or_default();
+        let denominator = u128::from(rate.denominator.max(1)) * 1_000_000_000;
+        let elapsed_frames = elapsed_ns.saturating_mul(u128::from(rate.numerator)) / denominator;
+        self.preview_start_frame
+            .saturating_add(elapsed_frames.min(u128::from(u64::MAX)) as u64)
+    }
+
+    fn scene_frame_rate(&self, scene_id: &str) -> Option<crate::stage::FrameRate> {
+        let timeline = self
+            .scenes
+            .get(scene_id)?
+            .source_document()
+            .get("timeline")?;
+        if let Some(rate) = timeline.get("frameRate") {
+            let numerator: u32 = rate.get("numerator")?.as_u64()?.try_into().ok()?;
+            let denominator: u32 = rate
+                .get("denominator")
+                .and_then(Value::as_u64)
+                .unwrap_or(1)
+                .try_into()
+                .ok()?;
+            return Some(crate::stage::FrameRate {
+                numerator,
+                denominator: denominator.max(1),
+            });
+        }
+
+        let fps = timeline.get("fps")?.as_f64()?;
+        if !fps.is_finite() || fps <= 0.0 {
+            return None;
+        }
+        Some(crate::stage::FrameRate {
+            numerator: (fps * 1_000.0).round().clamp(1.0, u32::MAX as f64) as u32,
+            denominator: 1_000,
+        })
     }
 
     // -----------------------------------------------------------------------
@@ -2950,12 +3115,10 @@ impl Engine {
             .or(self.preview_scene_id.as_ref())
             .and_then(|scene_id| self.stage_for_scene(scene_id).ok());
 
-        let stage = program_stage.unwrap_or_else(|| {
-            StageDocument::implicit("stage_none", 1920.0, 1080.0)
-        });
+        let stage =
+            program_stage.unwrap_or_else(|| StageDocument::implicit("stage_none", 1920.0, 1080.0));
 
         let (
-            mut total_tiles,
             mut tracked,
             mut active,
             mut dirty,
@@ -2963,13 +3126,12 @@ impl Engine {
             mut evicted,
             mut pinned,
             mut cache_bytes,
-        ) = (0u64, 0usize, 0usize, 0usize, 0usize, 0usize, 0usize, 0u64);
+        ) = (0usize, 0usize, 0usize, 0usize, 0usize, 0usize, 0u64);
 
         let mut tile_detail = Vec::new();
 
         for scene in self.scenes.values() {
             let stats = scene.tiles.stats();
-            total_tiles += stats.total_tiles;
             tracked += stats.tracked_tiles;
             active += stats.rendered_tiles;
             dirty += stats.dirty_tiles;
@@ -3015,6 +3177,10 @@ impl Engine {
                     "revision": scene.revision,
                     "preparationState": scene.preparation.as_str(),
                     "channel": channel,
+                    // Where this scene's animation has reached. Reported because a frozen
+                    // playhead is invisible otherwise: the renderer animates correctly and
+                    // the monitors still show one still frame.
+                    "frame": scene.frame,
                     "objectCount": scene.object_count,
                     "preparedTileCount": scene.prepared_tile_count,
                     "estimatedBytes": scene.tiles.stats().cache_bytes,
@@ -3073,10 +3239,18 @@ impl Engine {
             "patchesApplied": self.patches_applied,
             "previewSceneId": self.preview_scene_id,
             "programSceneId": self.program_scene_id,
+            "previewFrame": self.preview_scene_id
+                .as_deref()
+                .map(|scene_id| self.channel_frame(Channel::Preview, scene_id)),
             "tiles": {
                 "gridColumns": grid.columns,
                 "gridRows": grid.rows,
-                "totalTiles": total_tiles,
+                // The grid this stage implies, so it agrees with the columns and rows beside it.
+                // Summing every loaded scene's grid here reported 126 for a 25x5 stage, because a
+                // second small scene contributed its own single tile to a number labelled as the
+                // stage's. The occupancy counts below are genuinely cross-scene: they describe
+                // what the cache is holding, not what the stage is divided into.
+                "totalTiles": grid.tile_count(),
                 "trackedTiles": tracked,
                 "activeTiles": active,
                 "dirtyTiles": dirty,
@@ -3150,8 +3324,14 @@ impl Engine {
 
         if include_tiles {
             if let Some(object) = status.as_object_mut() {
-                object.insert("gpuAdapter".to_string(), json!(self.capabilities.gpu.adapter));
-                object.insert("gpuBackend".to_string(), json!(self.capabilities.gpu.backend));
+                object.insert(
+                    "gpuAdapter".to_string(),
+                    json!(self.capabilities.gpu.adapter),
+                );
+                object.insert(
+                    "gpuBackend".to_string(),
+                    json!(self.capabilities.gpu.backend),
+                );
                 object.insert(
                     "gpuLimits".to_string(),
                     json!({
@@ -3389,7 +3569,10 @@ fn asset_error(rejection: crate::assets::AssetRejection) -> ProtocolError {
         AssetRejection::StillReferenced(_) => ErrorCode::AssetRejected,
         AssetRejection::Io(_) => ErrorCode::InternalError,
     };
-    ProtocolError::new(code, format!("{}: {}", rejection.code(), rejection.message()))
+    ProtocolError::new(
+        code,
+        format!("{}: {}", rejection.code(), rejection.message()),
+    )
 }
 
 /// Decode base64 chunk data.

@@ -164,10 +164,14 @@ function titleForPanel(panelId: DockPanelId): string {
       return "Templates";
     case "object-library":
       return "Object Library";
-    // Panel id stays "scene-manager" so persisted dock layouts keep working;
-    // the user-facing name is Scene Inspector.
+    // Panel id stays "scene-manager" so persisted dock layouts keep working; the user-facing
+    // name is Object Manager, because what it lists is objects. XPression's Scene Manager is a
+    // different thing entirely — the library of scenes — and reusing that name here made the
+    // panel sound like it listed scenes.
     case "scene-manager":
-      return "Scene Inspector";
+      return "Object Manager";
+    case "object-inspector":
+      return "Object Inspector";
     case "material-manager":
       return "Material Manager";
     case "font-manager":

@@ -1,3 +1,4 @@
+import type { FontDefinition, FontFaceDefinition, SceneObject } from "@grapix/shared-types";
 import {
   Brush,
   ChevronRight,
@@ -16,7 +17,7 @@ import {
 } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { useEditorStore } from "../store/editorStore";
+import { PEN_SHAPE_FILL, PEN_SHAPE_STROKE, useEditorStore } from "../store/editorStore";
 import {
   useUiStore,
   type EditorTool,
@@ -238,12 +239,17 @@ function groupLabel(group: ToolGroup): string {
 export function ToolOptionsBar() {
   const activeTool = useUiStore((state) => state.activeTool);
   const brush = useUiStore((state) => state.brushOptions);
+  const typeOptions = useUiStore((state) => state.typeOptions);
+  const penOptions = useUiStore((state) => state.penOptions);
+  const penTarget = useUiStore((state) => state.penTarget);
   const marquee = useUiStore((state) => state.marqueeOptions);
   const eyedropper = useUiStore((state) => state.eyedropperOptions);
   const foreground = useUiStore((state) => state.foregroundColor);
+  const updatePenOptions = useUiStore((state) => state.updatePenOptions);
   const updateBrush = useUiStore((state) => state.updateBrushOptions);
   const updateMarquee = useUiStore((state) => state.updateMarqueeOptions);
   const updateEyedropper = useUiStore((state) => state.updateEyedropperOptions);
+  const updateTypeOptions = useUiStore((state) => state.updateTypeOptions);
   const setMarqueeSelection = useUiStore((state) => state.setMarqueeSelection);
   const selectedObjectId = useEditorStore((state) => state.selectedObjectId);
   const selected = useEditorStore((state) => state.scene.objects.find((object) => object.id === state.selectedObjectId));
@@ -259,10 +265,58 @@ export function ToolOptionsBar() {
   const closeShapePath = useEditorStore((state) => state.closeShapePath);
   const duplicateObject = useEditorStore((state) => state.duplicateObject);
   const deleteObject = useEditorStore((state) => state.deleteObject);
+  const setSelectedPaths = useUiStore((state) => state.setSelectedPaths);
   const moveObjectInStack = useEditorStore((state) => state.moveObjectInStack);
   const selectedPaths = useUiStore((state) => state.selectedPathObjectIds);
   const selectedAnchors = useUiStore((state) => state.selectedAnchorIndices);
   const setSelectedAnchors = useUiStore((state) => state.setSelectedAnchors);
+
+  function applyTypePatch(patch: Partial<Extract<SceneObject, { type: "text" }>>) {
+    if (selectedObjectId && selected?.type === "text") updateObject(selectedObjectId, patch);
+  }
+
+  /**
+   * Set what the pen paints with.
+   *
+   * The option is remembered for the next path *and* applied to the one in hand, so toggling the
+   * fill off mid-draw shows the outline immediately instead of only affecting the path after
+   * this one. The selected shape is the path being drawn: the pen selects each shape as it
+   * creates it.
+   */
+  function setPenPaint(patch: Partial<typeof penOptions>) {
+    updatePenOptions(patch);
+    if (selectedObjectId && selected?.type === "shape") updateObject(selectedObjectId, patch);
+  }
+
+  function chooseProjectFont(font: FontDefinition | undefined) {
+    if (!font) {
+      updateTypeOptions({ fontId: null });
+      applyTypePatch({
+        fontId: undefined,
+        fontAssetId: undefined,
+        fontFamily: "Inter, Arial, sans-serif",
+        fallbackFamilies: ["Arial", "sans-serif"]
+      });
+      return;
+    }
+    const weight = selected?.type === "text" ? selected.fontWeight : typeOptions.fontWeight;
+    const style = selected?.type === "text" ? selected.fontStyle ?? "normal" : typeOptions.fontStyle;
+    const face = closestFontFace(font, weight, style);
+    const patch = {
+      fontId: font.fontId,
+      fontFamily: font.family,
+      fallbackFamilies: font.fallbackFamilies,
+      fontWeight: String(face?.weight ?? 400),
+      fontStyle: face?.style ?? "normal",
+      fontAssetId: face?.source.kind === "file" ? face.source.assetId : undefined
+    } satisfies Partial<Extract<SceneObject, { type: "text" }>>;
+    updateTypeOptions({
+      fontId: font.fontId,
+      fontWeight: patch.fontWeight,
+      fontStyle: patch.fontStyle
+    });
+    applyTypePatch(patch);
+  }
 
   function alignPaths(axis: "x" | "y") {
     const objects = sceneObjects.filter((object) => selectedPaths.includes(object.id) && !object.locked);
@@ -307,6 +361,7 @@ export function ToolOptionsBar() {
             beginHistory("delete paths");
             selectedPaths.forEach(deleteObject);
             commitHistory();
+            setSelectedPaths([]);
           }} type="button">Delete</button>
           <button disabled={!selectedObjectId} onClick={() => selectedObjectId && moveObjectInStack(selectedObjectId, "front")} type="button">Bring to front</button>
           <button disabled={!selectedObjectId} onClick={() => selectedObjectId && moveObjectInStack(selectedObjectId, "back")} type="button">Send to back</button>
@@ -339,39 +394,80 @@ export function ToolOptionsBar() {
             if (selected?.type === "shape") setShapePointsSmooth(selected.id, selectedAnchors, true, false);
           }} type="button">Break handles</button>
           <button disabled={selected?.type !== "shape" || selected.path.closed} onClick={() => {
+            beginHistory("close path");
             if (selected?.type === "shape") closeShapePath(selected.id);
+            commitHistory();
           }} type="button">Close path</button>
           <button disabled={selected?.type !== "shape" || !selected.path.closed} onClick={() => {
+            beginHistory("open path");
             if (selected?.type === "shape") updateObject(selected.id, { path: { ...selected.path, closed: false } });
+            commitHistory();
           }} type="button">Open path</button>
         </>
       ) : null}
       {activeTool === "horizontal-type" || activeTool === "vertical-type" ? (
         <>
-          <label>Font <select value={selected?.type === "text" ? selected.fontId ?? "" : ""} onChange={(event) => {
-            const font = projectFonts.find((item) => item.fontId === event.target.value);
-            if (selectedObjectId && selected?.type === "text" && font) {
-              const face = font.faces[0];
-              updateObject(selectedObjectId, {
-                fontId: font.fontId,
-                fontFamily: font.family,
-                fallbackFamilies: font.fallbackFamilies,
-                fontWeight: String(face?.weight ?? 400),
-                fontStyle: face?.style ?? "normal",
-                fontAssetId: face?.source.kind === "file" ? face.source.assetId : undefined
-              });
-            }
+          <label>Font <select value={selected?.type === "text" ? selected.fontId ?? "" : typeOptions.fontId ?? ""} onChange={(event) => {
+            chooseProjectFont(projectFonts.find((item) => item.fontId === event.target.value));
           }}>
             <option value="">System / unmanaged</option>
             {projectFonts.map((font) => <option disabled={font.enabled === false} key={font.fontId} value={font.fontId}>{font.displayName}</option>)}
           </select></label>
-          <label>Size <input min={1} type="number" value={selected?.type === "text" ? selected.fontSize : 48} onChange={(event) => {
-            if (selectedObjectId && selected?.type === "text") updateObject(selectedObjectId, { fontSize: event.target.valueAsNumber });
+          <label>Size <input min={1} type="number" value={selected?.type === "text" ? selected.fontSize : typeOptions.fontSize} onChange={(event) => {
+            const fontSize = event.target.valueAsNumber;
+            if (!Number.isFinite(fontSize)) return;
+            updateTypeOptions({ fontSize });
+            applyTypePatch({ fontSize });
           }} /></label>
-          <label>Weight <select value={selected?.type === "text" ? selected.fontWeight : "700"} onChange={(event) => {
-            if (selectedObjectId && selected?.type === "text") updateObject(selectedObjectId, { fontWeight: event.target.value });
+          <label>Weight <select value={selected?.type === "text" ? selected.fontWeight : typeOptions.fontWeight} onChange={(event) => {
+            const fontWeight = event.target.value;
+            updateTypeOptions({ fontWeight });
+            applyTypePatch({ fontWeight });
+            const fontId = selected?.type === "text" ? selected.fontId : typeOptions.fontId;
+            const font = projectFonts.find((item) => item.fontId === fontId);
+            const face = font ? closestFontFace(font, fontWeight, selected?.type === "text" ? selected.fontStyle ?? "normal" : typeOptions.fontStyle) : undefined;
+            applyTypePatch({ fontAssetId: face?.source.kind === "file" ? face.source.assetId : undefined });
           }}><option>100</option><option>200</option><option>300</option><option>400</option><option>500</option><option>600</option><option>700</option><option>800</option><option>900</option></select></label>
+          <label>Style <select value={selected?.type === "text" ? selected.fontStyle ?? "normal" : typeOptions.fontStyle} onChange={(event) => {
+            const fontStyle = event.target.value as typeof typeOptions.fontStyle;
+            updateTypeOptions({ fontStyle });
+            applyTypePatch({ fontStyle });
+            const fontId = selected?.type === "text" ? selected.fontId : typeOptions.fontId;
+            const font = projectFonts.find((item) => item.fontId === fontId);
+            const face = font ? closestFontFace(font, selected?.type === "text" ? selected.fontWeight : typeOptions.fontWeight, fontStyle) : undefined;
+            applyTypePatch({ fontAssetId: face?.source.kind === "file" ? face.source.assetId : undefined });
+          }}><option value="normal">Normal</option><option value="italic">Italic</option><option value="oblique">Oblique</option></select></label>
           <span>Fill {foreground.type === "solid" ? foreground.color : foreground.type}</span>
+        </>
+      ) : null}
+      {activeTool === "pen" ? (
+        <>
+          <label>
+            <input
+              checked={penOptions.fillEnabled}
+              onChange={(event) => setPenPaint({ fillEnabled: event.target.checked })}
+              type="checkbox"
+            />
+            Fill
+          </label>
+          <label>
+            <input
+              checked={penOptions.strokeEnabled}
+              onChange={(event) => setPenPaint({ strokeEnabled: event.target.checked })}
+              type="checkbox"
+            />
+            Stroke
+          </label>
+          <span className="tool-option-swatch">
+            <i style={{ background: PEN_SHAPE_FILL, opacity: penOptions.fillEnabled ? 1 : 0.25 }} />
+            <i style={{ background: PEN_SHAPE_STROKE, opacity: penOptions.strokeEnabled ? 1 : 0.25 }} />
+          </span>
+          <span>{penTarget === "mask" ? "Drawing a mask" : "Drawing a shape"}</span>
+          {penTarget === "shape" && !penOptions.fillEnabled && !penOptions.strokeEnabled ? (
+            <span className="tool-option-warning">
+              With both off the path is invisible; it is still selectable in Object Manager.
+            </span>
+          ) : null}
         </>
       ) : null}
       {activeTool === "brush" ? (
@@ -414,10 +510,14 @@ export function ToolOptionsBar() {
           <label>Mode <select value={marquee.mode} onChange={(event) => updateMarquee({ mode: event.target.value as typeof marquee.mode })}>
             <option value="objects">Object selection</option><option value="region">Region selection</option><option value="mask">Mask creation</option>
           </select></label>
-          <label>Operation <select value={marquee.operation} onChange={(event) => updateMarquee({ operation: event.target.value as typeof marquee.operation })}>
-            <option value="new">New</option><option value="add">Add</option><option value="subtract">Subtract</option><option value="intersect">Intersect</option>
-          </select></label>
-          <NumericOption label="Feather" min={0} max={500} value={marquee.feather} onChange={(feather) => updateMarquee({ feather })} />
+          {marquee.mode !== "region" ? (
+            <label>Operation <select value={marquee.operation} onChange={(event) => updateMarquee({ operation: event.target.value as typeof marquee.operation })}>
+              <option value="new">New</option><option value="add">Add</option><option value="subtract">Subtract</option><option value="intersect">Intersect</option>
+            </select></label>
+          ) : null}
+          {marquee.mode === "mask" ? (
+            <NumericOption label="Feather" min={0} max={500} value={marquee.feather} onChange={(feather) => updateMarquee({ feather })} />
+          ) : null}
           <label>Constraint <select value={marquee.constraint} onChange={(event) => updateMarquee({ constraint: event.target.value as typeof marquee.constraint })}>
             <option value="free">Free</option><option value="fixed-ratio">Fixed ratio</option><option value="fixed-size">Fixed size</option>
           </select></label>
@@ -431,7 +531,6 @@ export function ToolOptionsBar() {
             </>
           ) : null}
           <label><input checked={marquee.fromCenter} onChange={(event) => updateMarquee({ fromCenter: event.target.checked })} type="checkbox" /> From centre</label>
-          <label><input checked={marquee.antiAlias} onChange={(event) => updateMarquee({ antiAlias: event.target.checked })} type="checkbox" /> Anti-alias</label>
           {marquee.mode === "objects" ? (
             <label>Include <select value={marquee.objectContainment} onChange={(event) => updateMarquee({ objectContainment: event.target.value as typeof marquee.objectContainment })}>
               <option value="touching">Touching</option><option value="enclosed">Fully enclosed</option>
@@ -451,4 +550,17 @@ function NumericOption(props: { label: string; min: number; max: number; value: 
 function toolName(tool: EditorTool): string {
   const grouped = Object.values(TOOL_GROUPS).flat().find((item) => item.id === tool);
   return grouped?.name ?? SINGLE_TOOLS.find((item) => item.id === tool)?.name ?? "Tool";
+}
+
+function closestFontFace(
+  font: FontDefinition,
+  weight: string,
+  style: FontFaceDefinition["style"]
+): FontFaceDefinition | undefined {
+  const targetWeight = Number(weight) || 400;
+  return [...font.faces].sort((left, right) => {
+    const leftScore = Math.abs(left.weight - targetWeight) + (left.style === style ? 0 : 1_000);
+    const rightScore = Math.abs(right.weight - targetWeight) + (right.style === style ? 0 : 1_000);
+    return leftScore - rightScore;
+  })[0];
 }

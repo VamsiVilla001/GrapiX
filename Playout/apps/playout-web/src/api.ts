@@ -1,12 +1,43 @@
 import type {
-  PlayoutRundownDocument,
   PlayoutRuntimeStatus,
+  PlayoutTakeList,
   PublishedSceneMetadata,
   SceneDocument
 } from "@grapix/shared-types";
 
 const apiRoot =
   import.meta.env.VITE_GRAPIX_PLAYOUT_API_URL ?? "http://127.0.0.1:4300";
+
+/**
+ * MJPEG endpoint for a channel monitor.
+ *
+ * Given straight to an `<img>` rather than fetched: the browser decodes the stream
+ * natively and off the main thread, so a monitor open for a whole show costs no
+ * per-frame JavaScript.
+ *
+ * `view` picks fill or key. The key is the greyscale matte a downstream keyer cuts, which
+ * is how broadcast verifies transparency — SDI carries no alpha, so fill and key travel as
+ * separate signals. Both are ordinary JPEGs.
+ */
+export function monitorStreamUrl(
+  channel: "preview" | "program",
+  view: "fill" | "key" = "fill"
+): string {
+  return `${apiRoot}/api/playout/monitor/${channel}?view=${view}`;
+}
+
+/**
+ * Distinguish an explicit operator take-out from an empty runtime after service restart.
+ *
+ * Program's MJPEG connection deliberately survives both states. Only the former should cover
+ * its retained last frame; after a restart the engine may still be live and remains authoritative.
+ */
+export function isProgramExplicitlyCleared(status: PlayoutRuntimeStatus): boolean {
+  return (
+    status.programRef === null &&
+    Object.values(status.takeStates).some((takeState) => takeState === "OFFLINE")
+  );
+}
 
 /**
  * Health of the standalone render engine, as Playout sees it.
@@ -95,18 +126,52 @@ export const playoutApi = {
       method: "POST",
       body: JSON.stringify({ scene })
     }),
-  listRundowns: () =>
-    request<PlayoutRundownDocument[]>("/api/playout/rundowns"),
-  createRundown: (name: string) =>
-    request<PlayoutRundownDocument>("/api/playout/rundowns/new", {
+  removeScene: (sceneId: string) =>
+    request<{ sceneId: string; takeId: number | null; versionsRemoved: number }>(
+      `/api/playout/scenes/${encodeURIComponent(sceneId)}`,
+      { method: "DELETE" }
+    ),
+  listTakeLists: () => request<PlayoutTakeList[]>("/api/playout/take-lists"),
+  createTakeList: (name: string) =>
+    request<PlayoutTakeList>("/api/playout/take-lists/new", {
       method: "POST",
       body: JSON.stringify({ name })
     }),
-  saveRundown: (rundown: PlayoutRundownDocument) =>
-    request<PlayoutRundownDocument>("/api/playout/rundowns", {
+  saveTakeList: (takeList: PlayoutTakeList) =>
+    request<PlayoutTakeList>("/api/playout/take-lists", {
       method: "POST",
-      body: JSON.stringify(rundown)
+      body: JSON.stringify(takeList)
     }),
+
+  /** Cue a Scene Manager Take ID straight to Preview. */
+  cueSceneByTakeId: (takeId: number) =>
+    request<PlayoutRuntimeStatus>("/api/playout/control/cue", {
+      method: "POST",
+      body: JSON.stringify({ takeId })
+    }),
+  /** Take a Scene Manager Take ID straight to Program — the direct recall XPression is built around. */
+  takeSceneByTakeId: (takeId: number) =>
+    request<PlayoutRuntimeStatus>("/api/playout/control/take", {
+      method: "POST",
+      body: JSON.stringify({ takeId })
+    }),
+  cueEntry: (takeListId: string, entryId: string) =>
+    request<PlayoutRuntimeStatus>("/api/playout/control/cue", {
+      method: "POST",
+      body: JSON.stringify({ takeListId, entryId })
+    }),
+  takeEntry: (takeListId: string, entryId: string) =>
+    request<PlayoutRuntimeStatus>("/api/playout/control/take", {
+      method: "POST",
+      body: JSON.stringify({ takeListId, entryId })
+    }),
+  takeOut: () =>
+    request<PlayoutRuntimeStatus>("/api/playout/control/take-out", { method: "POST" }),
+  continueTakeList: (takeListId: string) =>
+    request<{ takeList: PlayoutTakeList; status: PlayoutRuntimeStatus }>(
+      "/api/playout/control/continue",
+      { method: "POST", body: JSON.stringify({ takeListId }) }
+    ),
   status: () => request<PlayoutRuntimeStatus>("/api/playout/status"),
   engine: () => request<EngineHealthView>("/api/playout/engine"),
   connectEngine: () =>
@@ -143,7 +208,12 @@ async function request<T>(route: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiRoot}${route}`, {
     ...init,
     headers: {
-      "content-type": "application/json",
+      // Only claim a JSON body when one is actually sent. Fastify answers a
+      // body-less request that declares application/json with
+      // FST_ERR_CTP_EMPTY_JSON_BODY ("Body cannot be empty when content-type
+      // is set to application/json"), which broke output start/stop, take-out
+      // and engine reconnect.
+      ...(init?.body === undefined ? {} : { "content-type": "application/json" }),
       ...init?.headers
     }
   });
@@ -161,4 +231,81 @@ async function request<T>(route: string, init?: RequestInit): Promise<T> {
     );
   }
   return result as T;
+}
+
+/** What the control service pushes. Mirrors `PlayoutEventKind` in the control service. */
+export type PlayoutEventKind = "library.changed" | "sequence.changed" | "runtime.changed";
+
+/** Every event kind the control service pushes. */
+const PLAYOUT_EVENT_KINDS: readonly PlayoutEventKind[] = [
+  "library.changed",
+  "sequence.changed",
+  "runtime.changed"
+];
+
+interface Listener {
+  onEvent: (kind: PlayoutEventKind) => void;
+  onConnectionChange?: (live: boolean) => void;
+}
+
+/**
+ * The one live stream, shared by every subscriber.
+ *
+ * Refcounted deliberately. `React.StrictMode` mounts an effect twice, and a subscribe call that
+ * opened its own `EventSource` each time left two streams against one window — visible as
+ * `liveSubscribers` sitting at 2 in the control service's health. Multiplexing also means a
+ * second component can subscribe later without a second socket.
+ */
+let sharedSource: EventSource | null = null;
+const listeners = new Set<Listener>();
+
+/**
+ * Subscribe to the control service's live event stream.
+ *
+ * The library used to refresh only on mount and on an explicit button press, so a scene
+ * published from the Editor did not appear until the operator thought to press refresh. This
+ * closes that gap. An event names what changed; the caller refetches. A missed event therefore
+ * costs one stale render rather than a cache that has silently diverged.
+ *
+ * `EventSource` reconnects on its own, so a control-service restart heals without help. The
+ * returned function detaches, and the last detach closes the socket.
+ */
+export function subscribeToPlayoutEvents(
+  onEvent: (kind: PlayoutEventKind) => void,
+  onConnectionChange?: (live: boolean) => void
+): () => void {
+  const listener: Listener = { onEvent, onConnectionChange };
+  listeners.add(listener);
+
+  if (!sharedSource) {
+    const source = new EventSource(`${apiRoot}/api/playout/events`);
+    for (const kind of PLAYOUT_EVENT_KINDS) {
+      source.addEventListener(kind, () => {
+        for (const current of listeners) current.onEvent(kind);
+      });
+    }
+    source.onopen = () => {
+      for (const current of listeners) current.onConnectionChange?.(true);
+    };
+    // Not an error worth surfacing: EventSource retries by itself, and the UI keeps its
+    // three-second poll as the floor, so a dropped stream degrades to the old behaviour.
+    source.onerror = () => {
+      for (const current of listeners) current.onConnectionChange?.(false);
+    };
+    sharedSource = source;
+  } else if (sharedSource.readyState === EventSource.OPEN) {
+    // A late subscriber needs to be told the stream is already live; it will not see the
+    // `onopen` that happened before it arrived.
+    onConnectionChange?.(true);
+  }
+
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0 && sharedSource) {
+      sharedSource.onopen = null;
+      sharedSource.onerror = null;
+      sharedSource.close();
+      sharedSource = null;
+    }
+  };
 }

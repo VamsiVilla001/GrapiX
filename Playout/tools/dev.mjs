@@ -11,13 +11,18 @@ const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 
 const processes = [
   {
-    name: "native renderer",
+    // The render engine, not the retired protocol v2 daemon: the engine owns Program, the
+    // frame clock and the outputs, and it is the only renderer Playout speaks to.
+    name: "render engine",
     command: "cargo",
     shell: false,
     args: [
       "run",
       "--manifest-path",
-      "services/render-daemon/Cargo.toml"
+      "services/render-engine/Cargo.toml",
+      "--",
+      "--config",
+      "services/render-engine/engine.toml"
     ]
   },
   {

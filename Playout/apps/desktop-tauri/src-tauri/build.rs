@@ -35,6 +35,16 @@ fn stage_render_engine_sidecar() {
         .join("target")
         .join(&profile)
         .join(format!("grapix-render-engine{extension}"));
+
+    // Restage whenever the engine is rebuilt.
+    //
+    // Without this cargo caches the build script and never re-runs it, so the staged sidecar
+    // keeps whatever engine existed the last time something else in this crate changed. That
+    // silently shipped a stale engine: the app launched it, the app looked fine, and a fix
+    // made in the engine was simply absent. Declared before the existence check so a missing
+    // engine still arms the trigger for when it appears.
+    println!("cargo:rerun-if-changed={}", source.display());
+
     if !source.is_file() {
         println!(
             "cargo:warning=render engine sidecar not found at {}; build it before packaging",

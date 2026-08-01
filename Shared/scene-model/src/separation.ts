@@ -38,10 +38,10 @@ export type StateDomain = (typeof STATE_DOMAINS)[number];
 
 /** Where each domain lives, so nothing is stored twice. */
 export const STATE_DOMAIN_OWNERS: Readonly<Record<StateDomain, string>> = Object.freeze({
-  project: "project service (services/api-server)",
+  project: "project service (Editor/services/project-api)",
   stage: "StageDocument (@grapix/stage-model)",
   scene: "SceneDocument (@grapix/shared-types)",
-  editor: "editor stores (apps/editor-web), never persisted into a scene",
+  editor: "editor stores (Editor/apps/editor-web), never persisted into a scene",
   operator: "playout control service",
   playout: "playout control service",
   asset: "asset manager and the engine's asset cache",

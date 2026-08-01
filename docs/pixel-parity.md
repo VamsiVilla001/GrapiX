@@ -21,7 +21,7 @@ npm run certify:parity    # in another
 
 All four pass on an NVIDIA RTX 3070 Ti (Vulkan) with **zero differing pixels**.
 
-The tile-versus-single-pass result is the one worth dwelling on. `packages/tile-system`
+The tile-versus-single-pass result is the one worth dwelling on. `Shared/tile-system`
 proves seam-freedom *algorithmically* — that the tiles cover the region exactly once and the
 overscan ring is discarded. This proves it *photographically*: the composited image and the
 single-pass image are the same bytes. Those are different claims, and a design that rests on
@@ -76,7 +76,7 @@ glance without a colour key.
 `tools/certification/pixel-parity.mjs` is the comparison, separate from any capture route,
 because the two fail differently: a capture problem is plumbing, a comparison result is
 evidence. It has its own unit tests
-(`packages/render-protocol/tests/pixel-parity.test.mjs`, 20 tests) covering the metrics, the
+(`Shared/render-protocol/tests/pixel-parity.test.mjs`, 20 tests) covering the metrics, the
 alpha handling, the BGRA conversion, and a PNG codec that reads what both the Rust `image`
 crate and browsers actually write — real deflate and all five row filters. A reader that only
 understood its own output would pass its own tests and fail on every real capture.

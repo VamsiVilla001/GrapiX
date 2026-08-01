@@ -1,7 +1,7 @@
 // GrapiX shared composite shader.
 //
 // This file is consumed byte-for-byte by BOTH renderers:
-//   * services/render-daemon  (Rust + wgpu, via include_str!)
+//   * services/render-daemon  (grapix-render-core, used by the engine, via include_str!)
 //   * the future browser WebGPU preview (Vite `?raw` import)
 //
 // Do not fork this file per renderer. Any change here must be made together

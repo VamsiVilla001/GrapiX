@@ -3,7 +3,8 @@
 This package is the single source of truth for everything that must be
 pixel-identical between the two GrapiX renderers:
 
-- `services/render-daemon` — Rust + `wgpu`, produces broadcast output frames.
+- `services/render-engine` — Rust + `wgpu` via its `grapix-render-core` library,
+  produces broadcast output frames.
 - The browser WebGPU preview (future) — described in `docs/rendering-engine.md`.
 
 The reason this package exists: if the editor preview and the on-air output are
@@ -17,7 +18,7 @@ blend definitions, and transform math removes the largest sources of drift.
    does not redefine it and no second scene format may be introduced.
 2. **WGSL shader source** — `wgsl/*.wgsl`, consumed verbatim by both renderers.
 3. **Uniform byte layouts** — `layouts.json` is machine-readable; the Rust
-   daemon has a unit test asserting its `#[repr(C)]` structs match these sizes
+   render core has a unit test asserting its `#[repr(C)]` structs match these sizes
    and offsets exactly. The browser renderer must add the equivalent check
    (e.g. asserting its `ArrayBuffer` writer offsets against `layouts.json`).
 4. **Blend-mode definitions** — ids and equations in `layouts.json`.
@@ -71,7 +72,7 @@ transform = projection * translate(x, y) * rotate_z(radians(rotation))
 - The shader consumes a unit quad in `[0,1]^2`; `scale(width, height)` sizes it.
 - `QuadUniforms.params.y` is the analytic primitive kind: `0` rectangle,
   `1` ellipse. Ellipses discard fragments outside the unit-quad circle, so
-  editor and daemon share the same transform/colour/blend contract without a
+  editor and engine share the same transform/colour/blend contract without a
   second vertex layout. `params.z/w` remain reserved.
 
 ### Native mesh transform and camera
@@ -157,7 +158,7 @@ visible in either case.
   Adobe's standard blend-mode math where it is expressible without a shader
   compositing pass. Both renderers mirror PixiJS's premultiplied blend
   equations so preview and program match. The `layouts.json` `blendModes`
-  table is the authoritative per-mode contract; the daemon builds one cached
+  table is the authoritative per-mode contract; the engine builds one cached
   pipeline per id and the editor maps the id to the equivalent PixiJS mode.
 
   | id | name | colour | alpha |
@@ -194,7 +195,7 @@ visible in either case.
   validate against it in tests. The Rust check lives at
   `services/render-daemon/tests/layout_contract.rs`.
 - Dynamic-offset uniform binding is an implementation detail of each renderer
-  (the daemon rounds the stride up to the device's
+  (the render core rounds the stride up to the device's
   `min_uniform_buffer_offset_alignment`); the *contents* of each 304-byte slot
   are what this contract fixes. The quad payload includes a fixed eight-stop
   linear/radial gradient block with pad, repeat, and reflect spread plus
@@ -211,13 +212,13 @@ Objects sort by `layerId`, then `zDepth`, then `zIndex` — the same rule as
 `apps/editor-web/src/rendering/sceneMaterial.ts`.
 
 Known deviation: the editor compares `layerId` with JavaScript
-`localeCompare`; the daemon uses plain byte-order comparison. These agree for
+`localeCompare`; the render core uses plain byte-order comparison. These agree for
 the ASCII ids GrapiX generates. If layer ids ever carry non-ASCII text, the
 editor should switch to a byte-order comparison so both sides match.
 
 ## How each side consumes this package
 
-- **Rust daemon**: consumes both `composite_quad.wgsl` and `mesh_pbr.wgsl`
+- **Rust render core**: consumes both `composite_quad.wgsl` and `mesh_pbr.wgsl`
   verbatim with `include_str!`; `layouts.json` is read by cross-language
   layout tests.
 - **Browser (future)**: import the WGSL with Vite raw imports, e.g.
@@ -228,6 +229,6 @@ editor should switch to a byte-order comparison so both sides match.
 ## Changing the contract
 
 Any change to a `.wgsl` file, `layouts.json`, or the rules in this document is
-a contract change: update the Rust structs + tests in the daemon and the
+a contract change: update the Rust structs + tests in the render core and the
 browser writer in the same commit, and bump `contractVersion` in
 `layouts.json` when the byte layout changes.

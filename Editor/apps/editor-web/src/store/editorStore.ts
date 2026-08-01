@@ -60,11 +60,17 @@ import {
   type SceneScriptReference,
   type TextSceneObject
 } from "@grapix/shared-types";
+import {
+  convertSceneDimensions,
+  type CanvasConversionRequest
+} from "../lib/convertSceneDimensions";
 import { importMaterialAsset } from "../modules/material-manager/services/assetImporter";
 import { builtInShaders } from "../modules/material-manager/services/shaderRegistry";
 import { ensureDefaultStandardMaterial } from "../modules/material-manager/services/defaultMaterial";
 import { assetExistsOnApi } from "../lib/apiClient";
 import { clonePropertyAnimation, removePropertyKeyframe } from "./timelineAnimation";
+import { withColorStyles } from "./objectColorStyles";
+import { nextUniqueObjectName } from "./objectNaming";
 
 export type LibraryObjectKind =
   | "text"
@@ -112,6 +118,8 @@ export interface EditorState {
   setSceneId: (id: string) => void;
   setSceneName: (name: string) => void;
   updateCanvasViewport: (patch: Partial<SceneViewportSettings>) => void;
+  /** Resize the open scene's canvas, optionally scaling its content. One undo step. */
+  convertCanvasDimensions: (request: CanvasConversionRequest) => void;
   addTextObject: () => void;
   addRectObject: () => void;
   addEllipseObject: () => void;
@@ -131,7 +139,7 @@ export interface EditorState {
   setContainerChild: (containerId: string, childId: string, included: boolean) => boolean;
   // Pen-tool / bezier-path authoring. All commit through the scene history, so a
   // pen gesture wrapped in beginHistory/commitHistory is a single undo step.
-  createPenShape: (origin: Vec2) => string;
+  createPenShape: (origin: Vec2, paint?: { fillEnabled: boolean; strokeEnabled: boolean }) => string;
   appendShapeVertex: (objectId: string, vertex: Vec2, inTangent?: Vec2, outTangent?: Vec2) => number;
   updateShapeVertex: (objectId: string, index: number, patch: { vertex?: Vec2; inTangent?: Vec2; outTangent?: Vec2 }) => void;
   addShapePoint: (objectId: string, afterIndex: number, point?: Vec2) => void;
@@ -197,6 +205,7 @@ export interface EditorState {
   updateAutomation: (automation: SceneAutomationDefinition) => void;
   attachSceneScript: (script: SceneScriptReference, asset: AssetLibraryItem) => void;
   assignMaterialSlot: (objectId: string, slotName: string, binding: string | PrimitiveMaterialBinding) => void;
+  renameObject: (objectId: string, name: string) => boolean;
   assignMaterialToObjects: (objectIds: string[], materialId: string, slotName?: string) => boolean;
   assignAssetToObjects: (objectIds: string[], assetId: string, slotName?: string) => boolean;
   // Central XPression-style face-index material-binding API. One bind/unbind =
@@ -233,7 +242,7 @@ export interface EditorState {
   duplicateGradientPreset: (presetId: string) => string | null;
   deleteGradientPreset: (presetId: string) => void;
   createLayerForObject: (objectId: string) => string | null;
-  renameLayer: (layerId: string, nextLayerId: string) => void;
+  renameLayer: (layerId: string, nextLayerId: string) => boolean;
   deleteLayer: (layerId: string) => void;
   setLayerVisibility: (layerId: string, visible: boolean) => void;
   setLayerLocked: (layerId: string, locked: boolean) => void;
@@ -314,6 +323,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
           }
         })
       })),
+    // Through commitScene rather than loadScene: loading a scene clears the undo stack, and a
+    // resolution change an author can't undo is the one they most want back.
+    convertCanvasDimensions: (request) => {
+      const converted = convertSceneDimensions(get().scene, request);
+      if (converted === get().scene) return;
+      commitScene(converted);
+    },
     addTextObject: () => addObject(createTextObject()),
     addRectObject: () => addObject(createRectObject()),
     addEllipseObject: () => addObject(createEllipseObject()),
@@ -371,6 +387,25 @@ export const useEditorStore = create<EditorState>((set, get) => {
           )
         })
       })),
+    renameObject: (objectId, name) => {
+      const nextName = name.trim();
+      const { scene } = get();
+      const target = scene.objects.find((object) => object.id === objectId);
+      if (!target || !nextName) return false;
+      if (target.name === nextName) return true;
+      if (scene.objects.some((object) =>
+        object.id !== objectId && object.name.trim().toLocaleLowerCase() === nextName.toLocaleLowerCase()
+      )) {
+        return false;
+      }
+      commitScene({
+        ...scene,
+        objects: scene.objects.map((object) =>
+          object.id === objectId ? ({ ...object, name: nextName } as SceneObject) : object
+        )
+      });
+      return true;
+    },
     addTextAt: (origin, size, writingMode) => {
       const text = createTextObject({
         x: origin.x,
@@ -478,7 +513,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       set({ scene: touchScene({ ...scene, objects: normalizeObjectStack(objects) }) });
       return true;
     },
-    createPenShape: (origin) => {
+    createPenShape: (origin, paint = { fillEnabled: true, strokeEnabled: true }) => {
       const { scene } = get();
       const shape = createShapeObject({
         x: origin.x,
@@ -486,16 +521,21 @@ export const useEditorStore = create<EditorState>((set, get) => {
         width: 1,
         height: 1,
         path: { closed: false, vertices: [{ x: 0, y: 0 }], inTangents: [{ x: 0, y: 0 }], outTangents: [{ x: 0, y: 0 }] },
-        // Draw with both a fill and stroke (like AE's pen), so a new path is
-        // immediately a coloured, editable shape — a fill renders even while open.
-        fillEnabled: true,
-        fill: "#7c5cff",
-        strokeEnabled: true,
+        // Fill and stroke are the pen's own options, not the "arrives unassigned" default every
+        // other object is born with: a path being drawn has to be visible while it is being
+        // drawn. A fill renders even while the path is still open.
+        fillEnabled: paint.fillEnabled,
+        fill: PEN_SHAPE_FILL,
+        strokeEnabled: paint.strokeEnabled,
         strokeWidth: 2,
-        stroke: "#ffffff"
+        stroke: PEN_SHAPE_STROKE
       });
       const layerObjects = scene.objects.filter((item) => item.layerId === shape.layerId);
-      const objectWithStack = { ...shape, zIndex: layerObjects.reduce((highest, item) => Math.max(highest, item.zIndex), -1) + 1 };
+      const objectWithStack = {
+        ...shape,
+        name: nextUniqueObjectName(scene.objects, shape.name),
+        zIndex: layerObjects.reduce((highest, item) => Math.max(highest, item.zIndex), -1) + 1
+      };
       commitScene({ ...scene, objects: normalizeObjectStack([...scene.objects, objectWithStack]) });
       set({ selectedObjectId: objectWithStack.id, selectedFaceIndices: [0], faceSelectionAnchor: 0 });
       return objectWithStack.id;
@@ -512,8 +552,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         inTangents: [...object.path.inTangents, inTangent],
         outTangents: [...object.path.outTangents, outTangent]
       };
-      const bounds = bezierPathBounds(path);
-      const updated: ShapeSceneObject = { ...object, path, width: Math.max(1, bounds.width), height: Math.max(1, bounds.height) };
+      const updated = fitShapeToPath(object, path);
       commitScene({ ...scene, objects: scene.objects.map((item) => item.id === objectId ? updated : item) });
       return path.vertices.length - 1;
     },
@@ -530,8 +569,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         inTangents: at(object.path.inTangents, patch.inTangent),
         outTangents: at(object.path.outTangents, patch.outTangent)
       };
-      const bounds = bezierPathBounds(path);
-      const updated: ShapeSceneObject = { ...object, path, width: Math.max(1, bounds.width), height: Math.max(1, bounds.height) };
+      const updated = fitShapeToPath(object, path);
       commitScene({ ...scene, objects: scene.objects.map((item) => item.id === objectId ? updated : item) });
     },
     addShapePoint: (objectId, afterIndex, authoredPoint) => {
@@ -547,9 +585,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const point = authoredPoint ?? { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
       const insertAt = fromIndex + 1;
       const path = insertPathPoint(object.path, insertAt, point);
+      const updated = fitShapeToPath(object, path);
       commitScene({
         ...scene,
-        objects: scene.objects.map((item) => item.id === objectId ? { ...object, path } : item)
+        objects: scene.objects.map((item) => item.id === objectId ? updated : item)
       });
     },
     removeShapePoints: (objectId, indices) => {
@@ -560,9 +599,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const minimum = object.path.closed ? 3 : 2;
       if (object.path.vertices.length - removed.size < minimum) return;
       const path = filterPathPoints(object.path, (_, index) => !removed.has(index));
+      const updated = fitShapeToPath(object, path);
       commitScene({
         ...scene,
-        objects: scene.objects.map((item) => item.id === objectId ? { ...object, path } : item)
+        objects: scene.objects.map((item) => item.id === objectId ? updated : item)
       });
     },
     setShapePointsSmooth: (objectId, indices, smooth, linked = true) => {
@@ -585,9 +625,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
           return derived.outTangent;
         })
       };
+      const updated = fitShapeToPath(object, path);
       commitScene({
         ...scene,
-        objects: scene.objects.map((item) => item.id === objectId ? { ...object, path } : item)
+        objects: scene.objects.map((item) => item.id === objectId ? updated : item)
       });
     },
     convertObjectToShape: (objectId) => {
@@ -1605,8 +1646,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const targetLayer = normalizeLayerId(nextLayerId);
       const { scene } = get();
 
-      if (!targetLayer || targetLayer === layerId || !scene.objects.some((object) => object.layerId === layerId)) {
-        return;
+      if (!targetLayer || !scene.objects.some((object) => object.layerId === layerId)) {
+        return false;
+      }
+      if (targetLayer === layerId) return true;
+      if (scene.objects.some((object) => object.layerId === targetLayer)) {
+        return false;
       }
 
       commitScene({
@@ -1617,6 +1662,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
           )
         )
       });
+      return true;
     },
     deleteLayer: (layerId) => {
       const { scene } = get();
@@ -1899,6 +1945,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const layerObjects = scene.objects.filter((item) => item.layerId === object.layerId);
     const objectWithStack = {
       ...object,
+      name: nextUniqueObjectName(scene.objects, object.name),
       zIndex: layerObjects.reduce((highest, item) => Math.max(highest, item.zIndex), -1) + 1
     } as SceneObject;
 
@@ -1927,7 +1974,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       ...selected,
       animation: clonePropertyAnimation(selected.animation),
       id: createObjectId(selected.type),
-      name: `${selected.name} Copy`,
+      name: nextUniqueObjectName(scene.objects, selected.name),
       x: selected.x + 48,
       y: selected.y + 48,
       zIndex: selected.zIndex + 1,
@@ -2040,7 +2087,7 @@ function mergeImportedScene(current: SceneDocument, imported: SceneDocument): Sc
     materialInstances: uniqueById(current.materialInstances ?? [], imported.materialInstances ?? [], "materialInstanceId"),
     fonts: uniqueById(current.fonts ?? [], imported.fonts ?? [], "fontId"),
     gradientPresets: uniqueById(current.gradientPresets ?? [], imported.gradientPresets ?? [], "presetId"),
-    objects: normalizeObjectStack([...current.objects, ...objects]),
+    objects: normalizeObjectStack(ensureUniqueObjectNames([...current.objects, ...objects])),
     dataContext: {
       ...current.dataContext,
       importedDesigns: [
@@ -2060,7 +2107,9 @@ function createTextObject(patch: Partial<TextSceneObject> = {}): TextSceneObject
     width: 420,
     height: 72,
     fill: "#f7fbff",
+    fillStyle: { type: "solid", color: "#f7fbff" },
     stroke: "transparent",
+    strokeStyle: { type: "solid", color: "transparent" },
     fontSize: 48,
     fontFamily: "Inter, Arial, sans-serif",
     fontWeight: "700",
@@ -2101,7 +2150,6 @@ function createRectObject(patch: Partial<RectSceneObject> = {}): RectSceneObject
     ...createBaseObject("rect"),
     type: "rect",
     name: "Rectangle",
-    fill: "#263348",
     radius: 10,
     ...patch
   };
@@ -2133,20 +2181,49 @@ function createShapeObject(patch: Partial<ShapeSceneObject> = {}): ShapeSceneObj
   };
   const path = patch.path ?? defaultPath;
   const bounds = bezierPathBounds(path);
+  // Both colour layers go through `withColorStyles`, so a colour named here or by the caller is
+  // the colour that gets drawn. Without it the base object's unassigned `fillStyle` outlived every
+  // fill a factory asked for, because the renderers read the rich style first.
   return {
     ...createBaseObject("shape"),
-    type: "shape",
-    name: "Shape",
-    width: bounds.width || 180,
-    height: bounds.height || 160,
-    fill: "#7c5cff",
-    stroke: "#f7fbff",
-    strokeWidth: 0,
-    path,
-    fillEnabled: true,
-    strokeEnabled: false,
-    fillRule: "nonzero",
-    ...patch
+    ...withColorStyles({
+      type: "shape",
+      name: "Shape",
+      width: bounds.width || 180,
+      height: bounds.height || 160,
+      stroke: "#f7fbff",
+      strokeWidth: 0,
+      path,
+      fillEnabled: true,
+      strokeEnabled: false,
+      fillRule: "nonzero"
+    }),
+    ...withColorStyles(patch)
+  } as ShapeSceneObject;
+}
+
+function fitShapeToPath(object: ShapeSceneObject, path: BezierPath): ShapeSceneObject {
+  const bounds = bezierPathBounds(path);
+  const offset = { x: bounds.x, y: bounds.y };
+  const shiftedPath = offset.x === 0 && offset.y === 0
+    ? path
+    : {
+        ...path,
+        vertices: path.vertices.map((vertex) => ({
+          x: vertex.x - offset.x,
+          y: vertex.y - offset.y
+        }))
+      };
+  const anchor = object.anchor ?? { x: 0, y: 0 };
+  return {
+    ...object,
+    path: shiftedPath,
+    anchor: {
+      x: anchor.x - offset.x,
+      y: anchor.y - offset.y
+    },
+    width: Math.max(1, bounds.width),
+    height: Math.max(1, bounds.height)
   };
 }
 
@@ -2236,8 +2313,6 @@ function createEllipseObject(patch: Partial<EllipseSceneObject> = {}): EllipseSc
     name: "Ellipse",
     width: 220,
     height: 160,
-    fill: "#23c7d9",
-    stroke: "#f7fbff",
     ...patch
   };
 }
@@ -2274,7 +2349,7 @@ function createLibraryObject(kind: LibraryObjectKind, scene: SceneDocument): Sce
         radius: 0
       });
     case "quad":
-      return createRectObject({ name: "Quad", width: 360, height: 210, fill: "#263348", radius: 0 });
+      return createRectObject({ name: "Quad", width: 360, height: 210, radius: 0 });
     case "sphere":
       return createMeshObject("sphere", {
         name: "Sphere",
@@ -2282,27 +2357,25 @@ function createLibraryObject(kind: LibraryObjectKind, scene: SceneDocument): Sce
         y: scene.canvas.height / 2,
         width: 220,
         height: 220,
-        depth: 220,
-        fill: "#9fc7ff"
+        depth: 220
       });
     case "line":
       return createLineObject();
     case "shape":
       return createShapeObject();
     case "model":
-      return createMeshObject("model", { name: "3D Model", x: scene.canvas.width / 2, y: scene.canvas.height / 2, fill: "#6be7ff" });
+      return createMeshObject("model", { name: "3D Model", x: scene.canvas.width / 2, y: scene.canvas.height / 2 });
     case "cube":
-      return createMeshObject("cube", { name: "Cube", x: scene.canvas.width / 2, y: scene.canvas.height / 2, fill: "#84a7ff" });
+      return createMeshObject("cube", { name: "Cube", x: scene.canvas.width / 2, y: scene.canvas.height / 2 });
     case "cylinder":
-      return createMeshObject("cylinder", { name: "Cylinder", x: scene.canvas.width / 2, y: scene.canvas.height / 2, fill: "#66d9a8" });
+      return createMeshObject("cylinder", { name: "Cylinder", x: scene.canvas.width / 2, y: scene.canvas.height / 2 });
     case "torus":
-      return createMeshObject("torus", { name: "Torus", x: scene.canvas.width / 2, y: scene.canvas.height / 2, fill: "#b889ff" });
+      return createMeshObject("torus", { name: "Torus", x: scene.canvas.width / 2, y: scene.canvas.height / 2 });
     case "slab":
       return createMeshObject("slab", {
         name: "Slab",
         x: scene.canvas.width / 2,
         y: scene.canvas.height / 2,
-        fill: "#8bd1c7",
         width: 360,
         height: 92,
         depth: 42,
@@ -2412,7 +2485,6 @@ function createMeshObject(meshKind: MeshSceneObject["meshKind"], patch: Partial<
     width: 240,
     height: 180,
     depth: 120,
-    fill: "#6be7ff",
     stroke: "#ffffff",
     strokeWidth: 2,
     meshKind,
@@ -2523,6 +2595,20 @@ function createGroupObject(patch: Partial<GroupSceneObject> = {}): GroupSceneObj
   };
 }
 
+/**
+ * How an object with nothing assigned to it looks.
+ *
+ * Fully transparent rather than a neutral grey, because a grey fill is still a fill: it would
+ * composite over whatever is behind and would key as opaque on air. The outline is a mid tone
+ * chosen to stay legible against both a dark canvas and a light one, since the canvas background
+ * is the designer's choice.
+ */
+const UNASSIGNED_FILL = "#00000000";
+const UNASSIGNED_OUTLINE = "#8fa6b6";
+/** What the pen draws with. Exported-in-spirit constants so the tool options bar can show them. */
+export const PEN_SHAPE_FILL = "#7c5cff";
+export const PEN_SHAPE_STROKE = "#ffffff";
+
 function createBaseObject(type: SceneObject["type"]) {
   return {
     id: createObjectId(type),
@@ -2541,14 +2627,60 @@ function createBaseObject(type: SceneObject["type"]) {
     opacity: 1,
     visible: true,
     locked: false,
-    fill: "#23c7d9",
-    stroke: "#f7fbff",
-    fillStyle: { type: "solid", color: "#23c7d9" } as ColorValue,
-    strokeStyle: { type: "solid", color: "#f7fbff" } as ColorValue,
-    strokeWidth: 0,
+    // An object arrives with nothing assigned, and it must look like it.
+    //
+    // Every type used to be born with an arbitrary fill — quads slate blue, cubes lavender,
+    // toruses purple — while `materialSlots` stayed empty. A solid coloured shape is exactly
+    // what an *assigned* material looks like, so the viewport told the designer the object was
+    // finished when nothing had been bound to it. Transparent fill plus a hairline outline reads
+    // as an empty container: it shows extent and orientation, and it cannot be mistaken for a
+    // surface. Assigning a material or an explicit fill is what makes it solid.
+    fill: UNASSIGNED_FILL,
+    stroke: UNASSIGNED_OUTLINE,
+    fillStyle: { type: "solid", color: UNASSIGNED_FILL } as ColorValue,
+    strokeStyle: { type: "solid", color: UNASSIGNED_OUTLINE } as ColorValue,
+    strokeWidth: 1,
     bindings: {},
     materialSlots: {}
   };
+}
+
+function normalizedObjectFillStyle(object: SceneObject): ColorValue {
+  const normalized = normalizeColorValue(object.fillStyle ?? object.fill, object.fill);
+  // Text objects created by older builds inherited the base object's transparent
+  // fillStyle even though their text fill was white. That stale base value must
+  // not override the visible text colour forever.
+  if (
+    object.type === "text"
+    && normalized.type === "solid"
+    && normalized.color.toLowerCase() === UNASSIGNED_FILL
+    && object.fill.toLowerCase() !== UNASSIGNED_FILL
+  ) {
+    return normalizeColorValue(object.fill, "#f7fbff");
+  }
+  return normalized;
+}
+
+function normalizedTextLineHeight(object: Extract<SceneObject, { type: "text" }>): number {
+  const value = object.lineHeight ?? object.fontSize * 1.2;
+  // Early scenes stored CSS-style multipliers (the old default was 1.2), while
+  // both renderers and the Inspector use pixels. Migrate those scenes on load.
+  return value > 0 && value <= 4 ? object.fontSize * value : value;
+}
+
+function normalizedObjectStrokeStyle(object: SceneObject): ColorValue {
+  const normalized = normalizeColorValue(object.strokeStyle ?? object.stroke, object.stroke);
+  // The same legacy base-style mismatch affected text outlines: old text objects
+  // declared a transparent stroke but retained the base object's grey strokeStyle.
+  if (
+    object.type === "text"
+    && normalized.type === "solid"
+    && normalized.color.toLowerCase() === UNASSIGNED_OUTLINE
+    && object.stroke.toLowerCase() === "transparent"
+  ) {
+    return normalizeColorValue(object.stroke, "transparent");
+  }
+  return normalized;
 }
 
 function normalizeScene(scene: SceneDocument): SceneDocument {
@@ -2560,7 +2692,7 @@ function normalizeScene(scene: SceneDocument): SceneDocument {
   // Scene-authored shaders (imported WGSL) are preserved untouched.
   const authoredShaders = (scene.shaders ?? []).filter((shader) => !builtInShaderIds.has(shader.shaderId));
   const objects = normalizeObjectStack(
-    scene.objects.map((object, index) => ({
+    ensureUniqueObjectNames(scene.objects.map((object, index) => ({
       ...object,
       zDepth: object.type === "camera" && object.zDepth === 0 && !object.target
         ? sceneFocalDistance(scene)
@@ -2572,8 +2704,8 @@ function normalizeScene(scene: SceneDocument): SceneDocument {
       scaleY: object.scaleY ?? 1,
       scaleZ: object.scaleZ ?? 1,
       anchor: object.anchor ?? { x: 0, y: 0 },
-      fillStyle: normalizeColorValue(object.fillStyle ?? object.fill, object.fill),
-      strokeStyle: normalizeColorValue(object.strokeStyle ?? object.stroke, object.stroke),
+      fillStyle: normalizedObjectFillStyle(object),
+      strokeStyle: normalizedObjectStrokeStyle(object),
       masks: (object.masks ?? []).map((mask, maskIndex) => ({
         ...mask,
         name: mask.name || `Mask ${maskIndex + 1}`,
@@ -2642,7 +2774,7 @@ function normalizeScene(scene: SceneDocument): SceneDocument {
             direction: object.direction ?? "auto",
             fontStyle: object.fontStyle ?? "normal",
             textDecoration: object.textDecoration ?? {},
-            lineHeight: object.lineHeight ?? object.fontSize * 1.2,
+            lineHeight: normalizedTextLineHeight(object),
             letterSpacing: object.letterSpacing ?? 0,
             wordSpacing: object.wordSpacing ?? 0,
             paragraphSpacing: object.paragraphSpacing ?? 0,
@@ -2659,7 +2791,7 @@ function normalizeScene(scene: SceneDocument): SceneDocument {
             paintBlendMode: object.paintBlendMode ?? "normal"
           }
         : {})
-    } as SceneObject))
+    } as SceneObject)))
   );
   const requestedCamera = objects.find((object) => object.id === scene.activeCameraId && object.type === "camera");
   const activeCameraId = requestedCamera?.id
@@ -2919,6 +3051,23 @@ function touchScene(scene: SceneDocument): SceneDocument {
 
 function clampTimelineFrame(frame: number, durationFrames: number): number {
   return Math.max(0, Math.min(durationFrames, Math.round(frame)));
+}
+
+
+function ensureUniqueObjectNames(objects: readonly SceneObject[]): SceneObject[] {
+  const accepted: SceneObject[] = [];
+  for (const object of objects) {
+    const name = object.name.trim() || "Object";
+    const duplicate = accepted.some((candidate) =>
+      candidate.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase()
+    );
+    accepted.push(duplicate
+      ? ({ ...object, name: nextUniqueObjectName(accepted, name) } as SceneObject)
+      : object.name === name
+        ? object
+        : ({ ...object, name } as SceneObject));
+  }
+  return accepted;
 }
 
 function sortPropertyKeys(keys: PropertyKeyframe[]): PropertyKeyframe[] {

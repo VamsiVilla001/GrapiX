@@ -1,5 +1,5 @@
 // Emits the TypeScript contract fixtures to JSON for non-TypeScript
-// consumers (the Rust render daemon's contract tests).
+// consumers (the Rust render core's contract tests).
 //
 // Usage:
 //   npm run fixtures:emit  -w @grapix/shared-types   (build + write JSON)

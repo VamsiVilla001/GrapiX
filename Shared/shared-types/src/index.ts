@@ -213,7 +213,7 @@ export type MaterialBlendMode = "normal" | "add" | "multiply" | "screen" | "over
 
 /**
  * Blend modes implemented identically in BOTH renderers (PixiJS preview and
- * the Rust render daemon) as fixed-function GPU blending, using Adobe's
+ * the Rust render core) as fixed-function GPU blending, using Adobe's
  * standard blend-mode math where it is fixed-function-expressible. The exact
  * per-mode blend equations are the contract in
  * Shared/render-shaders/layouts.json; both renderers mirror PixiJS's
@@ -238,6 +238,79 @@ export type MaterialDepthMode = "disabled" | "read" | "read-write";
 export type TextureFitMode = "stretch" | "fit" | "fill" | "crop" | "tile" | "original" | "pixel-perfect" | "nine-slice";
 export type TextureWrapMode = "clamp" | "repeat" | "mirror-repeat";
 export type TextureFilteringMode = "nearest" | "linear";
+
+/**
+ * Fit modes whose result is a pure UV scale/offset, so every renderer can honour them with the
+ * sampler transform it already has.
+ *
+ * A cover crop only ever samples a sub-rectangle of the texture (repeat <= 1), which needs no
+ * behaviour outside [0,1] and therefore looks identical in the editor preview and the native
+ * engine. The excluded modes all need something the material pipeline cannot express yet:
+ * `fit`, `original` and `pixel-perfect` draw the texture smaller than the surface, which requires
+ * a transparent border (sampling outside [0,1] smears the edge under clamp and repeats under
+ * repeat); `tile` and `nine-slice` need extra geometry. Those stay declared-but-unimplemented
+ * rather than silently rendering as `stretch`.
+ */
+export const IMPLEMENTED_TEXTURE_FIT_MODES: readonly TextureFitMode[] = Object.freeze([
+  "stretch",
+  "fill",
+  "crop"
+]);
+
+export interface TextureFitSurface {
+  surfaceWidth: number;
+  surfaceHeight: number;
+  textureWidth: number;
+  textureHeight: number;
+}
+
+export interface TextureFitTransform {
+  /** UV span sampled across the surface. 1 means the whole texture. */
+  repeat: [number, number];
+  /** UV of the sampled rectangle's origin. */
+  offset: [number, number];
+}
+
+export const TEXTURE_FIT_IDENTITY: TextureFitTransform = Object.freeze({
+  repeat: [1, 1] as [number, number],
+  offset: [0, 0] as [number, number]
+});
+
+/**
+ * The UV transform that makes `mode` respect the texture's own resolution on a given surface.
+ *
+ * This is the single definition of fit for the whole product: the editor's Three and Pixi paths
+ * and the native engine all derive their sampler transform here, so Preview and Program cannot
+ * disagree about where a texture's edges land. Returns the identity for `stretch` and for any
+ * mode outside `IMPLEMENTED_TEXTURE_FIT_MODES`, so an unimplemented mode degrades to today's
+ * behaviour instead of producing invented numbers.
+ */
+export function resolveTextureFit(mode: TextureFitMode, surface: TextureFitSurface): TextureFitTransform {
+  const { surfaceWidth, surfaceHeight, textureWidth, textureHeight } = surface;
+  // A zero or non-finite extent has no aspect ratio to preserve; stretching is the only answer
+  // that cannot divide by zero, and it is what every mode already did.
+  if (
+    mode === "stretch"
+    || !IMPLEMENTED_TEXTURE_FIT_MODES.includes(mode)
+    || !(surfaceWidth > 0 && surfaceHeight > 0 && textureWidth > 0 && textureHeight > 0)
+    || ![surfaceWidth, surfaceHeight, textureWidth, textureHeight].every(Number.isFinite)
+  ) {
+    return { repeat: [1, 1], offset: [0, 0] };
+  }
+
+  // Cover: scale the texture until it covers both axes, then centre the crop. The wider-aspect
+  // side is the one that overflows, so it is the one sampled short.
+  const surfaceAspect = surfaceWidth / surfaceHeight;
+  const textureAspect = textureWidth / textureHeight;
+  const repeat: [number, number] = textureAspect > surfaceAspect
+    ? [surfaceAspect / textureAspect, 1]
+    : [1, textureAspect / surfaceAspect];
+  return {
+    repeat,
+    offset: [(1 - repeat[0]) / 2, (1 - repeat[1]) / 2]
+  };
+}
+
 export type MaterialParameterType = "float" | "integer" | "boolean" | "colour" | "vector2" | "vector3" | "vector4" | "texture" | "sampler" | "enum" | "matrix";
 export type MaterialParameterValue = number | boolean | string | number[];
 
@@ -791,8 +864,20 @@ export interface RundownDocument {
 }
 
 // --- Playout operator documents -------------------------------------------
+//
+// The operator model is Ross XPression's, not a newsroom rundown's. Two surfaces:
+//
+//   Scene Manager   every published scene, grouped by category, each with a numeric
+//                   Take ID. An operator recalls a scene straight to air by typing its
+//                   number. This is the primary surface and it needs no playlist.
+//   Take List       an ordered list of takes for a scripted show, with a cursor and
+//                   Take In / Continue / Take Out.
+//
+// What was deliberately removed with the rundown: segments (grouping is the Scene
+// Manager's category), per-item page numbers (superseded by the scene's Take ID) and
+// document revisions (a take list autosaves; it is not a versioned publication).
 
-export const PLAYOUT_ITEM_STATES = [
+export const PLAYOUT_TAKE_STATES = [
   "NOT_LOADED",
   "LOADING",
   "LOADED",
@@ -808,7 +893,7 @@ export const PLAYOUT_ITEM_STATES = [
   "ERROR"
 ] as const;
 
-export type PlayoutItemState = (typeof PLAYOUT_ITEM_STATES)[number];
+export type PlayoutTakeState = (typeof PLAYOUT_TAKE_STATES)[number];
 
 export interface PublishedSceneMetadata {
   sceneId: string;
@@ -831,6 +916,14 @@ export interface PublishedSceneMetadata {
   /** Project colour space, so an output can tag its stream correctly. */
   colorSpace?: string;
   defaultTransition: "cut" | "mix" | "dip" | "wipe" | "push";
+  /**
+   * The Scene Manager recall number.
+   *
+   * XPression's Take ID: an operator types it to put this scene on air without any list.
+   * Assigned by Playout on first publish and stable across republishes, so a rehearsed
+   * number does not change under an operator when a designer republishes mid-show.
+   */
+  takeId: number;
   tags: string[];
   category?: string;
   sourceEditorId?: string;
@@ -854,45 +947,43 @@ export interface PlayoutTransition {
   delayFrames: number;
 }
 
-export interface PlayoutRundownItem {
-  itemId: string;
+/** One entry in a Take List. */
+export interface PlayoutTakeEntry {
+  /** Identity within the list. Not the scene's Take ID. */
+  entryId: string;
   sceneId: string;
   sceneVersion: number;
-  versionPolicy: "pinned" | "follow-latest";
+  /**
+   * `pinned` keeps rendering the version the operator rehearsed even after a republish.
+   * `latest` follows the newest published version.
+   */
+  versionPolicy: "pinned" | "latest";
+  /** Editable label. Defaults to the scene name. */
   name: string;
-  pageNumber?: string;
-  segmentId: string;
   layer: string;
-  channel: string;
-  output: string;
   transitionIn: PlayoutTransition;
   transitionOut: PlayoutTransition;
+  /** Overrides the published scene's data without changing the published scene. */
   instanceData: Record<string, unknown>;
   notes: string;
   color: string;
-  cuePolicy: "manual" | "auto";
-  automationEnabled: boolean;
   completed: boolean;
 }
 
-export interface PlayoutRundownSegment {
-  segmentId: string;
-  name: string;
-  color: string;
-  notes: string;
-  startTimecode?: string;
-  collapsed: boolean;
-  locked: boolean;
-}
-
-export interface PlayoutRundownDocument {
-  rundownId: string;
+/**
+ * An ordered list of takes.
+ *
+ * Autosaved, not published: it has no revision number because it is operator working
+ * state, not a versioned artifact. The published scenes it points at are the immutable
+ * things.
+ */
+export interface PlayoutTakeList {
+  takeListId: string;
   name: string;
   version: 1;
-  revision: number;
-  activeItemId?: string;
-  items: PlayoutRundownItem[];
-  segments: PlayoutRundownSegment[];
+  /** The entry Take In will operate on. Null when the list has been run to the end. */
+  cursorEntryId: string | null;
+  entries: PlayoutTakeEntry[];
   archived: boolean;
   createdAt: string;
   updatedAt: string;
@@ -901,17 +992,16 @@ export interface PlayoutRundownDocument {
 export interface PlayoutRuntimeStatus {
   rendererConnection: "connected" | "connecting" | "disconnected" | "error";
   /**
-   * Which renderer carried the last operation.
+   * What is on Preview and Program.
    *
-   * `engine` is the standalone protocol v3 render engine; `renderer` is the
-   * protocol v2 render daemon. Reported rather than inferred, because the two have
-   * different output configurations and an operator needs to know which one is
-   * actually on air.
+   * A take-list entry id when the operator worked from the list, or `scene:<sceneId>` when
+   * they recalled a scene directly from the Scene Manager by Take ID — because a direct
+   * recall has no list entry, and reporting a fake one would make the UI highlight a row
+   * that is not what is on air.
    */
-  activeRenderer?: "engine" | "renderer" | null;
-  previewItemId: string | null;
-  programItemId: string | null;
-  itemStates: Record<string, PlayoutItemState>;
+  previewRef: string | null;
+  programRef: string | null;
+  takeStates: Record<string, PlayoutTakeState>;
   lastError: string | null;
   updatedAt: string;
 }
@@ -2261,10 +2351,11 @@ export function resolvePrimitiveMaterial(
     if (slot.assetId && (!asset || asset.status === "MISSING" || asset.status === "ERROR" || asset.status === "UNSUPPORTED")) {
       warnings.push(`Texture ${slot.assetId} used by ${material.name} is missing or unavailable.`);
     }
-    // wrap (clamp/repeat/mirror) and filtering (linear/nearest) are applied by
-    // the editor's texture sampler + TilingSprite path. Only tile and
-    // nine-slice fit modes remain unimplemented.
-    if (["tile", "nine-slice"].includes(slot.fit)) {
+    // wrap (clamp/repeat/mirror) and filtering (linear/nearest) are applied by the editor's
+    // texture sampler and the native engine. Fit is narrower: only the modes in
+    // IMPLEMENTED_TEXTURE_FIT_MODES resolve to a UV transform both renderers can honour, so every
+    // other mode is reported rather than silently drawn as `stretch`.
+    if (!IMPLEMENTED_TEXTURE_FIT_MODES.includes(slot.fit)) {
       warnings.push(`Texture fit mode ${slot.fit} is not implemented by both renderers.`);
     }
   }
@@ -2321,7 +2412,7 @@ export function isMaterialCompatible(material: Material, objectType: SceneObject
 
 /**
  * The materialSlots key of an object's primary/front face. Kept as the literal
- * "main" so every pre-face scene, published package, and the Rust daemon (which
+ * "main" so every pre-face scene, published package, and the Rust render core (which
  * reads material_slots.get("main")) keep resolving their single material. Every
  * object's bindable-face list therefore starts with this slot at index 0.
  */

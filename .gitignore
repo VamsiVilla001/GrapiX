@@ -1,15 +1,40 @@
+# --- Dependencies and build output ------------------------------------------
 node_modules/
 dist/
 .vite/
+*.tsbuildinfo
+coverage/
+
+# Cargo build caches. One per crate: services/*, and each src-tauri.
+target/
+
+# Tauri generated schemas and permission files. They embed absolute paths, so a
+# stale copy fails a build naming a path that no longer exists.
+gen/
+
+# Sidecar binaries staged into a bundle by build.rs. Build output, not source —
+# and a stale one is how a retired binary gets shipped.
+binaries/
+
+# --- Local configuration and secrets ----------------------------------------
 *.local
 .env
 .env.*
-coverage/
-*.tsbuildinfo
+.claude/settings.local.json
+
+# --- Runtime state ----------------------------------------------------------
+# Scenes, assets, published packages, rundowns, caches, tokens and operator
+# logs. Written by the running system, never source. Real user content lives
+# here, so it is ignored rather than deleted by tooling.
 data/
-target/
+
+# --- Agent and harness scratch ----------------------------------------------
+.claude/worktrees/
 .codex-run/
 .codex/
+*.log
+*.err.log
 
+# --- Run evidence -----------------------------------------------------------
 # Pixel-parity captures and diff images: evidence from a run, not source.
 artifacts/

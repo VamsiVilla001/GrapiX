@@ -1,9 +1,9 @@
 /**
  * Render engine protocol v3 — the envelope.
  *
- * Protocol v2 (`@grapix/renderer-protocol`) got the important things right and
- * stays supported: a version, a request id, a strictly increasing per-connection
- * sequence, a timestamp, explicit nullability, and revision gating. v3 keeps all
+ * Protocol v2 got the important things right: a version, a request id, a strictly
+ * increasing per-connection sequence, a timestamp, explicit nullability, and revision
+ * gating. v3 keeps all
  * of that and adds the four things a *remote, multi-engine* deployment cannot
  * work without:
  *

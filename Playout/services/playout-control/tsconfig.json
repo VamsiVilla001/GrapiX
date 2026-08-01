@@ -1,7 +1,10 @@
 {
   "extends": "../../../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ES2022", "DOM"],
+    // ES2024 rather than the ES2022 baseline: this is a Node-only service and package.json
+    // requires Node >=22.12, which has Promise.withResolvers. The lib should describe the
+    // runtime this actually runs on.
+    "lib": ["ES2024", "DOM"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "types": ["node"],

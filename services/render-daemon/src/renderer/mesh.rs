@@ -85,6 +85,12 @@ pub const SCENE_LIGHT_UNIFORM_SIZE: usize = std::mem::size_of::<SceneLightUnifor
 pub const SCENE_LIGHTING_UNIFORMS_SIZE: usize = std::mem::size_of::<SceneLightingUniforms>();
 
 struct MeshDraw {
+    /// Which scene object this draw belongs to, so an animated transform can find it.
+    object_id: String,
+    /// Retained so a transform update rebuilds the whole uniform rather than writing at a
+    /// hand-computed byte offset into the struct.
+    uniforms: MeshUniforms,
+    uniform_buffer: wgpu::Buffer,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
@@ -104,6 +110,41 @@ impl MeshFrame {
 
     pub fn draw_count(&self) -> usize {
         self.draws.len()
+    }
+
+    /// Rewrite the model matrices of animated meshes.
+    ///
+    /// This is what makes an animated mesh cheap: geometry, textures, samplers and bind groups
+    /// are untouched, and only a 256-byte uniform per surface is written. Rebuilding the frame
+    /// instead would recreate every vertex buffer and texture, which is the 482 ms path that
+    /// made Program deliver two frames a second.
+    ///
+    /// Composed from the authored transform every time rather than from the previous frame, so
+    /// it cannot accumulate drift.
+    pub fn update_model_transforms(
+        &mut self,
+        queue: &wgpu::Queue,
+        transforms: &std::collections::HashMap<String, [f32; 16]>,
+    ) {
+        if transforms.is_empty() {
+            return;
+        }
+        for draw in &mut self.draws {
+            let Some(model) = transforms.get(&draw.object_id) else {
+                continue;
+            };
+            if draw.uniforms.model == *model {
+                continue;
+            }
+            draw.uniforms.model = *model;
+            // The normal matrix must follow, or lighting keeps using the old orientation and a
+            // rotating mesh is lit as though it never moved.
+            draw.uniforms.normal_model = Mat4::from_cols_array(model)
+                .inverse()
+                .transpose()
+                .to_cols_array();
+            queue.write_buffer(&draw.uniform_buffer, 0, bytemuck::bytes_of(&draw.uniforms));
+        }
     }
 }
 
@@ -197,7 +238,10 @@ impl MeshPipeline {
                     }),
                     primitive: wgpu::PrimitiveState {
                         topology: wgpu::PrimitiveTopology::TriangleList,
-                        front_face: wgpu::FrontFace::Ccw,
+                        // The camera uses a y-down scene up-vector. Its right axis is therefore
+                        // negative X; scene_view_projection reflects clip X back to the Editor's
+                        // left-to-right convention, which reverses winding once.
+                        front_face: wgpu::FrontFace::Cw,
                         cull_mode,
                         ..Default::default()
                     },
@@ -256,7 +300,9 @@ impl MeshPipeline {
                 let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("grapix-mesh-uniform-buffer"),
                     contents: bytemuck::bytes_of(&uniforms),
-                    usage: wgpu::BufferUsages::UNIFORM,
+                    // COPY_DST so an animated transform can rewrite the model matrix in place
+                    // instead of rebuilding the whole mesh frame.
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 });
                 let texture = create_texture(
                     device,
@@ -298,6 +344,9 @@ impl MeshPipeline {
                     ],
                 });
                 draws.push(MeshDraw {
+                    object_id: mesh.object_id.clone(),
+                    uniforms,
+                    uniform_buffer,
                     vertex_buffer,
                     index_buffer,
                     bind_group,
@@ -432,7 +481,9 @@ fn scene_view_projection(scene: &PreparedScene) -> Mat4 {
         Vec3::new(width * 0.5, height * 0.5, 0.0),
         Vec3::new(0.0, -1.0, 0.0),
     );
-    projection * view
+    // A +Z camera with a y-down up-vector has a -X right axis. Correct that camera-space
+    // reflection here so authored X=0 is the left edge, as it is in the Editor and quad path.
+    Mat4::from_scale(Vec3::new(-1.0, 1.0, 1.0)) * projection * view
 }
 
 fn scene_camera_position(scene: &PreparedScene) -> Vec3 {

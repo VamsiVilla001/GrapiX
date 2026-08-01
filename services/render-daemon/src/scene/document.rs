@@ -254,6 +254,13 @@ pub enum PreparedTextAlign {
     Center,
     Right,
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreparedTextVerticalAlign {
+    Top,
+    Middle,
+    Bottom,
+}
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreparedAutoFit {
@@ -287,6 +294,7 @@ pub struct PreparedText {
     pub wrap: bool,
     pub auto_fit: PreparedAutoFit,
     pub align: PreparedTextAlign,
+    pub vertical_align: PreparedTextVerticalAlign,
     pub vertical: bool,
 }
 
@@ -816,10 +824,31 @@ fn prepare_texts(
             ));
             continue;
         }
-        let fill = value
+        let legacy_fill = value
             .get("fill")
             .and_then(Value::as_str)
             .unwrap_or("#ffffff");
+        let fill = match value.get("fillStyle").and_then(|style| style.get("type")).and_then(Value::as_str) {
+            Some("none") => "#00000000",
+            Some("solid") => value
+                .get("fillStyle")
+                .and_then(|style| style.get("color"))
+                .and_then(Value::as_str)
+                .unwrap_or(legacy_fill),
+            Some("linear-gradient" | "radial-gradient") => {
+                warnings.push(format!(
+                    "text object {id} uses a gradient fill; native text currently uses its legacy solid fill"
+                ));
+                legacy_fill
+            }
+            Some(kind) => {
+                warnings.push(format!(
+                    "text object {id} uses unknown fillStyle type {kind:?}; using its legacy fill"
+                ));
+                legacy_fill
+            }
+            None => legacy_fill,
+        };
         let Some(color) = parse_hex_color(fill) else {
             warnings.push(format!(
                 "text object {id} uses unsupported fill {fill:?}; using white"
@@ -867,7 +896,10 @@ fn prepare_texts(
                 _ => PreparedTextStyle::Normal,
             },
             font_size,
-            line_height: number("lineHeight", f64::from(font_size * 1.2)).max(1.0),
+            line_height: {
+                let authored = number("lineHeight", f64::from(font_size * 1.2)).max(0.01);
+                if authored <= 4.0 { authored * font_size } else { authored }
+            },
             letter_spacing: number("letterSpacing", 0.0),
             x: number("x", 0.0),
             y: number("y", 0.0),
@@ -906,6 +938,15 @@ fn prepare_texts(
                 "center" => PreparedTextAlign::Center,
                 "right" => PreparedTextAlign::Right,
                 _ => PreparedTextAlign::Left,
+            },
+            vertical_align: match value
+                .get("verticalAlign")
+                .and_then(Value::as_str)
+                .unwrap_or("top")
+            {
+                "middle" => PreparedTextVerticalAlign::Middle,
+                "bottom" => PreparedTextVerticalAlign::Bottom,
+                _ => PreparedTextVerticalAlign::Top,
             },
             vertical: value
                 .get("writingMode")
@@ -1444,6 +1485,29 @@ mod tests {
             .iter()
             .all(|warning| !warning.contains("\"text\"") || !warning.contains("NOT rendered")));
     }
+    #[test]
+    fn text_fill_style_and_legacy_line_height_are_prepared() {
+        let mut text = rect_object();
+        text["type"] = json!("text");
+        text["id"] = json!("text_style");
+        text["text"] = json!("Styled");
+        text["fontFamily"] = json!("sans-serif");
+        text["fontWeight"] = json!("400");
+        text["fontSize"] = json!(50);
+        text["lineHeight"] = json!(1.2);
+        text["verticalAlign"] = json!("bottom");
+        text["fill"] = json!("#ffffff");
+        text["fillStyle"] = json!({ "type": "solid", "color": "#102030" });
+        text["opacity"] = json!(0.5);
+
+        let prepared =
+            prepare_scene(&minimal_scene(vec![text])).expect("styled text must prepare");
+        let text = &prepared.texts[0];
+        assert_eq!(text.color_rgba, [0x10, 0x20, 0x30, 128]);
+        assert!((text.line_height - 60.0).abs() < 1e-4);
+        assert_eq!(text.vertical_align, PreparedTextVerticalAlign::Bottom);
+    }
+
 
     #[test]
     fn skips_invisible_rects() {

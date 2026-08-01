@@ -4,6 +4,7 @@ import {
   findMaterial,
   getBindableFaces,
   IMPLEMENTED_BLEND_MODES,
+  IMPLEMENTED_TEXTURE_FIT_MODES,
   resolveMaterialAsset,
   resolveMaterialColor,
   resolvePrimitiveMaterial,
@@ -156,7 +157,7 @@ export function isResolvedMaterialPreviewSupported(
     && resolved.material.enabled !== false
     && IMPLEMENTED_BLEND_MODES.includes(resolved.blendMode)
     && ["opaque", "straight", "premultiplied"].includes(resolved.alphaMode)
-    && resolved.textureSlots.every((slot) => !["tile", "nine-slice"].includes(slot.fit))
+    && resolved.textureSlots.every((slot) => IMPLEMENTED_TEXTURE_FIT_MODES.includes(slot.fit))
   );
 }
 

@@ -1,21 +1,21 @@
-//! GrapiX render daemon library.
+//! GrapiX render core.
 //!
-//! The daemon receives `SceneDocument` JSON (the same document the editor and
-//! API server use, defined in `Shared/shared-types`) over a local WebSocket,
-//! renders it headlessly with wgpu using the shared shaders from
-//! `Shared/render-shaders`, and hands finished frames to a video output
-//! backend (NDI when compiled with `--features ndi`, otherwise a null output).
+//! Scene parsing, mesh preparation, text shaping, pipeline caching and output adapters,
+//! rendered headlessly with wgpu using the shared shaders from `Shared/render-shaders`.
+//! Consumed by `services/render-engine` under the alias `grapix-render-core`, which is the
+//! only thing that renders in V1.
 //!
-//! Structured as a library so integration tests (`tests/`) can exercise the
-//! protocol, scene parsing, and renderer without spawning the binary.
+//! **Library only.** This crate used to ship a `grapix-render-daemon` binary speaking
+//! protocol v2 on port 4200. It is gone, along with its transport, controller, v2 protocol,
+//! resource table and asset cache — roughly 3,250 lines that nothing launched and no test
+//! exercised. Keeping a second renderer that could bind a port and drive its own outputs was
+//! a way to put unverified pixels on air (`docs/architecture.md`, invariants 1 and 7), and
+//! the engine on 4400 is the single renderer.
+//!
+//! The crate directory is still `services/render-daemon` so git history stays attached to
+//! these files; the package name is what the engine aliases.
 
-pub mod asset_cache;
 pub mod config;
-pub mod controller;
-pub mod media;
 pub mod output;
-pub mod protocol;
 pub mod renderer;
-pub mod resource;
 pub mod scene;
-pub mod transport;

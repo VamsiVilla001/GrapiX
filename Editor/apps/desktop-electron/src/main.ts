@@ -5,7 +5,17 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const workspaceRoot = path.resolve(__dirname, "../../../..");
 const editorDistPath = path.join(workspaceRoot, "Editor", "apps", "editor-web", "dist");
-const apiEntryPath = path.join(workspaceRoot, "services", "api-server", "dist", "index.js");
+// Editor/services/project-api since the Phase 2 migration; the npm package is still
+// @grapix/api-server. A wrong answer here is not a compile error — the shell would fail to
+// import its own service and show an editor with no project data.
+const apiEntryPath = path.join(
+  workspaceRoot,
+  "Editor",
+  "services",
+  "project-api",
+  "dist",
+  "index.js"
+);
 const apiBaseUrl = "http://127.0.0.1:4100";
 
 let mainWindow: BrowserWindow | null = null;

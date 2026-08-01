@@ -39,12 +39,12 @@ source object and must preserve unknown asset files.
 ## Contract verification
 
 - TypeScript fixtures are authored against the real `SceneDocument` type.
-- `packages/shared-types` emits the fixtures used by Rust tests.
+- `Shared/shared-types` emits the fixtures used by Rust tests.
 - `services/render-daemon/tests/scene_contract.rs` proves the native DTO can
   read the shared fixture.
 - Visual or semantic renderer changes require parity fixtures in addition to
   successful JSON parsing.
 
 The renderer transport has its own independent version in
-`@grapix/renderer-protocol`; changing one version does not automatically change
-the other.
+`@grapix/render-protocol` (protocol v3); changing one version does not
+automatically change the other.

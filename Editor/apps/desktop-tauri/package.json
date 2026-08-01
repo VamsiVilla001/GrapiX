@@ -2,10 +2,10 @@
   "name": "@grapix/desktop-tauri",
   "version": "0.1.0",
   "private": true,
-  "description": "GrapiX desktop shell (Tauri 2 + WebView2).",
+  "description": "GrapiX Editor desktop shell (Tauri 2 + WebView2). Runs the project service and ensures a render engine.",
   "scripts": {
-    "dev": "cargo build --manifest-path ../../../services/render-daemon/Cargo.toml --no-default-features && tauri dev",
-    "build": "cargo build --release --manifest-path ../../../services/render-daemon/Cargo.toml --no-default-features && tauri build",
+    "dev": "npm --prefix ../../.. run build -w @grapix/api-server && cargo build --manifest-path ../../../services/render-engine/Cargo.toml && tauri dev",
+    "build": "npm --prefix ../../.. run build -w @grapix/api-server && cargo build --release --manifest-path ../../../services/render-engine/Cargo.toml && tauri build",
     "check": "cargo check --manifest-path src-tauri/Cargo.toml",
     "test": "cargo test --manifest-path src-tauri/Cargo.toml",
     "tauri": "tauri"

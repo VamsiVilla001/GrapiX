@@ -15,6 +15,8 @@ import {
   getBindableFaces,
   getMaterialReadiness,
   IMPLEMENTED_BLEND_MODES,
+  IMPLEMENTED_TEXTURE_FIT_MODES,
+  resolveTextureFit,
   isMaterialCompatibleWithFace,
   normalizeMaterialSceneDocument,
   parameterDefaults,
@@ -312,7 +314,7 @@ test("implemented blend modes match the shared layout contract exactly", async (
   assert.deepEqual([...IMPLEMENTED_BLEND_MODES].sort(), ["add", "darken", "lighten", "multiply", "normal", "screen"]);
 
   // Every implemented mode declares both a color and an alpha equation, and
-  // the ids are stable and contiguous (the daemon indexes pipelines by id).
+  // the ids are stable and contiguous (the render core indexes pipelines by id).
   for (const mode of layouts.blendModes) {
     assert.ok(typeof mode.color === "string" && mode.color.length > 0, `${mode.name} missing color equation`);
     assert.ok(typeof mode.alpha === "string" && mode.alpha.length > 0, `${mode.name} missing alpha equation`);
@@ -778,4 +780,125 @@ test("preflight validates scene automation and checksummed script references", (
   }));
   assert.equal(checked.issues.some((issue) => issue.code === "SCENE_SCRIPT_HASH_MISMATCH"), false);
   assert.equal(checked.ok, true);
+});
+
+test("a cover fit crops the overflowing axis and leaves the other whole", () => {
+  // A 256x128 texture is wider than a 360x210 surface, so height fills and width is cropped.
+  const wide = resolveTextureFit("fill", {
+    surfaceWidth: 360,
+    surfaceHeight: 210,
+    textureWidth: 256,
+    textureHeight: 128
+  });
+  assert.equal(wide.repeat[1], 1, "the short axis samples the whole texture");
+  assert.ok(wide.repeat[0] < 1, "the long axis samples less than the whole texture");
+  // (360/210) / (256/128) = 0.857142...
+  assert.ok(Math.abs(wide.repeat[0] - (360 / 210) / (256 / 128)) < 1e-12);
+  assert.ok(Math.abs(wide.offset[0] - (1 - wide.repeat[0]) / 2) < 1e-12, "the crop is centred");
+  assert.equal(wide.offset[1], 0);
+
+  // A texture taller than the surface crops the other axis.
+  const tall = resolveTextureFit("fill", {
+    surfaceWidth: 400,
+    surfaceHeight: 100,
+    textureWidth: 100,
+    textureHeight: 400
+  });
+  assert.equal(tall.repeat[0], 1);
+  assert.ok(tall.repeat[1] < 1);
+  assert.ok(Math.abs(tall.offset[1] - (1 - tall.repeat[1]) / 2) < 1e-12);
+});
+
+test("a cover fit never samples outside the texture, so clamp and repeat wrap agree", () => {
+  // This is what makes cover implementable in every renderer: the sampled rectangle stays inside
+  // [0,1] on both axes, so no behaviour outside the texture is observable. The modes excluded from
+  // IMPLEMENTED_TEXTURE_FIT_MODES are excluded precisely because they break this.
+  for (const [sw, sh, tw, th] of [[360, 210, 256, 128], [100, 900, 1920, 1080], [640, 640, 1, 4096]]) {
+    const fit = resolveTextureFit("fill", {
+      surfaceWidth: sw, surfaceHeight: sh, textureWidth: tw, textureHeight: th
+    });
+    for (const axis of [0, 1]) {
+      assert.ok(fit.repeat[axis] > 0 && fit.repeat[axis] <= 1, `repeat[${axis}] within (0,1]`);
+      assert.ok(fit.offset[axis] >= 0, `offset[${axis}] not before the texture`);
+      assert.ok(
+        fit.offset[axis] + fit.repeat[axis] <= 1 + 1e-12,
+        `offset[${axis}] + repeat[${axis}] not past the texture`
+      );
+    }
+  }
+});
+
+test("a square texture on a square surface is untouched by any implemented fit", () => {
+  for (const mode of IMPLEMENTED_TEXTURE_FIT_MODES) {
+    const fit = resolveTextureFit(mode, {
+      surfaceWidth: 512, surfaceHeight: 512, textureWidth: 256, textureHeight: 256
+    });
+    assert.deepEqual(fit.repeat, [1, 1], `${mode} keeps matching aspects whole`);
+    assert.deepEqual(fit.offset, [0, 0], `${mode} does not offset matching aspects`);
+  }
+});
+
+test("stretch and unimplemented fit modes resolve to the identity transform", () => {
+  // Unimplemented modes must degrade to exactly today's behaviour rather than invent numbers; the
+  // scene validator is what tells the operator the mode is not honoured.
+  const surface = { surfaceWidth: 360, surfaceHeight: 210, textureWidth: 256, textureHeight: 128 };
+  for (const mode of ["stretch", "fit", "original", "pixel-perfect", "tile", "nine-slice"]) {
+    const fit = resolveTextureFit(mode, surface);
+    assert.deepEqual(fit.repeat, [1, 1], `${mode} repeat is identity`);
+    assert.deepEqual(fit.offset, [0, 0], `${mode} offset is identity`);
+  }
+  assert.equal(IMPLEMENTED_TEXTURE_FIT_MODES.includes("stretch"), true);
+  assert.equal(IMPLEMENTED_TEXTURE_FIT_MODES.includes("fit"), false);
+});
+
+test("a degenerate surface or texture extent cannot divide by zero", () => {
+  for (const surface of [
+    { surfaceWidth: 0, surfaceHeight: 210, textureWidth: 256, textureHeight: 128 },
+    { surfaceWidth: 360, surfaceHeight: 210, textureWidth: 0, textureHeight: 128 },
+    { surfaceWidth: 360, surfaceHeight: 0, textureWidth: 256, textureHeight: 0 },
+    { surfaceWidth: Number.NaN, surfaceHeight: 210, textureWidth: 256, textureHeight: 128 },
+    { surfaceWidth: 360, surfaceHeight: 210, textureWidth: Number.POSITIVE_INFINITY, textureHeight: 128 },
+    { surfaceWidth: -360, surfaceHeight: 210, textureWidth: 256, textureHeight: 128 }
+  ]) {
+    const fit = resolveTextureFit("fill", surface);
+    assert.deepEqual(fit.repeat, [1, 1]);
+    assert.deepEqual(fit.offset, [0, 0]);
+    assert.ok(fit.repeat.every(Number.isFinite) && fit.offset.every(Number.isFinite));
+  }
+});
+
+test("the scene validator reports every fit mode it cannot honour", () => {
+  // The UI offers eight fit modes. Only the implemented ones may pass silently: a mode that is
+  // authored, saved and then drawn as `stretch` with no warning is the exact defect this guards.
+  const build = (mode) => {
+    const material = createMaterialDefinition("Fit warning", { baseTextureAssetId: "asset_fit" });
+    material.textureSlots = [{
+      name: "baseTexture", assetId: "asset_fit", fit: mode, wrap: "clamp", filtering: "linear",
+      uvScale: [1, 1], uvOffset: [0, 0], uvRotation: 0, uvPivot: [0.5, 0.5]
+    }];
+    const object = rect("fit_rect", material.materialId);
+    return resolvePrimitiveMaterial(scene([material], [object], {
+      assets: [{
+        assetId: "asset_fit", name: "fit.png", kind: "image", source: "fit.png",
+        status: "READY", importedAt: timestamp
+      }]
+    }), object);
+  };
+
+  for (const mode of ["fit", "original", "pixel-perfect", "tile", "nine-slice"]) {
+    const resolved = build(mode);
+    assert.ok(
+      resolved.warnings.some((warning) => warning.includes(`fit mode ${mode}`)),
+      `expected ${mode} to be reported: ${resolved.warnings}`
+    );
+  }
+
+  for (const mode of IMPLEMENTED_TEXTURE_FIT_MODES) {
+    const resolved = build(mode);
+    assert.equal(
+      resolved.warnings.some((warning) => /fit mode/i.test(warning)),
+      false,
+      `${mode} must not be reported as unimplemented: ${resolved.warnings}`
+    );
+  }
 });

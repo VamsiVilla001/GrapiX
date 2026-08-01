@@ -8,7 +8,7 @@
 
 use glam::Mat4;
 
-use crate::scene::{PreparedGradient, PreparedScene};
+use crate::scene::{PreparedGradient, PreparedRect, PreparedScene};
 
 /// Shared shader source, compiled into the binary. The path reaches across
 /// the monorepo on purpose: there must be exactly one copy of this shader.
@@ -263,8 +263,23 @@ impl QuadPipeline {
     /// (matching the editor, which draws the background as scene content),
     /// then every prepared rect in render order.
     pub fn build_frame_quads(scene: &PreparedScene) -> Vec<QuadUniforms> {
+        Self::build_frame_quads_from(scene, &scene.rects)
+    }
+
+    /// Same, but from an explicit rect list rather than the scene's own.
+    ///
+    /// The render engine samples animation per frame and needs quads built from patched
+    /// geometry without cloning the whole `PreparedScene` — whose `fonts` carry the actual
+    /// font file bytes, so cloning it every frame would be far more expensive than the
+    /// render. The scene is still the source for the canvas and background.
+    ///
+    /// Order is the caller's: it must pass rects in prepared render order.
+    pub fn build_frame_quads_from(
+        scene: &PreparedScene,
+        rects: &[PreparedRect],
+    ) -> Vec<QuadUniforms> {
         let projection = scene_projection(scene.canvas_width, scene.canvas_height);
-        let mut quads = Vec::with_capacity(scene.rects.len() + 1);
+        let mut quads = Vec::with_capacity(rects.len() + 1);
 
         quads.push(quad_uniforms(
             projection,
@@ -285,7 +300,7 @@ impl QuadPipeline {
             },
         ));
 
-        for rect in &scene.rects {
+        for rect in rects {
             quads.push(quad_uniforms(
                 projection,
                 rect.x,

@@ -74,12 +74,12 @@ Important user requirements, preserved as closely as possible:
   `Shared/`.
 - The complete existing application must first be preserved as Editor without
   feature loss. Playout is then built as a professional operator-facing scene
-  library, rundown, sequencer, Preview and Program control application.
+  library, Scene Manager, Take List, Preview and Program control application.
 - Editor must provide a durable **Publish to Playout** workflow that validates,
   packages and versions every scene dependency and receives structured publish
   progress and acknowledgement.
 - Playout must continue from previously published scenes when Editor is closed
-  or disconnected and must own rundown/timecode/operator state independently.
+  or disconnected and must own take-list/timecode/operator state independently.
 
 ## Locked architecture decisions
 
@@ -127,7 +127,7 @@ GrapiX/
 ```
 
 - Editor owns authoring, project/source assets, validation and publishing.
-- Playout owns published scene versions, the scene library, rundowns, segments,
+- Playout owns published scene versions, the Scene Manager, take lists,
   page recall, operator data, timecode/automation, Preview/Program control,
   control APIs and output operations.
 - Shared owns scene, protocol, rundown, transition, package, shader, SDK and
@@ -215,32 +215,33 @@ Do not perform a repository-wide move before step 1 has a recoverable commit.
 
 ## Repository and module map
 
-### `apps/desktop-tauri`
+### `Editor/apps/desktop-tauri`
 
-Primary desktop shell and process supervisor.
+Primary Editor desktop shell.
 
 - Tauri 2 + Rust + Windows WebView2.
 - Loads the React/Vite editor.
-- Starts or reuses the Fastify API service.
-- Builds, stages, starts, or reuses the Rust render daemon.
-- Watches API health, renderer status, Program frame progress, and output
-  errors.
-- Uses bounded renderer restart attempts.
-- Remembers Program/output state and attempts restoration after restart.
-- Supports an explicit safe fallback scene state.
-- Exposes supervisor health to the editor status bar.
+- Runs the project service on 4100 (owned; stopped on window close).
+- **Ensures** `grapix-render-engine` on 4400: starts one if none is running,
+  adopts one that is, and never stops it — not even one it started. An authoring
+  window may not take a show off air.
+- Stages the engine binary as the Tauri sidecar.
+- Reports each process's reachability and ownership to the editor status bar, and
+  nothing about Program: Program state belongs to Playout and the engine.
+- Does **not** restart the renderer, restore Program or touch outputs. That is the
+  Engine Host's journal-and-verify path (M3) and Playout's authority.
 - Root `npm run dev` targets this app.
 
-### `apps/desktop-electron`
+### `Editor/apps/desktop-electron`
 
 Retained fallback shell from the earlier desktop phase.
 
-- Wraps the same web editor.
-- Can start/use the Fastify service.
+- Wraps the same web editor and can start the project service in-process.
 - Not the primary architecture after the Tauri 2 decision.
+- Holds no renderer or Program authority at all.
 - Preserve it until Tauri packaging and workflows fully replace it.
 
-### `apps/editor-web`
+### `Editor/apps/editor-web`
 
 React/Vite professional editor. Core dependencies are React 18, Zustand,
 PixiJS 8, Three.js, resizable panels, JSZip, Lucide, and Tauri APIs.
@@ -290,24 +291,25 @@ Important rendering modules:
 - `sceneMaterial.ts` — resolves material slots/instances/assets into renderable
   objects and per-face surface descriptors.
 - `slabGeometry.ts` — XPression-style generated Slab mesh.
-- `RendererClient.ts` — renderer-control client boundary, separate from editor
-  preview.
+- `engineClient.ts` — the protocol v3 engine client used by the Render Engine
+  panel and diagnostics. The only renderer client the Editor has.
 
-### Future `Editor/`, `Playout/`, and `Shared/`
+### `Editor/`, `Playout/`, and `Shared/`
 
-The existing modules above describe the current layout. Their approved future
-ownership is:
+The three-product split is in place (migration Phases 2 and 3, 2026-07-29):
 
-- `Editor/` — current desktop shells, `editor-web`, project API, authoring tests
-  and Publish to Playout.
-- `Playout/` — new operator desktop/web UI, playout control service, published
-  scene store, rundown/segment runtime, native daemon and output plugins.
-- `Shared/` — current shared-types, renderer-protocol, render-shaders,
-  grapix-sdk and future rundown/transition/package/common packages.
+- `Editor/` — desktop shells, `editor-web`, `services/project-api`, Publish to
+  Playout.
+- `Playout/` — `apps/playout-web`, `apps/desktop-tauri`, `services/playout-control`
+  (published scene store, Scene Manager and Take List runtime), `tools/dev.mjs`.
+- `Shared/` — thirteen contract packages; see `Shared/README.md`.
+- `services/` — `render-engine` (the engine, which owns Program and the output
+  adapters) and `render-daemon` (its render core library).
 
-This is Planned architecture until the safe migration phases pass.
+Output adapters deliberately live in the engine, not in Playout: the engine owns
+Program, and Playout controls outputs over protocol v3 rather than hosting them.
 
-### `packages/shared-types`
+### `Shared/shared-types`
 
 The central durable TypeScript contract.
 
@@ -333,28 +335,34 @@ Owns:
 
 Dependency rule: shared contracts must not depend on applications or services.
 
-### `packages/renderer-protocol`
+### `Shared/render-protocol`
 
-TypeScript source of truth for renderer protocol v2.
+TypeScript source of truth for engine protocol **v3**, and the only renderer
+client either application has. Protocol v2's client package was deleted on
+2026-07-29.
 
 Envelope safety includes:
 
-- protocol version
+- protocol version and message ID (duplicate suppression, so a retransmit is safe)
 - non-empty request ID
 - strictly increasing per-connection sequence
 - timestamp
-- expected renderer state
+- engine ID (routing when several engines are connected)
+- project ID (permission scoping)
+- `requiresAck`, stated rather than inferred
 - explicit nullable scene ID/revision/channel context
 - acknowledgement/error/capability/status/event envelopes
-- stale-sequence, revision, and state-precondition rejection
+- stale-sequence, revision and state-precondition rejection
 
-Command families include capability, heartbeat, scene load/update/warm/patch/
-release, Preview selection, cut Take, output configure/start/stop, resource
-profile, and status.
+Message groups: connection lifecycle, capabilities, scene load/full-sync/patch/
+release, preview, asset, diagnostics, output configuration and the full playout
+verb set. `EngineConnection` injects everything time-dependent, so reconnect
+backoff, heartbeat timeout, retry and resync are tested without real timers.
 
-Rust protocol parsing must change in the same commit when this package changes.
+Rust protocol parsing in `services/render-engine` must change in the same commit
+when this package changes.
 
-### `packages/render-shaders`
+### `Shared/render-shaders`
 
 Shared WGSL and machine-readable renderer contracts.
 
@@ -366,7 +374,7 @@ Shared WGSL and machine-readable renderer contracts.
 - Canonical physical mesh shader.
 - TypeScript/Rust byte-layout tests protect drift.
 
-### `packages/grapix-sdk` (`@grapix/sdk`)
+### `Shared/grapix-sdk` (`@grapix/sdk`)
 
 JavaScript authoring SDK for scene logic.
 
@@ -390,7 +398,7 @@ Security boundary:
   worker with CPU/wall-time/memory limits and typed-action-only output passes
   escape and flood testing.
 
-### `services/api-server`
+### `Editor/services/project-api`
 
 Fastify project service on local port 4100.
 
@@ -405,7 +413,9 @@ Responsibilities:
 - Scene-script import and static restrictions.
 - PSD/AI/SVG/Figma design import pipeline.
 - Media/model/After Effects compatibility import reports.
-- Renderer-daemon bridge.
+- Automation **evaluation** only: it returns the action plan a trigger would
+  produce and never executes it. The renderer-daemon bridge was deleted on
+  2026-07-29; it let the Editor Take and configure outputs.
 - Operator audit logging and read-only show mode.
 
 Storage safety:
@@ -417,15 +427,18 @@ Storage safety:
 - input magic/type/size validation
 - remote binding authentication and Origin checks
 
-### `services/render-daemon`
+### `services/render-daemon` — the render core (`grapix-render-core`)
 
-Standalone native Rust 1.87+ service using Tokio, wgpu 26, glam, glTF, image,
-serde, and an optional NDI adapter.
+Native Rust 1.87+ crate using Tokio, wgpu 26, glam, glTF, image, serde and an
+optional NDI adapter. Consumed by `services/render-engine` as its render core.
+Its own protocol v2 binary on 4200 is retired: nothing launches, packages or
+falls back to it, and it exists only so the crate's integration tests can drive
+the core end to end.
 
 Main module ownership:
 
 - `config.rs` — environment and runtime configuration.
-- `protocol.rs` — Rust protocol v2 envelopes and validation.
+- `protocol.rs` — Rust protocol v2 envelopes and validation (retired binary only).
 - `controller.rs` — command handling, renderer/output state.
 - `scene/document.rs` — Rust SceneDocument consumption.
 - `scene/lifecycle.rs` — registry and residency state.
@@ -441,7 +454,8 @@ Main module ownership:
 - `output/null.rs` — development/CI output.
 - `output/recording.rs` — deterministic raw BGRA recording.
 - `output/ndi.rs` — NDI adapter behind Cargo feature.
-- `transport/websocket.rs` — authenticated local WebSocket transport.
+- `transport/websocket.rs` — authenticated local WebSocket transport (retired
+  binary only; the engine has its own protocol v3 server).
 
 Broadcast loop:
 
@@ -1000,8 +1014,8 @@ cache or tokens.
 **Implemented path (2026-07-29):** `File > Publish to Playout` posts the
 `SceneDocument`, a viewport thumbnail, and the project colour space to
 `POST /api/playout/scenes`. Playout stores it as a new immutable version, the scene
-manager shows it with its thumbnail, and cards drag into a rundown. Certified by
-`npm run certify:publish-rundown` (21 checks). The `.gfxpkg` route below remains the
+manager shows it with its thumbnail and Take ID. Certified by
+`npm run certify:publish-takelist` (21 checks). The `.gfxpkg` route below remains the
 design for the packaged, checksum-revalidated transfer and is still what
 `File > Export Package…` produces; the direct publish is the live path.
 
@@ -1012,7 +1026,7 @@ Editor publication to Playout is distinct from saving an authoring project:
   promotes the published version into its scene library.
 - Scene identity and revision are preserved across updates.
 - Playout reports progress, warnings, failures and final acknowledgement.
-- Playout retains previously published versions needed by rundowns or Program.
+- Playout retains previously published versions needed by take lists or Program.
 - Local and remote endpoints require explicit configuration; remote operation
   adds authentication, TLS, replay protection and audit.
 
@@ -1074,6 +1088,501 @@ The required completion order remains:
 10. hardware certification
 
 ## Work chronology
+
+### 2026-08-01 — release build, and the sidecar staging that had silently stopped
+
+Packaged both desktop apps from the working tree. Repo typecheck clean, full `npm test` green,
+boundaries pass, root build clean.
+
+**The first pair of installers shipped a stale render engine and the build reported success.**
+Hashing the staged sidecars after packaging found `binaries/grapix-render-engine-*.exe` in *both*
+apps at `1B6AE044…` (mtime 07-30 09:04:24) while `services/render-engine/target/release/` held
+`F7C47AD1…` (07-30 13:54:39) — the engine built *after* the 30 July afternoon Rust work on
+`text.rs`, `document.rs` and `scene/mod.rs`. The build script's own recorded stamp showed it had
+last run at 07-30 13:59:49 and had not run since, through two subsequent release builds including
+the first one today: the crate recompiled, the script did not, and the old copy was bundled.
+
+`cargo clean -p app --release` / `-p playout-app --release` forced the scripts to run, after which
+all three copies hash `F7C47AD1…`. Note `fs::copy` on Windows preserves the *source* mtime, so a
+staged sidecar's timestamp is the engine's build time, not the staging time — which is what makes
+the mismatch legible at all.
+
+I did not establish why the `rerun-if-changed` trigger failed to fire; the engine's mtime
+(13:54:39) is older than the script's last run (13:59:49), so cargo was arguably right to skip it,
+and the copy made at 13:59:49 nonetheless carried a 09:04 binary. The mechanism is not understood,
+so it is not to be trusted — hence rule 88.
+
+**Artifacts** (2026-08-01 00:22 / 00:24): `GrapiX_0.1.0_x64-setup.exe` (7.2 MB),
+`GrapiX_0.1.0_x64_en-US.msi` (10.2 MB), `GrapiX Playout_0.2.0_x64-setup.exe` (6.8 MB),
+`GrapiX Playout_0.2.0_x64_en-US.msi` (9.8 MB). The Editor `app.exe` embeds
+`index-HJ1EZY-H.js`/`index-BX7kMiO4.css`, the content-hashed names of the bundle that greps
+positive for this session's UI — the assets themselves are compressed inside the binary, so the
+asset name is the evidence, not the string. Playout carries none of the editor-web work; it was
+rebuilt so both installers come from one tree.
+
+### 2026-08-01 — the pen drew nothing, and the pen has options now
+
+**The pen's fill was in the scene and was never the field anyone drew from.** `createPenShape`
+asked for a `#7c5cff` fill and a white stroke, but passed only the legacy `fill`/`stroke` strings.
+`createShapeObject` spreads `createBaseObject`, which sets the *unassigned* `fillStyle`
+(`#00000000`) and `strokeStyle` (`#8fa6b6`), and the renderers read the rich style first
+(`pixiColorValue(fillStyle, fill)`). So every pen path was filled with fully transparent black and
+outlined in grey while its saved `fill` said purple. Confirmed on a live pen shape before
+touching anything: `fill: "#7c5cff"` beside `fillStyle: {solid, "#00000000"}`.
+
+`store/objectColorStyles.ts` fixes the class rather than the instance: `withColorStyles` derives
+the rich style from a colour a factory names, an explicitly passed style always wins, and
+`transparent` becomes `{type: "none"}` rather than a transparent paint. `createShapeObject` runs
+both its own defaults and the caller's patch through it — its declared `#f7fbff` stroke had the
+same silent disagreement, invisible only because library shapes are born with the stroke off.
+This is the same defect the `normalizedObjectFillStyle` text special-case patches for *old saved
+scenes*; that stays as the migration path, but new objects no longer create it.
+
+**Fill and Stroke are pen tool options.** `penOptions` in the ui store, both on by default,
+surfaced as two checkboxes in the tool options bar with swatches that dim when their half is off.
+They set what the next path is painted with *and* apply to the path in hand, so toggling mid-draw
+is visible immediately. Both off draws nothing, so the bar says so rather than letting the
+operator conclude the tool is broken again.
+
+**Verification.** editor-web 73/0 (+4), typecheck clean, boundaries pass. In the app: a pen shape
+created after the fix carries `fillStyle: #7c5cff` and `strokeStyle: #ffffff` against the
+pre-fix shape's `#00000000`/`#8fa6b6` in the same scene; both checkboxes flip the in-progress
+shape's `fillEnabled`/`strokeEnabled` and the both-off warning appears. **Not visually confirmed:**
+the Browser pane was not displayed this session, so screenshots and coordinate clicks were
+unavailable and no multi-vertex path could be drawn by hand — the evidence is the scene data plus
+the renderer's own `pixiColorValue(fillStyle, fill)` call, not a picture of a filled path.
+
+### 2026-07-31 — per-type Object Inspector properties and per-template dimension conversion
+
+Two asks: the tools were not showing their full properties in the Object Inspector, and a
+template's canvas needed converting to custom sizes.
+
+**Six object types had no type section at all.** The Inspector covered the shared transform,
+colour and mask properties plus type sections for text, mesh, light and camera. An image had no
+`objectFit`, a line had no `points`, a shape had no fill rule or path readout, a paint layer had
+no strokes, a marker had no `markerKind`/`eventName`, and a group had no child list — every one of
+them a property the object carries, saves and publishes with no way to see it. They are now in
+`components/ObjectTypeProperties.tsx`, one section per type.
+
+**Where a property is not drawn, the control says so instead of accepting the value.** Checked
+each against both renderers before exposing it. `objectFit`, line `points`, shape toggles, paint
+stroke size/opacity/flow/colour, group children and marker fields are consumed, so they are
+editable. `fillRule`, `paintBlendMode`, mesh clip playback, `textIndent` and `overflow` are
+consumed by nothing, so they render disabled beside a note naming what is missing. Text
+decoration is the one preview-only control left enabled, with the note saying the engine's text
+renderer does not draw it — image, line, shape and paint are already Editor-only object types the
+engine reports as unsupported, so their sections carry that warning rather than implying parity.
+
+**Two copies of one rule had drifted.** `isPropertySupported` existed in both `Inspector.tsx` and
+`PropertiesSidebar.tsx`: the first offered `rotationX`/`rotationY`/`rotationZ` on layers and
+groups, the second on meshes only. Both were wrong against
+`resolveSceneObjectHierarchy`, which inherits `scaleZ` but never X/Y rotation and reads
+`rotationZ` from meshes alone — so a layer's bound `rotationX` moved nothing. One definition in
+`store/objectPropertySupport.ts`, pinned by tests. The field primitives were duplicated the same
+way (one `SelectField` could relabel options, the other could not) and are now
+`components/inspectorFields.tsx`.
+
+**The Object Inspector's Text tab was unreachable.** Found while verifying in the app: the text
+descriptor listed `Text` as both the type tab and an optional tab, so the strip rendered two tabs
+named `Text`. React logged duplicate keys and clicking either selected the same tab. The type tab
+already carries the full text editor, so the repeat is removed and `objectInspectorTabsFor`
+de-duplicates by name — a repeated name is not cosmetic, it is a tab that cannot be selected.
+
+**"Convert Dimensions…" is implemented.** It had been in the Templates context menu since the
+panel was built, raising an alert about a future tooling pass. `lib/convertSceneDimensions.ts`
+converts one scene's canvas with three explicit content modes — `fit` (uniform, centred),
+`stretch` (per-axis) and `canvas-only` — because converting is an authoring decision, unlike
+`conformScene`, which repairs a canvas and must never move an operator's graphics. Only scene
+pixels scale: rotation, opacity and the unitless scale factors are left alone, and keyframe
+*frames* never move, only the pixel values on the X, Y and depth channels. The open template
+converts through a new `convertCanvasDimensions` store action so it is one undo step; a closed one
+is written straight to the catalogue. Project Settings still lists the result as needing
+conforming when it leaves the project resolution, and the dialog says so before converting.
+
+**Verification.** editor-web 69/0 (was 64, +5 new suites), typecheck 0 errors, `check:boundaries`
+passes. Driven in the running app: line/marker/group/text sections render and edit, group child
+assignment moves the count 0 → 1, HD 1080 → HD 720 on the open template scaled every object by 2/3
+and undid in one step, and 1920×1080 → 1080×1920 `fit` on a *closed* template produced the
+predicted 0.5625 scale with a 656.25 px centring offset while leaving the open template untouched.
+
+**Not done:** underline and strikethrough in the native text renderer, so decorated captions still
+differ between Preview and Program. Even-odd fill, paint blend and hardness/spacing/roundness, and
+glTF clip playback remain unimplemented in both renderers and are disabled rather than lying.
+
+### 2026-07-30 — texture orientation, texture resolution, and two stale certifications
+
+Seven asks in one message about the Editor after the Scene Manager work. Five landed cleanly;
+the two rendering ones needed the Rust side too, and chasing them turned up three unrelated
+defects worth more than the asks.
+
+**The flip was a parent reflection, not a UV bug.** `ThreeSceneLayer` carried
+`content.scale.y = -1` to convert GrapiX's y-down canvas into three.js's y-up world. It places
+objects correctly and quietly breaks every textured surface: reflecting a parent mirrors its
+children's geometry, so UVs flip *and* triangle winding inverts, and under back-face culling you
+see the back face. Together that reads as a texture flipped on both axes - the reported symptom,
+and why it looked like a 180-degree rotation rather than one flip. Guessing a compensating
+`flipY` would have masked it. The fix is what `docs/3d-engine-architecture.md` already
+specified: negate Y in the *positions* (`canvasToWorldY`), leave geometry handedness alone.
+Negating an axis reverses rotations about the other two, so `rotationX`/`rotationZ` are negated
+and `rotationY` is not - free under a reflection, explicit without one, and invisible until
+something is rotated, so it has a test. `projectMeshBounds` composes the identical transform
+because selection handles come from it. `projectPoint` used to apply its own `-point.y` "to match
+the content root"; with callers converting, that made two owners of one convention, so it now
+takes world space. Proved by counterfactual: restoring the mirror made the quad *vanish*
+(inverted winding, culled), removing it rendered the probe's TL-red/TR-green/BL-blue/BR-white
+exactly as authored.
+
+**"Texture resolutions are ignored" was literally true.** `TextureFitMode` has eight modes, the
+inspector offered all eight, `getMaterialReadiness` warned about only `tile`/`nine-slice` - and
+the renderers consumed `slot.fit` *nowhere*. Switching `fill` to `original` produced a
+byte-identical render (41.18 KB both), so all six "supported" modes were `stretch`. Now
+`resolveTextureFit` (shared-types) and `resolve_texture_fit` (mesh_prepare.rs) are one definition
+in two languages pinned to the same numbers by tests on both sides, because Preview and Program
+sampling different rectangles of one texture is a parity break. Implemented: `stretch`, `fill`,
+`crop` (centred cover crop). Refused *and disabled in the UI*: `fit`, `original`,
+`pixel-perfect`, `tile`, `nine-slice`. The dividing line is not effort - a cover crop only ever
+samples inside [0,1], so clamp and repeat cannot disagree and every renderer can honour it with
+the sampler transform it already has; the excluded modes draw the texture *smaller* than the
+surface and need a transparent border the material pipeline cannot express. Shipping four of them
+as "stretch with a nicer name" is what created this bug. Measured in-app with a circle probe:
+`stretch` 76x88 (aspect 0.864, predicted 0.857), `fill` 88x88 (aspect 1.000), area ratio 1.1674
+against 1.1667 predicted. Fit applies to planar surfaces and a mesh's `main` face; bevel and
+extrusion faces pass no surface rather than a plausible wrong crop.
+
+**A green certification I had not actually run.** `hub`'s port readiness is satisfied by *any*
+listener on the port. Port 4400 was still held by the packaged Editor's sidecar from 05:46, so
+`engine5` reported "ready" without ever binding, and every certification I ran hit a binary
+predating my changes. Confirmed with `Get-NetTCPConnection -LocalPort 4400` and the owning
+process's `Path`. **Check who owns the port before trusting a suite that talks to it** - a
+readiness probe proves something is listening, never that it is yours. Killing the stale sidecar
+and rebinding turned one of my "fixes" from unverified into genuinely verified.
+
+**Two harnesses were asserting on arbitrary order.** Both surfaced only once a fresh engine held
+the port. `certify:engine` read `scenes[0].revision` - the engine reports every loaded scene and
+their order is not in the protocol, so it was reading a different scene's revision (382, expected
+2); it now looks the scene up by id. `status_payload` summed `total_tiles` across every loaded
+scene while reporting one stage's `gridColumns`/`gridRows`, so a 25x5 stage reported 126 tiles
+(125 + another scene's single tile). `totalTiles` is now that grid's own count; the occupancy
+numbers beside it stay cross-scene because that is what they describe. `certify:parity` crashed
+outright: it relies on `preview.request` without a `sceneId`, and the engine deliberately stopped
+falling back to an arbitrary scene in HashMap order ("a refusal is actionable; a confident wrong
+picture on a confidence monitor is not"). The harness loads two scenes and compares them, so it
+now names which one it is measuring.
+
+**Verification.** boundaries pass; typecheck 0 errors; JS 0 failing suites; render-core 66 Rust
+tests; `certify:engine` **52/0** (was 50/2), `certify:parity` **8/0** +1 documented browser skip
+(was crashing), `publish-takelist` 27/0, `ipc` 11/0, `playout-engine` 33/0, `monitors` 21/0,
+`take-animation` 9/0, `materials` 76/0. Both desktop apps rebuilt; all five staged
+`grapix-render-engine.exe` copies identical at 07:17:43, so the packaged apps carry the fit
+change - the `rerun-if-changed` fix from the previous session holding up.
+
+**Not done, and not pretended otherwise:** `fit`, `original` and `pixel-perfect` need a
+transparent-border capability in both renderers before they can be honest; they are disabled
+rather than lying. The browser-vs-native parity leg remains a documented manual step.
+
+### 2026-07-29 — the retired v2 daemon binary is gone
+
+Asked whether port 4300 belonged to the new engine or the old rust daemon, and to free it if
+it was the old one. It is neither: **4300 is `playout-control`**, the Playout control API, and
+removing it would take Playout off the air. The port map:
+
+| Port | Owner |
+| --- | --- |
+| 4100 | `project-api` (Editor) |
+| 4200 | the retired protocol-v2 daemon — **was free, now unbindable** |
+| 4300 | `playout-control` — current, required |
+| 4400 | `grapix-render-engine` — the only renderer |
+
+But the question was worth asking, because the daemon leftovers were real. `services/render-daemon`
+still built a `grapix-render-daemon` **binary** from `main.rs` that bound 4200 and drove its own
+outputs. Its README claimed the binary was kept "only so the crate's own integration tests can
+drive the render core end to end without the engine". **That was false** — `tests/` imports only
+`scene` and `renderer`, never `transport` or `controller`. Nothing launched it either: no package
+script (`dev:daemon` was already gone), no desktop shell, no service.
+
+Deleted, about 3,250 lines: `main.rs`, `transport/`, `controller.rs`, `protocol.rs` (v2),
+`resource.rs`, `asset_cache.rs`, `media.rs`, and `DaemonConfig`/auth-token handling from
+`config.rs` — which is where the `4200` default lived. Kept what the engine actually imports:
+`scene`, `renderer`, `output`, and the output-format half of `config`. Verified by reference
+analysis first: the engine uses only `grapix_render_core::{scene, renderer, output}`.
+
+Dependency fallout, pruned: `futures-util`, `tokio-tungstenite`, `tracing-subscriber` and
+`getrandom` were used only by the deleted code. `tokio` dropped from
+`rt-multi-thread, macros, net, sync, time, signal` to just `sync, time`, with `macros` and
+`rt-multi-thread` moved to `[dev-dependencies]` for `#[tokio::test]` in `gpu_smoke.rs` — so the
+engine no longer compiles a multi-thread runtime it does not use.
+
+Also renamed the package `grapix-render-daemon` → `grapix-render-core`, which let the engine drop
+its `{ package = ... }` alias. The directory stays `services/render-daemon` so git history stays
+attached to the surviving files.
+
+Why it mattered beyond tidiness: a second renderer able to bind a port and transmit is exactly
+what invariants 1 and 7 forbid. Leaving it also cost me real time this session — it is the kind
+of stale artifact that makes "which renderer am I looking at?" a question at all.
+
+Verification: render-core 6 suites / 0 failures, engine 11 suites / 0 failures,
+`--no-default-features` 6/6, `certify:render-core` 3/3, boundaries clean, typecheck 0, 15 JS
+suites clean, and `publish-takelist` 26/26 + `take-animation` 9/9 + `monitors` 21/21 against the
+rebuilt engine. The `ndi` feature still fails to *build* here only because `grafton-ndi` needs
+the NDI SDK, which is pre-existing and documented.
+
+### 2026-07-29 — the animation did not play on take
+
+Reported symptom: "the animation is of 20 frames, that means it is animating from A to B, but
+Preview and Program show only B." Two independent causes, and each one alone hid the other.
+
+**1. Nothing advanced the playhead.** `program.rs` kept a private `frame` counter and passed
+it to `render_program_frame`, which never wrote it back to the scene. `render_stream_frame`
+renders `scene.frame`, and only `handle_cue` (→ 0 or `startFrame`) and `handle_stop` (→ 0) ever
+set it. So every monitor was frozen on one frame forever. Measured: five monitor frames over
+five seconds, byte-identical.
+
+The renderer was never the problem. `preview.request` with explicit frames 0/5/10/15/20/30
+produced five distinct pictures (20 and 30 identical, correctly holding at the last key) while
+the implicit frame stayed at 0. `certify:animation` had always passed because it asks for
+explicit frame numbers — it proved the renderer and said nothing about the playhead.
+
+Fixes: `Engine::advance_program_playhead(elapsed)`, called from the clock; the clock now ticks
+whenever `has_program_scene()` even with no running output, because an operator confirms a
+graphic before any SDI/NDI output exists; `handle_take_online` rewinds to 0 so an "in"
+animation replays on every take; `handle_cue` refuses to rewind a scene already on Program,
+because Preview and Program can name the same `LoadedScene` and share one playhead — a cue
+would otherwise yank live air back to the start. `engine.getStatus` now reports each scene's
+`frame`, which is how the GPU-free protocol tests observe it.
+
+Advance is by **elapsed** frames, not an absolute number, so each scene is timed from its own
+take and a dropped frame moves the animation on by the time that really passed rather than
+playing it in slow motion. Measured at 49.9 fps against a configured 50/1.
+
+**2. The monitor started too late to see it.** `preview.streamStart` refuses while a channel
+is empty, so a monitor opened before anything was cued sat on the hub's 2 s retry. A 20-frame
+animation at 50 fps is over in 0.4 s, so the operator reliably saw only the finished graphic —
+which is exactly "shows only B". The hub now acts on the engine's `event.channelChanged`, which
+is emitted at +0 ms on take. First frame went from +911 ms to +52 ms.
+
+Also reduced the clock's idle poll from 250 ms to 40 ms: that interval *is* the delay between a
+take and the playhead starting, and 250 ms of a 400 ms animation is most of the motion. It only
+applies with no running output; real air keeps the loop hot. And the playhead advance moved off
+`spawn_blocking` onto a short async lock — it is a counter increment, and sending it through the
+thread pool 50 times a second on an idle machine bought nothing.
+
+**Proof:** `certify:take-animation` holds a monitor open across a take and counts distinct
+pictures in the window the animation occupies: 7 distinct in the first 400 ms, then one for the
+hold. It warms the render path first, deliberately — the first preview frame of a scene costs a
+~500 ms preparation, and gating on that would measure a one-off startup cost instead of the
+behaviour under test. A frozen playhead fails the warm case just as loudly.
+
+**Time lost to my own tooling, and a diagnosis I had to retract.** Two traps, one real and one
+of my own making.
+
+*Real:* a failed `restart` left the **old** build serving 4300, so a fix looked inert while I
+hunted it in source. `GET /api/playout/health` now reports `pid` and `buildAtMs` — the mtime of
+the bundle the process actually loaded — so comparing it with `dist/index.js` answers "is this
+my build?" in one command. Measured drift 0 ms after a clean relaunch.
+
+*Retracted:* I concluded a second `playout-control` was fighting the first for the engine
+connection, citing two live processes and a `socket closed (code 1006)` loop. **That evidence
+was contaminated.** `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like
+'*playout-control*' }` matches the PowerShell running the query, because the filter string is
+in its own command line. One of my "two processes" was the query. Re-measured with a filter on
+`Name -eq 'node.exe'` and excluding `$PID`: exactly one service, holding 4300, `lastError:
+null`, engine clients flat at 4 over 20s with no churn. The 1006 loop was a transient from an
+engine restart mid-flight plus a `nohup` instance that died on `EADDRINUSE`; I cannot attribute
+it to duplicate services and should not have.
+
+The fix stands on its own merits regardless: a duplicate launch *is* harmful, because
+`EngineSupervisor` connects from its constructor while Fastify binds last, so the duplicate is a
+phantom engine client for its whole startup and then dies on a raw `EADDRINUSE` stack.
+`preflight.ts` probes the port **before** the supervisor exists and refuses with the cause and
+the remedy (`GRAPIX_PLAYOUT_PORT`). Proven: exit 1 in 0.3s with the engine's client count
+unchanged, so it never connects. `listen` also handles the race and releases the engine first.
+
+`project-api` does not share the hazard: the Editor's engine connection lives in the browser, so
+a duplicate there merely fails to bind with nothing to fight over.
+
+### 2026-07-29 — frame transport: the operator monitors show a picture
+
+**The Preview and Program panels had never shown a rendered frame.** They drew a *slate* —
+a clapperboard card built from scene metadata. The engine could always stream
+(`preview.streamStart` renders JPEGs on its own cadence, certified since the engine went
+standalone); the Editor viewport consumed it and nothing else did. The missing piece was a
+consumer, not a renderer. The engine README's refusal table claiming
+`preview.streamStart`/`streamStop`/`setViewport` were `CAPABILITY_UNSUPPORTED` was stale by
+several sessions and sent me looking for work that was already done.
+
+`MonitorHub` in `playout-control` owns one engine stream per channel and republishes it as
+`multipart/x-mixed-replace` MJPEG at `GET /api/playout/monitor/{preview,program}`, with
+`GET /api/playout/monitors` reporting viewers, cadence and last frame. MJPEG rather than a
+WebSocket or base64 over the event bus: an `<img>` consumes it directly, so the browser
+decodes off the main thread and two monitors open for a whole show cost no per-frame
+JavaScript — and it needed no new dependency.
+
+**Refcounted per channel.** First viewer starts the engine stream, last one stops it, so an
+unattended station renders nothing. Proven live: three viewers → one engine stream,
+surviving two of them leaving, released on the last. The engine allows four concurrent
+streams, so a stream per page load would have exhausted it in four reloads.
+
+**Frames are decoded once** and the same `Buffer` is written to every viewer; the HTTP write
+drops on `writableNeedDrain` rather than queueing, because a monitor behind on the socket
+must show the next frame late, not a growing backlog of the past.
+
+**Two bugs found by building this:**
+
+1. `PlayoutEngineController.connect()` builds a **new** `EngineConnection` every reconnect
+   (`autoReconnect: false` — the supervisor owns retries), so a listener attached with
+   `connection.on` silently stopped firing the first time the engine restarted. Event
+   subscription now lives on the controller and outlives any socket. Same lesson as the SSE
+   refcount fix: consumers must not have to know about connection churn.
+2. My first UI gate keyed the picture on `slate !== null`, i.e. on Playout's in-memory
+   `programRef`. That record is empty after a control-service restart while the engine keeps
+   rendering — so the panel would have said "No scene assigned" over a live Program. Now
+   gated on the engine connection alone, with the picture layered *over* the slate so a gap
+   reveals the slate rather than a blank box.
+
+**Retry belongs in the hub, not the browser.** The MJPEG connection never needs reopening:
+the hub can start the engine stream later and frames flow into the already-open response.
+So a panel opened before anything is cued starts painting the moment a scene is taken — no
+reconnect, no reload — and one refusal per interval instead of one per client.
+
+**`certify:monitors` measures deltas, not absolutes.** A running GrapiX Playout window is
+itself a viewer holding both monitors open, and the harness first reported eight failures
+for that reason. It now baselines viewer counts and stream ids, and puts a scene on air
+itself if Program is empty rather than depending on `certify:publish-takelist` having run.
+16/16 with the operator app open.
+
+**My monitors broke `certify:engine`** — it asserted `previewStreams[0].streamId ===
+"stream_e2e"`, true only while nothing else streamed. It now finds its stream by id. A
+latent assumption, not a new fault, but worth the note: these harnesses share one engine.
+
+**Then: alpha, and the research that killed the plan.** The ask was to move MJPEG to ffmpeg
+with an alpha channel. I started it — engine PNG streaming, VP9 `yuva420p` over WebM to a
+`<video>` — then checked how broadcast graphics software actually does this before paying for
+it. It does not do this at all:
+
+- **SDI carries no alpha.** Transparency is split into a dedicated physical **key** signal.
+- **The key is monitored as a greyscale image**: white opaque, black transparent, grey for
+  feathered shadows and anti-aliased text. Ross calls it "Show Alpha"; the switcher routes
+  the key to a preview monitor as greyscale.
+- **CasparCG and Viz Engine both do the same**: fill on one SDI output, key on the adjacent
+  one, recombined by a downstream keyer (DSK) with shaped/straight keying.
+
+Checkerboard transparency is a *design-tool* convention (Photoshop, After Effects), not a
+broadcast one. So the correct feature was **fill/key views**, not an alpha codec — and a key
+is greyscale, which JPEG already carries. I reverted the PNG streaming, kept MJPEG, and
+added `PreviewView { Fill, Key }` as a render mode in `preview.rs`: one branch in the
+existing BGRA→RGB loop writing `[a, a, a]`, so zero extra allocation. Correct for shaped and
+straight fill alike, because premultiplication scales the colour and never the alpha.
+
+ffmpeg turned out to be the right tool for *measuring* the result and unnecessary in the
+product. Measured on `Test-scene-1`: key background `[0,0,0]` (transparent canvas), key rect
+`[75,75,75]` = **29%** against an authored opacity of **0.3** — JPEG quantisation only. The
+same rect in the fill is `[180,180,180]`, indistinguishable from opaque. The key is the only
+place that 30% is visible, which is exactly the operator value.
+
+**Two more real bugs, both found by tooling rather than reasoning:**
+
+1. `reply.raw.writeHead()` **buffers the header until the first body write**, so a monitor
+   opened on an empty channel left the client waiting on headers for a frame that might never
+   come. The certification harness hung for 300 s on undici's headers timeout; curl had been
+   hiding it because frames arrived in ~70 ms. Fixed with an explicit `flushHeaders()`.
+2. **Chromium does not close an MJPEG connection when its `<img>` is detached.** Keying the
+   element on the view remounted it per switch and stranded the old stream server-side —
+   measured as `program/fill` stuck at 2 while `program/key` was 1. One reused `<img>` with a
+   changing `src` aborts the previous load. Verified: switching drops fill 1→0, and six more
+   switches change nothing.
+
+Certified 21/21 (`certify:monitors`), 39 control-service tests, 5 new Rust preview tests, and
+driven in a real browser: PREVIEW on FILL beside PROGRAM on KEY, both painting.
+
+
+### 2026-07-29 — animation runtime, live Editor link, XPression operator model
+
+**Program was rendering a still image.** The engine had no animation runtime at all:
+`render_program_frame(frame)` passed the frame number only as `video.frame_index`, and the
+prepared scene was cached on `(sceneId, revision, bounds)`. Program ran at the right rate with
+zero dropped frames and never moved. The Editor viewport animated (it calls
+`evaluateSceneAtFrame`); the engine did not.
+
+Fixed with `services/render-engine/src/animation.rs`, mirroring the TypeScript evaluator
+exactly: per-property channels and legacy keyframes, channels winning; independent per-property
+sampling; hold rather than extrapolate outside the keyed range; easing from the *outgoing* key;
+bezier tangents overriding named easing. Applied by patching the animatable numeric fields of
+already-prepared objects, **not** by re-preparing — full preparation costs 482 ms against a
+20 ms budget. Needed two additive render-core functions (`build_frame_quads_from`,
+`composite_texts`) because cloning `PreparedScene` per frame would copy font file bytes.
+15 unit tests, plus `npm run certify:animation` which compares real rendered pixels at several
+frames.
+
+**`preview.request` ignored an explicit `sceneId`** and fell back to `self.scenes.keys().next()`
+— an arbitrary scene in HashMap order. Preview could show a scene the operator never selected,
+and which one depended on hash ordering. Caught by the animation proof, whose "still" scene
+rendered the moving scene's frames. It now honours `sceneId` and refuses when nothing is cued.
+
+**The Editor→Playout link is live.** The library was fetched on mount and then only on an
+explicit refresh press, so a published scene sat invisible. `PlayoutEventBus` +
+`GET /api/playout/events` (SSE) pushes `library.changed`; the UI refetches. Polling stays as
+the floor. Also fixed a leak I introduced: an unmemoised `refreshEngine` in the effect's
+dependency array reopened the stream every render.
+
+**The rundown is gone, replaced by XPression's model** — Scene Manager keyed by Take ID plus an
+optional ordered Take List. The full table of what moved is in
+`docs/editor-playout-workspace.md`, Phase 4b. Take Out and Continue were dead buttons and are
+now implemented.
+
+**Scene data cleaned:** 100 scenes to 1. 93 generated "Lower Third Starter", plus fixtures,
+empty placeholders, orphan `.gfxpkg`, stale backups and the whole published library. Archive at
+`data/backups/pre-cleanup-scenes-*.tar.gz`.
+
+### 2026-07-29 — repository restructure and protocol v2 retirement
+
+Structure and cleanup only; no feature redesign. The full rationale for each removal
+is in `docs/editor-playout-workspace.md`, Phase 4a.
+
+**Protocol v2 retired from both applications.** `Shared/renderer-protocol` deleted
+outright. Editor lost a dead `RendererClient.ts`, the `renderDaemon.ts` bridge and
+every `/api/render-daemon/*` route — which included `take`, `output.configure`,
+`output.start` and `output.stop`, so the Editor's own HTTP surface was violating
+invariant 4, not just its UI. Editor automation now evaluates and returns a plan;
+it never executes. Playout lost `NativeRendererClient` and the runtime fallback,
+and `activeRenderer` left `PlayoutRuntimeStatus` because there is one renderer.
+
+**Editor desktop shell rewritten** (`supervisor.rs`, ~600 → ~430 lines). It was a
+Program supervisor: it staged the v2 daemon as a Tauri sidecar, watched frame
+counters, restarted the renderer, re-took the Program scene and restarted outputs,
+and killed the daemon on window close. Every one of those breaks invariants 3, 4
+or 5. It now runs the project service (owned) and *ensures* the engine (never
+owned, never stopped). Both shells now leave the engine running even when they
+started it — asserted by a unit test in each.
+
+**Boundary guard strengthened.** `check:boundaries` previously inspected only the
+three domain-root manifests and two hardcoded package names; it would not have
+seen `Editor/apps/editor-web` depending on `@grapix/playout-control`. It now walks
+every manifest in each domain, derives the forbidden set from what each domain
+actually owns, and fails on any dependency or import of a retired package. Both
+halves were verified by deliberately introducing a violation.
+
+**Command surface rebuilt.** Root `package.json` went from 28 scripts with stale
+aliases and hand-maintained package lists to a flat delegating surface:
+`dev/build/typecheck/test` per domain, `test:engine`, `test:core`,
+`check:boundaries`, and seven `certify:*` harnesses. Deleted `certify:e2e` and
+`certify:soak` with their scripts — both drove the v2 path, and `run-local-e2e.mjs`
+still pointed at the pre-migration `services/api-server/dist`, so it had been
+broken since Phase 2 without anyone noticing.
+
+**Docs consolidated.** `docs/README.md` states the authority order. Three
+superseded documents deleted. `rendering-engine.md` retitled to what it is — the
+Editor's *current, temporary* browser viewport — and its roadmap items that belong
+to the engine were removed rather than duplicated. The 35-point ledger is marked
+historical with a refreshed, measured evidence table.
+
+**Disk reclaimed: ~8.4 GB.** Two stale agent worktrees (7.4 GB; branches kept),
+`.codex-run/` (26 MB of logs, one 24.9 MB), a root `target/` holding two scratch
+build dirs (983 MB), `data/.codex-test-trash/`, a Chrome smoke profile and stray
+logs. `.gitignore` rewritten with the classes that produced them.
+
+**Verification:** 826 automated tests pass (439 Shared, 68 Editor, 9 Playout, 97
+render core, 217 engine — Playout gained 4 supervisor tests and 2 runtime tests),
+plus `npm run typecheck` and `npm run check:boundaries`.
 
 ### 2026-07-05 — workspace/editor foundation
 
@@ -1214,15 +1723,15 @@ relationship to Editor and Playout as Viz Engine is to Viz Artist and Viz Trio.
 The driving requirement was a logical stage of at least 50,000 × 50,000, which
 cannot be one GPU texture on any hardware.
 
-Assessment first, in
-[`docs/render-engine-assessment.md`](docs/render-engine-assessment.md): the
+Assessment first (recorded in `docs/render-engine-assessment.md`, since folded
+into [`docs/local-v1-system-design.md`](docs/local-v1-system-design.md) §3): the
 existing `SceneCanvas` was a single flat `width`/`height` pair, so stage size,
 render size and output size were the *same number* everywhere in the repository,
 and `RendererPatch` had exactly three operations. Protocol v2 had no `messageId`,
 so duplicate suppression was impossible, and no `engineId`, so multi-engine
 routing was impossible.
 
-**Eleven new contract packages** under `packages/`, all pure TypeScript with no
+**Eleven new contract packages** (created under `packages/`, now `Shared/`), all pure TypeScript with no
 DOM or GPU access:
 
 - `stage-model` — virtual canvas in f64 up to 50,000², origin anchors, regions,
@@ -1269,6 +1778,58 @@ Key decisions worth not relitigating:
 - Editor and Playout share one `EngineConnection` implementation. The Editor
   wrapper deliberately omits `takeOnline`; the Playout wrapper deliberately
   omits every content mutation.
+
+### 2026-08-01 — Editor MCP server
+
+Added `Editor/services/editor-mcp` (`@grapix/editor-mcp`), a Model Context
+Protocol server that connects Claude, Codex, Gemini, Kimi or any other MCP client
+to the Editor. stdio by default; streamable HTTP on 4150 with DNS-rebinding
+protection for clients that attach to a running server; `--read-only` omits every
+mutating tool.
+
+**53 tools**, all prefixed `grapix_editor_` so they stay unambiguous alongside a
+future Playout server: knowledge (8), scenes (8), objects (7), materials (5),
+assets and fonts (7), structured imports (6), live data and automation (4),
+publish and status (4), rundowns (4). Plus 8 resources (`grapix://primer`,
+`authority`, `capabilities`, `rules`, and templates for documents, scenes and
+asset bytes) and 5 prompts.
+
+**It goes through `project-api` on 4100, never `data/`.** That is what keeps an
+agent under the same origin allow-list, bearer token, read-only show mode,
+operator audit hook, per-scene write lock, scene backup and revision counter a
+human author works under. A file-system shortcut would bypass every one of them.
+
+**The knowledge half is the reason the authoring half is safe to hand to an
+agent.** It ingests `docs/`, the READMEs, this file, and the `Shared/` contract
+sources from the working tree — not a bundled snapshot, which would be wrong the
+first time someone edited the original. From the contracts it derives a
+capability map that reports **declared** and **implemented** separately for every
+enum, because this repository has repeatedly shipped options the renderers ignore
+(six of eight `TextureFitMode` values drew as `stretch`). `analyze_scene` audits a
+stored scene against that gap alongside `resolveSceneObjectHierarchy` and
+`preflightScenePackage`, and the object factory writes both colour
+representations, so rule 88 holds for agent-authored objects too.
+
+**The boundary is a build-time guard, not a comment.** `assertEditorAuthority`
+runs at server construction and in the test suite, and throws if any tool name
+contains `take`, `cue`, `continue`, `clear_program`, `on_air`, `output` or
+`program`. `publish_scene` builds a `.gfxpkg` and says in its own description
+that it does not put anything on air.
+
+Verified: 34 tests across three suites (the authority guard, knowledge
+extraction, and a real MCP `Client` driving a spawned `dist/index.js` over
+stdio); `npm run check:boundaries` passes with Editor at 6 packages; and a live
+run against a project service on 4100 created a scene, added objects, bound live
+data, keyframed a 20-frame in-move, created and assigned a material, analysed
+clean, and published a 3.3 KB package, then deleted and recovered.
+
+Known limits, stated rather than hidden: `POST /api/scenes` takes no
+expected-revision field, so whole-document writes re-read immediately before
+saving and refuse a moved revision — this narrows the race, it does not close it.
+Search ranking biases toward documentation authority but does not force it; a
+detail document can and does outrank `architecture.md` when it is the better
+match, and each hit reports its authority rank so the caller can apply the order
+itself.
 
 ## Basic v0.1 checkpoint scope
 
@@ -1380,24 +1941,33 @@ Primary:
 
 ```bash
 npm install
-npm run dev
+npm run dev            # Editor desktop: project service + ensured render engine
+npm run dev:playout    # Playout: engine + control service + operator UI
 ```
 
 Individual development processes:
 
 ```bash
-npm run dev:web
-npm run dev:api
-npm run dev:daemon
+npm run dev:web        # editor UI in a browser
+npm run dev:api        # project service only
+npm run dev:engine     # render engine only
+npm run dev:mcp        # MCP server for AI clients, watching sources
 ```
 
 Default local endpoints:
 
 - editor: `http://127.0.0.1:5173`
-- API: `http://127.0.0.1:4100`
-- native daemon WebSocket: `ws://127.0.0.1:4200`
+- playout: `http://127.0.0.1:5174`
+- project API: `http://127.0.0.1:4100`
+- editor MCP (HTTP transport only): `http://127.0.0.1:4150/mcp`
+- playout control API: `http://127.0.0.1:4300`
+- render engine WebSocket: `ws://127.0.0.1:4400`
 
-The Tauri shell reuses already-running services when possible.
+Both desktop shells adopt an already-running service instead of replacing it, and
+neither ever stops the render engine — including one it started itself.
+
+`npm run dev:daemon` no longer exists: the protocol v2 daemon on 4200 is retired.
+Its crate is the engine's render core; run its tests with `npm run test:core`.
 
 ## Known gaps and next priorities
 
@@ -1441,7 +2011,7 @@ The Tauri shell reuses already-running services when possible.
 - Gates: engine Rust **217**, render-daemon **97**, render-protocol **139**,
   shared-types **62**, editor **45**, api **18**, playout **3**;
   `certify:engine` **52/52**, `certify:playout-engine` **32/32**,
-  `certify:publish-rundown` **21/21**, `certify:ipc` **11/11**,
+  `certify:publish-takelist` **21/21**, `certify:ipc` **11/11**,
   `certify:parity` **8/8 with the browser capture skipped**; boundaries, full
   typecheck and production build all passing.
 
@@ -1462,7 +2032,7 @@ certification gates that drive the real Rust engine over protocol v3:
   whole output path: adapter listing with live/unavailable reasons, refusal of an
   adapter the deployment did not enable, a virtual output configured and started by
   the take, real frames from the Program clock, and outputs stopped by a clear.
-- `npm run certify:publish-rundown` — 21/21. The designer-to-operator path:
+- `npm run certify:publish-takelist` — 21/21. The designer-to-operator path:
   the Editor publishes with a thumbnail, the scene appears in the manager with its
   resolution, colour space and exact rational rate, it is placed in a rundown pinned
   to its version, and a Take from the rundown drives the standalone engine, which
@@ -1665,31 +2235,29 @@ no client could ever have read them. Both are now `rename_all = "camelCase"`, an
 ## Documentation map
 
 - [`README.md`](README.md) — repository entry point and commands.
-- [`docs/project-memory.md`](docs/project-memory.md) — older detailed build log.
-- [`docs/architecture.md`](docs/architecture.md) — product architecture.
+- [`docs/README.md`](docs/README.md) — **the documentation index and authority
+  order.** Start here; it states which document wins when two disagree.
+- [`docs/architecture.md`](docs/architecture.md) — canonical local V1 product and
+  runtime architecture, invariants and acceptance gates.
+- [`docs/local-v1-system-design.md`](docs/local-v1-system-design.md) — the design
+  review behind it: findings, alternatives, M1–M4 plan, acceptance tests.
 - [`docs/editor-playout-workspace.md`](docs/editor-playout-workspace.md) —
-  approved Editor/Playout master workspace, publishing, rundown and migration
-  architecture.
+  workspace ownership, publishing, rundown architecture and the phase log.
 - [`docs/architecture-review-compliance.md`](docs/architecture-review-compliance.md)
-  — 35-point acceptance ledger.
-- [`docs/render-engine-assessment.md`](docs/render-engine-assessment.md) — what the
-  repository contained before the engine separation, what is reused, and the
-  fifteen required architecture changes.
+  — historical 35-point ledger; its evidence table is current.
 - [`docs/render-engine-architecture.md`](docs/render-engine-architecture.md) —
-  target architecture: deployment modes, virtual canvas, tile rendering, stage
-  versus output resolution, surface mapping, protocol v3, frame clock.
-- [`docs/render-engine-migration.md`](docs/render-engine-migration.md) — phased
-  migration plan and the gate for each phase.
+  virtual canvas, tile rendering, stage versus output resolution, surface
+  mapping, protocol v3, frame clock.
 - [`services/render-engine/README.md`](services/render-engine/README.md) — engine
-  operation, precision rule, seam proof, honesty rules, and current status.
+  operation, precision rule, seam proof, honesty rules, current status.
 - [`services/render-engine/engine.toml`](services/render-engine/engine.toml) —
   annotated configuration reference and deployment examples.
-- [`docs/renderer-control-architecture.md`](docs/renderer-control-architecture.md)
-  — control/process boundaries.
-- [`docs/render-daemon-architecture.md`](docs/render-daemon-architecture.md)
-  — daemon/output/native planning.
-- [`docs/rendering-engine.md`](docs/rendering-engine.md) — preview/native renderer
-  state.
+- [`docs/render-daemon-architecture.md`](docs/render-daemon-architecture.md) —
+  render-core design, the shared-shader decision, TypeScript↔Rust scene contract.
+- [`services/render-daemon/README.md`](services/render-daemon/README.md) — the
+  render core library, and why its v2 binary is retired.
+- [`docs/rendering-engine.md`](docs/rendering-engine.md) — the Editor's current
+  browser viewport, explicitly temporary.
 - [`docs/scene-document-v1.md`](docs/scene-document-v1.md) — durable scene
   compatibility.
 - [`docs/material-system.md`](docs/material-system.md) — material/asset/shader
@@ -1700,12 +2268,21 @@ no client could ever have read them. Both are now `rename_all = "camelCase"`, an
   — fonts, rundowns, transitions, triggers, scripts, SDK.
 - [`docs/design-file-import.md`](docs/design-file-import.md) — PSD/AI/SVG/Figma
   normalized import.
+- [`docs/pixel-parity.md`](docs/pixel-parity.md) — how Editor, Preview and Program
+  pixels are compared.
 - [`docs/hardware-certification-template.md`](docs/hardware-certification-template.md)
   — external certification record.
-- [`services/render-daemon/README.md`](services/render-daemon/README.md) — native
-  service operation and protocol.
-- [`packages/render-shaders/docs/shader-contract.md`](packages/render-shaders/docs/shader-contract.md)
+- [`docs/project-memory.md`](docs/project-memory.md) — older detailed build log.
+- [`Shared/render-shaders/docs/shader-contract.md`](Shared/render-shaders/docs/shader-contract.md)
   — GPU byte/layout/blend/colour contract.
+- [`Editor/services/editor-mcp/README.md`](Editor/services/editor-mcp/README.md) —
+  the MCP server: its tool surface, the ingested knowledge layer, the authority
+  guard, and client configuration for Claude/Codex/Gemini/Kimi.
+
+Deleted 2026-07-29 as superseded: `docs/render-engine-assessment.md` (folded into
+`local-v1-system-design.md` §3), `docs/render-engine-migration.md` (folded into
+§11's M1–M4 plan), `docs/renderer-control-architecture.md` (described protocol v2
+and files that no longer exist).
 
 ## Rules for the next session
 
@@ -1725,9 +2302,12 @@ no client could ever have read them. Both are now `rename_all = "camelCase"`, an
     verification for rendering/UI changes.
 13. Update this memory when architecture, module ownership, status, or major
     verified work changes.
-14. Before moving repository paths or starting Playout, read
-    `docs/editor-playout-workspace.md`; Phase 0 and Phase 1 are complete, so
-    continue at the gated Phase 2 mechanical Editor move.
+14. Before moving repository paths, read `docs/README.md` for the authority order
+    and `docs/editor-playout-workspace.md` for the phase log. Phases 0–3 and 4a
+    are complete; the next implementation step is milestone M2 in
+    `docs/local-v1-system-design.md`, not another move. Gate any move on
+    `npm run check:boundaries`, `npm run typecheck`, `npm test` **and** probing
+    the running system — every fault the previous two moves caused was silent.
 15. Keep Playout independent from Editor lifecycle and never let Editor become
     authoritative for on-air Program state.
 16. Never represent a large stage as one GPU texture. A 50,000 × 50,000 RGBA8
@@ -1737,7 +2317,7 @@ no client could ever have read them. Both are now `rename_all = "camelCase"`, an
     viewport origin in f64 first, then narrow to f32. Both `stage-model` and the
     engine's `stage.rs` enforce this, and tests assert the improvement — do not
     add a path that bypasses them.
-18. `packages/tile-system` and `services/render-engine/src/tile.rs` are parallel
+18. `Shared/tile-system` and `services/render-engine/src/tile.rs` are parallel
     implementations of one specification. Change them together; the two test
     suites exist to catch the divergences that follow from not doing so.
 19. Keep the Editor's engine wrapper free of `takeOnline` and the Playout wrapper
@@ -1751,18 +2331,20 @@ no client could ever have read them. Both are now `rename_all = "camelCase"`, an
 22. Only the cut transition is implemented. Refuse anything else rather than
     substituting a cut, and never set `hardware_certified` from a compile-time
     feature flag.
-23. The render engine listens on 4400 and is wired into both applications.
-    Asset sync, incremental patches, preview streaming and renderer restart are
-    still refused with an explicit code — keep them refused rather than stubbed,
-    and keep `docs/render-engine-migration.md` honest about which is which.
+23. The render engine listens on 4400 and is the only renderer either application
+    speaks to. Asset sync, incremental patches, preview streaming and renderer
+    restart are still refused with an explicit code — keep them refused rather
+    than stubbed, and keep `services/render-engine/README.md` honest about which
+    is which.
 24. Replies and events must never share a `messageId`, and sequence handling must
     run before deduplication. Both were real faults that wedged a live connection;
     `protocol_server.rs` has a regression test for each.
 25. A preview whose scaled output fits one texture must use the single-pass path.
     Rendering it tile-by-tile costs a pipeline build per tile and turns a
     thumbnail into a minute of GPU time.
-26. Ports: 4100 api, 4200 daemon, 4300 playout-control, 4400-4403 engine and
-    render nodes, 5173/5174 web. Do not reuse one.
+26. Ports: 4100 project API, 4300 playout-control, 4400-4403 engine and render
+    nodes, 5173/5174 web. 4200 belonged to the retired v2 daemon — do not put
+    anything new there, and do not reuse any of the others.
 27. `is_live()` is the only thing that may decide whether an output is described as
     live, in the engine, the API and the UI. Never infer it from an adapter name, and
     never let an unavailable live adapter accept frames — an output that swallows
@@ -1798,3 +2380,214 @@ no client could ever have read them. Both are now `rename_all = "camelCase"`, an
 38. Publishing is additive. Every publish is a new version and rundown items pin the
     version they were built against; do not make a rundown follow the latest publish
     by default.
+39. The canonical V1 product boundary is now `docs/architecture.md`: Editor,
+    Playout and Render Engine are the three applications. `Shared/` is contracts,
+    not a fourth runtime. Remote publishing, remote engines and multi-machine
+    failover are V2.
+40. Editor and Playout use native Render View extensions of the main render-core.
+    A Render View changes viewport, cadence, metadata and priority; it must not
+    fork material, font, lighting, 3D or animation semantics into a browser or
+    application-owned renderer.
+41. Render View cached last-good frames are for operator continuity only and
+    must never be transmitted as fresh Program frames.
+42. An Editor Render View is never eligible to own Program. A separate Playout
+    standby worker may be promoted only after exact journal/checksum agreement,
+    first-frame validation and transfer of a fenced output lease.
+43. A same-machine standby covers a worker-process failure, not shared GPU,
+    driver, OS or machine failure. Do not describe it as hardware redundancy.
+44. The target V1 lifecycle is a persistent single-instance Engine Host that
+    neither Editor nor Playout stops on window close. It supervises the worker,
+    journals Program mutations and performs verified restore without replaying a
+    Take.
+45. `npm run check:boundaries` is the structural guard, and it is cheap. Run it
+    after touching any manifest or moving any file. It fails on a cross-domain
+    dependency, a relative import that climbs into another product, and any
+    dependency on a retired package — that last rule is what stops protocol v2
+    coming back one convenient import at a time.
+46. Neither desktop shell may stop the render engine, including one it started
+    itself. Each has a unit test asserting it; do not "fix" that test.
+47. The Editor evaluates automation and returns the plan. It does not execute it,
+    and it has no HTTP route that can Take or configure an output. If a feature
+    seems to need one, the feature belongs in Playout.
+48. The 8/24-hour soak gate has no harness. Do not mark it met, and do not
+    resurrect the deleted one — it drove the retired v2 daemon through Editor
+    routes that no longer exist. A replacement drives the engine over protocol v3
+    with Playout as the only controller.
+49. Program samples animation every frame from `services/render-engine/src/animation.rs`, which
+    is the parallel implementation of `evaluateSceneAtFrame` in `Shared/shared-types`. Change
+    them together, the way `Shared/tile-system` and `tile.rs` are changed together. Never fix
+    an animation bug by re-preparing the scene per frame: that path costs 482 ms a frame.
+50. `zDepth` is deliberately not animated. Render order is resolved during preparation, so
+    moving depth without re-sorting would look like it worked and produce wrong occlusion.
+51. `preview.request` honours an explicit `sceneId` and refuses when nothing is cued. Do not
+    reinstate a "pick any loaded scene" fallback — it showed operators a scene they had not
+    selected, chosen by HashMap order.
+52. The operator model is Scene Manager + Take List, not a rundown. Take IDs start at 101 and
+    are stable across republishes because operators memorise them. A direct recall is tracked
+    as `scene:take-<id>`, never as a borrowed take-list entry id.
+53. A command that names both a Take ID and a take-list entry is refused. Do not "helpfully"
+    pick one.
+54. `RundownDocument` in `Shared/shared-types` is the Editor's authoring-time sequencing model
+    for `@grapix/sdk`. It is not the operator running order and was deliberately left alone.
+55. Operator monitor streams are refcounted per channel. The first viewer starts the engine
+    stream and the last one stops it. Do not start a stream eagerly at boot or keep one alive
+    "just in case": the engine allows four concurrent and an unattended station must render
+    nothing.
+56. Do not gate the monitor picture on Playout's `programRef`/`previewRef`. Those live in the
+    control service's memory and are empty after a restart while the engine keeps rendering —
+    gating on them blanks a monitor over a live Program. The engine is the authority on what
+    is on a channel; a frame arriving is the proof.
+57. The picture is layered *over* the slate, never swapped with it. A gap must reveal the
+    slate, not a blank box.
+58. Retry for a monitor stream belongs in `MonitorHub`, not in the browser. The MJPEG
+    connection stays open, so the hub starting a stream later is enough — reopening from the
+    client multiplies refusals by the number of viewers.
+59. `MonitorHub` decodes each frame once and shares the `Buffer`. Do not decode per
+    subscriber, and do not queue frames: drop on `writableNeedDrain`, because a monitor
+    behind on the socket must show the next frame late rather than a backlog of the past.
+60. Subscribe to engine events through `PlayoutEngineController.onEngineEvent`, never
+    `connection.on`. `connect()` builds a new `EngineConnection` on every reconnect, so a
+    socket-scoped listener stops firing the first time the engine restarts.
+61. Certification harnesses share one engine, and a running GrapiX Playout window holds two
+    monitor streams. Assert on deltas and find your own stream by id — never `previewStreams[0]`,
+    and never assume an idle machine.
+62. Transparency for operators is **fill and key**, not an alpha channel. SDI carries no
+    alpha, so broadcast splits it into a greyscale key signal and the downstream keyer
+    recombines them; operators read the key as a greyscale picture. Do not reintroduce an
+    alpha-capable codec (PNG streams, VP9 `yuva420p`, ffmpeg) for a monitor — a key is
+    greyscale, JPEG carries it exactly, and checkerboard transparency is a design-tool
+    convention no operator uses.
+63. `PreviewView::Key` writes the alpha to all three channels. Correct for shaped and
+    straight fill alike, because premultiplication scales the colour and never the alpha. Do
+    not "fix" it by unpremultiplying first.
+64. Engine preview streams stay JPEG-only. The key is a render mode, not an encoding.
+65. An unknown `view` is refused, never defaulted to fill. Showing an operator the fill when
+    they asked for the key misreports what is being keyed on air.
+66. A long-lived HTTP stream MUST call `reply.raw.flushHeaders()`. Node buffers the header
+    until the first body write, so a monitor on an empty channel would leave the client
+    waiting for a frame that may never arrive.
+67. The operator UI reuses one `<img>` per monitor and changes its `src`. NEVER key the
+    element on the view: Chromium does not close an MJPEG connection when an `<img>` is
+    detached, so remounting strands the old stream server-side and spends an engine slot.
+68. `playout-control` refuses to start when its port is taken, and it checks **before** the
+    engine supervisor exists. Keep that ordering: the supervisor connects from its constructor
+    and Fastify binds last, so a duplicate launch otherwise spends its whole startup as a
+    phantom engine client and then dies on a raw `EADDRINUSE` stack.
+    `inspectPort`/`duplicateInstanceMessage` in `preflight.ts`; `listen` also handles the
+    `EADDRINUSE` race and releases the engine first.
+    `GET /api/playout/health` reports `pid` and `buildAtMs` (mtime of the loaded bundle) so a
+    stale process serving the port is visible instead of looking like a fix that did not work.
+    Check it before concluding a fix did not work.
+69. The Program clock advances the on-air scene's **playhead** (`advance_program_playhead`).
+    Preview streams render `scene.frame`, so if nothing writes it back every monitor freezes on
+    one picture while the renderer animates perfectly. Do not make the clock's counter private
+    again.
+70. The playhead advances whenever a scene is on air, NOT only when an output is running. An
+    operator confirms a graphic on the monitors before any SDI/NDI output exists.
+71. Advance by **elapsed** frames, never an absolute frame number: each scene is timed from its
+    own take, and a dropped frame must move the animation on by the time that passed instead of
+    playing it in slow motion.
+72. `playout.takeOnline` rewinds the playhead to 0 so an "in" animation replays on every take.
+    `playout.cue` MUST NOT rewind a scene already on Program — Preview and Program can name the
+    same `LoadedScene` and share one playhead, so cueing would yank live air back to the start.
+73. `certify:animation` asks for explicit frame numbers, so it proves the *renderer* and says
+    nothing about the playhead. `certify:take-animation` is the one that proves a take actually
+    plays. Keep both.
+74. `IDLE_POLL_MS` in `program.rs` is the delay between a take and the animation starting. Do
+    not raise it back to 250ms; a fifth of a second is most of a 20-frame move.
+75. The monitor hub starts a refused stream on `event.channelChanged` rather than waiting for
+    its retry. Without it a 0.4s animation was over before the first frame arrived — the
+    original "shows only B" report.
+76. A WMI/CIM `CommandLine -like '*foo*'` filter **matches the PowerShell running the query**,
+    because the pattern is in its own command line. That inflated a process count and cost me a
+    wrong root-cause diagnosis about duplicate services. Filter on `Name -eq 'node.exe'` and
+    exclude `$PID`, and establish who owns a port with
+    `Get-NetTCPConnection -State Listen -LocalPort <p>` rather than by counting processes.
+77. Port map: 4100 `project-api`, 4300 `playout-control`, 4400 `grapix-render-engine`. 4200 was
+    the retired protocol-v2 daemon and is now unbindable — that binary was deleted on
+    2026-07-29. **4300 is not the old daemon**; it is the Playout control API and stopping it
+    takes Playout off the air.
+78. `services/render-daemon` is a **library only** (`grapix-render-core`): `scene`, `renderer`,
+    `output`, and output-format `config`. Do not add a binary, a `main.rs`, a transport or a
+    port back to it. A second renderer able to bind a port and drive outputs is what invariants
+    1 and 7 forbid, and the engine on 4400 is the single renderer.
+79. Before keeping dead code because a comment says something depends on it, check. The
+    daemon binary's README claimed the crate's integration tests needed it; they import only
+    `scene` and `renderer`. Three thousand lines survived several sessions on that sentence.
+80. A port readiness probe proves *something* is listening, not that it is yours. Before
+    trusting any suite that talks to a port, confirm the owner:
+    `Get-NetTCPConnection -State Listen -LocalPort <p>` then that process's `Path`. A packaged
+    app's sidecar held 4400 from an earlier launch, `hub` reported the new engine "ready"
+    without it ever binding, and a whole certification run silently exercised a stale binary.
+81. Never reflect a parent transform to convert a coordinate system. Reflecting a parent mirrors
+    its children's geometry: UVs flip and triangle winding inverts, so textures render flipped
+    and back-face culling hides or mirrors the surface. Negate the position instead
+    (`canvasToWorldY`), and negate rotations about the two axes the negated one reverses
+    (`rotationX`, `rotationZ`; not `rotationY`). Lighting may be reflected - a light has no
+    geometry. `ThreeSceneLayer` and `projectMeshBounds` must compose the identical transform or
+    selection handles miss the object.
+82. Do not offer an authored option the renderers ignore. Six of eight `TextureFitMode` values
+    were selectable, saved, validated as fine, and drawn as `stretch`. Either implement a mode in
+    both renderers or disable it and warn. `IMPLEMENTED_TEXTURE_FIT_MODES` is the single list;
+    `resolveTextureFit` (TS) and `resolve_texture_fit` (Rust) are one definition in two
+    languages, pinned by tests on both sides, because Preview and Program must sample the same
+    rectangle of the same texture.
+83. Never assert on `scenes[0]` or any collection order the protocol does not promise. Two
+    certifications read arbitrary order: one compared a different scene's revision, and
+    `status_payload` summed every scene's tile count while labelling it one stage's grid. Look
+    entities up by id, and report a number beside the thing it actually describes.
+84. `store/objectPropertySupport.ts` is the single definition of which properties bind to which
+    object type, and it encodes what `resolveSceneObjectHierarchy` actually consumes: `scaleZ` is
+    inherited by containers, `rotationX`/`rotationY` are not, and `rotationZ` is read from meshes
+    alone. Do not reintroduce a per-panel copy — the two that existed had already drifted, and one
+    of them offered layers a rotation binding that moved nothing.
+85. Object Inspector tab names are identities, not labels: they key the strip and they are what a
+    remembered selection is matched against, so a repeat is a tab that cannot be selected. The text
+    descriptor listed "Text" twice and its dedicated panel was unreachable for the whole time the
+    module existed. `objectInspectorTabsFor` de-duplicates; keep the test that asserts it.
+86. Converting a template's canvas is not conforming it. `conformScene` repairs a canvas and must
+    never move objects; `convertSceneDimensions` is an authoring decision and asks which of `fit`,
+    `stretch` or `canvas-only` the author wants. It scales scene pixels only — never rotation,
+    opacity or the unitless scale factors — and never a keyframe's *frame*, because retiming an
+    animation is not a resolution change.
+87. **Hash the staged sidecar against the engine after every package build.** The
+    `cargo:rerun-if-changed` trigger in each `build.rs` is not sufficient on its own: on
+    2026-08-01 both apps packaged a `1B6AE044…` engine while the built engine was `F7C47AD1…`, and
+    every command exited 0. `cargo clean -p app --release` / `-p playout-app --release` forces the
+    script to run. A green build is not evidence that the bundled engine is the one you built —
+    the comparison is
+    `Get-FileHash services/render-engine/target/release/grapix-render-engine.exe` against both
+    `*/src-tauri/binaries/grapix-render-engine-x86_64-pc-windows-msvc.exe`.
+88. An object carries its colour twice — `fill`/`stroke` strings and `fillStyle`/`strokeStyle`
+    values — and **the renderers read the rich one first**. A factory that sets only the string
+    paints whatever the base object's style was, which is why the pen tool drew nothing for as long
+    as it existed. Any factory naming a colour must go through `withColorStyles`
+    (`store/objectColorStyles.ts`). Do not fix a future instance of this per object type; the text
+    special-case in `normalizedObjectFillStyle` is a migration for old *saved* scenes, not a
+    pattern to copy. The MCP server has its own `withColorStyles` in
+    `Editor/services/editor-mcp/src/sceneOps.ts`, built on the shared `solidColorValue` rather than
+    importing the editor app — a service must not depend on the web application. Both must keep
+    writing both representations.
+89. **The MCP server may never grow a Program or output verb.** `assertEditorAuthority`
+    (`Editor/services/editor-mcp/src/server.ts`) throws at server construction, and its test fails
+    the build, if a tool name contains `take`, `cue`, `continue`, `clear_program`, `on_air`,
+    `output` or `program`. Do not relax it to add a "convenience" tool that forwards to Playout.
+    The engine would refuse the call anyway by authenticated role, but the tool would first have
+    told a model that the Editor can put graphics on air, and that is the wrong belief to hand an
+    autonomous agent driving a broadcast system.
+90. The MCP server talks to `project-api` on 4100 and never to `data/` directly. The origin
+    allow-list, bearer token, read-only show mode, audit hook, per-scene write lock, backups and
+    revision counter all live in that service; a file-system shortcut for speed would bypass every
+    one of them. If a capability is missing, add the route to `project-api` and call it.
+91. `POST /api/scenes` replaces a whole document and takes **no** expected-revision field, so any
+    read-modify-write races the Editor UI and any other agent. `mutateScene` re-reads immediately
+    before saving and refuses a moved revision; that narrows the window, it does not close it, and
+    the README says so. Do not upgrade that wording to a guarantee without adding compare-and-swap
+    to the route. Note also that the live-data route `/api/scenes/:id/data-patches` compares
+    `updatedAt` **timestamps**, not the numeric revision — hence `expected_updated_at` on that one
+    tool.
+92. The MCP capability map must keep reporting *declared* and *implemented* separately. Collapsing
+    them would silently reintroduce exactly the class of bug rule 82 exists for, this time with an
+    agent authoring it at speed. Its knowledge is read from the working tree on every fingerprint
+    change — never bundle a snapshot of `docs/` or `memory.md` into the package, because it is
+    wrong the first time someone edits the original.

@@ -43,6 +43,8 @@ export interface PublishToPlayoutOptions {
   category?: string;
   /** Skip the thumbnail capture. Used when no viewport is mounted. */
   withoutThumbnail?: boolean;
+  /** Editor playhead restored after capturing the scene's held final frame. */
+  thumbnailRestoreFrame?: number;
 }
 
 export interface PublishToPlayoutResult {
@@ -61,13 +63,25 @@ export async function publishSceneToPlayout(
   scene: SceneDocument,
   options: PublishToPlayoutOptions = {}
 ): Promise<PublishToPlayoutResult> {
-  const thumbnail = options.withoutThumbnail ? null : await captureSceneThumbnail(320);
+  const thumbnail = options.withoutThumbnail
+    ? null
+    : await captureSceneThumbnail({
+        scene,
+        frame: Math.max(0, scene.timeline.durationFrames - 1),
+        restoreFrame: options.thumbnailRestoreFrame,
+        maxDimension: 320
+      });
+
+  // Playout must retain project fonts after the Editor closes. Font assets are
+  // small enough to travel with the immutable published scene; leaving their
+  // source pointed at :4100 made every restart lose the typeface.
+  const publishedScene = await inlinePublishedFonts(scene);
 
   const response = await fetch(`${playoutRoot}/api/playout/scenes`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      scene,
+      scene: publishedScene,
       options: {
         ...(thumbnail ? { thumbnailDataUrl: thumbnail.dataUrl } : {}),
         ...(options.colorSpace ? { colorSpace: options.colorSpace } : {}),
@@ -95,6 +109,30 @@ export async function publishSceneToPlayout(
   }
 
   return { published: payload, hasThumbnail: thumbnail !== null };
+}
+
+async function inlinePublishedFonts(scene: SceneDocument): Promise<SceneDocument> {
+  const assets = await Promise.all(scene.assets.map(async (asset) => {
+    if (asset.kind !== "font" || asset.source.startsWith("data:")) return asset;
+    const response = await fetch(asset.source);
+    if (!response.ok) {
+      throw new Error(`Could not package project font ${asset.name} (${response.status})`);
+    }
+    const bytes = await response.arrayBuffer();
+    const mimeType = asset.mimeType
+      ?? response.headers.get("content-type")
+      ?? "application/octet-stream";
+    return { ...asset, source: bytesToDataUrl(new Uint8Array(bytes), mimeType) };
+  }));
+  return { ...scene, assets };
+}
+
+function bytesToDataUrl(bytes: Uint8Array, mimeType: string): string {
+  const chunks: string[] = [];
+  for (let offset = 0; offset < bytes.byteLength; offset += 32_768) {
+    chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 32_768)));
+  }
+  return `data:${mimeType};base64,${btoa(chunks.join(""))}`;
 }
 
 /** Whether Playout is reachable, for enabling the publish action. */

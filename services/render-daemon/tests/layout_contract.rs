@@ -7,11 +7,11 @@
 
 use std::mem::offset_of;
 
-use grapix_render_daemon::renderer::mesh::{
+use grapix_render_core::renderer::mesh::{
     MeshUniforms, SceneLightUniform, SceneLightingUniforms, MESH_UNIFORMS_SIZE,
     SCENE_LIGHTING_UNIFORMS_SIZE, SCENE_LIGHT_UNIFORM_SIZE,
 };
-use grapix_render_daemon::renderer::pipeline::{QuadUniforms, QUAD_UNIFORMS_SIZE};
+use grapix_render_core::renderer::pipeline::{QuadUniforms, QUAD_UNIFORMS_SIZE};
 
 fn load_layouts() -> serde_json::Value {
     let path = concat!(
@@ -181,10 +181,9 @@ fn declared_wgsl_file_exists_and_declares_the_struct() {
         }
     }
     assert!(
-        grapix_render_daemon::renderer::mesh::MESH_PBR_WGSL.contains("struct SceneLight")
-            && grapix_render_daemon::renderer::mesh::MESH_PBR_WGSL.contains("struct SceneLighting")
-            && grapix_render_daemon::renderer::mesh::MESH_PBR_WGSL
-                .contains("@group(0) @binding(3)"),
+        grapix_render_core::renderer::mesh::MESH_PBR_WGSL.contains("struct SceneLight")
+            && grapix_render_core::renderer::mesh::MESH_PBR_WGSL.contains("struct SceneLighting")
+            && grapix_render_core::renderer::mesh::MESH_PBR_WGSL.contains("@group(0) @binding(3)"),
         "mesh shader must retain its shared authored-light uniform contract"
     );
 }

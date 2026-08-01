@@ -210,7 +210,12 @@ impl EngineStateMachine {
     }
 
     /// Attempt a transition. Refuses rather than panicking on an illegal one.
-    pub fn transition(&mut self, next: EngineState, reason: impl Into<String>, at_ms: u64) -> StateChange {
+    pub fn transition(
+        &mut self,
+        next: EngineState,
+        reason: impl Into<String>,
+        at_ms: u64,
+    ) -> StateChange {
         let allowed = self.current.can_transition_to(next);
         let change = StateChange {
             from: self.current,
@@ -238,7 +243,12 @@ impl EngineStateMachine {
     ///
     /// For the one legitimate case: something external making the previous state
     /// untrue whatever the table says.
-    pub fn force(&mut self, next: EngineState, reason: impl Into<String>, at_ms: u64) -> StateChange {
+    pub fn force(
+        &mut self,
+        next: EngineState,
+        reason: impl Into<String>,
+        at_ms: u64,
+    ) -> StateChange {
         let change = StateChange {
             from: self.current,
             to: next,
@@ -545,7 +555,7 @@ fn output_adapter_capabilities(config: &EngineConfig) -> Vec<OutputAdapterCapabi
             },
             "virtual" => OutputAdapterCapability {
                 adapter_id: "virtual".to_string(),
-                name: "Virtual output (headless, never live)".to_string(),
+                name: "Windowed virtual output (never live)".to_string(),
                 available: true,
                 unavailable_reason: None,
                 supports_alpha: true,

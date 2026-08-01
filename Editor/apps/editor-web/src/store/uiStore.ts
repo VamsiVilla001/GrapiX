@@ -44,6 +44,25 @@ export interface BrushOptions {
   angle: number;
   blendMode: BrushBlendMode;
 }
+export interface TypeOptions {
+  fontId: string | null;
+  fontSize: number;
+  fontWeight: string;
+  fontStyle: "normal" | "italic" | "oblique";
+}
+
+
+/**
+ * What the pen paints with.
+ *
+ * A path can be a filled region, an outline, or both, and which one you want is decided before
+ * you draw rather than repaired in the Inspector afterwards — so the options bar carries it, the
+ * way the brush carries its size and the type tool its font.
+ */
+export interface PenOptions {
+  fillEnabled: boolean;
+  strokeEnabled: boolean;
+}
 
 export interface MarqueeOptions {
   mode: MarqueeMode;
@@ -54,7 +73,6 @@ export interface MarqueeOptions {
   fixedHeight: number;
   fromCenter: boolean;
   feather: number;
-  antiAlias: boolean;
   objectContainment: "touching" | "enclosed";
 }
 
@@ -77,6 +95,8 @@ interface UiState {
   selectedMaskId: string | null;
   marqueeSelection: MarqueeSelection | null;
   foregroundColor: ColorValue;
+  typeOptions: TypeOptions;
+  penOptions: PenOptions;
   brushOptions: BrushOptions;
   marqueeOptions: MarqueeOptions;
   eyedropperOptions: EyedropperOptions;
@@ -90,6 +110,8 @@ interface UiState {
   setSelectedMaskId: (maskId: string | null) => void;
   setMarqueeSelection: (selection: MarqueeSelection | null) => void;
   setForegroundColor: (color: ColorValue) => void;
+  updateTypeOptions: (patch: Partial<TypeOptions>) => void;
+  updatePenOptions: (patch: Partial<PenOptions>) => void;
   updateBrushOptions: (patch: Partial<BrushOptions>) => void;
   updateMarqueeOptions: (patch: Partial<MarqueeOptions>) => void;
   updateEyedropperOptions: (patch: Partial<EyedropperOptions>) => void;
@@ -116,7 +138,19 @@ export const useUiStore = create<UiState>((set) => ({
   selectedAnchorIndices: [],
   selectedMaskId: null,
   marqueeSelection: null,
+  typeOptions: {
+    fontId: null,
+    fontSize: 48,
+    fontWeight: "700",
+    fontStyle: "normal"
+  },
   foregroundColor: { type: "solid", color: "#ffffff" },
+  // Fill and stroke both on, matching the pen in the design tools this panel is modelled on: a
+  // new path reads as a shape straight away rather than as an invisible outline.
+  penOptions: {
+    fillEnabled: true,
+    strokeEnabled: true
+  },
   brushOptions: {
     mode: "paint",
     size: 36,
@@ -138,7 +172,6 @@ export const useUiStore = create<UiState>((set) => ({
     fixedHeight: 180,
     fromCenter: false,
     feather: 0,
-    antiAlias: true,
     objectContainment: "touching"
   },
   eyedropperOptions: {
@@ -171,6 +204,8 @@ export const useUiStore = create<UiState>((set) => ({
   setSelectedMaskId: (selectedMaskId) => set({ selectedMaskId }),
   setMarqueeSelection: (marqueeSelection) => set({ marqueeSelection }),
   setForegroundColor: (foregroundColor) => set({ foregroundColor }),
+  updateTypeOptions: (patch) => set((state) => ({ typeOptions: { ...state.typeOptions, ...patch } })),
+  updatePenOptions: (patch) => set((state) => ({ penOptions: { ...state.penOptions, ...patch } })),
   updateBrushOptions: (patch) => set((state) => ({ brushOptions: { ...state.brushOptions, ...patch } })),
   updateMarqueeOptions: (patch) => set((state) => ({ marqueeOptions: { ...state.marqueeOptions, ...patch } })),
   updateEyedropperOptions: (patch) => set((state) => ({ eyedropperOptions: { ...state.eyedropperOptions, ...patch } })),

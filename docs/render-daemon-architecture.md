@@ -1,22 +1,22 @@
-# Render Daemon Architecture
+# Render core architecture and the shared-shader decision
 
-Status: scaffold landed 2026-07-15. This document explains the architecture
-decisions behind `services/render-daemon` and the shared-shader strategy in
-`packages/render-shaders`.
+> **V1 authority note (2026-07-29):** this document records the design decisions
+> behind `services/render-daemon` — now the engine's render core library
+> `grapix-render-core` — and the shared-shader strategy in
+> `Shared/render-shaders`. Its own protocol v2 binary is retired and launched by
+> nothing; see [`architecture.md`](architecture.md). The decisions below are the
+> load-bearing part and remain in force inside `services/render-engine`.
 
 ## Where it fits
 
 ```text
-Web Editor (React, PixiJS preview today / WebGPU preview later)
-        -> Shared Scene / Timeline / Binding Model  (packages/shared-types)
-        -> Authenticated local WebSocket (protocol v2, safe envelope)
-        -> Rust Render Daemon (wgpu, headless)      (services/render-daemon)
-        -> VideoOutput trait -> NDI | recording | null
+Editor / Playout
+        -> Shared scene / timeline / binding model      (Shared/shared-types)
+        -> Authenticated protocol v3                    (Shared/render-protocol)
+        -> Render engine                                (services/render-engine)
+           -> render core: wgpu, headless, scene prep   (services/render-daemon)
+           -> VideoOutput trait -> NDI | recording | virtual | null
 ```
-
-The daemon is the first concrete step toward the native renderer in
-`docs/architecture.md`. It is optional during this phase: nothing in the
-editor, Electron shell, or API server depends on it running.
 
 ## The shared-shader decision
 
@@ -26,7 +26,7 @@ different blending, different color math, different rounding of transforms.
 "Preview doesn't match program" is a chronic failure mode of this product
 category.
 
-**Decision**: one shader layer, two hosts. `packages/render-shaders` owns:
+**Decision**: one shader layer, two hosts. `Shared/render-shaders` owns:
 
 1. the WGSL source (consumed verbatim by wgpu today and browser WebGPU later),
 2. uniform byte layouts (`layouts.json`, machine-readable),
@@ -52,10 +52,10 @@ generation from TypeScript, so options 1 and 2 (generate Rust from schema /
 schema from TS) are unavailable without new tooling. The scaffold implements
 **option 3: a versioned Rust DTO layer with contract tests and fixtures**:
 
-- `packages/shared-types/src/fixtures.ts` — fixture object, compile-time
+- `Shared/shared-types/src/fixtures.ts` — fixture object, compile-time
   checked against the real `SceneDocument` type (the TS side of the contract).
 - `npm run fixtures:emit -w @grapix/shared-types` — serializes it to
-  `packages/shared-types/fixtures/scene-document.v1.json` (committed).
+  `Shared/shared-types/fixtures/scene-document.v1.json` (committed).
 - `services/render-daemon/tests/scene_contract.rs` — parses that JSON with the
   daemon's serde DTOs (the Rust side of the contract).
 
@@ -69,17 +69,19 @@ renderer does not consume (timeline details and asset payload metadata).
 If the scene model grows significantly, revisit generating a JSON Schema from
 the TypeScript source and deriving the Rust types from it.
 
-## Protocol
+## Transport, then and now
 
-Versioned JSON over an authenticated local WebSocket; daemon is the server (it
-is the long-lived process; controllers reconnect). A per-install 256-bit token
-is generated in the ignored `data/` directory and shared automatically with
-the API bridge. Browser Origins are denied unless explicitly allowlisted.
-Structural edits use full-scene replacement on `scene.load`/`scene.update`.
-High-frequency live data and object properties use typed, revision-safe
-`scene.patch`; preparation runs off the render thread and the watch channel
-coalesces bursts at frame boundaries. Updating only affected prepared binding
-targets instead of re-preparing the document remains an optimization gate.
+The retired v2 binary hosted the WebSocket server itself, on the reasoning that
+the renderer is the long-lived process and controllers come and go. That reasoning
+survived; the implementation moved. `services/render-engine` is now the long-lived
+server, and protocol v3 carries the same safety envelope plus message ids, engine
+ids, project scoping and explicit acknowledgement.
+
+What the render core still owns, whichever transport is in front of it: full-scene
+replacement for structural edits, typed revision-safe patches for high-frequency
+live data, preparation off the render thread, and a watch channel that coalesces
+bursts at frame boundaries. Updating only the affected prepared binding targets
+instead of re-preparing the document remains an optimization gate.
 
 ## Broadcast formats
 
@@ -124,6 +126,6 @@ Deliberately not implemented now; recorded so the order is agreed:
    material and render pipeline as hand-imported media — no side channel to
    the renderer.
 
-These are last in line behind: text/image/video rendering in the daemon,
-the browser WebGPU preview consuming `packages/render-shaders`, timeline
-playback, and NDI validation on an SDK machine.
+These are last in line behind the V1 acceptance gates in
+[`architecture.md`](architecture.md): the native Editor Render View, verified
+Program recovery, pixel parity, and NDI validation on an SDK machine.

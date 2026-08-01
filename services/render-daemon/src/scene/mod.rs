@@ -7,13 +7,13 @@ mod mesh_prepare;
 pub use document::{
     prepare_scene, PreparedAutoFit, PreparedFont, PreparedGradient, PreparedLight,
     PreparedLightKind, PreparedRect, PreparedScene, PreparedText, PreparedTextAlign,
-    PreparedTextStyle, SceneError, MAX_PREPARED_LIGHTS,
+    PreparedTextStyle, PreparedTextVerticalAlign, SceneError, MAX_PREPARED_LIGHTS,
 };
 pub use lifecycle::{
     estimate_prepared_scene_bytes, SceneLifecycle, SceneLifecycleStatus, SceneRegistry,
     SceneRegistryError, DEFAULT_MAX_PREPARED_CACHE_BYTES, DEFAULT_MAX_WARM_SCENES,
 };
 pub use mesh_prepare::{
-    PreparedCullMode, PreparedFilterMode, PreparedMesh, PreparedMeshMaterial, PreparedMeshSurface,
-    PreparedMeshVertex, PreparedTexture, PreparedWrapMode,
+    MeshTransform, PreparedCullMode, PreparedFilterMode, PreparedMesh, PreparedMeshMaterial,
+    PreparedMeshSurface, PreparedMeshVertex, PreparedTexture, PreparedWrapMode,
 };

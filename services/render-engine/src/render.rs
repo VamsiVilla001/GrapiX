@@ -102,8 +102,7 @@ impl TileSceneBuilder {
     ) -> anyhow::Result<&TileScene> {
         let needs_build = match self.cache.get(&tile.tile_id) {
             Some(existing) => {
-                existing.revision != self.revision
-                    || existing.render_bounds != tile.render_bounds
+                existing.revision != self.revision || existing.render_bounds != tile.render_bounds
             }
             None => true,
         };
@@ -128,8 +127,9 @@ impl TileSceneBuilder {
             tile.render_bounds.height,
         );
 
-        let prepared = prepare_scene(&rebased)
-            .map_err(|error| anyhow::anyhow!("tile {} scene preparation failed: {error}", tile.tile_id))?;
+        let prepared = prepare_scene(&rebased).map_err(|error| {
+            anyhow::anyhow!("tile {} scene preparation failed: {error}", tile.tile_id)
+        })?;
 
         let target_width = ((tile.render_bounds.width * render_scale).ceil() as u32).max(1);
         let target_height = ((tile.render_bounds.height * render_scale).ceil() as u32).max(1);
@@ -246,8 +246,13 @@ fn object_intersects(entry: &Map<String, Value>, tile: &Rect) -> bool {
             // Anchors and rotation can push the drawn area outside the nominal
             // rectangle, so pad generously rather than clipping something real.
             let padding = width.max(height);
-            Rect::new(x - padding, y - padding, width + padding * 2.0, height + padding * 2.0)
-                .intersects(tile)
+            Rect::new(
+                x - padding,
+                y - padding,
+                width + padding * 2.0,
+                height + padding * 2.0,
+            )
+            .intersects(tile)
         }
         // Text, meshes, paths, and lines have no simple extent here. Keep them:
         // the render target clips them correctly anyway.
@@ -264,7 +269,9 @@ fn offset_number(entry: &mut Map<String, Value>, key: &str, delta: f64) {
 
 /// Offset coordinate pairs nested inside masks, paths, and strokes.
 fn offset_nested_points(entry: &mut Map<String, Value>, delta_x: f64, delta_y: f64) {
-    for key in ["mask", "masks", "path", "paths", "strokes", "points", "vertices"] {
+    for key in [
+        "mask", "masks", "path", "paths", "strokes", "points", "vertices",
+    ] {
         if let Some(value) = entry.get_mut(key) {
             offset_points_in_value(value, delta_x, delta_y);
         }

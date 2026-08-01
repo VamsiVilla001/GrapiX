@@ -46,18 +46,19 @@
 //!   silently substituted.
 //! - `hardware_certified` is never set from a compile-time feature flag.
 
+pub mod animation;
 pub mod assets;
 pub mod capabilities;
 pub mod config;
 pub mod engine;
-pub mod outputs;
 pub mod ipc;
+pub mod outputs;
 pub mod patch;
 pub mod preview;
 pub mod program;
-pub mod scene_renderer;
 pub mod protocol;
 pub mod render;
+pub mod scene_renderer;
 pub mod security;
 pub mod stage;
 pub mod stream;
@@ -65,7 +66,7 @@ pub mod tile;
 pub mod transport;
 
 pub use capabilities::{EngineCapabilities, EngineState, EngineStateMachine};
+pub use config::{CliOptions, EngineConfig};
 pub use engine::Engine;
-pub use config::{EngineConfig, CliOptions};
 pub use stage::{Rect, StageDocument, VirtualCanvas};
 pub use tile::{TileGrid, TileManager};

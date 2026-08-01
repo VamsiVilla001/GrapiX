@@ -1,17 +1,17 @@
 import type { SceneDocument } from "./index.js";
 
 /**
- * Contract fixture shared with the Rust render daemon.
+ * Contract fixture shared with the Rust render core.
  *
  * This object is the TypeScript-side source of truth: it is compile-time
  * checked against the real `SceneDocument` type right here. Running
  * `npm run fixtures:emit -w @grapix/shared-types` serializes it to
- * `fixtures/scene-document.v1.json`, which the daemon's contract test
+ * `fixtures/scene-document.v1.json`, which the render core's contract test
  * (`services/render-daemon/tests/scene_contract.rs`) parses. If the type
  * changes shape, this file stops compiling and/or the regenerated fixture
  * breaks the Rust test — that is the drift detector.
  *
- * Content is deliberately chosen for the daemon's v1 renderer: one visible
+ * Content is deliberately chosen for the render core's v1 renderer: one visible
  * rect (renderable), plus one text and one ellipse object (must produce
  * explicit unsupported-type warnings on the Rust side).
  */

@@ -61,14 +61,21 @@ pub fn resolve_source(
                 .unwrap_or(1080) as u32;
             let bounds = stage.bounds();
             let scale = StageDocument::fit_render_scale(&bounds, max_width, max_height);
-            (bounds, scale, format!("scaled stage to {max_width}x{max_height}"))
+            (
+                bounds,
+                scale,
+                format!("scaled stage to {max_width}x{max_height}"),
+            )
         }
         "viewport" => {
             let viewport_id = source
                 .get("viewportId")
                 .and_then(Value::as_str)
                 .ok_or_else(|| {
-                    ProtocolError::new(ErrorCode::InvalidPayload, "viewport source needs viewportId")
+                    ProtocolError::new(
+                        ErrorCode::InvalidPayload,
+                        "viewport source needs viewportId",
+                    )
                 })?;
             let viewport = stage.viewport(viewport_id).ok_or_else(|| {
                 ProtocolError::new(
@@ -183,6 +190,49 @@ pub struct PreviewOutcome {
     pub render_micros: u64,
 }
 
+/// What representation of a channel a preview shows.
+///
+/// Broadcast does not carry transparency as an alpha channel — SDI has none, so a graphics
+/// engine emits **fill** (the colour) and **key** (a greyscale matte) as two separate
+/// signals, and the downstream keyer recombines them. Operators verify a graphic by looking
+/// at the key as a greyscale picture: white is opaque, black is transparent, and the greys
+/// in between are the feathered shadows and anti-aliased text edges that a badly clipped
+/// key destroys.
+///
+/// So this is a *render mode*, not a codec concern. A key view is a greyscale image, which
+/// JPEG carries perfectly well; reaching for an alpha-capable codec would deliver a
+/// design-tool checkerboard that no operator uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PreviewView {
+    /// Full-colour composite: what the graphic looks like.
+    #[default]
+    Fill,
+    /// Alpha as greyscale luminance: what the downstream keyer cuts.
+    Key,
+}
+
+impl PreviewView {
+    /// Absent means fill. An unknown value is refused rather than defaulted, because
+    /// silently showing fill to a client that asked for key would misreport what is keyed.
+    pub fn parse(value: Option<&str>) -> Result<Self, ProtocolError> {
+        match value {
+            None | Some("fill") => Ok(Self::Fill),
+            Some("key") => Ok(Self::Key),
+            Some(other) => Err(ProtocolError::new(
+                ErrorCode::InvalidPayload,
+                format!("preview view must be \"fill\" or \"key\"; got \"{other}\""),
+            )),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Fill => "fill",
+            Self::Key => "key",
+        }
+    }
+}
+
 /// Render a preview.
 ///
 /// Two paths, and choosing between them matters a great deal for latency:
@@ -204,6 +254,8 @@ pub fn render_preview(
     quality: u8,
     // "jpeg" for a human looking at it, "png" for anything measured.
     encoding: &str,
+    // Fill or key. A key view is the alpha as greyscale — how broadcast monitors a matte.
+    view: PreviewView,
     show_tile_debug: bool,
     // `force_tiled` renders by the tile-composite route even when the region would fit
     // one texture. Diagnostic, and distinct from `show_tile_debug`: that one *draws* the
@@ -221,10 +273,19 @@ pub fn render_preview(
         resolved.width <= max_texture_dimension && resolved.height <= max_texture_dimension;
 
     if fits_one_texture && !show_tile_debug && !force_tiled {
-        return render_single_pass(gpu, scene, resolved, quality, encoding, frame, cached);
+        return render_single_pass(gpu, scene, resolved, quality, encoding, view, frame, cached);
     }
 
-    render_tiled(gpu, scene, resolved, frame, quality, encoding, show_tile_debug)
+    render_tiled(
+        gpu,
+        scene,
+        resolved,
+        frame,
+        quality,
+        encoding,
+        view,
+        show_tile_debug,
+    )
 }
 
 /// One rebased pass over the whole requested region.
@@ -238,6 +299,7 @@ fn render_single_pass(
     resolved: &ResolvedPreview,
     quality: u8,
     encoding: &str,
+    view: PreviewView,
     frame: u64,
     cached: Option<&mut crate::scene_renderer::SceneRenderer>,
 ) -> Result<PreviewOutcome, ProtocolError> {
@@ -266,14 +328,18 @@ fn render_single_pass(
                 ),
                 frame,
                 || {
+                    // Preview must animate for the same reason Program does: an operator
+                    // checking a graphic before air is checking the motion, not a still.
+                    let animation = crate::animation::SceneAnimation::from_document(&document);
                     let rebased = crate::render::rebase_scene_json(
                         &document,
                         origin,
                         resolved.logical.width,
                         resolved.logical.height,
                     );
-                    grapix_render_core::scene::prepare_scene(&rebased)
-                        .map_err(|error| format!("preview scene preparation failed: {error}"))
+                    let prepared = grapix_render_core::scene::prepare_scene(&rebased)
+                        .map_err(|error| format!("preview scene preparation failed: {error}"))?;
+                    Ok((prepared, animation))
                 },
             )
         }
@@ -307,7 +373,7 @@ fn render_single_pass(
         render_scale: resolved.render_scale,
     };
 
-    let base64 = encode_preview(&target, quality, encoding)?;
+    let base64 = encode_preview(&target, quality, encoding, view)?;
 
     Ok(PreviewOutcome {
         width: target.width,
@@ -325,6 +391,7 @@ fn render_tiled(
     frame: u64,
     quality: u8,
     encoding: &str,
+    view: PreviewView,
     show_tile_debug: bool,
 ) -> Result<PreviewOutcome, ProtocolError> {
     let started = std::time::Instant::now();
@@ -400,7 +467,7 @@ fn render_tiled(
         draw_tile_boundaries(&mut target, &rendered);
     }
 
-    let base64 = encode_preview(&target, quality, encoding)?;
+    let base64 = encode_preview(&target, quality, encoding, view)?;
 
     Ok(PreviewOutcome {
         width: target.width,
@@ -472,11 +539,18 @@ fn draw_tile_boundaries(target: &mut CompositeTarget, tiles: &[crate::render::Re
 /// The alpha is *unpremultiplied* on the way out, because PNG is defined as straight alpha.
 /// Writing premultiplied bytes into a PNG would make every semi-transparent pixel darker
 /// than it is, in a file format that says otherwise.
-fn encode_png(target: &CompositeTarget) -> Result<String, ProtocolError> {
+fn encode_png(target: &CompositeTarget, view: PreviewView) -> Result<String, ProtocolError> {
     let mut rgba = Vec::with_capacity((target.width as usize) * (target.height as usize) * 4);
 
     for chunk in target.pixels.chunks_exact(4) {
         let (b, g, r, a) = (chunk[0], chunk[1], chunk[2], chunk[3]);
+        // A key view is the matte itself, so it is written as an opaque greyscale image
+        // rather than as transparency. Keeping it opaque is the point: this is what the
+        // downstream keyer receives on its own wire.
+        if view == PreviewView::Key {
+            rgba.extend_from_slice(&[a, a, a, 255]);
+            continue;
+        }
         if a == 0 || a == 255 {
             rgba.extend_from_slice(&[r, g, b, a]);
             continue;
@@ -506,13 +580,25 @@ fn encode_png(target: &CompositeTarget) -> Result<String, ProtocolError> {
     Ok(base64::engine::general_purpose::STANDARD.encode(&encoded))
 }
 
-fn encode_jpeg(target: &CompositeTarget, quality: u8) -> Result<String, ProtocolError> {
+fn encode_jpeg(
+    target: &CompositeTarget,
+    quality: u8,
+    view: PreviewView,
+) -> Result<String, ProtocolError> {
     // The composite is BGRA premultiplied; JPEG has no alpha, so flatten onto a
     // mid-grey checkerboard-free background and swap to RGB.
     let mut rgb = Vec::with_capacity((target.width as usize) * (target.height as usize) * 3);
 
     for chunk in target.pixels.chunks_exact(4) {
         let (b, g, r, a) = (chunk[0], chunk[1], chunk[2], chunk[3]);
+
+        // The key is the alpha itself, written to all three channels as luminance. Correct
+        // for shaped and straight fill alike: premultiplication scales the colour, never
+        // the alpha.
+        if view == PreviewView::Key {
+            rgb.extend_from_slice(&[a, a, a]);
+            continue;
+        }
 
         if a == 255 {
             rgb.extend_from_slice(&[r, g, b]);
@@ -529,13 +615,16 @@ fn encode_jpeg(target: &CompositeTarget, quality: u8) -> Result<String, Protocol
     }
 
     let mut encoded = Vec::new();
-    let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(
-        &mut encoded,
-        quality.clamp(1, 100),
-    );
+    let mut encoder =
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut encoded, quality.clamp(1, 100));
 
     encoder
-        .encode(&rgb, target.width, target.height, image::ExtendedColorType::Rgb8)
+        .encode(
+            &rgb,
+            target.width,
+            target.height,
+            image::ExtendedColorType::Rgb8,
+        )
         .map_err(|error| {
             ProtocolError::new(
                 ErrorCode::InternalError,
@@ -555,10 +644,11 @@ fn encode_preview(
     target: &CompositeTarget,
     quality: u8,
     encoding: &str,
+    view: PreviewView,
 ) -> Result<String, ProtocolError> {
     match encoding {
-        "jpeg" => encode_jpeg(target, quality),
-        "png" => encode_png(target),
+        "jpeg" => encode_jpeg(target, quality, view),
+        "png" => encode_png(target, view),
         other => Err(ProtocolError::new(
             ErrorCode::CapabilityUnsupported,
             format!(
@@ -566,5 +656,128 @@ fn encode_preview(
                  protocol but not implemented"
             ),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Two pixels: one fully opaque red, one half-transparent, one fully transparent.
+    /// BGRA, premultiplied — the composite's own layout.
+    fn target() -> CompositeTarget {
+        CompositeTarget {
+            width: 3,
+            height: 1,
+            pixels: vec![
+                0, 0, 200, 255, // opaque red
+                0, 0, 100, 128, // half-transparent red, premultiplied
+                0, 0, 0, 0, // fully transparent
+            ],
+            logical_bounds: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 3.0,
+                height: 1.0,
+            },
+            render_scale: 1.0,
+        }
+    }
+
+    fn decode(base64_png: &str) -> image::RgbaImage {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(base64_png)
+            .expect("valid base64");
+        image::load_from_memory(&bytes)
+            .expect("valid png")
+            .to_rgba8()
+    }
+
+    #[test]
+    fn a_key_view_is_the_alpha_as_greyscale() {
+        // What a downstream keyer cuts: white opaque, black transparent, grey in between.
+        // Broadcast carries this as its own signal because SDI has no alpha channel, and an
+        // operator verifies a graphic by looking at exactly this picture.
+        let image = decode(&encode_png(&target(), PreviewView::Key).unwrap());
+
+        assert_eq!(
+            image.get_pixel(0, 0).0,
+            [255, 255, 255, 255],
+            "opaque reads as white"
+        );
+        assert_eq!(
+            image.get_pixel(1, 0).0,
+            [128, 128, 128, 255],
+            "half alpha reads as mid grey"
+        );
+        assert_eq!(
+            image.get_pixel(2, 0).0,
+            [0, 0, 0, 255],
+            "transparent reads as black"
+        );
+    }
+
+    #[test]
+    fn a_key_view_is_opaque_everywhere() {
+        // The matte is a picture, not transparency. A key that was itself transparent would
+        // be invisible on the very monitor meant to show it.
+        let image = decode(&encode_png(&target(), PreviewView::Key).unwrap());
+        for pixel in image.pixels() {
+            assert_eq!(pixel.0[3], 255);
+        }
+    }
+
+    #[test]
+    fn a_fill_view_still_carries_straight_alpha() {
+        // Regression guard: adding the key view must not disturb the fill path, which
+        // unpremultiplies because PNG is defined as straight alpha.
+        let image = decode(&encode_png(&target(), PreviewView::Fill).unwrap());
+
+        assert_eq!(image.get_pixel(0, 0).0, [200, 0, 0, 255]);
+        let half = image.get_pixel(1, 0).0;
+        assert_eq!(half[3], 128);
+        // 100 premultiplied at alpha 128 unpremultiplies to ~199, not 100.
+        assert!(
+            half[0] >= 198 && half[0] <= 201,
+            "unpremultiplied red was {}",
+            half[0]
+        );
+        assert_eq!(image.get_pixel(2, 0).0[3], 0);
+    }
+
+    #[test]
+    fn a_key_jpeg_carries_the_matte_as_luminance() {
+        // The monitor path is JPEG, so the key has to survive it. Lossy, so this asserts the
+        // bands are distinguishable rather than exact.
+        let base64 = encode_jpeg(&target(), 90, PreviewView::Key).unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&base64)
+            .unwrap();
+        let image = image::load_from_memory(&bytes).unwrap().to_luma8();
+
+        let opaque = image.get_pixel(0, 0).0[0];
+        let transparent = image.get_pixel(2, 0).0[0];
+        assert!(opaque > 200, "opaque should be near white, was {opaque}");
+        assert!(
+            transparent < 55,
+            "transparent should be near black, was {transparent}"
+        );
+    }
+
+    #[test]
+    fn an_unknown_view_is_refused_rather_than_defaulted() {
+        // Silently showing fill to a client that asked for key would misreport what is
+        // actually being keyed on air.
+        assert_eq!(PreviewView::parse(None).unwrap(), PreviewView::Fill);
+        assert_eq!(PreviewView::parse(Some("fill")).unwrap(), PreviewView::Fill);
+        assert_eq!(PreviewView::parse(Some("key")).unwrap(), PreviewView::Key);
+
+        let error = PreviewView::parse(Some("matte")).expect_err("must refuse");
+        assert_eq!(error.code, ErrorCode::InvalidPayload);
+        assert!(
+            error.message.contains("matte"),
+            "message should name the value: {}",
+            error.message
+        );
     }
 }

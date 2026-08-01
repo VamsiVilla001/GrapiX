@@ -172,8 +172,13 @@ check(
 
 // A large message over a stream socket is the case framing exists for: the reply carries
 // a base64 JPEG, which will not fit in one read.
+//
+// `sceneId` is explicit. This used to rely on the engine picking a scene when none was cued,
+// which it did from HashMap order — so the harness passed while an operator could get a
+// preview of a scene they never selected. The engine now refuses; callers name what they mean.
 const preview = await client.request("preview.request", {
   channel: "preview",
+  sceneId: scene.id,
   source: { type: "scaled-stage", maxWidth: 960, maxHeight: 540 },
   encoding: "jpeg",
   quality: 80

@@ -1,5 +1,10 @@
 import * as THREE from "three";
-import { normalizeSlabProperties, resolveSceneObjectHierarchy } from "@grapix/shared-types";
+import {
+  normalizeSlabProperties,
+  resolveSceneObjectHierarchy,
+  resolveTextureFit,
+  TEXTURE_FIT_IDENTITY
+} from "@grapix/shared-types";
 import type {
   CameraSceneObject,
   LightSceneObject,
@@ -36,10 +41,32 @@ type ThreeRenderableSceneObject =
   | Extract<RenderableSceneObject, { type: "rect" | "ellipse" | "image" }>;
 
 /**
+ * Canvas Y (down-positive) to three.js world Y (up-positive).
+ *
+ * A negation, which is numerically what reflecting the content root did — the difference is that
+ * this moves only the position and leaves the object's geometry, UVs and winding untouched.
+ */
+function canvasToWorldY(y: number): number {
+  return -y;
+}
+
+/**
+ * Canvas rotation to world rotation, for axes the Y negation reverses.
+ *
+ * Reflecting Y conjugates a rotation: Rz(t) becomes Rz(-t) and Rx(t) becomes Rx(-t), while Ry is
+ * unchanged. The reflection applied that for free, so removing it means applying it here or every
+ * rotated object would spin the opposite way.
+ */
+function canvasToWorldAngleDegrees(degrees: number): number {
+  return -degrees;
+}
+
+/**
  * Depth-buffered 3D layer used by the editor viewport. Pixi remains the 2D
  * broadcast compositor; real mesh primitives live here so Z translation,
  * perspective, face occlusion, and XYZ rotation are actual 3D transforms.
  */
+
 export class ThreeSceneLayer {
   private renderer: THREE.WebGLRenderer | null = null;
   private host: HTMLElement | null = null;
@@ -55,12 +82,20 @@ export class ThreeSceneLayer {
     this.lighting.name = "Scene lighting";
     addThreeChild(this.scene, this.lighting, "3D lighting root");
     addThreeChild(this.scene, this.content, "3D content root");
-    // GrapiX authors canvas coordinates with +Y pointing down. Three.js uses
-    // a right-handed +Y-up world. Reflect the authored scene once at the layer
-    // roots instead of rotating the camera 180 degrees around its view axis
-    // (which also mirrors X and made material-backed Quads move backwards).
+    // GrapiX authors canvas coordinates with +Y pointing down; three.js uses a right-handed
+    // +Y-up world. Lighting is reflected at its root because a light has no geometry — only
+    // positions and directions — so a reflection there is exactly the coordinate change wanted.
+    //
+    // Content is NOT reflected. It used to be (`content.scale.y = -1`), which placed objects
+    // correctly and quietly broke every textured surface: reflecting a parent mirrors its
+    // children's geometry, so a quad showed its texture upside down *and* had its triangle
+    // winding inverted, which under back-face culling showed the mirrored back face. Together
+    // those read as a texture flipped both vertically and horizontally. The camera-rotation
+    // trick this replaced had the same defect for the same reason.
+    //
+    // So content converts the axis where the axis actually lives — in the positions, via
+    // `canvasToWorldY` — and leaves geometry handedness alone.
     this.lighting.scale.y = -1;
-    this.content.scale.y = -1;
   }
 
   mount(host: HTMLElement, scene: SceneDocument): void {
@@ -116,6 +151,16 @@ export class ThreeSceneLayer {
       );
       this.renderer.render(this.scene, this.camera);
     }
+  }
+
+  /**
+   * Return the current transparent 3D layer for viewport/thumbnail compositing.
+   * Render immediately before read-back because WebGL drawing buffers are not retained.
+   */
+  captureFrame(): HTMLCanvasElement | null {
+    if (!this.renderer) return null;
+    this.renderer.render(this.scene, this.camera);
+    return this.renderer.domElement;
   }
 
   destroy(): void {
@@ -179,22 +224,26 @@ export class ThreeSceneLayer {
       object.faceMaterials?.main,
       object.fill,
       object.opacity,
-      this.textureLoader
+      this.textureLoader,
+      // A planar object's face IS its width x height, so its fit mode is exactly resolvable.
+      { width: object.width, height: object.height }
     );
     const surface = new THREE.Mesh(geometry, material);
     surface.castShadow = true;
     surface.receiveShadow = true;
     surface.position.set(
       object.width / 2 - (object.anchor?.x ?? 0),
-      object.height / 2 - (object.anchor?.y ?? 0),
+      canvasToWorldY(object.height / 2 - (object.anchor?.y ?? 0)),
       0
     );
 
     const root = new THREE.Group();
     root.name = object.name;
     root.userData.sceneObjectId = object.id;
-    root.position.set(object.x, object.y, object.zDepth);
-    root.rotation.z = THREE.MathUtils.degToRad(object.rotation ?? 0);
+    root.position.set(object.x, canvasToWorldY(object.y), object.zDepth);
+    root.rotation.z = THREE.MathUtils.degToRad(
+      canvasToWorldAngleDegrees(object.rotation ?? 0)
+    );
     root.scale.set(object.scaleX ?? 1, object.scaleY ?? 1, object.scaleZ ?? 1);
     addThreeChild(root, surface, `physical 2D surface for ${object.id}`);
     return root;
@@ -226,13 +275,15 @@ export class ThreeSceneLayer {
       // through element:N without flattening the other PBR surfaces.
       const importedMaterials = await gltf.parser.getDependencies("material") as THREE.Material[];
       const materialIndices = new Map(importedMaterials.map((material, index) => [material.uuid, index]));
+      // An imported glTF surface carries its own UVs and arbitrary geometry, so there is no
+      // width x height to fit a texture against; the authored UV transform is the whole story.
       const mainOverride = object.materialSlots.main
-        ? await createMaterial(object.faceMaterials?.main, object.fill, object.opacity, this.textureLoader)
+        ? await createMaterial(object.faceMaterials?.main, object.fill, object.opacity, this.textureLoader, null)
         : null;
       const elementOverrides = await Promise.all((object.materialElements ?? []).map(async (_, index) => {
         const slot = `element:${index}`;
         return object.materialSlots[slot]
-          ? createMaterial(object.faceMaterials?.[slot], object.fill, object.opacity, this.textureLoader)
+          ? createMaterial(object.faceMaterials?.[slot], object.fill, object.opacity, this.textureLoader, null)
           : null;
       }));
 
@@ -519,8 +570,18 @@ async function materialsForObject(
   const objectCullMode = object.meshKind === "slab"
     ? normalizeSlabProperties(object.slab).culling
     : undefined;
+  // "main" is the primary front face, whose extent is the object's width x height. Bevel,
+  // extrusion and side faces are sized from depth and bevel geometry, so they get no fit surface
+  // rather than a plausible-looking wrong one.
   const face = (slot: string, fallback: string) =>
-    createMaterial(object.faceMaterials?.[slot], fallback, object.opacity, loader, objectCullMode);
+    createMaterial(
+      object.faceMaterials?.[slot],
+      fallback,
+      object.opacity,
+      loader,
+      slot === "main" ? { width: object.width, height: object.height } : null,
+      objectCullMode
+    );
 
   if (object.meshKind === "slab") {
     return Promise.all([
@@ -556,11 +617,18 @@ async function materialsForObject(
   return face("main", object.fill);
 }
 
+/**
+ * `surface` is the drawn extent of the face in canvas units, used to resolve the texture's fit
+ * mode. Pass `null` when the caller genuinely does not know it: a cube or slab face is not the
+ * object's width x height, and guessing would crop textures by an invented amount. A null surface
+ * keeps the authored UV transform exactly as it is today.
+ */
 async function createMaterial(
   face: ResolvedFaceMaterial | undefined,
   fallback: string,
   objectOpacity: number,
   loader: THREE.TextureLoader,
+  surface: { width: number; height: number } | null,
   cullModeOverride?: "back" | "front" | "none"
 ): Promise<THREE.MeshStandardMaterial> {
   const descriptor = describeMeshSurfaceMaterial(face, fallback, objectOpacity);
@@ -600,7 +668,7 @@ async function createMaterial(
         ? THREE.LinearSRGBColorSpace
         : THREE.SRGBColorSpace;
       texture.anisotropy = 4;
-      applyTextureCoordinates(texture, resolved);
+      applyTextureCoordinates(texture, resolved, surface);
       material.map = texture;
       material.needsUpdate = true;
     } catch {
@@ -659,7 +727,11 @@ export function describeMeshSurfaceMaterial(
   };
 }
 
-function applyTextureCoordinates(texture: THREE.Texture, resolved: ResolvedFaceMaterial["resolved"] | undefined): void {
+function applyTextureCoordinates(
+  texture: THREE.Texture,
+  resolved: ResolvedFaceMaterial["resolved"] | undefined,
+  surface: { width: number; height: number } | null
+): void {
   const slot = resolved?.textureSlots[0];
   if (!slot) return;
   texture.wrapS = textureWrap(slot.wrap);
@@ -667,15 +739,31 @@ function applyTextureCoordinates(texture: THREE.Texture, resolved: ResolvedFaceM
   texture.magFilter = slot.filtering === "nearest" ? THREE.NearestFilter : THREE.LinearFilter;
   texture.minFilter = slot.filtering === "nearest" ? THREE.NearestMipmapNearestFilter : THREE.LinearMipmapLinearFilter;
 
+  // The fit mode picks the rectangle of the texture the surface samples, which is where the
+  // image's own resolution finally matters: a 256x128 texture on a 360x210 quad is cropped, not
+  // squashed. `image` is populated because this runs after the loader resolves; without it there
+  // is no resolution to respect, so the authored transform stands alone.
+  const image = texture.image as { width?: number; height?: number } | undefined;
+  const fit = surface && image?.width && image?.height
+    ? resolveTextureFit(slot.fit, {
+      surfaceWidth: surface.width,
+      surfaceHeight: surface.height,
+      textureWidth: image.width,
+      textureHeight: image.height
+    })
+    : TEXTURE_FIT_IDENTITY;
+
   const uvScale = vector2Parameter(resolved.parameters.uvScale, slot.uvScale);
   const uvOffset = vector2Parameter(resolved.parameters.uvOffset, slot.uvOffset);
   const uvRotation = numericParameter(resolved.parameters.uvRotation, slot.uvRotation);
-  const repeatX = (slot.flipX ? -1 : 1) * uvScale[0];
-  const repeatY = (slot.flipY ? -1 : 1) * uvScale[1];
+  // Authored scale narrows the fitted rectangle rather than replacing it, so a fit crop and a
+  // deliberate UV zoom compose instead of one silently discarding the other.
+  const repeatX = (slot.flipX ? -1 : 1) * uvScale[0] * fit.repeat[0];
+  const repeatY = (slot.flipY ? -1 : 1) * uvScale[1] * fit.repeat[1];
   texture.repeat.set(repeatX, repeatY);
   texture.offset.set(
-    uvOffset[0] + (slot.flipX ? 1 : 0),
-    uvOffset[1] + (slot.flipY ? 1 : 0)
+    fit.offset[0] + uvOffset[0] + (slot.flipX ? fit.repeat[0] : 0),
+    fit.offset[1] + uvOffset[1] + (slot.flipY ? fit.repeat[1] : 0)
   );
   texture.center.set(slot.uvPivot[0], slot.uvPivot[1]);
   texture.rotation = THREE.MathUtils.degToRad(uvRotation);
@@ -707,7 +795,7 @@ function applyObjectTransform<T extends THREE.Object3D>(rendered: T, object: Mes
   };
   const contentOffset = new THREE.Vector3(
     object.width / 2 - anchor.x,
-    object.height / 2 - anchor.y,
+    canvasToWorldY(object.height / 2 - anchor.y),
     object.depth / 2 - anchor.z
   );
   rendered.position.copy(contentOffset);
@@ -715,11 +803,15 @@ function applyObjectTransform<T extends THREE.Object3D>(rendered: T, object: Mes
   const root = new THREE.Group();
   root.name = object.name;
   root.userData.sceneObjectId = object.id;
-  root.position.set(object.x, object.y, object.zDepth);
+  root.position.set(object.x, canvasToWorldY(object.y), object.zDepth);
   root.rotation.set(
-    THREE.MathUtils.degToRad(object.rotationX ?? 0),
+    // X and Z reverse with the Y axis; Y does not. Getting this wrong is invisible on an
+    // unrotated object and obvious on a rotated one, which is the worst way to find out.
+    THREE.MathUtils.degToRad(canvasToWorldAngleDegrees(object.rotationX ?? 0)),
     THREE.MathUtils.degToRad(object.rotationY ?? 0),
-    THREE.MathUtils.degToRad(object.rotationZ ?? object.rotation ?? 0),
+    THREE.MathUtils.degToRad(
+      canvasToWorldAngleDegrees(object.rotationZ ?? object.rotation ?? 0)
+    ),
     "XYZ"
   );
   root.scale.set(object.scaleX ?? 1, object.scaleY ?? 1, object.scaleZ ?? 1);
@@ -734,12 +826,17 @@ export function projectMeshBounds(scene: SceneDocument, object: MeshSceneObject)
     y: object.anchor?.y ?? 0,
     z: object.depth / 2
   };
+  // Must compose exactly as `applyObjectTransform` does, including the Y negation and the
+  // reversed X/Z rotations: this is what selection handles and hit-testing are drawn from, so a
+  // mismatch puts the handles somewhere the object is not.
   const transform = new THREE.Matrix4().compose(
-    new THREE.Vector3(object.x, object.y, object.zDepth),
+    new THREE.Vector3(object.x, canvasToWorldY(object.y), object.zDepth),
     new THREE.Quaternion().setFromEuler(new THREE.Euler(
-      THREE.MathUtils.degToRad(object.rotationX ?? 0),
+      THREE.MathUtils.degToRad(canvasToWorldAngleDegrees(object.rotationX ?? 0)),
       THREE.MathUtils.degToRad(object.rotationY ?? 0),
-      THREE.MathUtils.degToRad(object.rotationZ ?? object.rotation ?? 0),
+      THREE.MathUtils.degToRad(
+        canvasToWorldAngleDegrees(object.rotationZ ?? object.rotation ?? 0)
+      ),
       "XYZ"
     )),
     new THREE.Vector3(object.scaleX ?? 1, object.scaleY ?? 1, object.scaleZ ?? 1)
@@ -751,7 +848,7 @@ export function projectMeshBounds(scene: SceneDocument, object: MeshSceneObject)
       for (const z of [0, object.depth]) {
         points.push(projectPoint(scene, camera, new THREE.Vector3(
           x - anchor.x,
-          y - anchor.y,
+          canvasToWorldY(y - anchor.y),
           z - anchor.z
         ).applyMatrix4(transform)));
       }
@@ -762,7 +859,11 @@ export function projectMeshBounds(scene: SceneDocument, object: MeshSceneObject)
   const minY = Math.min(...points.map((point) => point.y));
   const maxX = Math.max(...points.map((point) => point.x));
   const maxY = Math.max(...points.map((point) => point.y));
-  const center = projectPoint(scene, camera, new THREE.Vector3(object.x, object.y, object.zDepth));
+  const center = projectPoint(
+    scene,
+    camera,
+    new THREE.Vector3(object.x, canvasToWorldY(object.y), object.zDepth)
+  );
   return {
     x: minX,
     y: minY,
@@ -777,8 +878,10 @@ function projectPoint(
   camera: THREE.Camera,
   point: THREE.Vector3
 ): THREE.Vector3 {
-  // Match the Y reflection applied to the Three.js content root.
-  const projected = new THREE.Vector3(point.x, -point.y, point.z).project(camera);
+  // `point` is already in three.js world space: callers convert canvas Y through
+  // `canvasToWorldY` exactly as the renderer does. This used to negate Y itself to match the
+  // content root's reflection, which meant the axis convention lived in two places.
+  const projected = point.clone().project(camera);
   return new THREE.Vector3(
     (projected.x * 0.5 + 0.5) * scene.canvas.width,
     (-projected.y * 0.5 + 0.5) * scene.canvas.height,

@@ -8,9 +8,12 @@
  * This wrapper is the enforcement point. There is no method here that mutates a
  * scene, so an accidental edit from playout code cannot be written.
  *
- * It runs alongside the existing protocol v2 `NativeRendererClient` rather than
- * replacing it: the v2 path is what Playout uses today and is verified, so the v3
- * engine path is added beside it and switched over deliberately.
+ * Monitoring sits here for the same reason it is safe to: a preview stream renders what a
+ * channel already shows and cannot change it.
+ *
+ * The protocol v2 `NativeRendererClient` this once ran beside has been retired. This is
+ * the only renderer path, which is why a missing engine is reported rather than worked
+ * around — there is no second renderer to fall back to.
  */
 
 import {
@@ -22,15 +25,27 @@ import {
   WebSocketEngineTransport,
   type EngineCapabilities,
   type EngineChannel,
+  type EngineConnectionEvent,
   type EngineOutputFormat,
   type EngineProfile,
   type EngineRecord,
   type EngineState,
   type EngineStatus,
   type OutputsReplyPayload,
+  type PreviewView,
   type ResyncRequiredEventPayload
 } from "@grapix/render-protocol";
-import type { SceneDocument } from "@grapix/shared-types";
+import type { AssetLibraryItem, SceneDocument } from "@grapix/shared-types";
+
+/** What the engine reports when a preview stream starts. */
+export interface PreviewStreamAck {
+  streamId: string;
+  targetFps: number;
+  intervalMs: number;
+  width: number;
+  height: number;
+  warnings?: string[];
+}
 
 export const PLAYOUT_CLIENT_VERSION = "0.2.0";
 
@@ -78,6 +93,13 @@ export interface TakeResult {
 export class PlayoutEngineController {
   private readonly registry = new EngineRegistry();
   private readonly connections = new Map<string, EngineConnection>();
+  /**
+   * Event subscribers that outlive any single connection.
+   *
+   * Held here rather than on the `EngineConnection` because that object is replaced on
+   * every reconnect (`autoReconnect: false` — the supervisor owns retries).
+   */
+  private readonly eventListeners = new Set<(event: EngineConnectionEvent) => void>();
   private readonly options: EngineControllerOptions;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -177,6 +199,12 @@ export class PlayoutEngineController {
         default:
           break;
       }
+
+      // Fan out to subscribers that outlive this socket. `connect` builds a fresh
+      // `EngineConnection` on every reconnect, so a listener attached straight to the
+      // connection would silently stop firing the first time the engine restarted.
+      // Monitors must not have to know about connection churn.
+      for (const listener of this.eventListeners) listener(event);
     });
 
     this.connections.set(profileId, connection);
@@ -318,11 +346,60 @@ export class PlayoutEngineController {
   /** Load a published scene. Playout supplies it; it never authors it. */
   async load(profileId: string, scene: SceneDocument, stageId?: string): Promise<void> {
     const connection = this.requireConnection(profileId);
+    await this.ensureSceneAssets(connection, scene.assets);
     await connection.request(
       "scene.load",
       { scene, ...(stageId ? { stageId } : {}), prepare: false },
       { sceneId: scene.id, sceneRevision: scene.revision ?? 0 }
     );
+  }
+
+  /**
+   * Register and upload every published asset before scene preparation.
+   *
+   * The engine deliberately refuses undeclared bytes. Previously Playout skipped
+   * this protocol entirely, so a scene containing a project font was guaranteed
+   * to fail preparation even though the font was present in the scene library.
+   */
+  private async ensureSceneAssets(
+    connection: EngineConnection,
+    assets: AssetLibraryItem[]
+  ): Promise<void> {
+    for (const asset of assets) {
+      if (!asset.checksum) {
+        throw new Error(`asset ${asset.assetId} has no checksum and cannot be sent to the render engine`);
+      }
+      const registered = await connection.request("asset.register", {
+        assetId: asset.assetId,
+        uri: asset.source,
+        transport: "upload",
+        mimeType: asset.mimeType ?? "application/octet-stream",
+        sizeBytes: asset.sizeBytes ?? 0,
+        sha256: asset.checksum
+      });
+      const registration = registered.payload as {
+        alreadyCached?: boolean;
+        maxChunkBytes?: number;
+      };
+      if (registration.alreadyCached) continue;
+
+      const bytes = await readAssetBytes(asset);
+      const chunkBytes = Math.max(1, registration.maxChunkBytes ?? 256 * 1024);
+      const chunkCount = Math.max(1, Math.ceil(bytes.byteLength / chunkBytes));
+      for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
+        const start = chunkIndex * chunkBytes;
+        const end = Math.min(bytes.byteLength, start + chunkBytes);
+        const chunk = bytes.subarray(start, end);
+        await connection.request("asset.upload", {
+          assetId: asset.assetId,
+          sha256: asset.checksum,
+          chunkIndex,
+          chunkCount,
+          data: Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength).toString("base64"),
+          totalBytes: bytes.byteLength
+        });
+      }
+    }
   }
 
   async prepare(profileId: string, sceneId: string, viewportIds?: string[]): Promise<void> {
@@ -619,6 +696,84 @@ export class PlayoutEngineController {
     await connection.request("output.remove", { outputId });
   }
 
+  // -------------------------------------------------------------------------
+  // Monitoring
+  // -------------------------------------------------------------------------
+
+  /**
+   * Watch a channel as a stream of JPEG frames.
+   *
+   * This is what turns the operator's Preview and Program panels from a slate into a
+   * picture. It is an *observation*, which is why it belongs in a controller whose rule
+   * is that nothing here mutates a scene: a preview stream renders what the channel is
+   * already showing and cannot change it.
+   *
+   * `view` selects fill or key. The key is the greyscale matte a downstream keyer cuts —
+   * the broadcast way to check transparency, and the reason no alpha-capable codec is
+   * involved.
+   *
+   * The engine bounds the cadence itself and drops a tick it cannot serve rather than
+   * queueing, so a monitor can never push Program past its deadline.
+   */
+  async startPreviewStream(
+    profileId: string,
+    request: {
+      streamId: string;
+      channel: EngineChannel;
+      view?: PreviewView;
+      maxWidth: number;
+      maxHeight: number;
+      targetFps: number;
+      quality?: number;
+    }
+  ): Promise<PreviewStreamAck> {
+    const connection = this.requireConnection(profileId);
+    const reply = await connection.request("preview.streamStart", {
+      streamId: request.streamId,
+      channel: request.channel,
+      source: {
+        type: "scaled-stage",
+        maxWidth: request.maxWidth,
+        maxHeight: request.maxHeight
+      },
+      encoding: "jpeg",
+      ...(request.view ? { view: request.view } : {}),
+      targetFps: request.targetFps,
+      ...(request.quality !== undefined ? { quality: request.quality } : {})
+    });
+    return reply.payload as PreviewStreamAck;
+  }
+
+  /**
+   * Stop watching.
+   *
+   * Tolerant by design: the engine drops every stream belonging to a client when the
+   * socket closes, so after a reconnect the stream this is stopping may legitimately no
+   * longer exist. Failing here would turn routine teardown into a logged error.
+   */
+  async stopPreviewStream(profileId: string, streamId: string): Promise<void> {
+    try {
+      const connection = this.requireConnection(profileId);
+      await connection.request("preview.streamStop", { streamId });
+    } catch {
+      // Already gone. Nothing to release.
+    }
+  }
+
+  /**
+   * Subscribe to engine events across reconnects.
+   *
+   * Not scoped to a profile or a socket: the subscription is registered on the
+   * controller, so it keeps firing after the supervisor replaces the connection. A
+   * monitor attaches once at startup, before any engine exists, and still receives
+   * frames once one appears.
+   */
+  onEngineEvent(listener: (event: EngineConnectionEvent) => void): () => void {
+    this.eventListeners.add(listener);
+    return () => this.eventListeners.delete(listener);
+  }
+
+
   private requireConnection(profileId: string): EngineConnection {
     const connection = this.connections.get(profileId);
     if (!connection) {
@@ -626,4 +781,18 @@ export class PlayoutEngineController {
     }
     return connection;
   }
+}
+async function readAssetBytes(asset: AssetLibraryItem): Promise<Uint8Array> {
+  const dataUrl = asset.source.match(/^data:[^,]*?(;base64)?,(.*)$/s);
+  if (dataUrl) {
+    if (dataUrl[1]) return new Uint8Array(Buffer.from(dataUrl[2] ?? "", "base64"));
+    const decoded = decodeURIComponent(dataUrl[2] ?? "");
+    return Uint8Array.from(decoded, (character) => character.charCodeAt(0));
+  }
+
+  const response = await fetch(asset.source);
+  if (!response.ok) {
+    throw new Error(`asset ${asset.assetId} returned HTTP ${response.status}`);
+  }
+  return new Uint8Array(await response.arrayBuffer());
 }

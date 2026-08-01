@@ -151,11 +151,21 @@ impl Rect {
     ///
     /// This is the precision rule. Call it before narrowing anything for the GPU.
     pub fn to_local(&self, origin: Point) -> Rect {
-        Rect::new(self.x - origin.x, self.y - origin.y, self.width, self.height)
+        Rect::new(
+            self.x - origin.x,
+            self.y - origin.y,
+            self.width,
+            self.height,
+        )
     }
 
     pub fn to_stage(&self, origin: Point) -> Rect {
-        Rect::new(self.x + origin.x, self.y + origin.y, self.width, self.height)
+        Rect::new(
+            self.x + origin.x,
+            self.y + origin.y,
+            self.width,
+            self.height,
+        )
     }
 
     /// Narrow to the precision the GPU actually uses.
@@ -281,9 +291,7 @@ impl VirtualCanvas {
                 self.logical_width,
                 self.logical_height,
             ),
-            OriginAnchor::TopLeft => {
-                Rect::new(0.0, 0.0, self.logical_width, self.logical_height)
-            }
+            OriginAnchor::TopLeft => Rect::new(0.0, 0.0, self.logical_width, self.logical_height),
         }
     }
 
@@ -346,7 +354,9 @@ pub enum ViewportSource {
         #[serde(rename = "surfaceId")]
         surface_id: String,
     },
-    Rect { bounds: Rect },
+    Rect {
+        bounds: Rect,
+    },
 }
 
 impl Default for ViewportSource {
@@ -496,7 +506,9 @@ pub enum OutputMappingSource {
         #[serde(rename = "viewportId")]
         viewport_id: String,
     },
-    Rect { bounds: Rect },
+    Rect {
+        bounds: Rect,
+    },
 }
 
 impl Default for OutputMappingSource {
@@ -751,9 +763,7 @@ impl StageDocument {
 
         self.output_mappings
             .iter()
-            .filter(|mapping| {
-                mapping.enabled && enabled.contains(&mapping.output_id.as_str())
-            })
+            .filter(|mapping| mapping.enabled && enabled.contains(&mapping.output_id.as_str()))
             .map(|mapping| self.resolve_output_source(mapping))
             .filter(|rect| !rect.is_empty())
             .collect()
@@ -853,7 +863,9 @@ impl StageDocument {
             );
         }
 
-        let needs_tiling = self.canvas.exceeds_texture_limit(limits.max_texture_dimension);
+        let needs_tiling = self
+            .canvas
+            .exceeds_texture_limit(limits.max_texture_dimension);
         if needs_tiling && !self.tiling.enabled {
             error(
                 "TILING_REQUIRED",

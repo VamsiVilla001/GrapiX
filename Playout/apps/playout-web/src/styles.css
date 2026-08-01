@@ -294,7 +294,8 @@ button {
 
 .scene-card {
   display: grid;
-  grid-template-columns: 65px minmax(0, 1fr) auto;
+  /* Take ID first: it is what an operator reads and types. */
+  grid-template-columns: 38px 65px minmax(0, 1fr) auto;
   align-items: center;
   width: calc(100% - 10px);
   min-height: 53px;
@@ -406,7 +407,10 @@ button {
   cursor: not-allowed;
 }
 
-.add-to-rundown {
+.library-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
   margin: 7px;
 }
 
@@ -423,9 +427,9 @@ button {
 }
 
 .rundown-columns,
-.rundown-row {
+.take-row {
   display: grid;
-  grid-template-columns: 45px minmax(150px, 1fr) 90px 102px 42px;
+  grid-template-columns: 45px minmax(150px, 1fr) 90px 102px 66px;
   align-items: center;
 }
 
@@ -618,6 +622,44 @@ button {
   color: #738592;
 }
 
+.monitor-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/*
+ * FILL / KEY. Two hard states rather than a dropdown: an operator checking a matte under
+ * time pressure should not have to open a menu, and the active one must be readable at a
+ * glance from across a gallery.
+ */
+.monitor-view-toggle {
+  display: flex;
+  border: 1px solid #35424c;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.monitor-view-toggle button {
+  padding: 1px 6px;
+  border: 0;
+  background: #0d1419;
+  color: #6c7f8d;
+  font: inherit;
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.monitor-view-toggle button:hover {
+  color: #a8bcc9;
+}
+
+.monitor-view-toggle button.active {
+  background: #2c3b46;
+  color: #dceaf3;
+}
+
 .output-label {
   display: flex;
   align-items: center;
@@ -652,6 +694,40 @@ button {
   margin: 5px;
   border: 1px solid #35424c;
   box-shadow: inset 0 0 25px #0008;
+  overflow: hidden;
+}
+
+/*
+ * Slate and picture occupy the same cell so the picture paints over the slate. The slate
+ * is the fallback layer rather than an either/or branch: a gap in frames reveals it
+ * instead of leaving an operator looking at an empty box.
+ */
+.monitor-screen > * {
+  grid-area: 1 / 1;
+}
+
+.monitor-frames {
+  width: 100%;
+  height: 100%;
+  /* `contain` keeps the rendered aspect; a stretched Program monitor lies about framing. */
+  object-fit: contain;
+  /* Opaque: JPEG carries no alpha, so a checkerboard behind it would imply transparency
+     the frame does not have — and would let slate text show through the letterbox. */
+  background: #05080b;
+  opacity: 0;
+  transition: opacity 140ms linear;
+}
+
+.monitor-frames.painting {
+  opacity: 1;
+}
+
+/* WebView2 retains the last decoded MJPEG part after Program is cleared. Keep the stream
+   connected for the next take, but cover that stale frame after an explicit take-out. */
+.monitor-clear-cover {
+  width: 100%;
+  height: 100%;
+  background: #000;
 }
 
 .monitor-slate {
@@ -1060,6 +1136,11 @@ button {
   background: #2a3540;
 }
 
+.output-badge.windowed {
+  color: #d9efff;
+  background: #24516a;
+}
+
 .output-detail {
   display: flex;
   flex-wrap: wrap;
@@ -1127,4 +1208,210 @@ button {
 /* Dropping on a row inserts above it, so the marker sits on the top edge. */
 .rundown-row.drop-before {
   box-shadow: inset 0 2px 0 0 var(--blue);
+}
+
+/* --- Scene Manager: Take ID recall ---------------------------------------- */
+
+/*
+ * The recall field. An operator types a number and the scene goes on air — the fastest path
+ * in the product, so it sits above the search box rather than behind a menu.
+ */
+.recall-box {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  margin: 7px 7px 0;
+  padding: 0 7px;
+  border: 1px solid #2f4a5e;
+  border-radius: 3px;
+  background: #0f1a23;
+  color: #7f9aad;
+}
+
+.recall-box:focus-within {
+  border-color: #54a8ea;
+}
+
+.recall-box input {
+  height: 29px;
+  border: 0;
+  background: none;
+  color: #e8eef3;
+  font-family: Consolas, monospace;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  outline: none;
+}
+
+/* The scene's Take ID, in the Scene Manager list. */
+.take-id {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid #22323d;
+  color: #9fd2f5;
+  font-family: Consolas, monospace;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* A scene that is currently on Program, seen from the Scene Manager. */
+.scene-card.on-air {
+  border-color: #b6423f;
+  box-shadow: inset 3px 0 #e2564f;
+}
+
+.scene-card.on-air .take-id {
+  color: #ffb3ae;
+}
+
+/* --- Take List ------------------------------------------------------------ */
+
+.take-row {
+  min-height: 34px;
+  padding: 0 5px;
+  border-bottom: 1px solid #1a2530;
+  cursor: pointer;
+}
+
+.take-row:hover {
+  background: #141f28;
+}
+
+.take-row.selected {
+  background: #17324a;
+  box-shadow: inset 3px 0 #54a8ea;
+}
+
+/*
+ * The cursor is where Take In will act next. Distinct from selection on purpose: an operator
+ * can inspect one take while the show is queued on another, and confusing the two is how the
+ * wrong graphic goes to air.
+ */
+.take-row.cursor {
+  box-shadow: inset 3px 0 #f3c969;
+}
+
+.take-row.preview {
+  background: #14291f;
+}
+
+.take-row.online {
+  background: #2a1417;
+  box-shadow: inset 3px 0 #e2564f;
+}
+
+.take-state {
+  color: #8fa2b1;
+  font-family: Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.take-state.in_preview,
+.take-state.cued,
+.take-state.loaded {
+  color: #7ee2b8;
+}
+
+.take-state.online,
+.take-state.taking_online,
+.take-state.continuing {
+  color: #ff8f8f;
+}
+
+.take-state.missing_asset,
+.take-state.error,
+.take-state.disconnected {
+  color: #f3c969;
+}
+
+/* Dedicated native Program window for a local-only virtual output. */
+.virtual-output-window {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #000;
+}
+
+.virtual-output-window img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  opacity: 0;
+}
+
+.virtual-output-window img.painting {
+  opacity: 1;
+}
+
+.virtual-output-clear {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  background: #000;
+}
+
+.virtual-output-status {
+  position: absolute;
+  color: #8fa2b1;
+  font: 13px/1.4 Consolas, monospace;
+  letter-spacing: 0.04em;
+}
+
+
+.virtual-output-context-menu {
+  position: fixed;
+  z-index: 20;
+  width: 220px;
+  border: 1px solid #35424c;
+  border-radius: 4px;
+  padding: 5px;
+  background: #11181e;
+  box-shadow: 0 12px 28px rgb(0 0 0 / 55%);
+  color: #e5edf3;
+  font: 13px/1.3 Inter, sans-serif;
+}
+
+.virtual-output-context-menu button {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+  border: 0;
+  border-radius: 3px;
+  padding: 7px 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.virtual-output-context-menu button:hover,
+.virtual-output-context-menu button:focus-visible {
+  background: #263541;
+  outline: none;
+}
+
+.virtual-output-context-menu button:disabled {
+  color: #677782;
+  cursor: not-allowed;
+}
+
+.virtual-output-menu-separator {
+  height: 1px;
+  margin: 4px 3px;
+  background: #2f3b44;
+}
+
+.virtual-output-context-menu p {
+  margin: 6px 8px 3px;
+  color: #f3a0a4;
+  font-size: 11px;
 }

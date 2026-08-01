@@ -1,148 +1,12 @@
-//! Daemon and output configuration, including broadcast format validation.
-
-use std::fmt::Write as _;
-use std::fs::{self, OpenOptions};
-use std::io::Write as _;
-use std::path::{Path, PathBuf};
+//! Output configuration and broadcast format validation.
+//!
+//! The daemon process config that used to live here — bind host, port 4200, auth token and
+//! allowed origins — went with the retired binary. Nothing called `DaemonConfig::from_env`
+//! once the transport was gone, and leaving it meant the repository still carried a default
+//! port for a renderer that must not exist. The engine configures itself from
+//! `services/render-engine/engine.toml`.
 
 use serde::{Deserialize, Serialize};
-
-/// Daemon process configuration, sourced from environment variables.
-#[derive(Clone)]
-pub struct DaemonConfig {
-    pub host: String,
-    pub port: u16,
-    pub auth_token: String,
-    pub allowed_origins: Vec<String>,
-}
-
-impl DaemonConfig {
-    pub fn from_env() -> Result<Self, ConfigError> {
-        let host =
-            std::env::var("GRAPIX_RENDER_DAEMON_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-        let port = match std::env::var("GRAPIX_RENDER_DAEMON_PORT") {
-            Ok(raw) => raw
-                .parse::<u16>()
-                .map_err(|_| ConfigError::InvalidEnv("GRAPIX_RENDER_DAEMON_PORT", raw))?,
-            Err(_) => 4200,
-        };
-        let auth_token = load_or_create_auth_token()?;
-        let allowed_origins = comma_separated_env("GRAPIX_RENDER_DAEMON_ALLOWED_ORIGINS");
-
-        Ok(Self {
-            host,
-            port,
-            auth_token,
-            allowed_origins,
-        })
-    }
-}
-
-fn load_or_create_auth_token() -> Result<String, ConfigError> {
-    if let Ok(token) = std::env::var("GRAPIX_RENDER_DAEMON_TOKEN") {
-        return validate_auth_token(token, "GRAPIX_RENDER_DAEMON_TOKEN");
-    }
-
-    let path = std::env::var_os("GRAPIX_RENDER_DAEMON_TOKEN_FILE")
-        .map(PathBuf::from)
-        .unwrap_or_else(default_auth_token_path);
-
-    match fs::read_to_string(&path) {
-        Ok(token) => validate_auth_token(token, path.display().to_string()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => create_auth_token(&path),
-        Err(source) => Err(ConfigError::AuthTokenFile {
-            action: "read",
-            path,
-            source,
-        }),
-    }
-}
-
-fn create_auth_token(path: &Path) -> Result<String, ConfigError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|source| ConfigError::AuthTokenFile {
-            action: "create parent directory for",
-            path: path.to_path_buf(),
-            source,
-        })?;
-    }
-
-    let mut random_bytes = [0u8; 32];
-    getrandom::fill(&mut random_bytes).map_err(ConfigError::AuthTokenGeneration)?;
-    let mut token = String::with_capacity(random_bytes.len() * 2);
-
-    for byte in random_bytes {
-        write!(&mut token, "{byte:02x}").expect("writing to a String cannot fail");
-    }
-
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-
-    match options.open(path) {
-        Ok(mut file) => {
-            file.write_all(token.as_bytes())
-                .and_then(|()| file.write_all(b"\n"))
-                .map_err(|source| ConfigError::AuthTokenFile {
-                    action: "write",
-                    path: path.to_path_buf(),
-                    source,
-                })?;
-            Ok(token)
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            let token = fs::read_to_string(path).map_err(|source| ConfigError::AuthTokenFile {
-                action: "read",
-                path: path.to_path_buf(),
-                source,
-            })?;
-            validate_auth_token(token, path.display().to_string())
-        }
-        Err(source) => Err(ConfigError::AuthTokenFile {
-            action: "create",
-            path: path.to_path_buf(),
-            source,
-        }),
-    }
-}
-
-fn default_auth_token_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/render-daemon.token")
-}
-
-fn validate_auth_token(
-    token: String,
-    token_source: impl Into<String>,
-) -> Result<String, ConfigError> {
-    let token = token.trim().to_string();
-    let valid = token.len() >= 32
-        && token
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~'));
-
-    if !valid {
-        return Err(ConfigError::InvalidAuthToken {
-            token_source: token_source.into(),
-        });
-    }
-
-    Ok(token)
-}
-
-fn comma_separated_env(name: &'static str) -> Vec<String> {
-    std::env::var(name)
-        .unwrap_or_default()
-        .split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .collect()
-}
 
 /// Exact rational frame rate. 59.94 fps is `60000/1001`, never a float.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -284,21 +148,12 @@ pub const MAX_DIMENSION: u32 = 4320;
 pub const MIN_FRAME_RATE: u32 = 1;
 pub const MAX_FRAME_RATE: u32 = 240;
 
+/// Every variant is an output-format rejection.
+///
+/// The environment and authentication-token variants went with the retired daemon binary:
+/// output validation is all this crate configures now.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    #[error("environment variable {0} has invalid value {1:?}")]
-    InvalidEnv(&'static str, String),
-    #[error("render daemon authentication token from {token_source} must be at least 32 characters and contain only URL-safe characters")]
-    InvalidAuthToken { token_source: String },
-    #[error("failed to {action} render daemon authentication token file {path}: {source}")]
-    AuthTokenFile {
-        action: &'static str,
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("failed to generate render daemon authentication token: {0}")]
-    AuthTokenGeneration(getrandom::Error),
     #[error("width and height must be positive (got {width}x{height})")]
     InvalidDimensions { width: u32, height: u32 },
     #[error("width and height must not exceed {MAX_DIMENSION} (got {width}x{height})")]
@@ -550,19 +405,6 @@ mod tests {
         assert!(matches!(
             OutputConfig::from_message(message),
             Err(ConfigError::FrameRateOutOfRange { .. })
-        ));
-    }
-
-    #[test]
-    fn validates_auth_tokens() {
-        assert!(validate_auth_token("a".repeat(32), "test").is_ok());
-        assert!(matches!(
-            validate_auth_token("too-short".to_string(), "test"),
-            Err(ConfigError::InvalidAuthToken { .. })
-        ));
-        assert!(matches!(
-            validate_auth_token(format!("{}!", "a".repeat(32)), "test"),
-            Err(ConfigError::InvalidAuthToken { .. })
         ));
     }
 

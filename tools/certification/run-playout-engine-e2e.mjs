@@ -318,6 +318,15 @@ const unloaded = await call("POST", "/api/playout/engine/command/unload", {
 });
 check("scene unloaded", unloaded.status === 200);
 
+// And out of the library, so the operator's Scene Manager keeps matching the Editor's scenes.
+// Every run used to leave another "Playout e2e lower third" behind; seven of them had piled up.
+const purged = await call("DELETE", `/api/playout/scenes/${SCENE_ID}`);
+check(
+  "the proof scene is removed from the library",
+  purged.status === 200 || purged.status === 404,
+  `${purged.status} ${JSON.stringify(purged.payload).slice(0, 120)}`
+);
+
 console.log(`\n${pass.length} passed, ${fail.length} failed\n`);
 if (fail.length > 0) {
   console.log("Failed:");
