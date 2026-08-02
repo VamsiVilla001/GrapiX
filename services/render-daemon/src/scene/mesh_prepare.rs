@@ -10,6 +10,11 @@ use std::path::{Path, PathBuf};
 
 use base64::Engine;
 use glam::{EulerRot, Mat3, Mat4, Vec3, Vec4};
+use lyon_path::{math::point, Path as LyonPath};
+use lyon_tessellation::{
+    BuffersBuilder, FillOptions, FillTessellator, FillVertex, LineCap, LineJoin, StrokeOptions,
+    StrokeTessellator, StrokeVertex, VertexBuffers,
+};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -324,6 +329,58 @@ struct PlanarObjectDto {
     layer_id: String,
     #[serde(default)]
     z_index: f64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BezierPathDto {
+    closed: bool,
+    vertices: Vec<Vec2Dto>,
+    in_tangents: Vec<Vec2Dto>,
+    out_tangents: Vec<Vec2Dto>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ShapeObjectDto {
+    id: String,
+    x: f64,
+    y: f64,
+    #[serde(default)]
+    z_depth: f64,
+    #[serde(default)]
+    z_index: f64,
+    #[serde(default)]
+    layer_id: String,
+    #[serde(default)]
+    rotation: f64,
+    #[serde(default = "default_scale")]
+    scale_x: f64,
+    #[serde(default = "default_scale")]
+    scale_y: f64,
+    #[serde(default = "default_scale")]
+    scale_z: f64,
+    #[serde(default)]
+    anchor: Vec2Dto,
+    #[serde(default = "default_opacity")]
+    opacity: f64,
+    #[serde(default = "default_visible")]
+    visible: bool,
+    #[serde(default)]
+    fill: String,
+    #[serde(default)]
+    stroke: String,
+    #[serde(default)]
+    stroke_width: f64,
+    path: BezierPathDto,
+    #[serde(default)]
+    compound_paths: Vec<BezierPathDto>,
+    #[serde(default)]
+    fill_enabled: bool,
+    #[serde(default)]
+    stroke_enabled: bool,
+    #[serde(default)]
+    fill_rule: String,
 }
 
 #[derive(Default)]
@@ -663,6 +720,111 @@ pub fn prepare_meshes(
                     indices: surface.indices,
                     material,
                 }],
+            },
+        ));
+    }
+
+    // Shape layers use the same camera-space plane convention as material-bound
+    // rectangles and ellipses. Tessellation happens while the scene is warmed;
+    // Program receives immutable vertex/index buffers and performs no path work.
+    for value in objects {
+        if value.get("type").and_then(Value::as_str) != Some("shape") {
+            continue;
+        }
+        let shape: ShapeObjectDto = match serde_json::from_value(value.clone()) {
+            Ok(shape) => shape,
+            Err(error) => {
+                warnings.push(format!("shape object skipped: {error}"));
+                continue;
+            }
+        };
+        if !shape.visible {
+            continue;
+        }
+
+        let mut surfaces = Vec::new();
+        if shape.fill_enabled {
+            match tessellate_shape_fill(&shape) {
+                Ok(surface) => {
+                    if let Some(material) = flat_color_material(&shape.fill, shape.opacity as f32) {
+                        surfaces.push(PreparedMeshSurface {
+                            slot_key: "fill".to_string(),
+                            vertices: surface.vertices,
+                            indices: surface.indices,
+                            material,
+                        });
+                    } else {
+                        warnings.push(format!(
+                            "shape {} has invalid fill {:?} and is not rendered",
+                            shape.id, shape.fill
+                        ));
+                    }
+                }
+                Err(error) => warnings.push(format!(
+                    "shape {} fill tessellation failed and is not rendered: {error}",
+                    shape.id
+                )),
+            }
+        }
+        if shape.stroke_enabled && shape.stroke_width > 0.0 && shape.stroke != "transparent" {
+            match tessellate_shape_stroke(&shape) {
+                Ok(surface) => {
+                    if let Some(material) = flat_color_material(&shape.stroke, shape.opacity as f32)
+                    {
+                        surfaces.push(PreparedMeshSurface {
+                            slot_key: "stroke".to_string(),
+                            vertices: surface.vertices,
+                            indices: surface.indices,
+                            material,
+                        });
+                    } else {
+                        warnings.push(format!(
+                            "shape {} has invalid stroke {:?} and its stroke is not rendered",
+                            shape.id, shape.stroke
+                        ));
+                    }
+                }
+                Err(error) => warnings.push(format!(
+                    "shape {} stroke tessellation failed and is not rendered: {error}",
+                    shape.id
+                )),
+            }
+        }
+        if surfaces.is_empty() {
+            if !shape.fill_enabled
+                && !(shape.stroke_enabled
+                    && shape.stroke_width > 0.0
+                    && shape.stroke != "transparent")
+            {
+                continue;
+            }
+            warnings.push(format!(
+                "shape {} has no renderable fill or stroke and is not rendered",
+                shape.id
+            ));
+            continue;
+        }
+
+        let transform = MeshTransform {
+            x: shape.x as f32,
+            y: shape.y as f32,
+            z: shape.z_depth as f32,
+            rotation_x: 0.0,
+            rotation_y: 0.0,
+            rotation_z: shape.rotation as f32,
+            scale_x: shape.scale_x as f32,
+            scale_y: shape.scale_y as f32,
+            scale_z: shape.scale_z as f32,
+        };
+        prepared.push((
+            shape.layer_id,
+            shape.z_depth,
+            shape.z_index,
+            PreparedMesh {
+                object_id: shape.id,
+                model_transform: transform.to_matrix(),
+                transform,
+                surfaces,
             },
         ));
     }
@@ -1120,6 +1282,125 @@ fn ellipse_plane_surface(object: &MeshObjectDto) -> RawSurface {
         indices,
         authored_material: None,
     }
+}
+
+fn shape_path(shape: &ShapeObjectDto, close_open_paths: bool) -> Result<LyonPath, String> {
+    let mut builder = LyonPath::builder();
+    for path in std::iter::once(&shape.path).chain(shape.compound_paths.iter()) {
+        let count = path.vertices.len();
+        if count == 0 {
+            continue;
+        }
+        if path.in_tangents.len() != count || path.out_tangents.len() != count {
+            return Err(format!(
+                "path has {} vertices, {} in tangents and {} out tangents",
+                count,
+                path.in_tangents.len(),
+                path.out_tangents.len()
+            ));
+        }
+        let first = path.vertices[0];
+        builder.begin(point(
+            first.x as f32 - shape.anchor.x as f32,
+            first.y as f32 - shape.anchor.y as f32,
+        ));
+        let segment_count = if path.closed { count } else { count.saturating_sub(1) };
+        for index in 0..segment_count {
+            let next = (index + 1) % count;
+            let from = path.vertices[index];
+            let to = path.vertices[next];
+            let outgoing = path.out_tangents[index];
+            let incoming = path.in_tangents[next];
+            builder.cubic_bezier_to(
+                point(
+                    (from.x + outgoing.x) as f32 - shape.anchor.x as f32,
+                    (from.y + outgoing.y) as f32 - shape.anchor.y as f32,
+                ),
+                point(
+                    (to.x + incoming.x) as f32 - shape.anchor.x as f32,
+                    (to.y + incoming.y) as f32 - shape.anchor.y as f32,
+                ),
+                point(
+                    to.x as f32 - shape.anchor.x as f32,
+                    to.y as f32 - shape.anchor.y as f32,
+                ),
+            );
+        }
+        builder.end(path.closed || close_open_paths);
+    }
+    Ok(builder.build())
+}
+
+fn tessellated_surface(
+    slot_key: &str,
+    geometry: VertexBuffers<[f32; 2], u32>,
+) -> RawSurface {
+    RawSurface {
+        slot_key: slot_key.to_string(),
+        vertices: geometry
+            .vertices
+            .into_iter()
+            .map(|position| PreparedMeshVertex {
+                position: [position[0], position[1], 0.0],
+                normal: [0.0, 0.0, 1.0],
+                uv: [0.0, 0.0],
+            })
+            .collect(),
+        indices: geometry.indices,
+        authored_material: None,
+    }
+}
+
+fn tessellate_shape_fill(shape: &ShapeObjectDto) -> Result<RawSurface, String> {
+    let path = shape_path(shape, true)?;
+    let mut geometry: VertexBuffers<[f32; 2], u32> = VertexBuffers::new();
+    let options = if shape.fill_rule == "evenodd" {
+        FillOptions::even_odd()
+    } else {
+        FillOptions::non_zero()
+    };
+    FillTessellator::new()
+        .tessellate_path(
+            &path,
+            &options,
+            &mut BuffersBuilder::new(&mut geometry, |vertex: FillVertex| {
+                vertex.position().to_array()
+            }),
+        )
+        .map_err(|error| error.to_string())?;
+    if geometry.indices.is_empty() {
+        return Err("path produced no triangles".to_string());
+    }
+    Ok(tessellated_surface("fill", geometry))
+}
+
+fn tessellate_shape_stroke(shape: &ShapeObjectDto) -> Result<RawSurface, String> {
+    let path = shape_path(shape, false)?;
+    let mut geometry: VertexBuffers<[f32; 2], u32> = VertexBuffers::new();
+    let options = StrokeOptions::default()
+        .with_line_width(shape.stroke_width as f32)
+        .with_line_cap(LineCap::Round)
+        .with_line_join(LineJoin::Round);
+    StrokeTessellator::new()
+        .tessellate_path(
+            &path,
+            &options,
+            &mut BuffersBuilder::new(&mut geometry, |vertex: StrokeVertex| {
+                vertex.position().to_array()
+            }),
+        )
+        .map_err(|error| error.to_string())?;
+    if geometry.indices.is_empty() {
+        return Err("path produced no triangles".to_string());
+    }
+    Ok(tessellated_surface("stroke", geometry))
+}
+
+fn flat_color_material(color: &str, object_opacity: f32) -> Option<PreparedMeshMaterial> {
+    let mut material = fallback_material(color, object_opacity)?;
+    material.lit = false;
+    material.cull_mode = PreparedCullMode::None;
+    Some(material)
 }
 
 fn sphere_surfaces(object: &MeshObjectDto) -> Vec<RawSurface> {

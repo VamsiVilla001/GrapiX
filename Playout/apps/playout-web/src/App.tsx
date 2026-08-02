@@ -11,6 +11,7 @@ import {
   CircleAlert,
   Clapperboard,
   Clock3,
+  CloudDownload,
   Cpu,
   Database,
   FileInput,
@@ -80,6 +81,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [busyAction, setBusyAction] = useState<OperatorAction | null>(null);
+  const [syncingEditor, setSyncingEditor] = useState(false);
 
   /** Scene Manager selection, by Take ID. */
   const [selectedTakeId, setSelectedTakeId] = useState<number | null>(null);
@@ -91,6 +93,28 @@ export function App() {
   const refreshLibrary = useCallback(async () => {
     setLibrary(await playoutApi.listScenes());
   }, []);
+
+  const fetchFromEditor = useCallback(async () => {
+    setSyncingEditor(true);
+    setError(null);
+    try {
+      await playoutApi.syncFromEditor();
+      await refreshLibrary();
+    } catch (fetchError) {
+      setError(errorMessage(fetchError));
+    } finally {
+      setSyncingEditor(false);
+    }
+  }, [refreshLibrary]);
+
+  const handleRefresh = useCallback(async () => {
+    try {
+      await playoutApi.syncFromEditor();
+    } catch {
+      // Editor offline is ignored during routine refresh
+    }
+    await refreshLibrary();
+  }, [refreshLibrary]);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -157,12 +181,23 @@ export function App() {
     const statusTimer = window.setInterval(refreshStatus, 3000);
     const engineTimer = window.setInterval(refreshEngine, 3000);
     const clockTimer = window.setInterval(() => setClock(new Date()), 250);
+    const editorSyncTimer = window.setInterval(() => {
+      void (async () => {
+        try {
+          await playoutApi.syncFromEditor();
+          await refreshLibrary();
+        } catch {
+          // Background sync failure is silent
+        }
+      })();
+    }, 10000);
     return () => {
       cancelled = true;
       detachEvents();
       window.clearInterval(statusTimer);
       window.clearInterval(engineTimer);
       window.clearInterval(clockTimer);
+      window.clearInterval(editorSyncTimer);
     };
   }, [refreshEngine, refreshLibrary, refreshStatus, refreshTakeList]);
 
@@ -344,7 +379,7 @@ export function App() {
     }
 
     try {
-      await playoutApi.removeScene(selectedScene.sceneId);
+      await playoutApi.removeScene(selectedScene.sceneId, true);
       setSelectedTakeId(null);
       await refreshLibrary();
     } catch (removeError) {
@@ -436,13 +471,26 @@ export function App() {
           icon={<Library size={15} />}
           actions={
             <>
+              <button
+                className="small-button"
+                disabled={syncingEditor}
+                onClick={() => void fetchFromEditor()}
+                title="Check for new or updated scenes from Editor (http://127.0.0.1:4100)"
+              >
+                <CloudDownload size={13} className={syncingEditor ? "spin" : ""} />
+                {syncingEditor ? "Fetching…" : "Fetch"}
+              </button>
               <label className="small-button import-button">
                 <FileInput size={13} />
                 Import
                 <input type="file" accept=".json,application/json" onChange={importScene} />
               </label>
-              <button className="icon-button" onClick={refreshLibrary} title="Refresh library">
-                <RefreshCw size={14} />
+              <button
+                className="icon-button"
+                onClick={() => void handleRefresh()}
+                title="Refresh library and sync updated scenes from Editor"
+              >
+                <RefreshCw size={14} className={syncingEditor ? "spin" : ""} />
               </button>
             </>
           }

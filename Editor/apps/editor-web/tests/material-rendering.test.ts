@@ -5,6 +5,7 @@ import {
   resolvePrimitiveMaterial,
   type Material,
   type MeshSceneObject,
+  type ImageSceneObject,
   type RectSceneObject,
   type SceneObject,
   type SceneDocument
@@ -226,6 +227,33 @@ test("textured canonical material reaches a flat object as one physical surface"
   assert.equal(rendered.faceMaterials?.main.resolved.material.type, "pbr");
 });
 
+test("direct image assets carry MIME hints for extension-less content URLs", () => {
+  const material = createMaterialDefinition("Unused", "pbr");
+  const source = "http://127.0.0.1:4100/api/assets/asset_imported/content";
+  const object: ImageSceneObject = {
+    ...mesh(undefined),
+    id: "image_imported",
+    type: "image",
+    name: "Imported image",
+    src: source,
+    objectFit: "stretch"
+  } as ImageSceneObject;
+  const document = scene(material, object);
+  document.assets = [{
+    assetId: "asset_imported",
+    name: "Imported image",
+    kind: "image",
+    source,
+    mimeType: "image/webp",
+    importedAt: timestamp,
+    status: "READY"
+  }];
+
+  const rendered = resolveRenderableObjects(document)[0];
+  assert.equal(rendered.type, "image");
+  assert.equal(rendered.materialAssetMime, "image/webp");
+});
+
 test("Three.js projection follows GrapiX canvas movement without mirroring either axis", () => {
   const material = createMaterialDefinition("Projection", "pbr");
   const object = mesh(material.materialId);
@@ -277,5 +305,31 @@ test("a Z rotation turns the same way on screen as it does on the canvas", () =>
   assert.ok(
     tiltedBounds.y + tiltedBounds.height > unrotated.y + unrotated.height,
     "a positive canvas rotation must extend the slab downward, not upward"
+  );
+});
+
+test("rotating a sphere keeps its projected selection bounds spherical", () => {
+  const material = createMaterialDefinition("Sphere bounds", "pbr");
+  const sphere = {
+    ...mesh(material.materialId),
+    meshKind: "sphere" as const,
+    rotationX: 0,
+    rotationY: 0,
+    rotationZ: 0
+  };
+  const document = scene(material, sphere);
+  const unrotated = projectMeshBounds(document, sphere);
+
+  const rotated = { ...sphere, rotationX: 45 };
+  document.objects = [rotated];
+  const rotatedBounds = projectMeshBounds(document, rotated);
+
+  assert.ok(
+    Math.abs(rotatedBounds.width - unrotated.width) < 2,
+    `X rotation must not stretch sphere width (${unrotated.width} -> ${rotatedBounds.width})`
+  );
+  assert.ok(
+    Math.abs(rotatedBounds.height - unrotated.height) < 2,
+    `X rotation must not stretch sphere height (${unrotated.height} -> ${rotatedBounds.height})`
   );
 });

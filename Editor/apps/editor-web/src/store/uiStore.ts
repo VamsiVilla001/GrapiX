@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { BrushBlendMode, ColorValue, Vec2 } from "@grapix/shared-types";
 
-type PropertiesTab = "Properties" | "Materials" | "Text" | "Data Binding";
+type PropertiesTab = "Properties" | "Transform" | "Materials" | "Text" | "Data Binding";
 export type EditorTool =
   | "select"
   | "move"

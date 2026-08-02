@@ -15,15 +15,16 @@ const apiRoot =
  * natively and off the main thread, so a monitor open for a whole show costs no
  * per-frame JavaScript.
  *
- * `view` picks fill or key. The key is the greyscale matte a downstream keyer cuts, which
- * is how broadcast verifies transparency — SDI carries no alpha, so fill and key travel as
- * separate signals. Both are ordinary JPEGs.
+ * `view` picks fill or key. `tier` keeps the embedded confidence monitors cheap while the
+ * windowed virtual output asks the engine for the project's native canvas resolution.
+ * Both are ordinary JPEGs.
  */
 export function monitorStreamUrl(
   channel: "preview" | "program",
-  view: "fill" | "key" = "fill"
+  view: "fill" | "key" = "fill",
+  tier: "confidence" | "output" = "confidence"
 ): string {
-  return `${apiRoot}/api/playout/monitor/${channel}?view=${view}`;
+  return `${apiRoot}/api/playout/monitor/${channel}?view=${view}&tier=${tier}`;
 }
 
 /**
@@ -126,11 +127,18 @@ export const playoutApi = {
       method: "POST",
       body: JSON.stringify({ scene })
     }),
-  removeScene: (sceneId: string) =>
+  removeScene: (sceneId: string, force = true) =>
     request<{ sceneId: string; takeId: number | null; versionsRemoved: number }>(
-      `/api/playout/scenes/${encodeURIComponent(sceneId)}`,
+      `/api/playout/scenes/${encodeURIComponent(sceneId)}${force ? "?force=true" : ""}`,
       { method: "DELETE" }
     ),
+  syncFromEditor: () =>
+    request<{
+      syncedCount: number;
+      updatedCount: number;
+      totalScenes: number;
+      scenes: PublishedSceneMetadata[];
+    }>("/api/playout/scenes/sync-editor", { method: "POST" }),
   listTakeLists: () => request<PlayoutTakeList[]>("/api/playout/take-lists"),
   createTakeList: (name: string) =>
     request<PlayoutTakeList>("/api/playout/take-lists/new", {

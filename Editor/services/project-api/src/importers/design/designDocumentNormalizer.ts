@@ -38,12 +38,29 @@ export function normalizeDesignDocument(
       };
     });
 
+  const families = referencedFamilies(pages);
   return {
     ...document,
     width: pages[0]?.width ?? Math.max(1, Math.round(document.width * scale)),
     height: pages[0]?.height ?? Math.max(1, Math.round(document.height * scale)),
+    // Adapters collect fonts from the whole source document. A family used only by
+    // layers that selection or the hidden-layer filter removed is not missing from
+    // the scene, and reporting it sends an author looking for a font nothing needs.
+    fonts: document.fonts.filter((font) => families.has(font.family)),
     pages
   };
+}
+
+function referencedFamilies(pages: NormalizedDesignDocument["pages"]): Set<string> {
+  const families = new Set<string>();
+  const walk = (nodes: NormalizedDesignNode[]): void => {
+    for (const node of nodes) {
+      if (node.text?.fontFamily) families.add(node.text.fontFamily);
+      walk(node.children);
+    }
+  };
+  pages.forEach((page) => walk(page.nodes));
+  return families;
 }
 
 function normalizeNode(

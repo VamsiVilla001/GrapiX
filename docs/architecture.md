@@ -109,13 +109,19 @@ scene renderer embedded in React.
 - It may be configured as a local warm standby worker only after the standby
   certification gate described below.
 
-**Implemented 2026-07-29 for the confidence monitors.** `playout-control` holds the
-engine's `preview.streamStart` stream per channel and view, and republishes it to the
-operator UI as `multipart/x-mixed-replace` MJPEG at
-`GET /api/playout/monitor/{preview,program}?view={fill,key}`. Streams are refcounted, so N
-operator viewers cost one engine stream and an unattended station renders nothing. The
-operator UI paints frames over the metadata slate rather than replacing it, so a gap
-reveals the slate instead of a blank monitor. Certified by `npm run certify:monitors`.
+**Implemented 2026-07-29 for the confidence monitors; native-resolution window tier added
+2026-08-01.** `playout-control` holds the engine's `preview.streamStart` stream per channel,
+view and tier, and republishes it as `multipart/x-mixed-replace` MJPEG at
+`GET /api/playout/monitor/{preview,program}?view={fill,key}&tier={confidence,output}`.
+The default confidence tier remains a 640 × 360, quality-70 stream for small operator panels.
+The output tier is a distinct, shared stream at quality 92 whose scaled-stage bounds cover the
+maximum project canvas; because the engine never upscales, its emitted dimensions equal the
+project canvas. The engine's negotiated `maxPreviewPixels` limit remains authoritative and
+refuses an oversized canvas instead of silently downscaling it. Streams are refcounted, so N
+viewers of one surface cost one engine stream and an unattended station renders nothing. The
+operator UI paints frames over the metadata slate rather than replacing it, so a gap reveals
+the slate instead of a blank monitor. Confidence transport is certified by
+`npm run certify:monitors`.
 
 **Fill and key, not an alpha channel.** Broadcast carries transparency as a separate
 greyscale key signal because SDI has no alpha; the downstream keyer recombines fill and

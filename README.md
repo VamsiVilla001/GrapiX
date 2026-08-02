@@ -56,6 +56,7 @@ by anything here. Editor and Playout speak protocol v3
 | --- | --- |
 | 4100 | `Editor/services/project-api` |
 | 4150 | `Editor/services/editor-mcp`, when run over HTTP instead of stdio |
+| 4160 | `Editor/services/editor-assistant` (AI assistant broker) |
 | 4300 | `Playout/services/playout-control` |
 | 4400–4403 | `services/render-engine` and additional render nodes |
 | 5173 / 5174 | editor web / playout web |
@@ -69,10 +70,22 @@ bindings, preflight and publish — plus the ingested architecture, contracts an
 capability knowledge of this repository.
 
 It is the Editor, and only the Editor: a build-time guard fails if a tool ever
-names Cue, Take, Continue, Clear, Program or an output verb. Client
-configuration is in
+names Cue, Take, Continue, Clear, Program or an output verb.
+
+MCP is provider-neutral, so the server is not written per-model — Claude, Codex,
+Gemini, Kimi, Cursor and a local Llama all reach the same tools through their own
+client. It speaks stdio (a client launches it) or Streamable HTTP on 4150, where one
+running server serves several clients at once, each in its own session. It is also
+published as a self-contained CLI, so a client can use it with no checkout build:
+
+```json
+{ "mcpServers": { "grapix-editor": { "command": "npx", "args": ["-y", "@grapix/editor-mcp"] } } }
+```
+
+Client configuration for every editor is in
 [`Editor/services/editor-mcp/README.md`](Editor/services/editor-mcp/README.md);
-`.mcp.json` at the repository root configures Claude Code automatically.
+`.mcp.json` configures Claude Code and `.vscode/mcp.json` configures VS Code Copilot
+automatically for anyone who clones this repository.
 
 ## Commands
 

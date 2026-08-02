@@ -352,6 +352,75 @@ test("the requested view is what the engine is asked for", async () => {
   assert.equal(request.channel, "preview");
 });
 
+test("windowed output gets an independent native-resolution stream", async () => {
+  const engine = new FakeEngine();
+  const monitors = hub(engine);
+  const confidenceFrames = [];
+  const outputFrames = [];
+
+  monitors.subscribe("program", "fill", (frame) => confidenceFrames.push(frame));
+  monitors.subscribe("program", "fill", (frame) => outputFrames.push(frame), "output");
+  await settle();
+
+  const confidence = engine.requests.find(
+    (request) => request.streamId === "playout_monitor_program_fill"
+  );
+  const output = engine.requests.find(
+    (request) => request.streamId === "playout_output_program_fill"
+  );
+  assert.deepEqual(
+    {
+      maxWidth: confidence.maxWidth,
+      maxHeight: confidence.maxHeight,
+      quality: confidence.quality
+    },
+    { maxWidth: 640, maxHeight: 360, quality: 70 }
+  );
+  assert.deepEqual(
+    {
+      maxWidth: output.maxWidth,
+      maxHeight: output.maxHeight,
+      quality: output.quality
+    },
+    { maxWidth: 50_000, maxHeight: 50_000, quality: 92 }
+  );
+
+  // The output stream is addressed separately, so its canvas-sized frame cannot enlarge
+  // or replace the confidence panel's cheap stream.
+  engine.pushFrame("playout_output_program_fill", { width: 1920, height: 1080 });
+  assert.equal(outputFrames.length, 1);
+  assert.equal(confidenceFrames.length, 0);
+  const outputStatus = monitors.status().find((entry) => entry.tier === "output");
+  assert.deepEqual(
+    {
+      channel: outputStatus.channel,
+      view: outputStatus.view,
+      tier: outputStatus.tier,
+      live: outputStatus.live,
+      viewers: outputStatus.viewers,
+      targetFps: outputStatus.targetFps,
+      framesReceived: outputStatus.framesReceived,
+      width: outputStatus.width,
+      height: outputStatus.height,
+      sceneId: outputStatus.sceneId,
+      lastError: outputStatus.lastError
+    },
+    {
+      channel: "program",
+      view: "fill",
+      tier: "output",
+      live: true,
+      viewers: 1,
+      targetFps: 30,
+      framesReceived: 1,
+      width: 1920,
+      height: 1080,
+      sceneId: "001",
+      lastError: null
+    }
+  );
+});
+
 test("a viewer attached before anything is cued starts painting when a scene arrives", async () => {
   const engine = new FakeEngine({ failStart: true });
   const monitors = hub(engine, { retryMs: 10 });

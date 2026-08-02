@@ -1,0 +1,26 @@
+{
+  "name": "@grapix/editor-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GrapiX Editor AI assistant broker: an MCP client + model connector that drives the editor-mcp authoring tools from an in-app chat. Editor-only; no Program or output authority.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.3.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "fastify": "^5.10.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4"
+  }
+}

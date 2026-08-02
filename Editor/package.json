@@ -8,8 +8,9 @@
     "dev:web": "npm --prefix .. run dev -w @grapix/editor-web",
     "dev:api": "npm --prefix .. run dev -w @grapix/api-server",
     "dev:mcp": "npm --prefix .. run dev -w @grapix/editor-mcp",
-    "build": "npm --prefix .. run build:shared && npm --prefix .. run build -w @grapix/api-server && npm --prefix .. run build -w @grapix/editor-mcp && npm --prefix .. run build -w @grapix/editor-web && npm --prefix .. run build -w @grapix/desktop-electron",
-    "typecheck": "npm --prefix .. run build:shared && npm --prefix .. run typecheck -w @grapix/api-server && npm --prefix .. run typecheck -w @grapix/editor-mcp && npm --prefix .. run typecheck -w @grapix/editor-web && npm --prefix .. run typecheck -w @grapix/desktop-electron && npm --prefix .. run check -w @grapix/desktop-tauri",
-    "verify": "npm --prefix .. test -w @grapix/api-server && npm --prefix .. test -w @grapix/editor-mcp && npm --prefix .. test -w @grapix/editor-web && npm --prefix .. test -w @grapix/desktop-tauri"
+    "dev:assistant": "npm --prefix .. run dev -w @grapix/editor-assistant",
+    "build": "npm --prefix .. run build:shared && npm --prefix .. run build -w @grapix/api-server && npm --prefix .. run build -w @grapix/editor-mcp && npm --prefix .. run build -w @grapix/editor-assistant && npm --prefix .. run build -w @grapix/editor-web && npm --prefix .. run build -w @grapix/desktop-electron",
+    "typecheck": "npm --prefix .. run build:shared && npm --prefix .. run typecheck -w @grapix/api-server && npm --prefix .. run typecheck -w @grapix/editor-mcp && npm --prefix .. run typecheck -w @grapix/editor-assistant && npm --prefix .. run typecheck -w @grapix/editor-web && npm --prefix .. run typecheck -w @grapix/desktop-electron && npm --prefix .. run check -w @grapix/desktop-tauri",
+    "verify": "npm --prefix .. test -w @grapix/api-server && npm --prefix .. test -w @grapix/editor-mcp && npm --prefix .. test -w @grapix/editor-assistant && npm --prefix .. test -w @grapix/editor-web && npm --prefix .. test -w @grapix/desktop-tauri"
   }
 }

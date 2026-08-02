@@ -37,6 +37,17 @@ import {
 } from "@grapix/render-protocol";
 import type { AssetLibraryItem, SceneDocument } from "@grapix/shared-types";
 
+/**
+ * Reply budget for the scene lifecycle: load, prepare, take.
+ *
+ * The protocol client defaults to 15 s because it also serves the Editor's UI, where a
+ * wedged engine must not wedge the interface. Taking a freshly imported scene is not a
+ * UI click: the engine decodes and uploads every texture it needs first - 83 assets and
+ * ~49 MB for a real PSD - and a cold Take that legitimately takes 20 s must not be
+ * reported as a dead engine.
+ */
+const SCENE_LIFECYCLE_TIMEOUT_MS = 120_000;
+
 /** What the engine reports when a preview stream starts. */
 export interface PreviewStreamAck {
   streamId: string;
@@ -350,7 +361,7 @@ export class PlayoutEngineController {
     await connection.request(
       "scene.load",
       { scene, ...(stageId ? { stageId } : {}), prepare: false },
-      { sceneId: scene.id, sceneRevision: scene.revision ?? 0 }
+      { sceneId: scene.id, sceneRevision: scene.revision ?? 0, timeoutMs: SCENE_LIFECYCLE_TIMEOUT_MS }
     );
   }
 
@@ -360,6 +371,12 @@ export class PlayoutEngineController {
    * The engine deliberately refuses undeclared bytes. Previously Playout skipped
    * this protocol entirely, so a scene containing a project font was guaranteed
    * to fail preparation even though the font was present in the scene library.
+   *
+   * An asset the scene itself marks `MISSING` is an acknowledged authoring gap, not a
+   * surprise: it is skipped so the rest of the scene still reaches air, and the
+   * renderer shows its missing-texture state for the objects that used it. An asset
+   * claiming `READY` with no checksum is a different thing - a producer wrote a scene
+   * that cannot be verified - and that still refuses the load.
    */
   private async ensureSceneAssets(
     connection: EngineConnection,
@@ -367,7 +384,10 @@ export class PlayoutEngineController {
   ): Promise<void> {
     for (const asset of assets) {
       if (!asset.checksum) {
-        throw new Error(`asset ${asset.assetId} has no checksum and cannot be sent to the render engine`);
+        if (asset.status === "MISSING" || !asset.source) continue;
+        throw new Error(
+          `asset ${asset.assetId} (${asset.name}) is READY but has no checksum, so the render engine cannot verify it. Re-import it with embedded assets, or mark it missing.`
+        );
       }
       const registered = await connection.request("asset.register", {
         assetId: asset.assetId,
@@ -407,7 +427,7 @@ export class PlayoutEngineController {
     await connection.request(
       "scene.prepare",
       { sceneId, ...(viewportIds ? { viewportIds } : {}) },
-      { sceneId }
+      { sceneId, timeoutMs: SCENE_LIFECYCLE_TIMEOUT_MS }
     );
   }
 
@@ -466,7 +486,7 @@ export class PlayoutEngineController {
           ...(options.transitionId ? { transitionId: options.transitionId } : {}),
           ...(options.overrideUnprepared ? { overrideUnprepared: true } : {})
         },
-        { sceneId, sceneRevision }
+        { sceneId, sceneRevision, timeoutMs: SCENE_LIFECYCLE_TIMEOUT_MS }
       );
       connection.markOnAir(`took ${sceneId} to program`);
       return { accepted: true, overridden: options.overrideUnprepared === true };

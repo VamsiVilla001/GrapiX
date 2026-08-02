@@ -217,6 +217,26 @@ test("removing a scene a take list still references is refused", async (t) => {
   const removal = await store.removeScene("scene_news");
   assert.equal(removal.versionsRemoved, 1);
 });
+test("removing a referenced scene with force cleans up take list entries", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "grapix-playout-remove-force-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const store = new PlayoutStore(root);
+  await store.publishScene(sceneFixture("scene_news", "2026-07-28T10:00:00.000Z"));
+
+  const list = await store.createTakeList("Morning");
+  const saved = await store.saveTakeList({
+    ...list,
+    cursorEntryId: "entry_open",
+    entries: [entryFixture("entry_open")]
+  });
+
+  // With force = true, referenced entries are removed from active take lists
+  const removal = await store.removeScene("scene_news", { force: true });
+  assert.equal(removal.versionsRemoved, 1);
+
+  const updatedList = await store.readTakeList(saved.takeListId);
+  assert.deepEqual(updatedList?.entries, []);
+});
 
 test("removing an unknown scene reports not found rather than succeeding quietly", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "grapix-playout-remove-missing-"));

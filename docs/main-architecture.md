@@ -188,10 +188,13 @@ A Render View is a specialised view of the one native renderer, not a second ren
   **The native Editor Render View is milestone M2 (Planned); today the Editor authors through a
   browser Pixi/Three viewport — the largest open item.**
 - **Playout Render View** — operational Preview + Program confidence monitors, immutable published
-  revisions. **Implemented for the confidence monitors:** `playout-control` republishes the engine
-  `preview.streamStart` stream as refcounted `multipart/x-mixed-replace` MJPEG at
-  `GET /api/playout/monitor/{preview,program}?view={fill,key}`. Fill and key are render modes
-  (greyscale key, JPEG-exact), not an alpha channel.
+  revisions. **Implemented:** `playout-control` republishes the engine `preview.streamStart` stream
+  as refcounted `multipart/x-mixed-replace` MJPEG at
+  `GET /api/playout/monitor/{preview,program}?view={fill,key}&tier={confidence,output}`. The default
+  confidence tier stays 640 × 360 for embedded panels. Windowed virtual outputs use a separate,
+  shared quality-92 stream that resolves to native project-canvas dimensions; the engine refuses
+  canvases above `maxPreviewPixels` rather than silently downscaling them. Fill and key are render
+  modes (greyscale key, JPEG-exact), not an alpha channel.
 - **Program extension** — global, Playout-role only; owns the rational frame clock and output
   adapters; first priority for GPU memory/scheduling/residency.
 
@@ -229,7 +232,9 @@ map** (which supersedes the older ledger where they differ).
   **Take List** with a persisted cursor that clears (never wraps) and autosaves (no revision counter).
   Ambiguous command (Take ID *and* entry) is refused. Direct recall tracked as `scene:take-<id>`.
   **Take Out** (clear Program) and **Continue** (advance cursor) implemented.
-- **Confidence monitors:** refcounted fill/key MJPEG streams (`certify:monitors`).
+- **Confidence/output observers:** refcounted fill/key MJPEG streams; confidence panels use
+  640 × 360 while windowed virtual outputs request native project resolution
+  (`certify:monitors` covers the confidence transport).
 - **Animation playhead:** Program clock advances the on-air scene's playhead, reported per scene as
   `frame`; take rewinds to 0, cue does not rewind an already-on-air scene (`certify:take-animation`).
 - **Publish/packaging:** strict versioned `.gfxpkg` v2 — manifest, scene, materials, assets, bindings,
@@ -258,8 +263,21 @@ map** (which supersedes the older ledger where they differ).
   type; solid/unlit ignore lights; Basic Lit/PBR consume them; readable fallback with no light;
   deterministic **16-light Take gate**). Editor uses three.js behind a swappable `SceneRenderer`;
   active perspective/ortho camera drives the editor mesh projection.
-- **Design import:** PSD (`ag-psd`), SVG-compatible AI, SVG, exported/API Figma → normalized document
-  → scenes/assets + structured compatibility report; fixture-tested.
+- **Design import:** PSD (`ag-psd`), SVG-compatible AI, SVG, exported Figma JSON, and Figma
+  links → normalized document → scenes/assets + structured compatibility report;
+  fixture-tested. A Figma link takes one of two transports: **REST** (`geometry=paths` node
+  JSON + `/images` fill URLs, token with `file_content:read`, never stored) yields editable
+  text/vectors/components; **Desktop MCP** (no token) can only return a screenshot, so nodes
+  arrive rasterized and reported. `auto` prefers REST when a token exists.
+  The report is scoped to the produced scene: disabled source effects, layers removed by
+  selection/hidden-layer filtering, and fonts no imported text references are not reported.
+  PSD **bitmap** masks keep their alpha channel as a stored asset (`ObjectMask.alphaAssetId`)
+  with `mode: "none"` — the data round-trips, the shape is not sampled by either renderer yet.
+  PSD **clipping masks** clip to the base layer's bounds. Blend modes resolve to the six
+  modes both renderers implement (`blendModes.ts`); substitutions are reported. Imported
+  objects share one compositing layer (`layerId: "main"`) with nesting in `childIds`, and
+  the pivot at the object origin — `layerId` and `anchor` are render-order and transform
+  inputs, not places to record source structure.
 - **Virtual canvas / tiles:** f64 stage up to 50,000², f64→f32 tile-origin rebase rule, per-tile
   overscan, index-driven tile selection, seam-free composite.
 - **Pixel parity (native):** determinism, tile-composite vs single-pass byte-identity, far-vs-near
@@ -280,7 +298,7 @@ map** (which supersedes the older ledger where they differ).
 | **Video** | Decoder lifecycle + budget + bounded latest-frame queue modeled; API probe reports certification needs. | Native codec/hardware decode is deliberately unavailable and **blocks publish/Take** until certified. |
 | **3D depth of field** | Real meshes/lights/glTF geometry + PBR in both renderers. | Native active-camera consumption, hierarchy/timeline-resolved light transforms, skeletal/morph animation runtime in native, shadows, LOD, native transparent depth ordering, hardware parity. |
 | **Materials depth** | Standard Material, blend, UV, fit, lighting. | Native 2D sprite/text material path, per-material browser samplers (WebGPU bind group), custom shader execution (compiler worker), video materials, chroma/mask/gradient pipelines, tile/nine-slice fit, material export/copy-paste, GPU-memory estimates, cross-scene texture residency + deferred disposal. |
-| **Shapes / paths depth** | Shape object, bézier paths, fill/stroke, masks, pen tool, path interpolation (editor 2D). | Advanced shape operators (repeater/merge/boolean/round-corners), animated Trim Paths, and complete native daemon path tessellation for Program parity. |
+| **Shapes / paths depth** | Shape object, bézier and compound paths, fill/stroke, masks, pen tool and path interpolation in the editor; the native daemon tessellates authored fill/stroke paths for Program. | Advanced shape operators (repeater/merge/boolean/round-corners), animated Trim Paths, native masks and paint strokes, and browser/native pixel-parity certification. |
 | **Transitions** | T0 **cut** executes; mix/dip/wipe/push/custom persist and sequence correctly. | T1 (dual render targets, progress/cancel/complete events, HD/UHD headroom + dropped-frame certification) and T2 (validated bounded WGSL manifest) — non-cut kinds return **`deferred`**, never a silent cut. |
 | **Publish plane (Phase 5)** | `.gfxpkg` build + local staging/promotion path. | Endpoint management/auth/discovery, upload with progress/cancel, reconnect/idempotency/duplicate tests, offline reconciliation. |
 | **Operator depth (Phase 6/7)** | Cue→Preview, cut→Program, autosave. | Take-list editing depth, output configuration, layer/channel conflict model, timecode/instance-data live updates, control-API breadth. |
@@ -304,9 +322,11 @@ map** (which supersedes the older ledger where they differ).
   TLS/mTLS, discovery, primary/backup machines, cross-machine output fencing, distributed tile rendering,
   venue-network security. V1 keeps stable engine/project/scene/state-revision/output-lease identifiers so
   V2 needs no scene or protocol rewrite.
-- **Future integrations (last priority):** browser WebGPU renderer on the shared WGSL; GrapiX consuming
-  Figma Dev Mode MCP and Adobe Firefly Services MCP for import/generation (imported assets flow through
-  the normal asset + material + render pipeline, never a side channel to the renderer).
+- **Figma MCP integration:** implemented for official Figma Desktop MCP metadata/screenshot
+  import over loopback. Editable Figma layers still require exported REST-compatible JSON.
+- **Future integrations (last priority):** browser WebGPU renderer on the shared WGSL and
+  Adobe Firefly Services MCP for generation (imported assets flow through the normal asset +
+  material + render pipeline, never a side channel to the renderer).
 
 ## 7. Milestone and phase status
 

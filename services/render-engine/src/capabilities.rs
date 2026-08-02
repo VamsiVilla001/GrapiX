@@ -507,6 +507,7 @@ impl EngineCapabilities {
                 "rect".to_string(),
                 "ellipse".to_string(),
                 "text".to_string(),
+                "shape".to_string(),
                 "image".to_string(),
                 "mesh".to_string(),
                 "layer".to_string(),

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getMaterialBindingId, isMaterialCompatible, isMaterialCompatibleWithFace, normalizeSlabProperties, sampleChannel, type AnimatableProperty, type BindingMap, type MaskMode, type SceneObject, type SceneProperty, type SlabPropertiesInput } from "@grapix/shared-types";
+import { getMaterialBindingId, isMaterialCompatible, isMaterialCompatibleWithFace, normalizeSlabProperties, sampleChannel, type AnimatableProperty, type MaskMode, type SceneObject, type SlabPropertiesInput } from "@grapix/shared-types";
 import { ArrowDown, ArrowUp, Clock3, Copy, Diamond, Eye, EyeOff, Lock, PenTool, Plus, Trash2, Unlock } from "lucide-react";
 import { ColorValueEditor } from "./ColorValueEditor";
 import { ObjectTypeProperties } from "./ObjectTypeProperties";
@@ -13,19 +13,41 @@ import {
   ToggleField
 } from "./inspectorFields";
 import { useEditorStore } from "../store/editorStore";
-import { bindablePropertiesFor } from "../store/objectPropertySupport";
 import { useUiStore } from "../store/uiStore";
 
-export function Inspector() {
+export type InspectorScope = "type" | "transform";
+
+const MATERIAL_OBJECT_TYPES: ReadonlySet<SceneObject["type"]> = new Set([
+  "text", "rect", "ellipse", "image", "shape", "paint", "mesh"
+]);
+const DIMENSION_OBJECT_TYPES: ReadonlySet<SceneObject["type"]> = new Set([
+  "text", "rect", "ellipse", "image", "line", "shape", "paint", "mesh"
+]);
+const APPEARANCE_OBJECT_TYPES: ReadonlySet<SceneObject["type"]> = new Set([
+  "text", "rect", "ellipse", "line", "shape"
+]);
+const FILL_OBJECT_TYPES: ReadonlySet<SceneObject["type"]> = new Set([
+  "text", "rect", "ellipse", "shape"
+]);
+const MASKABLE_OBJECT_TYPES: ReadonlySet<SceneObject["type"]> = new Set([
+  "text", "rect", "ellipse", "image", "line", "shape", "paint", "mesh"
+]);
+
+export function Inspector({ scope = "type" }: { scope?: InspectorScope }) {
   const scene = useEditorStore((state) => state.scene);
   const selectedObjectId = useEditorStore((state) => state.selectedObjectId);
   const updateObject = useEditorStore((state) => state.updateObject);
   const renameObject = useEditorStore((state) => state.renameObject);
   const setActiveCameraId = useEditorStore((state) => state.setActiveCameraId);
   const setContainerChild = useEditorStore((state) => state.setContainerChild);
-  const updateObjectBindings = useEditorStore((state) => state.updateObjectBindings);
   const assignMaterialSlot = useEditorStore((state) => state.assignMaterialSlot);
   const object = scene.objects.find((item) => item.id === selectedObjectId);
+  const supportsMaterial = MATERIAL_OBJECT_TYPES.has(object?.type ?? "marker");
+  const supportsDimensions = DIMENSION_OBJECT_TYPES.has(object?.type ?? "marker");
+  const supportsAppearance = APPEARANCE_OBJECT_TYPES.has(object?.type ?? "marker");
+  const supportsFill = FILL_OBJECT_TYPES.has(object?.type ?? "marker");
+  const supportsMasks = MASKABLE_OBJECT_TYPES.has(object?.type ?? "marker");
+  const supportsDetailedTransform = object?.type !== "camera" && object?.type !== "light";
 
   if (!object) {
     return (
@@ -40,18 +62,6 @@ export function Inspector() {
     updateObject(object!.id, patchValue);
   }
 
-  function setBinding(property: SceneProperty, path: string) {
-    const bindings: BindingMap = {
-      ...object!.bindings,
-      [property]: path
-    };
-
-    if (!path.trim()) {
-      delete bindings[property];
-    }
-
-    updateObjectBindings(object!.id, bindings);
-  }
 
   const slab = object.type === "mesh" && object.meshKind === "slab"
     ? normalizeSlabProperties(object.slab)
@@ -77,6 +87,8 @@ export function Inspector() {
 
   return (
     <aside className="inspector">
+      {scope === "type" ? (
+        <>
       <div className="panel-heading">
         <h2>Inspector</h2>
         <div className="mini-action-row">
@@ -98,6 +110,7 @@ export function Inspector() {
       </div>
 
       <section className="field-section">
+        <h3>Object</h3>
         <ObjectNameField
           object={object}
           onRename={(name) => {
@@ -106,6 +119,7 @@ export function Inspector() {
             return false;
           }}
         />
+        {supportsMaterial ? (
         <SelectField
           label="Main Material"
           value={getMaterialBindingId(object.materialSlots.main) ?? ""}
@@ -119,6 +133,7 @@ export function Inspector() {
           }
           onChange={(value) => assignMaterialSlot(object.id, "main", value)}
         />
+        ) : null}
         {object.type === "text" ? (
           <TextField label="Text" value={object.text} onChange={(value) => patch({ text: value } as Partial<SceneObject>)} />
         ) : null}
@@ -126,14 +141,22 @@ export function Inspector() {
           <TextField label="Image URL" value={object.src} onChange={(value) => patch({ src: value } as Partial<SceneObject>)} />
         ) : null}
       </section>
+        </>
+      ) : null}
 
+      {scope === "transform" ? (
       <section className="field-section two-column">
+        <h3>Transform</h3>
         <AnimatedNumberField label="X" object={object} property="x" value={object.x} />
         <AnimatedNumberField label="Y" object={object} property="y" value={object.y} />
         <AnimatedNumberField label="Position Z" object={object} property="zDepth" value={object.zDepth} />
         <TextField label="Layer" value={object.layerId} onChange={(value) => patch({ layerId: value || "main" })} />
+        {supportsDimensions ? (
+          <>
         <NumberField label="W" value={object.width} onChange={(value) => patch({ width: value })} />
         <NumberField label="H" value={object.height} onChange={(value) => patch({ height: value })} />
+          </>
+        ) : null}
         {object.type === "mesh" ? (
           <>
             <NumberField label={object.meshKind === "slab" ? "Extrusion" : "Depth"} value={object.depth} min={0.01} onChange={(value) => patch({ depth: value } as Partial<SceneObject>)} />
@@ -159,7 +182,7 @@ export function Inspector() {
               onChange={(value) => patch({ anchor3d: { x: object.anchor3d?.x ?? object.width / 2, y: object.anchor3d?.y ?? object.height / 2, z: value } } as Partial<SceneObject>)}
             />
           </>
-        ) : (
+        ) : supportsDetailedTransform ? (
           <>
             <AnimatedNumberField label="Rotate" object={object} property="rotation" value={object.rotation} />
             <AnimatedNumberField label="Scale X" object={object} property="scaleX" step={0.05} value={object.scaleX ?? 1} />
@@ -175,7 +198,8 @@ export function Inspector() {
               onChange={(value) => patch({ anchor: { x: object.anchor?.x ?? 0, y: value } })}
             />
           </>
-        )}
+        ) : null}
+        {supportsDetailedTransform ? (
         <AnimatedNumberField
           label="Opacity"
           max={1}
@@ -185,8 +209,12 @@ export function Inspector() {
           step={0.05}
           value={object.opacity}
         />
+        ) : null}
       </section>
+      ) : null}
 
+      {scope === "type" ? (
+        <>
       {slab ? (
         <>
           <section className="field-section">
@@ -281,7 +309,10 @@ export function Inspector() {
         </>
       ) : null}
 
+      {supportsAppearance ? (
       <section className="field-section">
+        <h3>Appearance</h3>
+        {supportsFill ? (
         <ColorValueEditor
           fallback={object.fill}
           label="Fill"
@@ -291,6 +322,7 @@ export function Inspector() {
             ...(fillStyle.type === "solid" ? { fill: fillStyle.color } : {})
           })}
         />
+        ) : null}
         <ColorValueEditor
           fallback={object.stroke}
           label="Stroke"
@@ -307,11 +339,13 @@ export function Inspector() {
         ) : null}
         </div>
       </section>
+      ) : null}
 
       <ObjectTypeProperties object={object} />
 
       {object.type === "text" ? (
         <section className="field-section two-column">
+          <h3>Typography</h3>
           <TextFontControls object={object} patch={patch} />
           <NumberField
             label="Font"
@@ -607,22 +641,11 @@ export function Inspector() {
 
       {object.importedDesign ? <ImportedDesignSection object={object} /> : null}
 
-      <MasksSection object={object} />
+      {supportsMasks ? <MasksSection object={object} /> : null}
 
-      <section className="field-section binding-section">
-        <h3>Bindings</h3>
-        {bindablePropertiesFor(object)
-          .map((property) => (
-            <label className="binding-row" key={property}>
-              <span>{property}</span>
-              <input
-                value={object.bindings[property] ?? ""}
-                onChange={(event) => setBinding(property, event.target.value)}
-                placeholder="data.path"
-              />
-            </label>
-          ))}
-      </section>
+        </>
+      ) : null}
+
     </aside>
   );
 }

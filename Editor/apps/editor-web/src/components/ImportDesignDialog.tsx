@@ -19,7 +19,12 @@ export function ImportDesignDialog({ onClose }: { onClose: () => void }) {
   const createTemplateFromScene = useTemplateStore((state) => state.createTemplateFromScene);
   const [sourceMode, setSourceMode] = useState<SourceMode>("file");
   const [file, setFile] = useState<File | null>(null);
-  const [figmaSource, setFigmaSource] = useState({ fileKey: "", accessToken: "", nodeIds: "" });
+  const [figmaSource, setFigmaSource] = useState<{
+    url: string;
+    nodeIds: string;
+    transport: "auto" | "rest" | "desktop-mcp";
+    accessToken: string;
+  }>({ url: "", nodeIds: "", transport: "auto", accessToken: "" });
   const [options, setOptions] = useState<DesignImportOptions>(DEFAULT_DESIGN_IMPORT_OPTIONS);
   const [destination, setDestination] = useState<"replace" | "merge">(hasActiveScene ? "merge" : "replace");
   const [phase, setPhase] = useState<"idle" | "reading" | "parsing" | "converting" | "ready" | "error">("idle");
@@ -39,7 +44,7 @@ export function ImportDesignDialog({ onClose }: { onClose: () => void }) {
 
   const canAnalyze = sourceMode === "file"
     ? Boolean(file)
-    : Boolean(figmaSource.fileKey.trim() && figmaSource.accessToken.trim());
+    : Boolean(figmaSource.url.trim());
   const selectedScenes = useMemo(
     () => result?.scenes
       .filter((scene) => selectedSceneIds.includes(scene.id))
@@ -58,9 +63,10 @@ export function ImportDesignDialog({ onClose }: { onClose: () => void }) {
       const imported = sourceMode === "file"
         ? await importDesignFileToApi(file!, options)
         : await importFigmaDesignToApi({
-            fileKey: figmaSource.fileKey,
-            accessToken: figmaSource.accessToken,
-            nodeIds: figmaSource.nodeIds.split(",").map((value) => value.trim()).filter(Boolean)
+            url: figmaSource.url,
+            nodeIds: figmaSource.nodeIds.split(",").map((value) => value.trim()).filter(Boolean),
+            transport: figmaSource.transport,
+            accessToken: figmaSource.accessToken.trim() || undefined
           }, options);
       setPhase("converting");
       await new Promise((resolve) => window.setTimeout(resolve, 30));
@@ -105,7 +111,7 @@ export function ImportDesignDialog({ onClose }: { onClose: () => void }) {
 
         <div className="design-import-source-tabs" role="tablist" aria-label="Design source">
           <button className={sourceMode === "file" ? "active" : ""} onClick={() => setSourceMode("file")} role="tab" type="button">File upload</button>
-          <button className={sourceMode === "figma" ? "active" : ""} onClick={() => setSourceMode("figma")} role="tab" type="button">Figma API</button>
+          <button className={sourceMode === "figma" ? "active" : ""} onClick={() => setSourceMode("figma")} role="tab" type="button">Figma link</button>
         </div>
 
         {sourceMode === "file" ? (
@@ -119,10 +125,46 @@ export function ImportDesignDialog({ onClose }: { onClose: () => void }) {
           </label>
         ) : (
           <div className="design-import-figma-fields">
-            <label>Figma URL or file key<input value={figmaSource.fileKey} onChange={(event) => setFigmaSource((current) => ({ ...current, fileKey: event.target.value }))} /></label>
-            <label>Personal access token<input autoComplete="off" type="password" value={figmaSource.accessToken} onChange={(event) => setFigmaSource((current) => ({ ...current, accessToken: event.target.value }))} /></label>
-            <label>Selected node IDs, comma separated<input placeholder="Optional" value={figmaSource.nodeIds} onChange={(event) => setFigmaSource((current) => ({ ...current, nodeIds: event.target.value }))} /></label>
-            <p>The token is sent only to the local GrapiX API and is not stored in the project or import report.</p>
+            <label>Figma link<input placeholder="https://www.figma.com/design/…?node-id=1-2" value={figmaSource.url} onChange={(event) => setFigmaSource((current) => ({ ...current, url: event.target.value }))} /></label>
+            <label>Additional node IDs, comma separated<input placeholder="Optional · 1:2, 3:4" value={figmaSource.nodeIds} onChange={(event) => setFigmaSource((current) => ({ ...current, nodeIds: event.target.value }))} /></label>
+            <label>Transport
+              <select
+                value={figmaSource.transport}
+                onChange={(event) => setFigmaSource((current) => ({ ...current, transport: event.target.value as typeof current.transport }))}
+              >
+                <option value="auto">Auto · REST when a token is available</option>
+                <option value="rest">REST API · editable layers</option>
+                <option value="desktop-mcp">Figma Desktop MCP · screenshot, no token</option>
+              </select>
+            </label>
+            <label>Personal access token
+              <input
+                aria-label="Figma personal access token"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder={figmaSource.transport === "desktop-mcp" ? "Not used by the Desktop MCP transport" : "figd_…"}
+                disabled={figmaSource.transport === "desktop-mcp"}
+                type="password"
+                value={figmaSource.accessToken}
+                onChange={(event) => setFigmaSource((current) => ({ ...current, accessToken: event.target.value }))}
+              />
+            </label>
+            {figmaSource.transport !== "desktop-mcp" && !figmaSource.accessToken.trim() ? (
+              <p className="design-import-token-hint" role="note">
+                Paste a token to import editable layers. Create one in Figma → Settings → Security → Personal access tokens,
+                with the <code>file_content:read</code> scope. Leave this empty to fall back to <code>FIGMA_ACCESS_TOKEN</code>
+                on the project service — or, with Transport set to Auto and no token anywhere, to the Desktop MCP screenshot.
+              </p>
+            ) : null}
+            <p>
+              <strong>REST</strong> fetches Figma&apos;s native document JSON, so text stays editable text and vectors stay paths.
+              It needs a personal access token with the <code>file_content:read</code> scope (Figma → Settings → Security), or
+              <code> FIGMA_ACCESS_TOKEN</code> on the machine running the project service. The token is sent to the local project
+              service for this import only and is never stored in the project, the scene, or the report.
+              <br />
+              <strong>Figma Desktop MCP</strong> (127.0.0.1:3845) needs no token, but the server exposes only sparse XML and a
+              rendered screenshot, so each node arrives as one image and is reported as rasterized.
+            </p>
           </div>
         )}
 

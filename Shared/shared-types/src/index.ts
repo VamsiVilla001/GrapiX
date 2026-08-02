@@ -1363,7 +1363,7 @@ export interface BaseSceneObject {
   masks?: ObjectMask[];
   /** Round-trippable source metadata retained by the professional design importer. */
   importedDesign?: {
-    sourceFormat: "psd" | "ai" | "svg" | "figma-json" | "figma-api";
+    sourceFormat: "psd" | "ai" | "svg" | "figma-json" | "figma-mcp";
     sourceName: string;
     sourceNodeId?: string;
     sourceNodeType: string;
@@ -1506,6 +1506,13 @@ export interface ObjectMask {
   editorColor?: string;
   animation?: MaskAnimation;
   paintStrokes?: PaintStroke[];
+  /**
+   * Asset holding this mask's alpha channel, for masks whose shape is a bitmap
+   * rather than a path (a Photoshop layer mask, for example). Neither renderer
+   * samples it yet; a mask carrying one is authored with `mode: "none"` so the
+   * layer renders unmasked rather than clipped by the wrong shape.
+   */
+  alphaAssetId?: string;
 }
 
 export interface MaskPathKeyframe {

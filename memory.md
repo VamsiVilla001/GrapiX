@@ -2591,3 +2591,158 @@ and files that no longer exist).
     agent authoring it at speed. Its knowledge is read from the working tree on every fingerprint
     change — never bundle a snapshot of `docs/` or `memory.md` into the package, because it is
     wrong the first time someone edits the original.
+93. **The MCP server's Streamable HTTP transport is session-based, one `McpServer` per client,
+    keyed by `mcp-session-id`.** It shipped "stateless": one shared server, a fresh transport per
+    request, and `server.connect()` called every time — so a client's *second* call died with
+    "Already connected to a transport". stdio hid it completely, because there one process is one
+    server, which is why 34 passing tests and a live stdio run said nothing was wrong; every
+    HTTP client (Cursor, a remote Codex, anything attaching to a running server) broke right
+    after the handshake. Do not "simplify" it back to a shared server, and do not test it with a
+    single call — `tests/http-transport.test.mjs` makes several calls per session and opens two
+    concurrent sessions because only that shape fails against the bug. The ingested corpus and
+    the project client are shared across sessions on purpose, so a new session does not re-read
+    the repository.
+94. **`@grapix/editor-mcp` is the one publishable package, and two things about it must not be
+    "tidied".** (a) `@grapix/shared-types` is a **devDependency**, inlined into
+    `bundle/grapix-editor-mcp.mjs` by `scripts/bundle.mjs`. Moving it back to `dependencies`
+    makes `npm install` fail for every external user, because that version exists on no
+    registry. The MCP SDK and zod stay external on purpose: a protocol fix should arrive by
+    `npm install`, not by republishing GrapiX. (b) The entry guard compares `realpathSync` of
+    `process.argv[1]` and `import.meta.url`, because npm installs a `bin` as a **symlink** on
+    macOS and Linux — a string comparison makes `npx`/global runs start nothing at all, with no
+    output and exit 0, which is the worst way for a CLI to fail. The published tarball is four
+    files and deliberately contains no `docs/`, no `memory.md` and no `dist/`; the knowledge
+    corpus is read from a checkout (rule 92), so the server exits 2 with instructions when it
+    cannot find one rather than serving an empty one.
+95. **The Editor was write-only against its own project service until 2026-08-01.** It had
+    `saveSceneToApi` and `listScenesFromApi` but no function that read a scene document back:
+    `GET /api/scenes/:id` existed in `project-api` for as long as the route existed and the UI
+    never called it, there was no File > Open, and the editor booted from `createEmptyScene()`
+    into a localStorage template catalogue. So any scene authored outside a running window — by
+    the MCP server, another agent, or a previous session — was invisible, and the reported
+    symptom ("I can't see the new scene in the exe") had no cache to clear because no code path
+    existed. `readSceneFromApi` + `File > Open Scene…` is that path. Do not reintroduce a
+    save-only client: a design that can write state it cannot read back is how two sources of
+    truth start.
+96. **A scene opened from the service keeps its server id.** `sceneToTemplateScene` assigns a
+    fresh numeric catalogue id (`004`) and is for a *design import*, whose scene has no server
+    identity yet. Using it for an opened scene renames `scene_4e51e528` to `004`, so the next
+    Save posts a **different** id — creating a second scene and silently leaving the original
+    untouched while the author believes they are editing it. `serverSceneToTemplateScene` keeps
+    the id, and `openServerScene` replaces an existing catalogue entry for the same `sceneId`
+    rather than adding a second card pointing at one scene. `tests/open-server-scene.test.ts`
+    pins both halves, including that the import wrapper still renumbers.
+97. **`tauri build` deletes `target/<profile>/<sidecar>.exe` before staging it**
+    (`tauri-build/src/lib.rs`, `copy_binaries` -> `fs::remove_file(&dest).unwrap()`), so a
+    **running render engine fails the desktop build** with `Os { code: 5, PermissionDenied }`
+    and an unwrap panic that names the tauri source, not the file. Stop the engine before
+    building the shell. Two traps found on 2026-08-01: deleting a running image reports **Access
+    Denied (5)**, not a sharing violation, so probing with "can I open it for write" answers the
+    wrong question and clears a file that is in fact blocked; and piping the build through
+    `| tail` makes the harness report the **pipeline's** exit code, so a failed build looks like
+    a success. Run it unpiped.
+98. **A content-addressed store must serialize writes per target path.** One design import
+    extracts the same bytes once per referencing layer (a PSD reusing a texture), and every
+    copy resolves to one `asset_<checksum>` path. `persistExtractedAssets` writes them with
+    `Promise.all`, so the second `rename` onto that path failed on Windows with **EPERM**
+    (`MoveFileEx` -> `ERROR_ACCESS_DENIED` while the first replacement still holds the
+    destination). It surfaced as "Asset X could not be embedded" and left the layer on an
+    inline data URL. `atomicWriteFile` now queues per resolved path, which also lets the
+    checksum short-circuit in `importAssetBuffer` see the first write. Nine of forty warnings
+    on a real 93 MB PSD were this one bug.
+99. **An import report describes the scene, not the source file.** Format adapters walk the
+    whole document, so they reported unrenderable masks and effects for layers the
+    hidden-layer filter then dropped, and for effects Photoshop had switched **off**. Twelve
+    mask warnings named layers that were not in the scene. `pruneDesignImportIssues` drops
+    issues whose `sourceNodeId` did not survive normalization, effect warnings are gated on
+    `enabled`, and the normalizer keeps only fonts an imported text node still references.
+100. **A mask whose shape is a bitmap may not be authored as a path.** The PSD bitmap-mask
+    fallback used the layer's bounding box as an `add` mask with `inverted` from the mask's
+    default colour - a full-bounds hide, so the layer disappeared while the report claimed the
+    mask was "preserved" and `grapixObjectConverter` dropped `alphaAssetId` entirely. It now
+    carries the alpha asset with `mode: "none"` (the renderer's skip condition), so the layer
+    renders unmasked and the report says so. Invariant 7 is about this: a fallback may not
+    silently produce different pixels.
+101. **Nothing may re-fetch an asset that is already in the store.** `persistExtractedAssets`
+    re-downloaded the source document from `PUBLIC_ASSET_BASE` because `assetMode: "embed"`
+    plus a `sourceUrl` looked like a remote asset - a 93 MB loopback copy of a file written
+    moments earlier, and a hard failure when the service does not run on 4100. That base is
+    now derived from `GRAPIX_API_PORT`, and an asset served under its own id is skipped.
+102. **`layerId` is a compositing layer and the FIRST render-order key; it is not a parent
+    pointer.** `grapixObjectConverter` wrote the parent object's id into it while nesting was
+    already expressed by `childIds` (the only thing `resolveSceneObjectHierarchy` reads), so
+    every group's children landed in their own pseudo-layer sorted alphabetically against
+    `"main"`. A PSD's opaque bottom layer therefore painted over every nested object in
+    Preview and Program, and the Object Manager grew a fake layer per group. Imported
+    objects stay on one layer; `zIndex` follows the document walk.
+103. **`anchor` is an object-local pivot, applied as `T(x,y) · R · S · T(-anchor)`.** The PSD
+    importer set it from `layer.referencePoint`, which is Photoshop's free-transform
+    reference in **document** space. A full-frame layer with `referencePoint.y = 1080` was
+    drawn one canvas height above the frame and vanished; three of the four background
+    layers of a real deliverable disappeared this way. Import the pivot as `{0,0}` and keep
+    the source value in `sourceData`.
+104. **A Photoshop clipping mask is a mask, not metadata.** `clipping: true` means the layer
+    is clipped to the alpha of the nearest unclipped layer below it in the same group. Kept
+    as metadata only, a 1918x927 gradient clipped to a 727x205 text layer covered the whole
+    canvas. It now becomes a mask over the base layer's **bounds** - exact for a rectangle
+    or shape base, approximate for a text base, and reported either way.
+105. **An importer may not author a blend mode the renderers dropped.** `mapBlendMode`
+    returned `overlay` and `subtract`, which are declared in `MaterialBlendMode` and rendered
+    by nothing, and let Photoshop's `vivid light` / `luminosity` fall through to `normal`
+    silently. `Editor/services/project-api/src/importers/design/blendModes.ts` is now the one
+    table for Photoshop, SVG/CSS and Figma names; it returns only
+    `IMPLEMENTED_BLEND_MODES` values and marks approximations so the caller can report them.
+106. **Never do bookkeeping writes on a read path, and always retry a Windows rename.**
+    `readStoredAssetContent` rewrote the asset sidecar on every GET to stamp
+    `lastAccessedAt`: opening an imported scene rewrote one JSON per asset (86) against the
+    reference-index rebuild `saveScene` runs, and a single `EPERM` from `MoveFileEx` turned
+    an image request into a **500** - which the editor draws as an empty white quad, and made
+    every autosave fail. The stamp is throttled to a minute and best-effort, the index
+    rebuild writes only changed sidecars and never fails a save, and `atomicWriteFile`
+    retries `EPERM`/`EACCES`/`EBUSY` renames with backoff.
+107. **Figma Desktop MCP cannot produce editable layers; only the REST API can.** The MCP
+    server exposes `get_metadata` (sparse XML), `get_design_context` (generated
+    React/Tailwind) and `get_screenshot` — never the native document JSON, so that route is a
+    screenshot by construction. `figmaRestImporter.ts` is the editable route: it parses the
+    file key and node ids out of any link flavour (`/design`, `/file`, `/proto`, `/board`,
+    `/branch/<key>`, bare key, `?node-id=1-2` incl. `I1-2;3-4`), calls
+    `/v1/files/{key}/nodes?ids=…&geometry=paths` plus `/v1/files/{key}/images` for `imageRef`
+    fills, and reuses the `figma-json` adapter. The token (personal `figd_…` via
+    `X-Figma-Token`, or OAuth bearer) is per request or `FIGMA_ACCESS_TOKEN`, and is never
+    written to the project, the scene or the report. `transport: "rest"` with no token fails
+    loudly instead of silently rasterizing.
+108. **The web client must surface the service's own error text.** `request()` in
+    `apiClient.ts` threw `API request failed with 422` and discarded the `error` body, so a
+    Figma import that failed for a missing `file_content:read` scope told the operator only a
+    status code. It now reads the payload first and throws `payload.error` when present.
+109. **A Figma coordinate is page space; a scene dimension is not.** `boundsOfNodes`
+    computed the canvas as `maxY - Math.min(0, minY)`, so a 1920x1080 frame sitting at
+    y = 4875 on its Figma page imported as a **5955-high** scene with the artwork pushed off
+    the origin. The selected root frame is the scene: origin `0,0`, canvas = its own
+    `width`/`height`, every node `localX = node.absoluteX - root.absoluteX` at each nesting
+    level. Several roots (whole-page import) use their common top-left and extent. The frame's
+    page position survives as metadata only (`sourceData.pagePosition`). `rootMetadata` in the
+    MCP importer also now prefers the first element that declares width **and** height,
+    because a `<page>` wrapper carries neither and the fallback silently adopted the
+    screenshot's scale as the canvas size.
+110. **The render engine registers assets by checksum, so an importer that omits it produces
+    scenes that cannot go on air.** `convertAssets` never emitted `checksum`, so *every*
+    design-imported scene failed at `asset.register` with "asset … has no checksum and cannot
+    be sent to the render engine". `persistExtractedAssets` now carries `checksum`/`sizeBytes`
+    from the store, `convertAssets` emits them, an asset with neither checksum nor inline
+    bytes is `MISSING` instead of a `READY` lie, `readSceneUnlocked` backfills checksums for
+    scenes written before this (and downgrades the ones that are not in the store), and
+    `ensureSceneAssets` skips acknowledged `MISSING` assets rather than refusing the whole
+    scene. A `READY` asset with no checksum is still a hard failure - that is a broken
+    producer, not an authoring gap.
+111. **The authoring source document is provenance, not scene content.** The import pushed the
+    source PSD into `scene.assets`, and Playout ships every scene asset to the engine: a
+    93 MB upload per take that renders nothing, and `asset.register` timing out at 15 s
+    behind it. The source now lives only in `dataContext.__designImport.sourceAssetIds`.
+112. **A `RATE_LIMITED` frame was never consumed, so retry the SAME frame.** The engine's
+    limiter runs before its sequence tracker (`transport.rs`), so re-sending a rate-limited
+    request as a *new* message leaves a hole in the inbound sequence: the engine answered
+    with `inbound sequence gap; requiring a resync` and, after a few, dropped the socket
+    (1006) mid asset-sync. `EngineConnection.request` now retransmits the identical frame -
+    same message id, same sequence - after the delay the engine states, up to five times.
+    Sequence contiguity is the contract; backpressure is not an outage.

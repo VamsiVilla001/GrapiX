@@ -8,6 +8,7 @@ import { useUiStore } from "../store/uiStore";
 import { ProjectSettingsDialog } from "./ProjectSettingsDialog";
 import { ProjectViewportDialog } from "./ProjectViewportDialog";
 import { ImportDesignDialog } from "./ImportDesignDialog";
+import { OpenSceneDialog } from "./OpenSceneDialog";
 import { PublishToPlayoutDialog } from "./PublishToPlayoutDialog";
 
 interface MenuItem {
@@ -34,6 +35,7 @@ export function MenuBar() {
   const [viewportDialogOpen, setViewportDialogOpen] = useState(false);
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
   const [designImportOpen, setDesignImportOpen] = useState(false);
+  const [openSceneOpen, setOpenSceneOpen] = useState(false);
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const barRef = useRef<HTMLDivElement>(null);
 
@@ -146,6 +148,7 @@ export function MenuBar() {
         { label: "Project Settings…", onSelect: () => setProjectSettingsOpen(true) },
         { separator: true },
         { label: "New Scene…", onSelect: newScene },
+        { label: "Open Scene…", onSelect: () => setOpenSceneOpen(true) },
         { label: "Import Design File…", onSelect: () => setDesignImportOpen(true) },
         { separator: true },
         { label: "Save", disabled: !hasActiveScene, onSelect: () => void save() },
@@ -276,6 +279,7 @@ export function MenuBar() {
     {projectSettingsOpen ? <ProjectSettingsDialog onClose={() => setProjectSettingsOpen(false)} /> : null}
     {viewportDialogOpen ? <ProjectViewportDialog onClose={() => setViewportDialogOpen(false)} /> : null}
     {designImportOpen ? <ImportDesignDialog onClose={() => setDesignImportOpen(false)} /> : null}
+    {openSceneOpen ? <OpenSceneDialog onClose={() => setOpenSceneOpen(false)} /> : null}
     {publishDialogOpen ? <PublishToPlayoutDialog onClose={() => setPublishDialogOpen(false)} /> : null}
     </>
   );

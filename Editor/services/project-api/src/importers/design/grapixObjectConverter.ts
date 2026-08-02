@@ -31,19 +31,28 @@ function convertPage(
   report: DesignImportReport
 ): SceneDocument {
   const timestamp = new Date().toISOString();
-  const assets = convertAssets(document);
+  const assets = convertAssets(document, report);
   const materials: Material[] = [];
   const objects: SceneObject[] = [];
   let stack = 0;
 
-  const convertNodes = (nodes: NormalizedDesignNode[], parentId?: string): string[] => {
+  /*
+   * Nesting is expressed by `childIds` alone - `resolveSceneObjectHierarchy` reads
+   * nothing else. `layerId` is a compositing layer (Background, Lower Third, ...)
+   * and it is the FIRST key both renderers sort on, so writing a parent id into it
+   * pushed every group's children into their own pseudo-layer, ordered
+   * alphabetically against "main": a PSD's opaque bottom layer then painted over
+   * every nested object in Preview and in Program. Imported objects stay on one
+   * layer, and `zIndex` (document walk order) decides what is on top.
+   */
+  const convertNodes = (nodes: NormalizedDesignNode[]): string[] => {
     const ids: string[] = [];
     nodes.forEach((node) => {
       const object = convertNode(node, document, options, report, assets, materials, stack++);
       objects.push(object);
       ids.push(object.id);
       if (isContainer(object)) {
-        object.childIds = convertNodes(node.children, object.id);
+        object.childIds = convertNodes(node.children);
       } else if (node.children.length) {
         const wrapper = convertNode({
           ...node,
@@ -58,10 +67,9 @@ function convertPage(
           effects: [],
           children: node.children
         }, document, options, report, assets, materials, stack++) as GroupSceneObject;
-        wrapper.childIds = convertNodes(node.children, wrapper.id);
+        wrapper.childIds = convertNodes(node.children);
         objects.push(wrapper);
       }
-      if (parentId) object.layerId = parentId;
     });
     return ids;
   };
@@ -94,6 +102,10 @@ function convertPage(
         sourceId: document.sourceId,
         importedAt: timestamp,
         pageId: page.id,
+        // Provenance by reference. The source document stays in the project store but
+        // out of the scene library: Playout ships every scene asset to the render
+        // engine, and a 93 MB PSD is neither renderable nor wanted on air.
+        sourceAssetIds: document.assets.filter((asset) => asset.kind === "source").map((asset) => asset.id),
         components: document.components,
         variables: document.variables,
         sourceMetadata: document.sourceMetadata
@@ -154,13 +166,17 @@ function convertNode(
     masks: node.masks.map((mask) => ({
       id: mask.id,
       name: mask.name,
-      type: mask.alphaAssetId ? "paint" as const : "bezier" as const,
+      // "paint" means brush strokes. A bitmap mask has neither strokes nor a real
+      // path, so it stays a bezier record carrying its alpha asset until the
+      // renderers can sample one.
+      type: "bezier" as const,
       path: mask.path,
       mode: mask.mode,
       inverted: mask.inverted,
       opacity: mask.opacity,
       feather: mask.feather,
       expansion: mask.expansion,
+      alphaAssetId: mask.alphaAssetId,
       visible: true,
       locked: false,
       editorColor: "#f5b942"
@@ -279,23 +295,52 @@ function convertNode(
   return { ...base, type: "rect", radius: node.cornerRadius ?? 0 };
 }
 
-function convertAssets(document: NormalizedDesignDocument): AssetLibraryItem[] {
+/**
+ * Scene asset library from the normalized document.
+ *
+ * `checksum` is load-bearing, not decoration: the render engine registers assets by
+ * SHA-256 and refuses a scene containing one without it ("asset … has no checksum and
+ * cannot be sent to the render engine"). Only an asset that reached the project store
+ * has one, so an asset that is still a bare external link is `MISSING` here rather
+ * than a `READY` entry that fails at Take time.
+ */
+function convertAssets(
+  document: NormalizedDesignDocument,
+  report: DesignImportReport
+): AssetLibraryItem[] {
   const timestamp = new Date().toISOString();
-  return document.assets.map((asset) => ({
-    assetId: asset.id,
-    name: asset.name,
-    kind: mapAssetKind(asset.kind),
-    source: asset.sourceUrl ?? (asset.dataBase64 ? `data:${asset.mimeType};base64,${asset.dataBase64}` : ""),
-    mimeType: asset.mimeType,
-    importedAt: timestamp,
-    sourcePath: asset.sourceUrl,
-    width: asset.width,
-    height: asset.height,
-    status: asset.sourceUrl || asset.dataBase64 ? "READY" : "MISSING",
-    colorSpace: "srgb",
-    alphaMode: "premultiplied",
-    tags: ["design-import", document.sourceFormat]
-  }));
+  // The authoring source (the PSD/AI/JSON the scene came from) is provenance, not scene
+  // content: it is referenced by id from `dataContext.__designImport.sourceAssetIds`.
+  return document.assets.filter((asset) => asset.kind !== "source").map((asset) => {
+    const stored = Boolean(asset.checksum);
+    const inline = Boolean(asset.dataBase64);
+    if (!stored && !inline && asset.sourceUrl) {
+      addDesignImportIssue(report, {
+        kind: "missing-asset",
+        severity: "warning",
+        message: `${asset.name} is only an external reference, so it has no checksum and the render engine cannot register it.`,
+        sourceNodeName: asset.name,
+        fallback: "Editor preview only; not available to Program"
+      });
+    }
+    return {
+      assetId: asset.id,
+      name: asset.name,
+      kind: mapAssetKind(asset.kind),
+      source: asset.sourceUrl ?? (inline ? `data:${asset.mimeType};base64,${asset.dataBase64}` : ""),
+      mimeType: asset.mimeType,
+      importedAt: timestamp,
+      sourcePath: asset.sourceUrl,
+      width: asset.width,
+      height: asset.height,
+      checksum: asset.checksum,
+      sizeBytes: asset.sizeBytes,
+      status: stored || inline ? "READY" as const : "MISSING" as const,
+      colorSpace: "srgb" as const,
+      alphaMode: "premultiplied" as const,
+      tags: ["design-import", document.sourceFormat]
+    };
+  });
 }
 
 function convertFonts(

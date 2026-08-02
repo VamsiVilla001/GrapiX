@@ -38,6 +38,7 @@
  */
 
 import type { EngineChannel, PreviewView } from "@grapix/render-protocol";
+import { MAX_PROJECT_DIMENSION } from "@grapix/shared-types";
 import type { PlayoutEngineController } from "./engineController.js";
 
 /** Channels the operator UI can watch. `auxiliary` exists in the protocol but has no panel. */
@@ -46,6 +47,17 @@ export type MonitorChannel = (typeof MONITOR_CHANNELS)[number];
 
 /** Fill is the colour an audience sees; key is the matte a downstream keyer cuts. */
 export const MONITOR_VIEWS = ["fill", "key"] as const;
+
+/**
+ * Confidence monitors are deliberately small. A windowed output instead observes Program
+ * at native project resolution; the engine's preview pixel budget remains the hard guard.
+ */
+export const MONITOR_STREAM_TIERS = ["confidence", "output"] as const;
+export type MonitorStreamTier = (typeof MONITOR_STREAM_TIERS)[number];
+
+export function isMonitorStreamTier(value: string): value is MonitorStreamTier {
+  return (MONITOR_STREAM_TIERS as readonly string[]).includes(value);
+}
 
 export function isMonitorChannel(value: string): value is MonitorChannel {
   return (MONITOR_CHANNELS as readonly string[]).includes(value);
@@ -70,6 +82,7 @@ export interface MonitorFrame {
 export interface MonitorChannelStatus {
   channel: MonitorChannel;
   view: PreviewView;
+  tier: MonitorStreamTier;
   /** Someone is watching and frames are arriving. */
   live: boolean;
   viewers: number;
@@ -91,9 +104,10 @@ export interface MonitorHubOptions {
    * a thumbnail to the held final frame.
    */
   targetFps?: number;
+  /** Confidence-monitor bounds. Windowed outputs use the project-resolution ceiling. */
   maxWidth?: number;
   maxHeight?: number;
-  /** JPEG quality. Lower than an Editor viewport: this is a small confidence monitor. */
+  /** Confidence-monitor JPEG quality. Windowed outputs use a higher fixed quality. */
   quality?: number;
   /**
    * How long without a frame before a channel reports `live: false` while still
@@ -116,6 +130,7 @@ type FrameListener = (frame: MonitorFrame) => void;
 interface ChannelState {
   channel: MonitorChannel;
   view: PreviewView;
+  tier: MonitorStreamTier;
   streamId: string;
   listeners: Set<FrameListener>;
   /** Guards against two subscribers racing to start the same stream. */
@@ -132,8 +147,28 @@ interface ChannelState {
   lastError: string | null;
 }
 
+interface MonitorStreamProfile {
+  targetFps: number;
+  maxWidth: number;
+  maxHeight: number;
+  quality: number;
+}
+
+/**
+ * A scaled-stage request never upscales, so these bounds mean "native project resolution".
+ * The engine still refuses a canvas above its negotiated maxPreviewPixels limit instead of
+ * silently returning a smaller frame.
+ */
+const OUTPUT_STREAM_PROFILE: Readonly<MonitorStreamProfile> = Object.freeze({
+  targetFps: 30,
+  maxWidth: MAX_PROJECT_DIMENSION,
+  maxHeight: MAX_PROJECT_DIMENSION,
+  quality: 92
+});
+
 /** Identity of one watchable surface. */
-const keyOf = (channel: MonitorChannel, view: PreviewView) => `${channel}/${view}`;
+const keyOf = (channel: MonitorChannel, view: PreviewView, tier: MonitorStreamTier) =>
+  `${channel}/${view}/${tier}`;
 
 export class MonitorHub {
   private readonly engine: PlayoutEngineController;
@@ -211,20 +246,21 @@ export class MonitorHub {
   subscribe(
     channel: MonitorChannel,
     view: PreviewView,
-    listener: FrameListener
+    listener: FrameListener,
+    tier: MonitorStreamTier = "confidence"
   ): () => void {
-    const state = this.channelState(channel, view);
+    const state = this.channelState(channel, view, tier);
     state.listeners.add(listener);
     // Fire-and-forget: an HTTP response must not wait on the GPU, and a failure to start
     // is reported through status rather than by failing the viewer's request.
-    void this.ensureStream(channel, view);
+    void this.ensureStream(channel, view, tier);
 
     let detached = false;
     return () => {
       if (detached) return;
       detached = true;
       state.listeners.delete(listener);
-      if (state.listeners.size === 0) void this.releaseStream(channel, view);
+      if (state.listeners.size === 0) void this.releaseStream(channel, view, tier);
     };
   }
 
@@ -233,52 +269,68 @@ export class MonitorHub {
     const rows: MonitorChannelStatus[] = [];
     for (const channel of MONITOR_CHANNELS) {
       for (const view of MONITOR_VIEWS) {
-        const state = this.channels.get(keyOf(channel, view));
-        if (!state) {
+        for (const tier of MONITOR_STREAM_TIERS) {
+          const state = this.channels.get(keyOf(channel, view, tier));
+          // Confidence surfaces always appear so the operator can distinguish idle from
+          // missing. Output surfaces appear once a window has actually requested one.
+          if (!state && tier === "output") continue;
+          if (!state) {
+            rows.push({
+              channel,
+              view,
+              tier,
+              live: false,
+              viewers: 0,
+              targetFps: null,
+              framesReceived: 0,
+              lastFrameAtMs: null,
+              width: null,
+              height: null,
+              sceneId: null,
+              lastError: null
+            });
+            continue;
+          }
+          const fresh =
+            state.lastFrameAtMs !== null && now - state.lastFrameAtMs <= this.options.staleAfterMs;
           rows.push({
             channel,
             view,
-            live: false,
-            viewers: 0,
-            targetFps: null,
-            framesReceived: 0,
-            lastFrameAtMs: null,
-            width: null,
-            height: null,
-            sceneId: null,
-            lastError: null
+            tier,
+            live: state.listeners.size > 0 && fresh,
+            viewers: state.listeners.size,
+            targetFps: state.targetFps,
+            framesReceived: state.framesReceived,
+            lastFrameAtMs: state.lastFrameAtMs,
+            width: state.width,
+            height: state.height,
+            sceneId: state.sceneId,
+            lastError: state.lastError
           });
-          continue;
         }
-        const fresh =
-          state.lastFrameAtMs !== null && now - state.lastFrameAtMs <= this.options.staleAfterMs;
-        rows.push({
-          channel,
-          view,
-          live: state.listeners.size > 0 && fresh,
-          viewers: state.listeners.size,
-          targetFps: state.targetFps,
-          framesReceived: state.framesReceived,
-          lastFrameAtMs: state.lastFrameAtMs,
-          width: state.width,
-          height: state.height,
-          sceneId: state.sceneId,
-          lastError: state.lastError
-        });
       }
     }
     return rows;
   }
 
-  private channelState(channel: MonitorChannel, view: PreviewView): ChannelState {
-    const id = keyOf(channel, view);
+  private channelState(
+    channel: MonitorChannel,
+    view: PreviewView,
+    tier: MonitorStreamTier
+  ): ChannelState {
+    const id = keyOf(channel, view, tier);
     const existing = this.channels.get(id);
     if (existing) return existing;
     const state: ChannelState = {
       channel,
       view,
-      // Stable per surface so a restart reuses the id rather than leaking a new one.
-      streamId: `playout_monitor_${channel}_${view}`,
+      tier,
+      // Keep confidence ids stable for diagnostics; output observers are a separate stream
+      // so opening a native-resolution window cannot enlarge the small operator panels.
+      streamId:
+        tier === "confidence"
+          ? `playout_monitor_${channel}_${view}`
+          : `playout_output_${channel}_${view}`,
       listeners: new Set(),
       starting: null,
       started: false,
@@ -295,10 +347,15 @@ export class MonitorHub {
     return state;
   }
 
-  private async ensureStream(channel: MonitorChannel, view: PreviewView): Promise<void> {
-    const state = this.channelState(channel, view);
+  private async ensureStream(
+    channel: MonitorChannel,
+    view: PreviewView,
+    tier: MonitorStreamTier
+  ): Promise<void> {
+    const state = this.channelState(channel, view, tier);
     if (state.started) return;
     if (state.starting) return state.starting;
+    const profile = tier === "output" ? OUTPUT_STREAM_PROFILE : this.options;
 
     const attempt = (async () => {
       try {
@@ -306,10 +363,10 @@ export class MonitorHub {
           streamId: state.streamId,
           channel: channel as EngineChannel,
           view,
-          maxWidth: this.options.maxWidth,
-          maxHeight: this.options.maxHeight,
-          targetFps: this.options.targetFps,
-          quality: this.options.quality
+          maxWidth: profile.maxWidth,
+          maxHeight: profile.maxHeight,
+          targetFps: profile.targetFps,
+          quality: profile.quality
         });
         // A viewer may have left while the request was in flight. Do not leave a stream
         // running for nobody.
@@ -318,12 +375,12 @@ export class MonitorHub {
           return;
         }
         state.started = true;
-        state.targetFps = ack.targetFps ?? this.options.targetFps;
+        state.targetFps = ack.targetFps ?? profile.targetFps;
         state.lastError = null;
         this.clearRetry(state);
       } catch (error) {
-        // Normal when no engine is connected or nothing is on the channel. The panel
-        // shows "no signal"; the reason is available in status.
+        // Normal when no engine is connected, nothing is on the channel, or a requested
+        // native-resolution output exceeds the engine's explicit preview pixel budget.
         state.started = false;
         state.lastError = error instanceof Error ? error.message : String(error);
         // Try again while someone is still watching. The viewer's HTTP connection stays
@@ -331,7 +388,7 @@ export class MonitorHub {
         // the moment a scene is taken — no reconnect, no reload. Retrying here rather
         // than in the browser also keeps one refusal per interval instead of one per
         // client.
-        this.scheduleRetry(channel, view);
+        this.scheduleRetry(channel, view, tier);
       } finally {
         state.starting = null;
       }
@@ -347,12 +404,18 @@ export class MonitorHub {
    * Only ever one timer per surface: a burst of viewers must not turn into a burst of
    * retries, and the timer is unrefed so it cannot hold the process open at shutdown.
    */
-  private scheduleRetry(channel: MonitorChannel, view: PreviewView): void {
-    const state = this.channelState(channel, view);
+  private scheduleRetry(
+    channel: MonitorChannel,
+    view: PreviewView,
+    tier: MonitorStreamTier
+  ): void {
+    const state = this.channelState(channel, view, tier);
     if (state.retryTimer || state.listeners.size === 0) return;
     const timer = setTimeout(() => {
       state.retryTimer = null;
-      if (state.listeners.size > 0 && !state.started) void this.ensureStream(channel, view);
+      if (state.listeners.size > 0 && !state.started) {
+        void this.ensureStream(channel, view, tier);
+      }
     }, this.options.retryMs);
     timer.unref?.();
     state.retryTimer = timer;
@@ -364,8 +427,12 @@ export class MonitorHub {
     state.retryTimer = null;
   }
 
-  private async releaseStream(channel: MonitorChannel, view: PreviewView): Promise<void> {
-    const state = this.channels.get(keyOf(channel, view));
+  private async releaseStream(
+    channel: MonitorChannel,
+    view: PreviewView,
+    tier: MonitorStreamTier
+  ): Promise<void> {
+    const state = this.channels.get(keyOf(channel, view, tier));
     if (!state) return;
     // Nobody is watching, so a pending retry would start a stream for no one.
     this.clearRetry(state);
@@ -389,17 +456,22 @@ export class MonitorHub {
     const channel = typeof payload.channel === "string" ? payload.channel : null;
     if (!channel || !isMonitorChannel(channel)) return;
     if (payload.sceneId === null) return;
-    for (const view of MONITOR_VIEWS) {
-      const state = this.channels.get(keyOf(channel, view));
-      if (!state || state.listeners.size === 0 || state.started) continue;
+    for (const state of this.channels.values()) {
+      if (
+        state.channel !== channel ||
+        state.listeners.size === 0 ||
+        state.started
+      ) {
+        continue;
+      }
       this.clearRetry(state);
       // Logged because the symptom of getting this wrong is subtle and operator-visible:
       // a monitor that starts a second late misses a 0.4s "in" animation entirely and looks
       // like the animation never played.
       console.log(
-        `[monitors] ${channel}/${view}: scene arrived on channel, starting stream for ${state.listeners.size} viewer(s)`
+        `[monitors] ${channel}/${state.view}/${state.tier}: scene arrived on channel, starting stream for ${state.listeners.size} viewer(s)`
       );
-      void this.ensureStream(channel, view);
+      void this.ensureStream(channel, state.view, state.tier);
     }
   }
 
@@ -408,7 +480,9 @@ export class MonitorHub {
       state.started = false;
       state.lastFrameAtMs = null;
       state.lastError = reason;
-      if (state.listeners.size > 0) void this.ensureStream(state.channel, state.view);
+      if (state.listeners.size > 0) {
+        void this.ensureStream(state.channel, state.view, state.tier);
+      }
     }
   }
 

@@ -96,7 +96,10 @@ export function resolveConfig(env: NodeJS.ProcessEnv = process.env): EditorMcpCo
     throw new ConfigurationError(
       "Could not locate the GrapiX repository root. Set GRAPIX_REPOSITORY_ROOT to the " +
         "directory that contains docs/, Shared/ and Editor/, or launch this server with " +
-        "that directory as its working directory."
+        "that directory as its working directory.\n" +
+        "Installed from npm, this is expected and not a packaging fault: the architecture, " +
+        "contract and capability knowledge is read from a real checkout so it can never serve a " +
+        "stale snapshot, so this server needs to be pointed at one."
     );
   }
   if (explicitRoot && !isRepositoryRoot(repositoryRoot)) {

@@ -20,6 +20,8 @@ glam = "0.29"
 gltf = { version = "1.4", features = ["import", "utils"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 serde = { version = "1", features = ["derive"] }
+lyon_path = "1"
+lyon_tessellation = "1"
 serde_json = "1"
 thiserror = "2"
 # `sync` and `time` only: the render core uses them for shared state and pacing. The

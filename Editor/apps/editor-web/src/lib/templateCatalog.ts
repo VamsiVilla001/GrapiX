@@ -89,6 +89,36 @@ export function sceneToTemplateScene(scene: SceneDocument, index: number): Templ
   };
 }
 
+/**
+ * Wraps a scene that already exists on the project service, **keeping its id**.
+ *
+ * `sceneToTemplateScene` assigns a fresh numeric catalogue id, which is right for
+ * a design import — that scene has no server identity yet. It is wrong for a scene
+ * opened from the service: renaming `scene_4e51e528` to `004` would make the next
+ * Save write a *different* scene and silently leave the original untouched, so the
+ * author would be editing a fork without being told.
+ *
+ * `sceneId` is therefore the server id, which also keeps `updateTemplateScene`
+ * consistent — it forces `scene.id = template.sceneId` on every edit.
+ * `getNextNumericSceneId` is unaffected: it skips ids that are not numeric.
+ */
+export function serverSceneToTemplateScene(scene: SceneDocument): TemplateScene {
+  const now = new Date().toISOString();
+
+  return {
+    templateId: `template_server_${scene.id}`,
+    sceneId: scene.id,
+    name: scene.name || scene.id,
+    shortLabel: scene.id,
+    videoProfile: profileFromScene(scene),
+    favorite: false,
+    thumbnailVariant: "navy",
+    scene,
+    createdAt: scene.createdAt ?? now,
+    updatedAt: scene.updatedAt ?? now
+  };
+}
+
 export function profileFromScene(scene: SceneDocument): VideoProfile {
   const fps = scene.timeline?.fps ?? defaultProfile.frameRate;
   const scanMode = "p";

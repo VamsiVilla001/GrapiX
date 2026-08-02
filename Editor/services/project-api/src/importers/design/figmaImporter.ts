@@ -11,6 +11,7 @@ import {
   type NormalizedDesignNodeType,
   type NormalizedDesignPage
 } from "@grapix/shared-types";
+import { resolveSourceBlendMode } from "./blendModes.js";
 import { addDesignImportIssue, reportImportWarning } from "./importReport.js";
 import { parseSvgPathData, rectanglePath } from "./svgPath.js";
 
@@ -20,7 +21,7 @@ export function importFigmaDocument(
   input: unknown,
   sourceName: string,
   report: DesignImportReport,
-  sourceFormat: "figma-json" | "figma-api",
+  sourceFormat: "figma-json",
   imageUrls: Record<string, string> = {}
 ): NormalizedDesignDocument {
   const root = asRecord(input);
@@ -70,25 +71,66 @@ export function importFigmaDocument(
   };
 }
 
+/**
+ * Convert one Figma canvas into a page whose origin is the imported content itself.
+ *
+ * Figma reports `absoluteBoundingBox` in **page** space, so a frame can sit at
+ * y = 4875 on a busy page. Sizing the scene from those coordinates produced a
+ * 4875 + 1080 = 5955-high canvas with the artwork pushed off the origin. The
+ * selected root frame is the scene: its own width and height are the canvas, its
+ * absolute position is the origin, and every node is expressed relative to it
+ * (`localX = node.absoluteX - root.absoluteX`).
+ *
+ * With several roots (a whole-page import) there is no single selected frame, so the
+ * origin is the top-left corner of their common bounds and the canvas is their
+ * extent - never a coordinate plus a size.
+ */
 function convertPage(
   page: Json,
   report: DesignImportReport,
   assets: Map<string, NormalizedDesignAsset>,
   imageUrls: Record<string, string>
 ): NormalizedDesignPage {
-  const children = convertChildren(page.children ?? [], { x: 0, y: 0 }, report, assets, imageUrls);
-  const bounds = boundsOfNodes(children);
+  const roots = array(page.children).filter((child) => child && typeof child === "object");
+  const frame = pageFrame(roots);
+  const children = convertChildren(roots, frame.origin, report, assets, imageUrls);
   const background = figmaPaintToColorValue((page.backgroundColor ? [{ type: "SOLID", color: page.backgroundColor }] : page.backgrounds)?.[0])
     ?? { type: "solid" as const, color: "#ffffff" };
   return {
     id: String(page.id ?? createSceneId("figma-page")),
     name: String(page.name ?? "Figma Page"),
-    width: Math.max(1, bounds.width || number(page.width, 1920)),
-    height: Math.max(1, bounds.height || number(page.height, 1080)),
+    width: Math.max(1, frame.width || number(page.width, 1920)),
+    height: Math.max(1, frame.height || number(page.height, 1080)),
     background,
     nodes: children,
     guides: layoutGridGuides(page.layoutGrids)
   };
+}
+
+/** The absolute rectangle a raw Figma node occupies, read the way `convertNode` reads it. */
+function absoluteBox(node: Json): { x: number; y: number; width: number; height: number } {
+  const box = asRecord(node.absoluteBoundingBox ?? node.absoluteRenderBounds ?? node.size);
+  return {
+    x: number(box.x, number(node.x)),
+    y: number(box.y, number(node.y)),
+    width: Math.max(0, number(box.width, number(node.width))),
+    height: Math.max(0, number(box.height, number(node.height)))
+  };
+}
+
+/** Scene origin and size for a canvas: the selected root frame, or the extent of several. */
+function pageFrame(roots: Json[]): { origin: { x: number; y: number }; width: number; height: number } {
+  const boxes = roots.map(absoluteBox).filter((box) => box.width > 0 && box.height > 0);
+  if (!boxes.length) return { origin: { x: 0, y: 0 }, width: 0, height: 0 };
+  if (boxes.length === 1) {
+    const [only] = boxes;
+    return { origin: { x: only.x, y: only.y }, width: only.width, height: only.height };
+  }
+  const minX = Math.min(...boxes.map((box) => box.x));
+  const minY = Math.min(...boxes.map((box) => box.y));
+  const maxX = Math.max(...boxes.map((box) => box.x + box.width));
+  const maxY = Math.max(...boxes.map((box) => box.y + box.height));
+  return { origin: { x: minX, y: minY }, width: maxX - minX, height: maxY - minY };
 }
 
 function convertChildren(
@@ -345,14 +387,7 @@ function mapFigmaType(type: string): NormalizedDesignNodeType {
 }
 
 function mapBlendMode(value: unknown): NormalizedDesignNode["blendMode"] {
-  const key = String(value ?? "NORMAL").toUpperCase();
-  if (key === "MULTIPLY") return "multiply";
-  if (key === "SCREEN") return "screen";
-  if (key === "OVERLAY") return "overlay";
-  if (key === "DARKEN") return "darken";
-  if (key === "LIGHTEN") return "lighten";
-  if (key === "LINEAR_DODGE" || key === "PLUS_LIGHTER") return "add";
-  return "normal";
+  return resolveSourceBlendMode(String(value ?? "NORMAL").toLowerCase()).mode;
 }
 
 function offsetPath(path: BezierPath, x: number, y: number): BezierPath {
@@ -367,15 +402,6 @@ function collectFonts(pages: NormalizedDesignPage[]) {
   });
   pages.forEach((page) => walk(page.nodes));
   return [...families].map((family) => ({ family, sourceName: family }));
-}
-
-function boundsOfNodes(nodes: NormalizedDesignNode[]) {
-  if (!nodes.length) return { width: 0, height: 0 };
-  const minX = Math.min(...nodes.map((node) => node.x));
-  const minY = Math.min(...nodes.map((node) => node.y));
-  const maxX = Math.max(...nodes.map((node) => node.x + node.width));
-  const maxY = Math.max(...nodes.map((node) => node.y + node.height));
-  return { width: maxX - Math.min(0, minX), height: maxY - Math.min(0, minY) };
 }
 
 function layoutGridGuides(grids: unknown): NormalizedDesignPage["guides"] {

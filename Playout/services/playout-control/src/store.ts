@@ -210,7 +210,7 @@ export class PlayoutStore {
    */
   async removeScene(
     sceneId: string,
-    guards: { onAirSceneIds?: readonly string[] } = {}
+    guards: { onAirSceneIds?: readonly string[]; force?: boolean } = {}
   ): Promise<SceneRemoval> {
     assertStorageId(sceneId, "sceneId");
 
@@ -238,10 +238,29 @@ export class PlayoutStore {
         }
       }
       if (referencing.length > 0) {
-        throw new SceneRemovalRefused(
-          `scene ${sceneId} is referenced by take list(s) ${referencing.join(", ")}; remove those entries first`,
-          "REFERENCED"
-        );
+        if (guards.force) {
+          for (const takeListId of referencing) {
+            const takeList = await this.readTakeList(takeListId);
+            if (takeList) {
+              const cleanEntries = takeList.entries.filter((entry) => entry.sceneId !== sceneId);
+              const next: PlayoutTakeList = {
+                ...structuredClone(takeList),
+                entries: cleanEntries,
+                cursorEntryId:
+                  takeList.cursorEntryId && cleanEntries.some((e) => e.entryId === takeList.cursorEntryId)
+                    ? takeList.cursorEntryId
+                    : cleanEntries[0]?.entryId ?? null,
+                updatedAt: new Date().toISOString()
+              };
+              await atomicWriteJson(this.takeListPath(takeListId), next);
+            }
+          }
+        } else {
+          throw new SceneRemovalRefused(
+            `scene ${sceneId} is referenced by take list(s) ${referencing.join(", ")}; remove those entries first or pass force`,
+            "REFERENCED"
+          );
+        }
       }
 
       const takeId = versions[0]?.takeId ?? null;
@@ -256,6 +275,79 @@ export class PlayoutStore {
 
       return { sceneId, takeId, versionsRemoved: versions.length };
     });
+  }
+
+  /**
+   * Fetch scenes from the Editor project service (port 4100) and publish/update them into Playout.
+   */
+  async syncFromEditor(
+    editorUrl = process.env.GRAPIX_EDITOR_API_URL || "http://127.0.0.1:4100"
+  ): Promise<{
+    syncedCount: number;
+    updatedCount: number;
+    totalScenes: number;
+    scenes: PublishedSceneMetadata[];
+  }> {
+    await this.ensure();
+    const endpoint = editorUrl.replace(/\/+$/, "");
+    let listResponse: Response;
+    try {
+      listResponse = await fetch(`${endpoint}/api/scenes`, { signal: AbortSignal.timeout(5000) });
+    } catch (cause) {
+      throw new Error(`Editor project service is not reachable at ${endpoint}: ${errorMessage(cause)}`);
+    }
+    if (!listResponse.ok) {
+      throw new Error(`Editor project service returned ${listResponse.status} from ${endpoint}/api/scenes`);
+    }
+
+    const payload = (await listResponse.json()) as {
+      scenes?: Array<{ id: string; name: string; updatedAt?: string }>;
+    };
+    const editorScenes = payload.scenes ?? [];
+    const published = await this.listScenes();
+    const publishedMap = new Map<string, PublishedSceneMetadata>();
+    for (const p of published) {
+      const existing = publishedMap.get(p.sceneId);
+      if (!existing || p.version > existing.version) {
+        publishedMap.set(p.sceneId, p);
+      }
+    }
+
+    let syncedCount = 0;
+    let updatedCount = 0;
+
+    for (const editorSceneSummary of editorScenes) {
+      const existing = publishedMap.get(editorSceneSummary.id);
+      const isNew = !existing;
+      const isUpdated =
+        existing &&
+        editorSceneSummary.updatedAt &&
+        new Date(editorSceneSummary.updatedAt).getTime() > new Date(existing.updatedAt).getTime();
+
+      if (isNew || isUpdated) {
+        try {
+          const docResponse = await fetch(
+            `${endpoint}/api/scenes/${encodeURIComponent(editorSceneSummary.id)}`,
+            { signal: AbortSignal.timeout(10000) }
+          );
+          if (!docResponse.ok) continue;
+          const docPayload = (await docResponse.json()) as { scene?: SceneDocument };
+          if (docPayload.scene) {
+            await this.publishScene(docPayload.scene, {
+              sourceEditorId: editorSceneSummary.id,
+              sourceEndpoint: endpoint
+            });
+            if (isNew) syncedCount++;
+            else updatedCount++;
+          }
+        } catch {
+          // Individual scene fetch failure shouldn't abort the rest of the sync
+        }
+      }
+    }
+
+    const updatedLibrary = await this.listScenes();
+    return { syncedCount, updatedCount, totalScenes: updatedLibrary.length, scenes: updatedLibrary };
   }
 
   async listTakeLists(): Promise<PlayoutTakeList[]> {
@@ -394,6 +486,9 @@ export class PlayoutStore {
     assertStorageId(takeListId, "takeListId");
     return path.join(this.takeListRoot(), `${takeListId}.json`);
   }
+}
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function assertScene(scene: SceneDocument): void {

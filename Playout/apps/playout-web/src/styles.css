@@ -554,7 +554,7 @@ button {
 .state-disconnected {
   border-color: #745226;
   color: #e7b25c;
-  background: #30240f;
+  background: #302213;
 }
 
 .row-actions {
@@ -1414,4 +1414,12 @@ button {
   margin: 6px 8px 3px;
   color: #f3a0a4;
   font-size: 11px;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
 }

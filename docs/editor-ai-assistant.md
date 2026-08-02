@@ -1,10 +1,14 @@
 # Editor AI Assistant — in-app chat over the MCP server (plan)
 
-Status: **Plan — not implemented.** The MCP server it builds on is Implemented
-(`Editor/services/editor-mcp`, 2026-08-01); everything below is **Planned** unless
-marked otherwise.
-Authority: subordinate to [`architecture.md`](architecture.md). This adds an Editor
-UI feature; it changes no product boundary and grows no Program/output verb.
+Status: **Implemented (AA-0 → AA-4), 2026-08-01.** The broker service
+`Editor/services/editor-assistant` (port 4160) and the editor-web chat dock exist, are
+typechecked and tested (6 broker tests incl. a live stub-model E2E; editor-web green), and pass
+`check:boundaries`. Two deviations from the original sketch, both deliberate: the broker
+**spawns and owns its editor-mcp child over stdio** (the recommended desktop-assistant
+transport) rather than attaching to the HTTP server on 4150; and confirm-to-apply is the
+default (mutating tools present but always staged), with `--read-only` as the stricter opt-in.
+Authority: subordinate to [`architecture.md`](architecture.md). It adds an Editor UI feature;
+it changes no product boundary and grows no Program/output verb.
 
 ## 1. The one correction that shapes the whole design
 
@@ -160,22 +164,34 @@ staged tool call. `GET /assistant/status` and an SSE `status` channel drive the 
 
 ## 8. Phased plan
 
-- **AA-0 — Broker skeleton.** `Editor/services/editor-assistant` on 4160: MCP client
-  attaches to `/mcp` (4150), one provider adapter (Anthropic), `GET /assistant/status`,
-  SSE `status`. Deliverable: the chip shows a real connection state end to end. No chat yet.
-- **AA-1 — Read-only chat.** Prompt/response over SSE; seed `grapix_orient` + primer;
-  expose only read tools (server `--read-only`). Deliverable: ask "what's in this scene",
-  get a grounded answer with `list_objects`/`analyze_scene` behind it.
-- **AA-2 — Confirm-to-apply authoring.** Enable mutating tools with per-call Apply/Skip;
-  `expected_revision` guard; audit `actor` tag. Deliverable: "add a blue lower third"
-  stages `add_object`/`create_material`/`assign_material`, operator applies.
-- **AA-3 — Provider abstraction + model picker.** OpenAI, Google, and one
-  `openai-compatible` local adapter; the tiny picker; per-provider config + offline mode.
-- **AA-4 — Polish.** Token/latency in the chip, budget guard, transcript persistence in
-  `data/` (per project, gitignored), keyboard toggle, dock size memory.
+- **AA-0 — Broker skeleton. [Implemented]** `Editor/services/editor-assistant` on 4160 spawns
+  and owns an editor-mcp child (`mcpClient.ts`), resolves a provider (`config.ts`), and serves
+  `GET /assistant/status` + an SSE `status` stream (`index.ts`, `sse.ts`). The editor-web chip
+  (`AssistantChip.tsx`) shows the live connection state.
+- **AA-1 — Read-only chat. [Implemented]** The bounded tool-call loop (`agent.ts`) streams over
+  SSE (`/assistant/message` + `/assistant/stream`); the system prompt is seeded from
+  `get_primer` (`index.ts` `buildSystemPrompt`); read tools auto-execute. `--read-only` launches
+  the child with only read tools present.
+- **AA-2 — Confirm-to-apply authoring. [Implemented]** Mutating tools are staged and applied via
+  `/assistant/apply` / `/assistant/skip`; the model may pass `expected_revision` (the MCP tools
+  enforce it, rule 91); applied mutations are audited with an `assistant:<model>` actor
+  (`audit.ts`). The dock renders each call as a row with Apply/Skip (`AssistantPanel.tsx`).
+- **AA-3 — Provider abstraction + model picker. [Implemented]** Anthropic, OpenAI, Google and an
+  `openai-compatible` local adapter (`providers/`), a `/assistant/model` switch route, and the
+  in-dock picker. Offline local mode works via `GRAPIX_LOCAL_BASE_URL`.
+- **AA-4 — Polish. [Implemented]** Last-usage tokens on the status stream, a per-session token
+  budget guard (`agent.ts`), transcript persistence under `data/assistant/` (`transcripts.ts`),
+  a Ctrl+Alt+A keyboard toggle, and remembered dock height (`assistantStore.ts`).
 
 Each phase typechecks, has tests (broker unit tests + a real MCP-client integration test
 against a spawned `editor-mcp`, mirroring `protocol.test.mjs`), and is verified live.
+
+**Desktop supervision — done (2026-08-01).** Both Editor shells start the broker as an **owned**
+service (started with the window, stopped on close — it holds no Program authority, unlike the
+ensured engine): the Tauri supervisor (`supervisor.rs`) spawns `node …/editor-assistant/dist/index.js`
+and health-checks `:4160`, and the Electron main spawns it with `ELECTRON_RUN_AS_NODE`. If a
+broker is already running on 4160 it is adopted, not duplicated. `npm run dev:assistant` remains
+for running it standalone.
 
 ## 9. Open decisions (need sign-off)
 

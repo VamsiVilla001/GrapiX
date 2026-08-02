@@ -152,7 +152,7 @@ export function VirtualOutputWindow({ outputId }: { outputId: string }) {
       {!painting ? <div className="virtual-output-status">Waiting for Program…</div> : null}
       <img
         className={painting ? "painting" : ""}
-        src={monitorStreamUrl("program", "fill")}
+        src={monitorStreamUrl("program", "fill", "output")}
         alt={`Windowed virtual output ${outputId}`}
         onLoad={() => setPainting(true)}
         onError={() => setPainting(false)}

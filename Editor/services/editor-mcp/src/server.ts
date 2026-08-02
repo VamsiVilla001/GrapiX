@@ -88,7 +88,10 @@ export interface BuiltServer {
   registeredTools: RegisteredEditorTool[];
 }
 
-export function createEditorMcpServer(config: EditorMcpConfig): BuiltServer {
+export function createEditorMcpServer(
+  config: EditorMcpConfig,
+  shared?: { knowledge?: KnowledgeBase; client?: ProjectApiClient }
+): BuiltServer {
   assertEditorAuthority(ALL_TOOLS);
 
   const server = new McpServer(
@@ -116,8 +119,10 @@ export function createEditorMcpServer(config: EditorMcpConfig): BuiltServer {
     }
   );
 
-  const knowledge = new KnowledgeBase(config.repositoryRoot);
-  const client = new ProjectApiClient(config);
+  // Shared across HTTP sessions so the corpus is ingested once, not per connection; stdio and
+  // tests pass nothing and get their own.
+  const knowledge = shared?.knowledge ?? new KnowledgeBase(config.repositoryRoot);
+  const client = shared?.client ?? new ProjectApiClient(config);
   const context: ToolContext = { client, config, knowledge };
 
   // A read-only server omits mutating tools entirely rather than registering

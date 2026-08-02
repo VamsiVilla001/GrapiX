@@ -48,10 +48,11 @@ binary. The engine configures itself from `services/render-engine/engine.toml`.
 
 ## What renders now
 
-Solid-color **rects and analytic ellipses**, Unicode-shaped **text**, and native,
-depth-tested **3D meshes**. Mesh support includes tessellated cube/slab, sphere,
-cylinder and torus primitives plus embedded glTF 2.0/GLB triangle geometry.
-Position Z, XYZ rotation, XYZ scale, anchor3d, perspective, face occlusion and
+Solid-color **rects and analytic ellipses**, tessellated **vector-shape
+fill/stroke paths**, Unicode-shaped **text**, and native, depth-tested **3D
+meshes**. Mesh support includes tessellated cube/slab, sphere, cylinder and torus
+primitives plus embedded glTF 2.0/GLB triangle geometry. Position Z, XYZ
+rotation, XYZ scale, anchor3d, perspective, face occlusion and
 back/front/double-sided culling are real 3D operations.
 
 Cube/slab faces, cylinder caps/sides, continuous sphere/torus surfaces and
@@ -71,10 +72,10 @@ composited into native Program frames; it never positions individual characters.
 Remote CSS is resolved and cached as project font assets by the Editor project
 service before this crate sees it.
 
-Everything is decoded while the scene is warmed; the broadcast frame clock
-performs no asset file or network I/O. Unsupported object/material states are
-reported explicitly and unsafe omissions remain Take blockers. Image objects,
-shapes and lines still require their native paths.
+Everything is decoded or tessellated while the scene is warmed; the broadcast
+frame clock performs no asset file or network I/O. Unsupported object/material
+states are reported explicitly and unsafe omissions remain Take blockers. Image
+objects, paint/line objects and native shape masking still require native paths.
 
 ## Shared shaders
 

@@ -1,6 +1,8 @@
 # --- Dependencies and build output ------------------------------------------
 node_modules/
 dist/
+# The publishable CLI bundle for @grapix/editor-mcp. Build output (esbuild), not source.
+bundle/
 .vite/
 *.tsbuildinfo
 coverage/
@@ -27,6 +29,7 @@ binaries/
 # logs. Written by the running system, never source. Real user content lives
 # here, so it is ignored rather than deleted by tooling.
 data/
+cache/
 
 # --- Agent and harness scratch ----------------------------------------------
 .claude/worktrees/

@@ -1,0 +1,16 @@
+{
+  "servers": {
+    "grapix-editor": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${workspaceFolder}/Editor/services/editor-mcp/dist/index.js"],
+      "env": {
+        "GRAPIX_REPOSITORY_ROOT": "${workspaceFolder}"
+      }
+    },
+    "Figma Desktop": {
+      "type": "http",
+      "url": "http://127.0.0.1:3845/mcp"
+    }
+  }
+}

@@ -5,6 +5,7 @@
 //! | Process | Port | Ownership |
 //! | --- | --- | --- |
 //! | `project-api` | 4100 | owned: the Editor's own project/asset service |
+//! | `editor-assistant` | 4160 | owned: the AI assistant broker (Editor-only, no Program authority) |
 //! | `grapix-render-engine` | 4400 | *ensured*, never owned |
 //!
 //! The engine is ensured rather than owned. `docs/architecture.md` invariant 5 is that
@@ -35,6 +36,7 @@ use tauri::{AppHandle, Emitter};
 
 const API_ADDRESS: &str = "127.0.0.1:4100";
 const ENGINE_ADDRESS: &str = "127.0.0.1:4400";
+const ASSISTANT_ADDRESS: &str = "127.0.0.1:4160";
 
 /// How long a process is given to answer before it is reported as failed.
 const STARTUP_GRACE: Duration = Duration::from_secs(45);
@@ -79,6 +81,7 @@ pub struct ProcessSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct SupervisorSnapshot {
     pub api: ProcessSnapshot,
+    pub assistant: ProcessSnapshot,
     pub engine: ProcessSnapshot,
     pub ready: bool,
     /// Stated on every build on purpose. Repository tests cannot certify a GPU and output
@@ -121,6 +124,7 @@ impl ProcessSlot {
 
 struct Inner {
     api: ProcessSlot,
+    assistant: ProcessSlot,
     engine: ProcessSlot,
     stopping: bool,
 }
@@ -129,6 +133,7 @@ impl Inner {
     fn snapshot(&self) -> SupervisorSnapshot {
         SupervisorSnapshot {
             api: self.api.snapshot(),
+            assistant: self.assistant.snapshot(),
             engine: self.engine.snapshot(),
             ready: self.api.state.is_up() && self.engine.state.is_up(),
             certification_warning: CERTIFICATION_WARNING.to_string(),
@@ -146,6 +151,7 @@ impl DesktopSupervisor {
     pub fn start(root: PathBuf, app: AppHandle) -> Self {
         let inner = Arc::new(Mutex::new(Inner {
             api: ProcessSlot::new("Project service", API_ADDRESS),
+            assistant: ProcessSlot::new("AI assistant", ASSISTANT_ADDRESS),
             engine: ProcessSlot::new("Render engine", ENGINE_ADDRESS),
             stopping: false,
         }));
@@ -160,6 +166,7 @@ impl DesktopSupervisor {
             // other order means it spends its first seconds retrying.
             ensure_engine(&root, &inner);
             start_api(&root, &inner);
+            start_assistant(&root, &inner);
             watch(&inner, &app);
         });
 
@@ -172,6 +179,7 @@ impl DesktopSupervisor {
             .map(|inner| inner.snapshot())
             .unwrap_or_else(|_| SupervisorSnapshot {
                 api: ProcessSlot::new("Project service", API_ADDRESS).snapshot(),
+                assistant: ProcessSlot::new("AI assistant", ASSISTANT_ADDRESS).snapshot(),
                 engine: ProcessSlot::new("Render engine", ENGINE_ADDRESS).snapshot(),
                 ready: false,
                 certification_warning: CERTIFICATION_WARNING.to_string(),
@@ -185,6 +193,7 @@ impl DesktopSupervisor {
         };
         inner.stopping = true;
         stop_owned(&mut inner.api);
+        stop_owned(&mut inner.assistant);
 
         // Not a bug and not laziness: an engine may be rendering Program. Closing an Editor
         // window must never stop it, whoever started it.
@@ -282,6 +291,35 @@ fn start_api(root: &Path, inner: &Arc<Mutex<Inner>>) {
     spawn(inner, |inner| &mut inner.api, command);
 }
 
+fn start_assistant(root: &Path, inner: &Arc<Mutex<Inner>>) {
+    if port_open(ASSISTANT_ADDRESS) {
+        adopt(inner, |inner| &mut inner.assistant, "already running on :4160");
+        return;
+    }
+
+    // Editor/services/editor-assistant: the AI assistant broker. Owned like the project
+    // service and stopped on close — it holds no Program or output authority, so unlike the
+    // engine there is no reason to leave it running past the window.
+    let entry = root
+        .join("Editor")
+        .join("services")
+        .join("editor-assistant")
+        .join("dist")
+        .join("index.js");
+    if !entry.is_file() {
+        fail(
+            inner,
+            |inner| &mut inner.assistant,
+            "build output not found; run `npm run build -w @grapix/editor-assistant`",
+        );
+        return;
+    }
+
+    let mut command = Command::new("node");
+    command.arg(entry).current_dir(root);
+    spawn(inner, |inner| &mut inner.assistant, command);
+}
+
 fn engine_binary(root: &Path, profile: &str) -> PathBuf {
     root.join("services")
         .join("render-engine")
@@ -375,20 +413,22 @@ fn watch(inner: &Arc<Mutex<Inner>>, app: &AppHandle) {
         // supervisor can honestly claim.
         let api_up = api_health();
         let engine_up = port_open(ENGINE_ADDRESS);
+        let assistant_up = assistant_health();
 
         let snapshot = {
             let Ok(mut guard) = inner.lock() else { return };
             let within_grace = started.elapsed() < STARTUP_GRACE;
             update(&mut guard.api, api_up, within_grace);
             update(&mut guard.engine, engine_up, within_grace);
+            update(&mut guard.assistant, assistant_up, within_grace);
             guard.snapshot()
         };
 
         // Emitted only on change: an event every two seconds forever would be noise, and the
         // UI polls the command for its initial state anyway.
         let fingerprint = format!(
-            "{:?}/{:?}/{}",
-            snapshot.api.state, snapshot.engine.state, snapshot.ready
+            "{:?}/{:?}/{:?}/{}",
+            snapshot.api.state, snapshot.assistant.state, snapshot.engine.state, snapshot.ready
         );
         if previous.as_deref() != Some(fingerprint.as_str()) {
             let _ = app.emit("grapix-supervisor-status", &snapshot);
@@ -438,6 +478,10 @@ fn port_open(address: &str) -> bool {
 
 fn api_health() -> bool {
     http_get(API_ADDRESS, "/health").is_some_and(|status| status == 200)
+}
+
+fn assistant_health() -> bool {
+    http_get(ASSISTANT_ADDRESS, "/assistant/health").is_some_and(|status| status == 200)
 }
 
 /// Minimal HTTP status probe. A dependency would be a larger surface than one request.

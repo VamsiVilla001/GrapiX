@@ -21,6 +21,7 @@
     "dev:web": "npm run dev -w @grapix/editor-web",
     "dev:api": "npm run dev -w @grapix/api-server",
     "dev:mcp": "npm run dev -w @grapix/editor-mcp",
+    "dev:assistant": "npm run dev -w @grapix/editor-assistant",
     "dev:electron": "npm run dev -w @grapix/desktop-electron",
 
     "clean:dist": "node tools/architecture/clean-dist.mjs",
@@ -38,6 +39,7 @@
     "test:core": "cargo test --manifest-path services/render-daemon/Cargo.toml",
     "check:engine": "cargo check --manifest-path services/render-engine/Cargo.toml --all-targets",
     "check:boundaries": "node tools/architecture/check-workspace-boundaries.mjs",
+    "pack:mcp": "npm pack -w @grapix/editor-mcp",
 
     "certify:engine": "node tools/certification/run-engine-e2e.mjs",
     "certify:animation": "node tools/certification/run-animation-proof.mjs",

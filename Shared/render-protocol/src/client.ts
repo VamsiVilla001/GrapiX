@@ -146,6 +146,23 @@ export interface EngineConnectionStats {
 
 const REPLY_TIMEOUT_MS = 15_000;
 
+/** How many times a `RATE_LIMITED` refusal is waited out before it reaches the caller. */
+const RATE_LIMIT_ATTEMPTS = 5;
+
+/**
+ * Milliseconds the engine asked us to wait, or `null` when this is not a rate limit.
+ *
+ * The engine answers `RATE_LIMITED: rate limit exceeded; retry in <n>ms`, which is
+ * `ErrorCode::RateLimited` plus `limiter.retry_after_ms` from
+ * `services/render-engine/src/transport.rs`.
+ */
+function rateLimitRetryAfterMs(error: unknown): number | null {
+  const message = error instanceof Error ? error.message : String(error);
+  if (!message.startsWith("RATE_LIMITED")) return null;
+  const stated = /retry in (\d+)ms/.exec(message);
+  return Math.min(2_000, Math.max(1, Number(stated?.[1] ?? 50)));
+}
+
 export class EngineConnection {
   private readonly options: EngineConnectionOptions;
   private readonly transport: EngineTransport;
@@ -374,13 +391,44 @@ export class EngineConnection {
    * Rejects on `reply.error` so callers get an exception rather than having to
    * inspect every reply. Times out rather than hanging: a wedged engine must not
    * wedge the Editor's UI.
+   *
+   * `RATE_LIMITED` is the one refusal handled here. The engine's token bucket is shared
+   * by every request on the connection, so a burst - registering and uploading the
+   * assets of a freshly imported scene - throttles the very next request by a few
+   * milliseconds, and turning that into an operator-visible Take failure invents an
+   * outage out of backpressure.
+   *
+   * The **same frame** is retransmitted, sequence and message id included. The limiter
+   * runs before the sequence tracker in `services/render-engine/src/transport.rs`, so a
+   * throttled frame is never consumed: sending a fresh one instead leaves a hole in the
+   * inbound sequence, which the engine answers with a resync demand and, after enough
+   * of them, a dropped connection.
    */
-  request<T extends EngineRequestType>(
+  async request<T extends EngineRequestType>(
     type: T,
     payload: EnginePayloadMap[T],
     options: RequestOptions = {}
   ): Promise<EngineMessage<unknown>> {
     const message = this.send(type, payload, options);
+
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await this.awaitReply(message, type, options);
+      } catch (error) {
+        const retryAfterMs = rateLimitRetryAfterMs(error);
+        if (retryAfterMs === null || attempt >= RATE_LIMIT_ATTEMPTS) throw error;
+        await new Promise((resolve) => this.setTimer(() => resolve(undefined), retryAfterMs + 5));
+        this.transport.send(encodeEngineMessage(message));
+        this.messagesSent += 1;
+      }
+    }
+  }
+
+  private awaitReply(
+    message: EngineMessage<unknown>,
+    type: EngineRequestType,
+    options: RequestOptions
+  ): Promise<EngineMessage<unknown>> {
     const timeoutMs = options.timeoutMs ?? REPLY_TIMEOUT_MS;
 
     return new Promise<EngineMessage<unknown>>((resolve, reject) => {

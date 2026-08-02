@@ -14,8 +14,18 @@ import {
   type NormalizedDesignNode,
   type NormalizedDesignPage
 } from "@grapix/shared-types";
+import { resolveSourceBlendMode } from "./blendModes.js";
 import { addDesignImportIssue, reportImportWarning } from "./importReport.js";
 import { rectanglePath } from "./svgPath.js";
+
+/** Axis-aligned rectangle path in object-local space, offset from the object origin. */
+function offsetRectanglePath(x: number, y: number, width: number, height: number): BezierPath {
+  const base = rectanglePath(width, height);
+  return {
+    ...base,
+    vertices: base.vertices.map((point) => ({ x: point.x + x, y: point.y + y }))
+  };
+}
 
 initializeCanvas(
   (width, height) => createCanvas(width, height) as any,
@@ -59,7 +69,10 @@ export function importPsdDocument(
         name: sourceName.replace(/\.[^.]+$/, ""),
         width: psd.width,
         height: psd.height,
-        background: { type: "solid", color: "#ffffff" },
+        // A layered PSD has no canvas colour of its own: whatever fills the frame is
+        // a layer, and that layer is imported. Declaring white here paints an opaque
+        // plate under a broadcast scene that is supposed to key.
+        background: { type: "none" },
         nodes: convertLayers(topLayers, { x: 0, y: 0 }, psd, report, assets),
         guides: psd.imageResources?.gridAndGuidesInformation?.guides?.map((guide) => ({
           orientation: guide.direction,
@@ -110,6 +123,14 @@ function convertArtboard(
   };
 }
 
+/**
+ * Convert one sibling run, resolving Photoshop clipping masks.
+ *
+ * A layer with `clipping` is clipped to the alpha of the nearest layer below it in
+ * the same group that is not itself clipped. Left unclipped, those layers draw at
+ * full size: this file's heading gradient is a 1918x927 plate clipped to a 727x205
+ * text layer, and importing it unclipped painted it over the whole canvas.
+ */
 function convertLayers(
   layers: Layer[],
   parentOrigin: { x: number; y: number },
@@ -117,7 +138,12 @@ function convertLayers(
   report: DesignImportReport,
   assets: Map<string, NormalizedDesignAsset>
 ): NormalizedDesignNode[] {
-  return layers.map((layer, index) => convertLayer(layer, index, parentOrigin, psd, report, assets));
+  let clipBase: Layer | undefined;
+  return layers.map((layer, index) => {
+    const base = layer.clipping ? clipBase : undefined;
+    if (!layer.clipping) clipBase = layer;
+    return convertLayer(layer, index, parentOrigin, psd, report, assets, base);
+  });
 }
 
 function convertLayer(
@@ -126,7 +152,8 @@ function convertLayer(
   parentOrigin: { x: number; y: number },
   psd: Psd,
   report: DesignImportReport,
-  assets: Map<string, NormalizedDesignAsset>
+  assets: Map<string, NormalizedDesignAsset>,
+  clipBase?: Layer
 ): NormalizedDesignNode {
   const left = layer.left ?? layer.artboard?.rect.left ?? parentOrigin.x;
   const top = layer.top ?? layer.artboard?.rect.top ?? parentOrigin.y;
@@ -189,14 +216,53 @@ function convertLayer(
       id: createSceneId("psd-alpha-mask"),
       name: `${layer.name ?? "Layer"} Alpha Mask`,
       path: rectanglePath(width, height),
-      mode: "add",
+      // A bitmap mask's shape lives in its alpha channel, not in a path. Neither
+      // renderer samples a mask alpha asset yet, and the layer bounds are the only
+      // path available — authoring that as an `add` region silently hid or revealed
+      // the whole layer depending on the mask's default colour (invariant 7). The
+      // mask is carried as an inert record with its alpha asset until both
+      // renderers can sample it, so the layer renders unmasked and says so.
+      mode: "none",
       inverted: layer.mask.defaultColor === 0,
       opacity: layer.mask.userMaskDensity ?? 1,
       feather: { x: layer.mask.userMaskFeather ?? 0, y: layer.mask.userMaskFeather ?? 0 },
       expansion: 0,
       alphaAssetId: maskAssetId
     });
-    reportImportWarning(report, `Bitmap mask on ${layer.name ?? id} is preserved with its alpha asset; native alpha-mask sampling is pending.`, "visual-difference", layer.name);
+    reportImportWarning(
+      report,
+      `Bitmap mask on ${layer.name ?? id} is preserved with its alpha asset, but the layer renders unmasked: neither renderer samples mask alpha yet.`,
+      "visual-difference",
+      layer.name,
+      "Inert mask with its alpha asset",
+      id
+    );
+  }
+  if (clipBase) {
+    const baseLeft = clipBase.left ?? left;
+    const baseTop = clipBase.top ?? top;
+    const baseWidth = Math.max(0.01, (clipBase.right ?? baseLeft + 1) - baseLeft);
+    const baseHeight = Math.max(0.01, (clipBase.bottom ?? baseTop + 1) - baseTop);
+    masks.push({
+      id: createSceneId("psd-clip-mask"),
+      name: `${layer.name ?? "Layer"} clipped to ${clipBase.name ?? "base layer"}`,
+      // Mask paths are object-local, so the base rectangle is expressed relative to
+      // this layer's own origin.
+      path: offsetRectanglePath(baseLeft - left, baseTop - top, baseWidth, baseHeight),
+      mode: "add",
+      inverted: false,
+      opacity: 1,
+      feather: { x: 0, y: 0 },
+      expansion: 0
+    });
+    reportImportWarning(
+      report,
+      `${layer.name ?? id} is a clipping mask over ${clipBase.name ?? "the layer below"} and is clipped to that layer's bounds; clipping to its alpha needs mask-alpha sampling.`,
+      "visual-difference",
+      layer.name,
+      "Clipped to the base layer's bounds",
+      id
+    );
   }
   const fills = layer.vectorFill ? [vectorContentPaint(layer.vectorFill)] : text?.style?.fillColor ? [{ type: "solid" as const, color: colorHex(text.style.fillColor) }] : [];
   const strokes = layer.vectorStroke?.content ? [vectorContentPaint(layer.vectorStroke.content)] : text?.style?.strokeColor ? [{ type: "solid" as const, color: colorHex(text.style.strokeColor) }] : [];
@@ -207,9 +273,21 @@ function convertLayer(
           : layer.adjustment ? "adjustment"
             : layer.placedLayer ? "smart-object"
               : "image";
-  const effects = convertPsdEffects(layer.effects, report, layer.name ?? id);
+  const effects = convertPsdEffects(layer.effects, report, layer.name ?? id, id);
   if (layer.adjustment) {
-    reportImportWarning(report, `Adjustment layer ${layer.name ?? id} is preserved as an editable imported layer with source parameters.`, "visual-difference", layer.name, "Nested composition metadata");
+    reportImportWarning(report, `Adjustment layer ${layer.name ?? id} is preserved as an editable imported layer with source parameters.`, "visual-difference", layer.name, "Nested composition metadata", id);
+  }
+
+  const blend = resolveSourceBlendMode(layer.blendMode);
+  if (!blend.exact) {
+    reportImportWarning(
+      report,
+      `Photoshop blend mode "${layer.blendMode}" on ${layer.name ?? id} has no GrapiX equivalent and was imported as "${blend.mode}".`,
+      "visual-difference",
+      layer.name,
+      `Nearest rendered blend mode: ${blend.mode}`,
+      id
+    );
   }
 
   return {
@@ -224,12 +302,18 @@ function convertLayer(
     rotation: placedRotation(layer),
     scaleX: 1,
     scaleY: 1,
-    anchor: layer.referencePoint ?? { x: 0, y: 0 },
+    // NOT `layer.referencePoint`: that is Photoshop's free-transform reference in
+    // DOCUMENT space, while `anchor` is the object-local pivot both renderers apply as
+    // `T(x,y) · R · S · T(-anchor)`. Importing it moved every layer by its own
+    // reference point - a full-canvas layer with `referencePoint.y = 1080` was drawn
+    // one canvas height above the frame and simply disappeared. The source value is
+    // kept in `sourceData` for round-tripping.
+    anchor: { x: 0, y: 0 },
     opacity: layer.opacity ?? 1,
     fillOpacity: layer.fillOpacity ?? 1,
     visible: !layer.hidden,
     locked: Boolean(layer.protected?.position || layer.protected?.composite),
-    blendMode: mapBlendMode(layer.blendMode),
+    blendMode: blend.mode,
     fills,
     strokes,
     strokeWidth: layer.vectorStroke?.lineWidth?.value ?? text?.style?.outlineWidth ?? 0,
@@ -257,13 +341,16 @@ function convertLayer(
     componentProperties: layer.placedLayer ? { ...layer.placedLayer } : undefined,
     sourceData: {
       clipping: layer.clipping,
+      clipBaseName: clipBase?.name,
+      referencePoint: layer.referencePoint,
       transparencyProtected: layer.transparencyProtected,
       fillOpacity: layer.fillOpacity,
       adjustment: layer.adjustment,
       artboard: layer.artboard,
       vectorStroke: layer.vectorStroke,
       placedLayer: layer.placedLayer,
-      animationFrames: layer.animationFrames
+      animationFrames: layer.animationFrames,
+      blendMode: layer.blendMode
     }
   };
 }
@@ -315,7 +402,12 @@ function vectorContentPaint(content: VectorContent): ColorValue {
   return { type: "solid", color: "#808080" };
 }
 
-function convertPsdEffects(effects: LayerEffectsInfo | undefined, report: DesignImportReport, name: string): NormalizedDesignEffect[] {
+function convertPsdEffects(
+  effects: LayerEffectsInfo | undefined,
+  report: DesignImportReport,
+  name: string,
+  sourceNodeId: string
+): NormalizedDesignEffect[] {
   if (!effects || effects.disabled) return [];
   const result: NormalizedDesignEffect[] = [];
   const shadows = [
@@ -347,9 +439,13 @@ function convertPsdEffects(effects: LayerEffectsInfo | undefined, report: Design
   ];
   for (const [effect, type] of simple) {
     if (!effect) continue;
-    result.push({ type, enabled: (effect as { enabled?: boolean }).enabled !== false, sourceData: effect as Record<string, unknown> });
-    if (type !== "outer-glow" && type !== "inner-glow") {
-      reportImportWarning(report, `Photoshop ${type} on ${name} is retained as editable source effect metadata.`, "unsupported-effect", name);
+    const enabled = (effect as { enabled?: boolean }).enabled !== false;
+    result.push({ type, enabled, sourceData: effect as Record<string, unknown> });
+    // A switched-off Photoshop effect contributes no pixels, so no renderer owes
+    // anything for it and it is not an unsupported feature. Only live effects are
+    // reported.
+    if (enabled && type !== "outer-glow" && type !== "inner-glow") {
+      reportImportWarning(report, `Photoshop ${type} on ${name} is retained as editable source effect metadata.`, "unsupported-effect", name, undefined, sourceNodeId);
     }
   }
   for (const effect of effects.solidFill ?? []) {
@@ -361,13 +457,14 @@ function convertPsdEffects(effects: LayerEffectsInfo | undefined, report: Design
   for (const effect of effects.stroke ?? []) {
     result.push({ type: "stroke", enabled: effect.enabled !== false, opacity: effect.opacity, color: colorHex(effect.color), radius: effect.size?.value, blendMode: mapBlendMode(effect.blendMode), sourceData: effect as unknown as Record<string, unknown> });
   }
-  if (result.length > 0) {
+  if (result.some((effect) => effect.enabled)) {
     reportImportWarning(
       report,
       `Photoshop layer effects on ${name} remain editable after import, but current canvas and output renderers do not reproduce them yet.`,
       "visual-difference",
       name,
-      "Editable imported effect metadata"
+      "Editable imported effect metadata",
+      sourceNodeId
     );
   }
   return result;

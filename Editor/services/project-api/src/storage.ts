@@ -21,6 +21,7 @@ const assetRoot = path.join(dataRoot, "assets");
 const assetIndexRoot = path.join(assetRoot, "index");
 const sceneBackupRoot = path.join(dataRoot, "backups", "scenes");
 const sceneWriteLocks = new Map<string, Promise<void>>();
+const fileWriteLocks = new Map<string, Promise<void>>();
 
 export interface StoredAssetRecord {
   assetId: string;
@@ -168,22 +169,39 @@ export async function readStoredAsset(assetId: string): Promise<StoredAssetRecor
   }
 }
 
+/** Rewrite the access stamp at most this often. A scene open reads every asset it uses. */
+const ACCESS_STAMP_INTERVAL_MS = 60_000;
+
 export async function readStoredAssetContent(
   assetId: string
 ): Promise<{ bytes: Buffer; record: StoredAssetRecord } | null> {
   const record = await readStoredAsset(assetId);
   if (!record) return null;
 
+  let bytes: Buffer;
   try {
-    const filePath = safeDataPath(record.relativePath);
-    const bytes = await readFile(filePath);
-    const touched = { ...record, lastAccessedAt: new Date().toISOString() };
-    await atomicWriteJson(assetRecordPath(record.assetId), touched);
-    return { bytes, record: touched };
+    bytes = await readFile(safeDataPath(record.relativePath));
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
     throw error;
   }
+
+  // Serving the bytes is the contract; `lastAccessedAt` is cache bookkeeping. Rewriting
+  // the sidecar on every read made a scene open rewrite one JSON per asset (86 for an
+  // imported PSD) against the reference-index rebuild a save runs, and one failed
+  // rename turned an image request into a 500 - which the editor draws as an empty
+  // white quad. The stamp is now throttled and never fails a read.
+  const stampAge = Date.now() - Date.parse(record.lastAccessedAt);
+  if (!Number.isFinite(stampAge) || stampAge > ACCESS_STAMP_INTERVAL_MS) {
+    const touched = { ...record, lastAccessedAt: new Date().toISOString() };
+    try {
+      await atomicWriteJson(assetRecordPath(record.assetId), touched);
+      return { bytes, record: touched };
+    } catch {
+      return { bytes, record };
+    }
+  }
+  return { bytes, record };
 }
 
 export async function saveScene(scene: SceneDocument): Promise<StoredSceneSummary> {
@@ -286,7 +304,7 @@ export async function recoverScene(sceneId: string): Promise<SceneDocument | nul
 async function readSceneUnlocked(sceneId: string): Promise<SceneDocument | null> {
   try {
     const scene = JSON.parse(await readFile(scenePath(sceneId), "utf8")) as SceneDocument;
-    return { ...scene, revision: scene.revision ?? 0 };
+    return { ...scene, revision: scene.revision ?? 0, assets: await hydrateAssetChecksums(scene.assets ?? []) };
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
       return null;
@@ -294,6 +312,30 @@ async function readSceneUnlocked(sceneId: string): Promise<SceneDocument | null>
 
     throw error;
   }
+}
+
+/**
+ * Fill in the checksum of every asset that is in this store but does not carry one.
+ *
+ * The render engine registers assets by SHA-256 and refuses a scene containing one
+ * without it, and scenes written before the design importer emitted checksums are
+ * still on disk. The store already knows the hash of the bytes, so the repair is a
+ * lookup; reading a scene fixes it in memory and the next save persists it.
+ */
+async function hydrateAssetChecksums(assets: SceneDocument["assets"]): Promise<SceneDocument["assets"]> {
+  if (!assets.some((asset) => !asset.checksum)) return assets;
+  return Promise.all(assets.map(async (asset) => {
+    if (asset.checksum) return asset;
+    const record = await readStoredAsset(asset.storageAssetId ?? asset.assetId).catch(() => null);
+    if (record) {
+      return { ...asset, checksum: record.checksum, sizeBytes: asset.sizeBytes ?? record.sizeBytes };
+    }
+    // Not in this store and not inline: the engine can never register it, so the
+    // document must stop advertising it as ready. Older imports wrote exactly this -
+    // a `figma-image-<ref>` fill that no asset pass ever stored.
+    const inline = asset.source?.startsWith("data:") ?? false;
+    return inline || asset.status !== "READY" ? asset : { ...asset, status: "MISSING" as const };
+  }));
 }
 
 export async function savePackage(
@@ -409,6 +451,10 @@ async function rebuildAssetReferenceIndex(): Promise<void> {
     }
   }
 
+  // A scene save must not fail because a reference-count sidecar could not be
+  // rewritten: the scene is the durable artifact, the counts are derived and are
+  // rebuilt by the next save. Writing them only where they changed also stops a save
+  // from rewriting every sidecar in the project.
   const files = await readdir(assetIndexRoot);
   await Promise.all(
     files.filter((file) => file.endsWith(".json")).map(async (file) => {
@@ -416,11 +462,19 @@ async function rebuildAssetReferenceIndex(): Promise<void> {
       const record = await readStoredAsset(assetId);
       if (!record) return;
       const sceneIds = [...(references.get(assetId) ?? [])].sort();
-      await atomicWriteJson(assetRecordPath(assetId), {
-        ...record,
-        referenceCount: sceneIds.length,
-        referencedByScenes: sceneIds
-      });
+      const unchanged = record.referenceCount === sceneIds.length
+        && record.referencedByScenes.length === sceneIds.length
+        && record.referencedByScenes.every((id, index) => id === sceneIds[index]);
+      if (unchanged) return;
+      try {
+        await atomicWriteJson(assetRecordPath(assetId), {
+          ...record,
+          referenceCount: sceneIds.length,
+          referencedByScenes: sceneIds
+        });
+      } catch {
+        // Left for the next save to reconcile.
+      }
     })
   );
 }
@@ -439,41 +493,88 @@ async function atomicWriteJson(targetPath: string, value: unknown): Promise<void
   await atomicWriteFile(targetPath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+/**
+ * Write `targetPath` through a temporary file in the same directory.
+ *
+ * Serialized per target path. Two concurrent writers of the *same* path is the
+ * normal case for a content-addressed store: one design import can extract the
+ * same bytes under several layer names, and every copy resolves to one
+ * `asset_<checksum>` path. Windows fails the second `MoveFileEx` with
+ * `ERROR_ACCESS_DENIED` (reported as `EPERM`) while the first replacement still
+ * holds the destination, which surfaced as spurious "could not be embedded"
+ * import warnings for duplicated Photoshop layers. Queuing also lets the
+ * checksum short-circuit in `importAssetBuffer` see the first write, so the
+ * duplicates stop re-writing identical bytes.
+ */
 async function atomicWriteFile(targetPath: string, data: string | Buffer): Promise<void> {
-  const parent = path.dirname(targetPath);
-  await mkdir(parent, { recursive: true });
-  const temporaryPath = path.join(
-    parent,
-    `.${path.basename(targetPath)}.${process.pid}.${randomUUID()}.tmp`
-  );
-  let handle: Awaited<ReturnType<typeof open>> | undefined;
-  try {
-    handle = await open(temporaryPath, "wx");
-    await handle.writeFile(data);
-    await handle.sync();
-    await handle.close();
-    handle = undefined;
-    await rename(temporaryPath, targetPath);
-  } finally {
-    await handle?.close().catch(() => undefined);
-    await unlink(temporaryPath).catch(() => undefined);
+  await withKeyedLock(fileWriteLocks, path.resolve(targetPath), async () => {
+    const parent = path.dirname(targetPath);
+    await mkdir(parent, { recursive: true });
+    const temporaryPath = path.join(
+      parent,
+      `.${path.basename(targetPath)}.${process.pid}.${randomUUID()}.tmp`
+    );
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
+    try {
+      handle = await open(temporaryPath, "wx");
+      await handle.writeFile(data);
+      await handle.sync();
+      await handle.close();
+      handle = undefined;
+      await renameWithRetry(temporaryPath, targetPath);
+    } finally {
+      await handle?.close().catch(() => undefined);
+      await unlink(temporaryPath).catch(() => undefined);
+    }
+  });
+}
+
+/**
+ * Replace `target` with `temporary`, retrying the Windows-transient failures.
+ *
+ * `MoveFileEx` with `MOVEFILE_REPLACE_EXISTING` fails with `ERROR_ACCESS_DENIED`
+ * (`EPERM`) or `ERROR_SHARING_VIOLATION` (`EBUSY`) while any other handle holds the
+ * destination - an indexer, a virus scanner, or a reader that opened it a
+ * millisecond earlier. The condition clears in milliseconds, and the alternative to
+ * retrying is losing a write that had nothing wrong with it: this is what turned
+ * asset reads and scene saves into 500s while the editor was open.
+ */
+async function renameWithRetry(temporary: string, target: string): Promise<void> {
+  const transient = new Set(["EPERM", "EACCES", "EBUSY"]);
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rename(temporary, target);
+      return;
+    } catch (error) {
+      const code = error instanceof Error && "code" in error ? String(error.code) : "";
+      if (attempt >= 5 || !transient.has(code)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 10 * 2 ** attempt));
+    }
   }
 }
 
 async function withSceneWriteLock<T>(sceneId: string, operation: () => Promise<T>): Promise<T> {
-  const previous = sceneWriteLocks.get(sceneId) ?? Promise.resolve();
+  return withKeyedLock(sceneWriteLocks, sceneId, operation);
+}
+
+async function withKeyedLock<T>(
+  locks: Map<string, Promise<void>>,
+  key: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  const previous = locks.get(key) ?? Promise.resolve();
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
   const queued = previous.catch(() => undefined).then(() => gate);
-  sceneWriteLocks.set(sceneId, queued);
+  locks.set(key, queued);
   await previous.catch(() => undefined);
   try {
     return await operation();
   } finally {
     release();
-    if (sceneWriteLocks.get(sceneId) === queued) sceneWriteLocks.delete(sceneId);
+    if (locks.get(key) === queued) locks.delete(key);
   }
 }
 

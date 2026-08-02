@@ -27,6 +27,7 @@ const MIN_CAMERA_FAR_SPAN = 0.01;
  * preserves the same relative result between HD and UHD canvases.
  */
 const PUNCTUAL_LIGHT_SCENE_SCALE = 0.04;
+const primitivePositionCache = new Map<string, THREE.BufferAttribute>();
 
 export interface ProjectedMeshBounds {
   x: number;
@@ -563,6 +564,27 @@ function geometryForObject(object: MeshSceneObject): THREE.BufferGeometry {
   }
 }
 
+function primitivePositions(object: MeshSceneObject): THREE.BufferAttribute {
+  const geometryKey = [
+    object.meshKind,
+    object.width,
+    object.height,
+    object.depth,
+    object.meshKind === "slab" ? JSON.stringify(normalizeSlabProperties(object.slab)) : ""
+  ].join(":");
+  const cached = primitivePositionCache.get(geometryKey);
+  if (cached) return cached;
+  const geometry = geometryForObject(object);
+  const positions = geometry.getAttribute("position") as THREE.BufferAttribute;
+  geometry.dispose();
+  primitivePositionCache.set(geometryKey, positions);
+  if (primitivePositionCache.size > 64) {
+    const oldestKey = primitivePositionCache.keys().next().value;
+    if (oldestKey !== undefined) primitivePositionCache.delete(oldestKey);
+  }
+  return positions;
+}
+
 async function materialsForObject(
   object: Extract<RenderableSceneObject, { type: "mesh" }>,
   loader: THREE.TextureLoader
@@ -841,24 +863,50 @@ export function projectMeshBounds(scene: SceneDocument, object: MeshSceneObject)
     )),
     new THREE.Vector3(object.scaleX ?? 1, object.scaleY ?? 1, object.scaleZ ?? 1)
   );
-  const points: THREE.Vector3[] = [];
+  const contentOffset = new THREE.Vector3(
+    object.width / 2 - anchor.x,
+    canvasToWorldY(object.height / 2 - anchor.y),
+    object.depth / 2 - anchor.z
+  );
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
 
-  for (const x of [0, object.width]) {
-    for (const y of [0, object.height]) {
-      for (const z of [0, object.depth]) {
-        points.push(projectPoint(scene, camera, new THREE.Vector3(
-          x - anchor.x,
-          canvasToWorldY(y - anchor.y),
-          z - anchor.z
-        ).applyMatrix4(transform)));
+  const includeLocalPoint = (point: THREE.Vector3) => {
+    const projected = projectPoint(scene, camera, point.add(contentOffset).applyMatrix4(transform));
+    minX = Math.min(minX, projected.x);
+    minY = Math.min(minY, projected.y);
+    maxX = Math.max(maxX, projected.x);
+    maxY = Math.max(maxY, projected.y);
+  };
+
+  if (object.meshKind === "model") {
+    // Imported model geometry loads asynchronously. Its authored fit box remains the synchronous
+    // selection fallback until the Render View exposes loaded mesh bounds.
+    for (const x of [0, object.width]) {
+      for (const y of [0, object.height]) {
+        for (const z of [0, object.depth]) {
+          includeLocalPoint(new THREE.Vector3(
+            x - object.width / 2,
+            canvasToWorldY(y - object.height / 2),
+            z - object.depth / 2
+          ));
+        }
       }
+    }
+  } else {
+    // Project the actual primitive surface rather than its enclosing box. A rotated sphere is
+    // still a sphere; rotating the old box made its selection handles stretch even though the
+    // rendered pixels did not.
+    const positions = primitivePositions(object);
+    const point = new THREE.Vector3();
+    for (let index = 0; index < positions.count; index += 1) {
+      point.set(positions.getX(index), positions.getY(index), positions.getZ(index));
+      includeLocalPoint(point);
     }
   }
 
-  const minX = Math.min(...points.map((point) => point.x));
-  const minY = Math.min(...points.map((point) => point.y));
-  const maxX = Math.max(...points.map((point) => point.x));
-  const maxY = Math.max(...points.map((point) => point.y));
   const center = projectPoint(
     scene,
     camera,

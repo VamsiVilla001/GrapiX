@@ -4,6 +4,9 @@
       "command": "node",
       "args": ["Editor/services/editor-mcp/dist/index.js"],
       "env": {}
+    },
+    "Figma Desktop": {
+      "url": "http://127.0.0.1:3845/mcp"
     }
   }
 }

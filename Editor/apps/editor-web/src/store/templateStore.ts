@@ -5,7 +5,8 @@ import {
   createSeedTemplateCatalog,
   formatNumericSceneId,
   profileFromScene,
-  sceneToTemplateScene
+  sceneToTemplateScene,
+  serverSceneToTemplateScene
 } from "../lib/templateCatalog";
 import { useProjectStore } from "./projectStore";
 
@@ -24,6 +25,7 @@ interface TemplateState {
   toggleFavorite: (templateId: string) => void;
   addNewTemplate: () => TemplateScene;
   createTemplateFromScene: (scene: SceneDocument) => void;
+  openServerScene: (scene: SceneDocument) => TemplateScene;
   updateTemplateScene: (templateId: string, scene: SceneDocument) => void;
   duplicateTemplate: (templateId: string) => void;
   renameTemplate: (templateId: string, name: string) => void;
@@ -87,6 +89,42 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
       selectedTemplateId: template.templateId,
       openedTemplateId: template.templateId
     }));
+  },
+  openServerScene: (scene) => {
+    const existing = get().templates.find((template) => template.sceneId === scene.id);
+
+    // Reopening replaces the catalogue copy in place rather than adding a second
+    // card for the same server scene. Two cards pointing at one scene id would let
+    // an author edit the stale one and save over the fresh one.
+    if (existing) {
+      const refreshed: TemplateScene = {
+        ...existing,
+        name: scene.name || existing.name,
+        videoProfile: profileFromScene(scene),
+        scene,
+        updatedAt: scene.updatedAt ?? new Date().toISOString()
+      };
+
+      set((state) => ({
+        templates: state.templates.map((template) =>
+          template.templateId === existing.templateId ? refreshed : template
+        ),
+        selectedTemplateId: refreshed.templateId,
+        openedTemplateId: refreshed.templateId
+      }));
+
+      return refreshed;
+    }
+
+    const template = serverSceneToTemplateScene(scene);
+
+    set((state) => ({
+      templates: [...state.templates, template],
+      selectedTemplateId: template.templateId,
+      openedTemplateId: template.templateId
+    }));
+
+    return template;
   },
   updateTemplateScene: (templateId, scene) =>
     set((state) => ({

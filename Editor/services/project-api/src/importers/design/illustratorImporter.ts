@@ -14,6 +14,7 @@ import {
   type NormalizedDesignNodeType,
   type NormalizedDesignPage
 } from "@grapix/shared-types";
+import { resolveSourceBlendMode } from "./blendModes.js";
 import { addDesignImportIssue, reportImportWarning } from "./importReport.js";
 import { parseSvgPathData, rectanglePath } from "./svgPath.js";
 
@@ -500,7 +501,7 @@ function collectComponents(nodes: NormalizedDesignNode[]) {
 }
 
 function mapSvgBlend(value: string | undefined): NormalizedDesignNode["blendMode"] {
-  return value === "multiply" ? "multiply" : value === "screen" ? "screen" : value === "overlay" ? "overlay" : value === "darken" ? "darken" : value === "lighten" ? "lighten" : "normal";
+  return resolveSourceBlendMode(value).mode;
 }
 
 function viewBox(attrs: Attributes): number[] {

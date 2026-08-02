@@ -57,6 +57,41 @@ promotes it, and an operator takes it.
 
 ## Install and run
 
+### From npm (no checkout build)
+
+Published as a self-contained CLI, so a client can launch it with no clone and no
+build step:
+
+```bash
+npx -y @grapix/editor-mcp --version
+npm install -g @grapix/editor-mcp   # or install it once
+```
+
+`@grapix/shared-types` is a workspace-private package on no registry, so it is
+**inlined into the published bundle** rather than declared as a dependency that
+could never resolve. The MCP SDK and zod stay ordinary dependencies: the SDK is the
+protocol implementation, and a protocol fix should arrive through `npm install`
+instead of requiring GrapiX to be republished.
+
+**It still needs a GrapiX checkout, and that is deliberate.** The knowledge half
+reads `docs/`, the READMEs, `memory.md` and the `Shared/` contract sources from the
+working tree, so it can never serve a stale snapshot of them (session rule 92).
+Point it at one:
+
+```bash
+GRAPIX_REPOSITORY_ROOT=/path/to/GrapiX npx -y @grapix/editor-mcp
+```
+
+Run from inside a checkout, that is detected automatically and the variable is
+unnecessary. Run from anywhere else without it, the server exits with code 2 and
+says exactly this rather than starting with an empty knowledge base.
+
+The comparison to `uvx blender-mcp` is exact on this point: that server needs
+Blender running with its addon; this one needs a GrapiX checkout, and
+`project-api` running for the authoring half.
+
+### From this repository
+
 The package is a workspace member; `npm install` at the repository root is
 enough. Build it once:
 
@@ -85,13 +120,25 @@ node Editor/services/editor-mcp/dist/index.js
 ### Streamable HTTP
 
 For clients that attach to a running server, or several assistants sharing one.
-Binds loopback, stateless per request, DNS-rebinding protection on.
+Binds loopback, DNS-rebinding protection on, and **one MCP session per client**:
+each connection gets its own server instance, keyed by the `mcp-session-id` the
+transport assigns on initialize, while the ingested corpus and project client are
+shared so an extra session costs nothing.
 
 ```bash
 node Editor/services/editor-mcp/dist/index.js --http
 ```
 
-Endpoint `http://127.0.0.1:4150/mcp`, plus a plain `GET /health`.
+Endpoint `http://127.0.0.1:4150/mcp` — POST to call, GET for the server→client
+notification stream, DELETE to end a session — plus a plain `GET /health`
+reporting the tool count and how many sessions are live.
+
+Session isolation is not a detail. This path previously reused a single server
+across requests, so a client's **second** call failed with *"Already connected to
+a transport"*. stdio hid it, because there one process is one server — but every
+HTTP client broke immediately after the handshake. `tests/http-transport.test.mjs`
+makes several calls per session and opens two concurrent sessions for that reason;
+a single-call test would pass against the bug.
 
 ### Read-only
 
@@ -105,7 +152,24 @@ node Editor/services/editor-mcp/dist/index.js --read-only
 
 ## Client configuration
 
-Replace `D:/Project KK/Personal projects/GrapiX` with your checkout path.
+Two shapes work everywhere. **Published** — no checkout build, one line, and the
+form to hand a teammate:
+
+```json
+{
+  "mcpServers": {
+    "grapix-editor": {
+      "command": "npx",
+      "args": ["-y", "@grapix/editor-mcp"],
+      "env": { "GRAPIX_REPOSITORY_ROOT": "/path/to/GrapiX" }
+    }
+  }
+}
+```
+
+**From a checkout** — what the rest of this section shows, and what you want while
+developing the server itself. Replace `D:/Project KK/Personal projects/GrapiX` with
+your checkout path.
 
 ### Claude Code
 
@@ -173,11 +237,49 @@ GRAPIX_REPOSITORY_ROOT = "D:/Project KK/Personal projects/GrapiX"
 }
 ```
 
-### Kimi, Cursor, Zed, and other clients
+### VS Code (GitHub Copilot agent mode)
 
-Any client that reads the common `mcpServers` shape takes the Claude Desktop
-block above verbatim. A client that prefers HTTP should start the server with
-`--http` and point at `http://127.0.0.1:4150/mcp`.
+`.vscode/mcp.json` in the workspace. VS Code uses `servers` rather than
+`mcpServers`, and wants the transport named:
+
+```json
+{
+  "servers": {
+    "grapix-editor": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["D:/Project KK/Personal projects/GrapiX/Editor/services/editor-mcp/dist/index.js"]
+    }
+  }
+}
+```
+
+### Kimi, Cursor, Zed, Windsurf, Cline, Continue, and anything else
+
+Any client that reads the common `mcpServers` shape takes the Claude Desktop block
+above verbatim; only the file it lives in differs, so check your client's docs for
+the path. That interchangeability is the point: **MCP is provider-neutral, so this
+server is not written per-model.** Claude, GPT/Codex, Gemini, Kimi and a local
+Llama all reach the same 53 tools through their own client, and adding a new model
+vendor requires no change here.
+
+A client that prefers HTTP starts the server with `--http` and points at the
+endpoint instead of launching a process:
+
+```json
+{
+  "mcpServers": {
+    "grapix-editor": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:4150/mcp"
+    }
+  }
+}
+```
+
+One running server serves several clients at once this way — each gets its own
+session — so Claude Code and Cursor can be attached to the same Editor
+simultaneously.
 
 ## Environment
 
@@ -273,7 +375,7 @@ and cannot clobber a change to a different object.
 npm test -w @grapix/editor-mcp
 ```
 
-Three suites, 34 tests:
+Four suites, 39 tests:
 
 - **`authority.test.mjs`** — the architecture guard. No tool may name a Program
   or output verb; the guard itself is proved to reject one; read-only mode drops
@@ -287,7 +389,43 @@ Three suites, 34 tests:
   read, a completion, tool calls, and schema rejection of bad arguments. It does
   not require the project service; the one tool that needs it is asserted to
   fail *informatively* rather than to succeed.
+- **`http-transport.test.mjs`** — the Streamable HTTP path, driven by real clients:
+  several calls inside one session, two concurrent sessions, a non-initialize POST
+  refused, and health reporting live session count. Shaped that way because a
+  single-call test passed against the session bug described above.
 
 Verified live against a running project service on 4100: create scene, add
 objects, bind live data, keyframe, create and assign a material, analyze,
 preflight, publish a 3.3 KB `.gfxpkg`, delete and recover.
+
+## Publishing
+
+`prepack` builds the bundle, so packing and publishing cannot ship a stale artifact:
+
+```bash
+npm run pack:mcp                      # from the repository root: builds + writes a .tgz
+npm publish -w @grapix/editor-mcp     # requires npm credentials for the @grapix scope
+```
+
+The tarball is deliberately four files — `bundle/grapix-editor-mcp.mjs`,
+`package.json`, `README.md`, `LICENSE`. No `src`, no `dist`, no tests, and above all
+no copy of `docs/` or `memory.md`.
+
+Verify a release candidate the way a user will get it, in a directory outside this
+repository:
+
+```bash
+npm install /path/to/grapix-editor-mcp-0.1.0.tgz
+GRAPIX_REPOSITORY_ROOT=/path/to/GrapiX node_modules/.bin/grapix-editor-mcp --version
+```
+
+Two things that a naive package would get wrong, both fixed here and worth not
+regressing:
+
+- **`bin` is resolved by real path.** npm installs a `bin` as a *symlink* on macOS and
+  Linux, so `process.argv[1]` is the link while `import.meta.url` is its target. The
+  entry guard compares `realpathSync` of both; a string comparison makes every
+  `npx`/global run start nothing at all, silently.
+- **`@grapix/shared-types` is a devDependency, not a dependency.** It is inlined by
+  the bundler. Declaring it as a runtime dependency would make `npm install` fail on
+  a package version that exists on no registry.

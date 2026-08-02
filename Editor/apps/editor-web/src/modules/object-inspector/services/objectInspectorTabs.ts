@@ -18,7 +18,7 @@ import type { SceneObject } from "@grapix/shared-types";
  */
 
 /** Tabs after the leading type tab. The type tab is always present and always first. */
-export const OPTIONAL_OBJECT_INSPECTOR_TABS = ["Materials", "Text", "Data Binding"] as const;
+export const OPTIONAL_OBJECT_INSPECTOR_TABS = ["Transform", "Materials", "Text", "Data Binding"] as const;
 export type OptionalObjectInspectorTab = (typeof OPTIONAL_OBJECT_INSPECTOR_TABS)[number];
 
 interface TypeDescriptor {
@@ -38,28 +38,29 @@ const DESCRIPTORS: Record<SceneObject["type"], TypeDescriptor> = {
   // so listing "Text" again produced two tabs with the same name. React saw duplicate keys, and
   // clicking either one selected the same tab — the dedicated panel was unreachable. The type tab
   // is the text editor; nothing is lost by naming it once.
-  text: { typeTab: "Text", optional: ["Materials", "Data Binding"] },
+  text: { typeTab: "Text", optional: ["Transform", "Materials", "Data Binding"] },
 
   // Surfaces that take a material and can be driven by data.
-  rect: { typeTab: "Quad", optional: ["Materials", "Data Binding"] },
-  ellipse: { typeTab: "Ellipse", optional: ["Materials", "Data Binding"] },
-  image: { typeTab: "Image", optional: ["Materials", "Data Binding"] },
-  shape: { typeTab: "Shape", optional: ["Materials", "Data Binding"] },
-  paint: { typeTab: "Paint", optional: ["Materials", "Data Binding"] },
-  mesh: { typeTab: "Mesh", optional: ["Materials", "Data Binding"] },
+  rect: { typeTab: "Quad", optional: ["Transform", "Materials", "Data Binding"] },
+  ellipse: { typeTab: "Ellipse", optional: ["Transform", "Materials", "Data Binding"] },
+  image: { typeTab: "Image", optional: ["Transform", "Materials", "Data Binding"] },
+  shape: { typeTab: "Shape", optional: ["Transform", "Materials", "Data Binding"] },
+  paint: { typeTab: "Paint", optional: ["Transform", "Materials", "Data Binding"] },
+  mesh: { typeTab: "Mesh", optional: ["Transform", "Materials", "Data Binding"] },
 
   // A stroke, not a surface: it has no material faces to bind, but its geometry and colour are
   // legitimately data-driven.
-  line: { typeTab: "Line", optional: ["Data Binding"] },
+  line: { typeTab: "Line", optional: ["Transform", "Data Binding"] },
 
-  // Scene furniture. A light has no surface and a camera renders nothing, so Materials would be
-  // an empty promise on both.
-  light: { typeTab: "Light", optional: [] },
-  camera: { typeTab: "Camera", optional: [] },
+  // Scene furniture has no material surface, but its placement still needs a precise numeric
+  // editor independent of its type-specific camera/light controls.
+  light: { typeTab: "Light", optional: ["Transform"] },
+  camera: { typeTab: "Camera", optional: ["Transform"] },
 
-  // Organisational objects. They carry transform and ordering, nothing paintable.
-  layer: { typeTab: "Layer", optional: [] },
-  group: { typeTab: "Group", optional: [] },
+  // Containers inherit transform state into their descendants. Markers are timeline metadata
+  // and have no painted or spatial controls of their own.
+  layer: { typeTab: "Layer", optional: ["Transform"] },
+  group: { typeTab: "Group", optional: ["Transform"] },
   marker: { typeTab: "Marker", optional: [] }
 };
 

@@ -6,6 +6,7 @@ import {
   type ProcessStatus
 } from "../hooks/useSupervisorStatus";
 import { useApiHealth } from "../hooks/useApiHealth";
+import { AssistantChip } from "./AssistantChip";
 
 export function StatusBar() {
   const scene = useEditorStore((state) => state.scene);
@@ -42,6 +43,7 @@ export function StatusBar() {
           Hardware: uncertified
         </span>
       ) : null}
+      <AssistantChip />
       <span className={`save-status ${saveStatus}`}>{saveStatusLabel(saveStatus, saveError)}</span>
     </footer>
   );

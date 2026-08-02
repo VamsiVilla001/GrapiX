@@ -10,7 +10,12 @@ import { fileURLToPath } from "node:url";
 import { EngineSupervisor } from "./engineSupervisor.js";
 import { readAllowedPlayoutOrigins } from "./origins.js";
 import { PlayoutEventBus } from "./events.js";
-import { isMonitorChannel, isMonitorView, MonitorHub } from "./monitorHub.js";
+import {
+  isMonitorChannel,
+  isMonitorStreamTier,
+  isMonitorView,
+  MonitorHub
+} from "./monitorHub.js";
 import { duplicateInstanceMessage, inspectPort } from "./preflight.js";
 import { PlayoutRuntime, type PlayoutTarget } from "./runtime.js";
 import { PlayoutStore, SceneRemovalRefused, type PublishSceneOptions } from "./store.js";
@@ -138,26 +143,30 @@ app.post<{
  * clear: the engine keeps rendering when this service restarts, so "I cannot see it" is not
  * the same as "nothing is on air".
  */
-app.delete<{ Params: { sceneId: string } }>(
+app.delete<{ Params: { sceneId: string }; Querystring: { force?: string } }>(
   "/api/playout/scenes/:sceneId",
   async (request, reply) => {
     const { sceneId } = request.params;
+    const force = request.query.force === "true";
 
-    let onAirSceneIds: string[];
-    try {
-      const status = await engine.requireConnected().status(engine.id);
-      onAirSceneIds = [status.programSceneId, status.previewSceneId].filter(
-        (value): value is string => typeof value === "string"
-      );
-    } catch (error) {
-      return reply.code(503).send({
-        error:
-          `cannot verify what is on air (${errorMessage(error)}); refusing to remove a published scene`
-      });
+    let onAirSceneIds: string[] = [];
+    const engineStatus = engine.status();
+    if (engineStatus.connected) {
+      try {
+        const runtimeStatus = runtime.getStatus();
+        onAirSceneIds = [runtimeStatus.programRef, runtimeStatus.previewRef]
+          .filter((v): v is string => typeof v === "string" && v.startsWith("scene:take-"))
+          .map((v) => v.replace("scene:take-", ""));
+      } catch {
+        onAirSceneIds = [];
+      }
+    } else {
+      // Disconnected engine has no scenes rendering on GPU
+      onAirSceneIds = [];
     }
 
     try {
-      const removal = await store.removeScene(sceneId, { onAirSceneIds });
+      const removal = await store.removeScene(sceneId, { onAirSceneIds, force });
       events.emit({
         kind: "library.changed",
         detail: { sceneId, reason: "removed", versionsRemoved: removal.versionsRemoved }
@@ -173,6 +182,24 @@ app.delete<{ Params: { sceneId: string } }>(
     }
   }
 );
+
+/**
+ * Sync scenes from the Editor project service (port 4100) into Playout.
+ */
+app.post("/api/playout/scenes/sync-editor", async (_request, reply) => {
+  try {
+    const result = await store.syncFromEditor();
+    if (result.syncedCount > 0 || result.updatedCount > 0) {
+      events.emit({
+        kind: "library.changed",
+        detail: { reason: "synced-editor", count: result.syncedCount + result.updatedCount }
+      });
+    }
+    return result;
+  } catch (error) {
+    return reply.code(502).send({ error: errorMessage(error) });
+  }
+});
 
 /**
  * The live link to the operator UI.
@@ -197,8 +224,8 @@ app.get("/api/playout/monitors", async () => ({ channels: monitors.status() }));
  *
  * `?view=fill` (default) is the colour an audience sees. `?view=key` is the greyscale matte
  * a downstream keyer cuts — the broadcast way to verify transparency, since SDI carries no
- * alpha and fill/key travel as separate signals. Both are ordinary images, which is why
- * there is no alpha-capable codec in this path.
+ * alpha and fill/key travel as separate signals. `?tier=confidence` keeps operator panels
+ * small; `?tier=output` requests native project resolution for a windowed virtual output.
  *
  * `multipart/x-mixed-replace` rather than a WebSocket or base64 over the event bus,
  * because an `<img>` consumes it directly: the browser decodes JPEG off the main thread
@@ -208,7 +235,10 @@ app.get("/api/playout/monitors", async () => ({ channels: monitors.status() }));
  * The socket is handed to the monitor hub and the handler returns without a body, so
  * Fastify must not try to serialise a reply.
  */
-app.get<{ Params: { channel: string }; Querystring: { view?: string } }>(
+app.get<{
+  Params: { channel: string };
+  Querystring: { view?: string; tier?: string };
+}>(
   "/api/playout/monitor/:channel",
   async (request, reply) => {
     const { channel } = request.params;
@@ -222,6 +252,14 @@ app.get<{ Params: { channel: string }; Querystring: { view?: string } }>(
       return reply
         .code(400)
         .send({ error: `monitor view must be "fill" or "key"; got "${requestedView}"` });
+    }
+    const requestedTier = request.query.tier ?? "confidence";
+    if (!isMonitorStreamTier(requestedTier)) {
+      return reply
+        .code(400)
+        .send({
+          error: `monitor tier must be "confidence" or "output"; got "${requestedTier}"`
+        });
     }
 
     const boundary = "grapixframe";
@@ -252,7 +290,7 @@ app.get<{ Params: { channel: string }; Querystring: { view?: string } }>(
       } catch {
         // Socket died mid-write. The close handler below releases the stream.
       }
-    });
+    }, requestedTier);
 
     reply.raw.on("close", detach);
     reply.raw.on("error", detach);

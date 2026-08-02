@@ -7,7 +7,7 @@ import { useEditorStore } from "../store/editorStore";
 import { bindablePropertiesFor } from "../store/objectPropertySupport";
 import { useUiStore } from "../store/uiStore";
 
-export const propertyInspectorTabs = ["Properties", "Materials", "Text", "Data Binding"] as const;
+export const propertyInspectorTabs = ["Properties", "Transform", "Materials", "Text", "Data Binding"] as const;
 export type PropertyInspectorTab = (typeof propertyInspectorTabs)[number];
 
 export function PropertiesSidebar() {
@@ -35,7 +35,8 @@ export function PropertiesSidebar() {
 }
 
 export function PropertyInspectorContent(props: { tab: PropertyInspectorTab }) {
-  if (props.tab === "Properties") return <Inspector />;
+  if (props.tab === "Properties") return <Inspector scope="type" />;
+  if (props.tab === "Transform") return <Inspector scope="transform" />;
   if (props.tab === "Materials") return <MaterialsTab />;
   if (props.tab === "Text") return <TextProperties />;
   return <DataBindingProperties />;

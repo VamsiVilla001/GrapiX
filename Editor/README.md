@@ -15,6 +15,8 @@ apps/desktop-electron   fallback shell
 services/project-api    scenes, assets, fonts, packages, automation evaluation
 services/editor-mcp     MCP server: the authoring surface and the ingested
                         architecture, contracts and capability knowledge
+services/editor-assistant  AI assistant broker (:4160): an MCP client + model
+                        connector driving an in-app chat dock
 ```
 
 ## What the desktop shell supervises
@@ -22,6 +24,7 @@ services/editor-mcp     MCP server: the authoring surface and the ingested
 | Process | Port | Ownership |
 | --- | --- | --- |
 | `project-api` | 4100 | owned; stopped when the window closes |
+| `editor-assistant` | 4160 | owned; stopped when the window closes |
 | `grapix-render-engine` | 4400 | **ensured, never owned** |
 
 The shell starts an engine when none is running, adopts one that is already up,
@@ -39,6 +42,7 @@ npm run dev:editor       # desktop shell: project service + ensured engine
 npm run dev:web          # UI only, in a browser
 npm run dev:api          # project service only
 npm run dev:mcp          # MCP server, watching sources
+npm run dev:assistant    # AI assistant broker on 4160 (needs a provider API key to chat)
 npm run build:editor
 npm run test:editor
 ```

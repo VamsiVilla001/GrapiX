@@ -10,16 +10,25 @@ import {
 import { importAssetBuffer } from "../../storage.js";
 import { normalizeDesignDocument } from "./designDocumentNormalizer.js";
 import { importFigmaDocument } from "./figmaImporter.js";
+import { importFigmaMcpDocument } from "./figmaMcpImporter.js";
+import { hasFigmaRestToken, importFigmaRestDocument } from "./figmaRestImporter.js";
 import { convertDesignDocumentToScenes } from "./grapixObjectConverter.js";
 import {
   completeDesignImportReport,
   createDesignImportReport,
+  pruneDesignImportIssues,
   reportImportWarning
 } from "./importReport.js";
 import { importIllustratorDocument, importSvgDocument } from "./illustratorImporter.js";
 import { importPsdDocument } from "./psdImporter.js";
 
-const PUBLIC_ASSET_BASE = "http://127.0.0.1:4100";
+/**
+ * Base for the asset URLs written into an imported scene. Derived from the port the
+ * service was told to bind, because a hardcoded 4100 makes an import running on any
+ * other port fetch a different process's asset store - or nothing at all.
+ */
+const PUBLIC_ASSET_BASE = process.env.GRAPIX_API_PUBLIC_BASE?.trim()
+  || `http://127.0.0.1:${Number(process.env.GRAPIX_API_PORT ?? 4100)}`;
 const MAX_EXTRACTED_ASSET_BYTES = 100 * 1024 * 1024;
 
 export class DesignImportManager {
@@ -44,46 +53,78 @@ export class DesignImportManager {
       name: fileName,
       kind: "source",
       mimeType: source.mimeType,
-      sourceUrl: `${PUBLIC_ASSET_BASE}/api/assets/${source.assetId}/content`
+      sourceUrl: `${PUBLIC_ASSET_BASE}/api/assets/${source.assetId}/content`,
+      checksum: source.checksum,
+      sizeBytes: source.sizeBytes
     });
     document = await persistExtractedAssets(document, options, report);
     document = normalizeDesignDocument(document, options);
+    pruneDesignImportIssues(report, importedNodeIds(document));
     const scenes = convertDesignDocumentToScenes(document, options, report);
     completeDesignImportReport(report, countNodes(document));
     return { document, scenes, report };
   }
 
+  /**
+   * Import a Figma link.
+   *
+   * `rest` is the editable route: it fetches the native document JSON, so text stays
+   * text and vectors stay paths. `desktop-mcp` needs no token but can only return the
+   * screenshot Figma renders, so the node lands as one image. `auto` prefers REST
+   * whenever a token is available.
+   */
   async importFigma(
     source: FigmaDesignImportSource,
     suppliedOptions: Partial<DesignImportOptions> = {}
   ): Promise<DesignImportResult> {
-    const options = mergeOptions({
-      ...suppliedOptions,
-      selectedNodeIds: suppliedOptions.selectedNodeIds ?? source.nodeIds
-    });
-    const fileKey = parseFigmaFileKey(source.fileKey);
-    if (!fileKey || !source.accessToken.trim()) throw new Error("A Figma file key/URL and access token are required.");
-    const report = createDesignImportReport("figma-api", `Figma ${fileKey}`);
-    const headers = { "X-Figma-Token": source.accessToken.trim() };
-    const documentResponse = source.nodeIds?.length
-      ? await figmaJson(`https://api.figma.com/v1/files/${encodeURIComponent(fileKey)}/nodes?ids=${encodeURIComponent(source.nodeIds.join(","))}&geometry=paths`, headers)
-      : await figmaJson(`https://api.figma.com/v1/files/${encodeURIComponent(fileKey)}?geometry=paths`, headers);
-    const payload = source.nodeIds?.length ? nodesResponseAsDocument(documentResponse, source.nodeIds) : documentResponse;
-    let imageUrls: Record<string, string> = {};
-    try {
-      const images = await figmaJson(`https://api.figma.com/v1/files/${encodeURIComponent(fileKey)}/images`, headers);
-      imageUrls = asStringMap((images as { images?: unknown }).images);
-    } catch (error) {
-      reportImportWarning(report, `Figma image-fill URLs could not be loaded: ${message(error)}`, "missing-asset");
+    const options = mergeOptions(suppliedOptions);
+    const transport = figmaTransport(source);
+    const report = createDesignImportReport(
+      transport === "rest" ? "figma-json" : "figma-mcp",
+      source.url.trim() || "Figma selection"
+    );
+    let document = transport === "rest"
+      ? await importFigmaRestDocument(source, report)
+      : await importFigmaMcpDocument(source, report);
+    if (transport === "rest") {
+      // Provenance: the exact JSON this scene came from, stored like an uploaded file.
+      const stored = await importAssetBuffer(
+        Buffer.from(JSON.stringify(document, null, 2)),
+        `${document.sourceName || "figma"}.figma.json`,
+        "application/json"
+      );
+      document.assets.push({
+        id: stored.assetId,
+        name: stored.fileName,
+        kind: "source",
+        mimeType: stored.mimeType,
+        sourceUrl: `${PUBLIC_ASSET_BASE}/api/assets/${stored.assetId}/content`,
+        checksum: stored.checksum,
+        sizeBytes: stored.sizeBytes
+      });
     }
-    let document = importFigmaDocument(payload, String((payload as any).name ?? `Figma ${fileKey}`), report, "figma-api", imageUrls);
-    document.sourceId = fileKey;
     document = await persistExtractedAssets(document, options, report);
     document = normalizeDesignDocument(document, options);
+    pruneDesignImportIssues(report, importedNodeIds(document));
     const scenes = convertDesignDocumentToScenes(document, options, report);
     completeDesignImportReport(report, countNodes(document));
     return { document, scenes, report };
   }
+}
+
+/** Resolve the requested transport, refusing REST with no token rather than silently rasterizing. */
+function figmaTransport(source: FigmaDesignImportSource): "rest" | "desktop-mcp" {
+  const requested = source.transport ?? "auto";
+  if (requested === "desktop-mcp") return "desktop-mcp";
+  if (requested === "rest") {
+    if (!hasFigmaRestToken(source)) {
+      throw new Error(
+        "Native Figma JSON needs a REST token. Provide a personal access token with the file_content:read scope, set FIGMA_ACCESS_TOKEN on the project service, or choose the Figma Desktop MCP transport, which imports a screenshot instead of editable layers."
+      );
+    }
+    return "rest";
+  }
+  return hasFigmaRestToken(source) ? "rest" : "desktop-mcp";
 }
 
 export function parseDesignImportOptions(value: string | undefined): Partial<DesignImportOptions> {
@@ -100,7 +141,26 @@ async function persistExtractedAssets(
 ): Promise<NormalizedDesignDocument> {
   const idMap = new Map<string, string>();
   const assets = await Promise.all(document.assets.map(async (asset) => {
-    if (!asset.dataBase64 && !(options.assetMode === "embed" && asset.sourceUrl)) return asset;
+    // An asset already in this store needs no work: `importFile` stores the source
+    // document before this pass, and re-fetching its own bytes over loopback to
+    // hash them into the same path costs a full copy of the file (93 MB for a
+    // real PSD) and fails outright if the public base does not resolve.
+    if (isStoredHere(asset)) return asset;
+    if (!asset.dataBase64 && !(options.assetMode === "embed" && asset.sourceUrl)) {
+      // A linked remote asset has no bytes in this project, so the engine cannot
+      // register it and Program cannot show it. Say so at import time rather than at
+      // Take time.
+      if (asset.sourceUrl && asset.kind !== "source") {
+        reportImportWarning(
+          report,
+          `Asset ${asset.name} stays linked to ${asset.sourceUrl.replace(/\?.*$/, "")} and has no stored bytes, so the render engine cannot register it. Re-import with "Embed extracted assets" to put it on air.`,
+          "missing-asset",
+          asset.name,
+          "External link only; not available to Program"
+        );
+      }
+      return asset;
+    }
     try {
       const bytes = asset.dataBase64
         ? Buffer.from(asset.dataBase64, "base64")
@@ -113,7 +173,11 @@ async function persistExtractedAssets(
         id: stored.assetId,
         dataBase64: undefined,
         sourceUrl: `${PUBLIC_ASSET_BASE}/api/assets/${stored.assetId}/content`,
-        linked: false
+        linked: false,
+        // The engine registers assets by SHA-256; without it the scene is refused at
+        // `asset.register` with "has no checksum and cannot be sent to the render engine".
+        checksum: stored.checksum,
+        sizeBytes: stored.sizeBytes
       };
     } catch (error) {
       reportImportWarning(report, `Asset ${asset.name} could not be embedded: ${message(error)}`, "missing-asset", asset.name, "Link/reference preserved");
@@ -125,6 +189,12 @@ async function persistExtractedAssets(
     nodes: page.nodes.map((node) => remapNodeAssets(node, idMap))
   }));
   return { ...document, assets, pages };
+}
+
+/** True when the asset already lives in this project's store under its own id. */
+function isStoredHere(asset: NormalizedDesignDocument["assets"][number]): boolean {
+  return !asset.dataBase64
+    && asset.sourceUrl === `${PUBLIC_ASSET_BASE}/api/assets/${asset.id}/content`;
 }
 
 function remapNodeAssets(node: NormalizedDesignNode, ids: Map<string, string>): NormalizedDesignNode {
@@ -171,10 +241,17 @@ function countNodes(document: NormalizedDesignDocument): number {
   return document.pages.reduce((total, page) => total + count(page.nodes), 0);
 }
 
-async function figmaJson(url: string, headers: Record<string, string>): Promise<unknown> {
-  const response = await fetch(url, { headers, signal: AbortSignal.timeout(30_000) });
-  if (!response.ok) throw new Error(`Figma API returned ${response.status}: ${(await response.text()).slice(0, 500)}`);
-  return response.json();
+/** Every node id that survived selection, hidden-layer and hierarchy normalization. */
+function importedNodeIds(document: NormalizedDesignDocument): Set<string> {
+  const ids = new Set<string>();
+  const walk = (nodes: NormalizedDesignNode[]): void => {
+    for (const node of nodes) {
+      ids.add(node.id);
+      walk(node.children);
+    }
+  };
+  document.pages.forEach((page) => walk(page.nodes));
+  return ids;
 }
 
 async function downloadAsset(url: string): Promise<Buffer> {
@@ -185,35 +262,7 @@ async function downloadAsset(url: string): Promise<Buffer> {
   return Buffer.from(await response.arrayBuffer());
 }
 
-function parseFigmaFileKey(input: string): string {
-  const trimmed = input.trim();
-  const match = /figma\.com\/(?:design|file|proto|board)\/([^/?#]+)/i.exec(trimmed);
-  return (match?.[1] ?? trimmed).replace(/[^a-zA-Z0-9_-]/g, "");
-}
-
-function nodesResponseAsDocument(response: any, ids: string[]): unknown {
-  const nodes = response?.nodes ?? {};
-  return {
-    ...response,
-    document: {
-      id: "selected-document",
-      name: response?.name ?? "Selected Figma nodes",
-      type: "DOCUMENT",
-      children: [{
-        id: "selected-page",
-        name: "Selected nodes",
-        type: "CANVAS",
-        children: ids.map((id) => nodes[id]?.document).filter(Boolean)
-      }]
-    }
-  };
-}
-
-function asStringMap(value: unknown): Record<string, string> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
-}
-
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+

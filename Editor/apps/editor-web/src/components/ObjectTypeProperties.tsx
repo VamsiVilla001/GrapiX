@@ -145,6 +145,7 @@ function LineProperties({ object }: { object: OfType<"line"> }) {
 
 function ShapeProperties({ object }: { object: OfType<"shape"> }) {
   const patch = usePatch(object.id);
+  const updateShapeVertex = useEditorStore((state) => state.updateShapeVertex);
   const compoundCount = object.compoundPaths?.length ?? 0;
 
   return (
@@ -177,10 +178,53 @@ function ShapeProperties({ object }: { object: OfType<"shape"> }) {
           onChange={(fillRule) => patch({ fillRule } as Partial<SceneObject>)}
         />
       </div>
+      {object.path.vertices.map((vertex, index) => {
+        const incoming = object.path.inTangents[index] ?? { x: 0, y: 0 };
+        const outgoing = object.path.outTangents[index] ?? { x: 0, y: 0 };
+        return (
+          <div className="inspector-stroke-row" key={index}>
+            <div className="inspector-section-heading">
+              <h4>Anchor {index + 1}</h4>
+              <span>local coordinates</span>
+            </div>
+            <div className="two-column">
+              <NumberField
+                label="X"
+                value={vertex.x}
+                onChange={(x) => updateShapeVertex(object.id, index, { vertex: { ...vertex, x } })}
+              />
+              <NumberField
+                label="Y"
+                value={vertex.y}
+                onChange={(y) => updateShapeVertex(object.id, index, { vertex: { ...vertex, y } })}
+              />
+              <NumberField
+                label="In X"
+                value={incoming.x}
+                onChange={(x) => updateShapeVertex(object.id, index, { inTangent: { ...incoming, x } })}
+              />
+              <NumberField
+                label="In Y"
+                value={incoming.y}
+                onChange={(y) => updateShapeVertex(object.id, index, { inTangent: { ...incoming, y } })}
+              />
+              <NumberField
+                label="Out X"
+                value={outgoing.x}
+                onChange={(x) => updateShapeVertex(object.id, index, { outTangent: { ...outgoing, x } })}
+              />
+              <NumberField
+                label="Out Y"
+                value={outgoing.y}
+                onChange={(y) => updateShapeVertex(object.id, index, { outTangent: { ...outgoing, y } })}
+              />
+            </div>
+          </div>
+        );
+      })}
       <ParityNote>
-        Fill rule is disabled: both renderers fill non-zero, so offering even-odd would change the
-        saved scene and nothing on screen. Anchors and handles are edited on the canvas with the
-        Direct Selection tool.
+        Anchor and tangent values are the same local coordinates used by Direct Selection on the
+        canvas. Fill rule stays disabled because both renderers currently fill non-zero.
         {compoundCount > 0
           ? ` The ${compoundCount} extra subpath${compoundCount === 1 ? "" : "s"} on this shape ${compoundCount === 1 ? "is" : "are"} preserved but not yet drawn.`
           : ""}
@@ -237,6 +281,60 @@ function PaintProperties({ object }: { object: OfType<"paint"> }) {
               value={stroke.flow}
               onChange={(flow) => updatePaintStroke(object.id, stroke.id, { flow })}
             />
+            <NumberField
+              disabled
+              label="Hardness %"
+              min={0}
+              max={100}
+              value={stroke.hardness * 100}
+              onChange={(hardness) => updatePaintStroke(object.id, stroke.id, { hardness: hardness / 100 })}
+            />
+            <NumberField
+              disabled
+              label="Spacing %"
+              min={1}
+              max={500}
+              value={stroke.spacing * 100}
+              onChange={(spacing) => updatePaintStroke(object.id, stroke.id, { spacing: spacing / 100 })}
+            />
+            <NumberField
+              disabled
+              label="Smoothing %"
+              min={0}
+              max={100}
+              value={stroke.smoothing * 100}
+              onChange={(smoothing) => updatePaintStroke(object.id, stroke.id, { smoothing: smoothing / 100 })}
+            />
+            <NumberField
+              disabled
+              label="Roundness %"
+              min={1}
+              max={100}
+              value={stroke.roundness * 100}
+              onChange={(roundness) => updatePaintStroke(object.id, stroke.id, { roundness: roundness / 100 })}
+            />
+            <NumberField
+              disabled
+              label="Angle °"
+              min={-180}
+              max={180}
+              value={stroke.angle}
+              onChange={(angle) => updatePaintStroke(object.id, stroke.id, { angle })}
+            />
+            <SelectField
+              disabled
+              label="Blend"
+              value={stroke.blendMode}
+              options={["normal", "multiply", "screen", "add", "erase"] as const}
+              onChange={(blendMode) => updatePaintStroke(object.id, stroke.id, { blendMode })}
+            />
+            <SelectField
+              disabled
+              label="Mask mode"
+              value={stroke.maskMode ?? "paint"}
+              options={["paint", "erase", "reveal"] as const}
+              onChange={(maskMode) => updatePaintStroke(object.id, stroke.id, { maskMode })}
+            />
             {stroke.color.type === "solid" ? (
               <ColorField
                 label="Colour"
@@ -250,10 +348,9 @@ function PaintProperties({ object }: { object: OfType<"paint"> }) {
         </div>
       ))}
       <ParityNote>
-        Size, opacity, flow and colour are the stroke properties the viewport draws. Hardness,
-        spacing, smoothing, roundness, angle and the per-layer blend are recorded by the Brush tool
-        but not yet honoured, so they are not offered here. Paint layers are Editor-only; the
-        render engine reports them as an unsupported object type.
+        Size, opacity, flow and colour are rendered and editable. Hardness, spacing, smoothing,
+        roundness, angle, blend and mask mode remain visible but disabled because the viewport does
+        not honour them yet. Paint layers are Editor-only; Program reports paint as unsupported.
       </ParityNote>
     </section>
   );
@@ -335,6 +432,7 @@ function MeshProperties({ object }: { object: OfType<"mesh"> }) {
       <div className="two-column">
         <ReadOnlyField label="Primitive" value={object.meshKind} />
         {isModel ? <ReadOnlyField label="Model asset" value={modelAsset?.name ?? object.modelAssetId ?? "none"} /> : null}
+        {isModel ? <ReadOnlyField label="Source" value={object.src ?? "none"} /> : null}
         {isModel ? <ReadOnlyField label="Elements" value={String(object.materialElements?.length ?? 0)} /> : null}
       </div>
       {isModel ? (

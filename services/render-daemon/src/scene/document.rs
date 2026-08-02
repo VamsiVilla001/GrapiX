@@ -21,8 +21,8 @@ use std::time::Duration;
 
 use super::mesh_prepare::{prepare_meshes, PreparedMesh};
 
-/// SceneDocument v1 now includes native 2D rect/ellipse and depth-tested mesh
-/// paths. Every other object type still produces an explicit warning.
+/// SceneDocument v1 includes native 2D rect/ellipse/vector-shape and
+/// depth-tested mesh paths. Every other object type produces an explicit warning.
 const SUPPORTED_VERSION: u64 = 1;
 pub const MAX_PREPARED_LIGHTS: usize = 16;
 
@@ -432,7 +432,7 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
             .and_then(Value::as_str)
             .unwrap_or("<missing type>");
 
-        if object_type == "mesh" || object_type == "light" || object_type == "text" {
+        if matches!(object_type, "mesh" | "light" | "text" | "shape") {
             continue;
         }
 
@@ -633,7 +633,7 @@ pub fn prepare_scene(scene_json: &Value) -> Result<PreparedScene, SceneError> {
 
     for (kind, count) in &unsupported_counts {
         warnings.push(format!(
-            "{count} object(s) of type {kind:?} are NOT rendered: native v1 currently renders text, rects, ellipses, and real 3D meshes"
+            "{count} object(s) of type {kind:?} are NOT rendered: native v1 currently renders text, rects, ellipses, vector shapes, and real 3D meshes"
         ));
     }
 
@@ -1414,6 +1414,50 @@ mod tests {
         assert_eq!(scene.rects.len(), 1);
         assert_eq!(scene.rects[0].primitive_kind, 1);
         assert!(scene.warnings.is_empty());
+    }
+
+    #[test]
+    fn prepares_bezier_shape_for_native_program_without_take_blockers() {
+        let shape = json!({
+            "id": "shape_1", "name": "Shape", "type": "shape",
+            "x": 400, "y": 510, "zDepth": 0, "zIndex": 2, "layerId": "main",
+            "width": 600, "height": 300, "rotation": 0,
+            "scaleX": 1.1, "scaleY": 1.1, "scaleZ": 1,
+            "anchor": { "x": 200, "y": 0 },
+            "opacity": 1, "visible": true, "locked": false,
+            "fill": "#7c5cff", "stroke": "#ffffff", "strokeWidth": 2,
+            "bindings": {}, "materialSlots": {},
+            "path": {
+                "closed": true,
+                "vertices": [
+                    { "x": 200, "y": 0 },
+                    { "x": 600, "y": 220 },
+                    { "x": 230, "y": 290 },
+                    { "x": 0, "y": 170 }
+                ],
+                "inTangents": [
+                    { "x": 0, "y": 0 }, { "x": 0, "y": 0 },
+                    { "x": 3, "y": 0 }, { "x": 0, "y": 0 }
+                ],
+                "outTangents": [
+                    { "x": 0, "y": 0 }, { "x": 0, "y": 0 },
+                    { "x": -3, "y": 0 }, { "x": 0, "y": 0 }
+                ]
+            },
+            "fillEnabled": true,
+            "strokeEnabled": true,
+            "fillRule": "nonzero"
+        });
+        let scene = prepare_scene(&minimal_scene(vec![shape])).expect("shape scene must prepare");
+        assert_eq!(scene.meshes.len(), 1);
+        assert_eq!(scene.meshes[0].object_id, "shape_1");
+        assert_eq!(scene.meshes[0].surfaces.len(), 2);
+        assert!(scene.meshes[0]
+            .surfaces
+            .iter()
+            .all(|surface| !surface.indices.is_empty()));
+        assert!(scene.warnings.is_empty(), "{:?}", scene.warnings);
+        assert!(scene.take_blockers.is_empty(), "{:?}", scene.take_blockers);
     }
 
     #[test]

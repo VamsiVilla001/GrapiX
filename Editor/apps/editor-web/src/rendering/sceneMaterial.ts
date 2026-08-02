@@ -93,10 +93,24 @@ export function applyMaterialSlots<T extends SceneObject>(object: T, scene: Scen
   const material = findMaterial(scene.materials, object.materialSlots.main);
 
   if (!material) {
-    // A mesh can be bound only on non-main faces; carry those resolutions even
-    // when the primary slot is empty.
-    if (faceMaterials) {
-      return { ...object, faceMaterials } as T & RenderableSceneObject;
+    // Direct image objects retain their source URL rather than binding an asset
+    // through a material. Carry the matching asset MIME so Pixi can select a
+    // parser for extension-less /api/assets/<id>/content URLs.
+    const directAsset = object.type === "image"
+      ? scene.assets.find((asset) => asset.source === object.src)
+      : undefined;
+    const directAssetMime = directAsset
+      && directAsset.status !== "MISSING"
+      && directAsset.status !== "ERROR"
+      && directAsset.status !== "UNSUPPORTED"
+      ? directAsset.mimeType
+      : undefined;
+    if (faceMaterials || directAssetMime) {
+      return {
+        ...object,
+        faceMaterials,
+        materialAssetMime: directAssetMime
+      } as T & RenderableSceneObject;
     }
     return object as T & RenderableSceneObject;
   }

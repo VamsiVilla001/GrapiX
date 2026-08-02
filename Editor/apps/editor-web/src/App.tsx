@@ -20,6 +20,8 @@ import { useSceneFonts } from "./hooks/useSceneFonts";
 import type { DockPanelId } from "./store/dockStore";
 import { useEditorStore } from "./store/editorStore";
 import { useTemplateStore } from "./store/templateStore";
+import { AssistantPanel } from "./components/AssistantPanel";
+import { useAssistantStore } from "./store/assistantStore";
 
 export function App() {
   useSceneAutosave();
@@ -60,6 +62,18 @@ export function App() {
     if (!hasActiveScene || !openedTemplateId) return;
     updateTemplateScene(openedTemplateId, scene);
   }, [hasActiveScene, openedTemplateId, scene, updateTemplateScene]);
+
+  // Ctrl+Alt+A toggles the assistant dock, matching the Ctrl+Alt+P parity-capture chord.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.ctrlKey && event.altKey && event.key.toLowerCase() === "a") {
+        event.preventDefault();
+        useAssistantStore.getState().toggleOpen();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
     <div className="app-shell reference-editor-shell">
@@ -103,6 +117,7 @@ export function App() {
         </Panel>
       </Group>
       <StatusBar />
+      <AssistantPanel />
     </div>
   );
 }

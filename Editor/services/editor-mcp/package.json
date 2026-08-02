@@ -1,29 +1,63 @@
 {
   "name": "@grapix/editor-mcp",
   "version": "0.1.0",
-  "private": true,
   "description": "Model Context Protocol server for the GrapiX Editor: authoring tools plus the ingested architecture, contract and capability knowledge of the application.",
+  "license": "MIT",
+  "homepage": "https://github.com/VamsiVilla001/GrapiX/tree/main/Editor/services/editor-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/VamsiVilla001/GrapiX.git",
+    "directory": "Editor/services/editor-mcp"
+  },
+  "bugs": {
+    "url": "https://github.com/VamsiVilla001/GrapiX/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "grapix",
+    "broadcast",
+    "graphics",
+    "authoring",
+    "scene",
+    "claude",
+    "codex",
+    "cursor"
+  ],
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "bundle/grapix-editor-mcp.mjs",
   "bin": {
-    "grapix-editor-mcp": "dist/index.js"
+    "grapix-editor-mcp": "bundle/grapix-editor-mcp.mjs"
+  },
+  "files": [
+    "bundle",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
+    "build:bundle": "node scripts/bundle.mjs",
+    "prepack": "npm run build:bundle",
     "test": "npm run build && node --test tests/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@grapix/shared-types": "0.1.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@grapix/shared-types": "0.1.0",
     "@types/node": "^22.5.0",
+    "esbuild": "^0.25.0",
     "tsx": "^4.19.0",
     "typescript": "^5.5.4"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

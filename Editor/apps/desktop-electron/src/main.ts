@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Menu, net, protocol, shell } from "electron";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { spawn, type ChildProcess } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const workspaceRoot = path.resolve(__dirname, "../../../..");
@@ -17,9 +18,19 @@ const apiEntryPath = path.join(
   "index.js"
 );
 const apiBaseUrl = "http://127.0.0.1:4100";
+const assistantEntryPath = path.join(
+  workspaceRoot,
+  "Editor",
+  "services",
+  "editor-assistant",
+  "dist",
+  "index.js"
+);
+const assistantBaseUrl = "http://127.0.0.1:4160";
 
 let mainWindow: BrowserWindow | null = null;
 let apiServer: { close: () => Promise<void> } | null = null;
+let assistantProcess: ChildProcess | null = null;
 
 interface ApiServerModule {
   startApiServer: (options: { host: string; port: number; logger: boolean }) => Promise<{ close: () => Promise<void> }>;
@@ -61,6 +72,7 @@ app.whenReady().then(async () => {
   registerEditorProtocol();
   installApplicationMenu();
   await startLocalApi();
+  void startLocalAssistant();
   createMainWindow();
 });
 
@@ -78,6 +90,7 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   stopLocalApi();
+  stopLocalAssistant();
 });
 
 function createMainWindow(): void {
@@ -170,6 +183,39 @@ async function startLocalApi(): Promise<void> {
 function stopLocalApi(): void {
   void apiServer?.close();
   apiServer = null;
+}
+
+async function startLocalAssistant(): Promise<void> {
+  if (assistantProcess || (await isAssistantOnline())) {
+    return;
+  }
+
+  // Spawned as a child rather than imported in-process: the broker owns its own editor-mcp
+  // child and its shutdown, and this mirrors the Tauri shell. ELECTRON_RUN_AS_NODE makes the
+  // Electron binary run as Node, so no separate node install is required. Editor-only — it
+  // holds no Program or output authority.
+  assistantProcess = spawn(process.execPath, [assistantEntryPath], {
+    cwd: workspaceRoot,
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", GRAPIX_API_URL: apiBaseUrl },
+    stdio: "inherit"
+  });
+  assistantProcess.on("exit", () => {
+    assistantProcess = null;
+  });
+}
+
+function stopLocalAssistant(): void {
+  assistantProcess?.kill();
+  assistantProcess = null;
+}
+
+async function isAssistantOnline(): Promise<boolean> {
+  try {
+    const response = await fetch(`${assistantBaseUrl}/assistant/health`);
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 async function waitForApi(): Promise<void> {

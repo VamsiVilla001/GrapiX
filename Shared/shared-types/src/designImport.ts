@@ -7,7 +7,7 @@ import type {
   Vec2
 } from "./index.js";
 
-export type DesignSourceFormat = "psd" | "ai" | "svg" | "figma-json" | "figma-api";
+export type DesignSourceFormat = "psd" | "ai" | "svg" | "figma-json" | "figma-mcp";
 
 export interface DesignImportOptions {
   preserveHierarchy: boolean;
@@ -35,6 +35,13 @@ export interface NormalizedDesignAsset {
   linked?: boolean;
   width?: number;
   height?: number;
+  /**
+   * SHA-256 of the stored bytes, set once the asset is in the project store. The render
+   * engine registers assets by checksum and refuses one without it, so an asset that
+   * never reaches storage cannot go on air.
+   */
+  checksum?: string;
+  sizeBytes?: number;
 }
 
 export interface NormalizedDesignFont {
@@ -233,9 +240,28 @@ export interface DesignImportResult {
 }
 
 export interface FigmaDesignImportSource {
-  fileKey: string;
+  /** Figma design/Dev Mode/proto/board link, or a bare file key. */
+  url: string;
+  /** Optional API-form node IDs (for example 123:456). Added to any in the link. */
   nodeIds?: string[];
-  accessToken: string;
+  /**
+   * Which Figma transport to use.
+   *
+   * - `rest` — the REST API, the only route that returns native document JSON, so
+   *   the only one that yields editable layers. Requires a token.
+   * - `desktop-mcp` — the local Figma Desktop MCP server. No token, but it exposes
+   *   only sparse XML and a rendered screenshot, so the node arrives rasterized.
+   * - `auto` (default) — REST when a token is available, Desktop MCP otherwise.
+   */
+  transport?: "auto" | "rest" | "desktop-mcp";
+  /**
+   * Figma token for the REST route, used for this request only: it is never stored
+   * in the project, the scene, or the import report. Falls back to
+   * `FIGMA_ACCESS_TOKEN`/`FIGMA_TOKEN` in the project service environment.
+   */
+  accessToken?: string;
+  /** Defaults to `personal` for `figd_…` tokens and `oauth` for anything else. */
+  tokenKind?: "personal" | "oauth";
 }
 
 export const DEFAULT_DESIGN_IMPORT_OPTIONS: DesignImportOptions = {

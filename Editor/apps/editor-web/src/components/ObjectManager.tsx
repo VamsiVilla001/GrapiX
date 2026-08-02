@@ -25,11 +25,12 @@ import {
   Trash2,
   Unlock
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { sortObjectsForRender } from "../rendering/sceneMaterial";
 import { useEditorStore } from "../store/editorStore";
 import { useTemplateStore } from "../store/templateStore";
 import { useUiStore } from "../store/uiStore";
+import { scrubNumericValue } from "../modules/object-manager/services/numericScrub";
 import {
   PropertyInspectorContent,
   propertyInspectorTabs,
@@ -500,6 +501,19 @@ function TransformCell(props: {
   const rawValue = animatedValue ?? readTransformValue(props.object, props.column);
   const displayValue = props.column === "alpha" ? rawValue * 100 : rawValue;
   const hasKeyAtFrame = Boolean(channel?.keys.some((key) => key.frame === props.currentFrame));
+  const scrubStep = props.column.startsWith("s") ? 0.01 : props.column === "alpha" ? 1 : 0.1;
+  const scrubState = useRef<{
+    active: boolean;
+    pointerId: number;
+    startValue: number;
+    startX: number;
+  } | null>(null);
+  const [scrubbing, setScrubbing] = useState(false);
+
+  const setDisplayValue = (nextValue: number) => {
+    if (!Number.isFinite(nextValue)) return;
+    props.onSetValue(property, props.column === "alpha" ? nextValue / 100 : nextValue);
+  };
 
   if (!supported) {
     return <div className="scene-transform-cell unsupported">—</div>;
@@ -537,13 +551,57 @@ function TransformCell(props: {
       ) : null}
       <input
         aria-label={`${props.column} for ${props.object.name}`}
-        onChange={(event) => {
-          const nextValue = Number(event.target.value);
-          if (!Number.isFinite(nextValue)) return;
-          props.onSetValue(property, props.column === "alpha" ? nextValue / 100 : nextValue);
+        className={scrubbing ? "scrubbing" : undefined}
+        onChange={(event) => setDisplayValue(Number(event.target.value))}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (scrubbing) event.preventDefault();
         }}
-        onClick={(event) => event.stopPropagation()}
-        step={props.column.startsWith("s") ? 0.01 : props.column === "alpha" ? 1 : 0.1}
+        onPointerCancel={(event) => {
+          if (scrubState.current?.pointerId !== event.pointerId) return;
+          scrubState.current = null;
+          setScrubbing(false);
+        }}
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          event.stopPropagation();
+          scrubState.current = {
+            active: false,
+            pointerId: event.pointerId,
+            startValue: displayValue,
+            startX: event.clientX
+          };
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }}
+        onPointerMove={(event) => {
+          const scrub = scrubState.current;
+          if (!scrub || scrub.pointerId !== event.pointerId) return;
+          const deltaPixels = event.clientX - scrub.startX;
+          if (!scrub.active && Math.abs(deltaPixels) < 2) return;
+          if (!scrub.active) {
+            scrub.active = true;
+            setScrubbing(true);
+          }
+          event.preventDefault();
+          setDisplayValue(scrubNumericValue(
+            scrub.startValue,
+            deltaPixels,
+            scrubStep,
+            event.shiftKey ? 0.1 : 1
+          ));
+        }}
+        onPointerUp={(event) => {
+          if (scrubState.current?.pointerId !== event.pointerId) return;
+          const wasActive = scrubState.current.active;
+          scrubState.current = null;
+          setScrubbing(false);
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }
+          if (wasActive) event.preventDefault();
+        }}
+        step={scrubStep}
+        title="Drag horizontally to adjust; Shift-drag for fine control. Click to type an exact value."
         type="number"
         value={roundDisplayValue(displayValue)}
       />

@@ -269,6 +269,23 @@ export async function listScenesFromApi(): Promise<ApiSceneSummary[]> {
   return response.scenes;
 }
 
+/**
+ * Reads one stored scene document back.
+ *
+ * The Editor had no caller for this route for as long as the route existed, which
+ * made the application write-only with respect to the project service: it saved
+ * scenes and could never load one. Anything authored outside a running window — by
+ * the MCP server, another agent, or a previous session — was invisible, not because
+ * of a cache but because no code path existed. `File > Open Scene…` is that path.
+ */
+export async function readSceneFromApi(sceneId: string): Promise<SceneDocument> {
+  const response = await request<{ ok: boolean; scene: SceneDocument }>(
+    `/api/scenes/${encodeURIComponent(sceneId)}`
+  );
+
+  return response.scene;
+}
+
 export async function saveRundownOnApi(rundown: RundownDocument): Promise<void> {
   await request("/api/rundowns", {
     method: "POST",
@@ -450,9 +467,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
   });
 
+  const payload = await response.json().catch(() => null) as { error?: string; code?: string } | null;
+
   if (!response.ok) {
-    throw new Error(`API request failed with ${response.status}`);
+    // The service explains refusals in `error` - a missing Figma scope, a rejected
+    // token, an unsupported file. Reporting only the status code makes the operator
+    // guess at something the server already told us.
+    throw new Error(payload?.error ?? `API request failed with ${response.status}`);
   }
 
-  return (await response.json()) as T;
+  return payload as T;
 }

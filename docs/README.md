@@ -46,7 +46,7 @@ overview and forward plans, subordinate to the three authority documents above.
 | Document | What it is |
 | --- | --- |
 | [`main-architecture.md`](main-architecture.md) | A consolidated snapshot that merges every architecture document against the as-built codebase into one status-annotated view (Implemented / Partial / Planned / External gate). A reference, not a new canonical — `architecture.md` still wins on any conflict. |
-| [`editor-ai-assistant.md`](editor-ai-assistant.md) | **Plan.** An in-Editor chat panel driving an AI model through the MCP server, via an added agent-runtime broker. Adds no product boundary and no Program/output verb. |
+| [`editor-ai-assistant.md`](editor-ai-assistant.md) | **Implemented (2026-08-01).** An in-Editor chat dock driving an AI model through the MCP server, via the `Editor/services/editor-assistant` broker (port 4160). Adds no product boundary and no Program/output verb. |
 | [`remote-production-v2.md`](remote-production-v2.md) | **Plan (V2).** Cloud package distribution, a headless venue render engine with SDI/NDI I/O, and the operator update/verify/import-or-replace flow. Gated behind the V1 acceptance work. |
 
 ## Ledgers and history

@@ -218,7 +218,8 @@ impl OutputSink for VirtualSink {
     fn configure(&mut self, format: &OutputFormat) -> Result<Vec<String>, String> {
         self.format = format.clone();
         Ok(vec![
-            "windowed virtual output stays on this machine; no frames are transmitted".to_string(),
+            "windowed virtual output stays on this machine; no frames leave this machine"
+                .to_string(),
         ])
     }
 

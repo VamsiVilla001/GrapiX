@@ -181,18 +181,23 @@ Error handling: an unsupported or corrupt file returns 422 DESIGN_IMPORT_FAILED 
 
   defineTool({
     name: "import_figma",
-    title: "Import from the Figma API",
-    description: `Import a Figma file or node directly through the Figma API.
+    title: "Import a Figma link",
+    description: `Import a Figma design/Dev Mode link, either as native document JSON over the REST API (editable layers) or through the local Figma Desktop MCP server (screenshot, no token).
+
+The file key and node ids are extracted from the link, so paste it as copied. Branch, /file, /proto and /board links all work, and a bare file key is accepted.
 
 Args:
-  - source (object): the Figma source descriptor — { "fileKey": "...", "nodeIds": ["1:2"], "accessToken": "..." }.
+  - source (object): { "url": "https://www.figma.com/design/<key>/<name>?node-id=1-2", "nodeIds": ["3:4"], "transport": "auto" | "rest" | "desktop-mcp", "accessToken": "figd_...", "tokenKind": "personal" | "oauth" }.
+    url is required. nodeIds adds to whatever the link carries; with none, the whole file is imported (REST) or the current Figma selection is used (MCP).
+    transport defaults to "auto": REST when a token is available, Desktop MCP otherwise.
+    accessToken is used for this request only and is never stored; FIGMA_ACCESS_TOKEN on the project service works instead.
   - options (object): importer options.
   - response_format ('markdown' | 'json'): output format (default: 'json').
 
 Returns:
-  JSON shape: { ok, result: { document, report } }
+  JSON shape: { ok, result: { document, scenes, report } }
 
-The access token is passed straight through to the project service and is not stored by this MCP server. Prefer exporting the Figma JSON and using grapix_editor_import_design_file when you would rather not hand a token to a tool call.`,
+Transport differences that matter: **REST** returns Figma's own document JSON, so text stays text, vectors stay paths (geometry=paths), components/auto-layout/effects survive, and image fills resolve through /v1/files/:key/images; it needs a token with the file_content:read scope. **Desktop MCP** (127.0.0.1:3845, Figma Desktop in Dev Mode) needs no token but exposes only sparse XML and a rendered screenshot, so each node arrives as one image and the report records the raster fallback. Asking for transport "rest" without a token fails with that explanation rather than silently rasterizing.`,
     inputSchema: z
       .object({
         source: z.record(z.unknown()).describe("Figma source descriptor."),
