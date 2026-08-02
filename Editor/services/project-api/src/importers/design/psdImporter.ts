@@ -8,6 +8,7 @@ import {
   type DesignImportReport,
   type MaterialBlendMode,
   type NormalizedDesignAsset,
+  type NormalizedDesignBlendingOptions,
   type NormalizedDesignDocument,
   type NormalizedDesignEffect,
   type NormalizedDesignMask,
@@ -32,6 +33,20 @@ initializeCanvas(
   undefined,
   (width, height) => new ImageData(width, height) as any
 );
+
+const BEVEL_STYLE_BY_PSD: Record<string, NonNullable<NormalizedDesignEffect["style"]>> = {
+  "outer bevel": "outer-bevel",
+  "inner bevel": "inner-bevel",
+  emboss: "emboss",
+  "pillow emboss": "pillow-emboss",
+  "stroke emboss": "stroke-emboss"
+};
+
+const BEVEL_TECHNIQUE_BY_PSD: Record<string, NonNullable<NormalizedDesignEffect["bevelTechnique"]>> = {
+  smooth: "smooth",
+  "chisel hard": "chisel-hard",
+  "chisel soft": "chisel-soft"
+};
 
 export function importPsdDocument(
   bytes: Buffer,
@@ -273,7 +288,7 @@ function convertLayer(
           : layer.adjustment ? "adjustment"
             : layer.placedLayer ? "smart-object"
               : "image";
-  const effects = convertPsdEffects(layer.effects, report, layer.name ?? id, id);
+  const effects = convertPsdEffects(layer.effects, psd.patterns, assets, report, layer.name ?? id, id);
   if (layer.adjustment) {
     reportImportWarning(report, `Adjustment layer ${layer.name ?? id} is preserved as an editable imported layer with source parameters.`, "visual-difference", layer.name, "Nested composition metadata", id);
   }
@@ -336,6 +351,7 @@ function convertLayer(
     assetId,
     masks,
     effects,
+    blendingOptions: convertPsdBlendingOptions(layer, report, layer.name ?? id, id),
     children: convertLayers(layer.children ?? [], { x: left, y: top }, psd, report, assets),
     componentId: layer.placedLayer?.id,
     componentProperties: layer.placedLayer ? { ...layer.placedLayer } : undefined,
@@ -401,63 +417,249 @@ function vectorContentPaint(content: VectorContent): ColorValue {
   }
   return { type: "solid", color: "#808080" };
 }
-
-function convertPsdEffects(
+export function convertPsdEffects(
   effects: LayerEffectsInfo | undefined,
+  patterns: Psd["patterns"],
+  assets: Map<string, NormalizedDesignAsset>,
   report: DesignImportReport,
   name: string,
   sourceNodeId: string
 ): NormalizedDesignEffect[] {
   if (!effects || effects.disabled) return [];
   const result: NormalizedDesignEffect[] = [];
-  const shadows = [
-    ...(effects.dropShadow ?? []).map((effect) => ({ effect, type: "drop-shadow" as const })),
-    ...(effects.innerShadow ?? []).map((effect) => ({ effect, type: "inner-shadow" as const }))
-  ];
-  for (const { effect, type } of shadows) {
+
+  for (const effect of effects.dropShadow ?? []) {
+    const enabled = effect.enabled !== false;
     const angle = effect.angle ?? 120;
-    const distance = effect.distance?.value ?? 0;
+    const distance = unitValue(effect.distance);
     result.push({
-      type,
-      enabled: effect.enabled !== false,
-      opacity: effect.opacity ?? 1,
+      type: "drop-shadow",
+      enabled,
+      opacity: effect.opacity,
       color: colorHex(effect.color),
-      radius: effect.size?.value ?? 0,
-      spread: effect.choke?.value ?? 0,
       angle,
-      offset: { x: Math.cos(angle * Math.PI / 180) * distance, y: Math.sin(angle * Math.PI / 180) * distance },
+      useGlobalLight: effect.useGlobalLight,
+      distance,
+      offset: shadowOffset(angle, distance),
+      spread: unitValue(effect.choke),
+      size: unitValue(effect.size),
+      radius: unitValue(effect.size),
+      antialiased: effect.antialiased,
+      contour: effect.contour,
+      layerConceals: effect.layerConceals,
       blendMode: mapBlendMode(effect.blendMode),
+      sourceBlendMode: effect.blendMode,
       sourceData: effect as unknown as Record<string, unknown>
     });
   }
-  const simple: Array<[unknown, NormalizedDesignEffect["type"]]> = [
-    [effects.outerGlow, "outer-glow"],
-    [effects.innerGlow, "inner-glow"],
-    [effects.bevel, "bevel-emboss"],
-    [effects.satin, "satin"],
-    [effects.patternOverlay, "pattern-overlay"]
-  ];
-  for (const [effect, type] of simple) {
-    if (!effect) continue;
-    const enabled = (effect as { enabled?: boolean }).enabled !== false;
-    result.push({ type, enabled, sourceData: effect as Record<string, unknown> });
-    // A switched-off Photoshop effect contributes no pixels, so no renderer owes
-    // anything for it and it is not an unsupported feature. Only live effects are
-    // reported.
-    if (enabled && type !== "outer-glow" && type !== "inner-glow") {
-      reportImportWarning(report, `Photoshop ${type} on ${name} is retained as editable source effect metadata.`, "unsupported-effect", name, undefined, sourceNodeId);
-    }
+  for (const effect of effects.innerShadow ?? []) {
+    const enabled = effect.enabled !== false;
+    const angle = effect.angle ?? 120;
+    const distance = unitValue(effect.distance);
+    result.push({
+      type: "inner-shadow",
+      enabled,
+      opacity: effect.opacity,
+      color: colorHex(effect.color),
+      angle,
+      useGlobalLight: effect.useGlobalLight,
+      distance,
+      offset: shadowOffset(angle, distance),
+      choke: unitValue(effect.choke),
+      spread: unitValue(effect.choke),
+      size: unitValue(effect.size),
+      radius: unitValue(effect.size),
+      antialiased: effect.antialiased,
+      contour: effect.contour,
+      blendMode: mapBlendMode(effect.blendMode),
+      sourceBlendMode: effect.blendMode,
+      sourceData: effect as unknown as Record<string, unknown>
+    });
+  }
+  if (effects.outerGlow) {
+    const effect = effects.outerGlow;
+    result.push({
+      type: "outer-glow",
+      enabled: effect.enabled !== false,
+      opacity: effect.opacity,
+      color: colorHex(effect.color),
+      spread: unitValue(effect.choke),
+      choke: unitValue(effect.choke),
+      size: unitValue(effect.size),
+      radius: unitValue(effect.size),
+      noise: effect.noise,
+      range: effect.range,
+      jitter: effect.jitter,
+      antialiased: effect.antialiased,
+      contour: effect.contour,
+      blendMode: mapBlendMode(effect.blendMode),
+      sourceBlendMode: effect.blendMode,
+      sourceData: effect as unknown as Record<string, unknown>
+    });
+  }
+  if (effects.innerGlow) {
+    const effect = effects.innerGlow;
+    result.push({
+      type: "inner-glow",
+      enabled: effect.enabled !== false,
+      opacity: effect.opacity,
+      color: colorHex(effect.color),
+      technique: effect.technique,
+      source: effect.source,
+      choke: unitValue(effect.choke),
+      spread: unitValue(effect.choke),
+      size: unitValue(effect.size),
+      radius: unitValue(effect.size),
+      noise: effect.noise,
+      range: effect.range,
+      jitter: effect.jitter,
+      antialiased: effect.antialiased,
+      contour: effect.contour,
+      blendMode: mapBlendMode(effect.blendMode),
+      sourceBlendMode: effect.blendMode,
+      sourceData: effect as unknown as Record<string, unknown>
+    });
+  }
+  if (effects.bevel) {
+    const effect = effects.bevel;
+    result.push({
+      type: "bevel-emboss",
+      enabled: effect.enabled !== false,
+      style: effect.style ? BEVEL_STYLE_BY_PSD[effect.style] : undefined,
+      bevelTechnique: effect.technique ? BEVEL_TECHNIQUE_BY_PSD[effect.technique] : undefined,
+      depth: effect.strength,
+      direction: effect.direction,
+      size: unitValue(effect.size),
+      radius: unitValue(effect.size),
+      soften: unitValue(effect.soften),
+      angle: effect.angle,
+      altitude: effect.altitude,
+      useGlobalLight: effect.useGlobalLight,
+      highlightColor: colorHex(effect.highlightColor),
+      highlightBlendMode: mapBlendMode(effect.highlightBlendMode),
+      highlightSourceBlendMode: effect.highlightBlendMode,
+      highlightOpacity: effect.highlightOpacity,
+      shadowColor: colorHex(effect.shadowColor),
+      shadowBlendMode: mapBlendMode(effect.shadowBlendMode),
+      shadowSourceBlendMode: effect.shadowBlendMode,
+      shadowOpacity: effect.shadowOpacity,
+      glossContour: effect.contour,
+      antialiasGloss: effect.antialiasGloss,
+      contourEnabled: effect.useShape,
+      contour: effect.useShape ? effect.contour : undefined,
+      textureEnabled: effect.useTexture,
+      sourceData: effect as unknown as Record<string, unknown>
+    });
+  }
+  if (effects.satin) {
+    const effect = effects.satin;
+    result.push({
+      type: "satin",
+      enabled: effect.enabled !== false,
+      opacity: effect.opacity,
+      color: colorHex(effect.color),
+      angle: effect.angle,
+      distance: unitValue(effect.distance),
+      size: unitValue(effect.size),
+      radius: unitValue(effect.size),
+      invert: effect.invert,
+      antialiased: effect.antialiased,
+      contour: effect.contour,
+      blendMode: mapBlendMode(effect.blendMode),
+      sourceBlendMode: effect.blendMode,
+      sourceData: effect as unknown as Record<string, unknown>
+    });
   }
   for (const effect of effects.solidFill ?? []) {
-    result.push({ type: "color-overlay", enabled: effect.enabled !== false, color: colorHex(effect.color), opacity: effect.opacity, blendMode: mapBlendMode(effect.blendMode), sourceData: effect as unknown as Record<string, unknown> });
+    result.push({
+      type: "color-overlay",
+      enabled: effect.enabled !== false,
+      color: colorHex(effect.color),
+      paint: { type: "solid", color: colorHex(effect.color) },
+      opacity: effect.opacity,
+      blendMode: mapBlendMode(effect.blendMode),
+      sourceBlendMode: effect.blendMode,
+      sourceData: effect as unknown as Record<string, unknown>
+    });
   }
   for (const effect of effects.gradientOverlay ?? []) {
-    result.push({ type: "gradient-overlay", enabled: effect.enabled !== false, opacity: effect.opacity, paint: effect.gradient?.type === "solid" ? vectorContentPaint({ ...effect.gradient, style: effect.type, angle: effect.angle, offset: effect.offset, scale: effect.scale }) : undefined, sourceData: effect as unknown as Record<string, unknown> });
+    result.push({
+      type: "gradient-overlay",
+      enabled: effect.enabled !== false,
+      opacity: effect.opacity,
+      paint: effect.gradient?.type === "solid"
+        ? vectorContentPaint({ ...effect.gradient, style: effect.type, angle: effect.angle, offset: effect.offset, scale: effect.scale })
+        : undefined,
+      gradientStyle: effect.type,
+      angle: effect.angle,
+      scale: effect.scale,
+      offset: effect.offset,
+      reverse: effect.reverse,
+      dither: effect.dither,
+      alignWithLayer: effect.align,
+      blendMode: mapBlendMode(effect.blendMode),
+      sourceBlendMode: effect.blendMode,
+      sourceData: effect as unknown as Record<string, unknown>
+    });
+  }
+  if (effects.patternOverlay) {
+    const effect = effects.patternOverlay;
+    const enabled = effect.enabled !== false;
+    const pattern = resolvePsdPattern(effect.pattern, patterns, assets, report, name, sourceNodeId, enabled);
+    result.push({
+      type: "pattern-overlay",
+      enabled,
+      opacity: effect.opacity,
+      patternName: pattern.name,
+      patternAssetId: pattern.assetId,
+      scale: effect.scale,
+      offset: effect.phase,
+      linked: effect.align,
+      blendMode: mapBlendMode(effect.blendMode),
+      sourceBlendMode: effect.blendMode,
+      sourceData: effect as unknown as Record<string, unknown>
+    });
   }
   for (const effect of effects.stroke ?? []) {
-    result.push({ type: "stroke", enabled: effect.enabled !== false, opacity: effect.opacity, color: colorHex(effect.color), radius: effect.size?.value, blendMode: mapBlendMode(effect.blendMode), sourceData: effect as unknown as Record<string, unknown> });
+    const enabled = effect.enabled !== false;
+    const pattern = effect.fillType === "pattern"
+      ? resolvePsdPattern(effect.pattern, patterns, assets, report, name, sourceNodeId, enabled)
+      : {};
+    result.push({
+      type: "stroke",
+      enabled,
+      opacity: effect.opacity,
+      size: unitValue(effect.size),
+      radius: unitValue(effect.size),
+      position: effect.position,
+      fillType: effect.fillType,
+      color: effect.color ? colorHex(effect.color) : undefined,
+      paint: effect.gradient?.type === "solid"
+        ? vectorContentPaint({
+            ...effect.gradient,
+            style: effect.gradient.style ?? "linear",
+            angle: effect.gradient.angle,
+            offset: effect.gradient.offset,
+            scale: effect.gradient.scale
+          })
+        : undefined,
+      patternName: pattern.name,
+      patternAssetId: pattern.assetId,
+      overprint: effect.overprint,
+      blendMode: mapBlendMode(effect.blendMode),
+      sourceBlendMode: effect.blendMode,
+      sourceData: effect as unknown as Record<string, unknown>
+    });
   }
   if (result.some((effect) => effect.enabled)) {
+    reportImportWarning(
+      report,
+      `Photoshop layer effects on ${name} are unsupported by the current GrapiX renderers.`,
+      "unsupported-effect",
+      name,
+      "Editable imported effect metadata",
+      sourceNodeId
+    );
     reportImportWarning(
       report,
       `Photoshop layer effects on ${name} remain editable after import, but current canvas and output renderers do not reproduce them yet.`,
@@ -469,6 +671,100 @@ function convertPsdEffects(
   }
   return result;
 }
+
+function resolvePsdPattern(
+  reference: { id: string; name: string } | undefined,
+  patterns: Psd["patterns"],
+  assets: Map<string, NormalizedDesignAsset>,
+  report: DesignImportReport,
+  layerName: string,
+  sourceNodeId: string,
+  enabled: boolean
+): { name?: string; assetId?: string } {
+  if (!reference) return {};
+  const pattern = patterns?.find((candidate) => candidate.id === reference.id);
+  const name = pattern?.name ?? reference.name;
+  if (pattern && pattern.bounds.w > 0 && pattern.bounds.h > 0 && pattern.data.length === pattern.bounds.w * pattern.bounds.h * 4) {
+    const assetId = `psd-pattern-${safeId(pattern.id)}`;
+    if (!assets.has(assetId)) {
+      assets.set(assetId, {
+        id: assetId,
+        name: `${pattern.name}.png`,
+        kind: "image",
+        mimeType: "image/png",
+        dataBase64: encodePixelData({ data: pattern.data, width: pattern.bounds.w, height: pattern.bounds.h }),
+        width: pattern.bounds.w,
+        height: pattern.bounds.h
+      });
+    }
+    return { name, assetId };
+  }
+  if (enabled) {
+    reportImportWarning(
+      report,
+      `Photoshop pattern "${name}" on ${layerName} could not be resolved to pixels, so no pattern asset was imported.`,
+      "missing-asset",
+      layerName,
+      "Pattern name retained without an invented asset",
+      sourceNodeId
+    );
+  }
+  return { name };
+}
+
+function convertPsdBlendingOptions(
+  layer: Layer,
+  report: DesignImportReport,
+  name: string,
+  sourceNodeId: string
+): NormalizedDesignBlendingOptions | undefined {
+  const blendIf = decodeBlendIf(layer.channelBlendingRestrictions);
+  const options: NormalizedDesignBlendingOptions = {
+    fillOpacity: layer.fillOpacity,
+    knockout: layer.knockout === false ? "none" : undefined,
+    blendInteriorEffectsAsGroup: layer.blendInteriorElements,
+    blendClippedLayersAsGroup: layer.blendClippendElements,
+    transparencyShapesLayer: layer.transparencyShapesLayer,
+    layerMaskHidesEffects: layer.layerMaskAsGlobalMask,
+    blendIf
+  };
+  if (layer.knockout) {
+    reportImportWarning(
+      report,
+      `Photoshop knockout on ${name} is retained in source metadata, but ag-psd collapses its shallow/deep value to a boolean.`,
+      "visual-difference",
+      name,
+      "Typed knockout omitted because its depth is unavailable",
+      sourceNodeId
+    );
+  }
+  return Object.values(options).some((value) => value !== undefined) ? options : undefined;
+}
+
+function decodeBlendIf(values: number[] | undefined): NormalizedDesignBlendingOptions["blendIf"] {
+  if (!values?.length) return undefined;
+  const channels = ["gray", "red", "green", "blue"] as const;
+  return values.slice(0, channels.length).map((value, index) => {
+    const packed = value >>> 0;
+    return {
+      channel: channels[index],
+      sourceBlackPoint: packed >>> 24,
+      sourceWhitePoint: (packed >>> 16) & 0xff,
+      targetBlackPoint: (packed >>> 8) & 0xff,
+      targetWhitePoint: packed & 0xff
+    };
+  });
+}
+
+function unitValue(value: { value: number } | undefined): number {
+  return value?.value ?? 0;
+}
+
+function shadowOffset(angle: number, distance: number): { x: number; y: number } {
+  const radians = angle * Math.PI / 180;
+  return { x: Math.cos(radians) * distance, y: Math.sin(radians) * distance };
+}
+
 
 function encodePixelData(imageData: { data: ArrayLike<number>; width: number; height: number }): string {
   const png = new PNG({ width: imageData.width, height: imageData.height });

@@ -84,6 +84,30 @@ test("stores multi-sequence rundowns and evaluates conditional scene/rundown eve
   };
   assert.equal((await app.inject({ method: "POST", url: "/api/scenes", payload: scene })).statusCode, 200);
 
+  const missingObject = await app.inject({
+    method: "PATCH",
+    url: "/api/scenes/score_scene/objects/missing",
+    payload: { x: 10 }
+  });
+  assert.equal(missingObject.statusCode, 404);
+  assert.equal(missingObject.json().error, "Object not found");
+
+  const missingMaterial = await app.inject({
+    method: "PATCH",
+    url: "/api/scenes/score_scene/materials/missing",
+    payload: { opacity: 0.5 }
+  });
+  assert.equal(missingMaterial.statusCode, 404);
+  assert.equal(missingMaterial.json().error, "Material not found");
+
+  const unsafeDataPath = await app.inject({
+    method: "PATCH",
+    url: "/api/scenes/score_scene/data-patches",
+    payload: { path: "__proto__.polluted", value: true }
+  });
+  assert.equal(unsafeDataPath.statusCode, 400);
+  assert.match(unsafeDataPath.json().error, /reserved segment/);
+
   const rundown = {
     rundownId: "game_day",
     name: "Game day",

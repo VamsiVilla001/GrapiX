@@ -1,6 +1,7 @@
 import {
   createSceneId,
   normalizeColorValue,
+  normalizeObjectEffects,
   type AssetKind,
   type AssetLibraryItem,
   type DesignImportOptions,
@@ -9,8 +10,11 @@ import {
   type GroupSceneObject,
   type Material,
   type NormalizedDesignDocument,
+  type NormalizedDesignEffect,
   type NormalizedDesignNode,
   type NormalizedDesignPage,
+  type ObjectBlendingOptions,
+  type ObjectEffect,
   type SceneDocument,
   type SceneObject
 } from "@grapix/shared-types";
@@ -138,6 +142,8 @@ function convertNode(
   const firstStroke = normalizeColorValue(node.strokes[0], "transparent");
   const fill = firstFill.type === "solid" ? firstFill.color : firstFill.type === "none" ? "transparent" : firstFill.stops[0]?.color ?? "#ffffff";
   const stroke = firstStroke.type === "solid" ? firstStroke.color : firstStroke.type === "none" ? "transparent" : firstStroke.stops[0]?.color ?? "transparent";
+  const effects = convertNodeEffects(node.effects, node, report);
+  const blendingOptions = convertNodeBlendingOptions(node);
   const base = {
     id: `import-${safeId(node.id)}`,
     name: node.name,
@@ -181,6 +187,8 @@ function convertNode(
       locked: false,
       editorColor: "#f5b942"
     })),
+    effects: effects.length ? effects : undefined,
+    blendingOptions,
     importedDesign: {
       sourceFormat: document.sourceFormat,
       sourceName: document.sourceName,
@@ -293,6 +301,62 @@ function convertNode(
     fallback: "Editable rectangle with retained source metadata"
   });
   return { ...base, type: "rect", radius: node.cornerRadius ?? 0 };
+}
+
+function convertNodeEffects(
+  sourceEffects: NormalizedDesignEffect[],
+  node: NormalizedDesignNode,
+  report: DesignImportReport
+): ObjectEffect[] {
+  const candidates: Array<Record<string, unknown>> = [];
+  sourceEffects.forEach((effect, index) => {
+    if (effect.type === "layer-blur" || effect.type === "background-blur" || effect.type === "unknown") {
+      if (effect.enabled) {
+        addDesignImportIssue(report, {
+          kind: "unsupported-effect",
+          severity: "warning",
+          message: `${effect.type} on ${node.name} cannot be represented as a GrapiX layer style.`,
+          sourceNodeId: node.sourceId,
+          sourceNodeName: node.name,
+          fallback: "Verbatim imported effect metadata"
+        });
+      }
+      return;
+    }
+    const {
+      id,
+      type,
+      enabled,
+      bevelTechnique,
+      gradientStyle,
+      radius,
+      ...parameters
+    } = effect;
+    candidates.push({
+      id: id ?? `import-${safeId(node.id)}-effect-${index + 1}`,
+      type,
+      enabled,
+      ...parameters,
+      technique: bevelTechnique ?? effect.technique,
+      style: gradientStyle ?? effect.style
+    });
+  });
+  return normalizeObjectEffects(candidates);
+}
+
+function convertNodeBlendingOptions(node: NormalizedDesignNode): ObjectBlendingOptions | undefined {
+  const source = node.blendingOptions;
+  const options: ObjectBlendingOptions = {
+    fillOpacity: source?.fillOpacity ?? node.fillOpacity,
+    knockout: source?.knockout,
+    blendInteriorEffectsAsGroup: source?.blendInteriorEffectsAsGroup,
+    blendClippedLayersAsGroup: source?.blendClippedLayersAsGroup,
+    transparencyShapesLayer: source?.transparencyShapesLayer,
+    layerMaskHidesEffects: source?.layerMaskHidesEffects,
+    vectorMaskHidesEffects: source?.vectorMaskHidesEffects,
+    blendIf: source?.blendIf
+  };
+  return Object.values(options).some((value) => value !== undefined) ? options : undefined;
 }
 
 /**

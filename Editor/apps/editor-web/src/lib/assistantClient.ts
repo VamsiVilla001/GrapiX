@@ -49,11 +49,12 @@ export type AssistantEvent =
 const CHAT_EVENTS = ["text", "tool-executing", "tool-result", "staged", "usage", "error", "done"] as const;
 
 async function postJson(path: string, body: unknown): Promise<void> {
-  await fetch(`${assistantBaseUrl}${path}`, {
+  const response = await fetch(`${assistantBaseUrl}${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body)
   });
+  if (!response.ok) throw new Error(await responseError(response));
 }
 
 export async function getAssistantStatus(): Promise<AssistantStatus> {
@@ -76,7 +77,11 @@ export function openStatusStream(onStatus: (status: AssistantStatus) => void): E
 
 export async function createAssistantSession(): Promise<string> {
   const response = await fetch(`${assistantBaseUrl}/assistant/session`, { method: "POST" });
-  const body = (await response.json()) as { sessionId: string };
+  if (!response.ok) throw new Error(await responseError(response));
+  const body = (await response.json()) as { sessionId?: unknown };
+  if (typeof body.sessionId !== "string" || body.sessionId.length === 0) {
+    throw new Error("assistant session response did not contain a sessionId");
+  }
   return body.sessionId;
 }
 
@@ -108,4 +113,15 @@ export async function skipAssistantCall(sessionId: string, callId: string): Prom
 
 export async function setAssistantModel(providerId: string, model?: string): Promise<void> {
   await postJson("/assistant/model", { providerId, model });
+}
+
+async function responseError(response: Response): Promise<string> {
+  let detail = "";
+  try {
+    const body = (await response.json()) as { error?: unknown };
+    if (typeof body.error === "string") detail = `: ${body.error}`;
+  } catch {
+    // An empty or non-JSON response still carries a useful HTTP status.
+  }
+  return `assistant request failed with HTTP ${response.status}${detail}`;
 }

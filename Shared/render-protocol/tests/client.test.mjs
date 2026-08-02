@@ -257,8 +257,10 @@ test("connect performs hello, capabilities, and lands in synchronising", async (
     sent.map((message) => message.type),
     ["connection.hello", "engine.getCapabilities"]
   );
-  // Every outbound message carries the project scope and a rising sequence.
-  assert.equal(sent[0].projectId, "project_1");
+  // Connection setup is unscoped; project scope stays in the handshake payload
+  // until a canonical SceneRef accompanies a scene-bearing command.
+  assert.equal(sent[0].payload.projectId, "project_1");
+  assert.equal(sent[0].sceneRef, null);
   assert.equal(sent[0].sequence, 1);
   assert.equal(sent[1].sequence, 2);
 });
@@ -325,6 +327,7 @@ test("an error reply rejects the request rather than resolving it", async () => 
   );
 
   await assert.rejects(pending, /SCENE_NOT_PREPARED: scene_1 is still loading/);
+  assert.equal(client.stats().pendingRequests, 0);
 });
 
 test("an error demanding a full sync moves the client to synchronising", async () => {

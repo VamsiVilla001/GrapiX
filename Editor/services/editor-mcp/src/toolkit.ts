@@ -8,6 +8,7 @@
  * `structuredContent` — happens here exactly once.
  */
 
+import { AdobeToolError } from "@grapix/adobe-client";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
@@ -157,6 +158,13 @@ export function toolError(error: unknown): CallToolResult {
     return {
       isError: true,
       content: [{ type: "text", text: `${error.message}${detail}` }]
+    };
+  }
+
+  if (error instanceof AdobeToolError) {
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Adobe gateway error (${error.code}): ${error.message}` }]
     };
   }
 

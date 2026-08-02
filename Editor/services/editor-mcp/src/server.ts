@@ -15,6 +15,7 @@ import { KnowledgeBase } from "./knowledge/index.js";
 import { ProjectApiClient } from "./projectApiClient.js";
 import { registerPrompts } from "./prompts.js";
 import { registerResources } from "./resources.js";
+import { adobeTools } from "./tools/adobe.js";
 import { assetTools } from "./tools/assets.js";
 import { dataTools } from "./tools/data.js";
 import { importTools } from "./tools/imports.js";
@@ -38,6 +39,7 @@ export const ALL_TOOLS: RegisteredEditorTool[] = [
   ...materialTools,
   ...assetTools,
   ...importTools,
+  ...adobeTools,
   ...dataTools,
   ...publishTools,
   ...rundownTools

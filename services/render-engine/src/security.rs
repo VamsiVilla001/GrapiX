@@ -431,9 +431,11 @@ impl SequenceTracker {
 pub struct AuditEntry {
     pub at_ms: u64,
     pub client_id: String,
-    pub project_id: Option<String>,
     pub message_type: String,
-    pub scene_id: Option<String>,
+    /// Canonical scene identity, retained even for refused mutations so audit
+    /// records cannot be ambiguous across projects or domains.
+    #[serde(rename = "sceneRef", skip_serializing_if = "Option::is_none")]
+    pub scene_ref: Option<crate::protocol::SceneRef>,
     pub outcome: String,
     /// Set when an operator deliberately overrode a safety gate.
     #[serde(skip_serializing_if = "Option::is_none")]

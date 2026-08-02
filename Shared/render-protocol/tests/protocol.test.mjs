@@ -129,7 +129,7 @@ test("malformed envelopes are rejected field by field", () => {
     direction: "sideways",
     requestId: 5,
     engineId: undefined,
-    sceneRevision: -3
+    sceneRef: { projectId: "", domain: "draft", sceneId: "", revision: -3 }
   });
 
   assert.equal(bad.valid, false);
@@ -143,7 +143,7 @@ test("malformed envelopes are rejected field by field", () => {
   assert.ok(joined.includes("direction"));
   assert.ok(joined.includes("payload is required"));
   assert.ok(joined.includes("requestId"));
-  assert.ok(joined.includes("sceneRevision"));
+  assert.ok(joined.includes("sceneRef"));
 });
 
 test("explicit null is accepted where undefined is not", () => {
@@ -158,9 +158,7 @@ test("explicit null is accepted where undefined is not", () => {
     payload: {},
     requestId: null,
     engineId: null,
-    projectId: null,
-    sceneId: null,
-    sceneRevision: null
+    sceneRef: null
   };
   assert.equal(validateEnvelope(base).valid, true);
 
@@ -183,9 +181,7 @@ test("version mismatch is distinguished from a generic envelope error", () => {
       payload: {},
       requestId: null,
       engineId: null,
-      projectId: null,
-      sceneId: null,
-      sceneRevision: null
+      sceneRef: null
     })
   );
   assert.equal(wrongVersion.ok, false);

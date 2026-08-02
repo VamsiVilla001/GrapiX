@@ -17,7 +17,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Radio, Plus, Play, Square, Trash2, EyeOff, RefreshCw, ExternalLink, Monitor } from "lucide-react";
+import { Radio, Plus, Play, Square, Trash2, EyeOff, RefreshCw, ExternalLink, Monitor, Copy, Check, Wifi, Zap } from "lucide-react";
 
 import {
   playoutApi,
@@ -63,6 +63,9 @@ export function OutputsPanel({ engineConnected, programFormat }: OutputsPanelPro
 
   const [adapterId, setAdapterId] = useState("virtual");
   const [outputId, setOutputId] = useState("out_1");
+  const [ndiSourceName, setNdiSourceName] = useState("GrapiX Program Out");
+  const [ndiGroups, setNdiGroups] = useState("");
+  const [copiedSourceId, setCopiedSourceId] = useState<string | null>(null);
   const [width, setWidth] = useState(programFormat.width);
   const [height, setHeight] = useState(programFormat.height);
   const [rateIndex, setRateIndex] = useState(() =>
@@ -75,6 +78,19 @@ export function OutputsPanel({ engineConnected, programFormat }: OutputsPanelPro
       )
     )
   );
+
+  const handleAdapterChange = (newAdapterId: string) => {
+    setAdapterId(newAdapterId);
+    if (newAdapterId === "ndi") {
+      if (outputId === "out_1" || outputId === "") {
+        setOutputId("ndi_program");
+      }
+    } else if (newAdapterId === "virtual") {
+      if (outputId === "ndi_program" || outputId === "") {
+        setOutputId("out_1");
+      }
+    }
+  };
 
   const refresh = useCallback(async () => {
     if (!engineConnected) {
@@ -174,7 +190,7 @@ export function OutputsPanel({ engineConnected, programFormat }: OutputsPanelPro
             <span>Adapter</span>
             <select
               value={adapterId}
-              onChange={(event) => setAdapterId(event.target.value)}
+              onChange={(event) => handleAdapterChange(event.target.value)}
             >
               {view.availableAdapters.map((adapter) => (
                 <option
@@ -183,7 +199,11 @@ export function OutputsPanel({ engineConnected, programFormat }: OutputsPanelPro
                   disabled={!adapter.available}
                 >
                   {adapter.name}
-                  {adapter.live ? " — LIVE" : " — not live"}
+                  {adapter.adapterId === "ndi"
+                    ? " — NDI LIVE"
+                    : adapter.live
+                    ? " — LIVE"
+                    : " — not live"}
                   {adapter.available ? "" : " (unavailable)"}
                 </option>
               ))}
@@ -220,6 +240,34 @@ export function OutputsPanel({ engineConnected, programFormat }: OutputsPanelPro
               spellCheck={false}
             />
           </label>
+          {adapterId === "ndi" && (
+            <>
+              <label>
+                <span>NDI Source Name</span>
+                <input
+                  value={ndiSourceName}
+                  onChange={(event) => setNdiSourceName(event.target.value)}
+                  placeholder="e.g. GrapiX Program Out"
+                  spellCheck={false}
+                />
+              </label>
+
+              <label>
+                <span>NDI Groups (optional)</span>
+                <input
+                  value={ndiGroups}
+                  onChange={(event) => setNdiGroups(event.target.value)}
+                  placeholder="e.g. Public, StudioA"
+                  spellCheck={false}
+                />
+              </label>
+
+              <div className="ndi-format-chip">
+                <Wifi size={12} />
+                <span>Format: <strong>Progressive BGRA8 Premultiplied Alpha</strong> (Rec.709/sRGB)</span>
+              </div>
+            </>
+          )}
 
           <div className="outputs-form-row">
             <label>
@@ -262,16 +310,23 @@ export function OutputsPanel({ engineConnected, programFormat }: OutputsPanelPro
 
           <div className="outputs-form-actions">
             <button
-              className="primary-button"
               disabled={
                 busy !== null ||
                 outputId.trim().length === 0 ||
+                (adapterId === "ndi" && ndiSourceName.trim().length === 0) ||
                 selectedAdapter?.available === false
               }
               onClick={() =>
                 void run("configure", async () => {
                   const rate = FRAME_RATES[rateIndex]!;
                   const configuredOutputId = outputId.trim();
+                  const optionsPayload: Record<string, string> = {};
+                  if (adapterId === "ndi") {
+                    optionsPayload.sourceName = ndiSourceName.trim();
+                    if (ndiGroups.trim()) {
+                      optionsPayload.groups = ndiGroups.trim();
+                    }
+                  }
                   const result = await playoutApi.configureOutput({
                     outputId: configuredOutputId,
                     adapterId,
@@ -281,98 +336,126 @@ export function OutputsPanel({ engineConnected, programFormat }: OutputsPanelPro
                       numerator: rate.numerator,
                       denominator: rate.denominator
                     },
-                    colorSpace: programFormat.colorSpace
+                    colorSpace: programFormat.colorSpace,
+                    ...(Object.keys(optionsPayload).length > 0 ? { options: optionsPayload } : {})
                   });
-                  if (adapterId === "virtual" && "__TAURI_INTERNALS__" in window) {
-                    await openVirtualOutputWindow(configuredOutputId);
-                  }
-                  setAdding(false);
-                  return result;
-                })
+              if (adapterId === "virtual" && "__TAURI_INTERNALS__" in window) {
+                await openVirtualOutputWindow(configuredOutputId);
               }
-            >
-              Configure
-            </button>
-            <button className="small-button" onClick={() => setAdding(false)}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
-      <ul className="outputs-list">
-        {view?.outputs.map((output) => (
-          <OutputRow
-            key={output.outputId}
-            output={output}
-            busy={busy !== null}
-            onAction={(action) =>
-              void run(action, () => playoutApi.outputAction(output.outputId, action))
-            }
-          />
-        ))}
-        {view?.outputs.length === 0 && (
-          <li className="outputs-empty">
-            No output is configured. A take will render nowhere until one exists —
-            add a windowed virtual output to confirm a take without going live.
-          </li>
-        )}
-      </ul>
+              setAdding(false);
+              return result;
+            })
+          }
+        >
+          Configure
+        </button>
+        <button className="small-button" onClick={() => setAdding(false)}>
+          Cancel
+        </button>
+      </div>
     </div>
-  );
+  )}
+
+  <ul className="outputs-list">
+    {view?.outputs.map((output) => (
+      <OutputRow
+        key={output.outputId}
+        output={output}
+        busy={busy !== null}
+        onAction={(action) =>
+          void run(action, () => playoutApi.outputAction(output.outputId, action))
+        }
+      />
+    ))}
+    {view?.outputs.length === 0 && (
+      <li className="outputs-empty">
+        No output is configured. A take will render nowhere until one exists —
+        add an NDI live output or a windowed virtual output to start rendering.
+      </li>
+    )}
+  </ul>
+</div>
+);
 }
 
 function OutputRow({
-  output,
-  busy,
-  onAction
+output,
+busy,
+onAction
 }: {
-  output: EngineOutputView;
-  busy: boolean;
-  onAction: (action: "start" | "stop" | "remove") => void;
+output: EngineOutputView;
+busy: boolean;
+onAction: (action: "start" | "stop" | "remove") => void;
 }) {
-  const running = output.state === "running";
-  const windowed = output.adapterId === "virtual";
+const [copied, setCopied] = useState(false);
+const running = output.state === "running";
+const windowed = output.adapterId === "virtual";
+const isNdi = output.adapterId === "ndi";
 
-  return (
-    <li className={`output-row ${output.live ? "live" : windowed ? "windowed" : "headless"} ${output.state}`}>
-      <div className="output-identity">
-        <span className={output.live ? "output-badge live" : windowed ? "output-badge windowed" : "output-badge headless"}>
-          {output.live ? (
-            <>
-              <Radio size={11} /> LIVE
-            </>
-          ) : windowed ? (
-            <>
-              <Monitor size={11} /> WINDOWED
-            </>
-          ) : (
-            <>
-              <EyeOff size={11} /> NON-LIVE
-            </>
-          )}
-        </span>
-        <strong>{output.outputId}</strong>
-        <small>{output.name}</small>
-      </div>
+const handleCopySource = (sourceName: string) => {
+void navigator.clipboard.writeText(sourceName);
+setCopied(true);
+setTimeout(() => setCopied(false), 2000);
+};
 
-      <div className="output-detail">
-        <span>
-          {output.width}×{output.height} ·{" "}
-          {formatRate(output.frameRateNumerator, output.frameRateDenominator)} ·{" "}
-          {output.colorSpace}
-        </span>
-        <span className={`output-state ${output.state}`}>{output.state}</span>
-        {running && (
-          <span className="output-counters">
-            {output.framesSent} sent
-            {output.framesDropped > 0 ? ` · ${output.framesDropped} dropped` : ""}
-          </span>
-        )}
-        {output.live && !output.hardwareCertified && (
-          <span className="output-uncertified">not hardware certified</span>
-        )}
-      </div>
+return (
+<li className={`output-row ${isNdi ? "ndi live" : output.live ? "live" : windowed ? "windowed" : "headless"} ${output.state}`}>
+  <div className="output-identity">
+    <span className={isNdi ? "output-badge ndi" : output.live ? "output-badge live" : windowed ? "output-badge windowed" : "output-badge headless"}>
+      {isNdi ? (
+        <>
+          <Wifi size={11} /> NDI LIVE
+        </>
+      ) : output.live ? (
+        <>
+          <Radio size={11} /> LIVE
+        </>
+      ) : windowed ? (
+        <>
+          <Monitor size={11} /> WINDOWED
+        </>
+      ) : (
+        <>
+          <EyeOff size={11} /> NON-LIVE
+        </>
+      )}
+    </span>
+    {running && <span className="output-live-pulse" title="Live stream transmitting" />}
+    <strong>{output.outputId}</strong>
+    <small>{output.name}</small>
+  </div>
+
+  <div className="output-detail">
+    {output.sourceName && (
+      <span className="output-source-tag">
+        <span>Stream: <strong>{output.sourceName}</strong></span>
+        <button
+          className="output-copy-btn"
+          onClick={() => handleCopySource(output.sourceName!)}
+          title="Copy NDI Source Name"
+          type="button"
+        >
+          {copied ? <Check size={10} /> : <Copy size={10} />}
+          {copied ? "Copied!" : "Copy"}
+        </button>
+      </span>
+    )}
+    <span>
+      {output.width}×{output.height} ·{" "}
+      {formatRate(output.frameRateNumerator, output.frameRateDenominator)} ·{" "}
+      {output.colorSpace}
+    </span>
+    <span className={`output-state ${output.state}`}>{output.state}</span>
+    {running && (
+      <span className="output-counters">
+        {output.framesSent} sent
+        {output.framesDropped > 0 ? ` · ${output.framesDropped} dropped` : ""}
+      </span>
+    )}
+    {output.live && !output.hardwareCertified && (
+      <span className="output-uncertified">uncertified live output (NDI 6.x)</span>
+    )}
+  </div>
 
       {output.lastError && <p className="outputs-error">{output.lastError}</p>}
 

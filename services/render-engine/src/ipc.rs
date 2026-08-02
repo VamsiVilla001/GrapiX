@@ -36,6 +36,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 
+use crate::capabilities::ConnectionPrincipal;
 use crate::config::EngineConfig;
 use crate::engine::Engine;
 use crate::protocol;
@@ -199,9 +200,9 @@ where
         tracing::info!(%client_id, clients = guard.connected_clients, "ipc client connected");
     }
 
-    // An IPC client is local but not automatically trusted: when the engine requires a
-    // token, everything but the handshake is refused until it presents one.
-    let authenticated = !config.auth.required;
+    // IPC begins as a private Editor session. `process_frame` replaces this
+    // immutable principal only after validating connection.authenticate.
+    let mut principal = ConnectionPrincipal::loopback_editor(client_id.clone());
 
     // The same windows the WebSocket path uses: the two transports must not differ in
     // how much reordering or retransmission they tolerate.
@@ -225,7 +226,7 @@ where
                             &engine,
                             &config,
                             &client_id,
-                            authenticated,
+                            &mut principal,
                             &mut inbound,
                             &mut dedupe,
                             &mut limiter,
@@ -261,6 +262,11 @@ where
                             if target != &client_id {
                                 continue;
                             }
+                        }
+                        // Native Editor views are WebSocket binary frames. Never
+                        // downgrade them into an IPC JSON event or base64 payload.
+                        if event.binary.is_some() {
+                            continue;
                         }
                         let mut envelope = event.envelope;
                         outbound_sequence += 1;

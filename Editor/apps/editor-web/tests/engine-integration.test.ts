@@ -16,6 +16,7 @@ import {
   selectEditorBackend
 } from "../src/rendering/rendererPreference.js";
 import { sceneRequirements, stageRequirements } from "../src/rendering/engineClient.js";
+import { decodeNativeEditorFrame } from "../src/rendering/NativeEditorRenderView.js";
 
 // ---------------------------------------------------------------------------
 // Renderer preference policy
@@ -84,6 +85,33 @@ test("no backend at all returns undefined rather than a blank viewport", () => {
     selectEditorBackend({ availability: { webgl: false, webgpu: false, canvas: false } }),
     undefined
   );
+});
+
+test("native Editor frame decoder preserves binary alpha and canonical scene identity", () => {
+  const metadata = {
+    viewId: "view-1",
+    viewGeneration: 2,
+    frameId: "frame-2",
+    sceneRef: { projectId: "project-1", domain: "authoring" as const, sceneId: "scene-1", revision: 7 },
+    width: 1,
+    height: 1,
+    pixelFormat: "bgra8-premultiplied" as const,
+    alphaMode: "premultiplied" as const,
+    logicalBounds: { x: 0, y: 0, width: 1, height: 1 },
+    camera: { x: 0, y: 0, width: 1, height: 1 },
+    objectBounds: [],
+    pickedObjectId: null,
+    frame: 14
+  };
+  const header = new TextEncoder().encode(JSON.stringify(metadata));
+  const packet = new Uint8Array(4 + header.length + 4);
+  new DataView(packet.buffer).setUint32(0, header.length, false);
+  packet.set(header, 4);
+  packet.set([3, 2, 1, 128], 4 + header.length);
+
+  const decoded = decodeNativeEditorFrame(packet);
+  assert.equal(decoded.metadata.sceneRef.sceneId, "scene-1");
+  assert.deepEqual([...decoded.pixels], [3, 2, 1, 128]);
 });
 
 // ---------------------------------------------------------------------------

@@ -21,11 +21,14 @@ use tokio::sync::broadcast;
 
 use grapix_render_core::renderer::gpu::GpuContext;
 
-use crate::capabilities::{EngineCapabilities, EngineState, EngineStateMachine};
+use crate::capabilities::{
+    ConnectionPrincipal, EngineCapabilities, EngineState, EngineStateMachine, OwnedBytes,
+    ResourceGovernor, ResourcePriority, ScenePreparationEstimate,
+};
 use crate::config::EngineConfig;
 use crate::outputs::{self, OutputFormat, OutputInstance, OutputStatus};
 use crate::preview::{self, PreviewOutcome};
-use crate::protocol::{now_ms, Envelope, ErrorCode, ProtocolError, RequestType};
+use crate::protocol::{now_ms, Envelope, ErrorCode, ProtocolError, RequestType, SceneRef};
 use crate::render::TileSceneBuilder;
 use crate::security::{AuditEntry, AuditLog};
 use crate::stage::{Rect, StageDocument, TilingConfig};
@@ -104,6 +107,43 @@ impl LoadedScene {
     }
 }
 
+/// Deterministic manifest-level estimate used before preparation can allocate
+/// decoded/GPU resources. Precise post-upload accounting replaces this estimate
+/// at commit; it is intentionally conservative for unknown asset metadata.
+fn estimate_prepared_runtime(
+    scene: &LoadedScene,
+    priority: ResourcePriority,
+    budget: crate::capabilities::ResourceBudget,
+) -> ScenePreparationEstimate {
+    let document_bytes = scene.source_document().to_string().len() as u64;
+    let object_count = scene.object_count as u64;
+    let per_scene_tile_budget = budget.gpu_bytes / u64::from(budget.resident_scene_target.max(1));
+    ScenePreparationEstimate {
+        priority,
+        owned: OwnedBytes {
+            decoded_assets: document_bytes.saturating_add(object_count.saturating_mul(256)),
+            staging_buffers: document_bytes,
+            textures_and_mips: object_count
+                .saturating_mul(256 * 1024)
+                .saturating_add(512 * 1024),
+            geometry: object_count.saturating_mul(8 * 1024),
+            glyph_atlases: 512 * 1024,
+            tile_render_targets: per_scene_tile_budget / 2,
+            upload_rings: 512 * 1024,
+            pipeline_state: 256 * 1024,
+            bind_group_data: object_count.saturating_mul(256),
+            frame_pool: 0,
+        },
+    }
+}
+
+fn admission_protocol_error(error: crate::capabilities::AdmissionError) -> ProtocolError {
+    ProtocolError::new(
+        ErrorCode::EngineBusy,
+        format!("resource admission refused: {error:?}"),
+    )
+}
+
 /// An event plus who it is for.
 ///
 /// `target_client` of `None` means every connected client. The filter happens at the
@@ -113,6 +153,9 @@ impl LoadedScene {
 pub struct EngineEvent {
     pub target_client: Option<String>,
     pub envelope: Envelope,
+    /// Raw private Editor-view frame. WebSocket transport sends this as a binary
+    /// frame, never as JSON/base64; IPC intentionally does not expose this view.
+    pub binary: Option<Vec<u8>>,
 }
 
 pub struct Engine {
@@ -138,6 +181,9 @@ pub struct Engine {
     outputs: Vec<OutputInstance>,
     /// The asset store: content-addressed cache, uploads in flight, reference counts.
     assets: crate::assets::AssetStore,
+    /// Sole owner of decoded/GPU/prepared-runtime admission. It is touched only
+    /// during preparation and lifecycle transitions, never during a render tick.
+    resource_governor: ResourceGovernor,
     /// Registered preview streams, keyed by stream id.
     ///
     /// Held by the engine rather than by a connection so a stream's identity survives a
@@ -152,11 +198,18 @@ pub struct Engine {
     /// thumbnail.
     preview_renderer: Option<crate::scene_renderer::SceneRenderer>,
     /// Persistent Program renderer, built on the first frame that goes on air.
+    /// Private native renderers are keyed by Editor connection/view identity and
+    /// never reused by Preview or Program.
+    editor_renderers: std::collections::BTreeMap<String, crate::scene_renderer::SceneRenderer>,
     ///
     /// Held here rather than created per frame because building it compiles both
     /// shader pipelines: doing that every frame cost 482ms a frame against a 20ms
     /// budget.
     program_renderer: Option<crate::scene_renderer::SceneRenderer>,
+    /// Durable Program/output mutation journal. Failure to append a protected
+    /// command rejects its acknowledgement rather than claiming recoverability.
+    recovery_journal: Option<crate::recovery::RecoveryJournal>,
+    recovery_gate: crate::recovery::RecoveryGate,
     audit: AuditLog,
     started_at: Instant,
     event_sequence: u64,
@@ -217,6 +270,19 @@ impl Engine {
         let (events, _) = broadcast::channel(256);
         // Built before the struct literal takes ownership of the config.
         let assets = crate::assets::AssetStore::new(&config.assets);
+        let resource_governor =
+            ResourceGovernor::new(crate::capabilities::ResourceBudget::from_config(&config));
+        let recovery_journal = crate::recovery::RecoveryJournal::open(
+            std::path::Path::new(&config.assets.cache_directory).join("recovery"),
+        )
+        .ok();
+        let mut recovery_gate = crate::recovery::RecoveryGate::default();
+        // A new/clean journal has no prior output to restore; it still traverses
+        // the gate so output activation cannot accidentally bypass it.
+        if recovery_journal.is_some() {
+            let _ = recovery_gate.replayed_off_air();
+            let _ = recovery_gate.validate_first_frame(true);
+        }
 
         Self {
             config,
@@ -232,10 +298,14 @@ impl Engine {
             preview_started_at: None,
             outputs: Vec::new(),
             assets,
+            resource_governor,
             preview_streams: std::collections::BTreeMap::new(),
             preview_renderer: None,
+            editor_renderers: std::collections::BTreeMap::new(),
             renderer_restarts: 0,
             program_renderer: None,
+            recovery_journal,
+            recovery_gate,
             audit: AuditLog::new(audit_path, 512),
             started_at: Instant::now(),
             event_sequence: 0,
@@ -286,6 +356,22 @@ impl Engine {
         let _ = self.events.send(EngineEvent {
             target_client,
             envelope,
+            binary: None,
+        });
+    }
+
+    fn emit_binary_to(&mut self, target_client: String, bytes: Vec<u8>) {
+        self.event_sequence += 1;
+        let _ = self.events.send(EngineEvent {
+            target_client: Some(target_client),
+            envelope: Envelope::event(
+                "event.editorViewBinary",
+                Value::Null,
+                &self.engine_id,
+                self.event_sequence,
+                now_ms(),
+            ),
+            binary: Some(bytes),
         });
     }
 
@@ -306,11 +392,10 @@ impl Engine {
 
     fn record_audit(
         &mut self,
-        client_id: &str,
-        project_id: Option<String>,
+        principal: &ConnectionPrincipal,
         request: RequestType,
         message_type: &str,
-        scene_id: Option<String>,
+        scene_ref: Option<SceneRef>,
         outcome: &str,
         override_reason: Option<String>,
     ) {
@@ -319,13 +404,61 @@ impl Engine {
         }
         self.audit.record(AuditEntry {
             at_ms: now_ms(),
-            client_id: client_id.to_string(),
-            project_id,
+            client_id: principal.connection_id().to_string(),
             message_type: message_type.to_string(),
-            scene_id,
+            scene_ref,
             outcome: outcome.to_string(),
             override_reason,
         });
+    }
+
+    fn persist_recovery_command(
+        &mut self,
+        request: RequestType,
+        envelope: &Envelope,
+        scene_ref: Option<&SceneRef>,
+    ) -> Result<(), ProtocolError> {
+        use RequestType::*;
+        if !matches!(
+            request,
+            Cue | TakeOnline | TakeOffline | Continue | Update | Stop | Clear | Replace
+                | Transition | OutputConfigure | OutputStart | OutputStop | OutputRemove
+        ) {
+            return Ok(());
+        }
+        let package_checksum = scene_ref
+            .map(SceneRef::cache_key)
+            .unwrap_or_else(|| "engine-configuration".to_string());
+        let state = self.status_payload(false);
+        let output_lease = self.engine_id.clone();
+        let output_fence = self.event_sequence;
+        let journal = self.recovery_journal.as_mut().ok_or_else(|| {
+            ProtocolError::new(
+                ErrorCode::InternalError,
+                "recovery journal is unavailable; protected command was not acknowledged",
+            )
+        })?;
+        let command = journal
+            .append_accepted(crate::recovery::RecoveryCommand {
+                state_revision: 0,
+                idempotency_key: envelope.message_id.clone(),
+                precondition_revision: scene_ref.map(|reference| reference.revision),
+                message_type: envelope.message_type.clone(),
+                payload: envelope.payload.clone(),
+                package_checksum: package_checksum.clone(),
+                output_lease: output_lease.clone(),
+                output_fence,
+            })
+            .map_err(|error| ProtocolError::new(ErrorCode::InternalError, error.to_string()))?;
+        journal
+            .write_snapshot(crate::recovery::RecoverySnapshot {
+                watermark: command.state_revision,
+                state,
+                package_checksums: vec![package_checksum],
+                output_lease,
+                output_fence,
+            })
+            .map_err(|error| ProtocolError::new(ErrorCode::InternalError, error.to_string()))
     }
 
     // -----------------------------------------------------------------------
@@ -340,11 +473,69 @@ impl Engine {
         &mut self,
         request: RequestType,
         envelope: &Envelope,
-        client_id: &str,
+        principal: &ConnectionPrincipal,
     ) -> Result<(String, Value), ProtocolError> {
-        let payload = &envelope.payload;
-        let result = match request {
-            RequestType::Hello => self.handle_hello(payload),
+        if !principal.allows(request) {
+            let error = ProtocolError::new(
+                ErrorCode::UnauthorizedRole,
+                format!(
+                    "{} role is not permitted to execute {}",
+                    principal.role().as_str(),
+                    envelope.message_type
+                ),
+            );
+            self.record_audit(
+                principal,
+                request,
+                &envelope.message_type,
+                envelope.scene_ref.clone(),
+                &format!("refused: {}", error.code.as_str()),
+                None,
+            );
+            return Err(error);
+        }
+
+        let scene_ref = if request.requires_scene_ref() {
+            let scene_ref = envelope.scene_ref.clone().ok_or_else(|| {
+                ProtocolError::new(
+                    ErrorCode::InvalidPayload,
+                    format!("{} requires sceneRef", envelope.message_type),
+                )
+            })?;
+            if matches!(request.group(), "playout" | "preview") {
+                scene_ref.require_published_for_program()?;
+            }
+            Some(scene_ref)
+        } else {
+            envelope.scene_ref.clone()
+        };
+
+        // Runtime maps, render caches, streams, and asset references use this
+        // collision-free canonical key. Source documents are rewritten only in
+        // this private handler view, never at the wire boundary.
+        let mut scoped_payload = envelope.payload.clone();
+        if let (Some(scene_ref), Some(object)) =
+            (scene_ref.as_ref(), scoped_payload.as_object_mut())
+        {
+            let runtime_key = scene_ref.cache_key();
+            object.insert("sceneId".to_string(), Value::String(runtime_key.clone()));
+            object.insert("sceneRevision".to_string(), Value::from(scene_ref.revision));
+            if matches!(request, RequestType::SceneLoad | RequestType::SceneFullSync) {
+                if let Some(scene) = object.get_mut("scene").and_then(Value::as_object_mut) {
+                    scene.insert("id".to_string(), Value::String(runtime_key));
+                    scene.insert("revision".to_string(), Value::from(scene_ref.revision));
+                }
+            }
+            if request == RequestType::SceneApplyPatch {
+                if let Some(patch) = object.get_mut("patch").and_then(Value::as_object_mut) {
+                    patch.insert("sceneId".to_string(), Value::String(scene_ref.cache_key()));
+                }
+            }
+        }
+        let payload = &scoped_payload;
+        let client_id = principal.connection_id();
+        let mut result = match request {
+            RequestType::Hello => self.handle_hello(payload, principal),
             RequestType::Authenticate => Ok((
                 "reply.ack".to_string(),
                 json!({ "requestType": envelope.message_type }),
@@ -377,7 +568,11 @@ impl Engine {
             RequestType::SceneApplyPatch => self.handle_scene_patch(payload),
 
             RequestType::Cue => self.handle_cue(payload),
-            RequestType::TakeOnline => self.handle_take_online(payload, client_id),
+            RequestType::TakeOnline => self.handle_take_online(
+                payload,
+                client_id,
+                scene_ref.as_ref().expect("takeOnline requires SceneRef"),
+            ),
             RequestType::TakeOffline => self.handle_take_offline(payload),
             RequestType::Continue => self.handle_continue(payload),
             RequestType::Update => self.handle_update(payload),
@@ -387,6 +582,11 @@ impl Engine {
             RequestType::Transition => self.handle_transition(payload),
 
             RequestType::PreviewRequest => self.handle_preview(payload),
+            RequestType::EditorViewRequest => self.handle_editor_view(
+                payload,
+                scene_ref.as_ref().expect("editor view requires SceneRef"),
+                client_id,
+            ),
 
             RequestType::GetStatus => Ok(("reply.status".to_string(), self.status_payload(false))),
             RequestType::GetDiagnostics => {
@@ -403,7 +603,12 @@ impl Engine {
 
             RequestType::OutputList => Ok(("reply.outputs".to_string(), self.outputs_payload())),
             RequestType::OutputConfigure => self.handle_output_configure(payload),
-            RequestType::OutputStart => self.handle_output_start(payload),
+            RequestType::OutputStart => {
+                self.recovery_gate.permit_output().map_err(|error| {
+                    ProtocolError::new(ErrorCode::OutputError, error.to_string())
+                })?;
+                self.handle_output_start(payload)
+            }
             RequestType::OutputStop => self.handle_output_stop(payload),
             RequestType::OutputRemove => self.handle_output_remove(payload),
 
@@ -417,25 +622,31 @@ impl Engine {
             RequestType::PreviewSetViewport => self.handle_stream_set_viewport(payload, client_id),
             RequestType::RestartRenderer => self.handle_restart_renderer(payload, client_id),
         };
+        if result.is_ok() {
+            if let Err(error) = self.persist_recovery_command(request, envelope, scene_ref.as_ref()) {
+                self.recovery_gate.degrade();
+                self.emit(
+                    "event.recoveryDegraded",
+                    json!({ "reason": error.message, "command": envelope.message_type }),
+                );
+                result = Err(error);
+            }
+        }
 
-        let scene_id = envelope.scene_id.clone();
-        let project_id = envelope.project_id.clone();
         match &result {
             Ok(_) => self.record_audit(
-                client_id,
-                project_id,
+                principal,
                 request,
                 &envelope.message_type,
-                scene_id,
+                scene_ref.clone(),
                 "accepted",
                 None,
             ),
             Err(error) => self.record_audit(
-                client_id,
-                project_id,
+                principal,
                 request,
                 &envelope.message_type,
-                scene_id,
+                scene_ref,
                 &format!("refused: {}", error.code.as_str()),
                 None,
             ),
@@ -448,7 +659,11 @@ impl Engine {
     // Connection
     // -----------------------------------------------------------------------
 
-    fn handle_hello(&mut self, payload: &Value) -> Result<(String, Value), ProtocolError> {
+    fn handle_hello(
+        &mut self,
+        payload: &Value,
+        principal: &ConnectionPrincipal,
+    ) -> Result<(String, Value), ProtocolError> {
         let client_name = payload
             .get("clientName")
             .and_then(Value::as_str)
@@ -481,7 +696,12 @@ impl Engine {
             ));
         }
 
-        tracing::info!(%client_name, %client_role, "client said hello");
+        tracing::info!(
+            %client_name,
+            declared_role = %client_role,
+            connection_role = principal.role().as_str(),
+            "client said hello"
+        );
 
         Ok((
             "reply.hello".to_string(),
@@ -492,6 +712,7 @@ impl Engine {
                 "protocolVersion": crate::protocol::PROTOCOL_VERSION,
                 "state": self.state.state().as_str(),
                 "authenticationRequired": self.config.auth.required,
+                "connectionRole": principal.role().as_str(),
             }),
         ))
     }
@@ -504,9 +725,54 @@ impl Engine {
             json!({
                 "requestType": "connection.heartbeat",
                 "sentAtMs": sent_at_ms,
+
                 "engineTimeMs": now_ms(),
             }),
         ))
+    }
+    /// Render an Editor-only authoring view and queue its bytes to that one
+    /// connection. This path cannot observe or mutate Preview/Program selection.
+    fn handle_editor_view(
+        &mut self,
+        payload: &Value,
+        scene_ref: &SceneRef,
+        client_id: &str,
+    ) -> Result<(String, Value), ProtocolError> {
+        if scene_ref.domain != crate::protocol::SceneDomain::Authoring {
+            return Err(ProtocolError::new(
+                ErrorCode::InvalidPayload,
+                "editor.view.request requires an authoring SceneRef",
+            ));
+        }
+        let request: crate::editor_view::EditorViewRequest =
+            serde_json::from_value(payload.clone()).map_err(|error| {
+                ProtocolError::new(ErrorCode::InvalidPayload, format!("invalid editor view: {error}"))
+            })?;
+        let document = self
+            .require_scene(&scene_ref.cache_key())?
+            .source_document()
+            .clone();
+        let gpu = self.gpu.as_ref().cloned().ok_or_else(|| {
+            ProtocolError::new(ErrorCode::DeviceLost, "editor view requires an active GPU")
+        })?;
+        let renderer_key = format!("{client_id}:{}", request.view_id);
+        let renderer = self.editor_renderers.entry(renderer_key).or_insert_with(|| {
+            crate::scene_renderer::SceneRenderer::new(&gpu, request.pixel_width, request.pixel_height)
+        });
+        let frame = crate::editor_view::render_editor_view(
+            &gpu,
+            renderer,
+            scene_ref,
+            &document,
+            &request,
+            self.config.preview.max_pixels,
+        )?;
+        let metadata = serde_json::to_value(&frame.metadata).map_err(|error| {
+            ProtocolError::new(ErrorCode::InternalError, format!("editor view metadata failed: {error}"))
+        })?;
+        let bytes = crate::editor_view::pack_binary_frame(&frame.metadata, &frame.pixels)?;
+        self.emit_binary_to(client_id.to_string(), bytes);
+        Ok(("reply.editorView".to_string(), metadata))
     }
 
     // -----------------------------------------------------------------------
@@ -742,6 +1008,16 @@ impl Engine {
         Ok(("reply.scenePrepared".to_string(), prepared))
     }
 
+    fn resource_priority(&self, scene_id: &str) -> ResourcePriority {
+        if self.program_scene_id.as_deref() == Some(scene_id) {
+            ResourcePriority::Program
+        } else if self.preview_scene_id.as_deref() == Some(scene_id) {
+            ResourcePriority::PlayoutPreview
+        } else {
+            ResourcePriority::Warm
+        }
+    }
+
     /// Prepare a scene's tiles.
     ///
     /// Preparation is what turns a loaded document into something renderable, and
@@ -750,9 +1026,40 @@ impl Engine {
     fn prepare_scene(&mut self, scene_id: &str) -> Result<Value, ProtocolError> {
         let started = Instant::now();
         self.transition(EngineState::Preparing, "preparing a scene");
-
         let stage = self.stage_for_scene(scene_id)?;
         let viewport_rects = self.viewport_rects(&stage);
+
+        // Estimate and reserve before the first decode/shape/tessellation/upload.
+        // This is the preparation-plane transaction boundary; render ticks never
+        // scan the governor or evict resources.
+        let estimate = {
+            let scene = self.scenes.get(scene_id).ok_or_else(|| {
+                ProtocolError::new(ErrorCode::SceneNotFound, format!("no scene {scene_id}"))
+            })?;
+            estimate_prepared_runtime(
+                scene,
+                self.resource_priority(scene_id),
+                self.resource_governor.budget(),
+            )
+        };
+        let reservation_outcome = match self.resource_governor.reserve(scene_id, estimate) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                self.transition(EngineState::Ready, "resource admission refused");
+                return Err(admission_protocol_error(error));
+            }
+        };
+        for evicted_scene_id in &reservation_outcome.evicted {
+            if let Some(evicted_scene) = self.scenes.get_mut(evicted_scene_id) {
+                evicted_scene.builder.clear();
+                evicted_scene.tiles.mark_all_dirty();
+                evicted_scene.prepared_tile_count = 0;
+                evicted_scene.preparation = PreparationState::Loading;
+                evicted_scene.take_blockers =
+                    vec!["prepared runtime was evicted by resource admission".to_string()];
+            }
+        }
+        let reservation = reservation_outcome.reservation;
 
         // Asset readiness is part of being prepared. A scene whose logo has not arrived is
         // not ready to go on air, and the operator should learn that here rather than from
@@ -825,9 +1132,19 @@ impl Engine {
             PreparationState::ReadyWithWarnings
         };
 
+        let preparation_succeeded = failures.is_empty();
+        if !preparation_succeeded {
+            // A failed prepare may have populated tile-local prepared state. It
+            // cannot remain resident after the transaction rolls back.
+            scene.builder.clear();
+            scene.prepared_tile_count = 0;
+            prepared = 0;
+        }
+
         let state = scene.preparation;
         let revision = scene.revision;
         let preparation_ms = started.elapsed().as_millis() as u64;
+        let actual_owned = estimate.owned;
 
         tracing::info!(
             %scene_id,
@@ -838,6 +1155,19 @@ impl Engine {
             preparation_ms,
             "scene prepared"
         );
+        // The mutable scene borrow ends after the last read above, before this
+        // frame-boundary transaction commits or rolls back the reservation.
+        let last_used_ms = scene.last_used_ms;
+        if preparation_succeeded {
+            self.resource_governor
+                .uploaded(reservation)
+                .map_err(admission_protocol_error)?;
+            self.resource_governor
+                .commit(reservation, actual_owned, true, last_used_ms)
+                .map_err(admission_protocol_error)?;
+        } else {
+            self.resource_governor.rollback(reservation);
+        }
 
         self.transition(EngineState::Ready, "preparation finished");
         self.emit(
@@ -1114,6 +1444,7 @@ impl Engine {
                 format!("no scene {scene_id}"),
             ));
         }
+        self.resource_governor.release(&scene_id);
 
         if self.program_scene_id.as_deref() == Some(scene_id.as_str()) {
             self.program_scene_id = None;
@@ -1158,9 +1489,26 @@ impl Engine {
                 // from the requested frame, even when the same scene is already on Program.
                 self.preview_start_frame = start_frame.unwrap_or(0);
                 self.preview_started_at = Some(Instant::now());
-                self.preview_scene_id = Some(scene_id.clone());
+                let previous_preview = self.preview_scene_id.replace(scene_id.clone());
+                let now = now_ms();
+                if let Some(previous_preview) = previous_preview {
+                    if previous_preview != scene_id {
+                        self.resource_governor.touch(
+                            &previous_preview,
+                            ResourcePriority::Warm,
+                            false,
+                            now,
+                        );
+                    }
+                }
+                self.resource_governor.touch(
+                    &scene_id,
+                    ResourcePriority::PlayoutPreview,
+                    true,
+                    now,
+                );
                 if let Some(scene) = self.scenes.get_mut(&scene_id) {
-                    scene.last_used_ms = now_ms();
+                    scene.last_used_ms = now;
                 }
             }
         }
@@ -1185,6 +1533,7 @@ impl Engine {
         &mut self,
         payload: &Value,
         client_id: &str,
+        scene_ref: &SceneRef,
     ) -> Result<(String, Value), ProtocolError> {
         let scene_id = require_str(payload, "sceneId")?.to_string();
         let override_unprepared = payload
@@ -1248,26 +1597,33 @@ impl Engine {
 
         // An override is a legitimate operator decision, but an attributable one.
         if let Some(reason) = &override_reason {
-            tracing::warn!(%scene_id, %client_id, %reason, "unprepared scene taken online by override");
             self.audit.record(AuditEntry {
                 at_ms: now_ms(),
                 client_id: client_id.to_string(),
-                project_id: None,
                 message_type: "playout.takeOnline".to_string(),
-                scene_id: Some(scene_id.clone()),
+                scene_ref: Some(scene_ref.clone()),
                 outcome: "accepted".to_string(),
                 override_reason: Some(reason.clone()),
             });
         }
 
-        self.program_scene_id = Some(scene_id.clone());
+        let previous_program = self.program_scene_id.replace(scene_id.clone());
+        let now = now_ms();
+        if let Some(previous_program) = previous_program {
+            if previous_program != scene_id {
+                self.resource_governor
+                    .touch(&previous_program, ResourcePriority::Warm, false, now);
+            }
+        }
+        self.resource_governor
+            .touch(&scene_id, ResourcePriority::Program, true, now);
         if let Some(scene) = self.scenes.get_mut(&scene_id) {
             // Back to the top. A take is what starts an "in" animation, so a scene taken a
             // second time must play from frame 0 rather than resuming wherever its last run
             // left the playhead — an operator re-taking a lower third has to see it animate
             // in again, not appear already finished.
             scene.frame = 0;
-            scene.last_used_ms = now_ms();
+            scene.last_used_ms = now;
         }
         self.transition(EngineState::OnAir, "scene taken to program");
 
@@ -1427,24 +1783,78 @@ impl Engine {
     fn handle_replace(&mut self, payload: &Value) -> Result<(String, Value), ProtocolError> {
         let incoming = require_str(payload, "incomingSceneId")?.to_string();
         let channel = require_channel(payload)?;
+        let (preparation, blockers, revision) = {
+            let scene = self.require_scene(&incoming)?;
+            (
+                scene.preparation,
+                scene.take_blockers.clone(),
+                scene.revision,
+            )
+        };
 
-        self.require_scene(&incoming)?;
+        if let Some(expected_revision) =
+            payload.get("incomingSceneRevision").and_then(Value::as_u64)
+        {
+            if revision != expected_revision {
+                return Err(ProtocolError::new(
+                    ErrorCode::RevisionMismatch,
+                    format!(
+                        "replace names incoming revision {expected_revision} but the engine holds {revision} for {incoming}"
+                    ),
+                ));
+            }
+        }
 
-        match channel {
+        if !matches!(
+            preparation,
+            PreparationState::Ready | PreparationState::ReadyWithWarnings
+        ) || !blockers.is_empty()
+        {
+            return Err(ProtocolError::new(
+                ErrorCode::SceneNotPrepared,
+                format!(
+                    "scene {incoming} is {} with {} blocker(s): {}; prepare it before replacing Program",
+                    preparation.as_str(),
+                    blockers.len(),
+                    blockers.join("; ")
+                ),
+            ));
+        }
+
+        let warnings = match channel {
             Channel::Program => {
                 self.program_scene_id = Some(incoming.clone());
+                if let Some(scene) = self.scenes.get_mut(&incoming) {
+                    scene.frame = 0;
+                    scene.last_used_ms = now_ms();
+                }
                 self.transition(EngineState::OnAir, "program scene replaced");
+                self.start_program_outputs()
             }
             Channel::Preview | Channel::Auxiliary => {
                 self.preview_scene_id = Some(incoming.clone());
                 self.preview_start_frame = 0;
                 self.preview_started_at = Some(Instant::now());
+                if let Some(scene) = self.scenes.get_mut(&incoming) {
+                    scene.last_used_ms = now_ms();
+                }
+                Vec::new()
             }
-        }
+        };
+
+        self.emit(
+            "event.channelChanged",
+            json!({
+                "channel": channel.as_str(),
+                "sceneId": incoming,
+                "sceneRevision": revision,
+                "onAir": channel == Channel::Program,
+            }),
+        );
 
         Ok((
             "reply.ack".to_string(),
-            json!({ "requestType": "playout.replace" }),
+            json!({ "requestType": "playout.replace", "warnings": warnings }),
         ))
     }
 
@@ -1944,6 +2354,17 @@ impl Engine {
         client_id: &str,
     ) -> Result<(String, Value), ProtocolError> {
         let stream_id = require_str(payload, "streamId")?.to_string();
+        if let Some(existing) = self.preview_streams.get(&stream_id) {
+            // Stream ids are client-owned handles. Reusing another connection's id
+            // used to replace its stream and redirect its frames, despite stop and
+            // viewport updates correctly enforcing ownership.
+            if existing.client_id != client_id {
+                return Err(ProtocolError::new(
+                    ErrorCode::Unauthorized,
+                    format!("preview stream {stream_id} belongs to another client"),
+                ));
+            }
+        }
 
         let max_streams = self.config.preview.max_streams as usize;
         if !self.preview_streams.contains_key(&stream_id)
@@ -2473,7 +2894,12 @@ impl Engine {
         let cache = std::path::PathBuf::from(&self.config.assets.cache_directory);
         let mut adapters = Vec::new();
         for adapter_id in ["null", "virtual", "recording", "ndi", "decklink", "aja"] {
-            match outputs::create_sink(adapter_id, &cache, &Value::Null) {
+            match outputs::create_sink_with_ndi_pool_slots(
+                adapter_id,
+                &cache,
+                &Value::Null,
+                self.config.outputs.ndi_frame_pool_slots,
+            ) {
                 Ok(sink) => adapters.push(json!({
                     "adapterId": sink.adapter_id(),
                     "name": sink.name(),
@@ -2557,10 +2983,35 @@ impl Engine {
             ));
         }
 
+
+
+        // NDI owns a fixed sender/pool generation while it is running. Replacing
+        // it would change its network source or format underneath Program, so
+        // Playout must take it offline before a reconfiguration.
+        if self.outputs.iter().any(|output| {
+            output.output_id == output_id && output.adapter_id() == "ndi" && output.is_running()
+        }) {
+            return Err(ProtocolError::new(
+                ErrorCode::OutputError,
+                format!(
+                    "NDI output \"{output_id}\" is running; take it offline before changing sourceName or format"
+                ),
+            ));
+        }
+
         let options = payload.get("options").cloned().unwrap_or(Value::Null);
+        if adapter_id == "ndi" {
+            outputs::validate_ndi_options(&options)
+                .map_err(|error| ProtocolError::new(ErrorCode::InvalidPayload, error))?;
+        }
         let cache = std::path::PathBuf::from(&self.config.assets.cache_directory);
-        let sink = outputs::create_sink(&adapter_id, &cache, &options)
-            .map_err(|error| ProtocolError::new(ErrorCode::OutputError, error))?;
+        let sink = outputs::create_sink_with_ndi_pool_slots(
+            &adapter_id,
+            &cache,
+            &options,
+            self.config.outputs.ndi_frame_pool_slots,
+        )
+        .map_err(|error| ProtocolError::new(ErrorCode::OutputError, error))?;
 
         let live = sink.is_live();
         let certified = sink.hardware_certified();
@@ -2837,79 +3288,69 @@ impl Engine {
         if elapsed == 0 {
             return;
         }
-        let Some(scene_id) = self.program_scene_id.clone() else {
+        let Some(scene_id) = self.program_scene_id.as_deref() else {
             return;
         };
-        if let Some(scene) = self.scenes.get_mut(&scene_id) {
+        if let Some(scene) = self.scenes.get_mut(scene_id) {
             scene.frame = scene.frame.saturating_add(elapsed);
         }
     }
 
     /// Render one Program frame and hand it to every running output.
     ///
-    /// Called from the Program clock. Renders once and shares the frame, so adding a
-    /// virtual output alongside a live one costs a memcpy rather than a second
-    /// render — and both see byte-identical pixels, which is the point of having a
-    /// virtual output at all.
+    /// Called from the Program clock. The steady path copies no scene/stage
+    /// document or output strings; preparation remains exceptional work.
     pub fn render_program_frame(&mut self, frame: u64) -> Result<usize, String> {
         if !self.has_running_outputs() {
             return Ok(0);
         }
 
-        let Some(scene_id) = self.program_scene_id.clone() else {
+        let Some(scene_id) = self.program_scene_id.as_deref() else {
             return Ok(0);
         };
-
         let gpu = self
             .gpu
             .as_ref()
             .cloned()
             .ok_or_else(|| "engine has no GPU device".to_string())?;
 
-        // Every running output shares one format today; the first is authoritative.
-        let format = self
+        // The output format is static while an output is running. Copy only the
+        // dimensions instead of cloning its colour-space string on each tick.
+        let (output_width, output_height) = self
             .outputs
             .iter()
-            .find(|o| o.is_running())
-            .map(|o| o.format.clone())
-            .unwrap_or_default();
-
-        let stage = self
-            .stage_for_scene(&scene_id)
-            .map_err(|error| error.message.clone())?;
-
-        let started = std::time::Instant::now();
-
-        let bounds = stage.bounds();
+            .find(|output| output.is_running())
+            .map(|output| (output.format.width, output.format.height))
+            .unwrap_or((1920, 1080));
+        let bounds = self
+            .stage_for_scene_ref(scene_id)
+            .map_err(|error| error.message.clone())?
+            .bounds();
         let revision = self
             .scenes
-            .get(&scene_id)
+            .get(scene_id)
             .map(|scene| scene.revision)
             .unwrap_or(0);
-        // Built once, then reused. A resize keeps the pipelines and only rebuilds the
-        // target.
+        let started = std::time::Instant::now();
+
         if self.program_renderer.is_none() {
             self.program_renderer = Some(crate::scene_renderer::SceneRenderer::new(
                 &gpu,
-                format.width,
-                format.height,
+                output_width,
+                output_height,
             ));
         }
 
         let bounds_tuple = (bounds.x, bounds.y, bounds.width, bounds.height);
-
-        // Clone the document only when it is actually going to be re-prepared. On a
-        // steady Program that is never: cloning a large scene every frame would cost
-        // more than the render.
         let document = if self
             .program_renderer
             .as_ref()
             .expect("set above")
-            .needs_prepare(&scene_id, revision, bounds_tuple)
+            .needs_prepare(scene_id, revision, bounds_tuple)
         {
             Some(
                 self.scenes
-                    .get(&scene_id)
+                    .get(scene_id)
                     .ok_or_else(|| format!("no scene {scene_id}"))?
                     .source_document()
                     .clone(),
@@ -2919,18 +3360,14 @@ impl Engine {
         };
 
         let renderer = self.program_renderer.as_mut().expect("set above");
-        renderer.resize(&gpu, format.width, format.height);
-
+        renderer.resize(&gpu, output_width, output_height);
         let origin = crate::stage::Point::new(bounds.x, bounds.y);
-        let video = renderer.render(&gpu, &scene_id, revision, bounds_tuple, frame, || {
-            // Only runs when the scene or the stage bounds actually changed, which
-            // is exactly when the document above was cloned.
+        let video = renderer.render(&gpu, scene_id, revision, bounds_tuple, frame, || {
+            // Only runs after an invalidation or revision change, never on a
+            // steady render tick.
             let document = document.ok_or_else(|| {
                 "program scene needs re-preparing but the document was not captured".to_string()
             })?;
-            // Animation is read from the ORIGINAL document, not the rebased one: the
-            // rebase shifts object positions but not their animation channels, so the
-            // renderer shifts sampled X/Y by the same origin instead.
             let animation = crate::animation::SceneAnimation::from_document(&document);
             let rebased =
                 crate::render::rebase_scene_json(&document, origin, bounds.width, bounds.height);
@@ -2941,11 +3378,10 @@ impl Engine {
 
         self.frames_rendered += 1;
         self.last_render_micros = started.elapsed().as_micros() as u64;
-
         self.clear_program_error();
 
         let mut delivered = 0usize;
-        let mut health = Vec::new();
+        let mut output_error = false;
         for output in self.outputs.iter_mut() {
             if !output.is_running() {
                 continue;
@@ -2953,18 +3389,22 @@ impl Engine {
             if output.send(&video) {
                 delivered += 1;
             }
-            health.push(output.status());
+            output_error |= output.is_error();
         }
 
-        // Report any output that has fallen into error, so a failing transmit is
-        // visible rather than only showing up as a frozen picture downstream.
-        for status in health.into_iter().filter(|s| s.state == "error") {
-            self.emit(
-                "event.outputHealth",
-                serde_json::to_value(&status).unwrap_or(Value::Null),
-            );
+        // Status construction clones adapter strings, so it is deliberately
+        // exceptional work rather than an allocation made by every frame.
+        if output_error {
+            for index in 0..self.outputs.len() {
+                if self.outputs[index].is_error() {
+                    let status = self.outputs[index].status();
+                    self.emit(
+                        "event.outputHealth",
+                        serde_json::to_value(&status).unwrap_or(Value::Null),
+                    );
+                }
+            }
         }
-
         Ok(delivered)
     }
 
@@ -3276,6 +3716,16 @@ impl Engine {
                 "frameBudgetMs": 20.0,
                 "budgetUtilization": (self.last_render_micros as f64 / 1000.0) / 20.0,
             },
+            "resourceGovernor": {
+                "residentScenes": self.resource_governor.resident_count(),
+                "residentSceneTarget": self.resource_governor.budget().resident_scene_target,
+                "committedCpuBytes": self.resource_governor.committed().cpu_bytes(),
+                "committedGpuBytes": self.resource_governor.committed().gpu_bytes(),
+                "reservedCpuBytes": self.resource_governor.reserved().cpu_bytes(),
+                "reservedGpuBytes": self.resource_governor.reserved().gpu_bytes(),
+                "cpuBudgetBytes": self.resource_governor.budget().cpu_bytes,
+                "gpuBudgetBytes": self.resource_governor.budget().gpu_bytes,
+            },
             "render": {
                 "backend": self.capabilities.gpu.backend,
                 "drawCalls": 0,
@@ -3401,6 +3851,19 @@ impl Engine {
             ));
         }
         Ok(())
+    }
+
+    fn stage_for_scene_ref(&self, scene_id: &str) -> Result<&StageDocument, ProtocolError> {
+        let scene = self.require_scene(scene_id)?;
+        let stage_id = scene.stage_id.as_deref().ok_or_else(|| {
+            ProtocolError::new(
+                ErrorCode::StageNotFound,
+                format!("scene {scene_id} has no resolved stage"),
+            )
+        })?;
+        self.stages.get(stage_id).ok_or_else(|| {
+            ProtocolError::new(ErrorCode::StageNotFound, format!("no stage {stage_id}"))
+        })
     }
 
     pub fn stage_for_scene(&self, scene_id: &str) -> Result<StageDocument, ProtocolError> {

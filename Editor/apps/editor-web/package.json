@@ -11,6 +11,8 @@
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
+    "@grapix/adobe-client": "0.1.0",
+    "@grapix/adobe-common-schema": "0.1.0",
     "@grapix/animation-engine": "0.1.0",
     "@grapix/output-contracts": "0.1.0",
     "@grapix/render-protocol": "0.1.0",

@@ -86,14 +86,16 @@ GrapiX/
 │   │   └── desktop-electron/            @grapix/desktop-electron  fallback shell
 │   └── services/
 │       ├── project-api/                 @grapix/api-server        project/asset/package/publish service (port 4100)
-│       └── editor-mcp/                   @grapix/editor-mcp        MCP authoring surface (port 4150 over HTTP; else stdio)
+│       ├── editor-mcp/                   @grapix/editor-mcp        MCP authoring surface (port 4150 over HTTP; else stdio)
+│       ├── editor-assistant/             @grapix/editor-assistant  AI assistant broker (port 4160)
+│       └── adobe-mcp-gateway/            @grapix/adobe-mcp-gateway Adobe bridge gateway (port 4784)
 ├── Playout/                             @grapix/playout-workspace
 │   ├── apps/
 │   │   ├── playout-web/                 @grapix/playout-web       operator UI
 │   │   └── desktop-tauri/               @grapix/playout-desktop   shell: supervises engine + control, adopts if already up
 │   ├── services/playout-control/        @grapix/playout-control   library, take lists, operator commands, monitors (port 4300)
 │   └── tools/dev.mjs                                              one supervisor for web + control + engine
-├── Shared/                              @grapix/shared-workspace  13 contract packages (see §4)
+├── Shared/                              @grapix/shared-workspace  15 contract packages (see §4)
 ├── services/
 │   ├── render-engine/                   crate grapix-render-engine (bin) — protocol v3, tiles, virtual canvas, outputs (4400–4403)
 │   └── render-daemon/                   crate grapix-render-core (lib) — scene parse, mesh prep, text shaping, wgpu; v2 binary DELETED
@@ -120,7 +122,7 @@ preview and diagnostics.
 
 ## 4. Shared contracts — [Implemented]
 
-Thirteen application-neutral packages consumed by Editor, Playout and the Engine. None
+Fifteen application-neutral packages consumed by Editor, Playout and the Engine. None
 depends on an application (guarded).
 
 | Package | Role |
@@ -138,6 +140,8 @@ depends on an application (guarded).
 | `@grapix/render-shaders` | WGSL sources + `layouts.json` byte contract, blend ids, colour/alpha rules (the drift guard). |
 | `@grapix/render-protocol` | Protocol **v3** client + `EngineConnection`; the only engine client contract. |
 | `@grapix/sdk` (`grapix-sdk`) | Scene automation authoring contracts (`defineSceneScript`, `GrapixSequenceEngine`). |
+| `@grapix/adobe-common-schema` | The Adobe bridge wire protocol, the shared `AdobeImportDocument`, and the Photoshop/After Effects object models transcribed from Adobe's own SDKs. |
+| `@grapix/adobe-client` | Isomorphic client for the Adobe MCP gateway; runs in the Editor WebView and in Node tests. |
 
 The retired **protocol v2 TypeScript client** (`Shared/renderer-protocol`) was deleted; a
 dependency on any retired package fails `check:boundaries`.
@@ -174,7 +178,9 @@ flowchart TD
 | --- | --- |
 | 4100 | `Editor/services/project-api` (`@grapix/api-server`) |
 | 4150 | `Editor/services/editor-mcp` (HTTP mode; else stdio) |
+| 4160 | `Editor/services/editor-assistant` (AI assistant broker) |
 | 4300 | `Playout/services/playout-control` |
+| 4784 | `Editor/services/adobe-mcp-gateway` (Adobe bridge gateway; see [`adobe-integration.md`](adobe-integration.md)) |
 | 4400–4403 | `services/render-engine` and additional render nodes |
 | 5173 / 5174 | editor-web / playout-web (Vite) |
 | 4200 | **retired** — the protocol-v2 daemon, deleted 2026-07-29; nothing may bind it |

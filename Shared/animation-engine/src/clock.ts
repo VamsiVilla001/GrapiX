@@ -242,8 +242,14 @@ export class FrameClock {
 
   constructor(options: FrameClockOptions) {
     this.rate = normalizeFrameRate(options.rate);
-    this.startFrame = Math.max(0, Math.floor(options.startFrame ?? 0));
-    this.startNanos = options.startNanos ?? 0;
+    this.startFrame =
+      typeof options.startFrame === "number" && Number.isFinite(options.startFrame)
+        ? Math.max(0, Math.floor(options.startFrame))
+        : 0;
+    this.startNanos =
+      typeof options.startNanos === "number" && Number.isFinite(options.startNanos)
+        ? options.startNanos
+        : 0;
     this.currentFrame = this.startFrame;
   }
 
@@ -313,7 +319,7 @@ export class FrameClock {
 
   /** Jump to a frame, e.g. on a Cue or a scrub. Does not count as a drop. */
   seek(frame: number): void {
-    this.currentFrame = Math.max(0, Math.floor(frame));
+    this.currentFrame = Number.isFinite(frame) ? Math.max(0, Math.floor(frame)) : 0;
   }
 
   reset(): void {

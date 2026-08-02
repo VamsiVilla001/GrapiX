@@ -52,7 +52,7 @@ test("health reports the server, its tool count and its live session count", asy
   const health = await fetch(`http://127.0.0.1:${PORT}/health`).then((response) => response.json());
   assert.equal(health.ok, true);
   assert.equal(health.server, "grapix-editor-mcp-server");
-  assert.equal(health.tools, 53);
+  assert.equal(health.tools, 54);
   assert.equal(typeof health.sessions, "number");
 });
 
@@ -62,7 +62,7 @@ test("one HTTP session serves many calls in sequence", async () => {
 
   // Call 2 onwards is what the old implementation could not do.
   const tools = await client.listTools();
-  assert.equal(tools.tools.length, 53);
+  assert.equal(tools.tools.length, 54);
 
   const resources = await client.listResources();
   assert.ok(resources.resources.length > 0);
@@ -90,9 +90,9 @@ test("two clients hold independent concurrent sessions", async () => {
   const secondTools = await second.listTools();
   const firstAgain = await first.listTools();
 
-  assert.equal(firstTools.tools.length, 53);
-  assert.equal(secondTools.tools.length, 53);
-  assert.equal(firstAgain.tools.length, 53);
+  assert.equal(firstTools.tools.length, 54);
+  assert.equal(secondTools.tools.length, 54);
+  assert.equal(firstAgain.tools.length, 54);
 
   await first.close();
   await second.close();

@@ -146,3 +146,16 @@ test("frame sizes account for pixel format and row alignment", () => {
   assert.equal(odd % 256, 0);
   assert.ok(odd > 1_921 * 4 * 1_080);
 });
+
+test("invalid dimensions and frame rates are refused before an output is configured", () => {
+  assert.deepEqual(
+    validateOutputFormat(NULL_OUTPUT_DESCRIPTOR, format({ width: Infinity })).code,
+    "INVALID_OPTION"
+  );
+  assert.deepEqual(
+    validateOutputFormat(NULL_OUTPUT_DESCRIPTOR, format({ frameRate: { numerator: 0, denominator: 1 } })).code,
+    "FRAME_RATE_UNSUPPORTED"
+  );
+  assert.throws(() => frameByteSize(format({ height: NaN })), RangeError);
+  assert.throws(() => frameByteSize(format(), 0), RangeError);
+});

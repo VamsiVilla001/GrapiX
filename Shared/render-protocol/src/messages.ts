@@ -16,6 +16,14 @@ import type { EngineDiagnostics, EngineStatus } from "./diagnostics.js";
 import type { EngineErrorPayload, EngineRequestType } from "./envelope.js";
 import type { EngineState } from "./engine-state.js";
 
+/** Canonical scene address. Program accepts only `domain: "published"`. */
+export interface SceneRef {
+  projectId: string;
+  domain: "authoring" | "published";
+  sceneId: string;
+  revision: number;
+}
+
 /** Channels an engine renders independently. */
 export const ENGINE_CHANNELS = ["preview", "program", "auxiliary"] as const;
 export type EngineChannel = (typeof ENGINE_CHANNELS)[number];
@@ -390,6 +398,51 @@ export interface PreviewSetViewportPayload {
   source: PreviewSource;
 }
 
+// ---------------------------------------------------------------------------
+// Private Editor render view
+// ---------------------------------------------------------------------------
+
+export interface EditorViewBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface EditorViewRequestPayload {
+  sceneRef: SceneRef;
+  viewId: string;
+  /** Monotonic per view; a client discards a prior generation after resize/reconnect. */
+  viewGeneration: number;
+  bounds: EditorViewBounds;
+  pixelWidth: number;
+  pixelHeight: number;
+  frame?: number;
+  pick?: { x: number; y: number };
+}
+
+export interface EditorViewClosePayload {
+  viewId: string;
+  viewGeneration: number;
+}
+
+/** JSON metadata paired with one raw binary `bgra8-premultiplied` WebSocket message. */
+export interface EditorViewFrameMetadata {
+  viewId: string;
+  viewGeneration: number;
+  frameId: string;
+  sceneRef: SceneRef;
+  width: number;
+  height: number;
+  pixelFormat: "bgra8-premultiplied";
+  alphaMode: "premultiplied";
+  logicalBounds: EditorViewBounds;
+  camera: EditorViewBounds;
+  objectBounds: Array<{ objectId: string; x: number; y: number; width: number; height: number }>;
+  pickedObjectId: string | null;
+  frame: number;
+}
+
 export interface PreviewReplyPayload {
   channel: EngineChannel;
   streamId?: string;
@@ -666,6 +719,9 @@ export interface EnginePayloadMap {
   "preview.streamStop": PreviewStreamStopPayload;
   "preview.setViewport": PreviewSetViewportPayload;
 
+  "editor.view.request": EditorViewRequestPayload;
+  "editor.view.close": EditorViewClosePayload;
+
   "engine.getStatus": GetStatusPayload;
   "engine.getDiagnostics": GetDiagnosticsPayload;
   "engine.getCapabilities": CapabilitiesRequestPayload;
@@ -688,6 +744,7 @@ export interface EnginePayloadMap {
   "reply.scenePrepared": ScenePreparedReplyPayload;
   "reply.assetProgress": AssetProgressReplyPayload;
   "reply.preview": PreviewReplyPayload;
+  "reply.editorView": EditorViewFrameMetadata;
   "reply.outputs": OutputsReplyPayload;
 
   "event.engineState": EngineStateEventPayload;

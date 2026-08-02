@@ -27,7 +27,7 @@ import {
  * drift here is invisible until it is on air.
  */
 export function evaluateFrame(scene: SceneDocument, frame: number): SceneDocument {
-  return evaluateSceneAtFrame(scene, Math.max(0, Math.floor(frame)));
+  return evaluateSceneAtFrame(scene, Number.isFinite(frame) ? Math.max(0, Math.floor(frame)) : 0);
 }
 
 /** Properties that must match between renderers for state to be identical. */

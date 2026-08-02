@@ -30,6 +30,7 @@ use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, 
 use tokio_tungstenite::tungstenite::http::StatusCode;
 use tokio_tungstenite::tungstenite::Message;
 
+use crate::capabilities::ConnectionPrincipal;
 use crate::config::EngineConfig;
 use crate::engine::Engine;
 use crate::protocol::{self, now_ms, Envelope, ErrorCode, ProtocolError, RequestType};
@@ -156,10 +157,13 @@ async fn handle_connection(
         .peer_addr()
         .map(|address| address.to_string())
         .unwrap_or_else(|_| "unknown".to_string());
-
-    // Authentication happens in the handshake, so an unauthenticated client never
-    // reaches the message loop at all.
-    let mut authenticated = !security.auth_required;
+    // The WebSocket handshake is the authentication boundary. Hello may report a
+    // client role for diagnostics, but it can never alter this principal.
+    let mut principal = if security.auth_required {
+        ConnectionPrincipal::authenticated_playout(peer.clone())
+    } else {
+        ConnectionPrincipal::loopback_editor(peer.clone())
+    };
     let handshake_security = Arc::clone(&security);
     let peer_for_callback = peer.clone();
 
@@ -182,11 +186,6 @@ async fn handle_connection(
     let websocket = tokio_tungstenite::accept_hdr_async(stream, callback)
         .await
         .context("websocket handshake failed")?;
-
-    if security.auth_required {
-        // The handshake already verified the bearer subprotocol.
-        authenticated = true;
-    }
 
     let (mut sink, mut source) = websocket.split();
     let mut events = engine.lock().await.subscribe_events();
@@ -223,7 +222,7 @@ async fn handle_connection(
                             &engine,
                             &config,
                             &client_id,
-                            authenticated,
+                            &mut principal,
                             &mut inbound,
                             &mut dedupe,
                             &mut limiter,
@@ -259,6 +258,13 @@ async fn handle_connection(
                             if target != &client_id {
                                 continue;
                             }
+                        }
+                        if let Some(bytes) = event.binary {
+                            if sink.send(Message::Binary(bytes.into())).await.is_err() {
+                                break Ok(());
+                            }
+                            engine.lock().await.messages_sent += 1;
+                            continue;
                         }
                         let mut envelope = event.envelope;
                         outbound_sequence += 1;
@@ -307,7 +313,7 @@ pub(crate) async fn process_frame(
     engine: &Arc<Mutex<Engine>>,
     config: &EngineConfig,
     client_id: &str,
-    authenticated: bool,
+    principal: &mut ConnectionPrincipal,
     inbound: &mut SequenceTracker,
     dedupe: &mut MessageDeduplicator,
     limiter: &mut RateLimiter,
@@ -365,8 +371,32 @@ pub(crate) async fn process_frame(
         )];
     }
 
-    // 3. Authentication. Only the handshake works before a token is presented.
-    if !authenticated && !request.allowed_unauthenticated() {
+    // 3. IPC obtains its principal here; WebSocket obtains it in its authenticated
+    // handshake. The credential is verified before it can elevate a session.
+    if request == RequestType::Authenticate && config.auth.required && !principal.is_authenticated()
+    {
+        let presented = envelope
+            .payload
+            .get("token")
+            .and_then(serde_json::Value::as_str);
+        let expected = config.resolve_token().ok().flatten();
+        match (expected.as_deref(), presented) {
+            (Some(expected), Some(presented)) if tokens_match(expected, presented) => {
+                *principal = ConnectionPrincipal::authenticated_playout(client_id);
+            }
+            _ => {
+                return vec![make_error(
+                    ProtocolError::new(
+                        ErrorCode::Unauthenticated,
+                        "connection credential was rejected",
+                    ),
+                    request_id,
+                )];
+            }
+        }
+    }
+
+    if config.auth.required && !principal.is_authenticated() && !request.allowed_unauthenticated() {
         return vec![make_error(
             ProtocolError::new(
                 ErrorCode::Unauthenticated,
@@ -379,14 +409,18 @@ pub(crate) async fn process_frame(
         )];
     }
 
-    // 3b. Project scope.
+    // 3b. Project scope is part of SceneRef, never a separate mutable envelope
+    // field that could disagree with the runtime key.
     if !config.auth.allowed_projects.is_empty() {
-        if let Some(project_id) = &envelope.project_id {
-            if !config.auth.allowed_projects.contains(project_id) {
+        if let Some(scene_ref) = &envelope.scene_ref {
+            if !config.auth.allowed_projects.contains(&scene_ref.project_id) {
                 return vec![make_error(
                     ProtocolError::new(
                         ErrorCode::ProjectNotPermitted,
-                        format!("this engine does not serve project {project_id}"),
+                        format!(
+                            "this engine does not serve project {}",
+                            scene_ref.project_id
+                        ),
                     ),
                     request_id,
                 )];
@@ -469,7 +503,7 @@ pub(crate) async fn process_frame(
     // 6. Dispatch.
     let outcome = {
         let mut guard = engine.lock().await;
-        guard.handle(request, &envelope, client_id)
+        guard.handle(request, &envelope, principal)
     };
 
     match outcome {

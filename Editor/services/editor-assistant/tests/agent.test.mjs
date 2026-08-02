@@ -158,3 +158,52 @@ test("the session token budget refuses a new turn once exhausted", async () => {
   assert.ok(errors.length > errorsBefore, "the second turn is refused after the budget is exceeded");
   assert.match(errors.at(-1).message, /budget/i);
 });
+
+test("a provider failure is emitted and completes the turn without rejecting the HTTP caller", async () => {
+  const { events, emit } = collector();
+  const provider = {
+    id: "failing",
+    label: "Failing",
+    model: "test",
+    supportsTools: true,
+    async *chat() {
+      throw new Error("provider offline");
+    }
+  };
+  const agent = new Agent("s6", provider, fakeMcp(), config, "sys", emit);
+
+  await agent.send("hello");
+
+  assert.ok(events.some((event) => event.type === "error" && /provider offline/.test(event.message)));
+  assert.ok(events.some((event) => event.type === "done"));
+  assert.equal(agent.isRunning(), false);
+});
+
+test("a failed read tool becomes an error result and does not reject the turn", async () => {
+  const { events, emit } = collector();
+  const mcp = {
+    ...fakeMcp(),
+    callTool: async () => {
+      throw new Error("project API unavailable");
+    }
+  };
+  const agent = new Agent(
+    "s7",
+    scriptedProvider([
+      [
+        { type: "tool_use", id: "r1", name: "grapix_editor_list_objects", input: {} },
+        { type: "done", stopReason: "tool_use" }
+      ],
+      [{ type: "text", text: "I could not read the scene." }, { type: "done", stopReason: "end" }]
+    ]),
+    mcp,
+    config,
+    "sys",
+    emit
+  );
+
+  await agent.send("inspect");
+
+  assert.ok(events.some((event) => event.type === "tool-result" && event.isError && /unavailable/.test(event.text)));
+  assert.ok(events.some((event) => event.type === "done"));
+});

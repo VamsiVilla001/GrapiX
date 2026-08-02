@@ -19,6 +19,7 @@ import {
   isDropFrameRate,
   NANOS_PER_SECOND,
   rationalFromDecimal,
+  evaluateFrame,
   sceneStateFingerprint,
   secondsForFrames,
   timelineFrameRate,
@@ -343,6 +344,29 @@ test("playback finishes at the end when not looping", () => {
   assert.equal(playback.advance(1).frame, 1);
 });
 
+test("non-finite playback values cannot create an unbounded frame loop", () => {
+  const playback = new ScenePlayback({ durationFrames: 10 });
+  playback.cue();
+  playback.play();
+  assert.equal(playback.advance(Infinity).frame, 0);
+
+  const transition = new TransitionController();
+  transition.start({ transitionId: "invalid", phase: "in", durationFrames: Infinity });
+  assert.equal(transition.status.phase, "complete");
+});
+
+test("a frame clock rejects non-finite starting positions", () => {
+  const clock = new FrameClock({
+    rate: frameRatePreset("25"),
+    startFrame: Infinity,
+    startNanos: NaN
+  });
+  assert.equal(clock.frame, 0);
+  assert.equal(clock.deadlineFor(0), 0);
+  clock.seek(NaN);
+  assert.equal(clock.frame, 0);
+});
+
 test("loop wraps and ping-pong reverses", () => {
   const looping = new ScenePlayback({ durationFrames: 5, loop: "loop" });
   looping.cue();
@@ -609,6 +633,12 @@ test("evaluation is stable across repeated calls", () => {
   const result = verifyEvaluationStability(animatedScene(), [0, 10, 25, 50, 99], 5);
   assert.equal(result.stable, true);
   assert.deepEqual(result.unstableFrames, []);
+});
+
+test("non-finite frames normalize to the deterministic zero frame", () => {
+  const scene = animatedScene();
+  assert.deepEqual(evaluateFrame(scene, Infinity), evaluateFrame(scene, 0));
+  assert.deepEqual(evaluateFrame(scene, NaN), evaluateFrame(scene, 0));
 });
 
 test("fingerprint comparison reports objects present on only one side", () => {

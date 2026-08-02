@@ -33,7 +33,8 @@ import {
   type EngineStatus,
   type OutputsReplyPayload,
   type PreviewView,
-  type ResyncRequiredEventPayload
+  type ResyncRequiredEventPayload,
+  type SceneRef
 } from "@grapix/render-protocol";
 import type { AssetLibraryItem, SceneDocument } from "@grapix/shared-types";
 
@@ -46,6 +47,9 @@ import type { AssetLibraryItem, SceneDocument } from "@grapix/shared-types";
  * ~49 MB for a real PSD - and a cold Take that legitimately takes 20 s must not be
  * reported as a dead engine.
  */
+function publishedSceneRef(sceneId: string, revision = 0, projectId = "default"): SceneRef {
+  return { projectId, domain: "published", sceneId, revision };
+}
 const SCENE_LIFECYCLE_TIMEOUT_MS = 120_000;
 
 /** What the engine reports when a preview stream starts. */
@@ -361,7 +365,7 @@ export class PlayoutEngineController {
     await connection.request(
       "scene.load",
       { scene, ...(stageId ? { stageId } : {}), prepare: false },
-      { sceneId: scene.id, sceneRevision: scene.revision ?? 0, timeoutMs: SCENE_LIFECYCLE_TIMEOUT_MS }
+      { sceneRef: publishedSceneRef(scene.id, scene.revision ?? 0), timeoutMs: SCENE_LIFECYCLE_TIMEOUT_MS }
     );
   }
 
@@ -427,7 +431,7 @@ export class PlayoutEngineController {
     await connection.request(
       "scene.prepare",
       { sceneId, ...(viewportIds ? { viewportIds } : {}) },
-      { sceneId, timeoutMs: SCENE_LIFECYCLE_TIMEOUT_MS }
+      { sceneRef: publishedSceneRef(sceneId), timeoutMs: SCENE_LIFECYCLE_TIMEOUT_MS }
     );
   }
 
@@ -442,7 +446,7 @@ export class PlayoutEngineController {
     await connection.request(
       "playout.cue",
       { sceneId, sceneRevision, channel, ...(startFrame !== undefined ? { startFrame } : {}) },
-      { sceneId, sceneRevision }
+      { sceneRef: publishedSceneRef(sceneId, sceneRevision) }
     );
   }
 
@@ -486,7 +490,7 @@ export class PlayoutEngineController {
           ...(options.transitionId ? { transitionId: options.transitionId } : {}),
           ...(options.overrideUnprepared ? { overrideUnprepared: true } : {})
         },
-        { sceneId, sceneRevision, timeoutMs: SCENE_LIFECYCLE_TIMEOUT_MS }
+        { sceneRef: publishedSceneRef(sceneId, sceneRevision), timeoutMs: SCENE_LIFECYCLE_TIMEOUT_MS }
       );
       connection.markOnAir(`took ${sceneId} to program`);
       return { accepted: true, overridden: options.overrideUnprepared === true };
@@ -504,7 +508,7 @@ export class PlayoutEngineController {
     await connection.request(
       "playout.takeOffline",
       { sceneId, ...(transitionId ? { transitionId } : {}) },
-      { sceneId }
+      { sceneRef: publishedSceneRef(sceneId) }
     );
   }
 
@@ -519,7 +523,7 @@ export class PlayoutEngineController {
     await connection.request(
       "playout.continue",
       { sceneId, channel, ...(markerName ? { markerName } : {}) },
-      { sceneId }
+      { sceneRef: publishedSceneRef(sceneId) }
     );
   }
 
@@ -534,7 +538,7 @@ export class PlayoutEngineController {
     await connection.request(
       "playout.update",
       { sceneId, sceneRevision, data },
-      { sceneId, sceneRevision }
+      { sceneRef: publishedSceneRef(sceneId, sceneRevision) }
     );
   }
 
@@ -544,7 +548,7 @@ export class PlayoutEngineController {
     channel: EngineChannel = "program"
   ): Promise<void> {
     const connection = this.requireConnection(profileId);
-    await connection.request("playout.stop", { sceneId, channel }, { sceneId });
+    await connection.request("playout.stop", { sceneId, channel }, { sceneRef: publishedSceneRef(sceneId) });
   }
 
   async clear(
@@ -613,7 +617,7 @@ export class PlayoutEngineController {
         ...(options.interrupt ? { interrupt: true } : {}),
         ...(options.scope ? { scope: options.scope } : {})
       },
-      { sceneId }
+      { sceneRef: publishedSceneRef(sceneId) }
     );
   }
 
@@ -628,7 +632,7 @@ export class PlayoutEngineController {
     await connection.request(
       "scene.unload",
       { sceneId, ...(force ? { force: true } : {}) },
-      { sceneId }
+      { sceneRef: publishedSceneRef(sceneId) }
     );
   }
 
@@ -647,7 +651,7 @@ export class PlayoutEngineController {
     await connection.request(
       "scene.fullSync",
       { scene, reason },
-      { sceneId: scene.id, sceneRevision: scene.revision ?? 0 }
+      { sceneRef: publishedSceneRef(scene.id, scene.revision ?? 0) }
     );
   }
 

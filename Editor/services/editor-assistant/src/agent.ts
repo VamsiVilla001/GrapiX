@@ -106,7 +106,11 @@ export class Agent {
     this.messages.push({ role: "user", content: [{ type: "text", text: userText }] });
     this.iterations = 0;
     this.running = true;
-    await this.runLoop();
+    try {
+      await this.runLoop();
+    } catch (error) {
+      this.fail(error);
+    }
   }
 
   /** Apply a staged mutating tool call: execute it through MCP and record its result. */
@@ -115,9 +119,21 @@ export class Agent {
     if (!call || call.status !== "pending") return;
     call.status = "applied";
     this.emit({ type: "tool-executing", id: call.id, name: call.name, input: call.input, read: false });
-    const result = await this.mcp.callTool(call.name, call.input);
-    this.recordResult(call.id, call.name, result);
-    await this.continueIfReady();
+    try {
+      const result = await this.mcp.callTool(call.name, call.input);
+      this.recordResult(call.id, call.name, result);
+      await this.continueIfReady();
+    } catch (error) {
+      this.recordResult(call.id, call.name, {
+        text: `Tool execution failed: ${errorMessage(error)}`,
+        isError: true
+      });
+      try {
+        await this.continueIfReady();
+      } catch (continueError) {
+        this.fail(continueError);
+      }
+    }
   }
 
   /** Skip a staged mutating tool call: tell the model it was declined and continue. */
@@ -129,7 +145,11 @@ export class Agent {
       text: "The operator skipped this action; it was not performed. Do not retry it without being asked.",
       isError: false
     });
-    await this.continueIfReady();
+    try {
+      await this.continueIfReady();
+    } catch (error) {
+      this.fail(error);
+    }
   }
 
   pendingStaged(): StagedCall[] {
@@ -168,8 +188,15 @@ export class Agent {
         const read = tool ? isReadTool(tool) : false;
         if (read) {
           this.emit({ type: "tool-executing", id: call.id, name: call.name, input: call.input, read: true });
-          const result = await this.mcp.callTool(call.name, call.input);
-          this.recordResult(call.id, call.name, result);
+          try {
+            const result = await this.mcp.callTool(call.name, call.input);
+            this.recordResult(call.id, call.name, result);
+          } catch (error) {
+            this.recordResult(call.id, call.name, {
+              text: `Tool execution failed: ${errorMessage(error)}`,
+              isError: true
+            });
+          }
         } else if (!this.results.has(call.id)) {
           const staged: StagedCall = { id: call.id, name: call.name, input: call.input, status: "pending" };
           this.staged.set(call.id, staged);
@@ -221,19 +248,24 @@ export class Agent {
     const toolUses: ToolUseBlock[] = [];
     let failed = false;
 
-    for await (const event of this.provider.chat({ system: this.system, messages: this.messages, tools })) {
-      if (event.type === "text") {
-        text += event.text;
-        this.emit({ type: "text", text: event.text });
-      } else if (event.type === "tool_use") {
-        toolUses.push({ type: "tool_use", id: event.id, name: event.name, input: event.input });
-      } else if (event.type === "usage") {
-        this.tokensUsed += event.inputTokens + event.outputTokens;
-        this.emit({ type: "usage", inputTokens: event.inputTokens, outputTokens: event.outputTokens });
-      } else if (event.type === "error") {
-        this.emit({ type: "error", message: event.message });
-        failed = true;
+    try {
+      for await (const event of this.provider.chat({ system: this.system, messages: this.messages, tools })) {
+        if (event.type === "text") {
+          text += event.text;
+          this.emit({ type: "text", text: event.text });
+        } else if (event.type === "tool_use") {
+          toolUses.push({ type: "tool_use", id: event.id, name: event.name, input: event.input });
+        } else if (event.type === "usage") {
+          this.tokensUsed += event.inputTokens + event.outputTokens;
+          this.emit({ type: "usage", inputTokens: event.inputTokens, outputTokens: event.outputTokens });
+        } else if (event.type === "error") {
+          this.emit({ type: "error", message: event.message });
+          failed = true;
+        }
       }
+    } catch (error) {
+      this.emit({ type: "error", message: `Model request failed: ${errorMessage(error)}` });
+      return "error";
     }
 
     if (failed) return "error";
@@ -254,6 +286,11 @@ export class Agent {
     this.emit({ type: "done" });
   }
 
+  private fail(error: unknown): void {
+    this.emit({ type: "error", message: `Assistant turn failed: ${errorMessage(error)}` });
+    this.finish();
+  }
+
   private availableTools(): ToolSpec[] {
     return this.mcp.listToolInfo().map((tool) => ({
       name: tool.name,
@@ -265,4 +302,8 @@ export class Agent {
   private toolByName(name: string): McpToolInfo | undefined {
     return this.mcp.listToolInfo().find((tool) => tool.name === name);
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

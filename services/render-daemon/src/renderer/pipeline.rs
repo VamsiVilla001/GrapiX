@@ -64,6 +64,9 @@ pub struct QuadPipeline {
     blend_pipelines: [wgpu::RenderPipeline; BLEND_PIPELINE_COUNT],
     bind_group: wgpu::BindGroup,
     uniform_buffer: wgpu::Buffer,
+    /// Reused dynamic-uniform upload slab. Its capacity is fixed to the
+    /// per-frame quad ceiling, so `upload` performs no render-tick allocation.
+    staging: Vec<u8>,
     /// Byte stride between quad uniform slots; QUAD_UNIFORMS_SIZE rounded up
     /// to the device's min_uniform_buffer_offset_alignment (dynamic offsets).
     stride: u32,
@@ -255,6 +258,7 @@ impl QuadPipeline {
             blend_pipelines,
             bind_group,
             uniform_buffer,
+            staging: vec![0; stride as usize * MAX_QUADS_PER_FRAME],
             stride,
         }
     }
@@ -263,7 +267,9 @@ impl QuadPipeline {
     /// (matching the editor, which draws the background as scene content),
     /// then every prepared rect in render order.
     pub fn build_frame_quads(scene: &PreparedScene) -> Vec<QuadUniforms> {
-        Self::build_frame_quads_from(scene, &scene.rects)
+        let mut quads = Vec::with_capacity(MAX_QUADS_PER_FRAME);
+        Self::build_frame_quads_into(scene, &scene.rects, &mut quads);
+        quads
     }
 
     /// Same, but from an explicit rect list rather than the scene's own.
@@ -274,33 +280,40 @@ impl QuadPipeline {
     /// render. The scene is still the source for the canvas and background.
     ///
     /// Order is the caller's: it must pass rects in prepared render order.
-    pub fn build_frame_quads_from(
+    pub fn build_frame_quads_into(
         scene: &PreparedScene,
         rects: &[PreparedRect],
-    ) -> Vec<QuadUniforms> {
+        quads: &mut Vec<QuadUniforms>,
+    ) -> usize {
+        let required = rects.len().saturating_add(1);
+        quads.clear();
         let projection = scene_projection(scene.canvas_width, scene.canvas_height);
-        let mut quads = Vec::with_capacity(rects.len() + 1);
 
-        quads.push(quad_uniforms(
-            projection,
-            0.0,
-            0.0,
-            scene.canvas_width,
-            scene.canvas_height,
-            0.0,
-            1.0,
-            1.0,
-            0.0,
-            0.0,
-            QuadStyle {
-                fill_linear_premultiplied: scene.background_linear_premultiplied,
-                blend_mode: 0,
-                primitive_kind: 0,
-                gradient: scene.background_gradient,
-            },
-        ));
+        if quads.len() < quads.capacity() {
+            quads.push(quad_uniforms(
+                projection,
+                0.0,
+                0.0,
+                scene.canvas_width,
+                scene.canvas_height,
+                0.0,
+                1.0,
+                1.0,
+                0.0,
+                0.0,
+                QuadStyle {
+                    fill_linear_premultiplied: scene.background_linear_premultiplied,
+                    blend_mode: 0,
+                    primitive_kind: 0,
+                    gradient: scene.background_gradient,
+                },
+            ));
+        }
 
         for rect in rects {
+            if quads.len() == quads.capacity() {
+                break;
+            }
             quads.push(quad_uniforms(
                 projection,
                 rect.x,
@@ -320,20 +333,19 @@ impl QuadPipeline {
                 },
             ));
         }
-
-        quads
+        required
     }
 
     /// Upload quads into the dynamic-offset uniform buffer.
-    pub fn upload(&self, queue: &wgpu::Queue, quads: &[QuadUniforms]) {
-        let mut staging = vec![0u8; quads.len() * self.stride as usize];
-
+    pub fn upload(&mut self, queue: &wgpu::Queue, quads: &[QuadUniforms]) {
+        let byte_count = quads.len() * self.stride as usize;
+        debug_assert!(byte_count <= self.staging.len());
+        let staging = &mut self.staging[..byte_count];
         for (index, quad) in quads.iter().enumerate() {
             let offset = index * self.stride as usize;
             staging[offset..offset + QUAD_UNIFORMS_SIZE].copy_from_slice(bytemuck::bytes_of(quad));
         }
-
-        queue.write_buffer(&self.uniform_buffer, 0, &staging);
+        queue.write_buffer(&self.uniform_buffer, 0, staging);
     }
 
     /// Record one draw per quad. `upload` must have been called for this frame.

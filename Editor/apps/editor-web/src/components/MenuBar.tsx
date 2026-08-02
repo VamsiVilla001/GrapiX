@@ -10,6 +10,7 @@ import { ProjectViewportDialog } from "./ProjectViewportDialog";
 import { ImportDesignDialog } from "./ImportDesignDialog";
 import { OpenSceneDialog } from "./OpenSceneDialog";
 import { PublishToPlayoutDialog } from "./PublishToPlayoutDialog";
+import { AdobeIntegrationsDialog } from "./AdobeIntegrationsDialog";
 
 interface MenuItem {
   label?: string;
@@ -37,6 +38,7 @@ export function MenuBar() {
   const [designImportOpen, setDesignImportOpen] = useState(false);
   const [openSceneOpen, setOpenSceneOpen] = useState(false);
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
+  const [adobeIntegrationsOpen, setAdobeIntegrationsOpen] = useState(false);
   const barRef = useRef<HTMLDivElement>(null);
 
   const scene = useEditorStore((state) => state.scene);
@@ -146,6 +148,7 @@ export function MenuBar() {
       label: "File",
       items: [
         { label: "Project Settings…", onSelect: () => setProjectSettingsOpen(true) },
+        { label: "Integrations · Adobe…", onSelect: () => setAdobeIntegrationsOpen(true) },
         { separator: true },
         { label: "New Scene…", onSelect: newScene },
         { label: "Open Scene…", onSelect: () => setOpenSceneOpen(true) },
@@ -202,6 +205,7 @@ export function MenuBar() {
       label: "Project",
       items: [
         { label: "Project Settings…", onSelect: () => setProjectSettingsOpen(true) },
+        { label: "Integrations · Adobe…", onSelect: () => setAdobeIntegrationsOpen(true) },
         { separator: true },
         { label: "New Scene…", onSelect: newScene },
         { label: "Import PSD, AI or Figma…", onSelect: () => setDesignImportOpen(true) },
@@ -281,6 +285,7 @@ export function MenuBar() {
     {designImportOpen ? <ImportDesignDialog onClose={() => setDesignImportOpen(false)} /> : null}
     {openSceneOpen ? <OpenSceneDialog onClose={() => setOpenSceneOpen(false)} /> : null}
     {publishDialogOpen ? <PublishToPlayoutDialog onClose={() => setPublishDialogOpen(false)} /> : null}
+    {adobeIntegrationsOpen ? <AdobeIntegrationsDialog onClose={() => setAdobeIntegrationsOpen(false)} /> : null}
     </>
   );
 }

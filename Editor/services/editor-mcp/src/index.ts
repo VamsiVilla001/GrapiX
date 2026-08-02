@@ -94,26 +94,35 @@ async function runHttp(config: EditorMcpConfig): Promise<void> {
   const sessions = new Map<string, StreamableHTTPServerTransport>();
 
   const httpServer = createServer((request: IncomingMessage, response: ServerResponse) => {
-    void handleRequest(request, response);
+    void handleRequest(request, response).catch((error: unknown) => {
+      log(`request failed before a response was created: ${error instanceof Error ? error.message : String(error)}`);
+      if (!response.headersSent) {
+        response.writeHead(400, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: "Invalid HTTP request" }));
+      } else {
+        response.destroy();
+      }
+    });
   });
 
   async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
+    try {
+      const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
 
-    if (url.pathname === "/health") {
-      response.writeHead(200, { "content-type": "application/json" });
-      response.end(
-        JSON.stringify({
-          ok: true,
-          server: SERVER_NAME,
-          version: SERVER_VERSION,
-          tools: registeredTools.length,
-          sessions: sessions.size,
-          readOnly: config.readOnly
-        })
-      );
-      return;
-    }
+      if (url.pathname === "/health") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            ok: true,
+            server: SERVER_NAME,
+            version: SERVER_VERSION,
+            tools: registeredTools.length,
+            sessions: sessions.size,
+            readOnly: config.readOnly
+          })
+        );
+        return;
+      }
 
     if (url.pathname !== "/mcp") {
       response.writeHead(404, { "content-type": "application/json" });
@@ -124,7 +133,6 @@ async function runHttp(config: EditorMcpConfig): Promise<void> {
     const header = request.headers["mcp-session-id"];
     const sessionId = Array.isArray(header) ? header[0] : header;
 
-    try {
       if (request.method === "POST") {
         const body = await readBody(request);
         const existing = sessionId ? sessions.get(sessionId) : undefined;
@@ -156,7 +164,9 @@ async function runHttp(config: EditorMcpConfig): Promise<void> {
         });
         transport.onclose = () => {
           if (transport.sessionId) sessions.delete(transport.sessionId);
-          void built.server.close();
+          void built.server.close().catch((error: unknown) => {
+            log(`failed to close MCP session server: ${error instanceof Error ? error.message : String(error)}`);
+          });
         };
         await built.server.connect(transport);
         await transport.handleRequest(request, response, body);

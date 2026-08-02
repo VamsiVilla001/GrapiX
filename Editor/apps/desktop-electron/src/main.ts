@@ -68,13 +68,20 @@ app.on("second-instance", () => {
   mainWindow.focus();
 });
 
-app.whenReady().then(async () => {
-  registerEditorProtocol();
-  installApplicationMenu();
-  await startLocalApi();
-  void startLocalAssistant();
-  createMainWindow();
-});
+void app.whenReady()
+  .then(async () => {
+    registerEditorProtocol();
+    installApplicationMenu();
+    await startLocalApi();
+    void startLocalAssistant().catch((error: unknown) => {
+      console.error(`[grapix-assistant] failed to start: ${errorMessage(error)}`);
+    });
+    createMainWindow();
+  })
+  .catch((error: unknown) => {
+    console.error(`[grapix] failed to start: ${errorMessage(error)}`);
+    app.exit(1);
+  });
 
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) {
@@ -114,8 +121,16 @@ function createMainWindow(): void {
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
-
+    try {
+      const target = new URL(url);
+      if (target.protocol === "https:" || target.protocol === "http:") {
+        void shell.openExternal(target.toString()).catch((error: unknown) => {
+          console.error(`[grapix-window] failed to open external URL: ${errorMessage(error)}`);
+        });
+      }
+    } catch {
+      // Reject malformed navigation targets.
+    }
     return { action: "deny" };
   });
   mainWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
@@ -139,11 +154,12 @@ function createMainWindow(): void {
 
   const editorDevUrl = process.env.GRAPIX_EDITOR_URL;
 
-  if (editorDevUrl) {
-    void mainWindow.loadURL(editorDevUrl);
-  } else {
-    void mainWindow.loadURL("grapix://editor/index.html");
-  }
+  const load = editorDevUrl
+    ? mainWindow.loadURL(editorDevUrl)
+    : mainWindow.loadURL("grapix://editor/index.html");
+  void load.catch((error: unknown) => {
+    console.error(`[grapix-window] failed to load editor: ${errorMessage(error)}`);
+  });
 
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -152,15 +168,20 @@ function createMainWindow(): void {
 
 function registerEditorProtocol(): void {
   protocol.handle("grapix", (request) => {
-    const url = new URL(request.url);
-    const requestedPath = decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname);
-    const filePath = path.normalize(path.join(editorDistPath, requestedPath));
+    try {
+      const url = new URL(request.url);
+      const requestedPath = decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname);
+      const filePath = path.resolve(editorDistPath, `.${requestedPath}`);
+      const relativePath = path.relative(editorDistPath, filePath);
 
-    if (!filePath.startsWith(editorDistPath)) {
-      return new Response("Forbidden", { status: 403 });
+      if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+        return new Response("Forbidden", { status: 403 });
+      }
+
+      return net.fetch(pathToFileURL(filePath).toString());
+    } catch {
+      return new Response("Bad request", { status: 400 });
     }
-
-    return net.fetch(pathToFileURL(filePath).toString());
   });
 }
 
@@ -181,7 +202,11 @@ async function startLocalApi(): Promise<void> {
 }
 
 function stopLocalApi(): void {
-  void apiServer?.close();
+  if (apiServer) {
+    void apiServer.close().catch((error: unknown) => {
+      console.error(`[grapix-api] failed to stop cleanly: ${errorMessage(error)}`);
+    });
+  }
   apiServer = null;
 }
 
@@ -224,10 +249,11 @@ async function waitForApi(): Promise<void> {
       return;
     }
 
-    await new Promise((resolve) => {
-      setTimeout(resolve, 200);
-    });
+    const delay = Promise.withResolvers<void>();
+    setTimeout(delay.resolve, 200);
+    await delay.promise;
   }
+  throw new Error("project API did not become healthy within 5 seconds");
 }
 
 async function isApiOnline(): Promise<boolean> {
@@ -285,4 +311,8 @@ function installApplicationMenu(): void {
   ]);
 
   Menu.setApplicationMenu(menu);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

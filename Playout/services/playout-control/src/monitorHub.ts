@@ -176,6 +176,8 @@ export class MonitorHub {
   private readonly now: () => number;
   private readonly channels = new Map<string, ChannelState>();
   private detachEvents: (() => void) | null = null;
+  private closed = false;
+
 
   constructor(engine: PlayoutEngineController, options: MonitorHubOptions) {
     this.engine = engine;
@@ -198,6 +200,8 @@ export class MonitorHub {
    * individual connections, so frames arrive whenever an engine appears.
    */
   start(): void {
+    if (this.closed) return;
+
     if (this.detachEvents) return;
     this.detachEvents = this.engine.onEngineEvent((event) => {
       if (event.type === "engine-event" && event.eventType === "event.previewFrame") {
@@ -226,13 +230,26 @@ export class MonitorHub {
 
   /** Stop every stream and detach. */
   async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
     this.detachEvents?.();
     this.detachEvents = null;
-    for (const state of this.channels.values()) this.clearRetry(state);
-    const running = [...this.channels.values()].filter((state) => state.started);
+    const states = [...this.channels.values()];
+    for (const state of states) {
+      this.clearRetry(state);
+      // An in-flight stream start checks this before marking itself active. Without
+      // clearing listeners here, close could return and a late acknowledgement would
+      // leave a GPU stream running after the hub is gone.
+      state.listeners.clear();
+    }
     this.channels.clear();
     await Promise.all(
-      running.map((state) => this.engine.stopPreviewStream(this.options.profileId, state.streamId))
+      states.map(async (state) => {
+        await state.starting?.catch(() => undefined);
+        if (!state.started) return;
+        state.started = false;
+        await this.engine.stopPreviewStream(this.options.profileId, state.streamId);
+      })
     );
   }
 
@@ -249,6 +266,10 @@ export class MonitorHub {
     listener: FrameListener,
     tier: MonitorStreamTier = "confidence"
   ): () => void {
+    if (this.closed) {
+      throw new Error("monitor hub is closed");
+    }
+
     const state = this.channelState(channel, view, tier);
     state.listeners.add(listener);
     // Fire-and-forget: an HTTP response must not wait on the GPU, and a failure to start
@@ -352,6 +373,8 @@ export class MonitorHub {
     view: PreviewView,
     tier: MonitorStreamTier
   ): Promise<void> {
+    if (this.closed) return;
+
     const state = this.channelState(channel, view, tier);
     if (state.started) return;
     if (state.starting) return state.starting;
@@ -409,6 +432,8 @@ export class MonitorHub {
     view: PreviewView,
     tier: MonitorStreamTier
   ): void {
+    if (this.closed) return;
+
     const state = this.channelState(channel, view, tier);
     if (state.retryTimer || state.listeners.size === 0) return;
     const timer = setTimeout(() => {
@@ -476,6 +501,8 @@ export class MonitorHub {
   }
 
   private handleEngineLoss(reason: string): void {
+    if (this.closed) return;
+
     for (const state of this.channels.values()) {
       state.started = false;
       state.lastFrameAtMs = null;
@@ -522,6 +549,18 @@ export class MonitorHub {
     state.started = true;
     state.lastError = null;
 
-    for (const listener of state.listeners) listener(frame);
+    for (const listener of state.listeners) {
+      try {
+        listener(frame);
+      } catch (error) {
+        // A broken HTTP/SSE client must not break the engine event dispatch for
+        // every other monitor attached to this surface.
+        console.warn(
+          `[monitors] ${state.channel}/${state.view}/${state.tier}: frame listener failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
+    }
   }
 }

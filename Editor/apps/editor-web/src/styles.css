@@ -7620,3 +7620,148 @@ h3 {
 @keyframes assistant-spin {
   to { transform: rotate(360deg); }
 }
+
+/* ---------------------------------------------------------------------------
+   Integrations · Adobe dialog
+
+   Every row answers "is it actually reachable right now", so state colour comes
+   from the gateway's own report rather than from whether a bridge is configured.
+   --------------------------------------------------------------------------- */
+.adobe-integrations-dialog {
+  width: min(760px, 92vw);
+}
+.adobe-gateway-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.adobe-gateway-meta {
+  font-size: 11px;
+  opacity: 0.7;
+}
+.adobe-gateway-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+.adobe-state {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: capitalize;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+.adobe-state-connected {
+  color: #79d99b;
+  border-color: rgba(121, 217, 155, 0.4);
+  background: rgba(121, 217, 155, 0.12);
+}
+.adobe-state-connecting {
+  color: #ffd479;
+  border-color: rgba(255, 212, 121, 0.4);
+  background: rgba(255, 212, 121, 0.12);
+}
+.adobe-state-disconnected {
+  color: rgba(255, 255, 255, 0.6);
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+}
+.adobe-state-error {
+  color: #ff8f8f;
+  border-color: rgba(255, 143, 143, 0.4);
+  background: rgba(255, 143, 143, 0.12);
+}
+.adobe-approval-row label {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 212, 121, 0.24);
+  border-radius: 8px;
+  background: rgba(255, 212, 121, 0.06);
+}
+.adobe-approval-row small {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  opacity: 0.72;
+}
+.adobe-application-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 10px;
+}
+.adobe-application {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.adobe-application.is-connected {
+  border-color: rgba(121, 217, 155, 0.3);
+}
+.adobe-application > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.adobe-application dl {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+.adobe-application dl > div {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 8px;
+  font-size: 11px;
+}
+.adobe-application dt {
+  opacity: 0.6;
+}
+.adobe-application dd {
+  margin: 0;
+}
+.adobe-application > footer {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+}
+.adobe-log-view {
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: #16181d;
+}
+.adobe-log-view ol {
+  margin: 0;
+  padding: 6px 8px;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+  font-family: var(--mono-font, ui-monospace, monospace);
+  font-size: 11px;
+}
+.adobe-log-view li {
+  display: grid;
+  grid-template-columns: 74px 96px 1fr;
+  gap: 8px;
+}
+.adobe-log-view time,
+.adobe-log-source {
+  opacity: 0.55;
+}
+.adobe-log-warn {
+  color: #ffd479;
+}
+.adobe-log-error {
+  color: #ff8f8f;
+}

@@ -29,7 +29,8 @@ import type {
   AckPayload,
   EnginePayloadMap,
   HelloReplyPayload,
-  ResyncRequiredEventPayload
+  ResyncRequiredEventPayload,
+  SceneRef
 } from "./messages.js";
 import {
   DEFAULT_HEARTBEAT,
@@ -67,6 +68,8 @@ export interface EngineTransport {
   send(frame: string): void;
   close(reason: string): void;
   onFrame(handler: (frame: string) => void): void;
+  /** Optional raw binary side-channel for private native Editor frames. */
+  onBinaryFrame?(handler: (frame: Uint8Array) => void): void;
   onClose(handler: (reason: string) => void): void;
   onError(handler: (error: Error) => void): void;
 }
@@ -100,6 +103,7 @@ export interface PendingRequest {
   requestId: string;
   type: EngineRequestType;
   messageId: string;
+  sceneRef: SceneRef | null;
   sentAtMs: number;
   attempts: number;
   requiresAck: boolean;
@@ -110,6 +114,7 @@ export type EngineConnectionEvent =
   | { type: "hello"; payload: HelloReplyPayload }
   | { type: "capabilities"; capabilities: EngineCapabilities }
   | { type: "message"; message: EngineMessage<unknown> }
+  | { type: "binary-frame"; data: Uint8Array }
   | { type: "engine-event"; eventType: EngineEventType; message: EngineMessage<unknown> }
   | { type: "resync-required"; payload: ResyncRequiredEventPayload }
   | { type: "protocol-error"; code: string; errors: string[] }
@@ -119,8 +124,7 @@ export type EngineConnectionEvent =
 export type EngineConnectionListener = (event: EngineConnectionEvent) => void;
 
 export interface RequestOptions {
-  sceneId?: string | null;
-  sceneRevision?: number | null;
+  sceneRef?: SceneRef | null;
   /** Override the per-type default. */
   requiresAck?: boolean;
   /** Wait for a correlated reply rather than fire-and-forget. */
@@ -210,6 +214,7 @@ export class EngineConnection {
     this.heartbeat = new HeartbeatMonitor(options.heartbeat ?? DEFAULT_HEARTBEAT, this.now());
 
     this.transport.onFrame((frame) => this.handleFrame(frame));
+    this.transport.onBinaryFrame?.((frame) => this.emit({ type: "binary-frame", data: frame }));
     this.transport.onClose((reason) => this.handleClose(reason));
     this.transport.onError((error) => this.handleError(error));
   }
@@ -362,9 +367,7 @@ export class EngineConnection {
       direction: "client-to-engine",
       requestId,
       engineId: this.engineId,
-      projectId: this.options.projectId ?? null,
-      sceneId: options.sceneId ?? null,
-      sceneRevision: options.sceneRevision ?? null,
+      sceneRef: options.sceneRef ?? null,
       requiresAck
     });
 
@@ -376,6 +379,7 @@ export class EngineConnection {
         requestId,
         type,
         messageId: message.messageId,
+        sceneRef: message.sceneRef,
         sentAtMs: message.timestampMs,
         attempts: 1,
         requiresAck
@@ -466,7 +470,7 @@ export class EngineConnection {
       direction: "client-to-engine",
       requestId,
       engineId: this.engineId,
-      projectId: this.options.projectId ?? null,
+      sceneRef: entry.sceneRef,
       requiresAck: true
     });
 
@@ -576,6 +580,7 @@ export class EngineConnection {
     switch (message.type) {
       case "reply.error": {
         const payload = message.payload as EngineErrorPayload;
+        if (message.requestId) this.pending.delete(message.requestId);
         this.settle(message.requestId, new Error(`${payload.code}: ${payload.message}`));
         if (payload.requiresFullSync) {
           this.transition("synchronising", `engine requested resync: ${payload.message}`);

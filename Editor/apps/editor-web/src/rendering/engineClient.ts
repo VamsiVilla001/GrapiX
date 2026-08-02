@@ -26,6 +26,9 @@ import {
   type EngineProfile,
   type EngineRecord,
   type EngineState,
+  type EditorViewFrameMetadata,
+  type EditorViewRequestPayload,
+  type SceneRef,
   type PreviewReplyPayload,
   type SceneRequirements,
   type StageRequirements
@@ -38,6 +41,7 @@ import {
   type StageDocument
 } from "@grapix/stage-model";
 
+import { decodeNativeEditorFrame, type NativeEditorFrame } from "./NativeEditorRenderView";
 export const EDITOR_CLIENT_VERSION = "0.2.0";
 
 export interface EditorEngineClientOptions {
@@ -377,7 +381,7 @@ export class EditorEngineClient {
         ...(stage ? { stageId: stage.stageId } : {}),
         prepare: true
       },
-      { sceneId: sanitized.id, sceneRevision: sanitized.revision ?? 0 }
+      { sceneRef: this.authoringSceneRef(sanitized.id, sanitized.revision ?? 0) }
     );
   }
 
@@ -495,11 +499,10 @@ export class EditorEngineClient {
     patch: ScenePatch
   ): Promise<{ revision: number; objectsTouched: string[]; wholeSceneInvalidated: boolean }> {
     const connection = this.requireConnection(profileId);
-
     const reply = await connection.request(
       "scene.applyPatch",
       { patch: { ...patch, timestampMs: patch.timestampMs || Date.now() } },
-      { sceneId: patch.sceneId, sceneRevision: patch.baseRevision }
+      { sceneRef: this.authoringSceneRef(patch.sceneId, patch.baseRevision) }
     );
 
     const payload = reply.payload as {
@@ -532,7 +535,7 @@ export class EditorEngineClient {
     await connection.request(
       "scene.fullSync",
       { scene: sanitized, reason },
-      { sceneId: sanitized.id, sceneRevision: sanitized.revision ?? 0 }
+      { sceneRef: this.authoringSceneRef(sanitized.id, sanitized.revision ?? 0) }
     );
   }
 
@@ -582,6 +585,78 @@ export class EditorEngineClient {
     });
 
     return reply.payload as PreviewReplyPayload;
+  }
+
+  /**
+   * Request an Engine-owned private authoring frame. The raw alpha frame is
+   * paired by `frameId`, never arrival order, so a reconnect cannot paint stale
+   * pixels over a resized Editor view.
+   */
+  async requestNativeEditorView(
+    profileId: string,
+    request: EditorViewRequestPayload
+  ): Promise<NativeEditorFrame> {
+    const connection = this.requireConnection(profileId);
+    const earlyFrames = new Map<string, NativeEditorFrame>();
+    let expected: EditorViewFrameMetadata | null = null;
+
+    return new Promise<NativeEditorFrame>((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        unsubscribe();
+        reject(new Error("timed out waiting for native Editor render frame"));
+      }, 15_000);
+      const finish = (frame: NativeEditorFrame) => {
+        window.clearTimeout(timer);
+        unsubscribe();
+        resolve(frame);
+      };
+      const accept = (frame: NativeEditorFrame) => {
+        if (
+          expected
+          && frame.metadata.frameId === expected.frameId
+          && frame.metadata.viewGeneration === request.viewGeneration
+        ) {
+          finish(frame);
+          return;
+        }
+        earlyFrames.set(frame.metadata.frameId, frame);
+      };
+      const unsubscribe = connection.on((event) => {
+        if (event.type !== "binary-frame") return;
+        try {
+          accept(decodeNativeEditorFrame(event.data));
+        } catch (error) {
+          window.clearTimeout(timer);
+          unsubscribe();
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      });
+
+      void connection
+        .request("editor.view.request", request, { sceneRef: request.sceneRef })
+        .then((reply) => {
+          expected = reply.payload as EditorViewFrameMetadata;
+          if (expected.viewGeneration !== request.viewGeneration) {
+            throw new Error("engine returned a native Editor frame for a different view generation");
+          }
+          const buffered = earlyFrames.get(expected.frameId);
+          if (buffered) finish(buffered);
+        })
+        .catch((error: unknown) => {
+          window.clearTimeout(timer);
+          unsubscribe();
+          reject(error instanceof Error ? error : new Error(String(error)));
+        });
+    });
+  }
+
+  async closeNativeEditorView(
+    profileId: string,
+    viewId: string,
+    viewGeneration: number
+  ): Promise<void> {
+    const connection = this.requireConnection(profileId);
+    await connection.request("editor.view.close", { viewId, viewGeneration });
   }
 
   /**
@@ -729,6 +804,15 @@ export class EditorEngineClient {
       throw new Error(`engine ${profileId} is not connected`);
     }
     return connection;
+  }
+
+  private authoringSceneRef(sceneId: string, revision: number): SceneRef {
+    return {
+      projectId: this.options.projectId ?? "editor-local",
+      domain: "authoring",
+      sceneId,
+      revision
+    };
   }
 
   private emit(): void {

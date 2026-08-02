@@ -110,10 +110,10 @@ export function App() {
   const handleRefresh = useCallback(async () => {
     try {
       await playoutApi.syncFromEditor();
-    } catch {
-      // Editor offline is ignored during routine refresh
+      await refreshLibrary();
+    } catch (error) {
+      setError(errorMessage(error));
     }
-    await refreshLibrary();
   }, [refreshLibrary]);
 
   const refreshStatus = useCallback(async () => {
@@ -171,8 +171,12 @@ export function App() {
     // stream drops, this degrades to the previous behaviour instead of freezing.
     const detachEvents = subscribeToPlayoutEvents(
       (kind) => {
-        if (kind === "library.changed") void refreshLibrary();
-        if (kind === "sequence.changed") void refreshTakeList();
+        if (kind === "library.changed") {
+          void refreshLibrary().catch((error: unknown) => setError(errorMessage(error)));
+        }
+        if (kind === "sequence.changed") {
+          void refreshTakeList().catch((error: unknown) => setError(errorMessage(error)));
+        }
         if (kind === "runtime.changed") void refreshStatus();
       },
       setLiveLink

@@ -22,6 +22,138 @@ pub const SUPPORTED_SCENE_DOCUMENT_VERSIONS: &[u32] = &[1];
 pub const SUPPORTED_STAGE_DOCUMENT_VERSIONS: &[u32] = &[1];
 
 // ---------------------------------------------------------------------------
+// Connection authority
+// ---------------------------------------------------------------------------
+
+/// Product identity assigned by the transport after it authenticates a connection.
+///
+/// This is intentionally not deserializable from a protocol `Hello`: a peer may
+/// describe itself there for diagnostics, but that description is never authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionRole {
+    Editor,
+    Playout,
+}
+
+impl ConnectionRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Editor => "editor",
+            Self::Playout => "playout",
+        }
+    }
+}
+
+/// Immutable, credential-derived authority for one connection.
+///
+/// A loopback session without an operational bearer credential is deliberately an
+/// Editor session. A successfully verified bearer credential is the only currently
+/// configured way to obtain the Playout authority. Keeping this assignment at the
+/// transport boundary makes a forged `clientRole` claim harmless.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectionPrincipal {
+    role: ConnectionRole,
+    connection_id: String,
+    authenticated: bool,
+}
+
+impl ConnectionPrincipal {
+    pub fn loopback_editor(connection_id: impl Into<String>) -> Self {
+        Self {
+            role: ConnectionRole::Editor,
+            connection_id: connection_id.into(),
+            authenticated: false,
+        }
+    }
+
+    pub fn authenticated_playout(connection_id: impl Into<String>) -> Self {
+        Self {
+            role: ConnectionRole::Playout,
+            connection_id: connection_id.into(),
+            authenticated: true,
+        }
+    }
+
+    pub fn role(&self) -> ConnectionRole {
+        self.role
+    }
+
+    pub fn connection_id(&self) -> &str {
+        &self.connection_id
+    }
+
+    pub fn is_authenticated(&self) -> bool {
+        self.authenticated
+    }
+
+    /// Closed capability matrix. New request types are denied until deliberately
+    /// classified here; no role receives authority merely because it connected.
+    pub fn allows(&self, request: crate::protocol::RequestType) -> bool {
+        use crate::protocol::RequestType::*;
+
+        match self.role {
+            ConnectionRole::Editor => matches!(
+                request,
+                Hello
+                    | Authenticate
+                    | Heartbeat
+                    | Capabilities
+                    | Disconnect
+                    | StageLoad
+                    | StageUnload
+                    | SceneLoad
+                    | SceneUnload
+                    | SceneFullSync
+                    | SceneApplyPatch
+                    | SceneValidate
+                    | ScenePrepare
+                    | AssetRegister
+                    | AssetUpload
+                    | AssetValidate
+                    | AssetPreload
+                    | AssetRelease
+                    | GetStatus
+                    | GetDiagnostics
+                    | GetCapabilities
+                    | OutputList
+                    | EditorViewRequest
+            ),
+            ConnectionRole::Playout => matches!(
+                request,
+                Hello
+                    | Authenticate
+                    | Heartbeat
+                    | Capabilities
+                    | Disconnect
+                    | Cue
+                    | TakeOnline
+                    | TakeOffline
+                    | Continue
+                    | Update
+                    | Stop
+                    | Clear
+                    | Replace
+                    | Transition
+                    | PreviewRequest
+                    | PreviewStreamStart
+                    | PreviewStreamStop
+                    | PreviewSetViewport
+                    | GetStatus
+                    | GetDiagnostics
+                    | GetCapabilities
+                    | SetConfiguration
+                    | RestartRenderer
+                    | OutputList
+                    | OutputConfigure
+                    | OutputStart
+                    | OutputStop
+                    | OutputRemove
+            ),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Identity
 // ---------------------------------------------------------------------------
 
@@ -277,6 +409,578 @@ impl EngineStateMachine {
 // ---------------------------------------------------------------------------
 // Capabilities
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Engine-owned resource admission and render-frame storage
+// ---------------------------------------------------------------------------
+
+/// The byte categories the engine owns.  These are deliberately not allocator
+/// statistics: the governor counts resources whose lifetime it controls, so its
+/// limits are portable across wgpu backends and operating systems.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct OwnedBytes {
+    pub decoded_assets: u64,
+    pub staging_buffers: u64,
+    pub textures_and_mips: u64,
+    pub geometry: u64,
+    pub glyph_atlases: u64,
+    pub tile_render_targets: u64,
+    pub upload_rings: u64,
+    pub pipeline_state: u64,
+    pub bind_group_data: u64,
+    pub frame_pool: u64,
+}
+
+impl OwnedBytes {
+    pub const fn cpu_bytes(self) -> u64 {
+        self.decoded_assets
+            .saturating_add(self.staging_buffers)
+            .saturating_add(self.frame_pool)
+    }
+
+    pub const fn gpu_bytes(self) -> u64 {
+        self.textures_and_mips
+            .saturating_add(self.geometry)
+            .saturating_add(self.glyph_atlases)
+            .saturating_add(self.tile_render_targets)
+            .saturating_add(self.upload_rings)
+            .saturating_add(self.pipeline_state)
+            .saturating_add(self.bind_group_data)
+    }
+
+    pub const fn total_bytes(self) -> u64 {
+        self.cpu_bytes().saturating_add(self.gpu_bytes())
+    }
+
+    fn saturating_add(self, other: Self) -> Self {
+        Self {
+            decoded_assets: self.decoded_assets.saturating_add(other.decoded_assets),
+            staging_buffers: self.staging_buffers.saturating_add(other.staging_buffers),
+            textures_and_mips: self
+                .textures_and_mips
+                .saturating_add(other.textures_and_mips),
+            geometry: self.geometry.saturating_add(other.geometry),
+            glyph_atlases: self.glyph_atlases.saturating_add(other.glyph_atlases),
+            tile_render_targets: self
+                .tile_render_targets
+                .saturating_add(other.tile_render_targets),
+            upload_rings: self.upload_rings.saturating_add(other.upload_rings),
+            pipeline_state: self.pipeline_state.saturating_add(other.pipeline_state),
+            bind_group_data: self.bind_group_data.saturating_add(other.bind_group_data),
+            frame_pool: self.frame_pool.saturating_add(other.frame_pool),
+        }
+    }
+
+    fn saturating_sub(self, other: Self) -> Self {
+        Self {
+            decoded_assets: self.decoded_assets.saturating_sub(other.decoded_assets),
+            staging_buffers: self.staging_buffers.saturating_sub(other.staging_buffers),
+            textures_and_mips: self
+                .textures_and_mips
+                .saturating_sub(other.textures_and_mips),
+            geometry: self.geometry.saturating_sub(other.geometry),
+            glyph_atlases: self.glyph_atlases.saturating_sub(other.glyph_atlases),
+            tile_render_targets: self
+                .tile_render_targets
+                .saturating_sub(other.tile_render_targets),
+            upload_rings: self.upload_rings.saturating_sub(other.upload_rings),
+            pipeline_state: self.pipeline_state.saturating_sub(other.pipeline_state),
+            bind_group_data: self.bind_group_data.saturating_sub(other.bind_group_data),
+            frame_pool: self.frame_pool.saturating_sub(other.frame_pool),
+        }
+    }
+}
+
+/// Scheduling priority. Only unreferenced Warm entries may be evicted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ResourcePriority {
+    Warm,
+    ActiveEditorView,
+    PlayoutPreview,
+    Program,
+}
+
+/// Hard, deterministic budgets. `resident_scene_target` is an admission target,
+/// not a promise that a scene fits: owned-byte budgets remain authoritative.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResourceBudget {
+    pub cpu_bytes: u64,
+    pub gpu_bytes: u64,
+    pub resident_scene_target: u32,
+}
+
+impl ResourceBudget {
+    /// Hardware profiles intentionally describe an admission range rather than a
+    /// magical scene count. A 2 GiB profile starts at 50, and additional GPU
+    /// capacity moves the target toward 60; byte accounting decides each scene.
+    pub fn from_config(config: &EngineConfig) -> Self {
+        let gib = 1024 * 1024 * 1024;
+        let additional = config.gpu.memory_budget_bytes.saturating_sub(2 * gib) / gib;
+        Self {
+            cpu_bytes: config
+                .assets
+                .cpu_cache_budget_bytes
+                .saturating_add(config.stage.tile_cache_budget_bytes),
+            gpu_bytes: config.gpu.memory_budget_bytes,
+            resident_scene_target: 50u32.saturating_add(additional.min(10) as u32),
+        }
+    }
+}
+
+/// Estimate created from package-manifest metadata before decoding or uploading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScenePreparationEstimate {
+    pub owned: OwnedBytes,
+    pub priority: ResourcePriority,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Reservation {
+    id: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReservationOutcome {
+    pub reservation: Reservation,
+    /// Warm LRU entries discarded before preparation. They were unreferenced.
+    pub evicted: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdmissionError {
+    DuplicateReservation,
+    UnknownReservation,
+    UploadNotRecorded,
+    EstimateExceeded,
+    Capacity {
+        requested_cpu_bytes: u64,
+        requested_gpu_bytes: u64,
+        available_cpu_bytes: u64,
+        available_gpu_bytes: u64,
+    },
+}
+
+#[derive(Debug, Clone)]
+struct ResidentResource {
+    owned: OwnedBytes,
+    priority: ResourcePriority,
+    referenced: bool,
+    last_used_ms: u64,
+}
+
+#[derive(Debug, Clone)]
+struct PendingReservation {
+    owner: String,
+    estimate: ScenePreparationEstimate,
+    uploaded: bool,
+}
+
+/// The sole Engine resource authority. It is deliberately a control/preparation
+/// plane object: no render-tick path accesses its maps or performs eviction.
+#[derive(Debug)]
+pub struct ResourceGovernor {
+    budget: ResourceBudget,
+    committed: OwnedBytes,
+    reserved: OwnedBytes,
+    residents: std::collections::BTreeMap<String, ResidentResource>,
+    reservations: std::collections::BTreeMap<u64, PendingReservation>,
+    next_reservation: u64,
+}
+
+impl ResourceGovernor {
+    pub fn new(budget: ResourceBudget) -> Self {
+        Self {
+            budget,
+            committed: OwnedBytes::default(),
+            reserved: OwnedBytes::default(),
+            residents: std::collections::BTreeMap::new(),
+            reservations: std::collections::BTreeMap::new(),
+            next_reservation: 1,
+        }
+    }
+
+    pub fn budget(&self) -> ResourceBudget {
+        self.budget
+    }
+
+    pub fn committed(&self) -> OwnedBytes {
+        self.committed
+    }
+
+    pub fn reserved(&self) -> OwnedBytes {
+        self.reserved
+    }
+
+    pub fn resident_count(&self) -> usize {
+        self.residents.len()
+    }
+
+    /// Estimate -> Reserve. It evicts only cold, unreferenced warm entries,
+    /// in deterministic LRU order, before rejecting the preparation.
+    pub fn reserve(
+        &mut self,
+        owner: impl Into<String>,
+        estimate: ScenePreparationEstimate,
+    ) -> Result<ReservationOutcome, AdmissionError> {
+        let owner = owner.into();
+        if self
+            .reservations
+            .values()
+            .any(|pending| pending.owner == owner)
+        {
+            return Err(AdmissionError::DuplicateReservation);
+        }
+
+        let mut evicted = Vec::new();
+        while !self.fits(estimate.owned)
+            || (!self.residents.contains_key(&owner)
+                && self.residents.len().saturating_add(self.reservations.len())
+                    >= self.budget.resident_scene_target as usize)
+        {
+            let candidate = self
+                .residents
+                .iter()
+                .filter(|(key, resident)| {
+                    key.as_str() != owner
+                        && resident.priority == ResourcePriority::Warm
+                        && !resident.referenced
+                })
+                .min_by_key(|(key, resident)| (resident.last_used_ms, *key))
+                .map(|(key, _)| key.clone());
+            let Some(candidate) = candidate else {
+                return Err(self.capacity_error(estimate.owned));
+            };
+            self.release(&candidate);
+            evicted.push(candidate);
+        }
+
+        let id = self.next_reservation;
+        self.next_reservation = self.next_reservation.saturating_add(1).max(1);
+        self.reserved = self.reserved.saturating_add(estimate.owned);
+        self.reservations.insert(
+            id,
+            PendingReservation {
+                owner,
+                estimate,
+                uploaded: false,
+            },
+        );
+        Ok(ReservationOutcome {
+            reservation: Reservation { id },
+            evicted,
+        })
+    }
+
+    /// Reserve -> Upload. Call this only after all decode/shape/tessellation and
+    /// GPU upload work succeeded off the render thread.
+    pub fn uploaded(&mut self, reservation: Reservation) -> Result<(), AdmissionError> {
+        let pending = self
+            .reservations
+            .get_mut(&reservation.id)
+            .ok_or(AdmissionError::UnknownReservation)?;
+        pending.uploaded = true;
+        Ok(())
+    }
+
+    /// Upload -> Commit at a frame boundary. Measured bytes must fit the estimate;
+    /// underestimation fails closed and leaves no partially committed runtime.
+    pub fn commit(
+        &mut self,
+        reservation: Reservation,
+        actual: OwnedBytes,
+        referenced: bool,
+        last_used_ms: u64,
+    ) -> Result<String, AdmissionError> {
+        let pending = self
+            .reservations
+            .get(&reservation.id)
+            .cloned()
+            .ok_or(AdmissionError::UnknownReservation)?;
+        if !pending.uploaded {
+            return Err(AdmissionError::UploadNotRecorded);
+        }
+        if actual.cpu_bytes() > pending.estimate.owned.cpu_bytes()
+            || actual.gpu_bytes() > pending.estimate.owned.gpu_bytes()
+        {
+            return Err(AdmissionError::EstimateExceeded);
+        }
+
+        self.reservations.remove(&reservation.id);
+        self.reserved = self.reserved.saturating_sub(pending.estimate.owned);
+        if let Some(previous) = self.residents.remove(&pending.owner) {
+            self.committed = self.committed.saturating_sub(previous.owned);
+        }
+        self.committed = self.committed.saturating_add(actual);
+        self.residents.insert(
+            pending.owner.clone(),
+            ResidentResource {
+                owned: actual,
+                priority: pending.estimate.priority,
+                referenced,
+                last_used_ms,
+            },
+        );
+        Ok(pending.owner)
+    }
+
+    /// Rollback is idempotent for callers that lost the device during upload.
+    pub fn rollback(&mut self, reservation: Reservation) {
+        if let Some(pending) = self.reservations.remove(&reservation.id) {
+            self.reserved = self.reserved.saturating_sub(pending.estimate.owned);
+        }
+    }
+
+    pub fn touch(
+        &mut self,
+        owner: &str,
+        priority: ResourcePriority,
+        referenced: bool,
+        now_ms: u64,
+    ) {
+        if let Some(resident) = self.residents.get_mut(owner) {
+            resident.priority = priority;
+            resident.referenced = referenced;
+            resident.last_used_ms = now_ms;
+        }
+    }
+
+    pub fn release(&mut self, owner: &str) -> Option<OwnedBytes> {
+        self.residents.remove(owner).map(|resident| {
+            self.committed = self.committed.saturating_sub(resident.owned);
+            resident.owned
+        })
+    }
+
+    fn fits(&self, requested: OwnedBytes) -> bool {
+        self.committed
+            .cpu_bytes()
+            .saturating_add(self.reserved.cpu_bytes())
+            .saturating_add(requested.cpu_bytes())
+            <= self.budget.cpu_bytes
+            && self
+                .committed
+                .gpu_bytes()
+                .saturating_add(self.reserved.gpu_bytes())
+                .saturating_add(requested.gpu_bytes())
+                <= self.budget.gpu_bytes
+    }
+
+    fn capacity_error(&self, requested: OwnedBytes) -> AdmissionError {
+        AdmissionError::Capacity {
+            requested_cpu_bytes: requested.cpu_bytes(),
+            requested_gpu_bytes: requested.gpu_bytes(),
+            available_cpu_bytes: self.budget.cpu_bytes.saturating_sub(
+                self.committed
+                    .cpu_bytes()
+                    .saturating_add(self.reserved.cpu_bytes()),
+            ),
+            available_gpu_bytes: self.budget.gpu_bytes.saturating_sub(
+                self.committed
+                    .gpu_bytes()
+                    .saturating_add(self.reserved.gpu_bytes()),
+            ),
+        }
+    }
+}
+
+/// A preallocated output/readback handoff slab. `acquire` and `release` only
+/// move indexes inside pre-reserved vectors and never grow the heap on tick.
+#[derive(Debug)]
+pub struct VideoFramePool {
+    slots: Vec<grapix_render_core::output::VideoFrame>,
+    free: Vec<usize>,
+    leased: Vec<bool>,
+}
+
+impl VideoFramePool {
+    pub fn new(width: u32, height: u32, slot_count: usize) -> Self {
+        let byte_len = (width as usize)
+            .saturating_mul(height as usize)
+            .saturating_mul(4);
+        let mut slots = Vec::with_capacity(slot_count);
+        let mut free = Vec::with_capacity(slot_count);
+        let mut leased = Vec::with_capacity(slot_count);
+        for index in 0..slot_count {
+            slots.push(grapix_render_core::output::VideoFrame {
+                width,
+                height,
+                data: vec![0; byte_len],
+                frame_index: 0,
+            });
+            free.push(slot_count - index - 1);
+            leased.push(false);
+        }
+        Self {
+            slots,
+            free,
+            leased,
+        }
+    }
+
+    pub fn acquire(&mut self) -> Option<usize> {
+        let index = self.free.pop()?;
+        self.leased[index] = true;
+        Some(index)
+    }
+
+    pub fn frame_mut(
+        &mut self,
+        index: usize,
+    ) -> Option<&mut grapix_render_core::output::VideoFrame> {
+        self.leased.get(index).copied().filter(|leased| *leased)?;
+        self.slots.get_mut(index)
+    }
+
+    pub fn release(&mut self, index: usize) -> bool {
+        if self.leased.get(index).copied() != Some(true) {
+            return false;
+        }
+        self.leased[index] = false;
+        self.free.push(index);
+        true
+    }
+
+    pub fn available(&self) -> usize {
+        self.free.len()
+    }
+
+    pub fn bytes(&self) -> u64 {
+        self.slots
+            .iter()
+            .map(|frame| frame.data.capacity() as u64)
+            .sum()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlendClass {
+    Opaque,
+    PremultipliedAlpha,
+    Blend,
+}
+
+/// Resolved during preparation. IDs reference persistent pipelines, materials,
+/// textures, geometry and scissor state; they do not own allocations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DrawPacket {
+    pub pipeline_id: u32,
+    pub material_id: u32,
+    pub texture_id: u32,
+    pub geometry_id: u32,
+    pub scissor_id: u32,
+    pub painter_order: u32,
+    pub blend: BlendClass,
+    /// Set only by classification that has proved reordering pixel-identical.
+    pub opaque_reorder_proven: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DrawBatch {
+    pub first_packet: usize,
+    pub packet_count: usize,
+    pub pipeline_id: u32,
+    pub material_id: u32,
+    pub texture_id: u32,
+    pub geometry_id: u32,
+    pub scissor_id: u32,
+    pub blend: BlendClass,
+}
+
+/// Fixed-capacity packet arena. The render tick calls `clear`, `push`, and
+/// `batches_into`; all refuse overflow instead of growing a `Vec`.
+#[derive(Debug)]
+pub struct DrawPacketArena {
+    packets: Vec<DrawPacket>,
+}
+
+impl DrawPacketArena {
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            packets: Vec::with_capacity(capacity),
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.packets.clear();
+    }
+
+    pub fn push(&mut self, packet: DrawPacket) -> Result<(), DrawPacket> {
+        if self.packets.len() == self.packets.capacity() {
+            return Err(packet);
+        }
+        self.packets.push(packet);
+        Ok(())
+    }
+
+    pub fn packets(&self) -> &[DrawPacket] {
+        &self.packets
+    }
+
+    /// Batch only contiguous compatible packets in painter order. Opaque
+    /// reordering is intentionally not implicit: a caller must invoke the
+    /// proof-gated method below during preparation, never on the render tick.
+    pub fn batches_into(&self, output: &mut [DrawBatch]) -> Result<usize, ()> {
+        let mut count = 0;
+        let mut first = 0;
+        while first < self.packets.len() {
+            let head = self.packets[first];
+            let mut end = first + 1;
+            while end < self.packets.len() && compatible(head, self.packets[end]) {
+                end += 1;
+            }
+            let Some(slot) = output.get_mut(count) else {
+                return Err(());
+            };
+            *slot = DrawBatch {
+                first_packet: first,
+                packet_count: end - first,
+                pipeline_id: head.pipeline_id,
+                material_id: head.material_id,
+                texture_id: head.texture_id,
+                geometry_id: head.geometry_id,
+                scissor_id: head.scissor_id,
+                blend: head.blend,
+            };
+            count += 1;
+            first = end;
+        }
+        Ok(count)
+    }
+
+    /// Sorting is legal only in a contiguous opaque partition every packet of
+    /// which has an explicit pixel-identical proof. `sort_unstable_by` uses no
+    /// heap allocation; callers run it during preparation, never a tick.
+    pub fn sort_proven_opaque_partition(&mut self, start: usize, end: usize) -> bool {
+        let Some(partition) = self.packets.get_mut(start..end) else {
+            return false;
+        };
+        if partition
+            .iter()
+            .any(|packet| packet.blend != BlendClass::Opaque || !packet.opaque_reorder_proven)
+        {
+            return false;
+        }
+        partition.sort_unstable_by_key(|packet| {
+            (
+                packet.pipeline_id,
+                packet.material_id,
+                packet.texture_id,
+                packet.geometry_id,
+                packet.scissor_id,
+            )
+        });
+        true
+    }
+}
+
+fn compatible(a: DrawPacket, b: DrawPacket) -> bool {
+    a.blend == b.blend
+        && a.pipeline_id == b.pipeline_id
+        && a.material_id == b.material_id
+        && a.texture_id == b.texture_id
+        && a.geometry_id == b.geometry_id
+        && a.scissor_id == b.scissor_id
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

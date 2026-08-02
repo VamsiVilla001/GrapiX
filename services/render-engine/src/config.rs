@@ -285,6 +285,11 @@ impl Default for DiagnosticsConfig {
 pub struct OutputsConfig {
     /// Adapter ids this engine will expose. Anything absent is not offered.
     pub enabled_adapters: Vec<String>,
+    /// Fixed number of preallocated NDI readback slabs per configured output.
+    ///
+    /// The NDI handoff is bounded by design: values outside 3–4 are clamped
+    /// during validation rather than allowing a client to grow its queue.
+    pub ndi_frame_pool_slots: u8,
 }
 
 impl Default for OutputsConfig {
@@ -298,6 +303,7 @@ impl Default for OutputsConfig {
                 "virtual".to_string(),
                 "recording".to_string(),
             ],
+            ndi_frame_pool_slots: 4,
         }
     }
 }
@@ -523,6 +529,7 @@ impl EngineConfig {
             .max_message_bytes
             .clamp(4 * 1024, 256 * 1024 * 1024);
         self.security.max_connections = self.security.max_connections.clamp(1, 256);
+        self.outputs.ndi_frame_pool_slots = self.outputs.ndi_frame_pool_slots.clamp(3, 4);
         self.security.rate_limit_burst = self.security.rate_limit_burst.clamp(1, 10_000);
 
         self.assets.max_chunk_bytes = self

@@ -22,7 +22,9 @@ export function useAssistant(): void {
     let chatSource: EventSource | undefined;
 
     void getAssistantStatus()
-      .then(setStatus)
+      .then((status) => {
+        if (!cancelled) setStatus(status);
+      })
       .catch(() => undefined);
     const statusSource = openStatusStream(setStatus);
 

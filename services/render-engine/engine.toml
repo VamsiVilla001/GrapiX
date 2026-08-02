@@ -136,6 +136,9 @@ heartbeat-timeout-ms = 8000
 #
 # Only `ndi`, `decklink` and `aja` are live. Everything else is safe by construction.
 enabled-adapters = ["null", "virtual", "recording"]
+# NDI uses a fixed 3–4 slab render-to-worker handoff. This is deployment-owned,
+# never an output.configure option, so a client cannot grow per-frame memory.
+ndi-frame-pool-slots = 4
 
 # ---------------------------------------------------------------------------
 # Deployment examples

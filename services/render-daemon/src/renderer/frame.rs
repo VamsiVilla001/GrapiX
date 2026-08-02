@@ -85,7 +85,7 @@ impl FrameTarget {
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        pipeline: &QuadPipeline,
+        pipeline: &mut QuadPipeline,
         quads: &[QuadUniforms],
         mesh_pipeline: &MeshPipeline,
         mesh_frame: Option<&MeshFrame>,

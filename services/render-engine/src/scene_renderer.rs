@@ -76,6 +76,9 @@ pub struct SceneRenderer {
 
     /// True once a quad-budget overflow has been reported, so it is said once.
     warned_overflow: bool,
+    /// Fixed-capacity prepared packet source for the quad pipeline. Reused on
+    /// every frame; overflow is clipped at the documented scene ceiling.
+    quads: Vec<pipeline::QuadUniforms>,
 }
 
 impl SceneRenderer {
@@ -91,6 +94,7 @@ impl SceneRenderer {
             mesh_frame: None,
             animation: Arc::new(crate::animation::SceneAnimation::default()),
             warned_overflow: false,
+            quads: Vec::with_capacity(pipeline::MAX_QUADS_PER_FRAME),
         }
     }
 
@@ -197,20 +201,25 @@ impl SceneRenderer {
             }
         }
 
-        let mut quads = match &animated_rects {
-            Some((rects, _)) => pipeline::QuadPipeline::build_frame_quads_from(&prepared, rects),
-            None => pipeline::QuadPipeline::build_frame_quads(&prepared),
+        let requested_quad_count = match &animated_rects {
+            Some((rects, _)) => {
+                pipeline::QuadPipeline::build_frame_quads_into(&prepared, rects, &mut self.quads)
+            }
+            None => pipeline::QuadPipeline::build_frame_quads_into(
+                &prepared,
+                &prepared.rects,
+                &mut self.quads,
+            ),
         };
-        if quads.len() > pipeline::MAX_QUADS_PER_FRAME {
+        if requested_quad_count > pipeline::MAX_QUADS_PER_FRAME {
             if !self.warned_overflow {
                 tracing::warn!(
-                    quads = quads.len(),
+                    quads = requested_quad_count,
                     max = pipeline::MAX_QUADS_PER_FRAME,
                     "scene exceeds the per-frame quad budget; the extra quads are not rendered"
                 );
                 self.warned_overflow = true;
             }
-            quads.truncate(pipeline::MAX_QUADS_PER_FRAME);
         }
 
         let mut video = self
@@ -218,8 +227,8 @@ impl SceneRenderer {
             .render_and_read_back(
                 &gpu.device,
                 &gpu.queue,
-                &self.quad_pipeline,
-                &quads,
+                &mut self.quad_pipeline,
+                &self.quads,
                 &self.mesh_pipeline,
                 self.mesh_frame.as_ref(),
                 frame_index,

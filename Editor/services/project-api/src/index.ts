@@ -455,14 +455,25 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
     Params: { sceneId: string; objectId: string };
     Body: Record<string, unknown>;
   }>("/api/scenes/:sceneId/objects/:objectId", async (request, reply) => {
-    const scene = await updateScene(request.params.sceneId, (currentScene) => ({
-      ...currentScene,
-      updatedAt: new Date().toISOString(),
-      objects: currentScene.objects.map((object) =>
-        object.id === request.params.objectId ? ({ ...object, ...request.body } as typeof object) : object
-      )
-    }));
+    const scene = await updateScene(request.params.sceneId, (currentScene) => {
+      if (!currentScene.objects.some((object) => object.id === request.params.objectId)) {
+        throw new SceneElementNotFoundError("Object");
+      }
+      return {
+        ...currentScene,
+        updatedAt: new Date().toISOString(),
+        objects: currentScene.objects.map((object) =>
+          object.id === request.params.objectId ? ({ ...object, ...request.body } as typeof object) : object
+        )
+      };
+    }).catch((error: unknown) => {
+      if (error instanceof SceneElementNotFoundError) return error;
+      throw error;
+    });
 
+    if (scene instanceof SceneElementNotFoundError) {
+      return reply.code(404).send({ ok: false, error: `${scene.element} not found` });
+    }
     if (!scene) {
       return reply.code(404).send({ ok: false, error: "Scene not found" });
     }
@@ -474,14 +485,25 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
     Params: { sceneId: string; materialId: string };
     Body: Record<string, unknown>;
   }>("/api/scenes/:sceneId/materials/:materialId", async (request, reply) => {
-    const scene = await updateScene(request.params.sceneId, (currentScene) => ({
-      ...currentScene,
-      updatedAt: new Date().toISOString(),
-      materials: currentScene.materials.map((material) =>
-        material.materialId === request.params.materialId ? { ...material, ...request.body } : material
-      )
-    }));
+    const scene = await updateScene(request.params.sceneId, (currentScene) => {
+      if (!currentScene.materials.some((material) => material.materialId === request.params.materialId)) {
+        throw new SceneElementNotFoundError("Material");
+      }
+      return {
+        ...currentScene,
+        updatedAt: new Date().toISOString(),
+        materials: currentScene.materials.map((material) =>
+          material.materialId === request.params.materialId ? { ...material, ...request.body } : material
+        )
+      };
+    }).catch((error: unknown) => {
+      if (error instanceof SceneElementNotFoundError) return error;
+      throw error;
+    });
 
+    if (scene instanceof SceneElementNotFoundError) {
+      return reply.code(404).send({ ok: false, error: `${scene.element} not found` });
+    }
     if (!scene) {
       return reply.code(404).send({ ok: false, error: "Scene not found" });
     }
@@ -521,8 +543,8 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
     if (typeof patchPath !== "string") {
       return reply.code(400).send({ ok: false, error: "path must be a string" });
     }
-
     let previousRevision = "";
+
     const scene = await updateScene(request.params.sceneId, (currentScene) => {
       previousRevision = currentScene.updatedAt;
       if (request.body.expectedRevision && request.body.expectedRevision !== previousRevision) {
@@ -534,7 +556,7 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
         updatedAt: new Date().toISOString()
       };
     }).catch((error: unknown) => {
-      if (error instanceof SceneRevisionConflictError) return error;
+      if (error instanceof SceneRevisionConflictError || error instanceof DataPatchInputError) return error;
       throw error;
     });
 
@@ -545,6 +567,9 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
         expectedRevision: scene.expected,
         actualRevision: scene.actual
       });
+    }
+    if (scene instanceof DataPatchInputError) {
+      return reply.code(400).send({ ok: false, error: scene.message });
     }
     if (!scene) {
       return reply.code(404).send({ ok: false, error: "Scene not found" });
@@ -720,6 +745,14 @@ class SceneRevisionConflictError extends Error {
   }
 }
 
+
+class SceneElementNotFoundError extends Error {
+  constructor(readonly element: "Object" | "Material") {
+    super(`${element} not found`);
+  }
+}
+class DataPatchInputError extends Error {}
+
 function acceptPatchRate(
   windows: Map<string, { startedAt: number; count: number }>,
   sceneId: string
@@ -744,16 +777,16 @@ function setDataPath(
   path: string,
   value: unknown
 ): Record<string, unknown> {
-  if (!path || path.length > 256) throw new Error("data path must contain 1 to 256 characters");
+  if (!path || path.length > 256) throw new DataPatchInputError("data path must contain 1 to 256 characters");
   const segments = path
     .replace(/\[(\d+)\]/g, ".$1")
     .split(".")
     .filter(Boolean);
   if (!segments.length || segments.length > 32) {
-    throw new Error("data path must contain 1 to 32 segments");
+    throw new DataPatchInputError("data path must contain 1 to 32 segments");
   }
   if (segments.some((segment) => ["__proto__", "prototype", "constructor"].includes(segment))) {
-    throw new Error("data path contains a reserved segment");
+    throw new DataPatchInputError("data path contains a reserved segment");
   }
   const clone = structuredClone(original);
   let current: Record<string, unknown> = clone;
@@ -762,7 +795,7 @@ function setDataPath(
     if (child === undefined) {
       current[segment] = {};
     } else if (typeof child !== "object" || child === null || Array.isArray(child)) {
-      throw new Error(`data path crosses non-object segment ${segment}`);
+      throw new DataPatchInputError(`data path crosses non-object segment ${segment}`);
     }
     current = current[segment] as Record<string, unknown>;
   }

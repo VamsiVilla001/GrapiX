@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 use std::fs;
 
 use grapix_render_engine::config::{self, CliOptions, EngineConfig, DEFAULT_PORT};
+use grapix_render_engine::protocol::{SceneDomain, SceneRef};
 use grapix_render_engine::security::{
     check_fetch_url, check_path_syntax, resolve_asset_path, tokens_match, AuditEntry, AuditLog,
     MessageDeduplicator, PathRejection, RateLimiter, SequenceTracker, SequenceVerdict,
@@ -56,6 +57,7 @@ fn built_in_defaults_are_a_safe_local_engine() {
             "recording".to_string()
         ]
     );
+    assert_eq!(engine_config.outputs.ndi_frame_pool_slots, 4);
     for adapter in &engine_config.outputs.enabled_adapters {
         assert!(
             !grapix_render_engine::outputs::is_live_adapter(adapter),
@@ -408,6 +410,18 @@ fn declared_but_unimplemented_adapters_warn() {
 }
 
 #[test]
+fn ndi_pool_slots_stay_within_the_fixed_handoff_bound() {
+    let mut engine_config = EngineConfig::default();
+    engine_config.outputs.ndi_frame_pool_slots = 1;
+    engine_config.validate().expect("validate");
+    assert_eq!(engine_config.outputs.ndi_frame_pool_slots, 3);
+
+    engine_config.outputs.ndi_frame_pool_slots = 9;
+    engine_config.validate().expect("validate");
+    assert_eq!(engine_config.outputs.ndi_frame_pool_slots, 4);
+}
+
+#[test]
 fn tokens_are_validated_for_length_and_shape() {
     let mut engine_config = EngineConfig::default();
 
@@ -703,9 +717,13 @@ fn the_audit_log_records_overrides_attributably() {
     log.record(AuditEntry {
         at_ms: 1_700_000_000_000,
         client_id: "playout-1".to_string(),
-        project_id: Some("project_x".to_string()),
         message_type: "playout.takeOnline".to_string(),
-        scene_id: Some("scene_1".to_string()),
+        scene_ref: Some(SceneRef {
+            project_id: "project_x".to_string(),
+            domain: SceneDomain::Published,
+            scene_id: "scene_1".to_string(),
+            revision: 1,
+        }),
         outcome: "accepted".to_string(),
         // An operator taking an unprepared scene online is a legitimate decision,
         // but it has to be an attributable one.
@@ -728,9 +746,8 @@ fn the_audit_log_is_bounded_in_memory() {
         log.record(AuditEntry {
             at_ms: index,
             client_id: "c".to_string(),
-            project_id: None,
             message_type: "playout.cue".to_string(),
-            scene_id: None,
+            scene_ref: None,
             outcome: "accepted".to_string(),
             override_reason: None,
         });

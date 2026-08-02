@@ -2,7 +2,7 @@
 
 Last consolidated: **2026-07-29**  
 Repository: `D:\Project KK\Personal projects\GrapiX`  
-Current branch: `Basic-v0.2`
+Current branch: `Basic-v0.3`
 Current baseline: **Basic v0.1 checkpoint**; use `git log -1` for its immutable
 commit hash.
 
@@ -1088,6 +1088,77 @@ The required completion order remains:
 10. hardware certification
 
 ## Work chronology
+
+### 2026-08-02 — GrapiX v0.4 Adobe Bridge, Phase 1 (MCP Foundation)
+
+Full document: [`docs/adobe-integration.md`](docs/adobe-integration.md).
+
+Three new packages, all authoring-only — no Program or output verb exists anywhere in this
+surface, so the Editor/Playout boundary is untouched:
+
+- `Shared/adobe-common-schema` (`@grapix/adobe-common-schema`) — the `grapix-adobe/1` wire
+  protocol, the shared `AdobeImportDocument`, and the Adobe object models.
+- `Shared/grapix-adobe-client` (`@grapix/adobe-client`) — isomorphic client; the Editor
+  panel runs it in the WebView and the gateway's integration tests run it in Node, so one
+  implementation is what both prove.
+- `Editor/services/adobe-mcp-gateway` (`@grapix/adobe-mcp-gateway`) — the gateway on
+  **port 4784**. `npm run dev:adobe`.
+
+Plus `File › Integrations · Adobe…` in the Editor (`AdobeIntegrationsDialog`, `adobeStore`).
+
+**Two transports, and the precedence rule.** `local` is a plugin inside the application;
+`cloud` is Adobe's Photoshop API driven in-process by the gateway. A call with no explicit
+transport prefers `local` and falls back to `cloud` — the same precedence the Figma
+importer uses for REST versus Desktop MCP. `local` wins because only a plugin sees the
+document the operator has open; `cloud` exists because a playout machine has no Photoshop
+on it. After Effects has no cloud API, so `transport: "cloud"` on an `aftereffects.*` tool
+is refused with `transport_unavailable` rather than quietly served by the local bridge.
+
+**Both Adobe SDKs are used, not guessed at.**
+
+- Photoshop: `@adobe/aio-lib-photoshop-api` (the library behind
+  `adobe/adobe-photoshop-api-sdk`) is a real dependency of the gateway. `photoshop.ts`
+  mirrors its `LayerType`, `BlendMode`, `ParagraphAlignment`, `Storage`, `MimeType` and
+  `JobOutputStatus`, and *both* transports speak that vocabulary — a PSD imported over the
+  cloud and through the plugin must produce the same scene.
+- After Effects: SDK **25.6.61** headers. `afterEffects.ts` transcribes `AEGP_ObjectType`
+  (`AE_GeneralPlug.h:982`), `AEGP_LayerStream` (`:1266`), `AEGP_KeyInterp` (`:1390`),
+  `AEGP_StreamType` (`:1438`), `AEGP_TrackMatte` (`:920`), `AEGP_LayerFlags` (`:952`) and
+  `PF_MaskMode` (`AE_Effect.h:1917`), citing header and line for each. Transcribed rather
+  than imported: the SDK is a C++ header set under Adobe's licence. `vendor/adobe/` is
+  gitignored and no build step reads it.
+
+Two AE decisions worth not relearning: `AEGP_LayerStream_ROTATION` and `_ROTATE_Z` are
+**one** index (`:1271`) — treating them as two would double-key Z rotation on every 3D
+layer; and `PF_MaskMode_ACCUM` is deliberately **unmapped**, because it is a real add
+rather than a screen, is unreachable from AE's UI, and aliasing it to `add` would render a
+different composite than AE and never say so.
+
+**No silent substitution.** Photoshop has 26 blend modes; GrapiX implements six in both
+renderers. Only exact equivalences map (including Photoshop `linearDodge` → GrapiX `add`).
+Everything else renders `normal` **and** emits a warning, because aliasing `colorBurn` to
+`multiply` puts a different picture on air than the designer approved.
+`adjustmentLayer` is `Rasterised`, not `Converted` — GrapiX has no adjustment pipeline.
+
+**Security.** Loopback + `Origin` check on the HTTP surface and the WS upgrade; token per
+connection compared with `timingSafeEqual`; 10 s hello deadline; 64 MiB frame cap; 500-entry
+log ring. Every mutating tool is refused with `approval_required` until the operator ticks
+the box in the panel — approval is per gateway session, clears on reconnect, and applies to
+the cloud transport too, so an unapproved edit never reaches Adobe. Photoshop API
+credentials are all-four-or-none (a partially configured API would advertise a transport
+that fails on first call) and never appear in status, logs or the panel.
+
+**Gates:** `@grapix/adobe-common-schema` **16**, `@grapix/adobe-mcp-gateway` **23**,
+`@grapix/editor-web` **91** (up from 83). Boundaries pass at Editor 8 / Playout 4 /
+Shared 16. Smoke-tested live: gateway process on 4784, the panel driven in a browser
+through connect → discover → bridge attach → view logs → restart bridge → approval toggle,
+and the real `@adobe/aio-lib-ims` path reaching Adobe, which rejected deliberately invalid
+credentials with `invalid_client` — proof the SDK path is wired rather than stubbed.
+
+**Not built:** Phase 2 (Photoshop UXP plugin), Phase 3 (After Effects ExtendScript bridge),
+Phase 4 (import-UI compatibility reports, asset dedupe, missing-font detection,
+cancellation, connection recovery). Until a plugin exists the local transport has nothing
+to route to, and the panel says "Unavailable" rather than implying the application is idle.
 
 ### 2026-08-01 — release build, and the sidecar staging that had silently stopped
 

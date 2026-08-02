@@ -645,6 +645,43 @@ async fn an_unprepared_scene_cannot_go_online_without_an_explicit_override() {
 }
 
 #[tokio::test]
+async fn replace_refuses_an_unprepared_or_stale_incoming_scene() {
+    let (port, engine) = start(false).await;
+    let mut client = Client::connect(port, None).await.expect("connect");
+    client.request("connection.hello", hello_payload()).await;
+    client
+        .request("scene.load", json!({ "scene": scene("scene_1", 2) }))
+        .await;
+
+    let unprepared = client
+        .request(
+            "playout.replace",
+            json!({
+                "channel": "program",
+                "outgoingSceneId": "scene_0",
+                "incomingSceneId": "scene_1",
+                "incomingSceneRevision": 2
+            }),
+        )
+        .await;
+    assert_eq!(unprepared["payload"]["code"], "SCENE_NOT_PREPARED");
+    assert_ne!(engine.lock().await.state(), EngineState::OnAir);
+
+    let stale = client
+        .request(
+            "playout.replace",
+            json!({
+                "channel": "program",
+                "outgoingSceneId": "scene_0",
+                "incomingSceneId": "scene_1",
+                "incomingSceneRevision": 1
+            }),
+        )
+        .await;
+    assert_eq!(stale["payload"]["code"], "REVISION_MISMATCH");
+}
+
+#[tokio::test]
 async fn cue_targets_preview_and_refuses_program() {
     let (port, _engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
@@ -2334,6 +2371,50 @@ async fn there_is_a_limit_on_concurrent_streams() {
         .as_str()
         .unwrap()
         .contains("4"));
+}
+
+#[tokio::test]
+async fn a_client_cannot_take_over_another_clients_preview_stream_id() {
+    let (port, engine) = start(false).await;
+    let mut owner = Client::connect(port, None).await.expect("owner connects");
+    owner.request("connection.hello", hello_payload()).await;
+    owner
+        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
+        .await;
+    owner
+        .request(
+            "preview.streamStart",
+            json!({
+                "streamId": "shared_stream",
+                "channel": "preview",
+                "source": { "type": "scaled-stage", "maxWidth": 160, "maxHeight": 90 },
+                "encoding": "jpeg",
+                "targetFps": 5
+            }),
+        )
+        .await;
+
+    let mut other = Client::connect(port, None).await.expect("other connects");
+    other.request("connection.hello", hello_payload()).await;
+    let takeover = other
+        .request(
+            "preview.streamStart",
+            json!({
+                "streamId": "shared_stream",
+                "channel": "preview",
+                "source": { "type": "scaled-stage", "maxWidth": 160, "maxHeight": 90 },
+                "encoding": "jpeg",
+                "targetFps": 5
+            }),
+        )
+        .await;
+
+    assert_eq!(takeover["payload"]["code"], "UNAUTHORIZED");
+    assert!(engine.lock().await.has_preview_streams());
+    let stopped = owner
+        .request("preview.streamStop", json!({ "streamId": "shared_stream" }))
+        .await;
+    assert_eq!(stopped["type"], "reply.ack");
 }
 
 #[tokio::test]

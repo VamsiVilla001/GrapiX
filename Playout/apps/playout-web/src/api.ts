@@ -87,6 +87,7 @@ export interface EngineOutputView {
   framesAccepted: number;
   framesSent: number;
   framesDropped: number;
+  sourceName?: string;
   lastError?: string;
 }
 
@@ -116,6 +117,7 @@ export interface ConfigureOutputRequest {
   height: number;
   frameRate: { numerator: number; denominator: number };
   colorSpace?: string;
+  options?: Record<string, string | number | boolean>;
   start?: boolean;
 }
 

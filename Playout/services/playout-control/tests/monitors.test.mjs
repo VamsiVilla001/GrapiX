@@ -300,6 +300,24 @@ test("closing the hub releases every running stream", async () => {
   assert.equal(engine.listeners.size, 0, "the event subscription must be detached");
 });
 
+test("closing while a stream start is in flight waits and releases it", async () => {
+  const engine = new FakeEngine();
+  let release;
+  engine.startGate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const monitors = hub(engine);
+
+  monitors.subscribe("program", "fill", () => {});
+  const closing = monitors.close();
+  release();
+  await closing;
+
+  assert.deepEqual(engine.verbs, ["start:playout_monitor_program_fill", "stop:playout_monitor_program_fill"]);
+  assert.equal(engine.running.size, 0);
+  assert.equal(engine.listeners.size, 0);
+});
+
 test("status reports every channel and view before anything is watched", () => {
   const monitors = hub(new FakeEngine());
   const status = monitors.status();

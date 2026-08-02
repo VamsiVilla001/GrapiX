@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 import { writePsd } from "ag-psd";
 import {
   DEFAULT_DESIGN_IMPORT_OPTIONS,
-  IMPLEMENTED_BLEND_MODES
+  IMPLEMENTED_BLEND_MODES,
+  validateSceneEffects
 } from "@grapix/shared-types";
 import { normalizeDesignDocument } from "../dist/importers/design/designDocumentNormalizer.js";
 import { importFigmaDocument } from "../dist/importers/design/figmaImporter.js";
@@ -16,7 +17,7 @@ import {
 import { convertDesignDocumentToScenes } from "../dist/importers/design/grapixObjectConverter.js";
 import { createDesignImportReport, pruneDesignImportIssues } from "../dist/importers/design/importReport.js";
 import { importIllustratorDocument, importSvgDocument } from "../dist/importers/design/illustratorImporter.js";
-import { importPsdDocument } from "../dist/importers/design/psdImporter.js";
+import { convertPsdEffects, importPsdDocument } from "../dist/importers/design/psdImporter.js";
 
 const fixtureRoot = fileURLToPath(new URL("./fixtures/", import.meta.url));
 
@@ -205,6 +206,62 @@ test("PSD fixture imports nested groups, editable text, vector shape, raster ass
   const pixel = scene.objects.find((object) => object.name === "Pixel Layer");
   assert.ok(pixel.importedDesign.effects.some((effect) => effect.type === "drop-shadow"));
   assert.ok(report.visualDifferences.some((message) => message.includes("Photoshop layer effects")));
+});
+
+test("PSD effects retain every style, warn only for enabled effects, and never invent missing patterns", () => {
+  const report = createDesignImportReport("psd", "synthetic-effects.psd");
+  const effects = convertPsdEffects({
+    dropShadow: [{ enabled: true, color: { r: 1, g: 2, b: 3 }, angle: 45, distance: { units: "Pixels", value: 9 }, choke: { units: "Pixels", value: 2 }, size: { units: "Pixels", value: 7 }, opacity: 0.4, useGlobalLight: true, layerConceals: true }],
+    innerShadow: [{ enabled: true, color: { r: 4, g: 5, b: 6 }, angle: 90, distance: { units: "Pixels", value: 8 }, choke: { units: "Pixels", value: 3 }, size: { units: "Pixels", value: 6 }, opacity: 0.5 }],
+    outerGlow: { enabled: true, color: { r: 7, g: 8, b: 9 }, choke: { units: "Pixels", value: 4 }, size: { units: "Pixels", value: 5 }, noise: 0.1, range: 0.8, jitter: 0.2 },
+    innerGlow: { enabled: true, color: { r: 10, g: 11, b: 12 }, technique: "precise", source: "center", choke: { units: "Pixels", value: 5 }, size: { units: "Pixels", value: 4 } },
+    bevel: { enabled: true, style: "pillow emboss", technique: "chisel hard", strength: 1.5, direction: "down", size: { units: "Pixels", value: 6 }, soften: { units: "Pixels", value: 2 }, angle: 120, altitude: 35, highlightColor: { r: 255, g: 255, b: 255 }, highlightOpacity: 0.8, shadowColor: { r: 0, g: 0, b: 0 }, shadowOpacity: 0.6, useTexture: true },
+    satin: { enabled: true, color: { r: 20, g: 21, b: 22 }, angle: 30, distance: { units: "Pixels", value: 3 }, size: { units: "Pixels", value: 9 }, invert: true },
+    solidFill: [{ enabled: true, color: { r: 23, g: 24, b: 25 }, opacity: 0.7 }],
+    gradientOverlay: [{ enabled: true, type: "radial", angle: 25, scale: 0.6, offset: { x: 0.2, y: 0.3 }, reverse: true, dither: true, align: false, gradient: { name: "Fixture", type: "solid", colorStops: [{ location: 0, midpoint: 0.5, color: { r: 0, g: 0, b: 0 } }, { location: 1, midpoint: 0.5, color: { r: 255, g: 255, b: 255 } }], opacityStops: [{ location: 0, midpoint: 0.5, opacity: 1 }, { location: 1, midpoint: 0.5, opacity: 1 }] } }],
+    patternOverlay: { enabled: true, pattern: { id: "unavailable", name: "Unresolved Pattern" }, scale: 0.5, phase: { x: 3, y: 4 }, align: true },
+    stroke: [{ enabled: true, size: { units: "Pixels", value: 2 }, position: "inside", fillType: "color", color: { r: 26, g: 27, b: 28 }, overprint: true }]
+  }, undefined, new Map(), report, "Synthetic PSD layer", "synthetic-layer");
+
+  assert.deepEqual(
+    new Set(effects.map((effect) => effect.type)),
+    new Set(["drop-shadow", "inner-shadow", "outer-glow", "inner-glow", "bevel-emboss", "satin", "color-overlay", "gradient-overlay", "pattern-overlay", "stroke"])
+  );
+  assert.deepEqual(effects.find((effect) => effect.type === "drop-shadow")?.offset, { x: Math.cos(Math.PI / 4) * 9, y: Math.sin(Math.PI / 4) * 9 });
+  assert.equal(effects.find((effect) => effect.type === "bevel-emboss")?.bevelTechnique, "chisel-hard");
+  const pattern = effects.find((effect) => effect.type === "pattern-overlay");
+  assert.equal(pattern?.patternName, "Unresolved Pattern");
+  assert.equal(pattern?.patternAssetId, undefined);
+  assert.ok(report.issues.some((issue) => issue.message.includes("could not be resolved to pixels")));
+  assert.deepEqual(report.unsupportedEffects, ["Synthetic PSD layer"]);
+
+  const disabledReport = createDesignImportReport("psd", "disabled-effects.psd");
+  convertPsdEffects({
+    dropShadow: [{ enabled: false, color: { r: 0, g: 0, b: 0 }, size: { units: "Pixels", value: 4 }, distance: { units: "Pixels", value: 2 } }]
+  }, undefined, new Map(), disabledReport, "Disabled PSD layer", "disabled-layer");
+  assert.deepEqual(disabledReport.unsupportedEffects, []);
+  assert.deepEqual(disabledReport.visualDifferences, []);
+});
+
+test("real Photoshop PSD imports typed scene effects that capability audit reports as unrendered", async () => {
+  const source = await readFile(fileURLToPath(new URL("../../../../vendor/adobe/photoshop-api-sdk/testfiles/input/input01.psd", import.meta.url)));
+  const report = createDesignImportReport("psd", "input01.psd");
+  const document = normalizeDesignDocument(importPsdDocument(source, "input01.psd", report), DEFAULT_DESIGN_IMPORT_OPTIONS);
+  const nodes = [];
+  const walk = (items) => items.forEach((node) => {
+    nodes.push(node);
+    walk(node.children);
+  });
+  document.pages.forEach((page) => walk(page.nodes));
+  assert.ok(nodes.some((node) => node.effects.some((effect) => effect.type === "drop-shadow")));
+
+  const [scene] = convertDesignDocumentToScenes(document, DEFAULT_DESIGN_IMPORT_OPTIONS, report);
+  const object = scene.objects.find((candidate) => candidate.effects?.some((effect) => effect.type === "drop-shadow"));
+  assert.ok(object?.effects?.length);
+  assert.equal(typeof object?.blendingOptions?.fillOpacity, "number");
+  const audit = validateSceneEffects(scene);
+  assert.ok(audit.affectedObjectIds.includes(object.id));
+  assert.ok(audit.unrenderedByType["drop-shadow"] >= 1);
 });
 
 test("visual compatibility fingerprint retains source geometry and alpha stops", async () => {

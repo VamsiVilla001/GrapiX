@@ -13,6 +13,7 @@
  *   requiresAck  stated rather than inferred from the message type
  */
 
+import type { SceneRef } from "./messages.js";
 export const ENGINE_PROTOCOL_VERSION = 3 as const;
 export type EngineProtocolVersion = typeof ENGINE_PROTOCOL_VERSION;
 
@@ -61,6 +62,9 @@ export const PREVIEW_MESSAGE_TYPES = [
   "preview.setViewport"
 ] as const;
 
+/** Private native authoring view. Only a credential-derived Editor principal may use it. */
+export const EDITOR_VIEW_MESSAGE_TYPES = ["editor.view.request", "editor.view.close"] as const;
+
 export const ENGINE_CONTROL_MESSAGE_TYPES = [
   "engine.getStatus",
   "engine.getDiagnostics",
@@ -94,6 +98,7 @@ export const ENGINE_REQUEST_TYPES = [
   ...ASSET_MESSAGE_TYPES,
   ...PLAYOUT_MESSAGE_TYPES,
   ...PREVIEW_MESSAGE_TYPES,
+  ...EDITOR_VIEW_MESSAGE_TYPES,
   ...ENGINE_CONTROL_MESSAGE_TYPES,
   ...OUTPUT_MESSAGE_TYPES
 ] as const;
@@ -112,6 +117,7 @@ export const ENGINE_REPLY_TYPES = [
   "reply.scenePrepared",
   "reply.assetProgress",
   "reply.preview",
+  "reply.editorView",
   "reply.outputs"
 ] as const;
 
@@ -171,11 +177,8 @@ export interface EngineEnvelope {
   requestId: string | null;
   /** Which engine this concerns. Null before the engine has identified itself. */
   engineId: string | null;
-  /** Permission scope. Null for connection-level messages. */
-  projectId: string | null;
-  sceneId: string | null;
-  /** Monotonic scene revision. Null for messages not scoped to a scene. */
-  sceneRevision: number | null;
+  /** Canonical scene address. Null only for connection-level messages. */
+  sceneRef: SceneRef | null;
   timestampMs: number;
   type: EngineMessageType;
   /** Whether the sender expects an explicit acknowledgement. */
@@ -223,7 +226,9 @@ const ACK_REQUIRED_TYPES = new Set<string>([
   "output.configure",
   "output.start",
   "output.stop",
-  "output.remove"
+  "output.remove",
+  "editor.view.request",
+  "editor.view.close"
 ]);
 
 export function messageRequiresAck(type: EngineMessageType): boolean {
@@ -237,9 +242,7 @@ export interface CreateEnvelopeOptions {
   direction?: EngineMessageDirection;
   requestId?: string | null;
   engineId?: string | null;
-  projectId?: string | null;
-  sceneId?: string | null;
-  sceneRevision?: number | null;
+  sceneRef?: SceneRef | null;
   requiresAck?: boolean;
 }
 
@@ -273,9 +276,7 @@ export function createEngineMessage<TPayload>(
     messageId: options.messageId,
     requestId: options.requestId ?? null,
     engineId: options.engineId ?? null,
-    projectId: options.projectId ?? null,
-    sceneId: options.sceneId ?? null,
-    sceneRevision: options.sceneRevision ?? null,
+    sceneRef: options.sceneRef ?? null,
     timestampMs: options.timestampMs,
     type,
     requiresAck: options.requiresAck ?? messageRequiresAck(type),
@@ -345,9 +346,8 @@ export interface EnvelopeValidation {
 /**
  * Structural validation of an arriving envelope.
  *
- * Deliberately strict about nullability: v2's lesson was that "field absent" and
- * "field explicitly null" must not be the same thing, because a missing sceneId
- * is a bug while a null one is a legitimate non-scene message.
+ * "field explicitly null" must not be the same thing, because a missing
+ * `sceneRef` is a bug while a null one is legitimate for connection messages.
  */
 export function validateEnvelope(value: unknown): EnvelopeValidation {
   const errors: string[] = [];
@@ -385,16 +385,32 @@ export function validateEnvelope(value: unknown): EnvelopeValidation {
     errors.push("payload is required, even when empty");
   }
 
-  for (const field of ["requestId", "engineId", "projectId", "sceneId"] as const) {
+  for (const field of ["requestId", "engineId"] as const) {
     const candidate = record[field];
     if (candidate !== null && typeof candidate !== "string") {
       errors.push(`${field} must be a string or explicitly null`);
     }
   }
 
-  const revision = record.sceneRevision;
-  if (revision !== null && (!Number.isSafeInteger(revision) || (revision as number) < 0)) {
-    errors.push("sceneRevision must be a non-negative safe integer or explicitly null");
+  const sceneRef = record.sceneRef;
+  if (sceneRef !== null) {
+    if (typeof sceneRef !== "object" || Array.isArray(sceneRef)) {
+      errors.push("sceneRef must be an object or explicitly null");
+    } else {
+      const ref = sceneRef as Record<string, unknown>;
+      if (typeof ref.projectId !== "string" || ref.projectId.trim() === "") {
+        errors.push("sceneRef.projectId must be a non-empty string");
+      }
+      if (ref.domain !== "authoring" && ref.domain !== "published") {
+        errors.push("sceneRef.domain must be authoring or published");
+      }
+      if (typeof ref.sceneId !== "string" || ref.sceneId.trim() === "") {
+        errors.push("sceneRef.sceneId must be a non-empty string");
+      }
+      if (!Number.isSafeInteger(ref.revision) || (ref.revision as number) < 0) {
+        errors.push("sceneRef.revision must be a non-negative safe integer");
+      }
+    }
   }
 
   return { valid: errors.length === 0, errors };

@@ -1361,6 +1361,16 @@ export interface BaseSceneObject {
   materialSlots: MaterialSlotMap;
   /** After Effects–style layer masks (bezier paths that clip the object). */
   masks?: ObjectMask[];
+  /**
+   * Photoshop-style layer styles, in the order they composite.
+   *
+   * First-class scene data: the inspector lists them, preflight audits them and
+   * `validateSceneEffects` reports every enabled one no renderer draws. Absent
+   * means the object has no styles, which is not the same as having disabled ones.
+   */
+  effects?: ObjectEffect[];
+  /** Photoshop Blending Options: fill opacity, knockout, blend-if. */
+  blendingOptions?: ObjectBlendingOptions;
   /** Round-trippable source metadata retained by the professional design importer. */
   importedDesign?: {
     sourceFormat: "psd" | "ai" | "svg" | "figma-json" | "figma-mcp";
@@ -1372,6 +1382,11 @@ export interface BaseSceneObject {
     componentId?: string;
     componentProperties?: Record<string, unknown>;
     responsiveLayout?: Record<string, unknown>;
+    /**
+     * Verbatim importer effect records. Superseded by the typed `effects` above
+     * for anything that reads them; kept because it round-trips source fields
+     * the typed model does not name.
+     */
     effects?: Array<Record<string, unknown>>;
     additionalFills?: ColorValue[];
     additionalStrokes?: ColorValue[];
@@ -1513,6 +1528,350 @@ export interface ObjectMask {
    * layer renders unmasked rather than clipped by the wrong shape.
    */
   alphaAssetId?: string;
+}
+
+/* ---------------------------------------------------------------------------
+   Layer styles / effects
+
+   The complete Photoshop "fx" set, modelled as first-class scene data rather
+   than provenance. Before this existed the design importer read every layer
+   style out of the PSD and then dropped it into `importedDesign.effects` as an
+   opaque `Record<string, unknown>`: the information survived a round trip and
+   nothing else in the system could see it — not the inspector, not preflight,
+   not the capability audit, not a renderer that might one day draw it.
+   --------------------------------------------------------------------------- */
+
+/** Photoshop's ten layer styles, in the order its Layer Style dialog lists them. */
+export type ObjectEffectType =
+  | "bevel-emboss"
+  | "stroke"
+  | "inner-shadow"
+  | "inner-glow"
+  | "satin"
+  | "color-overlay"
+  | "gradient-overlay"
+  | "pattern-overlay"
+  | "outer-glow"
+  | "drop-shadow";
+
+/**
+ * Effects both renderers draw.
+ *
+ * Deliberately empty. Every layer style needs a multi-pass shader compositing
+ * path that neither the PixiJS preview nor the Rust core has, and the same rule
+ * that governs `IMPLEMENTED_BLEND_MODES` governs this: a scene may carry an
+ * effect, and `validateSceneEffects` reports it, but nothing pretends to draw
+ * it. An effect silently ignored looks like a renderer bug; an effect reported
+ * as unimplemented is a known gap with a name.
+ */
+export const IMPLEMENTED_OBJECT_EFFECTS: readonly ObjectEffectType[] = Object.freeze([]);
+
+/** A Photoshop contour curve: control points in a 0..1 square. */
+export interface EffectContour {
+  name?: string;
+  curve: Vec2[];
+}
+
+/** Shared by every effect, so a consumer can list and toggle them without narrowing. */
+export interface ObjectEffectBase {
+  id: string;
+  type: ObjectEffectType;
+  /** Photoshop keeps switched-off styles in the file; a disabled effect contributes no pixels. */
+  enabled: boolean;
+  blendMode?: MaterialBlendMode;
+  opacity?: number;
+  /**
+   * The authored Photoshop mode when it has no `MaterialBlendMode` equivalent.
+   * Kept so a round trip back to Photoshop restores what the designer chose,
+   * rather than the mode GrapiX substituted.
+   */
+  sourceBlendMode?: string;
+  /** Verbatim source parameters, for a round trip and for anything not modelled above. */
+  sourceData?: Record<string, unknown>;
+}
+
+export interface DropShadowEffect extends ObjectEffectBase {
+  type: "drop-shadow";
+  color: string;
+  /** Degrees. Photoshop's global light angle when `useGlobalLight` is set. */
+  angle: number;
+  useGlobalLight?: boolean;
+  /** Photoshop "Distance": offset along `angle`. `offset` is the resolved x/y. */
+  distance: number;
+  offset?: Vec2;
+  /** Photoshop "Spread" (choke), 0..1. */
+  spread: number;
+  /** Photoshop "Size": blur radius in pixels. */
+  size: number;
+  noise?: number;
+  antialiased?: boolean;
+  contour?: EffectContour;
+  /** Photoshop "Layer Knocks Out Drop Shadow". */
+  layerConceals?: boolean;
+}
+
+export interface InnerShadowEffect extends ObjectEffectBase {
+  type: "inner-shadow";
+  color: string;
+  angle: number;
+  useGlobalLight?: boolean;
+  distance: number;
+  offset?: Vec2;
+  /** Photoshop "Choke", 0..1. */
+  choke: number;
+  size: number;
+  noise?: number;
+  antialiased?: boolean;
+  contour?: EffectContour;
+}
+
+export interface OuterGlowEffect extends ObjectEffectBase {
+  type: "outer-glow";
+  /** A glow may be a flat colour or a gradient; `paint` wins when present. */
+  color?: string;
+  paint?: ColorValue;
+  technique?: "softer" | "precise";
+  spread: number;
+  size: number;
+  range?: number;
+  jitter?: number;
+  noise?: number;
+  antialiased?: boolean;
+  contour?: EffectContour;
+}
+
+export interface InnerGlowEffect extends ObjectEffectBase {
+  type: "inner-glow";
+  color?: string;
+  paint?: ColorValue;
+  technique?: "softer" | "precise";
+  /** Photoshop "Source": a centre glow and an edge glow are different pictures. */
+  source?: "edge" | "center";
+  choke: number;
+  size: number;
+  range?: number;
+  jitter?: number;
+  noise?: number;
+  antialiased?: boolean;
+  contour?: EffectContour;
+}
+
+export interface BevelEmbossEffect extends ObjectEffectBase {
+  type: "bevel-emboss";
+  style: "outer-bevel" | "inner-bevel" | "emboss" | "pillow-emboss" | "stroke-emboss";
+  technique?: "smooth" | "chisel-hard" | "chisel-soft";
+  /** Photoshop "Depth", 0..n where 1 is 100%. */
+  depth: number;
+  direction: "up" | "down";
+  size: number;
+  soften: number;
+  angle: number;
+  altitude: number;
+  useGlobalLight?: boolean;
+  highlightColor: string;
+  highlightBlendMode?: MaterialBlendMode;
+  highlightOpacity: number;
+  shadowColor: string;
+  shadowBlendMode?: MaterialBlendMode;
+  shadowOpacity: number;
+  glossContour?: EffectContour;
+  antialiasGloss?: boolean;
+  /** The Contour and Texture sub-effects, which Photoshop nests under Bevel & Emboss. */
+  contourEnabled?: boolean;
+  contour?: EffectContour;
+  contourRange?: number;
+  textureEnabled?: boolean;
+  texturePatternName?: string;
+  texturePatternAssetId?: string;
+  textureScale?: number;
+  textureDepth?: number;
+  textureInvert?: boolean;
+  textureLinked?: boolean;
+}
+
+export interface SatinEffect extends ObjectEffectBase {
+  type: "satin";
+  color: string;
+  angle: number;
+  distance: number;
+  size: number;
+  invert?: boolean;
+  antialiased?: boolean;
+  contour?: EffectContour;
+}
+
+export interface ColorOverlayEffect extends ObjectEffectBase {
+  type: "color-overlay";
+  color: string;
+  paint?: ColorValue;
+}
+
+export interface GradientOverlayEffect extends ObjectEffectBase {
+  type: "gradient-overlay";
+  paint?: ColorValue;
+  style?: "linear" | "radial" | "angle" | "reflected" | "diamond";
+  angle: number;
+  scale?: number;
+  offset?: Vec2;
+  reverse?: boolean;
+  dither?: boolean;
+  /** Photoshop "Align with Layer". */
+  alignWithLayer?: boolean;
+}
+
+export interface PatternOverlayEffect extends ObjectEffectBase {
+  type: "pattern-overlay";
+  patternName?: string;
+  /**
+   * The pattern's pixels, once the importer has stored them. Photoshop patterns
+   * live in the file's pattern table rather than on the layer, so an import that
+   * could not resolve one leaves this absent and says so in the report.
+   */
+  patternAssetId?: string;
+  scale?: number;
+  offset?: Vec2;
+  linked?: boolean;
+}
+
+export interface StrokeEffect extends ObjectEffectBase {
+  type: "stroke";
+  size: number;
+  position: "outside" | "inside" | "center";
+  fillType: "color" | "gradient" | "pattern";
+  color?: string;
+  paint?: ColorValue;
+  patternName?: string;
+  patternAssetId?: string;
+  overprint?: boolean;
+}
+
+export type ObjectEffect =
+  | DropShadowEffect
+  | InnerShadowEffect
+  | OuterGlowEffect
+  | InnerGlowEffect
+  | BevelEmbossEffect
+  | SatinEffect
+  | ColorOverlayEffect
+  | GradientOverlayEffect
+  | PatternOverlayEffect
+  | StrokeEffect;
+
+/**
+ * Photoshop's Blending Options — the top pane of the same Layer Style dialog.
+ *
+ * Separate from `opacity` because Photoshop's two opacities differ: `opacity`
+ * fades the layer *and* its effects, `fillOpacity` fades only the layer's own
+ * pixels and leaves the effects at full strength. A stroke on a fill-0 shape is
+ * a common broadcast lower-third build, and collapsing the two erases it.
+ */
+export interface ObjectBlendingOptions {
+  fillOpacity?: number;
+  knockout?: "none" | "shallow" | "deep";
+  blendInteriorEffectsAsGroup?: boolean;
+  blendClippedLayersAsGroup?: boolean;
+  transparencyShapesLayer?: boolean;
+  layerMaskHidesEffects?: boolean;
+  vectorMaskHidesEffects?: boolean;
+  /** Photoshop "Blend If" sliders, per channel. Values are 0..255 source levels. */
+  blendIf?: EffectBlendIfChannel[];
+}
+
+export interface EffectBlendIfChannel {
+  channel: "gray" | "red" | "green" | "blue";
+  sourceBlackPoint: number;
+  sourceWhitePoint: number;
+  targetBlackPoint: number;
+  targetWhitePoint: number;
+}
+
+/** Every effect type, so a consumer can iterate without restating the union. */
+export const OBJECT_EFFECT_TYPES: readonly ObjectEffectType[] = Object.freeze([
+  "bevel-emboss",
+  "stroke",
+  "inner-shadow",
+  "inner-glow",
+  "satin",
+  "color-overlay",
+  "gradient-overlay",
+  "pattern-overlay",
+  "outer-glow",
+  "drop-shadow"
+]);
+
+/**
+ * Bring imported or hand-edited effects into range.
+ *
+ * Unknown effect types are dropped rather than kept as an untyped record: the
+ * whole point of the typed model is that anything reading `effects` can narrow
+ * on `type` without a fallback branch. What was dropped is recoverable from
+ * `importedDesign.effects`, which keeps the verbatim source records.
+ */
+export function normalizeObjectEffects(effects: unknown): ObjectEffect[] {
+  if (!Array.isArray(effects)) return [];
+  const normalized: ObjectEffect[] = [];
+
+  effects.forEach((candidate, index) => {
+    if (!candidate || typeof candidate !== "object") return;
+    const effect = candidate as Partial<ObjectEffect> & Record<string, unknown>;
+    if (typeof effect.type !== "string") return;
+    if (!OBJECT_EFFECT_TYPES.includes(effect.type as ObjectEffectType)) return;
+
+    normalized.push({
+      ...effect,
+      id: typeof effect.id === "string" && effect.id ? effect.id : `effect-${effect.type}-${index}`,
+      // Photoshop keeps switched-off styles in the file, so absence means "on":
+      // only an explicit `false` disables one.
+      enabled: effect.enabled !== false,
+      opacity: clampUnit(effect.opacity)
+    } as ObjectEffect);
+  });
+
+  return normalized;
+}
+
+function clampUnit(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return Math.min(1, Math.max(0, value));
+}
+
+export interface SceneEffectAudit {
+  /** Enabled effects, grouped by type, that no renderer draws. */
+  unrenderedByType: Partial<Record<ObjectEffectType, number>>;
+  /** Objects carrying at least one enabled, unrendered effect. */
+  affectedObjectIds: string[];
+  warnings: string[];
+}
+
+/**
+ * Report every enabled layer style that will not reach the screen.
+ *
+ * The rule this enforces is the repository's oldest one: a fallback may not
+ * silently produce visually different pixels. A drop shadow that imports, saves,
+ * validates and then renders as nothing is exactly that, so it is named here —
+ * once per type, with the objects that carry it — rather than discovered on air.
+ */
+export function validateSceneEffects(scene: SceneDocument): SceneEffectAudit {
+  const unrenderedByType: Partial<Record<ObjectEffectType, number>> = {};
+  const affectedObjectIds: string[] = [];
+
+  for (const object of scene.objects) {
+    let objectAffected = false;
+    for (const effect of object.effects ?? []) {
+      if (!effect.enabled) continue;
+      if (IMPLEMENTED_OBJECT_EFFECTS.includes(effect.type)) continue;
+      unrenderedByType[effect.type] = (unrenderedByType[effect.type] ?? 0) + 1;
+      objectAffected = true;
+    }
+    if (objectAffected) affectedObjectIds.push(object.id);
+  }
+
+  const warnings = Object.entries(unrenderedByType).map(
+    ([type, count]) =>
+      `${count} enabled ${type} effect${count === 1 ? "" : "s"} will not be drawn: no GrapiX renderer implements layer styles yet.`
+  );
+
+  return { unrenderedByType, affectedObjectIds, warnings };
 }
 
 export interface MaskPathKeyframe {
@@ -3197,6 +3556,13 @@ export function preflightScenePackage(scene: SceneDocument): ScenePackagePreflig
       code: "UNSAFE_MEMORY_ESTIMATE",
       message: `Estimated scene memory ${estimatedBytes} bytes exceeds the 1.5 GiB package safety limit.`
     });
+  }
+
+  // A layer style that imports, validates and then renders as nothing is a
+  // visual difference the operator must be told about before the scene is cued.
+  const effectAudit = validateSceneEffects(scene);
+  for (const warning of effectAudit.warnings) {
+    issues.push({ severity: "warning", code: "EFFECT_NOT_RENDERED", message: warning });
   }
 
   const duplicateIds = findDuplicateSceneIds(scene);

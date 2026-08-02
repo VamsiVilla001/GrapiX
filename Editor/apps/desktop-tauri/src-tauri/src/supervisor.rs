@@ -264,8 +264,8 @@ fn ensure_engine(root: &Path, inner: &Arc<Mutex<Inner>>) {
 }
 
 fn start_api(root: &Path, inner: &Arc<Mutex<Inner>>) {
-    if port_open(API_ADDRESS) {
-        adopt(inner, |inner| &mut inner.api, "already running on :4100");
+    if api_health() {
+        adopt(inner, |inner| &mut inner.api, "already running and healthy on :4100");
         return;
     }
 
@@ -292,8 +292,12 @@ fn start_api(root: &Path, inner: &Arc<Mutex<Inner>>) {
 }
 
 fn start_assistant(root: &Path, inner: &Arc<Mutex<Inner>>) {
-    if port_open(ASSISTANT_ADDRESS) {
-        adopt(inner, |inner| &mut inner.assistant, "already running on :4160");
+    if assistant_health() {
+        adopt(
+            inner,
+            |inner| &mut inner.assistant,
+            "already running and healthy on :4160",
+        );
         return;
     }
 

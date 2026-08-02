@@ -41,3 +41,10 @@ cache/
 # --- Run evidence -----------------------------------------------------------
 # Pixel-parity captures and diff images: evidence from a run, not source.
 artifacts/
+
+# --- Vendored third-party SDKs ----------------------------------------------
+# Adobe's After Effects SDK and Photoshop API SDK, fetched locally for reference.
+# Both carry Adobe licence terms and are not redistributable from this repository.
+# What GrapiX depends on is transcribed into Shared/adobe-common-schema with the
+# header and line each value came from; nothing in the build reads this directory.
+vendor/adobe/

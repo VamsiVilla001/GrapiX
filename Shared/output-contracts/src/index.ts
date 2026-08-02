@@ -197,6 +197,24 @@ export function validateOutputFormat(
     };
   }
 
+  if (!Number.isSafeInteger(format.width) || format.width <= 0
+    || !Number.isSafeInteger(format.height) || format.height <= 0) {
+    return {
+      ok: false,
+      code: "INVALID_OPTION",
+      message: `${descriptor.name} requires positive whole-pixel dimensions`
+    };
+  }
+
+  if (!Number.isSafeInteger(format.frameRate.numerator) || format.frameRate.numerator <= 0
+    || !Number.isSafeInteger(format.frameRate.denominator) || format.frameRate.denominator <= 0) {
+    return {
+      ok: false,
+      code: "FRAME_RATE_UNSUPPORTED",
+      message: `${descriptor.name} requires a finite positive rational frame rate`
+    };
+  }
+
   if (!descriptor.colorFormats.includes(format.colorFormat)) {
     return {
       ok: false,
@@ -409,7 +427,16 @@ export function bytesPerPixel(format: OutputColorFormat): number {
 
 /** Bytes one frame occupies, given a row alignment. */
 export function frameByteSize(format: OutputFrameFormat, rowAlignment = 1): number {
+  if (!Number.isSafeInteger(format.width) || format.width <= 0
+    || !Number.isSafeInteger(format.height) || format.height <= 0
+    || !Number.isSafeInteger(rowAlignment) || rowAlignment <= 0) {
+    throw new RangeError("frame dimensions and row alignment must be positive whole numbers");
+  }
   const rowBytes = Math.ceil(format.width * bytesPerPixel(format.colorFormat));
   const stride = Math.ceil(rowBytes / rowAlignment) * rowAlignment;
-  return stride * format.height;
+  const totalBytes = stride * format.height;
+  if (!Number.isSafeInteger(totalBytes)) {
+    throw new RangeError("frame byte size exceeds JavaScript's safe integer range");
+  }
+  return totalBytes;
 }

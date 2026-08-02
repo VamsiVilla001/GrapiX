@@ -15,6 +15,62 @@ use serde_json::Value;
 
 pub const PROTOCOL_VERSION: u32 = 3;
 
+/// Canonical identity of one immutable scene revision in one project domain.
+///
+/// `sceneId` alone is not a runtime key: projects may reuse ids and an Editor's
+/// mutable authoring document must never become a Program candidate by collision.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SceneRef {
+    pub project_id: String,
+    pub domain: SceneDomain,
+    pub scene_id: String,
+    pub revision: u64,
+}
+
+impl SceneRef {
+    pub fn cache_key(&self) -> String {
+        // Length prefixes make this unambiguous even when an external project or
+        // scene id contains punctuation used by the human-readable domain name.
+        format!(
+            "{}:{}|{}:{}|{}:{}|{}",
+            self.project_id.len(),
+            self.project_id,
+            self.domain.as_str().len(),
+            self.domain.as_str(),
+            self.scene_id.len(),
+            self.scene_id,
+            self.revision,
+        )
+    }
+
+    pub fn require_published_for_program(&self) -> Result<(), ProtocolError> {
+        if self.domain != SceneDomain::Published {
+            return Err(ProtocolError::new(
+                ErrorCode::InvalidPayload,
+                "Program and Playout Preview accept published SceneRef values only",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SceneDomain {
+    Authoring,
+    Published,
+}
+
+impl SceneDomain {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Authoring => "authoring",
+            Self::Published => "published",
+        }
+    }
+}
+
 /// Every message, in both directions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Envelope {
@@ -28,13 +84,10 @@ pub struct Envelope {
     pub request_id: Option<String>,
     #[serde(rename = "engineId")]
     pub engine_id: Option<String>,
-    /// Permission scope. Null for connection-level messages.
-    #[serde(rename = "projectId")]
-    pub project_id: Option<String>,
-    #[serde(rename = "sceneId")]
-    pub scene_id: Option<String>,
-    #[serde(rename = "sceneRevision")]
-    pub scene_revision: Option<u64>,
+    /// Canonical scene scope. It is absent only for connection and engine-wide
+    /// messages; scene commands must carry all four fields in this value.
+    #[serde(rename = "sceneRef")]
+    pub scene_ref: Option<SceneRef>,
     #[serde(rename = "timestampMs")]
     pub timestamp_ms: u64,
     #[serde(rename = "type")]
@@ -71,9 +124,7 @@ impl Envelope {
             message_id: format!("{engine_id}-{}{sequence}", Self::REPLY_PREFIX),
             request_id,
             engine_id: Some(engine_id.to_string()),
-            project_id: None,
-            scene_id: None,
-            scene_revision: None,
+            scene_ref: None,
             timestamp_ms,
             message_type: message_type.to_string(),
             requires_ack: false,
@@ -115,6 +166,7 @@ pub enum ErrorCode {
     SequenceGap,
     RevisionMismatch,
     ResyncRequired,
+    UnauthorizedRole,
     SceneNotFound,
     SceneNotPrepared,
     StageNotFound,
@@ -149,6 +201,7 @@ impl ErrorCode {
             ErrorCode::SequenceGap => "SEQUENCE_GAP",
             ErrorCode::RevisionMismatch => "REVISION_MISMATCH",
             ErrorCode::ResyncRequired => "RESYNC_REQUIRED",
+            ErrorCode::UnauthorizedRole => "UNAUTHORIZED_ROLE",
             ErrorCode::SceneNotFound => "SCENE_NOT_FOUND",
             ErrorCode::SceneNotPrepared => "SCENE_NOT_PREPARED",
             ErrorCode::StageNotFound => "STAGE_NOT_FOUND",
@@ -263,6 +316,8 @@ pub enum RequestType {
     PreviewStreamStart,
     PreviewStreamStop,
     PreviewSetViewport,
+    // Private Editor authoring view
+    EditorViewRequest,
     // Engine control
     GetStatus,
     GetDiagnostics,
@@ -311,6 +366,7 @@ impl RequestType {
             "preview.streamStart" => RequestType::PreviewStreamStart,
             "preview.streamStop" => RequestType::PreviewStreamStop,
             "preview.setViewport" => RequestType::PreviewSetViewport,
+            "editor.view.request" => RequestType::EditorViewRequest,
             "engine.getStatus" => RequestType::GetStatus,
             "engine.getDiagnostics" => RequestType::GetDiagnostics,
             "engine.getCapabilities" => RequestType::GetCapabilities,
@@ -339,11 +395,37 @@ impl RequestType {
             PreviewRequest | PreviewStreamStart | PreviewStreamStop | PreviewSetViewport => {
                 "preview"
             }
+            EditorViewRequest => "editor-view",
+
             GetStatus | GetDiagnostics | GetCapabilities | SetConfiguration | RestartRenderer => {
                 "engine"
             }
             OutputList | OutputConfigure | OutputStart | OutputStop | OutputRemove => "output",
         }
+    }
+
+    /// Scene-bearing requests are invalid without a canonical `SceneRef`. The
+    /// protocol deliberately does not reconstruct one from legacy bare ids.
+    pub fn requires_scene_ref(&self) -> bool {
+        matches!(
+            self,
+            Self::SceneLoad
+                | Self::SceneUnload
+                | Self::SceneFullSync
+                | Self::SceneApplyPatch
+                | Self::SceneValidate
+                | Self::ScenePrepare
+                | Self::Cue
+                | Self::TakeOnline
+                | Self::TakeOffline
+                | Self::Continue
+                | Self::Update
+                | Self::Stop
+                | Self::Replace
+                | Self::Transition
+                | Self::PreviewRequest
+                | Self::EditorViewRequest
+        )
     }
 
     /// Whether this message may be sent before authenticating.
@@ -370,6 +452,7 @@ impl RequestType {
                 | RequestType::SceneValidate
                 | RequestType::AssetValidate
                 | RequestType::OutputList
+                | RequestType::EditorViewRequest
         )
     }
 
@@ -380,6 +463,7 @@ impl RequestType {
     pub fn rate_cost(&self) -> f64 {
         match self {
             RequestType::PreviewRequest => 4.0,
+            RequestType::EditorViewRequest => 4.0,
             RequestType::AssetUpload => 2.0,
             RequestType::SceneLoad | RequestType::SceneFullSync => 4.0,
             RequestType::GetDiagnostics => 2.0,
@@ -432,10 +516,16 @@ pub fn decode(raw: &str, max_bytes: u64) -> Result<Envelope, ProtocolError> {
             "sequence must be a positive integer",
         ));
     }
-    if RequestType::parse(&envelope.message_type).is_none() {
-        return Err(ProtocolError::new(
+    let request = RequestType::parse(&envelope.message_type).ok_or_else(|| {
+        ProtocolError::new(
             ErrorCode::UnsupportedMessage,
             format!("unknown message type {}", envelope.message_type),
+        )
+    })?;
+    if request.requires_scene_ref() && envelope.scene_ref.is_none() {
+        return Err(ProtocolError::new(
+            ErrorCode::InvalidEnvelope,
+            format!("{} requires a sceneRef", envelope.message_type),
         ));
     }
 

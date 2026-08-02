@@ -217,7 +217,10 @@ fn start_engine(root: &Path, inner: &Arc<Mutex<Inner>>) {
         return;
     };
 
-    let config = root.join("services").join("render-engine").join("engine.toml");
+    let config = root
+        .join("services")
+        .join("render-engine")
+        .join("engine.toml");
     let mut command = Command::new(executable);
     command.current_dir(root);
     if config.is_file() {
@@ -229,7 +232,11 @@ fn start_engine(root: &Path, inner: &Arc<Mutex<Inner>>) {
 
 fn start_control(root: &Path, inner: &Arc<Mutex<Inner>>) {
     if port_open(CONTROL_ADDRESS) {
-        adopt(inner, |inner| &mut inner.control, "already running on :4300");
+        adopt(
+            inner,
+            |inner| &mut inner.control,
+            "already running on :4300",
+        );
         return;
     }
 
@@ -286,18 +293,22 @@ fn spawn(
     // process's own words, not a supervisor's summary of them.
     command.stdin(Stdio::null());
 
+    // Keep the lock through spawn and slot registration. Otherwise shutdown can set
+    // `stopping` between those two operations, leaving a newly spawned control process
+    // untracked and therefore unable to be stopped.
+    let mut guard = inner.lock().expect("supervisor mutex poisoned");
+    if guard.stopping {
+        return;
+    }
+    let slot = select(&mut guard);
     match command.spawn() {
         Ok(child) => {
-            let mut guard = inner.lock().expect("supervisor mutex poisoned");
-            let slot = select(&mut guard);
             println!("[playout] started {}", slot.label);
             slot.child = Some(child);
             slot.state = ProcessState::Starting;
             slot.detail = None;
         }
         Err(error) => {
-            let mut guard = inner.lock().expect("supervisor mutex poisoned");
-            let slot = select(&mut guard);
             eprintln!("[playout] could not start {}: {error}", slot.label);
             slot.state = ProcessState::Failed;
             slot.detail = Some(error.to_string());
@@ -305,12 +316,11 @@ fn spawn(
     }
 }
 
-fn adopt(
-    inner: &Arc<Mutex<Inner>>,
-    select: impl Fn(&mut Inner) -> &mut ProcessSlot,
-    detail: &str,
-) {
+fn adopt(inner: &Arc<Mutex<Inner>>, select: impl Fn(&mut Inner) -> &mut ProcessSlot, detail: &str) {
     let mut guard = inner.lock().expect("supervisor mutex poisoned");
+    if guard.stopping {
+        return;
+    }
     let slot = select(&mut guard);
     println!("[playout] adopting {}: {detail}", slot.label);
     slot.state = ProcessState::Adopted;
@@ -346,6 +356,9 @@ fn watch(root: &Path, inner: &Arc<Mutex<Inner>>, app: &AppHandle) {
 
         let (restart_engine, restart_control) = {
             let mut guard = inner.lock().expect("supervisor mutex poisoned");
+            if guard.stopping {
+                return;
+            }
             let within_grace = started.elapsed() < STARTUP_GRACE;
             update(&mut guard.engine, engine_up, within_grace);
             update(&mut guard.control, control_up, within_grace);
@@ -470,12 +483,35 @@ mod tests {
     fn shutdown_never_stops_the_engine() {
         let mut engine = ProcessSlot::new("Render engine", ENGINE_ADDRESS);
         engine.state = ProcessState::Online;
-        assert!(engine.child.is_none(), "no real child is spawned in a unit test");
+        assert!(
+            engine.child.is_none(),
+            "no real child is spawned in a unit test"
+        );
 
         // The adopted case, which is the easy half.
         engine.state = ProcessState::Adopted;
         stop_slot(&mut engine);
         assert_eq!(engine.state, ProcessState::Adopted);
+    }
+
+    #[test]
+    fn stopping_prevents_a_late_adoption() {
+        let inner = Arc::new(Mutex::new(Inner {
+            engine: ProcessSlot::new("Render engine", ENGINE_ADDRESS),
+            control: ProcessSlot::new("Playout control", CONTROL_ADDRESS),
+            stopping: true,
+        }));
+
+        adopt(
+            &inner,
+            |inner| &mut inner.control,
+            "already running on :4300",
+        );
+
+        assert_eq!(
+            inner.lock().expect("test mutex").control.state,
+            ProcessState::Idle
+        );
     }
 
     #[test]

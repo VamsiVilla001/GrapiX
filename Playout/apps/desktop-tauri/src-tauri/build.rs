@@ -21,13 +21,19 @@ fn stage_render_engine_sidecar() {
         .and_then(Path::parent)
         .and_then(Path::parent)
     else {
-        println!("cargo:warning=unable to resolve the GrapiX workspace root for the engine sidecar");
+        println!(
+            "cargo:warning=unable to resolve the GrapiX workspace root for the engine sidecar"
+        );
         return;
     };
 
     let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
     let target = env::var("TARGET").unwrap_or_else(|_| "unknown-target".to_string());
-    let extension = if target.contains("windows") { ".exe" } else { "" };
+    let extension = if target.contains("windows") {
+        ".exe"
+    } else {
+        ""
+    };
 
     let source = root
         .join("services")

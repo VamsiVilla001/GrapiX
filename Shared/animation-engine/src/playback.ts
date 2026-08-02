@@ -71,7 +71,7 @@ export class ScenePlayback {
   private releasedMarkerId: string | null = null;
 
   constructor(options: PlaybackOptions) {
-    this.durationFrames = Math.max(0, Math.floor(options.durationFrames));
+    this.durationFrames = nonNegativeWholeNumber(options.durationFrames);
     this.startFrame = clampFrame(options.startFrame ?? 0, this.durationFrames);
     this.direction = options.direction ?? "forward";
     this.loop = options.loop ?? "none";
@@ -171,7 +171,7 @@ export class ScenePlayback {
       return { frame: this.currentFrame, state: this.currentState, crossedMarkers: crossed, looped };
     }
 
-    const steps = Math.max(0, Math.floor(frames));
+    const steps = nonNegativeWholeNumber(frames);
 
     for (let step = 0; step < steps; step += 1) {
       const next = this.direction === "forward" ? this.currentFrame + 1 : this.currentFrame - 1;
@@ -246,6 +246,10 @@ export class ScenePlayback {
         return false;
     }
   }
+}
+
+function nonNegativeWholeNumber(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
 }
 
 function clampFrame(frame: number, durationFrames: number): number {
@@ -333,7 +337,7 @@ export class TransitionController {
     this.interrupted = this.isRunning && interrupt;
     this.transitionId = request.transitionId;
     this.phase = request.phase;
-    this.durationFrames = Math.max(0, Math.floor(request.durationFrames));
+    this.durationFrames = nonNegativeWholeNumber(request.durationFrames);
     this.frame = 0;
     this.reverse = request.reverse === true;
     this.scope = request.scope ?? { type: "scene" };
@@ -350,7 +354,7 @@ export class TransitionController {
   advance(frames = 1): TransitionStatus {
     if (!this.isRunning) return this.status;
 
-    this.frame = Math.min(this.durationFrames, this.frame + Math.max(0, Math.floor(frames)));
+    this.frame = Math.min(this.durationFrames, this.frame + nonNegativeWholeNumber(frames));
     if (this.frame >= this.durationFrames) {
       this.phase = "complete";
     }

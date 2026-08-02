@@ -23,6 +23,7 @@ npm run dev            # Editor: desktop shell, project service, ensures an engi
 npm run dev:playout    # Playout: operator UI, control service, engine
 npm run dev:engine     # the render engine on its own
 npm run dev:web        # Editor UI in a browser, for debugging
+npm run dev:adobe      # Adobe bridge gateway (Photoshop / After Effects), port 4784
 ```
 
 The Editor desktop shell runs the project service and **ensures** a render engine
@@ -34,9 +35,9 @@ way with its own control service.
 
 ```text
 Editor/     apps/{editor-web,desktop-tauri,desktop-electron},
-            services/{project-api,editor-mcp}
+            services/{project-api,editor-mcp,editor-assistant,adobe-mcp-gateway}
 Playout/    apps/{playout-web,desktop-tauri}, services/playout-control
-Shared/     13 contract packages — see Shared/README.md
+Shared/     15 contract packages — see Shared/README.md
 services/   render-engine (the engine), render-daemon (its render core library)
 tools/      architecture guards and certification harnesses
 docs/       architecture and detail documents

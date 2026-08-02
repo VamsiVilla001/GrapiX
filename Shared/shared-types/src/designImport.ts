@@ -1,6 +1,8 @@
 import type {
   BezierPath,
   ColorValue,
+  EffectBlendIfChannel,
+  EffectContour,
   MaskMode,
   MaterialBlendMode,
   SceneDocument,
@@ -51,7 +53,13 @@ export interface NormalizedDesignFont {
   sourceName?: string;
 }
 
+/**
+ * Layer style data normalized from a design source before it becomes an
+ * `ObjectEffect`. The source effect id is optional because not every design
+ * format assigns one; the scene converter assigns a stable object-local id.
+ */
 export interface NormalizedDesignEffect {
+  id?: string;
   type:
     | "drop-shadow"
     | "inner-shadow"
@@ -67,15 +75,77 @@ export interface NormalizedDesignEffect {
     | "background-blur"
     | "unknown";
   enabled: boolean;
+  blendMode?: MaterialBlendMode;
+  sourceBlendMode?: string;
   opacity?: number;
   color?: string;
-  offset?: Vec2;
-  radius?: number;
-  spread?: number;
-  angle?: number;
-  blendMode?: MaterialBlendMode;
   paint?: ColorValue;
+  offset?: Vec2;
+  angle?: number;
+  distance?: number;
+  radius?: number;
+  size?: number;
+  spread?: number;
+  choke?: number;
+  noise?: number;
+  antialiased?: boolean;
+  contour?: EffectContour;
+  useGlobalLight?: boolean;
+  layerConceals?: boolean;
+  technique?: "softer" | "precise";
+  source?: "edge" | "center";
+  range?: number;
+  jitter?: number;
+  style?: "outer-bevel" | "inner-bevel" | "emboss" | "pillow-emboss" | "stroke-emboss";
+  bevelTechnique?: "smooth" | "chisel-hard" | "chisel-soft";
+  depth?: number;
+  direction?: "up" | "down";
+  soften?: number;
+  altitude?: number;
+  highlightColor?: string;
+  highlightBlendMode?: MaterialBlendMode;
+  highlightSourceBlendMode?: string;
+  highlightOpacity?: number;
+  shadowColor?: string;
+  shadowBlendMode?: MaterialBlendMode;
+  shadowSourceBlendMode?: string;
+  shadowOpacity?: number;
+  glossContour?: EffectContour;
+  antialiasGloss?: boolean;
+  contourEnabled?: boolean;
+  contourRange?: number;
+  textureEnabled?: boolean;
+  texturePatternName?: string;
+  texturePatternAssetId?: string;
+  textureScale?: number;
+  textureDepth?: number;
+  textureInvert?: boolean;
+  textureLinked?: boolean;
+  invert?: boolean;
+  gradientStyle?: "linear" | "radial" | "angle" | "reflected" | "diamond";
+  scale?: number;
+  reverse?: boolean;
+  dither?: boolean;
+  alignWithLayer?: boolean;
+  patternName?: string;
+  patternAssetId?: string;
+  linked?: boolean;
+  position?: "outside" | "inside" | "center";
+  fillType?: "color" | "gradient" | "pattern";
+  overprint?: boolean;
   sourceData?: Record<string, unknown>;
+}
+
+/** Photoshop's Blending Options, normalized alongside a layer's styles. */
+export interface NormalizedDesignBlendingOptions {
+  fillOpacity?: number;
+  knockout?: "none" | "shallow" | "deep";
+  blendInteriorEffectsAsGroup?: boolean;
+  blendClippedLayersAsGroup?: boolean;
+  transparencyShapesLayer?: boolean;
+  layerMaskHidesEffects?: boolean;
+  vectorMaskHidesEffects?: boolean;
+  blendIf?: EffectBlendIfChannel[];
 }
 
 export interface NormalizedDesignMask {
@@ -163,6 +233,7 @@ export interface NormalizedDesignNode {
   assetId?: string;
   masks: NormalizedDesignMask[];
   effects: NormalizedDesignEffect[];
+  blendingOptions?: NormalizedDesignBlendingOptions;
   children: NormalizedDesignNode[];
   layout?: NormalizedDesignLayout;
   componentId?: string;

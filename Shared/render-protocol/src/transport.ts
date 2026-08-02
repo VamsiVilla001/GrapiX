@@ -18,6 +18,7 @@ export interface MinimalWebSocket {
   readonly readyState: number;
   send(data: string): void;
   close(code?: number, reason?: string): void;
+  binaryType?: "blob" | "arraybuffer";
   onopen: ((event: unknown) => void) | null;
   onclose: ((event: { code?: number; reason?: string }) => void) | null;
   onerror: ((event: unknown) => void) | null;
@@ -54,6 +55,7 @@ export class WebSocketEngineTransport implements EngineTransport {
   private socket: MinimalWebSocket | null = null;
   private frameHandler?: (frame: string) => void;
   private closeHandler?: (reason: string) => void;
+  private binaryFrameHandler?: (frame: Uint8Array) => void;
   private errorHandler?: (error: Error) => void;
 
   private readonly options: WebSocketTransportOptions;
@@ -89,16 +91,19 @@ export class WebSocketEngineTransport implements EngineTransport {
       : ["grapix-engine-v3"];
 
     const socket = this.factory(this.options.url, protocols);
+    // Browser WebSocket otherwise surfaces binary messages as Blob, adding an
+    // asynchronous conversion and a second buffer before Editor can paint it.
+    socket.binaryType = "arraybuffer";
     this.socket = socket;
 
     socket.onmessage = (event) => {
-      // Binary frames are not part of protocol v3; ignoring them is safer than
-      // guessing at an encoding.
       if (typeof event.data === "string") {
         this.frameHandler?.(event.data);
+        return;
       }
+      const binary = binaryFrame(event.data);
+      if (binary) this.binaryFrameHandler?.(binary);
     };
-
     socket.onclose = (event) => {
       this.socket = null;
       const reason = event?.reason?.trim();
@@ -178,6 +183,10 @@ export class WebSocketEngineTransport implements EngineTransport {
     this.frameHandler = handler;
   }
 
+  onBinaryFrame(handler: (frame: Uint8Array) => void): void {
+    this.binaryFrameHandler = handler;
+  }
+
   onClose(handler: (reason: string) => void): void {
     this.closeHandler = handler;
   }
@@ -200,6 +209,14 @@ function resolveGlobalWebSocketFactory(): WebSocketFactory | undefined {
       url,
       protocols
     );
+}
+
+function binaryFrame(value: unknown): Uint8Array | null {
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  return null;
 }
 
 /** Is a global WebSocket available? Lets a caller choose a transport up front. */

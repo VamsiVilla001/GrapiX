@@ -1131,6 +1131,12 @@ button {
   background: #7e2a2f;
 }
 
+.output-badge.ndi {
+  color: #e6d9ff;
+  background: #4a1d82;
+  border: 1px solid #7c3aed;
+}
+
 .output-badge.headless {
   color: #b6c5d1;
   background: #2a3540;
@@ -1140,7 +1146,6 @@ button {
   color: #d9efff;
   background: #24516a;
 }
-
 .output-detail {
   display: flex;
   flex-wrap: wrap;
@@ -1164,6 +1169,64 @@ button {
 
 .output-uncertified {
   color: var(--amber);
+}
+.output-row.ndi {
+  border-left-color: #8b5cf6;
+}
+
+.output-live-pulse {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 8px #22c55e;
+  animation: ndi-pulse 1.5s infinite;
+}
+
+@keyframes ndi-pulse {
+  0% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(1.2); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.output-source-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #c4b5fd;
+  font-weight: 600;
+}
+
+.output-copy-btn {
+  background: transparent;
+  border: 1px solid #4c3a6e;
+  color: #a78bfa;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.output-copy-btn:hover {
+  background: #3b2a59;
+  color: #edd5ff;
+}
+
+.ndi-format-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  color: #ddd6fe;
+  font-size: 9px;
+  margin-top: 4px;
 }
 
 .output-actions {

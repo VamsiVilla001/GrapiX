@@ -101,7 +101,7 @@ pub fn render_single_frame(
     width: u32,
     height: u32,
 ) -> anyhow::Result<VideoFrame> {
-    let quad_pipeline = pipeline::QuadPipeline::new(&gpu.device);
+    let mut quad_pipeline = pipeline::QuadPipeline::new(&gpu.device);
     let mesh_pipeline = mesh::MeshPipeline::new(&gpu.device);
     let target = frame::FrameTarget::new(&gpu.device, width, height);
     let quads = pipeline::QuadPipeline::build_frame_quads(scene);
@@ -110,7 +110,7 @@ pub fn render_single_frame(
     let mut frame = target.render_and_read_back(
         &gpu.device,
         &gpu.queue,
-        &quad_pipeline,
+        &mut quad_pipeline,
         &quads,
         &mesh_pipeline,
         Some(&meshes),
@@ -141,7 +141,7 @@ pub fn spawn_render_loop(
     std::thread::Builder::new()
         .name("grapix-render-loop".to_string())
         .spawn(move || {
-            let quad_pipeline = pipeline::QuadPipeline::new(&gpu.device);
+            let mut quad_pipeline = pipeline::QuadPipeline::new(&gpu.device);
             let mesh_pipeline = mesh::MeshPipeline::new(&gpu.device);
             let target = frame::FrameTarget::new(&gpu.device, config.width, config.height);
             let mut text_renderer = text::NativeTextRenderer::new();
@@ -195,7 +195,7 @@ pub fn spawn_render_loop(
                         match target.render_and_read_back(
                             &gpu.device,
                             &gpu.queue,
-                            &quad_pipeline,
+                            &mut quad_pipeline,
                             &quads,
                             &mesh_pipeline,
                             cached_mesh_frame.as_ref(),

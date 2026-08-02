@@ -28,6 +28,7 @@ export function AssistantPanel() {
   const setDockHeight = useAssistantStore((state) => state.setDockHeight);
   const pushUser = useAssistantStore((state) => state.pushUser);
   const setToolStatus = useAssistantStore((state) => state.setToolStatus);
+  const ingest = useAssistantStore((state) => state.ingest);
 
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
@@ -44,20 +45,28 @@ export function AssistantPanel() {
     const text = draft.trim();
     if (!text || !sessionId || sending) return;
     pushUser(text);
-    void sendAssistantMessage(sessionId, text);
     setDraft("");
+    void sendAssistantMessage(sessionId, text).catch((error: unknown) => {
+      ingest({ type: "error", message: requestFailureMessage(error) });
+    });
   };
 
   const apply = (id: string) => {
     if (!sessionId) return;
     setToolStatus(id, "executing");
-    void applyAssistantCall(sessionId, id);
+    void applyAssistantCall(sessionId, id).catch((error: unknown) => {
+      setToolStatus(id, "staged");
+      ingest({ type: "error", message: requestFailureMessage(error) });
+    });
   };
 
   const skip = (id: string) => {
     if (!sessionId) return;
     setToolStatus(id, "skipped");
-    void skipAssistantCall(sessionId, id);
+    void skipAssistantCall(sessionId, id).catch((error: unknown) => {
+      setToolStatus(id, "staged");
+      ingest({ type: "error", message: requestFailureMessage(error) });
+    });
   };
 
   const startResize = (event: ReactMouseEvent) => {
@@ -196,4 +205,8 @@ function summariseInput(input: Record<string, unknown>): string {
     .map(([key, value]) => `${key}: ${typeof value === "object" ? JSON.stringify(value) : String(value)}`)
     .join(", ");
   return text.length > 160 ? `${text.slice(0, 159)}…` : text;
+}
+
+function requestFailureMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Assistant request failed";
 }

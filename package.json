@@ -22,6 +22,7 @@
     "dev:api": "npm run dev -w @grapix/api-server",
     "dev:mcp": "npm run dev -w @grapix/editor-mcp",
     "dev:assistant": "npm run dev -w @grapix/editor-assistant",
+    "dev:adobe": "npm run dev -w @grapix/adobe-mcp-gateway",
     "dev:electron": "npm run dev -w @grapix/desktop-electron",
 
     "clean:dist": "node tools/architecture/clean-dist.mjs",

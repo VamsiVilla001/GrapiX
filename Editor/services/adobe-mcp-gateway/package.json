@@ -1,0 +1,31 @@
+{
+  "name": "@grapix/adobe-mcp-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@adobe/aio-lib-ims": "^8.1.2",
+    "@adobe/aio-lib-photoshop-api": "^1.1.0",
+    "@grapix/adobe-common-schema": "0.1.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@grapix/adobe-client": "0.1.0",
+    "@types/node": "^22.5.0",
+    "@types/ws": "^8.5.12",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}
