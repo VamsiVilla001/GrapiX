@@ -39,9 +39,10 @@
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json && npm run build:bundle-desktop",
+    "build": "tsc -p tsconfig.json && npm run build:bundle-desktop && npm run build:knowledge",
     "build:bundle": "node scripts/bundle.mjs",
     "build:bundle-desktop": "node scripts/bundle-desktop.mjs",
+    "build:knowledge": "node ../../../tools/packaging/stage-knowledge.mjs",
     "prepack": "npm run build:bundle",
     "test": "npm run build && node --test tests/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",

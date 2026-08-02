@@ -29,13 +29,25 @@
     "active": true,
     "targets": "all",
     "externalBin": [
-      "binaries/grapix-render-engine"
+      "binaries/grapix-render-engine",
+      "binaries/node"
     ],
     "resources": {
       "../../../../Editor/services/project-api/dist/bundle/grapix-api-server.mjs": "services/grapix-api-server.mjs",
       "../../../../Editor/services/editor-assistant/dist/bundle/grapix-editor-assistant.mjs": "services/grapix-editor-assistant.mjs",
       "../../../../Editor/services/adobe-mcp-gateway/dist/bundle/grapix-adobe-mcp-gateway.mjs": "services/grapix-adobe-mcp-gateway.mjs",
-      "../../../../Editor/services/editor-mcp/dist/bundle/grapix-editor-mcp.mjs": "services/grapix-editor-mcp.mjs"
+      "../../../../Editor/services/editor-mcp/dist/bundle/grapix-editor-mcp.mjs": "services/grapix-editor-mcp.mjs",
+      "../../../../Editor/services/editor-mcp/dist/knowledge-root/": "knowledge/",
+      "../../../../Editor/services/project-api/dist/bundle/node_modules/": "services/node_modules/"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "nsis": {
+        "installMode": "perMachine",
+        "startMenuFolder": "GrapiX"
+      }
     },
     "icon": [
       "icons/32x32.png",

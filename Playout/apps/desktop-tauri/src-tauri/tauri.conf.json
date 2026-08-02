@@ -29,10 +29,20 @@
     "active": true,
     "targets": "all",
     "externalBin": [
-      "binaries/grapix-render-engine"
+      "binaries/grapix-render-engine",
+      "binaries/node"
     ],
     "resources": {
       "../../../../Playout/services/playout-control/dist/bundle/grapix-playout-control.mjs": "services/grapix-playout-control.mjs"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "nsis": {
+        "installMode": "perMachine",
+        "startMenuFolder": "GrapiX"
+      }
     },
     "icon": [
       "icons/32x32.png",

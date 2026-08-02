@@ -1089,6 +1089,64 @@ The required completion order remains:
 
 ## Work chronology
 
+### 2026-08-02 — Self-contained installers: knowledge, runtime and native deps
+
+The installers shipped code but not the things the code needs. Everything now lands in one
+user-chosen directory, modelled on `C:\Program Files\XPressionDesigner`: executables and
+runtime at the root, `services/` and `knowledge/` beside them, all user data in AppData.
+
+```
+<chosen folder>\  app.exe  grapix-render-engine.exe  node.exe
+                  services\  4 bundles + node_modules\@napi-rs\
+                  knowledge\ docs\ Shared\ Editor\ Playout\ README.md memory.md package.json
+```
+
+**Knowledge corpus.** The MCP server reads its architecture and contract knowledge from a
+checkout, and *throws* when it cannot find one — an installed build reported `MCP error` and
+exposed no tools. `tools/packaging/stage-knowledge.mjs` copies the corpus into a
+`knowledge/` resource at the same relative paths. The file list comes from
+`corpusRelativePaths` in `corpus.ts`, not a second list in the packaging script, so a new
+document ships automatically. The supervisor still prefers a live checkout when one exists,
+because reading the working tree can never serve a stale invariant.
+
+**Node runtime.** Both supervisors ran `Command::new("node")`. A broadcast machine has no
+reason to have Node installed, so on a clean box every service failed to spawn. `node.exe`
+(79.5 MiB) now ships as a Tauri `externalBin` sidecar and `RuntimeLayout::node_command`
+prefers it, falling back to `PATH` only in a checkout.
+
+**Native dependencies.** `@napi-rs/canvas` is a Skia addon, so esbuild marks it external —
+"resolve from node_modules at runtime", which does not exist in an install. The project
+service died with `ERR_MODULE_NOT_FOUND`. `stage-native-deps.mjs` stages the package plus
+the host-platform binding (35.1 MiB) into `services/node_modules/`, where Node's upward
+resolution finds it. Only the host binding ships; all ten would add ~300 MB that could
+never load.
+
+**Playout data root.** `playout-control` reads `GRAPIX_PLAYOUT_DATA_DIR` and otherwise
+derives a path from its own file location — inside the read-only install directory. The
+Playout supervisor now sets it explicitly alongside `GRAPIX_DATA_ROOT`.
+
+**Installer.** `installMode: perMachine` makes the existing NSIS directory page default to
+`$PROGRAMFILES64\GrapiX` instead of `$LOCALAPPDATA`; the user can still choose any folder.
+`webviewInstallMode: embedBootstrapper` embeds the WebView2 installer so a machine with no
+internet can still install.
+
+**Rule: verify a packaging change against an extracted installer, never the source tree.**
+An in-repo smoke test passed while the real payload was broken, because `node_modules`
+resolved up the tree into the checkout. The `@napi-rs/canvas` failure only appeared once
+the NSIS payload was extracted to `D:\tmp` and run with `PATH` reduced to `system32`.
+
+**Verification.** The released folder was extracted from the built NSIS installer and run
+with every `NODE_*`/`npm_*`/`GRAPIX_*` variable stripped and `PATH` cut to system32:
+project service, Adobe gateway and assistant all answered `200`, MCP reported
+`connected` with 54 tools, and the MCP stdio banner read **40 documents, 112 session
+rules** — served entirely from the shipped corpus. `@napi-rs/canvas` rendered a real PNG
+through the staged Skia binding. Boundaries pass, typecheck clean, 401 Node tests and all
+Rust tests green.
+
+Installers: Editor `GrapiX_0.1.0_x64-setup.exe` (30.6 MB) / `.msi` (44.6 MB); Playout
+`GrapiX Playout_0.2.0_x64-setup.exe` (28.9 MB) / `.msi` (41.9 MB). Installed footprint
+157 MB, the growth being the Node runtime, Skia and the corpus.
+
 ### 2026-08-02 — Packaged installers: services actually shipped and reachable
 
 The `Basic-v0.4` installers launched, looked fine, and had no working MCP, AI assistant or

@@ -1,11 +1,18 @@
 /**
  * Reads the repository's own writing into a document corpus.
  *
- * This is deliberately read-from-source rather than a bundled snapshot. A
- * checked-in copy of `docs/architecture.md` would be wrong the first time
- * someone edited the original, and an agent that cites a stale invariant is
- * worse than one that cites none. Everything here is loaded from the working
- * tree and re-read when its mtime moves.
+ * Within a checkout this is read-from-source rather than a checked-in snapshot: a
+ * duplicated `docs/architecture.md` would be wrong the first time someone edited
+ * the original, and an agent that cites a stale invariant is worse than one that
+ * cites none. Everything here is loaded from the working tree and re-read when
+ * its mtime moves.
+ *
+ * A packaged install has no working tree, so the installer stages these same
+ * files — at these same relative paths — into a `knowledge/` resource directory
+ * and points `GRAPIX_REPOSITORY_ROOT` at it. `corpusRelativePaths` is what the
+ * staging step enumerates, which is why it lives here beside the specs rather
+ * than being restated in the packaging script: one list, so the shipped corpus
+ * cannot silently diverge from the one this module reads.
  */
 
 import { readdir, readFile, stat } from "node:fs/promises";
@@ -146,20 +153,35 @@ async function loadDocument(
   };
 }
 
-export async function loadCorpus(repositoryRoot: string): Promise<KnowledgeDocument[]> {
-  const docsDirectory = path.join(repositoryRoot, "docs");
+/** Every `docs/*.md`, in directory order, as corpus specs. */
+async function docSpecs(repositoryRoot: string): Promise<SourceSpec[]> {
   let docFiles: string[] = [];
   try {
-    docFiles = (await readdir(docsDirectory)).filter((file) => file.endsWith(".md"));
+    docFiles = (await readdir(path.join(repositoryRoot, "docs"))).filter((file) => file.endsWith(".md"));
   } catch {
-    docFiles = [];
+    return [];
   }
+  return docFiles.map((file) => {
+    const relativePath = `docs/${file}`;
+    return { relativePath, category: categorise(relativePath) };
+  });
+}
 
+/**
+ * Every repository-relative file the corpus reads, for the installer to stage.
+ *
+ * `package.json` is appended because `KnowledgeBase` reads the root scripts out of
+ * it for `list_commands` — it is part of the corpus even though it is not a
+ * document. Callers copy these paths verbatim: the layout is the contract.
+ */
+export async function corpusRelativePaths(repositoryRoot: string): Promise<string[]> {
+  const specs = [...(await docSpecs(repositoryRoot)), ...EXTRA_SOURCES, ...CONTRACT_SOURCES];
+  return [...specs.map((spec) => spec.relativePath), "package.json"];
+}
+
+export async function loadCorpus(repositoryRoot: string): Promise<KnowledgeDocument[]> {
   const specs: SourceSpec[] = [
-    ...docFiles.map((file) => {
-      const relativePath = `docs/${file}`;
-      return { relativePath, category: categorise(relativePath) };
-    }),
+    ...(await docSpecs(repositoryRoot)),
     ...EXTRA_SOURCES,
     ...CONTRACT_SOURCES
   ];

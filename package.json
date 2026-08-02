@@ -26,7 +26,8 @@
     "dev:electron": "npm run dev -w @grapix/desktop-electron",
 
     "clean:dist": "node tools/architecture/clean-dist.mjs",
-    "build": "npm run clean:dist && npm run build:shared && npm run build:editor && npm run build:playout",
+    "build": "npm run clean:dist && npm run build:shared && npm run build:editor && npm run build:playout && npm run stage:runtime",
+    "stage:runtime": "node tools/packaging/stage-node.mjs && node tools/packaging/stage-native-deps.mjs",
     "build:shared": "npm run build -w @grapix/shared-workspace",
     "build:editor": "npm run build -w @grapix/editor-workspace",
     "build:playout": "npm run build -w @grapix/playout-workspace",

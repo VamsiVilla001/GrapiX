@@ -182,6 +182,37 @@ impl RuntimeLayout {
         }
         candidates.into_iter().find(|path| path.is_file())
     }
+
+    /// Root the MCP server ingests its architecture and contract knowledge from.
+    ///
+    /// A checkout is its own corpus root and is preferred, because reading the live tree
+    /// can never serve a stale invariant. A packaged install has no tree, so it falls back
+    /// to the `knowledge/` resource the installer stages. Returning `None` would leave the
+    /// MCP server to auto-detect and throw, taking the assistant's tools with it.
+    fn knowledge_root(&self) -> Option<PathBuf> {
+        if let Some(root) = &self.workspace_root {
+            if root.join("docs").join("architecture.md").is_file() {
+                return Some(root.clone());
+            }
+        }
+        let staged = self.resource_root.as_ref()?.join("knowledge");
+        staged
+            .join("docs")
+            .join("architecture.md")
+            .is_file()
+            .then_some(staged)
+    }
+
+    /// The Node runtime used to run the service bundles.
+    ///
+    /// A packaged install ships its own `node.exe` beside the executable, because a
+    /// broadcast machine cannot be assumed to have Node on `PATH` — without this every
+    /// service fails to spawn on a clean install. A checkout falls back to `PATH`.
+    fn node_command(&self) -> PathBuf {
+        adjacent_binary("node")
+            .filter(|path| path.is_file())
+            .unwrap_or_else(|| PathBuf::from("node"))
+    }
 }
 
 /// Map a bundled resource file back to the source-tree package directory it came from.
@@ -373,6 +404,13 @@ fn start_assistant(layout: &RuntimeLayout, inner: &Arc<Mutex<Inner>>) {
         layout.data_root.join("assistant"),
     ));
 
+    // Forwarded by the assistant into the MCP child's environment. Without a root the MCP
+    // server cannot locate the corpus and throws on start-up rather than degrading, so an
+    // installed build reports `MCP error` and exposes no tools at all.
+    if let Some(knowledge) = layout.knowledge_root() {
+        extra.push(("GRAPIX_REPOSITORY_ROOT", knowledge));
+    }
+
     launch_node_service(
         layout,
         inner,
@@ -426,7 +464,7 @@ fn launch_node_service(
         return;
     };
 
-    let mut command = Command::new("node");
+    let mut command = Command::new(layout.node_command());
     command.arg(entry).current_dir(&layout.data_root);
     apply_shared_env(&mut command, layout);
     for (key, value) in extra_env {

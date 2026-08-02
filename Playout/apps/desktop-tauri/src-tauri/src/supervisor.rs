@@ -147,6 +147,17 @@ impl RuntimeLayout {
         }
         candidates.into_iter().find(|path| path.is_file())
     }
+
+    /// The Node runtime used to run the control service bundle.
+    ///
+    /// A packaged install ships its own `node.exe` beside the executable: a playout machine
+    /// cannot be assumed to have Node on `PATH`, and without this the control service never
+    /// starts. A checkout falls back to `PATH`.
+    fn node_command(&self) -> PathBuf {
+        adjacent_binary("node")
+            .filter(|path| path.is_file())
+            .unwrap_or_else(|| PathBuf::from("node"))
+    }
 }
 
 fn source_dir_for(bundle: &str) -> Option<&'static str> {
@@ -302,7 +313,7 @@ fn start_control(layout: &RuntimeLayout, inner: &Arc<Mutex<Inner>>) {
         return;
     };
 
-    let mut command = Command::new("node");
+    let mut command = Command::new(layout.node_command());
     command.arg(entry).current_dir(&layout.data_root);
     apply_shared_env(&mut command, layout);
     spawn(inner, |inner| &mut inner.control, command);
@@ -313,6 +324,9 @@ fn start_control(layout: &RuntimeLayout, inner: &Arc<Mutex<Inner>>) {
 /// the engine can write its state directory.
 fn apply_shared_env(command: &mut Command, layout: &RuntimeLayout) {
     command.env("GRAPIX_DATA_ROOT", &layout.data_root);
+    // `playout-control` reads its own variable and otherwise falls back to a path derived
+    // from its file location — inside the read-only install directory once packaged.
+    command.env("GRAPIX_PLAYOUT_DATA_DIR", layout.data_root.join("playout"));
 }
 
 fn engine_binary(root: &Path, profile: &str) -> PathBuf {
