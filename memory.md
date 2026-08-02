@@ -1089,6 +1089,21 @@ The required completion order remains:
 
 ## Work chronology
 
+### 2026-08-02 — Tauri Desktop Release Build & Sidecar Synchronization
+
+Packaged both desktop apps from the `Basic-v0.4` baseline after full Council integration, NDI live output, ResourceGovernor, and Adobe MCP bridge delivery.
+
+**Sidecar Verification**: Hashing the staged sidecars after packaging (`grapix-render-engine-x86_64-pc-windows-msvc.exe`) confirmed **100% hash identity** across all three locations (`1f7b3e843b9025e4`):
+- `services/render-engine/target/release/grapix-render-engine.exe` (`1f7b3e843b9025e4`)
+- `Editor/apps/desktop-tauri/src-tauri/binaries/grapix-render-engine-*.exe` (`1f7b3e843b9025e4`)
+- `Playout/apps/desktop-tauri/src-tauri/binaries/grapix-render-engine-*.exe` (`1f7b3e843b9025e4`)
+
+**Generated Bundles**:
+- **Editor Desktop**: `GrapiX_0.1.0_x64-setup.exe` (7.2 MB), `GrapiX_0.1.0_x64_en-US.msi` (11.0 MB)
+- **Playout Desktop**: `GrapiX Playout_0.2.0_x64-setup.exe` (6.8 MB), `GrapiX Playout_0.2.0_x64_en-US.msi` (9.7 MB)
+
+Boundaries pass, typechecks clean, 300+ Node unit tests and 60+ Rust tests green.
+
 ### 2026-08-02 — GrapiX v0.4 Adobe Bridge, Phase 1 (MCP Foundation)
 
 Full document: [`docs/adobe-integration.md`](docs/adobe-integration.md).
