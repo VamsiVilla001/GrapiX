@@ -114,9 +114,50 @@ pub struct PlayoutSupervisor {
     inner: Arc<Mutex<Inner>>,
 }
 
+/// Where the shell looks for the executables and JS bundles it launches.
+///
+/// A packaged installer carries the bundled `.mjs` under Tauri's `resource_dir`; a source
+/// checkout has none of that but does have `Playout/services/*/dist/bundle`. This layout
+/// captures both so one resolution rule works everywhere.
+#[derive(Clone)]
+pub struct RuntimeLayout {
+    pub workspace_root: Option<PathBuf>,
+    pub resource_root: Option<PathBuf>,
+    /// AppData directory the launched services may write to. `Program Files` is read-only
+    /// under a standard Windows account, so a launched service that tried to write there
+    /// would fail on first request.
+    pub data_root: PathBuf,
+}
+
+impl RuntimeLayout {
+    fn service_entry(&self, bundle: &str) -> Option<PathBuf> {
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        if let Some(resources) = &self.resource_root {
+            candidates.push(resources.join("services").join(bundle));
+        }
+        if let (Some(root), Some(package)) = (&self.workspace_root, source_dir_for(bundle)) {
+            candidates.push(
+                root.join("Playout")
+                    .join("services")
+                    .join(package)
+                    .join("dist")
+                    .join("bundle")
+                    .join(bundle),
+            );
+        }
+        candidates.into_iter().find(|path| path.is_file())
+    }
+}
+
+fn source_dir_for(bundle: &str) -> Option<&'static str> {
+    Some(match bundle {
+        "grapix-playout-control.mjs" => "playout-control",
+        _ => return None,
+    })
+}
+
 impl PlayoutSupervisor {
-    /// Start what is missing and watch everything.
-    pub fn start(root: PathBuf, app: AppHandle) -> Self {
+    pub fn start(layout: RuntimeLayout, app: AppHandle) -> Self {
         let inner = Arc::new(Mutex::new(Inner {
             engine: ProcessSlot::new("Render engine", ENGINE_ADDRESS),
             control: ProcessSlot::new("Playout control", CONTROL_ADDRESS),
@@ -131,9 +172,9 @@ impl PlayoutSupervisor {
             // The engine first: playout-control connects to it on startup, and starting them
             // the other way round means the control service spends its first seconds
             // retrying.
-            start_engine(&root, &inner);
-            start_control(&root, &inner);
-            watch(&root, &inner, &app);
+            start_engine(&layout, &inner);
+            start_control(&layout, &inner);
+            watch(&layout, &inner, &app);
         });
 
         supervisor
@@ -195,42 +236,54 @@ impl ProcessState {
 // Starting
 // ---------------------------------------------------------------------------
 
-fn start_engine(root: &Path, inner: &Arc<Mutex<Inner>>) {
+fn start_engine(layout: &RuntimeLayout, inner: &Arc<Mutex<Inner>>) {
     if port_open(ENGINE_ADDRESS) {
         adopt(inner, |inner| &mut inner.engine, "already running on :4400");
         return;
     }
 
     let configured = env::var_os("GRAPIX_RENDER_ENGINE_BIN").map(PathBuf::from);
+    let workspace_debug = layout
+        .workspace_root
+        .as_ref()
+        .map(|root| engine_binary(root, "debug"));
+    let workspace_release = layout
+        .workspace_root
+        .as_ref()
+        .map(|root| engine_binary(root, "release"));
     let candidates = [
         configured,
         adjacent_binary("grapix-render-engine"),
-        Some(engine_binary(root, "debug")),
-        Some(engine_binary(root, "release")),
+        workspace_debug,
+        workspace_release,
     ];
     let Some(executable) = candidates.into_iter().flatten().find(|path| path.is_file()) else {
         fail(
             inner,
             |inner| &mut inner.engine,
-            "binary not found; run `cargo build --manifest-path services/render-engine/Cargo.toml`",
+            "render engine binary is missing; the installer's staged sidecar was not found",
         );
         return;
     };
 
-    let config = root
-        .join("services")
-        .join("render-engine")
-        .join("engine.toml");
+    let config = layout
+        .workspace_root
+        .as_ref()
+        .map(|root| root.join("services").join("render-engine").join("engine.toml"));
     let mut command = Command::new(executable);
-    command.current_dir(root);
-    if config.is_file() {
+    if let Some(root) = &layout.workspace_root {
+        command.current_dir(root);
+    } else {
+        command.current_dir(&layout.data_root);
+    }
+    if let Some(config) = config.filter(|path| path.is_file()) {
         command.arg("--config").arg(config);
     }
-
+    apply_shared_env(&mut command, layout);
     spawn(inner, |inner| &mut inner.engine, command);
 }
 
-fn start_control(root: &Path, inner: &Arc<Mutex<Inner>>) {
+fn start_control(layout: &RuntimeLayout, inner: &Arc<Mutex<Inner>>) {
     if port_open(CONTROL_ADDRESS) {
         adopt(
             inner,
@@ -240,24 +293,26 @@ fn start_control(root: &Path, inner: &Arc<Mutex<Inner>>) {
         return;
     }
 
-    let entry = root
-        .join("Playout")
-        .join("services")
-        .join("playout-control")
-        .join("dist")
-        .join("index.js");
-    if !entry.is_file() {
+    let Some(entry) = layout.service_entry("grapix-playout-control.mjs") else {
         fail(
             inner,
             |inner| &mut inner.control,
-            "build output not found; run `npm run build -w @grapix/playout-control`",
+            "bundle not found; run `npm run build -w @grapix/playout-control` and re-run `tauri build`",
         );
         return;
-    }
+    };
 
     let mut command = Command::new("node");
-    command.arg(entry).current_dir(root);
+    command.arg(entry).current_dir(&layout.data_root);
+    apply_shared_env(&mut command, layout);
     spawn(inner, |inner| &mut inner.control, command);
+}
+
+/// `Program Files` is read-only under a standard Windows account. Route every launched
+/// service's data into per-user AppData so `playout-control` can write its rundowns, and
+/// the engine can write its state directory.
+fn apply_shared_env(command: &mut Command, layout: &RuntimeLayout) {
+    command.env("GRAPIX_DATA_ROOT", &layout.data_root);
 }
 
 fn engine_binary(root: &Path, profile: &str) -> PathBuf {
@@ -339,7 +394,7 @@ fn fail(inner: &Arc<Mutex<Inner>>, select: impl Fn(&mut Inner) -> &mut ProcessSl
 // Watching
 // ---------------------------------------------------------------------------
 
-fn watch(root: &Path, inner: &Arc<Mutex<Inner>>, app: &AppHandle) {
+fn watch(layout: &RuntimeLayout, inner: &Arc<Mutex<Inner>>, app: &AppHandle) {
     let started = Instant::now();
     let mut previous: Option<String> = None;
 
@@ -369,11 +424,11 @@ fn watch(root: &Path, inner: &Arc<Mutex<Inner>>, app: &AppHandle) {
         };
         if restart_engine {
             println!("[playout] restarting the render engine after it disappeared");
-            start_engine(root, inner);
+            start_engine(layout, inner);
         }
         if restart_control {
             println!("[playout] restarting playout-control after it disappeared");
-            start_control(root, inner);
+            start_control(layout, inner);
         }
 
         let snapshot = {

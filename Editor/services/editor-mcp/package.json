@@ -39,8 +39,9 @@
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && npm run build:bundle-desktop",
     "build:bundle": "node scripts/bundle.mjs",
+    "build:bundle-desktop": "node scripts/bundle-desktop.mjs",
     "prepack": "npm run build:bundle",
     "test": "npm run build && node --test tests/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",

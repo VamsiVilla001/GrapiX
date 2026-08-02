@@ -1089,6 +1089,52 @@ The required completion order remains:
 
 ## Work chronology
 
+### 2026-08-02 — Packaged installers: services actually shipped and reachable
+
+The `Basic-v0.4` installers launched, looked fine, and had no working MCP, AI assistant or
+Adobe gateway. Cause: the desktop shells only ever shipped the render engine sidecar. Every
+Node service was resolved from the *source tree*, which does not exist beside an installed
+`.exe`, so the supervisor reported "could not be reached" for services that were never there.
+
+Five service bundles are now built by `npm run build` and declared in `bundle.resources`:
+`grapix-api-server`, `grapix-editor-assistant`, `grapix-adobe-mcp-gateway`,
+`grapix-editor-mcp` (Editor) and `grapix-playout-control` (Playout). A `RuntimeLayout`
+resolves each from Tauri's `resource_dir` first and the dev tree second, so one code path
+serves both. `GRAPIX_DATA_ROOT` is pinned to per-user AppData because a standard account
+cannot write under `Program Files`.
+
+Four defects only a packaged run exposes, each fixed at the source:
+
+1. **esbuild's CJS shim throws on `node:` builtins.** Bundling Fastify inlined a `require`
+   shim whose fallback threw `Dynamic require of "node:events" is not supported`. Fixed with
+   a `createRequire(import.meta.url)` banner and `node:*` marked as passthrough.
+2. **Adobe gateway started nothing.** Its entrypoint guard was
+   `process.argv[1].endsWith("index.js")`; the bundle has another name, so it exited 0 in
+   silence — the literal "gateway could not be reached". Now compares
+   `import.meta.url` against `pathToFileURL(process.argv[1])`, which is name-independent.
+3. **The assistant could not find the MCP server.** `defaultMcpEntry` resolves
+   `../../editor-mcp/dist/index.js` relative to its own file — correct in the repo, absent in
+   an install, where both are flat files in one `services/` directory. The supervisor now
+   passes `GRAPIX_ASSISTANT_MCP_ENTRY` and `GRAPIX_ASSISTANT_DATA_DIR` explicitly.
+4. **WiX ignores a resource rename.** The MSI `File` table records the *source* basename, so
+   `grapix-editor-mcp-desktop.mjs` mapped to `services/grapix-editor-mcp.mjs` installed under
+   the source name and the supervisor's lookup missed it. Caught by reading the name out of
+   the built MSI, not by trusting the config. **Rule: a bundled resource's source basename
+   must equal its install basename** — never rely on `bundle.resources` to rename.
+
+**Verification.** Beyond boundaries/typecheck/tests, the installed layout was reproduced
+directly: the five bundles copied into a flat `services/` directory with no source tree and
+no `node_modules`, then launched exactly as the supervisor launches them. All four HTTP
+services answered `200`, and the assistant reported `mcp=connected` with **54 tools**.
+`fontkit` was exercised through the bundled project API by importing a real Arial file
+(family `Arial`, checksum computed), proving native-ish deps survive inlining. Payload names
+were then read back out of both MSIs to confirm what installs, with the stale
+`-desktop` name absent.
+
+Installers: Editor `GrapiX_0.1.0_x64-setup.exe` (8.5 MB) / `.msi` (12.4 MB); Playout
+`GrapiX Playout_0.2.0_x64-setup.exe` (7.0 MB) / `.msi` (10.0 MB). Sidecar hash identity
+across engine and both staged copies: `1f7b3e843b9025e4`.
+
 ### 2026-08-02 — Tauri Desktop Release Build & Sidecar Synchronization
 
 Packaged both desktop apps from the `Basic-v0.4` baseline after full Council integration, NDI live output, ResourceGovernor, and Adobe MCP bridge delivery.

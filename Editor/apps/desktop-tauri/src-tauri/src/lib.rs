@@ -2,7 +2,7 @@ mod supervisor;
 
 use std::path::{Path, PathBuf};
 
-use supervisor::{DesktopSupervisor, SupervisorSnapshot};
+use supervisor::{DesktopSupervisor, RuntimeLayout, SupervisorSnapshot};
 use tauri::Manager;
 
 #[tauri::command]
@@ -12,8 +12,9 @@ fn supervisor_status(supervisor: tauri::State<'_, DesktopSupervisor>) -> Supervi
 
 /// The repository root, four levels above `Editor/apps/desktop-tauri/src-tauri`.
 ///
-/// One level deeper than before the Phase 2 migration. A wrong answer here is not a compile
-/// error — the supervisor would look for services in the wrong place and quietly start none.
+/// A packaged build has no such tree beside the .exe: `CARGO_MANIFEST_DIR` was recorded at
+/// compile time and points at a machine that is not the operator's. This still returns a
+/// path there, so callers must verify it exists before using it. `RuntimeLayout` does that.
 fn workspace_root() -> Option<PathBuf> {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()?
@@ -35,8 +36,32 @@ pub fn run() {
                         .build(),
                 )?;
             }
-            let root = workspace_root().ok_or("failed to resolve GrapiX workspace root")?;
-            app.manage(DesktopSupervisor::start(root, app.handle().clone()));
+
+            // Two resolutions matter here, and neither is guaranteed to exist.
+            //
+            // - `workspace_root` was baked in at compile time. Present on the developer's
+            //   machine; a fantasy path on the operator's, so only used when it is really
+            //   there.
+            // - `resource_dir` is Tauri's own answer to "where did the installer put my
+            //   `bundle.resources`?". Present in packaged builds; absent under `cargo run`.
+            //
+            // The supervisor is willing to work with just one. Data is always written under
+            // the OS's per-user AppData dir so a Program-Files install stays read-only.
+            let workspace = workspace_root().filter(|path| path.exists());
+            let resources = app.path().resource_dir().ok().filter(|path| path.exists());
+            let data_root = app
+                .path()
+                .app_data_dir()
+                .map_err(|error| format!("cannot resolve AppData directory: {error}"))?;
+            std::fs::create_dir_all(&data_root)
+                .map_err(|error| format!("cannot create data directory: {error}"))?;
+
+            let layout = RuntimeLayout {
+                workspace_root: workspace,
+                resource_root: resources,
+                data_root,
+            };
+            app.manage(DesktopSupervisor::start(layout, app.handle().clone()));
             Ok(())
         })
         .on_window_event(|window, event| {

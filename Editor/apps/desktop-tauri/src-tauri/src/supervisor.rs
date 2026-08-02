@@ -23,6 +23,7 @@
 //!   (invariants 3 and 4). A shell that re-took a scene on air from a cached guess is exactly
 //!   the failure mode the journal-and-verify recovery model exists to prevent.
 
+use std::env;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
@@ -143,15 +144,67 @@ impl Inner {
         }
     }
 }
+/// Where the shell looks for the executables and JS bundles it launches.
+///
+/// A packaged installer has no `Editor/services/*/dist` source tree beside the .exe: it
+/// carries the bundled `.mjs` files under Tauri's own `resource_dir`. A development
+/// checkout has neither `resource_dir` nor packaged binaries, but does have the source
+/// tree. This runtime record captures both, so a single resolution rule works everywhere.
+#[derive(Clone)]
+pub struct RuntimeLayout {
+    /// Repository root when running from a `cargo run` / `tauri dev` checkout. `None` in
+    /// packaged builds, whose source tree is not on disk beside the .exe.
+    pub workspace_root: Option<PathBuf>,
+    /// Directory Tauri unpacked its `bundle.resources` into. `None` when running from
+    /// source, where every artifact lives in the workspace tree.
+    pub resource_root: Option<PathBuf>,
+    /// Where the Editor's data (scenes, assets, packages, logs) is written. Defaults to
+    /// the per-user AppData directory rather than Program Files, so a packaged installer
+    /// running under a standard Windows account does not try to write to a read-only tree.
+    pub data_root: PathBuf,
+}
+
+impl RuntimeLayout {
+    fn service_entry(&self, name: &str) -> Option<PathBuf> {
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        if let Some(resources) = &self.resource_root {
+            candidates.push(resources.join("services").join(name));
+        }
+        if let (Some(root), Some(package)) = (&self.workspace_root, source_dir_for(name)) {
+            candidates.push(
+                root.join("Editor")
+                    .join("services")
+                    .join(package)
+                    .join("dist")
+                    .join("bundle")
+                    .join(name),
+            );
+        }
+        candidates.into_iter().find(|path| path.is_file())
+    }
+}
+
+/// Map a bundled resource file back to the source-tree package directory it came from.
+/// A development checkout does not stage a `resource_root`, so the supervisor needs to
+/// know which `Editor/services/*` to fall back to.
+fn source_dir_for(bundle_file: &str) -> Option<&'static str> {
+    Some(match bundle_file {
+        "grapix-api-server.mjs" => "project-api",
+        "grapix-editor-assistant.mjs" => "editor-assistant",
+        "grapix-adobe-mcp-gateway.mjs" => "adobe-mcp-gateway",
+        "grapix-editor-mcp.mjs" => "editor-mcp",
+        _ => return None,
+    })
+}
 
 pub struct DesktopSupervisor {
-    root: PathBuf,
+    layout: RuntimeLayout,
     inner: Arc<Mutex<Inner>>,
 }
 
 impl DesktopSupervisor {
     /// Start what is missing and watch everything.
-    pub fn start(root: PathBuf, app: AppHandle) -> Self {
+    pub fn start(layout: RuntimeLayout, app: AppHandle) -> Self {
         let inner = Arc::new(Mutex::new(Inner {
             api: ProcessSlot::new("Project service", API_ADDRESS),
             assistant: ProcessSlot::new("AI assistant", ASSISTANT_ADDRESS),
@@ -161,17 +214,17 @@ impl DesktopSupervisor {
         }));
 
         let supervisor = Self {
-            root: root.clone(),
+            layout: layout.clone(),
             inner: Arc::clone(&inner),
         };
 
         thread::spawn(move || {
             // The engine first: the editor's engine client connects on start-up, and the
             // other order means it spends its first seconds retrying.
-            ensure_engine(&root, &inner);
-            start_api(&root, &inner);
-            start_assistant(&root, &inner);
-            start_adobe(&root, &inner);
+            ensure_engine(&layout, &inner);
+            start_api(&layout, &inner);
+            start_assistant(&layout, &inner);
+            start_adobe(&layout, &inner);
             watch(&inner, &app);
         });
 
@@ -211,8 +264,8 @@ impl DesktopSupervisor {
     }
 
     #[allow(dead_code)]
-    pub fn workspace_root(&self) -> &Path {
-        &self.root
+    pub fn layout(&self) -> &RuntimeLayout {
+        &self.layout
     }
 }
 
@@ -235,70 +288,69 @@ fn stop_owned(slot: &mut ProcessSlot) {
 // Starting
 // ---------------------------------------------------------------------------
 
-fn ensure_engine(root: &Path, inner: &Arc<Mutex<Inner>>) {
+fn ensure_engine(layout: &RuntimeLayout, inner: &Arc<Mutex<Inner>>) {
     if port_open(ENGINE_ADDRESS) {
         adopt(inner, |inner| &mut inner.engine, "already running on :4400");
         return;
     }
 
-    let configured = std::env::var_os("GRAPIX_RENDER_ENGINE_BIN").map(PathBuf::from);
+    let configured = env::var_os("GRAPIX_RENDER_ENGINE_BIN").map(PathBuf::from);
+    let workspace_debug = layout
+        .workspace_root
+        .as_ref()
+        .map(|root| engine_binary(root, "debug"));
+    let workspace_release = layout
+        .workspace_root
+        .as_ref()
+        .map(|root| engine_binary(root, "release"));
     let candidates = [
         configured,
         adjacent_binary("grapix-render-engine"),
-        Some(engine_binary(root, "debug")),
-        Some(engine_binary(root, "release")),
+        workspace_debug,
+        workspace_release,
     ];
     let Some(executable) = candidates.into_iter().flatten().find(|path| path.is_file()) else {
         fail(
             inner,
             |inner| &mut inner.engine,
-            "binary not found; run `cargo build --manifest-path services/render-engine/Cargo.toml`",
+            "render engine binary is missing; the installer's staged sidecar was not found",
         );
         return;
     };
 
-    let config = root
-        .join("services")
-        .join("render-engine")
-        .join("engine.toml");
+    let config = layout
+        .workspace_root
+        .as_ref()
+        .map(|root| root.join("services").join("render-engine").join("engine.toml"));
     let mut command = Command::new(executable);
-    command.current_dir(root);
-    if config.is_file() {
+    if let Some(root) = &layout.workspace_root {
+        command.current_dir(root);
+    } else {
+        command.current_dir(&layout.data_root);
+    }
+    if let Some(config) = config.filter(|path| path.is_file()) {
         command.arg("--config").arg(config);
     }
-
+    apply_shared_env(&mut command, layout);
     spawn(inner, |inner| &mut inner.engine, command);
 }
 
-fn start_api(root: &Path, inner: &Arc<Mutex<Inner>>) {
+fn start_api(layout: &RuntimeLayout, inner: &Arc<Mutex<Inner>>) {
     if api_health() {
         adopt(inner, |inner| &mut inner.api, "already running and healthy on :4100");
         return;
     }
-
-    // The project API moved to Editor/services/project-api in the Phase 2 migration; the npm
-    // package is still @grapix/api-server.
-    let entry = root
-        .join("Editor")
-        .join("services")
-        .join("project-api")
-        .join("dist")
-        .join("index.js");
-    if !entry.is_file() {
-        fail(
-            inner,
-            |inner| &mut inner.api,
-            "build output not found; run `npm run build -w @grapix/api-server`",
-        );
-        return;
-    }
-
-    let mut command = Command::new("node");
-    command.arg(entry).current_dir(root);
-    spawn(inner, |inner| &mut inner.api, command);
+    launch_node_service(
+        layout,
+        inner,
+        |inner| &mut inner.api,
+        "grapix-api-server.mjs",
+        "@grapix/api-server",
+        &[],
+    );
 }
 
-fn start_assistant(root: &Path, inner: &Arc<Mutex<Inner>>) {
+fn start_assistant(layout: &RuntimeLayout, inner: &Arc<Mutex<Inner>>) {
     if assistant_health() {
         adopt(
             inner,
@@ -308,29 +360,30 @@ fn start_assistant(root: &Path, inner: &Arc<Mutex<Inner>>) {
         return;
     }
 
-    // Editor/services/editor-assistant: the AI assistant broker. Owned like the project
-    // service and stopped on close — it holds no Program or output authority, so unlike the
-    // engine there is no reason to leave it running past the window.
-    let entry = root
-        .join("Editor")
-        .join("services")
-        .join("editor-assistant")
-        .join("dist")
-        .join("index.js");
-    if !entry.is_file() {
-        fail(
-            inner,
-            |inner| &mut inner.assistant,
-            "build output not found; run `npm run build -w @grapix/editor-assistant`",
-        );
-        return;
+    // The assistant spawns the MCP server as a child process. Left to itself it looks for
+    // `../../editor-mcp/dist/index.js` relative to its own file — true in the source tree,
+    // false in an installed build, where both are flat files in one `services` directory.
+    // Without this the assistant starts, reports `MCP error`, and the chat dock is dead.
+    let mut extra: Vec<(&str, PathBuf)> = Vec::new();
+    if let Some(mcp_entry) = layout.service_entry("grapix-editor-mcp.mjs") {
+        extra.push(("GRAPIX_ASSISTANT_MCP_ENTRY", mcp_entry));
     }
+    extra.push((
+        "GRAPIX_ASSISTANT_DATA_DIR",
+        layout.data_root.join("assistant"),
+    ));
 
-    let mut command = Command::new("node");
-    command.arg(entry).current_dir(root);
-    spawn(inner, |inner| &mut inner.assistant, command);
+    launch_node_service(
+        layout,
+        inner,
+        |inner| &mut inner.assistant,
+        "grapix-editor-assistant.mjs",
+        "@grapix/editor-assistant",
+        &extra,
+    );
 }
-fn start_adobe(root: &Path, inner: &Arc<Mutex<Inner>>) {
+
+fn start_adobe(layout: &RuntimeLayout, inner: &Arc<Mutex<Inner>>) {
     if adobe_health() {
         adopt(
             inner,
@@ -339,25 +392,57 @@ fn start_adobe(root: &Path, inner: &Arc<Mutex<Inner>>) {
         );
         return;
     }
+    launch_node_service(
+        layout,
+        inner,
+        |inner| &mut inner.adobe,
+        "grapix-adobe-mcp-gateway.mjs",
+        "@grapix/adobe-mcp-gateway",
+        &[],
+    );
+}
 
-    let entry = root
-        .join("Editor")
-        .join("services")
-        .join("adobe-mcp-gateway")
-        .join("dist")
-        .join("index.js");
-    if !entry.is_file() {
+/// Shared "run this Node bundle" launcher. The only real work of `start_*`.
+///
+/// Resolves the entry through `RuntimeLayout::service_entry`, sets `cwd` and env, and
+/// reports the concrete remedy when the bundle is missing from both `resource_root` and
+/// the development tree.
+fn launch_node_service(
+    layout: &RuntimeLayout,
+    inner: &Arc<Mutex<Inner>>,
+    select: impl Fn(&mut Inner) -> &mut ProcessSlot + Copy + 'static,
+    bundle_name: &str,
+    npm_workspace: &str,
+    extra_env: &[(&str, PathBuf)],
+) {
+    let Some(entry) = layout.service_entry(bundle_name) else {
         fail(
             inner,
-            |inner| &mut inner.adobe,
-            "build output not found; run `npm run build -w @grapix/adobe-mcp-gateway`",
+            select,
+            &format!(
+                "bundle not found; run `npm run build -w {npm_workspace}` and re-run `tauri build`"
+            ),
         );
         return;
-    }
+    };
 
     let mut command = Command::new("node");
-    command.arg(entry).current_dir(root);
-    spawn(inner, |inner| &mut inner.adobe, command);
+    command.arg(entry).current_dir(&layout.data_root);
+    apply_shared_env(&mut command, layout);
+    for (key, value) in extra_env {
+        command.env(key, value);
+    }
+    spawn(inner, select, command);
+}
+
+/// Environment every launched process shares.
+///
+/// A packaged installer runs under a standard Windows account, whose write access to
+/// `C:\Program Files` is blocked. `GRAPIX_DATA_ROOT` is therefore pinned to the per-user
+/// AppData directory — the project service and every downstream writer read this same
+/// variable, so one write here keeps disk I/O off `Program Files` everywhere.
+fn apply_shared_env(command: &mut Command, layout: &RuntimeLayout) {
+    command.env("GRAPIX_DATA_ROOT", &layout.data_root);
 }
 
 fn engine_binary(root: &Path, profile: &str) -> PathBuf {
