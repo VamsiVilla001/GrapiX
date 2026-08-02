@@ -37,7 +37,7 @@ use tauri::{AppHandle, Emitter};
 const API_ADDRESS: &str = "127.0.0.1:4100";
 const ENGINE_ADDRESS: &str = "127.0.0.1:4400";
 const ASSISTANT_ADDRESS: &str = "127.0.0.1:4160";
-
+const ADOBE_ADDRESS: &str = "127.0.0.1:4784";
 /// How long a process is given to answer before it is reported as failed.
 const STARTUP_GRACE: Duration = Duration::from_secs(45);
 /// Health poll interval. Two seconds is frequent enough for a status strip and cheap.
@@ -82,6 +82,7 @@ pub struct ProcessSnapshot {
 pub struct SupervisorSnapshot {
     pub api: ProcessSnapshot,
     pub assistant: ProcessSnapshot,
+    pub adobe: ProcessSnapshot,
     pub engine: ProcessSnapshot,
     pub ready: bool,
     /// Stated on every build on purpose. Repository tests cannot certify a GPU and output
@@ -125,6 +126,7 @@ impl ProcessSlot {
 struct Inner {
     api: ProcessSlot,
     assistant: ProcessSlot,
+    adobe: ProcessSlot,
     engine: ProcessSlot,
     stopping: bool,
 }
@@ -134,6 +136,7 @@ impl Inner {
         SupervisorSnapshot {
             api: self.api.snapshot(),
             assistant: self.assistant.snapshot(),
+            adobe: self.adobe.snapshot(),
             engine: self.engine.snapshot(),
             ready: self.api.state.is_up() && self.engine.state.is_up(),
             certification_warning: CERTIFICATION_WARNING.to_string(),
@@ -152,6 +155,7 @@ impl DesktopSupervisor {
         let inner = Arc::new(Mutex::new(Inner {
             api: ProcessSlot::new("Project service", API_ADDRESS),
             assistant: ProcessSlot::new("AI assistant", ASSISTANT_ADDRESS),
+            adobe: ProcessSlot::new("Adobe gateway", ADOBE_ADDRESS),
             engine: ProcessSlot::new("Render engine", ENGINE_ADDRESS),
             stopping: false,
         }));
@@ -167,6 +171,7 @@ impl DesktopSupervisor {
             ensure_engine(&root, &inner);
             start_api(&root, &inner);
             start_assistant(&root, &inner);
+            start_adobe(&root, &inner);
             watch(&inner, &app);
         });
 
@@ -180,6 +185,7 @@ impl DesktopSupervisor {
             .unwrap_or_else(|_| SupervisorSnapshot {
                 api: ProcessSlot::new("Project service", API_ADDRESS).snapshot(),
                 assistant: ProcessSlot::new("AI assistant", ASSISTANT_ADDRESS).snapshot(),
+                adobe: ProcessSlot::new("Adobe gateway", ADOBE_ADDRESS).snapshot(),
                 engine: ProcessSlot::new("Render engine", ENGINE_ADDRESS).snapshot(),
                 ready: false,
                 certification_warning: CERTIFICATION_WARNING.to_string(),
@@ -194,6 +200,7 @@ impl DesktopSupervisor {
         inner.stopping = true;
         stop_owned(&mut inner.api);
         stop_owned(&mut inner.assistant);
+        stop_owned(&mut inner.adobe);
 
         // Not a bug and not laziness: an engine may be rendering Program. Closing an Editor
         // window must never stop it, whoever started it.
@@ -323,6 +330,35 @@ fn start_assistant(root: &Path, inner: &Arc<Mutex<Inner>>) {
     command.arg(entry).current_dir(root);
     spawn(inner, |inner| &mut inner.assistant, command);
 }
+fn start_adobe(root: &Path, inner: &Arc<Mutex<Inner>>) {
+    if adobe_health() {
+        adopt(
+            inner,
+            |inner| &mut inner.adobe,
+            "already running and healthy on :4784",
+        );
+        return;
+    }
+
+    let entry = root
+        .join("Editor")
+        .join("services")
+        .join("adobe-mcp-gateway")
+        .join("dist")
+        .join("index.js");
+    if !entry.is_file() {
+        fail(
+            inner,
+            |inner| &mut inner.adobe,
+            "build output not found; run `npm run build -w @grapix/adobe-mcp-gateway`",
+        );
+        return;
+    }
+
+    let mut command = Command::new("node");
+    command.arg(entry).current_dir(root);
+    spawn(inner, |inner| &mut inner.adobe, command);
+}
 
 fn engine_binary(root: &Path, profile: &str) -> PathBuf {
     root.join("services")
@@ -418,6 +454,7 @@ fn watch(inner: &Arc<Mutex<Inner>>, app: &AppHandle) {
         let api_up = api_health();
         let engine_up = port_open(ENGINE_ADDRESS);
         let assistant_up = assistant_health();
+        let adobe_up = adobe_health();
 
         let snapshot = {
             let Ok(mut guard) = inner.lock() else { return };
@@ -425,14 +462,15 @@ fn watch(inner: &Arc<Mutex<Inner>>, app: &AppHandle) {
             update(&mut guard.api, api_up, within_grace);
             update(&mut guard.engine, engine_up, within_grace);
             update(&mut guard.assistant, assistant_up, within_grace);
+            update(&mut guard.adobe, adobe_up, within_grace);
             guard.snapshot()
         };
 
         // Emitted only on change: an event every two seconds forever would be noise, and the
         // UI polls the command for its initial state anyway.
         let fingerprint = format!(
-            "{:?}/{:?}/{:?}/{}",
-            snapshot.api.state, snapshot.assistant.state, snapshot.engine.state, snapshot.ready
+            "{:?}/{:?}/{:?}/{:?}/{}",
+            snapshot.api.state, snapshot.assistant.state, snapshot.adobe.state, snapshot.engine.state, snapshot.ready
         );
         if previous.as_deref() != Some(fingerprint.as_str()) {
             let _ = app.emit("grapix-supervisor-status", &snapshot);
@@ -486,6 +524,9 @@ fn api_health() -> bool {
 
 fn assistant_health() -> bool {
     http_get(ASSISTANT_ADDRESS, "/assistant/health").is_some_and(|status| status == 200)
+}
+fn adobe_health() -> bool {
+    http_get(ADOBE_ADDRESS, "/health").is_some_and(|status| status == 200)
 }
 
 /// Minimal HTTP status probe. A dependency would be a larger surface than one request.

@@ -94,7 +94,7 @@ function normalizeNode(
     rotation: finite(node.rotation),
     opacity: clamp01(node.opacity),
     fillOpacity: clamp01(node.fillOpacity ?? 1),
-    fills: node.fills.map((paint) => normalizeColorValue(paint, "#ffffff")),
+    fills: node.fills.map((paint) => normalizeColorValue(paint, "transparent")),
     strokes: node.strokes.map((paint) => normalizeColorValue(paint, "transparent")),
     strokeWidth: Math.max(0, finite(node.strokeWidth) * Math.max(scaleX, scaleY)),
     masks: node.masks.map((mask) => ({

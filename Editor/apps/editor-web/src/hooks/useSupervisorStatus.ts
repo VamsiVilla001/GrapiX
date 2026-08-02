@@ -25,6 +25,8 @@ export interface SupervisorStatus {
   api: ProcessStatus;
   /** The AI assistant broker (owned, Editor-only). Optional in the payload for older shells. */
   assistant?: ProcessStatus;
+  /** The Adobe MCP gateway (owned, port 4784). Optional in the payload for older shells. */
+  adobe?: ProcessStatus;
   /**
    * The render engine. Ensured, never owned: Program outlives the Editor window, so the
    * shell starts an engine when none is running and then leaves it alone.

@@ -141,12 +141,16 @@ function convertChildren(
   imageUrls: Record<string, string>
 ): NormalizedDesignNode[] {
   const result: NormalizedDesignNode[] = [];
-  let activeMask: NormalizedDesignMask | null = null;
+  let activeMaskInfo: { mask: NormalizedDesignMask; x: number; y: number } | null = null;
   for (const child of children) {
     const converted = convertNode(child, parentOrigin, report, assets, imageUrls);
     if (!converted) continue;
     if (child.isMask) {
-      activeMask = nodeAsMask(converted);
+      activeMaskInfo = {
+        mask: nodeAsMask(converted),
+        x: converted.x,
+        y: converted.y
+      };
       addDesignImportIssue(report, {
         kind: "converted",
         severity: "info",
@@ -156,7 +160,15 @@ function convertChildren(
       });
       continue;
     }
-    if (activeMask) converted.masks = [structuredClone(activeMask), ...converted.masks];
+    if (activeMaskInfo) {
+      const offsetX = activeMaskInfo.x - converted.x;
+      const offsetY = activeMaskInfo.y - converted.y;
+      const targetMask: NormalizedDesignMask = {
+        ...structuredClone(activeMaskInfo.mask),
+        path: offsetPath(activeMaskInfo.mask.path, offsetX, offsetY)
+      };
+      converted.masks = [targetMask, ...converted.masks];
+    }
     result.push(converted);
   }
   return result;

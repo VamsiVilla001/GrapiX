@@ -138,9 +138,9 @@ function convertNode(
   materials: Material[],
   zIndex: number
 ): SceneObject {
-  const firstFill = normalizeColorValue(node.fills[0], "#ffffff");
-  const firstStroke = normalizeColorValue(node.strokes[0], "transparent");
-  const fill = firstFill.type === "solid" ? firstFill.color : firstFill.type === "none" ? "transparent" : firstFill.stops[0]?.color ?? "#ffffff";
+  const firstFill = node.fills.length > 0 ? normalizeColorValue(node.fills[0], "transparent") : { type: "none" as const };
+  const firstStroke = node.strokes.length > 0 ? normalizeColorValue(node.strokes[0], "transparent") : { type: "none" as const };
+  const fill = firstFill.type === "solid" ? firstFill.color : firstFill.type === "none" ? "transparent" : firstFill.stops[0]?.color ?? "transparent";
   const stroke = firstStroke.type === "solid" ? firstStroke.color : firstStroke.type === "none" ? "transparent" : firstStroke.stops[0]?.color ?? "transparent";
   const effects = convertNodeEffects(node.effects, node, report);
   const blendingOptions = convertNodeBlendingOptions(node);
