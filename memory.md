@@ -1160,6 +1160,48 @@ The required completion order remains:
 
 ## Work chronology
 
+### 2026-09-06 — the basics, found by running the editor rather than reading it
+
+The library read the folders correctly and almost nothing built on top of it worked. Every fault
+below was invisible to the test suite and obvious within a minute of opening the app.
+
+**Thumbnails were blank everywhere.** `<img src="/api/project/assets/content?…">` sends no
+`Authorization` header and every project route answers 401 — and a broken `<img>` draws as nothing,
+so the failure had no symptom beyond an empty checkerboard. `AssetThumbnail` now resolves through
+the authenticated, etag-keyed blob path the renderers already used. The preview pane had a second
+bug in the same area: it looked only in `scene.assets`, so selecting anything the scene did not
+already carry — most of the library — previewed nothing.
+
+**3D textures never loaded at all, and that predates project assets.** `ThreeSceneLayer` handed
+`face.assetSource` straight to `TextureLoader`. A scene stores assets by *relative* path, so the
+loader resolved them against the page origin; Vite answers `index.html` with **200**, the decode
+fails, the catch keeps the authored colour, and a textured surface renders flat white. Design
+imports (`images/<scene>/…`) were broken identically, as were glTF models. `GpuSceneRenderer` had
+been fixed for this and `ThreeSceneLayer` never had. Both now go through
+`resolveProjectAssetObjectUrl`.
+
+**Colour and alpha now come from the file.** `imageProbe.ts` reads geometry and alpha out of
+PNG/JPEG/WebP/GIF/BMP headers — a bounded prefix, cached on size+mtime, so re-scanning an unchanged
+folder costs no I/O. The cases the obvious implementation gets wrong are covered: a palette PNG
+whose transparency is a `tRNS` chunk (the standard logo-on-transparent export, whose colour type
+alone reads opaque), a JPEG whose frame header sits behind a large EXIF block, lossless-WebP alpha.
+Nothing is guessed — an unreadable header yields no width, height or alpha rather than a plausible
+zero the panel would state as fact. A new material now takes its alpha mode from the image, so an
+image with no alpha channel produces an `opaque` material instead of paying for blending.
+
+Verified in the running editor against generated PNGs: both files listed with true geometry, alpha
+distinguished (480×270 opaque vs 400×200 alpha), thumbnails decoded as blob URLs with the right
+`naturalWidth`, and an assigned RGBA key rendering on the canvas with its transparent corners
+showing the checkerboard through.
+
+Two failures during verification were **not** faults in the work, and saying so mattered: the
+editor-mcp "service not running" test fails whenever a real project service is listening on 4100 —
+which the verification run itself had started — and `tsx watch` survives its parent being stopped,
+so the port stays held until the PID is killed.
+
+Gates: `typecheck` 0, `check:boundaries` passed, `test:editor` **529/529**, `test:shared` pass, new
+`imageProbe` 14/14, new `projectAssetRoutes` 9/9.
+
 ### 2026-09-06 — the asset folder becomes the library
 
 User correction, and it inverted the model that was about to be built: the Material Manager
@@ -7103,3 +7145,32 @@ capability matrix remains AE-A4.
     temporary name is unique per write and writes are serialised. A shared name means two concurrent
     savers race: the loser's rename fails `ENOENT`, and the file that survives can be the older body
     while both callers believe they saved. `storage.ts` has the keyed-lock pattern to follow.
+322. **A header-less consumer cannot fetch a project asset. Resolve *and* authenticate first.**
+    `<img>`, `TextureLoader`, `GLTFLoader` and Pixi's loader all fetch with no `Authorization`
+    header, and every project-service route answers 401. Worse than the 401 is the relative-path
+    case: a scene stores assets by relative path, so a raw source resolves against the *page*
+    origin, and the dev server answers `index.html` with **200** — the load does not fail loudly,
+    the decode does, and a textured surface renders flat white. Everything that loads a scene asset
+    goes through `resolveProjectAssetObjectUrl`. `isProjectServiceUrl` takes a *resolved* URL; it
+    returns false for a relative one, so never test a raw source with it.
+323. **A broken `<img>` has no symptom.** It draws as nothing, which is indistinguishable from an
+    empty panel. Neither typecheck nor the test suite can see it. Any change to how an asset is
+    addressed has to be looked at in the running editor before it is called done.
+324. **Read alpha from the file; never assume it.** A key with no alpha reaches air as a black
+    rectangle, and that is found at the worst possible moment. `imageProbe.ts` reads the header,
+    and the material takes its alpha mode from the answer. Two traps: PNG colour type alone is not
+    the answer — a palette PNG carries transparency in a `tRNS` chunk, which is exactly what a
+    logo-on-transparent export is — and a JPEG's frame header sits behind EXIF, so geometry is
+    never at a fixed offset.
+325. **An unreadable header yields nothing, not a default.** `width: 0` or an invented
+    `hasAlphaChannel: false` gets stated as fact by the panel and believed by an operator. Absent
+    is the honest answer, and the UI omits the field rather than showing a guess.
+326. **"Empty" is several different situations.** The asset library can be empty because a filter
+    excluded everything, because no project has been saved, because the read is in flight, or
+    because it failed. One sentence for all four sent authors to clear a filter that was not the
+    problem. Say which.
+327. **A dev server left running fails the test suite in a way that looks like a code fault.** The
+    editor-mcp "project service is not running" test asserts the message you get when nothing is
+    listening on 4100 — so any verification run that started a service breaks it. And `tsx watch`
+    survives its parent process being stopped: free the port by PID (`Get-NetTCPConnection
+    -LocalPort 4100`) before believing a failure.
