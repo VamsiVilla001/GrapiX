@@ -37,8 +37,9 @@ import {
   useMaterialManagerStore
 } from "../stores/materialManagerStore";
 import { placeMaterialContextMenu } from "./materialContextMenu";
-import { projectAssetLibraryItem, resolveProjectAssetUrl } from "../../../lib/projectAssets";
-import { useProjectAssetStore, watchProjectAssets } from "../../../store/projectAssetStore";
+import { projectAssetLibraryItem } from "../../../lib/projectAssets";
+import { AssetThumbnail } from "../../../components/AssetThumbnail";
+import { useProjectAssetStore, watchProjectAssets, type ProjectAssetStatus } from "../../../store/projectAssetStore";
 
 type LibraryItem =
   | { kind: "material"; id: string; name: string; material: Material }
@@ -79,6 +80,9 @@ export function MaterialLibrary(props: MaterialLibraryProps) {
   const openContextMenu = useMaterialManagerStore((state) => state.openContextMenu);
   const [newMaterialDialogOpen, setNewMaterialDialogOpen] = useState(false);
   const projectAssets = useProjectAssetStore((state) => state.assets);
+  const libraryStatus = useProjectAssetStore((state) => state.status);
+  const libraryError = useProjectAssetStore((state) => state.error);
+  const projectOpen = useProjectAssetStore((state) => state.projectOpen);
 
   /*
    * Read the project's asset folders now, and again on every window focus.
@@ -227,7 +231,7 @@ export function MaterialLibrary(props: MaterialLibraryProps) {
           </article>
         );
       })}
-      {items.length === 0 ? <div className="material-empty">No assets match the current search and filter.</div> : null}
+      {items.length === 0 ? <div className="material-empty">{emptyLibraryMessage(libraryStatus, libraryError, projectOpen)}</div> : null}
       <MaterialContextMenu
         importing={props.importing}
         onImportFolder={props.onImportFolder}
@@ -644,7 +648,7 @@ function Thumbnail({ item }: { item: LibraryItem }) {
     return (
       <div className="material-thumb checkerboard">
         {["image", "svg"].includes(item.asset.kind) && item.asset.status !== "MISSING"
-          ? <img src={resolveProjectAssetUrl(item.asset.thumbnailSource ?? item.asset.source)} alt="" />
+          ? <AssetThumbnail source={item.asset.thumbnailSource ?? item.asset.source} fallback={<FileImage size={28} />} />
           : item.asset.kind === "model" ? <Box size={28} /> : <FileImage size={28} />}
       </div>
     );
@@ -726,6 +730,27 @@ function createItems(
   });
 }
 
+/**
+ * Why the library is empty, which is four different situations wearing one appearance.
+ *
+ * "No assets match the current search and filter" was said for all of them, including the two that
+ * are not about filtering at all: a project that was never saved, and a read that failed. An author
+ * whose service had restarted was told their filter was too narrow, and clearing it changed
+ * nothing — the panel has to say which of these it is or it sends people looking in the wrong place.
+ */
+export function emptyLibraryMessage(
+  status: ProjectAssetStatus,
+  error: string | null,
+  projectOpen: boolean
+): string {
+  if (status === "error") {
+    return `${error ?? "The project's assets could not be read."} The list may be out of date; it refreshes when this window regains focus.`;
+  }
+  if (status === "loading") return "Reading the project's asset folders…";
+  if (!projectOpen) return "No project yet. Save the project to a folder, then its Assets folders become this library.";
+  return "No assets match the current search and filter.";
+}
+
 function itemMeta(item: LibraryItem, scene: ReturnType<typeof useEditorStore.getState>["scene"]): string {
   if (item.kind === "material") {
     const textured = item.material.textureSlots?.some((slot) => Boolean(slot.assetId));
@@ -734,7 +759,19 @@ function itemMeta(item: LibraryItem, scene: ReturnType<typeof useEditorStore.get
   if (item.kind === "instance") return `instance / ${item.base?.name ?? "missing base"}`;
   if (item.kind === "shader") return `${item.shader.validationStatus.toLowerCase()} / WGSL v${item.shader.version}`;
   const size = item.asset.sizeBytes ? `${Math.max(1, Math.round(item.asset.sizeBytes / 1024))} KiB` : "embedded";
-  return `${item.asset.kind} / ${size}`;
+  /*
+   * Geometry and alpha, when the file said so.
+   *
+   * These are the two facts an author actually chooses between two images on, and the second one
+   * costs a show when it is wrong: a key with no alpha channel reaches air as a black rectangle.
+   * Nothing is shown for an image whose header could not be read — an absent answer is honest,
+   * where "opaque" invented for an unreadable file would be believed.
+   */
+  const geometry = item.asset.width && item.asset.height
+    ? `${item.asset.width}×${item.asset.height}`
+    : null;
+  const alpha = item.asset.hasAlpha === true ? "alpha" : item.asset.hasAlpha === false ? "opaque" : null;
+  return [item.asset.kind, geometry, alpha, size].filter(Boolean).join(" / ");
 }
 
 function toSelection(item: LibraryItem): MaterialManagerSelection {

@@ -16,6 +16,7 @@ import type {
 } from "@grapix/shared-types";
 import type { RenderableSceneObject, ResolvedFaceMaterial } from "./sceneMaterial";
 import { createSlabGeometry } from "./slabGeometry";
+import { resolveProjectAssetObjectUrl } from "../lib/projectAssets";
 
 const DEFAULT_FOV = 45;
 const MIN_CAMERA_NEAR = 0.01;
@@ -253,7 +254,9 @@ export class ThreeSceneLayer {
   private async loadModel(object: Extract<RenderableSceneObject, { type: "mesh" }>): Promise<THREE.Object3D | null> {
     try {
       const { GLTFLoader } = await import("three/examples/jsm/loaders/GLTFLoader.js");
-      const gltf = await new GLTFLoader().loadAsync(object.src!);
+      // Same rewrite the texture path needs: a model stored in the project is addressed by a
+      // relative path the loader would otherwise resolve against the page origin.
+      const gltf = await new GLTFLoader().loadAsync(await resolveProjectAssetObjectUrl(object.src!));
       const model = gltf.scene.clone(true);
       const bounds = new THREE.Box3().setFromObject(model);
       const size = bounds.getSize(new THREE.Vector3());
@@ -685,7 +688,21 @@ async function createMaterial(
 
   if (face?.assetSource) {
     try {
-      const texture = await loader.loadAsync(face.assetSource);
+      /*
+       * Resolve and authenticate before the loader sees it.
+       *
+       * A scene stores an asset by the path the project knows it by — `Assets/Images/key.png`
+       * through the content route, or `images/<scene>/<layer>.png` for an imported design — and
+       * both are relative. Handing either straight to `TextureLoader` resolves it against the
+       * *page* origin: the Vite dev server, or `tauri.localhost` in the shell. Vite answers
+       * `index.html` with a 200, so the load does not even fail loudly — the decode fails, the
+       * catch below keeps the authored colour, and a textured surface renders as flat white.
+       *
+       * `resolveProjectAssetObjectUrl` points it at the project service, attaches the session
+       * bearer the content routes require, and hands back a blob URL, which is the only form a
+       * header-less loader can use. Data URLs and remote sources pass straight through.
+       */
+      const texture = await loader.loadAsync(await resolveProjectAssetObjectUrl(face.assetSource));
       texture.colorSpace = resolved?.material.colorSpace === "linear"
         ? THREE.LinearSRGBColorSpace
         : THREE.SRGBColorSpace;

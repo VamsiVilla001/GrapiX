@@ -1,10 +1,12 @@
-import type { MeshSceneObject, PrimitiveMaterialBinding, SceneDocument } from "@grapix/shared-types";
+import { projectAssetId, type MeshSceneObject, type PrimitiveMaterialBinding, type SceneDocument } from "@grapix/shared-types";
 import { useMemo } from "react";
 import { GpuSceneStage } from "../../../components/GpuSceneStage";
 import { resolveRenderableObjects } from "../../../rendering/sceneMaterial";
 import { useEditorStore } from "../../../store/editorStore";
 import { useMaterialManagerStore } from "../stores/materialManagerStore";
-import { resolveProjectAssetUrl } from "../../../lib/projectAssets";
+import { AssetThumbnail } from "../../../components/AssetThumbnail";
+import { projectAssetLibraryItem } from "../../../lib/projectAssets";
+import { useProjectAssetStore } from "../../../store/projectAssetStore";
 
 export function MaterialPreview() {
   const scene = useEditorStore((state) => state.scene);
@@ -12,7 +14,23 @@ export function MaterialPreview() {
   const background = useMaterialManagerStore((state) => state.previewBackground);
   const setBackground = useMaterialManagerStore((state) => state.setPreviewBackground);
   const preview = useMemo(() => createPreviewScene(scene, selection), [scene, selection]);
-  const asset = selection?.kind === "asset" ? scene.assets.find((item) => item.assetId === selection.id) : undefined;
+  const projectAssets = useProjectAssetStore((state) => state.assets);
+
+  /**
+   * The selected asset, whether or not the scene carries it yet.
+   *
+   * Looking only in `scene.assets` meant selecting anything in the project's folders previewed
+   * nothing at all — the panel lists the whole library, so most of what an author can click is a
+   * file the scene has never referenced. The scene's own entry still wins where both exist, because
+   * it carries the name and the alpha mode the author set.
+   */
+  const asset = useMemo(() => {
+    if (selection?.kind !== "asset") return undefined;
+    const carried = scene.assets.find((item) => item.assetId === selection.id);
+    if (carried) return carried;
+    const reference = projectAssets.find((item) => projectAssetId(item.path) === selection.id);
+    return reference ? projectAssetLibraryItem(reference) : undefined;
+  }, [projectAssets, scene.assets, selection]);
 
   return (
     <section className="material-preview-section">
@@ -26,7 +44,7 @@ export function MaterialPreview() {
       </header>
       <div className={`material-preview material-preview-${background}`}>
         {preview ? <GpuSceneStage scene={preview} objects={resolveRenderableObjects(preview)} /> : null}
-        {!preview && asset && ["image", "svg"].includes(asset.kind) && asset.status !== "MISSING" ? <img src={resolveProjectAssetUrl(asset.source)} alt={asset.name} /> : null}
+        {!preview && asset && ["image", "svg"].includes(asset.kind) && asset.status !== "MISSING" ? <AssetThumbnail source={asset.source} alt={asset.name} /> : null}
         {!preview && !asset ? <span>Select a material to render its live preview.</span> : null}
         {asset?.status === "MISSING" ? <span className="preview-warning">Source is missing. Relink the asset to restore the preview.</span> : null}
       </div>

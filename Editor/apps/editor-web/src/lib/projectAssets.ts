@@ -46,9 +46,31 @@ export function projectAssetLibraryItem(reference: ProjectAssetReference): Asset
     sizeBytes: reference.sizeBytes,
     importedAt: reference.modifiedAt,
     status: "READY",
+    // sRGB is the assumption every one of these formats encodes in, and the one both renderers
+    // apply. A file carrying a different profile is a real case, and reading ICC out of the header
+    // is the work that would answer it — until then this is stated rather than silently assumed.
     colorSpace: "srgb",
+    ...(reference.width !== undefined ? { width: reference.width } : {}),
+    ...(reference.height !== undefined ? { height: reference.height } : {}),
+    ...alphaFromReference(reference),
     tags: []
   };
+}
+
+/**
+ * The asset's alpha, as far as the header can say.
+ *
+ * `hasAlphaChannel` is a fact about the format; `alphaMode` is how the surface should be drawn.
+ * A file with an alpha channel is `straight` — which is what PNG, WebP and GIF store, and what
+ * both renderers expect — and one without is `opaque`. Neither is written when the header could
+ * not be read: `normalizeMaterialSceneDocument` then records `unknown`, which is the truth and
+ * which the renderers treat conservatively, rather than a guess the panel would show as fact.
+ */
+function alphaFromReference(reference: ProjectAssetReference): Partial<AssetLibraryItem> {
+  if (reference.hasAlphaChannel === undefined) return {};
+  return reference.hasAlphaChannel
+    ? { hasAlpha: true, alphaMode: "straight" }
+    : { hasAlpha: false, alphaMode: "opaque" };
 }
 
 /**

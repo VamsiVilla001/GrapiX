@@ -71,6 +71,7 @@ import {
   type SceneScriptReference,
   type TextSceneObject,
   projectAssetId,
+  type MaterialAlphaMode,
   type ProjectAssetReference,
 } from "@grapix/shared-types";
 import {
@@ -463,6 +464,24 @@ function withProjectAsset(
   return assets.map((item, position) => position === index
     ? { ...item, ...fresh, name: item.name, tags: item.tags, alphaMode: item.alphaMode ?? fresh.alphaMode }
     : item);
+}
+
+/**
+ * The alpha mode a new material should take from the image being bound to it.
+ *
+ * A textured material otherwise defaults to `straight`, which is the right assumption for an image
+ * nobody has read: a key drawn opaque is a black rectangle on air, while an opaque photo drawn with
+ * blending is merely slower. But the project library reads every image's header, so for a JPEG or a
+ * lossy WebP we *know* there is no alpha channel — and drawing those as transparent surfaces costs
+ * blending and invites the depth-sorting artefacts transparency brings.
+ *
+ * `undefined` for `unknown`, so an unread asset falls through to that safe default rather than
+ * having a guess written into the document.
+ */
+function materialAlphaModeForAsset(asset: AssetLibraryItem): MaterialAlphaMode | undefined {
+  if (asset.alphaMode === "opaque") return "opaque";
+  if (asset.alphaMode === "straight" || asset.alphaMode === "premultiplied") return asset.alphaMode;
+  return undefined;
 }
 
 /**
@@ -1764,7 +1783,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         material.assetId === assetId || material.textureSlots?.some((slot) => slot.assetId === assetId));
       const material = existing ?? createMaterialDefinition(
         asset.name.replace(/\.[^.]+$/, ""),
-        { baseTextureAssetId: assetId }
+        { baseTextureAssetId: assetId, alphaMode: materialAlphaModeForAsset(asset) }
       );
       if (selectedObjects.some((object) => !isMaterialCompatibleWithSlot(material, object, slotName))) {
         set({ materialActionError: "This image or texture is not compatible with the selected surface." });
@@ -1900,7 +1919,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         material.assetId === assetId || material.textureSlots?.some((slot) => slot.assetId === assetId));
       const material = existing ?? createMaterialDefinition(
         asset.name.replace(/\.[^.]+$/, ""),
-        { baseTextureAssetId: assetId }
+        { baseTextureAssetId: assetId, alphaMode: materialAlphaModeForAsset(asset) }
       );
       const faces = getBindableFaces(object);
       const targetIndices = faceIndices.length ? faceIndices : [0];

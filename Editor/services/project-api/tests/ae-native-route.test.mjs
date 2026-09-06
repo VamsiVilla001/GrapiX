@@ -65,16 +65,23 @@ async function withServer(run) {
 /**
  * Every entry the data root gained, so a silent conversion cannot hide in a subdirectory.
  *
- * Half-written files are excluded. Atomic writes here go to `<name>.tmp` and are renamed, and the
- * first-administrator bootstrap runs one of them concurrently with this test — so a snapshot taken
- * while that rename is in flight sees `users.json.tmp` and reports it as a side effect of the
- * inspection. It is neither a scene nor an asset directory, which is what this is asking about,
- * and whether it is visible depends only on how the two writes interleave.
+ * The service's own bookkeeping is excluded, because this asks whether *inspection converted
+ * anything* — not whether the process wrote a byte. Two things kept appearing between the before
+ * and after snapshots and neither is a conversion:
+ *
+ * - `<name>.tmp`, from an atomic write caught mid-rename. The first-administrator bootstrap runs
+ *   one concurrently with this test, so whether it is visible depends only on how the two writes
+ *   interleave.
+ * - `logs/audit.jsonl`. Every request is audited, including this one; the append is asynchronous,
+ *   so whether it lands before the second snapshot is a matter of timing.
+ *
+ * What the filter deliberately still catches is the thing the test is named for: a scene file, an
+ * asset directory, or a package appearing because a `.aep` was inspected.
  */
 async function entries(root) {
   try {
     return (await readdir(root, { recursive: true }))
-      .filter((entry) => !entry.endsWith(".tmp"))
+      .filter((entry) => !entry.endsWith(".tmp") && !entry.replace(/\\/g, "/").startsWith("logs/"))
       .sort();
   } catch {
     return [];

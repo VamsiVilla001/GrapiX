@@ -131,6 +131,20 @@ export interface ProjectAssetReference {
   modifiedAt: string;
   /** Which asset folder it came from, so the library can group without re-deriving it. */
   folder: ProjectAssetFolder;
+  /** Pixel width, read from the file's own header. Absent when the format could not be read. */
+  width?: number;
+  /** Pixel height, read from the file's own header. */
+  height?: number;
+  /**
+   * Whether the format carries an alpha channel.
+   *
+   * From the header, so it means "this file has an alpha channel", not "some pixel in it is
+   * actually transparent" — a fully opaque RGBA PNG is `true`. That is the question an author
+   * choosing a key asks, and it is answerable without decoding a folder of 4K plates. Absent
+   * rather than `false` when the format could not be read: an invented `false` would be stated as
+   * fact by the panel, and a key that turns out to be opaque is found at exactly the wrong moment.
+   */
+  hasAlphaChannel?: boolean;
 }
 
 /**

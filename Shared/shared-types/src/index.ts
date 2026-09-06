@@ -3695,6 +3695,16 @@ export function normalizeMaterial(material: Material): Material {
 export interface CreateStandardMaterialOptions {
   /** Optional image asset assigned to the Standard Material's base texture. */
   baseTextureAssetId?: string;
+  /**
+   * The surface's alpha handling, when the caller knows what the image actually is.
+   *
+   * Omitted, a textured material assumes `straight`, which is the safe assumption for an unknown
+   * image: a key drawn as opaque is a black rectangle on air, where an opaque photo drawn with
+   * blending enabled is merely slower. When the source has been read and has no alpha channel —
+   * a JPEG always, a 24-bit BMP, a lossy WebP — passing `opaque` avoids paying for blending and
+   * the depth-sorting artefacts that come with a transparent surface that never needed to be one.
+   */
+  alphaMode?: MaterialAlphaMode;
 }
 
 export function createMaterialDefinition(
@@ -3713,6 +3723,7 @@ export function createMaterialDefinition(
   legacyAssetId?: string
 ): Material {
   const timestamp = new Date().toISOString();
+  const requestedAlphaMode = typeof optionsOrLegacyType === "string" ? undefined : optionsOrLegacyType.alphaMode;
   const assetId = typeof optionsOrLegacyType === "string"
     ? legacyAssetId
     : optionsOrLegacyType.baseTextureAssetId;
@@ -3735,7 +3746,7 @@ export function createMaterialDefinition(
     },
     textureSlots: assetId ? [createDefaultTextureSlot("baseTexture", assetId)] : [],
     blendMode: "normal",
-    alphaMode: assetId ? "straight" : "premultiplied",
+    alphaMode: requestedAlphaMode ?? (assetId ? "straight" : "premultiplied"),
     cullMode: "back",
     depthMode: "read-write",
     colorSpace: "srgb",

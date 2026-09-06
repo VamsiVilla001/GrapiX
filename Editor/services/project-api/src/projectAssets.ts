@@ -33,6 +33,7 @@ import {
 import { readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 
+import { probeImageFile } from "./imageProbe.js";
 import { ProjectWorkspaceError, currentProject } from "./projectWorkspace.js";
 
 /**
@@ -109,14 +110,32 @@ async function scanDirectory(
     }
     if (!info.isFile()) continue;
 
+    const kind = projectAssetKind(entry.name);
+
+    /*
+     * Geometry and alpha, from the file's own header.
+     *
+     * Only for raster images: an SVG states no pixel size worth reporting, and a model or a font
+     * has no such thing. The probe reads a bounded prefix and caches on size and mtime, so
+     * re-scanning an unchanged folder — which happens on every window focus — costs no I/O at all.
+     */
+    const probe = kind === "image"
+      ? await probeImageFile(absolute, info.size, info.mtimeMs)
+      : null;
+
     context.references.push({
       path: toProjectRelativePosix(context.realRoot, absolute),
       name: entry.name,
-      kind: projectAssetKind(entry.name),
+      kind,
       mimeType: projectAssetMimeType(entry.name),
       sizeBytes: info.size,
       modifiedAt: new Date(info.mtimeMs).toISOString(),
-      folder
+      folder,
+      ...(probe?.width !== null && probe?.width !== undefined ? { width: probe.width } : {}),
+      ...(probe?.height !== null && probe?.height !== undefined ? { height: probe.height } : {}),
+      ...(probe?.hasAlphaChannel !== null && probe?.hasAlphaChannel !== undefined
+        ? { hasAlphaChannel: probe.hasAlphaChannel }
+        : {})
     });
   }
 }
