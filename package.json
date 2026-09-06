@@ -54,7 +54,8 @@
     "certify:parity": "node tools/certification/run-pixel-parity.mjs",
     "certify:materials": "npm test -w @grapix/shared-types && cargo test --manifest-path services/render-daemon/Cargo.toml --no-default-features",
     "certify:render-core": "cargo test --manifest-path services/render-daemon/Cargo.toml --test certification_project",
-    "certify:ae-runtime-fixtures": "npm --prefix Playout/services/playout-control run build && sh tools/certification/ae-runtime-fixtures/run-edge-corpus.sh compare && sh tools/certification/ae-runtime-fixtures/run-lower-third.sh"
+    "certify:ae-runtime-fixtures": "npm --prefix Playout/services/playout-control run build && sh tools/certification/ae-runtime-fixtures/run-edge-corpus.sh compare && sh tools/certification/ae-runtime-fixtures/run-lower-third.sh",
+    "check:ports": "node tools/architecture/check-ports.mjs"
   },
   "//overrides": "One copy of React, and one copy of its types, across the whole workspace. Two copies are not merely wasteful: hoisted packages (lucide-react, dockview-react) resolve the root copy, so they build elements with one React while an app renders them with the other — which surfaced as `Objects are not valid as a React child` from react-dom/server the moment the apps moved to 19. Two copies of the types fail the same way at compile time, because each declares its own `ReactNode`.",
   "overrides": {

@@ -371,3 +371,31 @@ V2 does not require a scene or protocol rewrite.
   deployment or client rendering, this document is authoritative for V1.
 - [`scene-document-v1.md`](scene-document-v1.md) remains the durable scene
   compatibility contract.
+
+## Ports
+
+Every port GrapiX binds is registered in
+[`Shared/service-discovery/src/ports.ts`](../Shared/service-discovery/src/ports.ts) and verified by
+`npm run check:ports`. Add a service to the register **before** giving it a port.
+
+| Port | Service | Owner | Override |
+| --- | --- | --- | --- |
+| 4100 | Editor project service | Editor | `GRAPIX_API_PORT` |
+| 4150 | Editor MCP server (`--http` only) | Editor | `GRAPIX_MCP_PORT` |
+| 4160 | Editor AI assistant service | Editor | `GRAPIX_ASSISTANT_PORT` |
+| 4300 | Playout control service | Playout | `GRAPIX_PLAYOUT_PORT` |
+| 4400 | Render engine (protocol v3) | Engine | `GRAPIX_ENGINE_PORT` |
+| 4401–4403 | Additional render nodes, scanned in order | Engine | per node |
+| 4784 | Adobe MCP bridge | Editor | `GRAPIX_ADOBE_GATEWAY_PORT` |
+| 5173 | Editor web UI (Vite dev) | Editor | — |
+| 5174 | Playout operator UI (Vite dev) | Playout | — |
+| 5199 | Second Editor web instance, for comparison runs | Editor | — |
+| 5353 | Link-local discovery (mDNS, RFC 6762) | Shared | — |
+
+**4200 is retired** and must not be reused. It belonged to the protocol v2 render daemon, whose
+binary was deleted on 2026-07-29; a new service answering there would answer requests meant for a
+renderer that no longer exists.
+
+Tests must not claim a fixed port — ask the OS for a free one with `listen(0)`. A hard-coded test
+port fails on any machine already running the real service, which is exactly how the editor-mcp
+suite fails when a project service is up.

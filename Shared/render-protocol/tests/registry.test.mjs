@@ -106,7 +106,7 @@ function profile(profileId, overrides = {}) {
   return normalizeEngineProfile({
     profileId,
     host: overrides.host ?? "127.0.0.1",
-    port: overrides.port ?? 4300,
+    port: overrides.port ?? 4400,
     ...overrides
   });
 }
@@ -118,20 +118,20 @@ function profile(profileId, overrides = {}) {
 test("engine URLs default to wss for anything not loopback", () => {
   // An unencrypted renderer connection across a venue network carries a bearer
   // token in the clear, so the secure default is not optional.
-  assert.equal(engineUrl("127.0.0.1", 4300), "ws://127.0.0.1:4300");
-  assert.equal(engineUrl("localhost", 4300), "ws://localhost:4300");
-  assert.equal(engineUrl("::1", 4300), "ws://[::1]:4300");
-  assert.equal(engineUrl("10.0.0.5", 4300), "wss://10.0.0.5:4300");
-  assert.equal(engineUrl("engine.example.com", 4300), "wss://engine.example.com:4300");
+  assert.equal(engineUrl("127.0.0.1", 4400), "ws://127.0.0.1:4400");
+  assert.equal(engineUrl("localhost", 4400), "ws://localhost:4400");
+  assert.equal(engineUrl("::1", 4400), "ws://[::1]:4400");
+  assert.equal(engineUrl("10.0.0.5", 4400), "wss://10.0.0.5:4400");
+  assert.equal(engineUrl("engine.example.com", 4400), "wss://engine.example.com:4400");
 
   // An operator may force plaintext on a trusted LAN.
-  assert.equal(engineUrl("10.0.0.5", 4300, { secure: false }), "ws://10.0.0.5:4300");
+  assert.equal(engineUrl("10.0.0.5", 4400, { secure: false }), "ws://10.0.0.5:4400");
 });
 
 test("IPv6 hosts are bracketed", () => {
-  assert.equal(engineUrl("fe80::1", 4300), "wss://[fe80::1]:4300");
+  assert.equal(engineUrl("fe80::1", 4400), "wss://[fe80::1]:4400");
   // Already bracketed stays as-is.
-  assert.equal(engineUrl("[fe80::1]", 4300), "wss://[fe80::1]:4300");
+  assert.equal(engineUrl("[fe80::1]", 4400), "wss://[fe80::1]:4400");
 });
 
 // ---------------------------------------------------------------------------
@@ -139,8 +139,8 @@ test("IPv6 hosts are bracketed", () => {
 // ---------------------------------------------------------------------------
 
 test("profiles normalise with a usable default label", () => {
-  const bare = normalizeEngineProfile({ profileId: "p1", host: "10.0.0.5", port: 4300 });
-  assert.equal(bare.label, "10.0.0.5:4300");
+  const bare = normalizeEngineProfile({ profileId: "p1", host: "10.0.0.5", port: 4400 });
+  assert.equal(bare.label, "10.0.0.5:4400");
   assert.equal(bare.enabled, true);
   assert.equal(bare.preferred, false);
   assert.equal(bare.role, "unassigned");
@@ -148,7 +148,7 @@ test("profiles normalise with a usable default label", () => {
   const named = normalizeEngineProfile({
     profileId: "p2",
     host: "10.0.0.6",
-    port: 4301,
+    port: 4401,
     label: "  GPU node  ",
     role: "primary",
     preferred: true
@@ -175,18 +175,21 @@ test("local discovery only ever considers loopback", () => {
   assert.equal(candidates[0].preferred, true);
 });
 
-test("the engine port range does not collide with the other GrapiX services", () => {
-  // 4100 project-api, 4300 playout-control, 5173/5174 web. A default that collided would
-  // make a local all-services run fail to start.
-  //
-  // 4200 stays in this set although nothing listens there any more: it belonged to the
-  // protocol v2 daemon, whose binary was deleted on 2026-07-29. Keeping it reserved means an
-  // engine default can never land on the port a second renderer used to own.
-  const taken = new Set([4100, 4200, 4300, 5173, 5174]);
-  for (const port of DEFAULT_LOCAL_ENGINE_PORTS) {
-    assert.ok(!taken.has(port), `engine port ${port} collides with an existing service`);
-  }
+/**
+ * The engine's own scan range, and only that.
+ *
+ * This used to carry a hand-written set of the other services' ports — and had already fallen
+ * behind by four of them, because a list of what everything else uses cannot be maintained from
+ * inside one package. That comparison now lives in `npm run check:ports`, which reads the register
+ * in `Shared/service-discovery/src/ports.ts` and can see every service, including the Rust engine's
+ * own default. What belongs here is the invariant this package owns: where a local engine is looked
+ * for, and that the range is contiguous from the documented default.
+ */
+test("the engine scan range starts at the documented default and is contiguous", () => {
   assert.equal(DEFAULT_LOCAL_ENGINE_PORTS[0], 4400);
+  DEFAULT_LOCAL_ENGINE_PORTS.forEach((port, index) => {
+    assert.equal(port, 4400 + index, "a gap would make an operator's second engine undiscoverable");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -195,10 +198,10 @@ test("the engine port range does not collide with the other GrapiX services", ()
 
 test("registering an engine yields an offline record with a resolved URL", () => {
   const registry = new EngineRegistry();
-  const record = registry.register(profile("local", { port: 4300 }), "manual", 1_000);
+  const record = registry.register(profile("local", { port: 4400 }), "manual", 1_000);
 
   assert.equal(record.state, "offline");
-  assert.equal(record.url, "ws://127.0.0.1:4300");
+  assert.equal(record.url, "ws://127.0.0.1:4400");
   assert.equal(record.engineId, null);
   assert.equal(record.capabilities, null);
   assert.equal(record.authenticated, false);
@@ -301,7 +304,7 @@ test("the summary counts states for an operator overview", () => {
   const registry = new EngineRegistry();
   for (const [index, state] of ["on-air", "ready", "error", "offline"].entries()) {
     const id = `p${index}`;
-    registry.register(profile(id, { port: 4300 + index }), "manual", 0);
+    registry.register(profile(id, { port: 4400 + index }), "manual", 0);
     registry.observe(id, { state, authenticated: state !== "offline" });
   }
 
@@ -322,10 +325,10 @@ test("the summary counts states for an operator overview", () => {
 test("selection prefers the operator's preferred engine", () => {
   const registry = new EngineRegistry();
 
-  registry.register(profile("plain", { port: 4300 }), "manual", 0);
+  registry.register(profile("plain", { port: 4400 }), "manual", 0);
   registry.observe("plain", { state: "ready", capabilities: capabilities({ engineId: "e1" }) });
 
-  registry.register(profile("chosen", { port: 4301, preferred: true }), "manual", 0);
+  registry.register(profile("chosen", { port: 4401, preferred: true }), "manual", 0);
   registry.observe("chosen", { state: "ready", capabilities: capabilities({ engineId: "e2" }) });
 
   assert.equal(registry.selectForStage(hugeStage).record.profileId, "chosen");
@@ -334,14 +337,14 @@ test("selection prefers the operator's preferred engine", () => {
 test("selection prefers primary over backup, then lowest load", () => {
   const registry = new EngineRegistry();
 
-  registry.register(profile("backup", { port: 4301, role: "backup" }), "manual", 0);
+  registry.register(profile("backup", { port: 4401, role: "backup" }), "manual", 0);
   registry.observe("backup", {
     state: "ready",
     capabilities: capabilities({ engineId: "b" }),
     load: 0
   });
 
-  registry.register(profile("primary", { port: 4300, role: "primary" }), "manual", 0);
+  registry.register(profile("primary", { port: 4400, role: "primary" }), "manual", 0);
   registry.observe("primary", {
     state: "ready",
     capabilities: capabilities({ engineId: "p" }),
@@ -352,13 +355,13 @@ test("selection prefers primary over backup, then lowest load", () => {
   assert.equal(registry.selectForStage(hugeStage).record.profileId, "primary");
 
   // Between two equal roles, load decides.
-  registry.register(profile("aux-busy", { port: 4302, role: "auxiliary" }), "manual", 0);
+  registry.register(profile("aux-busy", { port: 4402, role: "auxiliary" }), "manual", 0);
   registry.observe("aux-busy", {
     state: "ready",
     capabilities: capabilities({ engineId: "a1" }),
     load: 0.8
   });
-  registry.register(profile("aux-idle", { port: 4303, role: "auxiliary" }), "manual", 0);
+  registry.register(profile("aux-idle", { port: 4403, role: "auxiliary" }), "manual", 0);
   registry.observe("aux-idle", {
     state: "ready",
     capabilities: capabilities({ engineId: "a2" }),
@@ -372,7 +375,7 @@ test("selection prefers primary over backup, then lowest load", () => {
 test("an incompatible engine is never selected", () => {
   const registry = new EngineRegistry();
 
-  registry.register(profile("small", { port: 4300 }), "manual", 0);
+  registry.register(profile("small", { port: 4400 }), "manual", 0);
   registry.observe("small", {
     state: "ready",
     capabilities: capabilities({
@@ -394,13 +397,13 @@ test("an incompatible engine is never selected", () => {
 test("a disabled or non-operational engine is excluded with a stated reason", () => {
   const registry = new EngineRegistry();
 
-  registry.register(profile("disabled", { port: 4300, enabled: false }), "manual", 0);
+  registry.register(profile("disabled", { port: 4400, enabled: false }), "manual", 0);
   registry.observe("disabled", { state: "ready", capabilities: capabilities() });
 
-  registry.register(profile("broken", { port: 4301 }), "manual", 0);
+  registry.register(profile("broken", { port: 4401 }), "manual", 0);
   registry.observe("broken", { state: "error", lastError: "connection refused" });
 
-  registry.register(profile("unknown", { port: 4302 }), "manual", 0);
+  registry.register(profile("unknown", { port: 4402 }), "manual", 0);
   registry.observe("unknown", { state: "ready" }); // no capabilities yet
 
   assert.equal(registry.selectForStage(hugeStage), undefined);
@@ -425,16 +428,16 @@ test("with no engines registered the explanation says so", () => {
 test("mirror targets are the operational backups", () => {
   const registry = new EngineRegistry();
 
-  registry.register(profile("primary", { port: 4300, role: "primary" }), "manual", 0);
+  registry.register(profile("primary", { port: 4400, role: "primary" }), "manual", 0);
   registry.observe("primary", { state: "on-air", capabilities: capabilities() });
 
-  registry.register(profile("backup-up", { port: 4301, role: "backup" }), "manual", 0);
+  registry.register(profile("backup-up", { port: 4401, role: "backup" }), "manual", 0);
   registry.observe("backup-up", { state: "ready", capabilities: capabilities() });
 
-  registry.register(profile("backup-down", { port: 4302, role: "backup" }), "manual", 0);
+  registry.register(profile("backup-down", { port: 4402, role: "backup" }), "manual", 0);
   registry.observe("backup-down", { state: "offline" });
 
-  registry.register(profile("aux", { port: 4303, role: "auxiliary" }), "manual", 0);
+  registry.register(profile("aux", { port: 4403, role: "auxiliary" }), "manual", 0);
   registry.observe("aux", { state: "ready", capabilities: capabilities() });
 
   // A backup must hold the same scenes or it cannot be failed over to.
@@ -447,10 +450,10 @@ test("mirror targets are the operational backups", () => {
 test("failover picks a capable backup, never the failed engine", () => {
   const registry = new EngineRegistry();
 
-  registry.register(profile("primary", { port: 4300, role: "primary" }), "manual", 0);
+  registry.register(profile("primary", { port: 4400, role: "primary" }), "manual", 0);
   registry.observe("primary", { state: "error", capabilities: capabilities() });
 
-  registry.register(profile("backup", { port: 4301, role: "backup" }), "manual", 0);
+  registry.register(profile("backup", { port: 4401, role: "backup" }), "manual", 0);
   registry.observe("backup", {
     state: "ready",
     capabilities: capabilities({ engineId: "b" }),
@@ -464,10 +467,10 @@ test("failover picks a capable backup, never the failed engine", () => {
 test("failover refuses a backup that cannot render the stage", () => {
   const registry = new EngineRegistry();
 
-  registry.register(profile("primary", { port: 4300, role: "primary" }), "manual", 0);
+  registry.register(profile("primary", { port: 4400, role: "primary" }), "manual", 0);
   registry.observe("primary", { state: "error", capabilities: capabilities() });
 
-  registry.register(profile("weak", { port: 4301, role: "backup" }), "manual", 0);
+  registry.register(profile("weak", { port: 4401, role: "backup" }), "manual", 0);
   registry.observe("weak", {
     state: "ready",
     // Cannot tile, so it cannot render a 50,000-wide stage at all.
@@ -481,17 +484,17 @@ test("failover refuses a backup that cannot render the stage", () => {
 test("failover prefers a designated backup over an auxiliary", () => {
   const registry = new EngineRegistry();
 
-  registry.register(profile("primary", { port: 4300, role: "primary" }), "manual", 0);
+  registry.register(profile("primary", { port: 4400, role: "primary" }), "manual", 0);
   registry.observe("primary", { state: "error", capabilities: capabilities() });
 
-  registry.register(profile("aux", { port: 4301, role: "auxiliary" }), "manual", 0);
+  registry.register(profile("aux", { port: 4401, role: "auxiliary" }), "manual", 0);
   registry.observe("aux", {
     state: "ready",
     capabilities: capabilities({ engineId: "a" }),
     load: 0
   });
 
-  registry.register(profile("backup", { port: 4302, role: "backup" }), "manual", 0);
+  registry.register(profile("backup", { port: 4402, role: "backup" }), "manual", 0);
   registry.observe("backup", {
     state: "ready",
     capabilities: capabilities({ engineId: "b" }),
@@ -553,7 +556,7 @@ function fakeSocketFactory(script = {}) {
 test("the transport sends the token as a subprotocol, never in the URL", async () => {
   const { factory, sockets } = fakeSocketFactory();
   const transport = new WebSocketEngineTransport({
-    url: "wss://10.0.0.5:4300",
+    url: "wss://10.0.0.5:4400",
     authToken: "secret-token",
     factory
   });
@@ -564,12 +567,12 @@ test("the transport sends the token as a subprotocol, never in the URL", async (
   assert.ok(!sockets[0].url.includes("secret-token"));
   assert.deepEqual(sockets[0].protocols, ["grapix-engine-v3", "bearer.secret-token"]);
   assert.equal(transport.kind, "websocket");
-  assert.equal(transport.address, "wss://10.0.0.5:4300");
+  assert.equal(transport.address, "wss://10.0.0.5:4400");
 });
 
 test("frames round-trip through the transport", async () => {
   const { factory, sockets } = fakeSocketFactory();
-  const transport = new WebSocketEngineTransport({ url: "ws://127.0.0.1:4300", factory });
+  const transport = new WebSocketEngineTransport({ url: "ws://127.0.0.1:4400", factory });
 
   const received = [];
   transport.onFrame((frame) => received.push(frame));
@@ -584,7 +587,7 @@ test("frames round-trip through the transport", async () => {
 
 test("binary frames are ignored rather than guessed at", async () => {
   const { factory, sockets } = fakeSocketFactory();
-  const transport = new WebSocketEngineTransport({ url: "ws://127.0.0.1:4300", factory });
+  const transport = new WebSocketEngineTransport({ url: "ws://127.0.0.1:4400", factory });
 
   const received = [];
   transport.onFrame((frame) => received.push(frame));
@@ -596,14 +599,14 @@ test("binary frames are ignored rather than guessed at", async () => {
 
 test("sending before the socket is open throws rather than dropping the frame", () => {
   const { factory } = fakeSocketFactory({ autoOpen: false });
-  const transport = new WebSocketEngineTransport({ url: "ws://127.0.0.1:4300", factory });
+  const transport = new WebSocketEngineTransport({ url: "ws://127.0.0.1:4400", factory });
 
   assert.throws(() => transport.send("{}"), /socket is not open/);
 });
 
 test("a close is reported with a usable reason", async () => {
   const { factory, sockets } = fakeSocketFactory();
-  const transport = new WebSocketEngineTransport({ url: "ws://127.0.0.1:4300", factory });
+  const transport = new WebSocketEngineTransport({ url: "ws://127.0.0.1:4400", factory });
 
   const closes = [];
   transport.onClose((reason) => closes.push(reason));
@@ -622,7 +625,7 @@ test("a connect timeout closes the half-open socket", async () => {
   const { factory, sockets } = fakeSocketFactory({ autoOpen: false });
 
   const transport = new WebSocketEngineTransport({
-    url: "ws://127.0.0.1:4300",
+    url: "ws://127.0.0.1:4400",
     factory,
     connectTimeoutMs: 5_000,
     setTimer: (handler) => {
@@ -643,7 +646,7 @@ test("a connect timeout closes the half-open socket", async () => {
 
 test("a socket error during connect rejects the open", async () => {
   const { factory, sockets } = fakeSocketFactory({ autoOpen: false });
-  const transport = new WebSocketEngineTransport({ url: "ws://127.0.0.1:4300", factory });
+  const transport = new WebSocketEngineTransport({ url: "ws://127.0.0.1:4400", factory });
 
   const pending = transport.open();
   sockets[0].onerror({});

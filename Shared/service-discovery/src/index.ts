@@ -93,6 +93,22 @@ export {
  * and adding a browse for a type no responder publishes would be a discovery path that silently
  * never resolves.
  */
+/**
+ * The port register. Every port GrapiX binds, verified by `npm run check:ports`.
+ *
+ * It lives in this package because discovery is already the answer to "which service is where":
+ * the register is what a service announces from, and what a peer falls back to when nothing has
+ * been discovered.
+ */
+export {
+  GRAPIX_RETIRED_PORTS,
+  GRAPIX_SERVICE_PORTS,
+  servicePort,
+  whatClaimsPort,
+  type GrapixServiceOwner,
+  type GrapixServicePort
+} from "./ports.js";
+
 export const GRAPIX_SERVICE_TYPES = {
   /** The Editor project service (default port 4100). */
   editor: "_grapix-editor._tcp",
