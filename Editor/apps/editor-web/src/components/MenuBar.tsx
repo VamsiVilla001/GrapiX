@@ -6,7 +6,7 @@ import { useEditorStore, type LibraryObjectKind } from "../store/editorStore";
 import { useTemplateStore } from "../store/templateStore";
 import { useUiStore } from "../store/uiStore";
 import { describeHistoryStep } from "../lib/historyShortcut";
-import { ensureProjectLocation } from "../lib/ensureProject";
+import { saveSceneWithProjectPrompt } from "../lib/ensureProject";
 import { HISTORY_SCOPE_LABELS } from "./HistoryControls";
 import { ProjectSettingsDialog } from "./ProjectSettingsDialog";
 import { ProjectViewportDialog } from "./ProjectViewportDialog";
@@ -52,23 +52,6 @@ export function MenuBar({ initialOpenMenu }: { initialOpenMenu?: string } = {}) 
   const scene = useEditorStore((state) => state.scene);
   const hasActiveScene = useEditorStore((state) => state.hasActiveScene);
   const saveScene = useEditorStore((state) => state.saveScene);
-  const setSaveStatus = useEditorStore((state) => state.setSaveStatus);
-
-  /**
-   * Save, asking where the project lives the first time.
-   *
-   * The prompt belongs to the menu rather than to the store: this is the path a person took, so
-   * this is the only place a dialog may open. `saveScene` itself just refuses when no project is
-   * set, which is what keeps autosave and tests from raising a file picker.
-   */
-  async function saveWithProject() {
-    const outcome = await ensureProjectLocation(useEditorStore.getState().scene.name);
-    if (!outcome.ok) {
-      if (outcome.message) setSaveStatus("error", outcome.message);
-      return;
-    }
-    await saveScene();
-  }
   const undo = useEditorStore((state) => state.undo);
   const redo = useEditorStore((state) => state.redo);
   const canUndo = useEditorStore((state) => state.undoStack.length > 0);
@@ -176,7 +159,7 @@ export function MenuBar({ initialOpenMenu }: { initialOpenMenu?: string } = {}) 
         { label: "Open Scene…", onSelect: () => setOpenSceneOpen(true) },
         { label: "Import Design File…", onSelect: () => setDesignImportOpen(true) },
         { separator: true },
-        { label: "Save", disabled: !hasActiveScene, onSelect: () => void saveWithProject() },
+        { label: "Save   Ctrl+S", disabled: !hasActiveScene, onSelect: () => void saveSceneWithProjectPrompt() },
         { label: "Revert to Autosave…", disabled: !hasActiveScene, onSelect: () => setAutosaveRecoveryOpen(true) },
         { label: "Publish to Playout…", disabled: templates.length === 0, onSelect: () => setPublishDialogOpen(true) },
         { label: "Export Package…", disabled: !hasActiveScene, onSelect: () => void publish() },

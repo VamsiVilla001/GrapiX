@@ -9,6 +9,26 @@
 export type HistoryIntent = "undo" | "redo" | null;
 
 /**
+ * True when a key press means "save the scene".
+ *
+ * Here beside the history table for the same reason: the interesting part is which chords are
+ * refused, and a rule that lives in a React handler is a rule nobody asserts.
+ *
+ * Unlike undo, this does **not** exempt text-entry targets. Save is a document command, not a field
+ * command — an author who has just typed a headline and reaches for Ctrl+S means save the scene, and
+ * no text input has a competing meaning for it.
+ *
+ * Bare `Ctrl+S` / `Cmd+S` only. `Ctrl+Shift+S` is Save As, which does not exist yet: claiming it
+ * would make a real command look implemented while doing nothing, which is worse than letting it
+ * through. An Alt chord belongs to the panel toggles.
+ */
+export function isSaveShortcut(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "shiftKey" | "altKey">): boolean {
+  if (event.key.toLowerCase() !== "s") return false;
+  if (!(event.ctrlKey || event.metaKey)) return false;
+  return !event.shiftKey && !event.altKey;
+}
+
+/**
  * True when the event came from somewhere that owns its own undo.
  *
  * A text field, a number field and a `contentEditable` region all have the browser's own text undo,

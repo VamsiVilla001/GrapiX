@@ -13,6 +13,7 @@
 
 import { getProjectOnApi, openProjectOnApi } from "./apiClient";
 import { canPickFiles, pickProjectSavePath } from "./desktopBridge";
+import { useEditorStore } from "../store/editorStore";
 
 export interface EnsureProjectOutcome {
   ok: boolean;
@@ -48,4 +49,28 @@ export async function ensureProjectLocation(suggestedName?: string): Promise<Ens
 
   await openProjectOnApi(chosen, suggestedName);
   return { ok: true, message: null };
+}
+
+/**
+ * Save the open scene, asking where the project lives if this is the first time.
+ *
+ * The one place that turns "the author asked to save" into a write, shared by the File menu and by
+ * Ctrl+S. Two entry points running two copies of this would drift, and the interesting half is the
+ * refusal handling — a cancelled dialog has to leave a visible reason rather than looking like a
+ * save that silently did nothing.
+ *
+ * Deliberately not in the editor store. `saveScene` is called by autosave, by tests and by
+ * anything that persists in the background; a store action that could raise a file dialog would
+ * raise it from all of them. Prompting belongs to the paths a person took, which is this one.
+ */
+export async function saveSceneWithProjectPrompt(): Promise<boolean> {
+  const store = useEditorStore.getState();
+  if (!store.hasActiveScene) return false;
+
+  const outcome = await ensureProjectLocation(store.scene.name);
+  if (!outcome.ok) {
+    if (outcome.message) store.setSaveStatus("error", outcome.message);
+    return false;
+  }
+  return store.saveScene();
 }

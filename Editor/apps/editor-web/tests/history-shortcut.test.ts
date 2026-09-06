@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   describeHistoryStep,
+  isSaveShortcut,
   isTextEntryTarget,
   resolveHistoryIntent
 } from "../src/lib/historyShortcut";
@@ -95,4 +96,55 @@ test("a step with no label still says something useful", () => {
 test("an empty history says so instead of offering a command", () => {
   assert.equal(describeHistoryStep("Undo", undefined), "Nothing to undo");
   assert.equal(describeHistoryStep("Redo", undefined), "Nothing to redo");
+});
+
+/* ── Save ─────────────────────────────────────────────────────────────────────────────────── */
+
+/** A keyboard event, as much of one as the predicate reads. */
+function keyEvent(overrides: Partial<KeyboardEvent> & { key: string }) {
+  return { ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, ...overrides };
+}
+
+test("Ctrl+S and Cmd+S both mean save", () => {
+  assert.equal(isSaveShortcut(keyEvent({ key: "s", ctrlKey: true })), true);
+  assert.equal(isSaveShortcut(keyEvent({ key: "s", metaKey: true })), true);
+  assert.equal(isSaveShortcut(keyEvent({ key: "S", ctrlKey: true })), true, "caps lock still saves");
+});
+
+test("a bare S does not save", () => {
+  assert.equal(isSaveShortcut(keyEvent({ key: "s" })), false);
+  assert.equal(isSaveShortcut(keyEvent({ key: "a", ctrlKey: true })), false);
+});
+
+/**
+ * Save As does not exist yet. Claiming its chord would make a real command look implemented while
+ * doing nothing, which is worse than letting the browser have it.
+ */
+test("Ctrl+Shift+S is left alone until Save As exists", () => {
+  assert.equal(isSaveShortcut(keyEvent({ key: "s", ctrlKey: true, shiftKey: true })), false);
+});
+
+/** Alt chords belong to the assistant and console toggles. */
+test("an Alt chord is not save", () => {
+  assert.equal(isSaveShortcut(keyEvent({ key: "s", ctrlKey: true, altKey: true })), false);
+});
+
+/**
+ * Unlike undo, save is a document command: an author who has just typed a headline and reaches for
+ * Ctrl+S means save the scene. `isSaveShortcut` reads no target, so a text field cannot suppress it.
+ */
+test("save does not defer to a text field the way undo does", () => {
+  assert.equal(isSaveShortcut(keyEvent({ key: "s", ctrlKey: true })), true);
+  assert.equal(
+    resolveHistoryIntent({
+      key: "z",
+      ctrlKey: true,
+      shiftKey: false,
+      altKey: false,
+      metaKey: false,
+      target: { tagName: "INPUT", isContentEditable: false }
+    } as unknown as KeyboardEvent),
+    null,
+    "undo still defers, so the two rules are genuinely different"
+  );
 });

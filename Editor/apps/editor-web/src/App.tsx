@@ -15,7 +15,8 @@ import { TemplatesPanel } from "./components/TemplatesPanel";
 import { TimelinePanel } from "./components/TimelinePanel";
 import { MaterialManagerPanel } from "./modules/material-manager";
 import { useSceneFonts } from "./hooks/useSceneFonts";
-import { resolveHistoryIntent } from "./lib/historyShortcut";
+import { saveSceneWithProjectPrompt } from "./lib/ensureProject";
+import { isSaveShortcut, resolveHistoryIntent } from "./lib/historyShortcut";
 import type { DockPanelId } from "./store/dockStore";
 import { useEditorStore } from "./store/editorStore";
 import { useTemplateStore } from "./store/templateStore";
@@ -97,6 +98,32 @@ function EditorWorkspace() {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("grapix:toggle-console", onToggleConsole);
     };
+  }, []);
+
+  /**
+   * Ctrl+S / Cmd+S saves, and asks where the project lives the first time.
+   *
+   * On `window` and without the text-entry refusal `resolveHistoryIntent` makes for undo. Save is a
+   * document command, not a field command: an author who has just typed a headline and hits Ctrl+S
+   * means save the scene, and no text input has a competing meaning for it. Every other editor they
+   * use behaves this way.
+   *
+   * `preventDefault` runs before any of our own conditions, including "is a scene open". If it did
+   * not, a Ctrl+S with an empty editor would open the browser's Save Page dialog — in the desktop
+   * shell that is a WebView2 file picker offering to save the application's own HTML, which is a
+   * confusing thing to hand someone who asked to save their work.
+   *
+   * Bare Ctrl+S only. Ctrl+Shift+S is Save As, which does not exist yet, and swallowing it would
+   * make a real command look implemented while doing nothing.
+   */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!isSaveShortcut(event)) return;
+      event.preventDefault();
+      void saveSceneWithProjectPrompt();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   /**
