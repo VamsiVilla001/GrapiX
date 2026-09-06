@@ -17,6 +17,7 @@ import {
   IMPLEMENTED_BLEND_MODES,
   IMPLEMENTED_TEXTURE_FIT_MODES,
   resolveTextureFit,
+  textureWrapForFit,
   isMaterialCompatibleWithFace,
   normalizeMaterialSceneDocument,
   parameterDefaults,
@@ -127,12 +128,23 @@ test("repeat wrap and nearest filtering resolve without a warning; tile fit stil
   assert.ok(!resolved.warnings.some((w) => /wrap mode/i.test(w)), `unexpected wrap warning: ${resolved.warnings}`);
   assert.ok(!resolved.warnings.some((w) => /filtering mode/i.test(w)), `unexpected filtering warning: ${resolved.warnings}`);
 
-  // tile / nine-slice fit remain unimplemented and must still warn.
+  // Tile is implemented: a UV repeat past 1.0 with repeat wrapping, which needs no extra geometry.
   material.textureSlots[0].fit = "tile";
   const tiled = resolvePrimitiveMaterial(scene([material], [object], {
     assets: [{ assetId: "asset_frame", name: "frame.png", kind: "image", source: "frame.png", status: "READY", importedAt: timestamp }]
   }), object);
-  assert.ok(tiled.warnings.some((w) => /fit mode tile/i.test(w)), `expected tile-fit warning: ${tiled.warnings}`);
+  assert.ok(!tiled.warnings.some((w) => /fit mode tile/i.test(w)), `unexpected tile warning: ${tiled.warnings}`);
+
+  // Nine-slice still is not, and the warning must survive: its nine regions scale differently from
+  // one another, which is real geometry rather than a sampler transform.
+  material.textureSlots[0].fit = "nine-slice";
+  const sliced = resolvePrimitiveMaterial(scene([material], [object], {
+    assets: [{ assetId: "asset_frame", name: "frame.png", kind: "image", source: "frame.png", status: "READY", importedAt: timestamp }]
+  }), object);
+  assert.ok(
+    sliced.warnings.some((w) => /fit mode nine-slice/i.test(w)),
+    `expected nine-slice warning: ${sliced.warnings}`
+  );
 });
 
 test("one-level material instance overrides only selected parameters", () => {
@@ -858,21 +870,40 @@ test("a cover fit never samples outside the texture, so clamp and repeat wrap ag
   }
 });
 
-test("a square texture on a square surface is untouched by any implemented fit", () => {
-  for (const mode of IMPLEMENTED_TEXTURE_FIT_MODES) {
+/**
+ * The cover-style fits answer "which rectangle of the texture does this surface sample", so when
+ * the aspects already match there is nothing to crop and they are the identity.
+ *
+ * Tile is deliberately not one of them: it answers "how many copies of the texture fit", which
+ * depends on the texture's pixel size rather than its aspect. A 256px texture on a 512px surface is
+ * untouched by a cover fit and is 2x2 copies under tile — both correct, for different questions.
+ */
+test("a square texture on a square surface is untouched by every cover fit", () => {
+  const coverFits = IMPLEMENTED_TEXTURE_FIT_MODES.filter((mode) => mode !== "tile");
+  assert.ok(coverFits.length >= 3, "the cover fits are what this test is about");
+
+  for (const mode of coverFits) {
     const fit = resolveTextureFit(mode, {
       surfaceWidth: 512, surfaceHeight: 512, textureWidth: 256, textureHeight: 256
     });
     assert.deepEqual(fit.repeat, [1, 1], `${mode} keeps matching aspects whole`);
     assert.deepEqual(fit.offset, [0, 0], `${mode} does not offset matching aspects`);
   }
+
+  assert.deepEqual(
+    resolveTextureFit("tile", {
+      surfaceWidth: 512, surfaceHeight: 512, textureWidth: 256, textureHeight: 256
+    }).repeat,
+    [2, 2],
+    "tile counts copies, so a matching aspect is no reason to leave it alone"
+  );
 });
 
 test("stretch and unimplemented fit modes resolve to the identity transform", () => {
   // Unimplemented modes must degrade to exactly today's behaviour rather than invent numbers; the
   // scene validator is what tells the operator the mode is not honoured.
   const surface = { surfaceWidth: 360, surfaceHeight: 210, textureWidth: 256, textureHeight: 128 };
-  for (const mode of ["stretch", "fit", "original", "pixel-perfect", "tile", "nine-slice"]) {
+  for (const mode of ["stretch", "fit", "original", "pixel-perfect", "nine-slice"]) {
     const fit = resolveTextureFit(mode, surface);
     assert.deepEqual(fit.repeat, [1, 1], `${mode} repeat is identity`);
     assert.deepEqual(fit.offset, [0, 0], `${mode} offset is identity`);
@@ -915,7 +946,7 @@ test("the scene validator reports every fit mode it cannot honour", () => {
     }), object);
   };
 
-  for (const mode of ["fit", "original", "pixel-perfect", "tile", "nine-slice"]) {
+  for (const mode of ["fit", "original", "pixel-perfect", "nine-slice"]) {
     const resolved = build(mode);
     assert.ok(
       resolved.warnings.some((warning) => warning.includes(`fit mode ${mode}`)),
@@ -930,5 +961,78 @@ test("the scene validator reports every fit mode it cannot honour", () => {
       false,
       `${mode} must not be reported as unimplemented: ${resolved.warnings}`
     );
+  }
+});
+
+/* ── Tile fit ─────────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Tiling keeps the texture at its own pixel size and repeats it, so `repeat` is the surface
+ * measured in texture widths. It was excluded from the implemented set for years on the grounds
+ * that it "needs extra geometry" — it does not; that is nine-slice. It needs repeat wrapping,
+ * which every sampler in the product already has.
+ */
+test("tile repeats the texture at its own size", () => {
+  assert.deepEqual(
+    resolveTextureFit("tile", {
+      surfaceWidth: 512, surfaceHeight: 256, textureWidth: 128, textureHeight: 128
+    }),
+    { repeat: [4, 2], offset: [0, 0] }
+  );
+});
+
+/** A partial tile is correct: 300 across a 128 texture is two copies and a bit. */
+test("a surface that is not a whole number of tiles keeps the remainder", () => {
+  const fit = resolveTextureFit("tile", {
+    surfaceWidth: 300, surfaceHeight: 128, textureWidth: 128, textureHeight: 128
+  });
+  assert.ok(Math.abs(fit.repeat[0] - 300 / 128) < 1e-9);
+  assert.equal(fit.repeat[1], 1);
+});
+
+/**
+ * Anchored at the origin, not centred. Centring would put a seam through the middle of the first
+ * tile and move every tile whenever the surface resized.
+ */
+test("a tiled surface is anchored at its origin", () => {
+  assert.deepEqual(
+    resolveTextureFit("tile", {
+      surfaceWidth: 333, surfaceHeight: 777, textureWidth: 64, textureHeight: 64
+    }).offset,
+    [0, 0]
+  );
+});
+
+test("tile is an implemented fit mode, and nine-slice still is not", () => {
+  assert.ok(IMPLEMENTED_TEXTURE_FIT_MODES.includes("tile"));
+  assert.ok(!IMPLEMENTED_TEXTURE_FIT_MODES.includes("nine-slice"), "nine-slice needs real geometry");
+  assert.ok(!IMPLEMENTED_TEXTURE_FIT_MODES.includes("fit"), "fit needs a transparent border");
+});
+
+/**
+ * A tile authored against a clamped slot must still tile. Under clamp, sampling past 1.0 smears
+ * the edge row across the whole surface — a result so unlike tiling that drawing it would be the
+ * silent-wrong-render this codebase refuses everywhere else.
+ */
+test("tile forces repeat wrapping, whatever the author selected", () => {
+  assert.equal(textureWrapForFit("tile", "clamp"), "repeat");
+  assert.equal(textureWrapForFit("tile", "mirror-repeat"), "repeat");
+});
+
+test("every other fit mode leaves the authored wrap alone", () => {
+  for (const mode of ["stretch", "fill", "crop", "fit", "nine-slice"]) {
+    assert.equal(textureWrapForFit(mode, "clamp"), "clamp", `${mode} must not override wrap`);
+    assert.equal(textureWrapForFit(mode, "mirror-repeat"), "mirror-repeat");
+  }
+});
+
+/** A degenerate extent has no tile count to compute; stretching is the only answer that is safe. */
+test("tile falls back to the identity when an extent is unusable", () => {
+  for (const surface of [
+    { surfaceWidth: 0, surfaceHeight: 100, textureWidth: 10, textureHeight: 10 },
+    { surfaceWidth: 100, surfaceHeight: 100, textureWidth: 0, textureHeight: 10 },
+    { surfaceWidth: Number.NaN, surfaceHeight: 100, textureWidth: 10, textureHeight: 10 }
+  ]) {
+    assert.deepEqual(resolveTextureFit("tile", surface), { repeat: [1, 1], offset: [0, 0] });
   }
 });

@@ -259,17 +259,43 @@ export type TextureFilteringMode = "nearest" | "linear";
  *
  * A cover crop only ever samples a sub-rectangle of the texture (repeat <= 1), which needs no
  * behaviour outside [0,1] and therefore looks identical in the editor preview and the native
- * engine. The excluded modes all need something the material pipeline cannot express yet:
- * `fit`, `original` and `pixel-perfect` draw the texture smaller than the surface, which requires
- * a transparent border (sampling outside [0,1] smears the edge under clamp and repeats under
- * repeat); `tile` and `nine-slice` need extra geometry. Those stay declared-but-unimplemented
- * rather than silently rendering as `stretch`.
+ * engine.
+ *
+ * `tile` is the mirror image of that, and it was excluded for a reason that turned out to be
+ * wrong: it samples repeat >= 1 and needs no extra geometry at all, only `repeat` wrapping, which
+ * every sampler in the product already has. Nine-slice is the mode that genuinely needs geometry,
+ * because its nine regions scale differently from one another.
+ *
+ * Still excluded: `fit`, `original` and `pixel-perfect` draw the texture *smaller* than the
+ * surface, which requires a transparent border. Sampling outside [0,1] smears the edge under clamp
+ * and wraps under repeat, so neither wrap mode can express "nothing here" — that needs an alpha
+ * cutoff in both renderers' shaders, or the two would disagree. They stay
+ * declared-but-unimplemented rather than silently rendering as `stretch`.
  */
 export const IMPLEMENTED_TEXTURE_FIT_MODES: readonly TextureFitMode[] = Object.freeze([
   "stretch",
   "fill",
-  "crop"
+  "crop",
+  "tile"
 ]);
+
+/**
+ * The wrap mode a fit mode requires, whatever the author selected.
+ *
+ * `tile` is the only one that overrides. It works by sampling past 1.0, and under `clamp` that
+ * smears the edge row across the whole surface rather than repeating — a result so unlike tiling
+ * that drawing it would be the silent-wrong-render this codebase refuses everywhere else. Every
+ * other mode samples inside [0,1] and leaves the author's choice untouched.
+ *
+ * Both renderers call this rather than each deciding for itself: a tile that repeats in the editor
+ * and smears in Program is a parity break that would only be found on air.
+ */
+export function textureWrapForFit(
+  mode: TextureFitMode,
+  authoredWrap: TextureWrapMode
+): TextureWrapMode {
+  return mode === "tile" ? "repeat" : authoredWrap;
+}
 
 export interface TextureFitSurface {
   surfaceWidth: number;
@@ -310,6 +336,24 @@ export function resolveTextureFit(mode: TextureFitMode, surface: TextureFitSurfa
     || ![surfaceWidth, surfaceHeight, textureWidth, textureHeight].every(Number.isFinite)
   ) {
     return { repeat: [1, 1], offset: [0, 0] };
+  }
+
+  /*
+   * Tile: the texture keeps its own pixel size and repeats to fill the surface.
+   *
+   * `repeat` is how many copies span each axis, so it is simply the surface measured in texture
+   * widths. Offset stays at the origin — a tiled pattern is anchored at the surface's top-left the
+   * way a wallpaper is, not centred, because centring would put a seam through the middle of the
+   * first tile and move it every time the surface resized.
+   *
+   * A fractional result is correct and wanted: a 300px surface with a 128px texture shows two full
+   * copies and a partial third, which is what tiling means.
+   */
+  if (mode === "tile") {
+    return {
+      repeat: [surfaceWidth / textureWidth, surfaceHeight / textureHeight],
+      offset: [0, 0]
+    };
   }
 
   // Cover: scale the texture until it covers both axes, then centre the crop. The wider-aspect

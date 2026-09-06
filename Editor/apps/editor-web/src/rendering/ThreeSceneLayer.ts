@@ -3,6 +3,7 @@ import {
   normalizeSlabProperties,
   resolveSceneObjectHierarchy,
   resolveTextureFit,
+  textureWrapForFit,
   TEXTURE_FIT_IDENTITY
 } from "@grapix/shared-types";
 import type {
@@ -773,8 +774,11 @@ function applyTextureCoordinates(
 ): void {
   const slot = resolved?.textureSlots[0];
   if (!slot) return;
-  texture.wrapS = textureWrap(slot.wrap);
-  texture.wrapT = textureWrap(slot.wrap);
+  // The fit mode can override the authored wrap: a tile is defined by sampling past 1.0, and
+  // clamp would smear the edge row across the surface rather than repeating.
+  const wrap = textureWrapForFit(slot.fit, slot.wrap);
+  texture.wrapS = textureWrap(wrap);
+  texture.wrapT = textureWrap(wrap);
   texture.magFilter = slot.filtering === "nearest" ? THREE.NearestFilter : THREE.LinearFilter;
   texture.minFilter = slot.filtering === "nearest" ? THREE.NearestMipmapNearestFilter : THREE.LinearMipmapLinearFilter;
 

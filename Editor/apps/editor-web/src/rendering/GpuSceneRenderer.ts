@@ -29,7 +29,8 @@ import {
   type SceneObject,
   buildFontFamilyStack,
   fontDefinitionForText,
-  normalizeColorValue
+  normalizeColorValue,
+  textureWrapForFit
 } from "@grapix/shared-types";
 import type { PreviewRendererCapabilities } from "./ScenePreviewRenderer";
 import { isProjectServiceUrl, resolveProjectAssetObjectUrl, resolveProjectAssetUrl } from "../lib/projectAssets";
@@ -116,7 +117,9 @@ function applyTextureSampler(texture: Texture, slot: MaterialTextureSlot | undef
   }
 
   texture.source.scaleMode = slot.filtering === "nearest" ? "nearest" : "linear";
-  texture.source.addressMode = pixiWrapMode(slot.wrap);
+  // The fit mode can override the authored wrap: a tile is defined by sampling past 1.0, and clamp
+  // would smear the edge row across the surface instead of repeating.
+  texture.source.addressMode = pixiWrapMode(textureWrapForFit(slot.fit, slot.wrap));
 }
 
 /**

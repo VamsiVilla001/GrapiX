@@ -424,7 +424,21 @@ fn default_scale() -> f64 {
 /// This list and [`resolve_texture_fit`] MUST stay identical to the TypeScript definition: the
 /// editor preview and Program are the same pixels by contract, so a fit mode honoured on one side
 /// and stretched on the other is a parity break, not a cosmetic difference.
-const IMPLEMENTED_TEXTURE_FIT_MODES: [&str; 3] = ["stretch", "fill", "crop"];
+const IMPLEMENTED_TEXTURE_FIT_MODES: [&str; 4] = ["stretch", "fill", "crop", "tile"];
+
+/// The wrap mode a fit mode requires, whatever the author selected.
+///
+/// Mirrors `textureWrapForFit` in `Shared/shared-types`. `tile` samples past 1.0, and under clamp
+/// that smears the edge row across the surface instead of repeating — so a tile authored against a
+/// clamped slot would repeat in the editor and smear in Program, a parity break found only on air.
+fn texture_wrap_for_fit(mode: &str, authored_wrap: &str) -> &'static str {
+    match (mode, authored_wrap) {
+        ("tile", _) => "repeat",
+        (_, "repeat") => "repeat",
+        (_, "mirror-repeat") => "mirror-repeat",
+        _ => "clamp",
+    }
+}
 
 /// The UV scale/offset that makes `mode` respect the texture's own resolution on `surface`.
 ///
@@ -446,6 +460,21 @@ fn resolve_texture_fit(
             .all(|value| value.is_finite() && *value > 0.0)
     {
         return identity;
+    }
+
+    // Tile: the texture keeps its own pixel size and repeats to fill the surface, so `repeat` is
+    // the surface measured in texture widths. Anchored at the origin like wallpaper rather than
+    // centred: centring would put a seam through the middle of the first tile and move it every
+    // time the surface resized. A fractional result is correct — a 300px surface with a 128px
+    // texture shows two full copies and a partial third.
+    if mode == "tile" {
+        return (
+            [
+                surface_width / texture_width,
+                surface_height / texture_height,
+            ],
+            [0.0, 0.0],
+        );
     }
 
     // Cover: scale until the texture covers both axes, then centre the crop. The wider-aspect
@@ -1161,9 +1190,18 @@ fn resolve_surface_material(
             texture_slot.uv_pivot[0] as f32,
             texture_slot.uv_pivot[1] as f32,
         ],
-        wrap: match texture_slot.wrap.as_deref() {
-            Some("repeat") => PreparedWrapMode::Repeat,
-            Some("mirror-repeat") | Some("mirror") => PreparedWrapMode::MirrorRepeat,
+        // The fit mode can override the authored wrap: a tile is defined by sampling past 1.0, and
+        // clamp would smear the edge row across the surface instead of repeating.
+        wrap: match texture_wrap_for_fit(
+            texture_slot.fit.as_deref().unwrap_or("stretch"),
+            match texture_slot.wrap.as_deref() {
+                Some("mirror") => "mirror-repeat",
+                Some(authored) => authored,
+                None => "clamp",
+            },
+        ) {
+            "repeat" => PreparedWrapMode::Repeat,
+            "mirror-repeat" => PreparedWrapMode::MirrorRepeat,
             _ => PreparedWrapMode::Clamp,
         },
         filtering: if texture_slot.filtering.as_deref() == Some("nearest") {
@@ -2879,12 +2917,52 @@ mod tests {
         assert!(repeat[1] < 1.0);
         assert!((offset[1] - (1.0 - repeat[1]) / 2.0).abs() < 1e-6);
 
-        // Matching aspects are left alone by every implemented mode.
-        for mode in IMPLEMENTED_TEXTURE_FIT_MODES {
+        // Matching aspects are left alone by every cover fit. Tile is not one: it counts copies of
+        // the texture rather than choosing a rectangle of it, so the texture's pixel size decides
+        // the answer and a matching aspect is no reason to leave it alone.
+        for mode in IMPLEMENTED_TEXTURE_FIT_MODES
+            .iter()
+            .filter(|mode| **mode != "tile")
+        {
             let (repeat, offset) = resolve_texture_fit(mode, 512.0, 512.0, 256.0, 256.0);
             assert_eq!(repeat, [1.0, 1.0], "{mode} altered a matching aspect");
             assert_eq!(offset, [0.0, 0.0], "{mode} offset a matching aspect");
         }
+    }
+
+    /// Tiling, and the parity that matters: these numbers must equal `resolveTextureFit("tile")`
+    /// in `Shared/shared-types`. A tile that repeats twice in the editor and four times in Program
+    /// is a parity break nobody sees until it is on air.
+    #[test]
+    fn tile_repeats_the_texture_at_its_own_size() {
+        assert_eq!(
+            resolve_texture_fit("tile", 512.0, 256.0, 128.0, 128.0),
+            ([4.0, 2.0], [0.0, 0.0])
+        );
+
+        // A partial tile is correct: 300 across a 128 texture is two copies and a bit.
+        let (repeat, offset) = resolve_texture_fit("tile", 300.0, 128.0, 128.0, 128.0);
+        assert!((repeat[0] - 300.0 / 128.0).abs() < 1e-6);
+        assert_eq!(repeat[1], 1.0);
+        // Anchored at the origin like wallpaper: centring would put a seam through the first tile.
+        assert_eq!(offset, [0.0, 0.0]);
+
+        // A degenerate extent has no tile count to compute.
+        assert_eq!(
+            resolve_texture_fit("tile", 0.0, 128.0, 128.0, 128.0),
+            ([1.0, 1.0], [0.0, 0.0])
+        );
+    }
+
+    /// Tile is defined by sampling past 1.0, so it forces repeat wrapping whatever the author set.
+    /// Under clamp it would smear the edge row across the surface instead of repeating.
+    #[test]
+    fn tile_forces_repeat_wrapping() {
+        assert_eq!(texture_wrap_for_fit("tile", "clamp"), "repeat");
+        assert_eq!(texture_wrap_for_fit("tile", "mirror-repeat"), "repeat");
+        assert_eq!(texture_wrap_for_fit("fill", "clamp"), "clamp");
+        assert_eq!(texture_wrap_for_fit("fill", "mirror-repeat"), "mirror-repeat");
+        assert_eq!(texture_wrap_for_fit("stretch", "repeat"), "repeat");
     }
 
     #[test]
@@ -2975,7 +3053,6 @@ mod tests {
             "fit",
             "original",
             "pixel-perfect",
-            "tile",
             "nine-slice",
         ] {
             assert_eq!(
