@@ -277,7 +277,8 @@ export class EngineConnection {
       throw error;
     }
 
-    const hello = await this.request("connection.hello", {
+    try {
+      const hello = await this.request("connection.hello", {
       clientId: this.options.clientId,
       clientName: this.options.clientName,
       clientRole: this.options.clientRole,
@@ -290,16 +291,25 @@ export class EngineConnection {
     this.engineId = helloPayload.engineId;
     this.emit({ type: "hello", payload: helloPayload });
 
-    if (helloPayload.authenticationRequired) {
+    // `authenticationRequired` says this engine grants operator authority only to a bearer.
+    // It does not say *this* connection lacks authority: a local IPC session is already an
+    // Editor session, and demanding a token there would refuse the very transport the Editor
+    // is designed to use ("an engine can serve a local Editor without ever opening a port").
+    // So authenticate when a credential is available, and fail early only when the authority
+    // actually granted cannot serve the role this client declared.
+    const granted = helloPayload.connectionRole;
+    if (helloPayload.authenticationRequired && this.options.authToken) {
       this.transition("authenticating", "engine requires authentication");
-      if (!this.options.authToken) {
-        this.transition("error", "engine requires authentication but no token was configured");
-        throw new Error("engine requires authentication but no token was configured");
-      }
       await this.request("connection.authenticate", {
         token: this.options.authToken,
         ...(this.options.projectId ? { projectId: this.options.projectId } : {})
       });
+    } else if (this.options.clientRole === "playout" && granted !== undefined && granted !== "playout") {
+      const reason =
+        `this connection was granted ${granted} authority, which cannot drive operator verbs; ` +
+        "supply the engine bearer token";
+      this.transition("error", reason);
+      throw new Error(reason);
     }
     this.authenticated = true;
 
@@ -311,7 +321,23 @@ export class EngineConnection {
     this.heartbeat.reset(this.now());
     this.reconnectAttempts = 0;
 
-    return this.capabilities;
+      return this.capabilities;
+    } catch (error) {
+      // Opening the socket is only half of connecting. A refused role, failed
+      // authentication, bad Hello, or capability timeout must close the transport as well.
+      // Leaving it established consumes one of the engine's bounded client slots; repeated
+      // retries used to fill all eight slots and make every later handshake hang.
+      const reason = error instanceof Error ? error.message : "connection setup failed";
+      this.closingIntentionally = true;
+      this.transport.close(`connection setup failed: ${reason}`);
+      this.closingIntentionally = false;
+      this.failAllWaiters(error instanceof Error ? error : new Error(reason));
+      this.authenticated = false;
+      this.stateMachine.force("error", reason, this.now());
+      this.emit({ type: "state", state: "error", previous: "connecting", reason });
+      this.scheduleReconnect();
+      throw error;
+    }
   }
 
   /** Close deliberately. Does not reconnect. */
@@ -351,6 +377,31 @@ export class EngineConnection {
   // Sending
   // -------------------------------------------------------------------------
 
+  /**
+   * Refuse a frame the engine has told us it will not accept.
+   *
+   * The engine enforces `limits.maxMessageBytes` before it parses, so an oversized frame is rejected
+   * with no request id to correlate — the caller's request never gets an answer and dies on its
+   * timeout. A 13 MiB scene against an 8 MiB limit reached an operator as "connection closed:
+   * reconnecting" a minute after Take, which names neither the cause nor the remedy.
+   *
+   * Failing here costs one comparison and produces the two numbers that explain it.
+   */
+  private assertSendable(type: EngineRequestType, frame: string): void {
+    const limit = this.capabilities?.limits.maxMessageBytes ?? this.options.maxMessageBytes;
+    if (!limit) return;
+
+    // The wire is UTF-8, and the engine counts bytes: a scene full of base64 is one byte per
+    // character, a scene full of typography is not.
+    const bytes = utf8Length(frame);
+    if (bytes <= limit) return;
+
+    throw new Error(
+      `${type} is ${bytes} bytes; this engine accepts at most ${limit}. `
+        + "Asset bytes belong in asset.upload, which the engine chunks; a scene document carries references."
+    );
+  }
+
   /** Fire-and-forget send. Returns the message that went out. */
   send<T extends EngineRequestType>(
     type: T,
@@ -371,7 +422,16 @@ export class EngineConnection {
       requiresAck
     });
 
-    this.transport.send(encodeEngineMessage(message));
+    const frame = encodeEngineMessage(message);
+    try {
+      this.assertSendable(type, frame);
+    } catch (error) {
+      // Nothing went out, so this sequence number must not be spent: the engine parks a message that
+      // arrives with a gap ahead of it, and the next real frame would sit in that hole unanswered.
+      this.outboundSequence.release(message.sequence);
+      throw error;
+    }
+    this.transport.send(frame);
     this.messagesSent += 1;
 
     if (requiresAck) {
@@ -862,4 +922,20 @@ export class MemoryEngineTransport implements EngineTransport {
   sentMessages(): EngineMessage<unknown>[] {
     return this.sent.map((frame) => JSON.parse(frame) as EngineMessage<unknown>);
   }
+}
+
+/** Byte length of a string as UTF-8, without allocating a copy of it. */
+function utf8Length(value: string): number {
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff) {
+      // A surrogate pair is one 4-byte code point; skip its low half.
+      bytes += 4;
+      index += 1;
+    } else bytes += 3;
+  }
+  return bytes;
 }

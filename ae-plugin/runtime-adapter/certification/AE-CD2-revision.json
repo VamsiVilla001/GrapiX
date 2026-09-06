@@ -1,0 +1,248 @@
+{
+  "hello": {
+    "protocolMajor": 2,
+    "capabilities": [
+      "project.discovery",
+      "property.read",
+      "property.write",
+      "time.rational",
+      "render.readiness",
+      "data.revision"
+    ],
+    "aeVersion": "26.3"
+  },
+  "composition": {
+    "itemId": 1,
+    "displayName": "LOWER_THIRD"
+  },
+  "layers": [
+    {
+      "layerId": 21,
+      "displayName": "SCORE"
+    },
+    {
+      "layerId": 20,
+      "displayName": "PLAYER_NAME"
+    },
+    {
+      "layerId": 19,
+      "displayName": "PLAYER_IMAGE"
+    },
+    {
+      "layerId": 17,
+      "displayName": "TEAM_COLOR"
+    },
+    {
+      "layerId": 15,
+      "displayName": "BAR"
+    }
+  ],
+  "before": {
+    "first": {
+      "value": 100,
+      "valueType": "number"
+    },
+    "second": {
+      "value": 100,
+      "valueType": "number"
+    }
+  },
+  "applied": {
+    "kind": "result",
+    "protocolMajor": 2,
+    "protocolMinor": 0,
+    "sessionId": "ae-recert-20260818",
+    "requestId": "8feec10b-342a-41bd-b0ce-c996e8ac8132",
+    "sequence": 5,
+    "operation": "APPLY_DATA_REVISION",
+    "ok": true,
+    "surface": "aegp-sdk",
+    "projectDigest": null,
+    "time": null,
+    "result": {
+      "revision": 1,
+      "applied": [
+        {
+          "target": {
+            "compositionItemId": 1,
+            "layerId": 21,
+            "sourceItemId": null,
+            "path": [
+              {
+                "matchName": "ADBE Opacity",
+                "ordinal": 0
+              }
+            ]
+          },
+          "previous": {
+            "value": 100,
+            "valueType": "number"
+          },
+          "current": {
+            "value": 71,
+            "valueType": "number"
+          }
+        },
+        {
+          "target": {
+            "compositionItemId": 1,
+            "layerId": 20,
+            "sourceItemId": null,
+            "path": [
+              {
+                "matchName": "ADBE Opacity",
+                "ordinal": 0
+              }
+            ]
+          },
+          "previous": {
+            "value": 100,
+            "valueType": "number"
+          },
+          "current": {
+            "value": 62,
+            "valueType": "number"
+          }
+        }
+      ],
+      "rolledBack": false
+    }
+  },
+  "afterApplied": {
+    "first": {
+      "value": 71,
+      "valueType": "number"
+    },
+    "second": {
+      "value": 62,
+      "valueType": "number"
+    }
+  },
+  "refused": {
+    "kind": "result",
+    "protocolMajor": 2,
+    "protocolMinor": 0,
+    "sessionId": "ae-recert-20260818",
+    "requestId": "b1423d28-5e12-43c3-a11f-270e43038e86",
+    "sequence": 8,
+    "operation": "APPLY_DATA_REVISION",
+    "ok": false,
+    "surface": "aegp-sdk",
+    "projectDigest": null,
+    "time": null,
+    "error": {
+      "code": "INVALID_PAYLOAD",
+      "message": "After Effects rejected the operation",
+      "retryable": false
+    }
+  },
+  "afterRefused": {
+    "first": {
+      "value": 71,
+      "valueType": "number"
+    },
+    "second": {
+      "value": 62,
+      "valueType": "number"
+    }
+  },
+  "refusedTarget": {
+    "kind": "result",
+    "protocolMajor": 2,
+    "protocolMinor": 0,
+    "sessionId": "ae-recert-20260818",
+    "requestId": "2d7f8139-1215-4efa-a712-88cf0cbb5e5d",
+    "sequence": 11,
+    "operation": "APPLY_DATA_REVISION",
+    "ok": false,
+    "surface": "aegp-sdk",
+    "projectDigest": null,
+    "time": null,
+    "error": {
+      "code": "TARGET_NOT_FOUND",
+      "message": "After Effects rejected the operation",
+      "retryable": false
+    }
+  },
+  "afterRefusedTarget": {
+    "first": {
+      "value": 71,
+      "valueType": "number"
+    },
+    "second": {
+      "value": 62,
+      "valueType": "number"
+    }
+  },
+  "restored": {
+    "kind": "result",
+    "protocolMajor": 2,
+    "protocolMinor": 0,
+    "sessionId": "ae-recert-20260818",
+    "requestId": "5aee3c73-6e9b-4743-9dfb-0e8707e657ca",
+    "sequence": 14,
+    "operation": "APPLY_DATA_REVISION",
+    "ok": true,
+    "surface": "aegp-sdk",
+    "projectDigest": null,
+    "time": null,
+    "result": {
+      "revision": 2,
+      "applied": [
+        {
+          "target": {
+            "compositionItemId": 1,
+            "layerId": 21,
+            "sourceItemId": null,
+            "path": [
+              {
+                "matchName": "ADBE Opacity",
+                "ordinal": 0
+              }
+            ]
+          },
+          "previous": {
+            "value": 71,
+            "valueType": "number"
+          },
+          "current": {
+            "value": 100,
+            "valueType": "number"
+          }
+        },
+        {
+          "target": {
+            "compositionItemId": 1,
+            "layerId": 20,
+            "sourceItemId": null,
+            "path": [
+              {
+                "matchName": "ADBE Opacity",
+                "ordinal": 0
+              }
+            ]
+          },
+          "previous": {
+            "value": 62,
+            "valueType": "number"
+          },
+          "current": {
+            "value": 100,
+            "valueType": "number"
+          }
+        }
+      ],
+      "rolledBack": false
+    }
+  },
+  "afterRestore": {
+    "first": {
+      "value": 100,
+      "valueType": "number"
+    },
+    "second": {
+      "value": 100,
+      "valueType": "number"
+    }
+  }
+}

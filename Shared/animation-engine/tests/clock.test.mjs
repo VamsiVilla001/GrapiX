@@ -126,7 +126,13 @@ test("deadlines are computed from the frame number, so they cannot drift", () =>
 
   assert.ok(drift > 3_000_000, `expected > 3ms accumulation drift, got ${drift}ns`);
   // And the exact value is recoverable at any frame, not just the first.
-  assert.equal(computed, Math.round((frames * NANOS_PER_SECOND * 1_001) / 60_000));
+  assert.equal(computed, 166_833_333_333_333);
+});
+
+test("deadline delegation preserves Rust-compatible truncation at 59.94", () => {
+  const rate = frameRatePreset("59.94");
+  assert.equal(deadlineNanos(rate, 2), 33_366_666);
+  assert.equal(deadlineNanos(rate, 215_784), 3_599_996_400_000);
 });
 
 test("frame and time conversions round-trip", () => {

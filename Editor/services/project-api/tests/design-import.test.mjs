@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { writePsd } from "ag-psd";
@@ -12,12 +14,18 @@ import { normalizeDesignDocument } from "../dist/importers/design/designDocument
 import { importFigmaDocument } from "../dist/importers/design/figmaImporter.js";
 import {
   documentFromFigmaMcpCaptures,
-  parseFigmaMcpNodeIds
+  parseFigmaMcpNodeIds,
+  validateFigmaMcpImportSource
 } from "../dist/importers/design/figmaMcpImporter.js";
 import { convertDesignDocumentToScenes } from "../dist/importers/design/grapixObjectConverter.js";
-import { createDesignImportReport, pruneDesignImportIssues } from "../dist/importers/design/importReport.js";
+import {
+  createDesignImportReport,
+  populateDesignImportCounts,
+  pruneDesignImportIssues
+} from "../dist/importers/design/importReport.js";
 import { importIllustratorDocument, importSvgDocument } from "../dist/importers/design/illustratorImporter.js";
 import { convertPsdEffects, importPsdDocument } from "../dist/importers/design/psdImporter.js";
+import { parseDesignImportOptions } from "../dist/importers/design/designImportManager.js";
 
 const fixtureRoot = fileURLToPath(new URL("./fixtures/", import.meta.url));
 
@@ -26,7 +34,7 @@ test("SVG/Illustrator-compatible import preserves hierarchy, editable paths, gra
   const report = createDesignImportReport("svg", "design-import.svg");
   const normalized = normalizeDesignDocument(
     importSvgDocument(xml, "design-import.svg", report),
-    DEFAULT_DESIGN_IMPORT_OPTIONS
+    DEFAULT_DESIGN_IMPORT_OPTIONS, report
   );
   const [scene] = convertDesignDocumentToScenes(normalized, DEFAULT_DESIGN_IMPORT_OPTIONS, report);
   assert.equal(scene.canvas.width, 640);
@@ -52,7 +60,7 @@ test("AI fixture dispatches through the Illustrator adapter and remains native/e
   const report = createDesignImportReport("ai", "design-import.ai");
   const document = await importIllustratorDocument(bytes, "design-import.ai", report);
   const [scene] = convertDesignDocumentToScenes(
-    normalizeDesignDocument(document, DEFAULT_DESIGN_IMPORT_OPTIONS),
+    normalizeDesignDocument(document, DEFAULT_DESIGN_IMPORT_OPTIONS, report),
     DEFAULT_DESIGN_IMPORT_OPTIONS,
     report
   );
@@ -68,7 +76,7 @@ test("Figma import converts auto layout, components, masks, effects, gradients, 
   const report = createDesignImportReport("figma-json", "figma-design.json");
   const document = normalizeDesignDocument(
     importFigmaDocument(json, "figma-design.json", report, "figma-json"),
-    DEFAULT_DESIGN_IMPORT_OPTIONS
+    DEFAULT_DESIGN_IMPORT_OPTIONS, report
   );
   const [scene] = convertDesignDocumentToScenes(document, DEFAULT_DESIGN_IMPORT_OPTIONS, report);
   const component = scene.objects.find((object) => object.name === "Score Card");
@@ -93,8 +101,16 @@ test("Figma MCP link import creates a raster scene without an API token", () => 
   const source = { url: "https://www.figma.com/design/file-key/Fixture?node-id=123-456" };
   assert.deepEqual(parseFigmaMcpNodeIds(source), ["123:456"]);
   assert.deepEqual(
-    parseFigmaMcpNodeIds({ ...source, nodeIds: ["7:8", "7-8", "bad"] }),
-    ["7:8"]
+    parseFigmaMcpNodeIds({ ...source, nodeIds: ["7:8", "7-8", "bad", "123:456"] }),
+    ["7:8", "123:456"]
+  );
+  assert.throws(
+    () => validateFigmaMcpImportSource({ url: "https://example.com/not-figma", nodeIds: ["7:8"] }),
+    /not a Figma link/
+  );
+  assert.throws(
+    () => validateFigmaMcpImportSource({ url: "https://www.figma.com/design/abc123DEF456ghi789JK/Fixture" }),
+    /will not import its active selection/
   );
 
   const report = createDesignImportReport("figma-mcp", source.url);
@@ -108,7 +124,7 @@ test("Figma MCP link import creates a raster scene without an API token", () => 
     height: 1080
   }], report);
   const [scene] = convertDesignDocumentToScenes(
-    normalizeDesignDocument(document, DEFAULT_DESIGN_IMPORT_OPTIONS),
+    normalizeDesignDocument(document, DEFAULT_DESIGN_IMPORT_OPTIONS, report),
     DEFAULT_DESIGN_IMPORT_OPTIONS,
     report
   );
@@ -196,7 +212,7 @@ test("PSD fixture imports nested groups, editable text, vector shape, raster ass
   const document = normalizeDesignDocument(importPsdDocument(psdBytes, "fixture.psd", report), {
     ...DEFAULT_DESIGN_IMPORT_OPTIONS,
     importHiddenLayers: true
-  });
+  }, report);
   const [scene] = convertDesignDocumentToScenes(document, DEFAULT_DESIGN_IMPORT_OPTIONS, report);
   assert.equal(scene.canvas.width, 320);
   assert.ok(scene.objects.some((object) => object.type === "group" && object.name === "Nested Group"));
@@ -206,6 +222,7 @@ test("PSD fixture imports nested groups, editable text, vector shape, raster ass
   const pixel = scene.objects.find((object) => object.name === "Pixel Layer");
   assert.ok(pixel.importedDesign.effects.some((effect) => effect.type === "drop-shadow"));
   assert.ok(report.visualDifferences.some((message) => message.includes("Photoshop layer effects")));
+  assert.ok(report.warnings.some((message) => message.includes("PSD feature checking was enabled")));
 });
 
 test("PSD effects retain every style, warn only for enabled effects, and never invent missing patterns", () => {
@@ -246,7 +263,7 @@ test("PSD effects retain every style, warn only for enabled effects, and never i
 test("real Photoshop PSD imports typed scene effects that capability audit reports as unrendered", async () => {
   const source = await readFile(fileURLToPath(new URL("../../../../vendor/adobe/photoshop-api-sdk/testfiles/input/input01.psd", import.meta.url)));
   const report = createDesignImportReport("psd", "input01.psd");
-  const document = normalizeDesignDocument(importPsdDocument(source, "input01.psd", report), DEFAULT_DESIGN_IMPORT_OPTIONS);
+  const document = normalizeDesignDocument(importPsdDocument(source, "input01.psd", report), DEFAULT_DESIGN_IMPORT_OPTIONS, report);
   const nodes = [];
   const walk = (items) => items.forEach((node) => {
     nodes.push(node);
@@ -268,7 +285,7 @@ test("visual compatibility fingerprint retains source geometry and alpha stops",
   const xml = await readFile(`${fixtureRoot}/design-import.svg`, "utf8");
   const report = createDesignImportReport("svg", "visual.svg");
   const [scene] = convertDesignDocumentToScenes(
-    normalizeDesignDocument(importSvgDocument(xml, "visual.svg", report), DEFAULT_DESIGN_IMPORT_OPTIONS),
+    normalizeDesignDocument(importSvgDocument(xml, "visual.svg", report), DEFAULT_DESIGN_IMPORT_OPTIONS, report),
     DEFAULT_DESIGN_IMPORT_OPTIONS,
     report
   );
@@ -297,7 +314,7 @@ test("import options prune nested selections, flatten hierarchy, and disable com
   const selected = normalizeDesignDocument(source, {
     ...DEFAULT_DESIGN_IMPORT_OPTIONS,
     selectedNodeIds: [targetText.id]
-  });
+  }, sourceReport);
   assert.equal(selected.pages[0].nodes.length, 1);
   assert.deepEqual(selected.pages[0].nodes[0].children.map((node) => node.name), ["Team Name"]);
 
@@ -305,7 +322,7 @@ test("import options prune nested selections, flatten hierarchy, and disable com
     ...DEFAULT_DESIGN_IMPORT_OPTIONS,
     preserveHierarchy: false,
     convertComponents: false
-  });
+  }, sourceReport);
   assert.ok(flattened.pages[0].nodes.every((node) => node.children.length === 0));
   assert.ok(flattened.pages[0].nodes.every((node) => !["group", "frame", "component", "component-set", "instance"].includes(node.type)));
   assert.ok(flattened.pages[0].nodes.every((node) => node.componentId === undefined));
@@ -369,7 +386,7 @@ test("PSD import reports effects only where a live effect reaches an imported la
   const report = createDesignImportReport("psd", "warnings.psd");
   const document = normalizeDesignDocument(
     importPsdDocument(warningFixturePsd(), "warnings.psd", report),
-    DEFAULT_DESIGN_IMPORT_OPTIONS
+    DEFAULT_DESIGN_IMPORT_OPTIONS, report
   );
   pruneDesignImportIssues(report, collectNodeIds(document));
   convertDesignDocumentToScenes(document, DEFAULT_DESIGN_IMPORT_OPTIONS, report);
@@ -392,7 +409,7 @@ test("PSD bitmap mask is carried with its alpha asset and clips nothing until a 
   const report = createDesignImportReport("psd", "warnings.psd");
   const document = normalizeDesignDocument(
     importPsdDocument(warningFixturePsd(), "warnings.psd", report),
-    { ...DEFAULT_DESIGN_IMPORT_OPTIONS, importHiddenLayers: true }
+    { ...DEFAULT_DESIGN_IMPORT_OPTIONS, importHiddenLayers: true }, report
   );
   pruneDesignImportIssues(report, collectNodeIds(document));
   const [scene] = convertDesignDocumentToScenes(document, DEFAULT_DESIGN_IMPORT_OPTIONS, report);
@@ -429,7 +446,7 @@ test("imported nesting lives in childIds, never in the compositing layer key", (
   const report = createDesignImportReport("psd", "warnings.psd");
   const document = normalizeDesignDocument(
     importPsdDocument(warningFixturePsd(), "warnings.psd", report),
-    { ...DEFAULT_DESIGN_IMPORT_OPTIONS, importHiddenLayers: true }
+    { ...DEFAULT_DESIGN_IMPORT_OPTIONS, importHiddenLayers: true }, report
   );
   const [scene] = convertDesignDocumentToScenes(document, DEFAULT_DESIGN_IMPORT_OPTIONS, report);
 
@@ -468,7 +485,7 @@ test("PSD layers keep a local pivot and a rendered blend mode", () => {
   const report = createDesignImportReport("psd", "pivot.psd");
   const document = normalizeDesignDocument(
     importPsdDocument(psdBytes, "pivot.psd", report),
-    DEFAULT_DESIGN_IMPORT_OPTIONS
+    DEFAULT_DESIGN_IMPORT_OPTIONS, report
   );
   const [scene] = convertDesignDocumentToScenes(document, DEFAULT_DESIGN_IMPORT_OPTIONS, report);
   const plate = scene.objects.find((object) => object.name === "Full Frame Plate");
@@ -481,4 +498,155 @@ test("PSD layers keep a local pivot and a rendered blend mode", () => {
   assert.equal(material.blendMode, "screen");
   assert.ok(IMPLEMENTED_BLEND_MODES.includes(material.blendMode));
   assert.ok(report.visualDifferences.some((message) => message.includes('blend mode "vivid light"')));
+});
+
+test("flattening composes group translation, rotation, scale, and anchor", async () => {
+  const json = JSON.parse(await readFile(`${fixtureRoot}/figma-design.json`, "utf8"));
+  const report = createDesignImportReport("figma-json", "transform.json");
+  const source = importFigmaDocument(json, "transform.json", report, "figma-json");
+  const child = {
+    ...source.pages[0].nodes[0].children.find((node) => !node.isMask),
+    id: "transformed-child",
+    name: "Transformed child",
+    type: "rectangle",
+    x: 5,
+    y: 10,
+    width: 20,
+    height: 10,
+    rotation: 0,
+    scaleX: 3,
+    scaleY: 4,
+    anchor: { x: 0, y: 0 },
+    children: []
+  };
+  source.pages[0].nodes = [{
+    ...source.pages[0].nodes[0],
+    id: "transformed-group",
+    type: "group",
+    x: 10,
+    y: 20,
+    width: 100,
+    height: 80,
+    rotation: 90,
+    scaleX: 2,
+    scaleY: 2,
+    anchor: { x: 0, y: 0 },
+    children: [child]
+  }];
+
+  const normalized = normalizeDesignDocument(source, {
+    ...DEFAULT_DESIGN_IMPORT_OPTIONS,
+    preserveHierarchy: false
+  }, report);
+  const [flattened] = normalized.pages[0].nodes;
+  assert.equal(flattened.id, "transformed-child");
+  assert.ok(Math.abs(flattened.x + 10) < 1e-9);
+  assert.ok(Math.abs(flattened.y - 30) < 1e-9);
+  assert.equal(flattened.rotation, 90);
+  assert.equal(flattened.scaleX, 6);
+  assert.equal(flattened.scaleY, 8);
+});
+
+test("remote SVG assets are streamed under the cap despite a lied content length", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "grapix-stream-cap-"));
+  const originalFetch = globalThis.fetch;
+  const chunk = new Uint8Array(1024 * 1024);
+  let fetches = 0;
+  process.env.GRAPIX_DATA_ROOT = root;
+  globalThis.fetch = async (input) => {
+    assert.equal(String(input), "https://cdn.example.test/huge.png");
+    fetches += 1;
+    let sent = 0;
+    return new Response(new ReadableStream({
+      pull(controller) {
+        if (sent >= 101) {
+          controller.close();
+          return;
+        }
+        sent += 1;
+        controller.enqueue(chunk);
+      }
+    }), { status: 200, headers: { "content-length": "1" } });
+  };
+  try {
+    const { DesignImportManager } = await import(`../dist/importers/design/designImportManager.js?stream-cap=${Date.now()}`);
+    const manager = new DesignImportManager();
+    const result = await manager.importFile(
+      Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><image href="https://cdn.example.test/huge.png" width="1" height="1"/></svg>'),
+      "oversized.svg",
+      { assetMode: "embed" }
+    );
+
+    assert.equal(fetches, 1, "the external asset was fetched exactly once");
+    assert.equal(result.report.counts.assetsFailed, 1);
+    assert.ok(result.report.warnings.some((entry) => entry.includes("exceeds 100 MB")));
+
+    const blocked = await manager.importFile(
+      Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><image href="https://127.0.0.1/private.png" width="1" height="1"/></svg>'),
+      "blocked.svg",
+      { assetMode: "embed" }
+    );
+    assert.equal(fetches, 1, "a blocked private address must never be fetched");
+    assert.equal(blocked.report.counts.assetsFailed, 1);
+    assert.ok(blocked.report.warnings.some((entry) => entry.includes("blocked local or private host")));
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.GRAPIX_DATA_ROOT;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("report counts partition every normalized source node and reject unknown options", async () => {
+  const xml = await readFile(`${fixtureRoot}/design-import.svg`, "utf8");
+  const report = createDesignImportReport("svg", "design-import.svg");
+  const document = normalizeDesignDocument(
+    importSvgDocument(xml, "design-import.svg", report),
+    DEFAULT_DESIGN_IMPORT_OPTIONS,
+    report
+  );
+  populateDesignImportCounts(document, report);
+  assert.equal(report.counts.native + report.counts.genericContainers + report.counts.flattened, report.counts.nodes);
+  assert.throws(() => parseDesignImportOptions('{"flattenGroups":false}'), /Unknown import option "flattenGroups"/);
+});
+
+test("unsupported feature policies preserve nested subtrees or report unavailable raster fallback", async () => {
+  const json = JSON.parse(await readFile(`${fixtureRoot}/figma-design.json`, "utf8"));
+  const report = createDesignImportReport("figma-json", "policy.json");
+  const source = importFigmaDocument(json, "policy.json", report, "figma-json");
+  const unsupported = {
+    ...source.pages[0].nodes[0],
+    id: "unsupported-group",
+    name: "Unsupported group",
+    type: "group",
+    genericContainer: true,
+    children: [source.pages[0].nodes[0].children.find((node) => !node.isMask)]
+  };
+  source.pages[0].nodes = [unsupported];
+
+  const nested = normalizeDesignDocument(source, {
+    ...DEFAULT_DESIGN_IMPORT_OPTIONS,
+    preserveHierarchy: false,
+    unsupportedFeaturePolicy: "nested-composition"
+  }, report);
+  assert.equal(nested.pages[0].nodes[0].type, "group");
+  assert.equal(nested.pages[0].nodes[0].children.length, 1);
+  assert.ok(report.issues.some((issue) => issue.message.includes("requested nested-composition")));
+
+  const rasterReport = createDesignImportReport("figma-json", "policy-raster.json");
+  const raster = normalizeDesignDocument(source, {
+    ...DEFAULT_DESIGN_IMPORT_OPTIONS,
+    unsupportedFeaturePolicy: "rasterize-layer"
+  }, rasterReport);
+  convertDesignDocumentToScenes(raster, DEFAULT_DESIGN_IMPORT_OPTIONS, rasterReport);
+  assert.ok(rasterReport.issues.some((issue) => issue.message.includes("requested rasterize-layer") && issue.message.includes("no source-rendered fallback")));
+});
+
+test("SVG blend substitutions are reported", () => {
+  const report = createDesignImportReport("svg", "overlay.svg");
+  importSvgDocument(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect id="overlay" width="10" height="10" fill="#fff" style="mix-blend-mode:overlay"/></svg>',
+    "overlay.svg",
+    report
+  );
+  assert.ok(report.visualDifferences.some((message) => message.includes('blend mode "overlay"') && message.includes('"screen"')));
 });

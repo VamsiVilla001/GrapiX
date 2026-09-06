@@ -1,0 +1,22 @@
+{
+  "phase": "AE-F0",
+  "role": "independent reference frames, exported through After Effects Render Queue",
+  "recordedAt": "2026-08-11T20:56:51Z",
+  "aeProductVersion": "26.3",
+  "aerender": "C:/Program Files/Adobe/Adobe After Effects 2026/Support Files/aerender.exe",
+  "project": "Layer-01-copy.aep",
+  "projectSha256": "658da9de5485e952da983700130ee3c7c78c4448e6c8a0edc1d2cfe2a0a3363a",
+  "composition": "Comp 01",
+  "startFrame": 0,
+  "endFrame": 2,
+  "renderSettingsTemplate": "Best Settings",
+  "outputModuleTemplate": "TIFF Sequence with Alpha",
+  "aerenderExitCode": 0,
+  "frameCount": 3,
+  "independence": "Frames come from AE's Render Queue through aerender.exe, not through the adapter's checkout path. The GrapiX adapter is resident in the render process because it lives in the Plug-ins folder, but it issues no command during an export and contributes no pixels.",
+  "frames": [
+    { "file": "frame_00000.tif", "bytes": 8312564, "sha256": "011212cda3da5be00050d6558534938cd8581a4789eaa9ba7bfe95ebfe47b0ba" },
+    { "file": "frame_00001.tif", "bytes": 8312564, "sha256": "abe008132fc7096621b50c7c61b65332d6f470fecdea08ecd2503398b5731864" },
+    { "file": "frame_00002.tif", "bytes": 8312564, "sha256": "043d0130235776049c5773b90c27fb843de6cab811a5c9d555d087bfab54a4c8" }
+  ]
+}

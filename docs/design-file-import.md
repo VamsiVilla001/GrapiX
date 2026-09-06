@@ -134,6 +134,68 @@ stored:
   `dataContext.__designImport.sourceAssetIds`. Shipping a 93 MB PSD to the renderer
   costs a full upload per take and renders nothing.
 
+### Motion
+
+A design import brings motion across in one of three modes, chosen in the dialog and defaulting to
+`design-only` so an existing caller is unaffected:
+
+| Mode | Source | Needs |
+| --- | --- | --- |
+| `design-only` | — | nothing |
+| `design-and-prototype-motion` | prototype transitions and Smart Animate, read from the document | nothing |
+| `full-motion-manifest` | keyframed Motion timelines | `grapix-figma-motion.json` from the export bridge |
+
+Figma's REST API cannot see a Motion timeline: it returns prototype *interactions* — two frames are
+related and the change takes 300 ms — never a layer's per-property tracks. Those live only on
+`node.animations` inside Figma, so the third mode needs the **GrapiX Motion Bridge** plugin
+(`tools/figma-motion-bridge`, built with `npm run build:figma-bridge`). Smart Animate is where real
+per-property motion comes from on the REST route: the difference between the transition's two frames
+*is* the animation, so layers are matched **by name path** and each changed property becomes a
+two-key track on the destination node.
+
+A manifest can only accompany a **Figma link**. The design-file route's request body is the design's
+raw bytes, leaving nowhere for a second file, so that tab imports prototype motion instead — which an
+exported Figma document genuinely carries — and says so beside the control. `DesignImportManager.importFile`
+itself accepts a manifest, so in-process callers have no such limit.
+
+Motion is applied after the scenes exist and to copies: `applyFigmaMotion` returns a new scene and
+never mutates its input, which is what makes "the design still lands if the motion fails" true rather
+than a promise to undo writes already made.
+
+#### What can become a keyframe
+
+GrapiX animates the channels in `ANIMATABLE_PROPERTIES`, which the render engine's `animation.rs`
+samples every Program frame. Of what a Figma timeline can carry, only **x, y, rotation, scaleX,
+scaleY and opacity** have a channel. `FIGMA_MOTION_CHANNELS` in
+`Shared/shared-types/src/figmaMotion.ts` is that table and its *absences* are the specification:
+width, height, corner radii, stroke and border weights, auto-layout spacing, grid gaps, fills,
+strokes and effects have no channel, so they classify `unsupported`, keep their source data on the
+report entry, and author nothing. `PATH_TRIM_START`/`PATH_TRIM_END` look mappable — GrapiX has trim
+paths — but they are not an animation channel and `animation.rs` excludes path geometry
+deliberately, so a trim track can only be reported.
+
+Two conversions in the bridge are correctness matters rather than cosmetics:
+
+- **`ManualKeyframe.timelinePosition` and `Timeline.duration` are seconds**; the manifest is
+  milliseconds throughout. This is the same trap as the legacy `transitionDuration` being
+  milliseconds while `interactions[].actions[].transition.duration` is seconds.
+- **`TRANSLATION_X`/`_Y`/`_XY` and `ROTATION` are offsets from the layer's design position**, not
+  coordinates, and are marked `valueSpace: "offset"`. Importing a 0 key as `x = 0` would fling every
+  animated layer to the canvas origin. Scale is a multiplier with 1 meaning "as designed", so it is
+  absolute. `TRANSLATION_XY`/`SCALE_XY` carry two channels on one track and split into two.
+
+Easing is reproduced exactly or sampled and *said* to be sampled. The seven polynomial presets and
+`CUSTOM_CUBIC_BEZIER` map onto GrapiX curves exactly. Springs cannot: Figma Motion states a
+normalized `bounce` from 0 to 1 and publishes no inverse of `physicalSpringToNormalized`, so the
+physical parameters genuinely cannot be recovered. A spring is baked into keyframes that trace it,
+bounded to 48 so the result stays editable, and reported as an approximation. The one undocumented
+assumption is stated in `normalizedSpringToPhysical`: **damping ratio = 1 - bounce**, with the
+segment's own length as the period. Substituting the nearest preset for a spring would render
+different pixels with nothing to show for it.
+
+An easing bound to a variable resolves to no curve, because its value lives in a mode the export
+cannot pick. The track still crosses; only the curve is absent.
+
 ## Fallback and reporting
 
 Each import returns a structured report listing imported items, converted
@@ -170,3 +232,18 @@ includes PSD, SVG-compatible AI, SVG, and exported Figma JSON. The tests cover
 nested layers, editable text, vector geometry, extracted images, masks,
 clipping, gradients/alpha stops, effects, components, missing fonts, option
 filtering, scene serialization, and structural visual fingerprints.
+
+Motion has four suites, split by what each can be wrong about:
+
+- `Shared/shared-types/tests/figma-motion-bridge.test.mjs` — the bridge's conversion: units, the
+  `XY` split, which fields claim a channel, every easing kind, the bounce-to-damping relation. This
+  is where the Figma vocabulary is pinned, and it runs without Figma because the conversion lives in
+  `Shared`, not in the plugin.
+- `Editor/services/project-api/tests/figmaMotion.test.mjs` — the conversion engine: channels,
+  offset resolution against the layer's design position, overlapping timelines, spring baking.
+- `Editor/services/project-api/tests/figmaPrototype.test.mjs` — REST prototype capture, the
+  seconds/milliseconds split, Smart Animate diffing.
+- `Editor/services/project-api/tests/figmaMotionFileImport.test.mjs` — the manager wiring on the
+  file route, including that a design-only import is unchanged.
+- `Editor/apps/editor-web/tests/design-import-motion.test.ts` — the dialog's decisions: the file-tab
+  fallback, manifest validation, and the report's group order.

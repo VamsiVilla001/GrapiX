@@ -12,6 +12,32 @@ use std::path::{Path, PathBuf};
 use supervisor::{PlayoutSupervisor, RuntimeLayout, SupervisorSnapshot};
 use tauri::Manager;
 
+/// Resolve the account directory shared with the Editor and seed it from the authoritative
+/// legacy Editor account when upgrading an installation that previously split the stores.
+fn shared_auth_root(data_root: &Path) -> Result<PathBuf, String> {
+    let parent = data_root.parent().unwrap_or(data_root);
+    let shared = parent.join("com.grapix.shared");
+    std::fs::create_dir_all(&shared)
+        .map_err(|error| format!("cannot create shared account directory: {error}"))?;
+
+    let candidates = [parent.join("com.grapix.editor"), data_root.to_path_buf()];
+    for name in ["users.json", "signing-secret"] {
+        let target = shared.join(name);
+        if target.exists() {
+            continue;
+        }
+        if let Some(source) = candidates
+            .iter()
+            .map(|root| root.join(name))
+            .find(|path| path.is_file())
+        {
+            std::fs::copy(&source, &target)
+                .map_err(|error| format!("cannot migrate shared {name}: {error}"))?;
+        }
+    }
+    Ok(shared)
+}
+
 #[tauri::command]
 fn supervisor_status(supervisor: tauri::State<'_, PlayoutSupervisor>) -> SupervisorSnapshot {
     supervisor.snapshot()
@@ -57,10 +83,12 @@ pub fn run() {
                 .map_err(|error| format!("cannot resolve AppData directory: {error}"))?;
             std::fs::create_dir_all(&data_root)
                 .map_err(|error| format!("cannot create data directory: {error}"))?;
+            let auth_root = shared_auth_root(&data_root)?;
             let layout = RuntimeLayout {
                 workspace_root: workspace,
                 resource_root: resources,
                 data_root,
+                auth_root,
             };
             app.manage(PlayoutSupervisor::start(layout, app.handle().clone()));
             Ok(())

@@ -1,0 +1,358 @@
+{
+  "$schema": "../lower-third.schema.json",
+  "version": 1,
+  "id": "bo0a-lower-third-v1",
+  "phase": "BO0a",
+  "scope": "Pinned native LOWER_THIRD fixture. PLAYER_NAME, SCORE and TEAM_COLOR are proven through the production AeControlService path against the declared canonical surface. PLAYER_IMAGE remains AE-CD3 footage replacement. This does not certify Program ingress, the licensed third-party plugin, authored composition markers or hardware output. The composition clock was measured with AEGP_GetCompFrameDuration and cross-checked by the SET_TIME round trip in ae-plugin/runtime-adapter/certification/AE-A3-declared-surface.json; the previously declared 30000/1001 rate was refuted.",
+  "fixture": {
+    "file": "fixtures/lower-third.aep",
+    "sha256": "903406290b24405d3b1ff1bbd5a6c9999dc3e1e66c53989647d5eb695a06439c",
+    "authoringCommand": "fixture <absolute path> lower-third",
+    "aeBuild": "26.3",
+    "pluginSet": [
+      "GrapiXRuntimeAdapter.aex"
+    ]
+  },
+  "render": {
+    "composition": "LOWER_THIRD",
+    "compositionItemId": 1,
+    "width": 1920,
+    "height": 1080,
+    "pixelAspect": "1/1",
+    "frameRate": "2997/100",
+    "clock": {
+      "frameDuration": "800",
+      "timeScale": "23976"
+    },
+    "durationFrames": 300,
+    "sourceAlphaMode": "premultiplied-black"
+  },
+  "controls": [
+    {
+      "id": "PLAYER_NAME",
+      "kind": "text",
+      "updateClass": "fast",
+      "target": {
+        "compositionItemId": 1,
+        "layerId": 20,
+        "sourceItemId": null
+      },
+      "nativeBinding": {
+        "kind": "source-text",
+        "verification": "live-verified"
+      },
+      "productionProbe": {
+        "status": "not-advertised",
+        "path": [
+          {
+            "matchName": "ADBE Text Properties",
+            "ordinal": 0
+          },
+          {
+            "matchName": "ADBE Text Document",
+            "ordinal": 0
+          }
+        ]
+      },
+      "acceptedValues": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 80
+      }
+    },
+    {
+      "id": "SCORE",
+      "kind": "integer-text",
+      "updateClass": "fast",
+      "target": {
+        "compositionItemId": 1,
+        "layerId": 21,
+        "sourceItemId": null
+      },
+      "nativeBinding": {
+        "kind": "source-text",
+        "verification": "live-verified"
+      },
+      "productionProbe": {
+        "status": "not-advertised",
+        "path": [
+          {
+            "matchName": "ADBE Text Properties",
+            "ordinal": 0
+          },
+          {
+            "matchName": "ADBE Text Document",
+            "ordinal": 0
+          }
+        ]
+      },
+      "acceptedValues": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 999,
+        "format": "%03d"
+      }
+    },
+    {
+      "id": "PLAYER_IMAGE",
+      "kind": "image-source",
+      "updateClass": "preload-required",
+      "target": {
+        "compositionItemId": 1,
+        "layerId": 19,
+        "sourceItemId": 18
+      },
+      "nativeBinding": {
+        "kind": "solid-source",
+        "verification": "live-verified"
+      },
+      "productionProbe": {
+        "status": "not-advertised",
+        "path": [
+          {
+            "matchName": "ADBE Layer Source",
+            "ordinal": 0
+          }
+        ]
+      },
+      "acceptedValues": {
+        "fixtureHandles": [
+          "portrait-blue",
+          "portrait-gold"
+        ],
+        "production": "not available: this fixture has an internal solid, not replaceable footage; validated project-store media remains AE-CD3"
+      }
+    },
+    {
+      "id": "TEAM_COLOR",
+      "kind": "colour",
+      "updateClass": "fast",
+      "target": {
+        "compositionItemId": 1,
+        "layerId": 17,
+        "sourceItemId": 16
+      },
+      "nativeBinding": {
+        "kind": "fill-colour",
+        "effectMatchName": "ADBE Fill",
+        "verification": "live-verified"
+      },
+      "productionProbe": {
+        "status": "not-advertised",
+        "path": [
+          {
+            "matchName": "ADBE Effect Parade",
+            "ordinal": 0
+          },
+          {
+            "matchName": "ADBE Fill",
+            "ordinal": 0
+          },
+          {
+            "matchName": "ADBE Fill-0002",
+            "ordinal": 0
+          }
+        ]
+      },
+      "acceptedValues": {
+        "type": "string",
+        "pattern": "^#[0-9A-Fa-f]{6}$"
+      }
+    }
+  ],
+  "cueMap": {
+    "authoringStatus": "declared-not-authored",
+    "rate": {
+      "numerator": 2997,
+      "denominator": 100
+    },
+    "clock": {
+      "frameDuration": "800",
+      "timeScale": "23976"
+    },
+    "markers": [
+      {
+        "text": "GRAPIX:CUE",
+        "time": {
+          "value": "0",
+          "scale": "23976"
+        }
+      },
+      {
+        "text": "GRAPIX:IN",
+        "time": {
+          "value": "800",
+          "scale": "23976"
+        }
+      },
+      {
+        "text": "GRAPIX:HOLD",
+        "time": {
+          "value": "1600",
+          "scale": "23976"
+        }
+      },
+      {
+        "text": "GRAPIX:CONTINUE:score",
+        "time": {
+          "value": "2400",
+          "scale": "23976"
+        }
+      },
+      {
+        "text": "GRAPIX:UPDATE",
+        "time": {
+          "value": "3200",
+          "scale": "23976"
+        }
+      },
+      {
+        "text": "GRAPIX:OUT",
+        "time": {
+          "value": "4000",
+          "scale": "23976"
+        }
+      },
+      {
+        "text": "GRAPIX:END",
+        "time": {
+          "value": "4800",
+          "scale": "23976"
+        }
+      }
+    ],
+    "resolved": [
+      {
+        "role": "CUE",
+        "id": null,
+        "time": {
+          "value": "0",
+          "scale": "23976"
+        },
+        "compositionTime": {
+          "value": "0",
+          "scale": "23976"
+        },
+        "frame": 0,
+        "deadlineNanos": 0
+      },
+      {
+        "role": "IN",
+        "id": null,
+        "time": {
+          "value": "800",
+          "scale": "23976"
+        },
+        "compositionTime": {
+          "value": "800",
+          "scale": "23976"
+        },
+        "frame": 1,
+        "deadlineNanos": 33366700
+      },
+      {
+        "role": "HOLD",
+        "id": null,
+        "time": {
+          "value": "1600",
+          "scale": "23976"
+        },
+        "compositionTime": {
+          "value": "1600",
+          "scale": "23976"
+        },
+        "frame": 2,
+        "deadlineNanos": 66733400
+      },
+      {
+        "role": "CONTINUE",
+        "id": "score",
+        "time": {
+          "value": "2400",
+          "scale": "23976"
+        },
+        "compositionTime": {
+          "value": "2400",
+          "scale": "23976"
+        },
+        "frame": 3,
+        "deadlineNanos": 100100100
+      },
+      {
+        "role": "UPDATE",
+        "id": null,
+        "time": {
+          "value": "3200",
+          "scale": "23976"
+        },
+        "compositionTime": {
+          "value": "3200",
+          "scale": "23976"
+        },
+        "frame": 4,
+        "deadlineNanos": 133466800
+      },
+      {
+        "role": "OUT",
+        "id": null,
+        "time": {
+          "value": "4000",
+          "scale": "23976"
+        },
+        "compositionTime": {
+          "value": "4000",
+          "scale": "23976"
+        },
+        "frame": 5,
+        "deadlineNanos": 166833500
+      },
+      {
+        "role": "END",
+        "id": null,
+        "time": {
+          "value": "4800",
+          "scale": "23976"
+        },
+        "compositionTime": {
+          "value": "4800",
+          "scale": "23976"
+        },
+        "frame": 6,
+        "deadlineNanos": 200200200
+      }
+    ],
+    "digest": "f69ad7e1abf6e1f9b67c445a89a32a832df4c43f635ed61d5998742883412824"
+  },
+  "comparisons": [
+    {
+      "id": "LOWER_THIRD-baseline-frame-0",
+      "frame": 0,
+      "reference": "references/LOWER_THIRD",
+      "matteMode": "premul-black",
+      "channelOrder": "argb",
+      "tolerance": {
+        "maxChannelDelta": 0,
+        "maxDifferingPixels": 0
+      }
+    }
+  ],
+  "expectedDependencies": {
+    "fonts": [],
+    "media": [],
+    "effects": [
+      "ADBE Fill"
+    ],
+    "missing": [
+      "approved licensed third-party plugin required by BO0a criterion 15"
+    ],
+    "liveReport": "live-asserted-via-LIST_EFFECTS"
+  },
+  "externalGates": [
+    "AE-CD3 validated media preload and rollback: PLAYER_IMAGE declares ADBE Layer Source, which is footage replacement and outside the declared property surface; the fixture layer is a solid, so no replaceable footage exists to drive",
+    "composition markers cannot be authored or read through the current adapter; cue map is declared-not-authored",
+    "approved licensed third-party plugin provisioned and rendering",
+    "LIST_COMPOSITIONS must emit the composition's exact AEGP_GetCompFrameDuration rational before the declared rate can be reconciled against a live composition automatically",
+    "AE-F2 checkout-to-Program ingress",
+    "AE-F3 30-minute POC soak"
+  ]
+}

@@ -1,5 +1,8 @@
 import { create } from "zustand";
+import { useProjectAssetStore } from "./projectAssetStore";
+import { projectAssetLibraryItem } from "../lib/projectAssets";
 import {
+  normalizePropertyValue,
   type AssetLibraryItem,
   type AnimatableProperty,
   appendSceneHistory,
@@ -16,9 +19,13 @@ import {
   isMaterialCompatibleWithFace,
   normalizeMaterial,
   normalizeMaterialSceneDocument,
+  normalizeCameraPlanes,
   normalizeColorValue,
   normalizePrimitiveMaterialBinding,
+  normalizeSlabBevels,
   normalizeSlabProperties,
+  objectBounds,
+  objectBoundsInScene,
   resolveSceneObjectHierarchy,
   readAnimatableProperty,
   redoSceneHistory,
@@ -35,6 +42,7 @@ import {
   type LightSceneObject,
   type LineSceneObject,
   type BezierPath,
+  type PathKeyframe,
   type ObjectMask,
   type PaintSceneObject,
   type PaintStroke,
@@ -42,6 +50,7 @@ import {
   type FontDefinition,
   type GradientPreset,
   type Material,
+  type SceneHistoryEntry,
   type MaterialFace,
   type MaterialInstance,
   type MaterialParameterValue,
@@ -49,6 +58,7 @@ import {
   type PropertyKeyframe,
   type MarkerSceneObject,
   type MeshSceneObject,
+  type MeshPrimitiveKind,
   type RectSceneObject,
   type ShapeSceneObject,
   type SceneDocument,
@@ -57,9 +67,43 @@ import {
   type SceneTimeline,
   type SceneViewportSettings,
   type SceneObject,
+  type SlabPropertiesInput,
   type SceneScriptReference,
-  type TextSceneObject
+  type TextSceneObject,
+  projectAssetId,
+  type ProjectAssetReference,
 } from "@grapix/shared-types";
+import {
+  normaliseObjectSelection,
+  reconcileObjectSelection,
+  type ObjectSelection
+} from "./objectSelection";
+import {
+  collectContainerSubtreeIds,
+  containerContains,
+  isAllowedContainerChild,
+  isContainerObject,
+  parentOfObject
+} from "./objectHierarchy";
+import { normalizeLayerId } from "./layerIds";
+import {
+  insertAnchorOnSegment,
+  moveAnchorHandle,
+  segmentCount,
+  setAnchorKind,
+  toggleAnchorKind
+} from "../tools/bezierEditing";
+import {
+  alignMoves,
+  distributeMoves,
+  movableTargets,
+  parentBoundsFor,
+  resolveAlignFrame,
+  type AlignEdge,
+  type AlignReference,
+  type AlignTarget,
+  type DistributeMode
+} from "../tools/alignment";
 import {
   convertSceneDimensions,
   type CanvasConversionRequest
@@ -67,10 +111,11 @@ import {
 import { importMaterialAsset } from "../modules/material-manager/services/assetImporter";
 import { builtInShaders } from "../modules/material-manager/services/shaderRegistry";
 import { ensureDefaultStandardMaterial } from "../modules/material-manager/services/defaultMaterial";
-import { assetExistsOnApi } from "../lib/apiClient";
+import { assetExistsOnApi, saveSceneToApi } from "../lib/apiClient";
 import { clonePropertyAnimation, removePropertyKeyframe } from "./timelineAnimation";
 import { withColorStyles } from "./objectColorStyles";
 import { nextUniqueObjectName } from "./objectNaming";
+import { useUiStore } from "./uiStore";
 
 export type LibraryObjectKind =
   | "text"
@@ -96,13 +141,24 @@ export type LibraryObjectKind =
 
 interface SceneHistoryTransaction {
   label: string;
+  scope?: string;
   scene: SceneDocument;
 }
 
 export interface EditorState {
   scene: SceneDocument;
   hasActiveScene: boolean;
+  /**
+   * The **active** member of the selection: the object the Inspector edits, the canvas gizmo
+   * follows, and the alignment tools align to. Non-null exactly when `selectedObjectIds` is
+   * non-empty, and always one of them. Its name and meaning are unchanged, which is why the
+   * hundred-odd single-object readers needed no edit.
+   */
   selectedObjectId: string | null;
+  /** The whole selection, in document order. */
+  selectedObjectIds: string[];
+  /** Where a Shift range measures from. */
+  objectSelectionAnchorId: string | null;
   selectedFaceIndices: number[];
   faceSelectionAnchor: number | null;
   dataJson: string;
@@ -110,11 +166,40 @@ export interface EditorState {
   saveStatus: "local" | "saving" | "saved" | "error";
   saveError: string | null;
   materialActionError: string | null;
-  undoStack: SceneDocument[];
-  redoStack: SceneDocument[];
+  undoStack: SceneHistoryEntry[];
+  redoStack: SceneHistoryEntry[];
   historyTransaction: SceneHistoryTransaction | null;
+  /**
+   * The module credited with the next change.
+   *
+   * Set by whichever panel the author is working in, so an untransacted mutation still records who
+   * made it without every one of the store's mutations having to name itself. Attribution only —
+   * there is one history, and scope never selects a separate stack.
+   */
+  historyScope: string | null;
   setSaveStatus: (status: EditorState["saveStatus"], error?: string | null) => void;
+  /**
+   * Persist the open scene, coalescing concurrent callers.
+   *
+   * The one place that writes a scene and owns `saveStatus`. Save, publish and autosave all
+   * route through here: two save paths would report two different statuses for one document,
+   * and a second request issued while the first is in flight can report success for a write
+   * that later failed. Resolves `false` when there is nothing to save.
+   */
+  saveScene: () => Promise<boolean>;
+  /** Select exactly one object, or nothing. A shim over `selectObjects`. */
   selectObject: (objectId: string | null) => void;
+  /**
+   * Replace the whole selection.
+   *
+   * `active` defaults to the last id, which is what every additive gesture wants; `anchor`
+   * defaults to the active id. The result is normalised, so a caller cannot install an active
+   * object that is not a member.
+   */
+  selectObjects: (
+    ids: readonly string[],
+    options?: { active?: string | null; anchor?: string | null }
+  ) => void;
   setSceneId: (id: string) => void;
   setSceneName: (name: string) => void;
   updateCanvasViewport: (patch: Partial<SceneViewportSettings>) => void;
@@ -130,11 +215,23 @@ export interface EditorState {
   updatePaintStroke: (objectId: string, strokeId: string, patch: Partial<PaintStroke>) => void;
   addLibraryObject: (kind: LibraryObjectKind) => void;
   addModelObjectFromAsset: (assetId: string) => boolean;
+  convertMeshKind: (objectId: string, next: MeshPrimitiveKind) => boolean;
   duplicateSelectedObject: () => void;
   deleteSelectedObject: () => void;
   duplicateObject: (objectId: string) => void;
   deleteObject: (objectId: string) => void;
   updateObject: (objectId: string, patch: Partial<SceneObject>) => void;
+  /**
+   * Patch many objects with the same value, as **one** undo step.
+   *
+   * Not a loop over `updateObject`: that would rebuild and normalise the scene once per target and
+   * deposit one history entry each unless the caller remembered to wrap it. One commit writes every
+   * target, carries the caller's label, and is taken back by a single Ctrl+Z — which is what an author
+   * who edited twelve objects at once expects.
+   *
+   * Returns the number of objects written, so a caller can distinguish "nothing matched" from "done".
+   */
+  updateObjects: (objectIds: readonly string[], patch: Partial<SceneObject>, label: string) => number;
   setActiveCameraId: (cameraId: string | null) => void;
   setContainerChild: (containerId: string, childId: string, included: boolean) => boolean;
   // Pen-tool / bezier-path authoring. All commit through the scene history, so a
@@ -142,9 +239,30 @@ export interface EditorState {
   createPenShape: (origin: Vec2, paint?: { fillEnabled: boolean; strokeEnabled: boolean }) => string;
   appendShapeVertex: (objectId: string, vertex: Vec2, inTangent?: Vec2, outTangent?: Vec2) => number;
   updateShapeVertex: (objectId: string, index: number, patch: { vertex?: Vec2; inTangent?: Vec2; outTangent?: Vec2 }) => void;
+  addShapeSubpath: (objectId: string) => number;
+  updateShapeSubpath: (objectId: string, index: number, path: BezierPath) => boolean;
+  removeShapeSubpath: (objectId: string, index: number) => boolean;
+  moveShapeSubpath: (objectId: string, index: number, direction: -1 | 1) => boolean;
   addShapePoint: (objectId: string, afterIndex: number, point?: Vec2) => void;
   removeShapePoints: (objectId: string, indices: number[]) => void;
-  setShapePointsSmooth: (objectId: string, indices: number[], smooth: boolean, linked?: boolean) => void;
+  /**
+   * Align or distribute a selection, as one undo step.
+   *
+   * `keyObjectId` is the object that holds still under a `key-object` reference. Both return the
+   * number of objects actually moved, so a caller can report "nothing to do" rather than leaving
+   * the operator wondering whether the button worked.
+   */
+  alignSelection: (
+    objectIds: readonly string[],
+    edge: AlignEdge,
+    reference: AlignReference,
+    keyObjectId?: string | null
+  ) => number;
+  distributeSelection: (objectIds: readonly string[], mode: DistributeMode) => number;
+  setShapeAnchorKind: (objectId: string, indices: number[], kind: "corner" | "smooth") => void;
+  toggleShapeAnchorKind: (objectId: string, index: number) => void;
+  /** Add an anchor at parameter `t` along a segment without moving the curve. Returns its index. */
+  insertShapePointOnSegment: (objectId: string, segmentIndex: number, t: number) => number;
   convertObjectToShape: (objectId: string) => string | null;
   closeShapePath: (objectId: string) => void;
   // AE-style layer masks. addMask is for pen-drawing (empty path at a local
@@ -153,6 +271,29 @@ export interface EditorState {
   addMask: (objectId: string, origin: Vec2) => string | null;
   addMaskFromPath: (objectId: string, path: BezierPath, type?: ObjectMask["type"], feather?: Vec2) => string | null;
   appendMaskVertex: (objectId: string, maskId: string, vertex: Vec2) => void;
+  /**
+   * Place objects immediately before or after a sibling, in one step.
+   *
+   * "Before" means *earlier in the flat render order*, which the Object Manager draws lower down
+   * because it reverses the list. The panel is responsible for that translation; this action speaks
+   * render order only.
+   */
+  reorderObjectsInStack: (
+    objectIds: readonly string[],
+    targetId: string,
+    placement: "before" | "after"
+  ) => void;
+  /**
+   * Apply a resolved drop: reparent, reorder, re-layer, or any combination, as **one** undo step.
+   *
+   * Sequencing lives here rather than in the panel because the order matters — a cross-parent move
+   * has to detach, adopt, then reorder — and a panel that got it wrong would leave a half-moved
+   * subtree. Returns false when the drop was refused or changed nothing.
+   */
+  applyObjectDrop: (
+    objectIds: readonly string[],
+    drop: { kind: string; targetId?: string }
+  ) => boolean;
   closeMaskPath: (objectId: string, maskId: string) => void;
   updateMask: (objectId: string, maskId: string, patch: Partial<ObjectMask>) => void;
   updateMaskVertex: (objectId: string, maskId: string, index: number, patch: { vertex?: Vec2; inTangent?: Vec2; outTangent?: Vec2 }) => void;
@@ -161,6 +302,13 @@ export interface EditorState {
   toggleMaskKeyframe: (objectId: string, maskId: string, property: "path" | "opacity" | "feather" | "expansion", frame: number) => void;
   updateMaskKeyframeFrame: (objectId: string, maskId: string, property: "path" | "opacity" | "feather" | "expansion", keyframeId: string, frame: number) => void;
   deleteMask: (objectId: string, maskId: string) => void;
+  toggleShapePathKeyframe: (objectId: string, frame: number) => void;
+  setShapePathAnimationEnabled: (objectId: string, enabled: boolean, frame: number) => void;
+  updateShapePathKeyframeFrame: (objectId: string, keyframeId: string, frame: number) => void;
+  deleteShapePathKeyframe: (objectId: string, keyframeId: string) => void;
+  toggleShapeTrimKeyframe: (objectId: string, channel: "start" | "end" | "offset", frame: number) => void;
+  setShapeTrimAnimationEnabled: (objectId: string, channel: "start" | "end" | "offset", enabled: boolean, frame: number) => void;
+  setShapeTrimValue: (objectId: string, channel: "start" | "end" | "offset", value: number, frame: number) => void;
   moveObjectInStack: (objectId: string, direction: "up" | "down" | "front" | "back") => void;
   updateObjectBindings: (objectId: string, bindings: BindingMap) => void;
   addObjectKeyframe: (objectId: string, frame: number) => void;
@@ -223,6 +371,20 @@ export interface EditorState {
   getBindableFaces: (objectId: string) => MaterialFace[];
   getObjectsUsingMaterial: (materialId: string) => string[];
   importAsset: (file: File) => Promise<string | null>;
+  /**
+   * Record a file from the project's asset folders as a scene asset, and answer its id.
+   *
+   * The library is the folder, but the *scene* still has to say which of those files it uses:
+   * publishing packages `scene.assets`, and the renderers resolve textures from it. Assignment is
+   * therefore the moment a browsed reference becomes part of the document — not import, because
+   * nothing is imported, and not browsing, because a scene must not gain a dependency merely by
+   * someone scrolling the panel.
+   *
+   * Idempotent by path: assigning the same file to a second object reuses the one entry. Re-adopting
+   * an entry the scene already has refreshes its metadata, so a file replaced on disk stops
+   * reporting the old size.
+   */
+  adoptProjectAsset: (reference: ProjectAssetReference) => string;
   relinkAsset: (assetId: string, file: File) => Promise<void>;
   updateAsset: (assetId: string, patch: Partial<AssetLibraryItem>) => void;
   refreshAssetAvailability: () => Promise<void>;
@@ -246,9 +408,18 @@ export interface EditorState {
   deleteLayer: (layerId: string) => void;
   setLayerVisibility: (layerId: string, visible: boolean) => void;
   setLayerLocked: (layerId: string, locked: boolean) => void;
-  beginHistory: (label: string) => void;
+  /** Open a transaction. `scope` defaults to the ambient `historyScope`. */
+  beginHistory: (label: string, scope?: string) => void;
   commitHistory: () => void;
   cancelHistory: () => void;
+  /** Credit subsequent changes to a module. Called by a panel when the author works in it. */
+  setHistoryScope: (scope: string | null) => void;
+  /**
+   * Take back the last change to the open scene.
+   *
+   * One history for the document, whichever module made the change — see `SceneHistoryEntry`. The
+   * entry's label and scope say what came back, so the UI can name it instead of undoing silently.
+   */
   undo: () => void;
   redo: () => void;
   setDataJson: (json: string) => void;
@@ -266,6 +437,51 @@ function isMaterialCompatibleWithSlot(material: Material, object: SceneObject, s
     : isMaterialCompatible(material, object.type);
 }
 
+/**
+ * The single outstanding scene write, or `null`.
+ *
+ * Module scope rather than store state: it is a concurrency latch, not something the UI
+ * renders — `saveStatus` is what the UI reads. Keeping it out of the store also means a
+ * coalesced caller cannot observe a half-updated store mid-write.
+ */
+let saveInFlight: Promise<boolean> | null = null;
+
+/**
+ * Add or refresh one project asset in a scene's asset list.
+ *
+ * An entry the scene already has keeps what the author changed — the name they gave it, their
+ * tags, an alpha mode they set — and takes the file's own facts from disk. Replacing it outright
+ * would silently undo those edits every time the file was touched.
+ */
+function withProjectAsset(
+  assets: readonly AssetLibraryItem[],
+  reference: ProjectAssetReference
+): AssetLibraryItem[] {
+  const fresh = projectAssetLibraryItem(reference);
+  const index = assets.findIndex((item) => item.assetId === fresh.assetId);
+  if (index < 0) return [...assets, fresh];
+  return assets.map((item, position) => position === index
+    ? { ...item, ...fresh, name: item.name, tags: item.tags, alphaMode: item.alphaMode ?? fresh.alphaMode }
+    : item);
+}
+
+/**
+ * The asset list a scene needs in order to reference `assetId`, when `assetId` names a file in the
+ * project library rather than something the scene already carries.
+ *
+ * Returns the list unchanged when the library has no such file — the caller then reports "could
+ * not be found", which is the honest answer for an id that names nothing on disk.
+ */
+function adoptedProjectAssets(
+  assets: readonly AssetLibraryItem[],
+  assetId: string
+): AssetLibraryItem[] {
+  const reference = useProjectAssetStore
+    .getState()
+    .assets.find((candidate) => projectAssetId(candidate.path) === assetId);
+  return reference ? withProjectAsset(assets, reference) : [...assets];
+}
+
 export const useEditorStore = create<EditorState>((set, get) => {
   const initialScene = createEmptyScene();
 
@@ -273,6 +489,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
     scene: initialScene,
     hasActiveScene: false,
     selectedObjectId: null,
+    selectedObjectIds: [],
+    objectSelectionAnchorId: null,
     selectedFaceIndices: [],
     faceSelectionAnchor: null,
     dataJson: JSON.stringify(initialScene.dataContext, null, 2),
@@ -283,21 +501,53 @@ export const useEditorStore = create<EditorState>((set, get) => {
     undoStack: [],
     redoStack: [],
     historyTransaction: null,
+    historyScope: null,
     setSaveStatus: (saveStatus, saveError = null) => set({ saveStatus, saveError }),
+    saveScene: async () => {
+      if (!get().hasActiveScene) return false;
+
+      // Coalesce rather than queue. A second caller arriving mid-flight wants "the scene is
+      // persisted", which the in-flight write already delivers; issuing a second POST would
+      // race it and let a stale body win. Autosave leans on this heavily — a timer tick
+      // landing during a manual save must not double-write.
+      const inFlight = saveInFlight;
+      if (inFlight) return inFlight;
+
+      const attempt = (async () => {
+        set({ saveStatus: "saving", saveError: null });
+        try {
+          /*
+           * One request, and no dialog.
+           *
+           * Where the project lives is asked for by the UI before it calls this — `saveWithProject`
+           * in the menu, `ensureProject` in the After Effects panel — because those are the paths a
+           * person took. Probing for a project here would raise a file picker from autosave and
+           * from every programmatic caller, and would turn a momentary service outage into "you
+           * have no project".
+           */
+          await saveSceneToApi(get().scene);
+          set({ saveStatus: "saved", saveError: null });
+          return true;
+        } catch (error) {
+          set({
+            saveStatus: "error",
+            saveError: error instanceof Error ? error.message : "Save failed"
+          });
+          return false;
+        } finally {
+          saveInFlight = null;
+        }
+      })();
+
+      saveInFlight = attempt;
+      return attempt;
+    },
     // Object selection means "the whole object" by default, so applying a
     // material to a cube/model cannot appear to fail merely because its Front
     // face is rotated away. An explicit face click in Materials narrows this
     // selection, and re-clicking the same object preserves that choice.
-    selectObject: (objectId) => set((state) => {
-      if (state.selectedObjectId === objectId) {
-        return { selectedObjectId: objectId };
-      }
-      const object = state.scene.objects.find((item) => item.id === objectId);
-      return {
-        selectedObjectId: objectId,
-        ...materialFaceSelection(object)
-      };
-    }),
+    selectObject: (objectId) => applySelection(objectId ? [objectId] : [], { active: objectId }),
+    selectObjects: (ids, options) => applySelection(ids, options),
     setSceneId: (id) =>
       set((state) => ({
         scene: touchScene({ ...state.scene, id })
@@ -360,6 +610,27 @@ export const useEditorStore = create<EditorState>((set, get) => {
       set({ materialActionError: null });
       return true;
     },
+    convertMeshKind: (objectId, next) => {
+      const { scene, selectedObjectId } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      if (!object || object.type !== "mesh") return false;
+
+      const converted = convertMeshObjectKind(object, next);
+      commitScene({
+        ...scene,
+        objects: scene.objects.map((item) => item.id === objectId ? converted : item)
+      }, `Convert mesh to ${next}`);
+
+      if (selectedObjectId === objectId) {
+        const faceCount = getBindableFaces(converted).length;
+        const selectedFaceIndices = get().selectedFaceIndices.filter((index) => index < faceCount);
+        set({
+          selectedFaceIndices: selectedFaceIndices.length ? selectedFaceIndices : [0],
+          faceSelectionAnchor: selectedFaceIndices.length ? selectedFaceIndices[0] : 0
+        });
+      }
+      return true;
+    },
     duplicateSelectedObject: () => {
       const { selectedObjectId } = get();
 
@@ -376,17 +647,41 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
     duplicateObject: duplicateObjectById,
     deleteObject: deleteObjectById,
-  updateObject: (objectId, patch) =>
-      set((state) => ({
-        scene: touchScene({
-          ...state.scene,
-          objects: normalizeObjectStack(
-            state.scene.objects.map((object) =>
-              object.id === objectId ? ({ ...object, ...patch } as SceneObject) : object
-            )
+    /**
+     * Patch one object, as one undo step.
+     *
+     * Through `commitScene`, so a visibility toggle or a lock can be undone. A continuous gesture —
+     * a canvas drag, a numeric scrub — wraps itself in `beginHistory`/`commitHistory` and therefore
+     * still deposits exactly one entry however many patches it emits.
+     */
+    updateObject: (objectId, patch) => {
+      const { scene } = get();
+      const target = scene.objects.find((object) => object.id === objectId);
+      const safe = target ? clampPatch(target, patch) : patch;
+      commitScene({
+        ...scene,
+        objects: normalizeObjectStack(
+          scene.objects.map((object) =>
+            object.id === objectId ? ({ ...object, ...safe } as SceneObject) : object
           )
-        })
-      })),
+        )
+      }, describeObjectPatch(patch));
+    },
+    updateObjects: (objectIds, patch, label) => {
+      const targets = new Set(objectIds);
+      if (targets.size === 0) return 0;
+      const { scene } = get();
+      let written = 0;
+      const objects = scene.objects.map((object) => {
+        if (!targets.has(object.id)) return object;
+        written += 1;
+        return { ...object, ...clampPatch(object, patch) } as SceneObject;
+      });
+      // Nothing matched: commit nothing rather than depositing an entry that undoes to itself.
+      if (written === 0) return 0;
+      commitScene({ ...scene, objects: normalizeObjectStack(objects) }, label);
+      return written;
+    },
     renameObject: (objectId, name) => {
       const nextName = name.trim();
       const { scene } = get();
@@ -403,7 +698,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         objects: scene.objects.map((object) =>
           object.id === objectId ? ({ ...object, name: nextName } as SceneObject) : object
         )
-      });
+      }, "Rename object");
       return true;
     },
     addTextAt: (origin, size, writingMode) => {
@@ -536,8 +831,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
         name: nextUniqueObjectName(scene.objects, shape.name),
         zIndex: layerObjects.reduce((highest, item) => Math.max(highest, item.zIndex), -1) + 1
       };
-      commitScene({ ...scene, objects: normalizeObjectStack([...scene.objects, objectWithStack]) });
-      set({ selectedObjectId: objectWithStack.id, selectedFaceIndices: [0], faceSelectionAnchor: 0 });
+      commitScene({ ...scene, objects: normalizeObjectStack([...scene.objects, objectWithStack]) }, "Draw shape");
+      set({ ...selectionOf(objectWithStack.id), selectedFaceIndices: [0], faceSelectionAnchor: 0 });
       return objectWithStack.id;
     },
     appendShapeVertex: (objectId, vertex, inTangent = { x: 0, y: 0 }, outTangent = { x: 0, y: 0 }) => {
@@ -572,19 +867,88 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const updated = fitShapeToPath(object, path);
       commitScene({ ...scene, objects: scene.objects.map((item) => item.id === objectId ? updated : item) });
     },
+    addShapeSubpath: (objectId) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      if (!object || object.type !== "shape") return -1;
+      const compoundPaths = [...(object.compoundPaths ?? []), createInsetSubpath(object.path)];
+      const updated: ShapeSceneObject = { ...object, compoundPaths };
+      commitScene({
+        ...scene,
+        objects: scene.objects.map((item) => item.id === objectId ? updated : item)
+      }, "Add shape subpath");
+      return compoundPaths.length - 1;
+    },
+    updateShapeSubpath: (objectId, index, path) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      const compoundPaths = object?.type === "shape" ? [...(object.compoundPaths ?? [])] : [];
+      if (!object || object.type !== "shape" || index < 0 || index >= compoundPaths.length) return false;
+      compoundPaths[index] = normalizeBezierPathArrays(path);
+      const updated: ShapeSceneObject = { ...object, compoundPaths };
+      commitScene({
+        ...scene,
+        objects: scene.objects.map((item) => item.id === objectId ? updated : item)
+      }, "Edit shape subpath");
+      return true;
+    },
+    removeShapeSubpath: (objectId, index) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      const compoundPaths = object?.type === "shape" ? [...(object.compoundPaths ?? [])] : [];
+      if (!object || object.type !== "shape" || index < 0 || index >= compoundPaths.length) return false;
+      compoundPaths.splice(index, 1);
+      const updated: ShapeSceneObject = {
+        ...object,
+        compoundPaths: compoundPaths.length ? compoundPaths : undefined
+      };
+      commitScene({
+        ...scene,
+        objects: scene.objects.map((item) => item.id === objectId ? updated : item)
+      }, "Remove shape subpath");
+      return true;
+    },
+    moveShapeSubpath: (objectId, index, direction) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      const compoundPaths = object?.type === "shape" ? [...(object.compoundPaths ?? [])] : [];
+      const destination = index + direction;
+      if (!object || object.type !== "shape"
+        || index < 0 || index >= compoundPaths.length
+        || destination < 0 || destination >= compoundPaths.length) return false;
+      [compoundPaths[index], compoundPaths[destination]] = [compoundPaths[destination], compoundPaths[index]];
+      const updated: ShapeSceneObject = { ...object, compoundPaths };
+      commitScene({
+        ...scene,
+        objects: scene.objects.map((item) => item.id === objectId ? updated : item)
+      }, "Reorder shape subpath");
+      return true;
+    },
+    /**
+     * Add an anchor after `afterIndex`.
+     *
+     * Without an authored point this subdivides the segment at its midpoint, which leaves the
+     * drawn curve untouched. It used to insert the midpoint of the two *vertices* with no
+     * handles: on a curved segment that is a point well off the curve, so pressing "Add point"
+     * silently flattened the very shape the operator was refining.
+     *
+     * An authored point is still placed literally — the caller has said where it wants the
+     * anchor, and honouring that is the whole reason the argument exists.
+     */
     addShapePoint: (objectId, afterIndex, authoredPoint) => {
       const { scene } = get();
       const object = scene.objects.find((item) => item.id === objectId);
       if (!object || object.type !== "shape" || object.path.vertices.length === 0) return;
       const fromIndex = Math.min(object.path.vertices.length - 1, Math.max(0, afterIndex));
-      const toIndex = object.path.closed
-        ? (fromIndex + 1) % object.path.vertices.length
-        : Math.min(object.path.vertices.length - 1, fromIndex + 1);
-      const from = object.path.vertices[fromIndex];
-      const to = object.path.vertices[toIndex];
-      const point = authoredPoint ?? { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
-      const insertAt = fromIndex + 1;
-      const path = insertPathPoint(object.path, insertAt, point);
+
+      let path: BezierPath;
+      if (authoredPoint) {
+        path = insertPathPoint(object.path, fromIndex + 1, authoredPoint);
+      } else {
+        if (fromIndex >= segmentCount(object.path)) return;
+        path = insertAnchorOnSegment(object.path, fromIndex, 0.5).path;
+      }
+
       const updated = fitShapeToPath(object, path);
       commitScene({
         ...scene,
@@ -605,31 +969,69 @@ export const useEditorStore = create<EditorState>((set, get) => {
         objects: scene.objects.map((item) => item.id === objectId ? updated : item)
       });
     },
-    setShapePointsSmooth: (objectId, indices, smooth, linked = true) => {
+    // Convert anchors between a corner and a tangent point.
+    //
+    // Replaces `setShapePointsSmooth(id, indices, smooth, linked)`, whose `linked` argument was
+    // never a real distinction: "Smooth" and "Link handles" in the tool options passed the same
+    // pair of values, so one of the two buttons did nothing, and "Break handles" *rewrote* the
+    // outgoing handle from the anchor's neighbours instead of breaking anything. Linkage is now
+    // read from the anchor's own geometry when a handle is dragged (`moveAnchorHandle`), so it
+    // needs no argument here and cannot disagree with what is on screen.
+    alignSelection: (objectIds, edge, reference, keyObjectId) => {
+      const { scene } = get();
+      const targets = alignTargetsFor(scene, objectIds);
+      if (targets.length === 0) return 0;
+
+      const frame = resolveAlignFrame(reference, targets, {
+        canvas: { x: 0, y: 0, width: scene.canvas.width, height: scene.canvas.height },
+        keyObjectId,
+        parentBounds: parentBoundsFor(scene, objectIds, (object) => objectBounds(object))
+      });
+      const moves = alignMoves(movableTargets(targets, reference, keyObjectId), edge, frame);
+      return applyMoves(moves, `align ${edge}`);
+    },
+    distributeSelection: (objectIds, mode) => {
+      const { scene } = get();
+      const targets = alignTargetsFor(scene, objectIds);
+      return applyMoves(distributeMoves(targets, mode), `distribute ${mode}`);
+    },
+    setShapeAnchorKind: (objectId, indices, kind) => {
       const { scene } = get();
       const object = scene.objects.find((item) => item.id === objectId);
       if (!object || object.type !== "shape") return;
-      const selected = new Set(indices);
-      const path: BezierPath = {
-        ...object.path,
-        inTangents: object.path.inTangents.map((handle, index) => {
-          if (!selected.has(index)) return handle;
-          if (!smooth) return { x: 0, y: 0 };
-          const derived = smoothHandles(object.path, index);
-          return linked ? derived.inTangent : handle;
-        }),
-        outTangents: object.path.outTangents.map((handle, index) => {
-          if (!selected.has(index)) return handle;
-          if (!smooth) return { x: 0, y: 0 };
-          const derived = smoothHandles(object.path, index);
-          return derived.outTangent;
-        })
-      };
+      const path = indices.reduce(
+        (current, index) => setAnchorKind(current, index, kind),
+        object.path
+      );
       const updated = fitShapeToPath(object, path);
       commitScene({
         ...scene,
         objects: scene.objects.map((item) => item.id === objectId ? updated : item)
       });
+    },
+    toggleShapeAnchorKind: (objectId, index) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      if (!object || object.type !== "shape") return;
+      const updated = fitShapeToPath(object, toggleAnchorKind(object.path, index));
+      commitScene({
+        ...scene,
+        objects: scene.objects.map((item) => item.id === objectId ? updated : item)
+      });
+    },
+    // Add an anchor where the operator clicked *on the curve*, keeping the curve identical.
+    insertShapePointOnSegment: (objectId, segmentIndex, t) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      if (!object || object.type !== "shape") return -1;
+      if (segmentIndex < 0 || segmentIndex >= segmentCount(object.path)) return -1;
+      const { path, index } = insertAnchorOnSegment(object.path, segmentIndex, t);
+      const updated = fitShapeToPath(object, path);
+      commitScene({
+        ...scene,
+        objects: scene.objects.map((item) => item.id === objectId ? updated : item)
+      });
+      return index;
     },
     convertObjectToShape: (objectId) => {
       const { scene } = get();
@@ -786,13 +1188,148 @@ export const useEditorStore = create<EditorState>((set, get) => {
         return { ...mask, animation };
       });
     },
-    moveObjectInStack: (objectId, direction) =>
-      set((state) => ({
-        scene: touchScene({
-          ...state.scene,
-          objects: moveObjectInStack(state.scene.objects, objectId, direction)
-        })
-      })),
+    toggleShapePathKeyframe: (objectId, frame) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      if (!object || object.type !== "shape") return;
+      const existing = object.pathAnimation ?? [];
+      const nextKeys = existing.some((key) => key.frame === frame)
+        ? existing.filter((key) => key.frame !== frame)
+        : [...existing, { id: createSceneId("pathkey"), frame, value: structuredClone(object.path) }];
+      const updated: ShapeSceneObject = {
+        ...object,
+        pathAnimation: nextKeys.length > 0 ? nextKeys : undefined
+      };
+      commitScene({ ...scene, objects: scene.objects.map((item) => item.id === objectId ? updated : item) });
+    },
+    setShapePathAnimationEnabled: (objectId, enabled, frame) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      if (!object || object.type !== "shape") return;
+      const updated: ShapeSceneObject = {
+        ...object,
+        pathAnimation: enabled
+          ? [{ id: createSceneId("pathkey"), frame, value: structuredClone(object.path) }]
+          : undefined
+      };
+      commitScene({ ...scene, objects: scene.objects.map((item) => item.id === objectId ? updated : item) });
+    },
+    updateShapePathKeyframeFrame: (objectId, keyframeId, frame) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      if (!object || object.type !== "shape" || !object.pathAnimation) return;
+      const updated: ShapeSceneObject = {
+        ...object,
+        pathAnimation: object.pathAnimation.map((key) => key.id === keyframeId ? { ...key, frame } : key)
+      };
+      commitScene({ ...scene, objects: scene.objects.map((item) => item.id === objectId ? updated : item) });
+    },
+    deleteShapePathKeyframe: (objectId, keyframeId) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      if (!object || object.type !== "shape" || !object.pathAnimation) return;
+      const nextKeys = object.pathAnimation.filter((key) => key.id !== keyframeId);
+      const updated: ShapeSceneObject = {
+        ...object,
+        pathAnimation: nextKeys.length > 0 ? nextKeys : undefined
+      };
+      commitScene({ ...scene, objects: scene.objects.map((item) => item.id === objectId ? updated : item) });
+    },
+    toggleShapeTrimKeyframe: (objectId, channel, frame) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      if (!object || object.type !== "shape") return;
+      const currentValue = channel === "start" ? object.trimStart ?? 0 : channel === "end" ? object.trimEnd ?? 100 : object.trimOffset ?? 0;
+      const animation = { ...(object.trimAnimation ?? {}) };
+      const existing = animation[channel] ?? [];
+      const nextKeys = existing.some((key) => key.frame === frame)
+        ? existing.filter((key) => key.frame !== frame)
+        : [...existing, { id: createSceneId("trimkey"), frame, value: currentValue }];
+      animation[channel] = nextKeys;
+      const anyKeys = (animation.start?.length ?? 0) + (animation.end?.length ?? 0) + (animation.offset?.length ?? 0) > 0;
+      const updated: ShapeSceneObject = { ...object, trimAnimation: anyKeys ? animation : undefined };
+      commitScene({ ...scene, objects: scene.objects.map((item) => item.id === objectId ? updated : item) });
+    },
+    setShapeTrimAnimationEnabled: (objectId, channel, enabled, frame) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      if (!object || object.type !== "shape") return;
+      const currentValue = channel === "start" ? object.trimStart ?? 0 : channel === "end" ? object.trimEnd ?? 100 : object.trimOffset ?? 0;
+      const animation = { ...(object.trimAnimation ?? {}) };
+      animation[channel] = enabled ? [{ id: createSceneId("trimkey"), frame, value: currentValue }] : undefined;
+      const anyKeys = (animation.start?.length ?? 0) + (animation.end?.length ?? 0) + (animation.offset?.length ?? 0) > 0;
+      const updated: ShapeSceneObject = { ...object, trimAnimation: anyKeys ? animation : undefined };
+      commitScene({ ...scene, objects: scene.objects.map((item) => item.id === objectId ? updated : item) });
+    },
+    setShapeTrimValue: (objectId, channel, value, frame) => {
+      const { scene } = get();
+      const object = scene.objects.find((item) => item.id === objectId);
+      if (!object || object.type !== "shape") return;
+      const keys = object.trimAnimation?.[channel];
+      // A static channel writes the value; an animated one writes the key at the playhead,
+      // adding one when there is none — the same rule the transform stopwatches follow.
+      if (!keys?.length) {
+        const patch = channel === "start" ? { trimStart: value } : channel === "end" ? { trimEnd: value } : { trimOffset: value };
+        const updated: ShapeSceneObject = { ...object, ...patch };
+        commitScene({ ...scene, objects: scene.objects.map((item) => item.id === objectId ? updated : item) });
+        return;
+      }
+      const animation = { ...(object.trimAnimation ?? {}) };
+      const existing = keys.findIndex((key) => key.frame === frame);
+      animation[channel] = existing >= 0
+        ? keys.map((key, index) => index === existing ? { ...key, value } : key)
+        : [...keys, { id: createSceneId("trimkey"), frame, value }];
+      const updated: ShapeSceneObject = { ...object, trimAnimation: animation };
+      commitScene({ ...scene, objects: scene.objects.map((item) => item.id === objectId ? updated : item) });
+    },
+    moveObjectInStack: (objectId, direction) => {
+      const { scene } = get();
+      commitScene(
+        { ...scene, objects: moveObjectInStack(scene.objects, objectId, direction) },
+        direction === "front" ? "Bring to front" : direction === "back" ? "Send to back" : `Move ${direction}`
+      );
+    },
+    reorderObjectsInStack: (objectIds, targetId, placement) => {
+      const { scene } = get();
+      const objects = reorderObjectsInStack(scene.objects, objectIds, targetId, placement);
+      if (objects === scene.objects) return;
+      commitScene({ ...scene, objects }, objectIds.length > 1 ? `Reorder ${objectIds.length} objects` : "Reorder object");
+    },
+    applyObjectDrop: (objectIds, drop) => {
+      const ids = [...objectIds];
+      if (ids.length === 0 || !drop.targetId) return false;
+      const { beginHistory, commitHistory } = get();
+
+      // One transaction around the whole drop: a cross-parent move is three mutations, and three
+      // undo steps for one gesture is the same defect as none.
+      beginHistory(ids.length > 1 ? `Move ${ids.length} objects` : "Move object", "scene-manager");
+      try {
+        if (drop.kind === "into") {
+          for (const id of ids) get().setContainerChild(drop.targetId, id, true);
+          return true;
+        }
+        if (drop.kind === "into-layer") {
+          for (const id of ids) get().moveObjectToLayer(id, drop.targetId);
+          return true;
+        }
+        if (drop.kind !== "before" && drop.kind !== "after") return false;
+
+        // A sibling placement may also be a reparent: the target's parent becomes theirs. Detach and
+        // adopt first so the reorder that follows works inside the right container.
+        const parent = parentOfObject(get().scene.objects, drop.targetId);
+        for (const id of ids) {
+          const currentParent = parentOfObject(get().scene.objects, id);
+          if (currentParent?.id === parent?.id) continue;
+          if (currentParent) get().setContainerChild(currentParent.id, id, false);
+          if (parent) get().setContainerChild(parent.id, id, true);
+          else get().moveObjectToLayer(id, get().scene.objects.find((object) => object.id === drop.targetId)?.layerId ?? "main");
+        }
+        get().reorderObjectsInStack(ids, drop.targetId, drop.kind);
+        return true;
+      } finally {
+        commitHistory();
+      }
+    },
     updateObjectBindings: (objectId, bindings) =>
       set((state) => ({
         scene: touchScene({
@@ -850,68 +1387,73 @@ export const useEditorStore = create<EditorState>((set, get) => {
           }
         })
       })),
-    setPropertyAnimationEnabled: (objectId, property, enabled, frame) =>
-      set((state) => ({
-        scene: touchScene({
-          ...state.scene,
-          objects: state.scene.objects.map((object) => {
-            if (object.id !== objectId) return object;
-            const animation = { ...(object.animation ?? {}) };
+    // Enabling a stopwatch creates a key and disabling one destroys every key on the channel, so
+    // both are undoable through `commitScene` rather than a bare `set`.
+    setPropertyAnimationEnabled: (objectId, property, enabled, frame) => {
+      const { scene } = get();
+      commitScene({
+        ...scene,
+        objects: scene.objects.map((object) => {
+          if (object.id !== objectId) return object;
+          const animation = { ...(object.animation ?? {}) };
 
-            if (enabled) {
-              const key: PropertyKeyframe = {
+          if (enabled) {
+            const key: PropertyKeyframe = {
+              id: createSceneId("pkf"),
+              frame: clampTimelineFrame(frame, scene.timeline.durationFrames),
+              value: readAnimatableProperty(object, property),
+              easing: "linear"
+            };
+            animation[property] = { keys: [key] };
+          } else {
+            delete animation[property];
+          }
+
+          return {
+            ...object,
+            animation: Object.keys(animation).length > 0 ? animation : undefined
+          } as SceneObject;
+        })
+      });
+    },
+    // One undo step per call, and therefore one per *gesture* when the caller wraps its drag in
+    // `beginHistory`/`commitHistory` — which the Object Manager's scrub and the Timeline both do.
+    // Emitting this from a drag without a transaction would deposit an entry per pointer move.
+    setAnimatedPropertyValue: (objectId, property, value, frame) => {
+      const { scene } = get();
+      commitScene({
+        ...scene,
+        objects: scene.objects.map((object) => {
+          if (object.id !== objectId) return object;
+          const nextObject = { ...object, [property]: value } as SceneObject;
+          const channel = object.animation?.[property];
+
+          if (!channel) return nextObject;
+
+          const nextFrame = clampTimelineFrame(frame, scene.timeline.durationFrames);
+          const existing = channel.keys.find((key) => key.frame === nextFrame);
+          const nextKey: PropertyKeyframe = existing
+            ? { ...existing, value }
+            : {
                 id: createSceneId("pkf"),
-                frame: clampTimelineFrame(frame, state.scene.timeline.durationFrames),
-                value: readAnimatableProperty(object, property),
+                frame: nextFrame,
+                value,
                 easing: "linear"
               };
-              animation[property] = { keys: [key] };
-            } else {
-              delete animation[property];
+          const keys = existing
+            ? channel.keys.map((key) => key.id === existing.id ? nextKey : key)
+            : [...channel.keys, nextKey];
+
+          return {
+            ...nextObject,
+            animation: {
+              ...object.animation,
+              [property]: { keys: sortPropertyKeys(keys) }
             }
-
-            return {
-              ...object,
-              animation: Object.keys(animation).length > 0 ? animation : undefined
-            } as SceneObject;
-          })
+          } as SceneObject;
         })
-      })),
-    setAnimatedPropertyValue: (objectId, property, value, frame) =>
-      set((state) => ({
-        scene: touchScene({
-          ...state.scene,
-          objects: state.scene.objects.map((object) => {
-            if (object.id !== objectId) return object;
-            const nextObject = { ...object, [property]: value } as SceneObject;
-            const channel = object.animation?.[property];
-
-            if (!channel) return nextObject;
-
-            const nextFrame = clampTimelineFrame(frame, state.scene.timeline.durationFrames);
-            const existing = channel.keys.find((key) => key.frame === nextFrame);
-            const nextKey: PropertyKeyframe = existing
-              ? { ...existing, value }
-              : {
-                  id: createSceneId("pkf"),
-                  frame: nextFrame,
-                  value,
-                  easing: "linear"
-                };
-            const keys = existing
-              ? channel.keys.map((key) => key.id === existing.id ? nextKey : key)
-              : [...channel.keys, nextKey];
-
-            return {
-              ...nextObject,
-              animation: {
-                ...object.animation,
-                [property]: { keys: sortPropertyKeys(keys) }
-              }
-            } as SceneObject;
-          })
-        })
-      })),
+      });
+    },
     addPropertyKeyframe: (objectId, property, frame, value) =>
       set((state) => ({
         scene: touchScene({
@@ -1272,11 +1814,21 @@ export const useEditorStore = create<EditorState>((set, get) => {
         set({ materialActionError: "Select a compatible object or material face first." });
         return false;
       }
-      const materialId = normalizePrimitiveMaterialBinding(binding)?.materialId;
+      const normalizedBinding = normalizePrimitiveMaterialBinding(binding);
+      const materialId = normalizedBinding?.materialId;
       const material = materialId ? scene.materials.find((item) => item.materialId === materialId) : undefined;
       if (!material) {
         set({ materialActionError: "The material to bind could not be found." });
         return false;
+      }
+      if (normalizedBinding?.instanceId) {
+        const instance = (scene.materialInstances ?? []).find(
+          (item) => item.materialInstanceId === normalizedBinding.instanceId
+        );
+        if (!instance || instance.baseMaterialId !== material.materialId) {
+          set({ materialActionError: "The material instance is missing or belongs to a different base material." });
+          return false;
+        }
       }
       const faces = getBindableFaces(object);
       // Default to the primary surface when no explicit face is required/selected.
@@ -1310,7 +1862,24 @@ export const useEditorStore = create<EditorState>((set, get) => {
       // faces — the material add + all face slots land in ONE history entry.
       const { scene } = get();
       const object = scene.objects.find((item) => item.id === objectId);
-      const asset = scene.assets.find((item) => item.assetId === assetId);
+
+      /*
+       * The asset may be a file the scene has never referenced.
+       *
+       * The Material Manager lists the project's asset folders, so the first thing an author does
+       * with a logo they dropped in with Explorer is assign it — at which point the scene has to
+       * start carrying it, because publishing packages `scene.assets` and the renderers resolve
+       * textures from it.
+       *
+       * Adopted into the same `commitScene` below rather than through `adoptProjectAsset`, which
+       * commits on its own: one gesture must be one undo. Two entries would make Ctrl+Z leave the
+       * asset in the scene bound to nothing.
+       */
+      const assets = scene.assets.some((item) => item.assetId === assetId)
+        ? scene.assets
+        : adoptedProjectAssets(scene.assets, assetId);
+      const asset = assets.find((item) => item.assetId === assetId);
+
       if (!object) {
         set({ materialActionError: "Select a compatible object or material face first." });
         return false;
@@ -1352,6 +1921,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       for (const key of slotKeys) materialSlots[key] = material.materialId;
       commitScene({
         ...scene,
+        assets,
         materials: existing ? scene.materials : [...scene.materials, material],
         objects: scene.objects.map((item) => item.id === objectId ? ({ ...item, materialSlots } as SceneObject) : item)
       });
@@ -1415,6 +1985,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
         set({ materialActionError: message });
         return null;
       }
+    },
+    adoptProjectAsset: (reference) => {
+      const { scene } = get();
+      commitScene({ ...scene, assets: withProjectAsset(scene.assets, reference) });
+      set({ materialActionError: null });
+      return projectAssetId(reference.path);
     },
     relinkAsset: async (assetId, file) => {
       // Store new bytes under their content hash and keep the scene asset ID
@@ -1596,23 +2172,45 @@ export const useEditorStore = create<EditorState>((set, get) => {
         })
       });
     },
+    /**
+     * Move an object, **and everything inside it**, to a compositing band.
+     *
+     * The subtree travels because all three renderers sort `layerId` before depth: leaving a group's
+     * children in the old band would draw them detached from the group that positions them. This had
+     * no callers when it moved one object, which is why the defect never showed.
+     *
+     * It also detaches from any parent. A container's children follow it *because it moved*; an
+     * object dropped straight onto a band is being taken out of its group on purpose.
+     */
     moveObjectToLayer: (objectId, layerId) => {
       const targetLayer = normalizeLayerId(layerId);
       const { scene } = get();
       const target = scene.objects.find((object) => object.id === objectId);
 
-      if (!targetLayer || !target || target.layerId === targetLayer) {
+      if (!targetLayer || !target) {
         return;
       }
 
+      const parent = parentOfObject(scene.objects, objectId);
+      if (target.layerId === targetLayer && !parent) {
+        return;
+      }
+
+      const travelling = collectContainerSubtreeIds(scene.objects, objectId);
       commitScene({
         ...scene,
         objects: normalizeObjectStack(
-          scene.objects.map((object) =>
-            object.id === objectId ? ({ ...object, layerId: targetLayer } as SceneObject) : object
-          )
+          scene.objects.map((object) => {
+            const next = travelling.has(object.id)
+              ? ({ ...object, layerId: targetLayer } as SceneObject)
+              : object;
+            // Drop the moved id from whatever container claimed it.
+            return isContainerObject(next) && next.childIds.includes(objectId)
+              ? ({ ...next, childIds: next.childIds.filter((id) => id !== objectId) } as SceneObject)
+              : next;
+          })
         )
-      });
+      }, `Move ${target.name} to layer`);
     },
     createLayerForObject: (objectId) => {
       const { scene } = get();
@@ -1763,18 +2361,28 @@ export const useEditorStore = create<EditorState>((set, get) => {
         gradientPresets: (state.scene.gradientPresets ?? []).filter((preset) => preset.presetId !== presetId)
       });
     },
-    beginHistory: (label) => {
+    beginHistory: (label, scope) => {
       const state = get();
-      if (!state.historyTransaction) set({ historyTransaction: { label, scene: state.scene } });
+      if (!state.historyTransaction) {
+        set({ historyTransaction: { label, scope: scope ?? state.historyScope ?? undefined, scene: state.scene } });
+      }
     },
     commitHistory: () => {
       const state = get();
-      if (!state.historyTransaction) return;
+      const transaction = state.historyTransaction;
+      if (!transaction) return;
+      // A gesture that changed nothing deposits nothing: a click that never dragged must not leave
+      // an empty step for the author to undo twice.
+      const unchanged = state.scene === transaction.scene;
       set({
-        undoStack: state.scene === state.historyTransaction.scene
+        undoStack: unchanged
           ? state.undoStack
-          : appendSceneHistory(state.undoStack, state.historyTransaction.scene),
-        redoStack: state.scene === state.historyTransaction.scene ? state.redoStack : [],
+          : appendSceneHistory(state.undoStack, {
+              scene: transaction.scene,
+              label: transaction.label,
+              scope: transaction.scope
+            }),
+        redoStack: unchanged ? state.redoStack : [],
         historyTransaction: null
       });
     },
@@ -1786,12 +2394,26 @@ export const useEditorStore = create<EditorState>((set, get) => {
         historyTransaction: null
       });
     },
+    setHistoryScope: (historyScope) => {
+      if (get().historyScope !== historyScope) set({ historyScope });
+    },
     undo: () => {
       const state = get();
+      // A transaction that is still open means a gesture is in flight — a drag, a scrub, an
+      // unfinished pen path. "Undo" then means "abandon what I am doing", not "pop the stack": the
+      // gesture has not been committed, so popping would take back the *previous* change and leave
+      // the half-finished one standing.
+      if (state.historyTransaction) {
+        set({ scene: state.historyTransaction.scene, historyTransaction: null });
+        return;
+      }
       const snapshot = undoSceneHistory(state.scene, state.undoStack, state.redoStack);
       if (!snapshot) return;
       set({
         ...snapshot,
+        // A restored scene may not contain everything that was selected — undoing an insert is
+        // exactly that case — so the selection is pruned in the same update.
+        ...selectionAfterRemoval(state, snapshot.scene.objects),
         historyTransaction: null,
         materialActionError: null
       });
@@ -1802,6 +2424,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (!snapshot) return;
       set({
         ...snapshot,
+        ...selectionAfterRemoval(state, snapshot.scene.objects),
         historyTransaction: null,
         materialActionError: null
       });
@@ -1830,7 +2453,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       set({
         scene: touchScene(normalized),
         hasActiveScene: true,
-        selectedObjectId: selectedObject?.id ?? null,
+        ...selectionOf(selectedObject?.id ?? null),
         ...materialFaceSelection(selectedObject),
         dataJson: JSON.stringify(normalized.dataContext, null, 2),
         dataError: null,
@@ -1849,7 +2472,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       commitScene(next);
       set({
         hasActiveScene: true,
-        selectedObjectId: imported.objects[0]?.id ?? null,
+        ...selectionOf(imported.objects[0]?.id ?? null),
         dataJson: JSON.stringify(next.dataContext, null, 2),
         dataError: null,
         historyTransaction: null,
@@ -1862,7 +2485,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       set({
         scene,
         hasActiveScene: true,
-        selectedObjectId: null,
+        ...selectionOf(null),
         selectedFaceIndices: [],
         faceSelectionAnchor: null,
         dataJson: JSON.stringify(scene.dataContext, null, 2),
@@ -1878,7 +2501,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       set({
         scene,
         hasActiveScene: false,
-        selectedObjectId: null,
+        ...selectionOf(null),
         selectedFaceIndices: [],
         faceSelectionAnchor: null,
         dataJson: JSON.stringify(scene.dataContext, null, 2),
@@ -1893,14 +2516,133 @@ export const useEditorStore = create<EditorState>((set, get) => {
     }
   };
 
-  function commitScene(scene: SceneDocument) {
+  /**
+   * Write the scene as one history step.
+   *
+   * Inside an open transaction it deposits nothing — the transaction owns the step — which is what
+   * lets a drag emit a hundred of these and still be one undo. Outside one, the entry is credited to
+   * the ambient `historyScope`, so a change made in a panel is attributed without every mutation in
+   * this store having to name itself. `label` is optional: an unlabelled step still undoes, the UI
+   * just says "Undo" rather than "Undo Delete 3 objects".
+   */
+  function commitScene(scene: SceneDocument, label?: string) {
     const state = get();
     set({
       scene: touchScene(scene),
-      undoStack: state.historyTransaction ? state.undoStack : appendSceneHistory(state.undoStack, state.scene),
+      undoStack: state.historyTransaction
+        ? state.undoStack
+        : appendSceneHistory(state.undoStack, {
+            scene: state.scene,
+            label,
+            scope: state.historyScope ?? undefined
+          }),
       redoStack: state.historyTransaction ? state.redoStack : [],
       materialActionError: null
     });
+  }
+
+  /**
+   * The selection fields for "exactly this object, or nothing".
+   *
+   * A spread rather than a call to `applySelection`, because every caller is a scene-lifecycle
+   * `set` that also replaces the scene: reading the *old* scene to validate the id would be
+   * wrong, and issuing a second `set` would paint an intermediate frame.
+   */
+  function selectionOf(objectId: string | null): Partial<EditorState> {
+    return {
+      selectedObjectIds: objectId ? [objectId] : [],
+      selectedObjectId: objectId,
+      objectSelectionAnchorId: objectId
+    };
+  }
+
+  /**
+   * The one place the selection is written.
+   *
+   * Ids that no longer exist are dropped before normalising, so a caller working from a stale
+   * render cannot install a selection of ghosts. Order is **document order** — the order
+   * `scene.objects` is in — because that is the only order the store can know: what is on screen
+   * depends on a search and a collapse state that belong to the panel. Gesture callers pass their
+   * own visible rows to `reduceObjectSelection`, so ranges still mean what the author sees.
+   */
+  function applySelection(
+    ids: readonly string[],
+    options?: { active?: string | null; anchor?: string | null }
+  ): void {
+    const state = get();
+    const existing = new Set(state.scene.objects.map((object) => object.id));
+    const present = ids.filter((id) => existing.has(id));
+    const requestedActive = options?.active === undefined ? present.at(-1) ?? null : options.active;
+    const selection = normaliseObjectSelection(
+      {
+        selectedObjectIds: present,
+        activeObjectId: requestedActive,
+        anchorId: options?.anchor ?? requestedActive ?? null
+      },
+      { rows: state.scene.objects.map((object) => object.id) }
+    );
+
+    set({
+      selectedObjectIds: selection.selectedObjectIds,
+      selectedObjectId: selection.activeObjectId,
+      objectSelectionAnchorId: selection.anchorId,
+      // The face choice belongs to the active object, so it survives a selection that keeps the
+      // same active object — adding a sibling must not reset which face Materials is editing —
+      // and resets when the active object changes.
+      ...(selection.activeObjectId === state.selectedObjectId
+        ? {}
+        : materialFaceSelection(state.scene.objects.find((item) => item.id === selection.activeObjectId)))
+    });
+  }
+
+  /**
+   * The selection fields to merge into a `set` that removes objects.
+   *
+   * Called from inside the same update as the mutation, never from an effect: a reconciling effect
+   * paints one frame in which the alignment toolbar counts deleted ids. "Above" is measured within
+   * the selection itself, which is exactly "the one you had selected before this one".
+   */
+  function selectionAfterRemoval(state: EditorState, remaining: readonly SceneObject[]): Partial<EditorState> {
+    const existing = new Set(remaining.map((object) => object.id));
+    const current: ObjectSelection = {
+      selectedObjectIds: state.selectedObjectIds,
+      activeObjectId: state.selectedObjectId,
+      anchorId: state.objectSelectionAnchorId
+    };
+    const next = reconcileObjectSelection(current, existing, state.selectedObjectIds);
+
+    return {
+      selectedObjectIds: next.selectedObjectIds,
+      selectedObjectId: next.activeObjectId,
+      objectSelectionAnchorId: next.anchorId,
+      ...(next.activeObjectId === state.selectedObjectId
+        ? {}
+        : materialFaceSelection(remaining.find((item) => item.id === next.activeObjectId)))
+    };
+  }
+
+  /**
+   * Move a set of objects in one history entry.
+   *
+   * `x`/`y` is the anchor's world position and bounds translate rigidly with it, so a bounds
+   * delta *is* a position delta — no inverse transform, and correct for a rotated or scaled
+   * object. Rotation, scale, anchor, hierarchy, masks, animation channels and bindings are all
+   * untouched: alignment moves an object, it does not re-author it.
+   */
+  function applyMoves(moves: readonly { id: string; dx: number; dy: number }[], label: string): number {
+    if (moves.length === 0) return 0;
+    const { scene } = get();
+    const byId = new Map(moves.map((move) => [move.id, move]));
+
+    commitScene({
+      ...scene,
+      objects: scene.objects.map((object) => {
+        const move = byId.get(object.id);
+        return move ? { ...object, x: object.x + move.dx, y: object.y + move.dy } : object;
+      })
+    });
+    void label;
+    return moves.length;
   }
 
   function addMaskToObject(
@@ -1949,17 +2691,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
       zIndex: layerObjects.reduce((highest, item) => Math.max(highest, item.zIndex), -1) + 1
     } as SceneObject;
 
-    set({
-      scene: touchScene({
-        ...scene,
-        objects: normalizeObjectStack([...scene.objects, objectWithStack]),
-        activeCameraId: objectWithStack.type === "camera" && !scene.activeCameraId
-          ? objectWithStack.id
-          : scene.activeCameraId
-      }),
-      selectedObjectId: objectWithStack.id,
-      ...materialFaceSelection(objectWithStack)
-    });
+    // `commitScene` rather than a bare `set`, so inserting an object is undoable. Inside an open
+    // history transaction it deposits nothing, which is what keeps a gesture one undo step.
+    commitScene({
+      ...scene,
+      objects: normalizeObjectStack([...scene.objects, objectWithStack]),
+      activeCameraId: objectWithStack.type === "camera" && !scene.activeCameraId
+        ? objectWithStack.id
+        : scene.activeCameraId
+    }, `Add ${objectWithStack.name}`);
+    applySelection([objectWithStack.id]);
   }
 
   function duplicateObjectById(objectId: string) {
@@ -1989,22 +2730,20 @@ export const useEditorStore = create<EditorState>((set, get) => {
         objectId: duplicated.id
       }));
 
-    set({
-      scene: touchScene({
-        ...scene,
-        objects: normalizeObjectStack([...scene.objects, duplicated]),
-        timeline: {
-          ...scene.timeline,
-          keyframes: [...scene.timeline.keyframes, ...duplicatedKeyframes]
-        }
-      }),
-      selectedObjectId: duplicated.id,
-      ...materialFaceSelection(duplicated)
-    });
+    commitScene({
+      ...scene,
+      objects: normalizeObjectStack([...scene.objects, duplicated]),
+      timeline: {
+        ...scene.timeline,
+        keyframes: [...scene.timeline.keyframes, ...duplicatedKeyframes]
+      }
+    }, `Duplicate ${selected.name}`);
+    applySelection([duplicated.id]);
   }
 
   function deleteObjectById(objectId: string) {
-    const { scene, selectedObjectId } = get();
+    const state = get();
+    const { scene } = state;
     const nextActiveCameraId = scene.activeCameraId === objectId
       ? scene.objects.find((object) => object.id !== objectId && object.type === "camera" && object.visible)?.id
       : scene.activeCameraId;
@@ -2014,19 +2753,18 @@ export const useEditorStore = create<EditorState>((set, get) => {
         ? ({ ...object, childIds: object.childIds.filter((id) => id !== objectId) } as SceneObject)
         : object);
 
-    set({
-      scene: touchScene({
-        ...scene,
-        activeCameraId: nextActiveCameraId,
-        objects: normalizeObjectStack(remainingObjects),
-        timeline: {
-          ...scene.timeline,
-          keyframes: scene.timeline.keyframes.filter((keyframe) => keyframe.objectId !== objectId)
-        }
-      }),
-      selectedObjectId: selectedObjectId === objectId ? null : selectedObjectId,
-      ...(selectedObjectId === objectId ? { selectedFaceIndices: [], faceSelectionAnchor: null } : {})
-    });
+    // The selection is reconciled in the same update as the removal. An effect would paint one
+    // frame in which the toolbar and the alignment tools count an object that is already gone.
+    commitScene({
+      ...scene,
+      activeCameraId: nextActiveCameraId,
+      objects: normalizeObjectStack(remainingObjects),
+      timeline: {
+        ...scene.timeline,
+        keyframes: scene.timeline.keyframes.filter((keyframe) => keyframe.objectId !== objectId)
+      }
+    }, "Delete object");
+    set(selectionAfterRemoval(state, remainingObjects));
   }
 });
 
@@ -2215,9 +2953,25 @@ function fitShapeToPath(object: ShapeSceneObject, path: BezierPath): ShapeSceneO
         }))
       };
   const anchor = object.anchor ?? { x: 0, y: 0 };
+  let pathAnimation = object.pathAnimation;
+  if (pathAnimation !== undefined) {
+    const currentFrame = useUiStore.getState().currentFrame;
+    const existingIndex = pathAnimation.findIndex((key) => key.frame === currentFrame);
+    if (existingIndex >= 0) {
+      pathAnimation = pathAnimation.map((key, index) =>
+        index === existingIndex ? { ...key, value: structuredClone(shiftedPath) } : key
+      );
+    } else {
+      pathAnimation = [
+        ...pathAnimation,
+        { id: createSceneId("pathkey"), frame: currentFrame, value: structuredClone(shiftedPath) }
+      ];
+    }
+  }
   return {
     ...object,
     path: shiftedPath,
+    ...(pathAnimation !== undefined ? { pathAnimation } : {}),
     anchor: {
       x: anchor.x - offset.x,
       y: anchor.y - offset.y
@@ -2226,6 +2980,40 @@ function fitShapeToPath(object: ShapeSceneObject, path: BezierPath): ShapeSceneO
     height: Math.max(1, bounds.height)
   };
 }
+/** Keep the three parallel path arrays structurally valid at every store boundary. */
+function normalizeBezierPathArrays(path: BezierPath): BezierPath {
+  const tangentAt = (tangents: readonly Vec2[], index: number): Vec2 => tangents[index] ?? { x: 0, y: 0 };
+  return {
+    ...path,
+    vertices: path.vertices.map((vertex) => ({ ...vertex })),
+    inTangents: path.vertices.map((_, index) => ({ ...tangentAt(path.inTangents, index) })),
+    outTangents: path.vertices.map((_, index) => ({ ...tangentAt(path.outTangents, index) }))
+  };
+}
+
+/** A visible, editable inner ring rather than an empty subpath the author cannot grab. */
+function createInsetSubpath(primary: BezierPath): BezierPath {
+  const bounds = bezierPathBounds(primary);
+  const width = Math.max(20, bounds.width || 80);
+  const height = Math.max(20, bounds.height || 80);
+  const left = bounds.x + width * 0.3;
+  const right = bounds.x + width * 0.7;
+  const top = bounds.y + height * 0.3;
+  const bottom = bounds.y + height * 0.7;
+  const vertices = [
+    { x: left, y: top },
+    { x: left, y: bottom },
+    { x: right, y: bottom },
+    { x: right, y: top }
+  ];
+  return {
+    closed: true,
+    vertices,
+    inTangents: vertices.map(() => ({ x: 0, y: 0 })),
+    outTangents: vertices.map(() => ({ x: 0, y: 0 }))
+  };
+}
+
 
 function insertPathPoint(path: BezierPath, index: number, point: Vec2): BezierPath {
   const insert = <T,>(values: T[], value: T) => [
@@ -2251,12 +3039,38 @@ function filterPathPoints(path: BezierPath, include: (point: Vec2, index: number
   };
 }
 
+/**
+ * Apply a vertex/handle edit.
+ *
+ * A patch naming exactly one handle is a drag of that handle, so it goes through
+ * `moveAnchorHandle`, which mirrors the opposite handle when the anchor is a tangent point and
+ * leaves it alone when it is a corner or deliberately broken. Direct Selection used to write the
+ * handle straight in, which silently broke every smooth anchor the first time it was touched.
+ *
+ * A patch naming *both* handles is the pen's own create-drag, which has already decided what both
+ * sides are, so it is written through unchanged rather than mirrored a second time.
+ */
 function patchPathPoint(
   path: BezierPath,
   index: number,
   patch: { vertex?: Vec2; inTangent?: Vec2; outTangent?: Vec2 }
 ): BezierPath {
   if (index < 0 || index >= path.vertices.length) return path;
+
+  const onlyIn = patch.inTangent && !patch.outTangent;
+  const onlyOut = patch.outTangent && !patch.inTangent;
+  if (onlyIn || onlyOut) {
+    const moved = moveAnchorHandle(
+      path,
+      index,
+      onlyIn ? "in" : "out",
+      (onlyIn ? patch.inTangent : patch.outTangent)!
+    );
+    return patch.vertex
+      ? { ...moved, vertices: moved.vertices.map((v, i) => (i === index ? patch.vertex! : v)) }
+      : moved;
+  }
+
   const replace = (values: Vec2[], value: Vec2 | undefined) =>
     value ? values.map((current, currentIndex) => currentIndex === index ? value : current) : values;
   return {
@@ -2503,6 +3317,46 @@ function createMeshObject(meshKind: MeshSceneObject["meshKind"], patch: Partial<
     }
   };
 }
+/**
+ * Change the geometry contract without carrying fields or face bindings that the next kind cannot use.
+ *
+ * `main` survives every conversion because it is face zero for every mesh. Other bindings survive only
+ * when the new kind names the same face key. Imported-model and slab data are kind-local: retaining
+ * either on an unrelated primitive makes a later conversion resurrect stale geometry.
+ */
+function convertMeshObjectKind(object: MeshSceneObject, next: MeshPrimitiveKind): MeshSceneObject {
+  const {
+    src,
+    modelAssetId,
+    materialElements,
+    clipName,
+    clipIndex,
+    timeScale,
+    frameOffset,
+    animationLoop,
+    slab,
+    ...base
+  } = object;
+  const modelMetadata = next === "model" && object.meshKind === "model"
+    ? { src, modelAssetId, materialElements, clipName, clipIndex, timeScale, frameOffset, animationLoop }
+    : {};
+  const candidate: MeshSceneObject = {
+    ...base,
+    type: "mesh",
+    meshKind: next,
+    materialSlots: {},
+    ...(next === "slab"
+      ? { slab: normalizeSlabProperties(object.meshKind === "slab" ? slab : undefined) }
+      : {}),
+    ...modelMetadata
+  };
+  const validSlots = new Set(getBindableFaces(candidate).map((face) => face.slotKey));
+  const materialSlots = Object.fromEntries(
+    Object.entries(object.materialSlots).filter(([slotKey]) => validSlots.has(slotKey))
+  );
+  return { ...candidate, materialSlots };
+}
+
 
 function createLightObject(lightKind: LightSceneObject["lightKind"], patch: Partial<LightSceneObject> = {}): LightSceneObject {
   return {
@@ -2683,6 +3537,64 @@ function normalizedObjectStrokeStyle(object: SceneObject): ColorValue {
   return normalized;
 }
 
+/**
+ * Bring every numeric field of a patch inside what the renderers accept, before it reaches the scene.
+ *
+ * At the mutation boundary rather than in each control, because a control's `min`/`max` is a browser
+ * hint: it blocks the spinner, not a paste, a data binding or a scrub, and the store never consulted it.
+ * Typing 500 into a spot light's cone used to save 500, show 500 and draw 179 — three numbers for one
+ * property. Clamping here means the saved value is the drawn value for every path that writes.
+ *
+ * Per-property ranges come from the shared table. Two rules cannot be expressed there: a camera's
+ * clipping planes and a slab's bevels constrain *each other*, so they need the object's current values
+ * and not just the patch — which is why this takes the object. The version that took only the type
+ * carried a comment claiming the planes were enforced, guarding a branch that returned the same value
+ * either way; the bevels were never clamped at all, so a 500-unit bevel on a 100-deep slab saved 500
+ * and drew 50.
+ */
+function clampPatch(object: SceneObject, patch: Partial<SceneObject>): Partial<SceneObject> {
+  const objectType = object.type;
+  const clamped: Record<string, unknown> = { ...patch };
+  let changed = false;
+  for (const [property, value] of Object.entries(clamped)) {
+    if (typeof value !== "number") continue;
+    const next = normalizePropertyValue(objectType, property, value);
+    if (next !== undefined && next !== value) {
+      clamped[property] = next;
+      changed = true;
+    }
+  }
+  const current = object as unknown as Record<string, unknown>;
+  const numberOf = (property: string, fallback: number) => {
+    const value = property in clamped ? clamped[property] : current[property];
+    return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  };
+  if (objectType === "camera" && ("near" in clamped || "far" in clamped)) {
+    const planes = normalizeCameraPlanes(numberOf("near", 1), numberOf("far", 20000));
+    if (planes.near !== numberOf("near", 1) || planes.far !== numberOf("far", 20000)) {
+      clamped.near = planes.near;
+      clamped.far = planes.far;
+      changed = true;
+    }
+  }
+  if (objectType === "mesh" && object.meshKind === "slab"
+    && ("slab" in clamped || "depth" in clamped || "width" in clamped || "height" in clamped)) {
+    const slab = normalizeSlabProperties(
+      ("slab" in clamped ? clamped.slab : object.slab) as SlabPropertiesInput | undefined
+    );
+    const bevels = normalizeSlabBevels(
+      { width: numberOf("width", 0), height: numberOf("height", 0), depth: numberOf("depth", 0.01) },
+      slab.frontBevel,
+      slab.backBevel
+    );
+    if (bevels.front.size !== slab.frontBevel.size || bevels.front.depth !== slab.frontBevel.depth
+      || bevels.back.size !== slab.backBevel.size || bevels.back.depth !== slab.backBevel.depth) {
+      clamped.slab = { ...slab, frontBevel: bevels.front, backBevel: bevels.back };
+      changed = true;
+    }
+  }
+  return changed ? (clamped as Partial<SceneObject>) : patch;
+}
 function normalizeScene(scene: SceneDocument): SceneDocument {
   const builtInShaderDefinitions = builtInShaders.map((shader) => shader.definition);
   const builtInShaderIds = new Set(builtInShaderDefinitions.map((shader) => shader.shaderId));
@@ -2882,30 +3794,25 @@ function materialFaceSelection(object: SceneObject | undefined): Pick<
   };
 }
 
-function isContainerObject(object: SceneObject): object is LayerSceneObject | GroupSceneObject {
-  return object.type === "layer" || object.type === "group";
+/**
+ * The alignable members of a selection.
+ *
+ * Hidden objects are dropped because aligning something the operator cannot see is a change they
+ * cannot check. Locked ones are kept but flagged: a locked graphic is exactly the thing you want
+ * others to line up *to*, so it belongs in the bounding box while staying still.
+ */
+function alignTargetsFor(scene: SceneDocument, objectIds: readonly string[]): AlignTarget[] {
+  const wanted = new Set(objectIds);
+  const byId = new Map(scene.objects.map((object) => [object.id, object]));
+  return scene.objects
+    .filter((object) => wanted.has(object.id) && object.visible)
+    .map((object) => ({
+      id: object.id,
+      bounds: objectBoundsInScene(object, byId),
+      locked: object.locked
+    }));
 }
 
-function isAllowedContainerChild(container: LayerSceneObject | GroupSceneObject, child: SceneObject): boolean {
-  if (container.type === "group") {
-    return true;
-  }
-  return container.layerKind === "camera" ? child.type === "camera" : child.type !== "camera";
-}
-
-function containerContains(objects: SceneObject[], containerId: string, soughtId: string): boolean {
-  const byId = new Map(objects.map((object) => [object.id, object]));
-  const visited = new Set<string>();
-  const visit = (id: string): boolean => {
-    if (id === soughtId) return true;
-    if (visited.has(id)) return false;
-    visited.add(id);
-    const object = byId.get(id);
-    if (!object || !isContainerObject(object)) return false;
-    return object.childIds.some(visit);
-  };
-  return visit(containerId);
-}
 
 function localizeSceneObjectTransform(
   worldObject: SceneObject,
@@ -2965,19 +3872,6 @@ function safeHierarchyScale(value: number): number {
   return value < 0 ? -0.0001 : 0.0001;
 }
 
-function collectContainerSubtreeIds(objects: SceneObject[], rootId: string): Set<string> {
-  const byId = new Map(objects.map((object) => [object.id, object]));
-  const collected = new Set<string>();
-  const visit = (id: string): void => {
-    if (collected.has(id)) return;
-    collected.add(id);
-    const object = byId.get(id);
-    if (!object || !isContainerObject(object)) return;
-    object.childIds.forEach(visit);
-  };
-  visit(rootId);
-  return collected;
-}
 
 function createDefaultTimeline(): SceneTimeline {
   return {
@@ -3042,6 +3936,27 @@ function createObjectSnapshot(object: SceneObject): SceneKeyframe["properties"] 
   return snapshot;
 }
 
+/**
+ * Name a patch for the history, so "Undo" can say what it takes back.
+ *
+ * Only patches an author would recognise as a distinct action are named; anything else falls back to
+ * a generic label rather than reciting field names, because "Undo x, y, width, height" is noise. An
+ * unnamed step still undoes — the UI just says "Undo".
+ */
+function describeObjectPatch(patch: Partial<SceneObject>): string {
+  const keys = Object.keys(patch);
+  if (keys.length === 1) {
+    if (keys[0] === "visible") return "visible" in patch && patch.visible ? "Show object" : "Hide object";
+    if (keys[0] === "locked") return "locked" in patch && patch.locked ? "Lock object" : "Unlock object";
+    if (keys[0] === "name") return "Rename object";
+    if (keys[0] === "layerId") return "Move object to layer";
+  }
+  if (keys.length > 0 && keys.every((key) => key === "x" || key === "y")) return "Move object";
+  if (keys.length > 0 && keys.every((key) => key.startsWith("scale"))) return "Scale object";
+  if (keys.length > 0 && keys.every((key) => key.startsWith("rotation"))) return "Rotate object";
+  return "Edit object";
+}
+
 function touchScene(scene: SceneDocument): SceneDocument {
   return {
     ...scene,
@@ -3076,15 +3991,6 @@ function sortPropertyKeys(keys: PropertyKeyframe[]): PropertyKeyframe[] {
       ? left.id.localeCompare(right.id)
       : left.frame - right.frame
   );
-}
-
-/** Layers are identified by kebab-case slugs on objects ("main", "layer-2"). */
-function normalizeLayerId(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
 }
 
 function moveObjectInStack(
@@ -3130,6 +4036,43 @@ function moveObjectInStack(
   const layerObjectMap = new Map(renumberedLayerObjects.map((object) => [object.id, object]));
 
   return normalizeObjectStack(objects.map((object) => layerObjectMap.get(object.id) ?? object));
+}
+
+/**
+ * Splice objects to sit immediately before or after a sibling, within their compositing band.
+ *
+ * Works on the flat render order of the band — the same list `moveObjectInStack` walks — and finishes
+ * through `normalizeObjectStack`, so `zIndex` comes out contiguous and every renderer sorts it the
+ * same way. The moved objects keep their relative order rather than the order they were clicked in:
+ * a multi-object drag should look like the run you picked up, not a reshuffle of it.
+ *
+ * `before`/`after` are in **render order**, so `before` is the *lower* `zIndex`. The Object Manager
+ * draws that list reversed, so what an author sees as "above" arrives here as `after`. The panel owns
+ * that translation; doing it in both places is how it ends up applied twice.
+ */
+function reorderObjectsInStack(
+  objects: SceneObject[],
+  objectIds: readonly string[],
+  targetId: string,
+  placement: "before" | "after"
+): SceneObject[] {
+  const target = objects.find((object) => object.id === targetId);
+  const moving = new Set(objectIds);
+  if (!target || moving.has(targetId)) return objects;
+
+  const band = sortObjectsForRender(objects.filter((object) => object.layerId === target.layerId));
+  const held = band.filter((object) => moving.has(object.id));
+  if (held.length === 0) return objects;
+
+  const remaining = band.filter((object) => !moving.has(object.id));
+  const targetIndex = remaining.findIndex((object) => object.id === targetId);
+  if (targetIndex === -1) return objects;
+
+  const insertAt = placement === "before" ? targetIndex : targetIndex + 1;
+  const next = [...remaining.slice(0, insertAt), ...held, ...remaining.slice(insertAt)];
+  const renumbered = new Map(next.map((object, index) => [object.id, { ...object, zIndex: index } as SceneObject]));
+
+  return normalizeObjectStack(objects.map((object) => renumbered.get(object.id) ?? object));
 }
 
 function normalizeObjectStack(objects: SceneObject[]): SceneObject[] {

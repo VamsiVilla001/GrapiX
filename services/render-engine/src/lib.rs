@@ -46,10 +46,17 @@
 //!   silently substituted.
 //! - `hardware_certified` is never set from a compile-time feature flag.
 
+pub mod ae_ingress;
+#[cfg(windows)]
+pub mod ae_ring_source;
+pub mod ae_runtime_client;
+pub mod ae_schedule;
 pub mod animation;
+pub mod auth;
 pub mod assets;
 pub mod capabilities;
 pub mod config;
+pub mod easing;
 pub mod editor_view;
 pub mod engine;
 pub mod ipc;

@@ -1,0 +1,70 @@
+{
+  "phase": "AE-F0",
+  "step": "Independent reference frames (step one of the card: produce the oracle before writing the code it judges)",
+  "recordedAt": "2026-08-12T03:05:00+05:30",
+  "verdict": "Reference export works and is independent. Two traps found before any checkout code existed, and one prerequisite is now explicit: this fixture carries no renderable pixels.",
+  "how": {
+    "tool": "C:/Program Files/Adobe/Adobe After Effects 2026/Support Files/aerender.exe (26.3x87)",
+    "why": "AE-F0 requires references that are not captured through the path under test. aerender drives After Effects' own Render Queue in a separate process, so a channel-swizzle or premultiplication defect in the adapter cannot bless its own baseline.",
+    "settings": {
+      "renderSettingsTemplate": "Best Settings",
+      "outputModuleTemplate": "TIFF Sequence with Alpha"
+    },
+    "adapterPresent": "The adapter is resident in the render process because it lives in the Plug-ins folder, but it issues no command during an export and contributes no pixels.",
+    "script": "ae-plugin/runtime-adapter/references/export-references.sh",
+    "digestTool": "ae-plugin/runtime-adapter/references/pixel-digest.mjs"
+  },
+  "referenceFormat": {
+    "dimensions": "1920x1080",
+    "bitsPerSample": [
+      8,
+      8,
+      8,
+      8
+    ],
+    "samplesPerPixel": 4,
+    "compression": "1 (none)",
+    "photometricInterpretation": "2 (RGB)",
+    "planarConfiguration": "1 (chunky)",
+    "payloadBytes": 8294400,
+    "software": "Adobe After Effects 2026 (Windows)",
+    "channelOrderInFile": "RGBA, chunky — note the consumer contract is BGRA8, so the comparison must swizzle deliberately and say so, never incidentally."
+  },
+  "findings": [
+    {
+      "id": "R1",
+      "finding": "A file-level SHA-256 cannot serve as the pixel oracle. Three renders of one unchanged frame produced three different file digests over byte-identical pixel payloads, because After Effects embeds per-render XMP metadata (14,821 bytes of XMP plus an IPTC block and a timestamp tag).",
+      "evidence": {
+        "fileSha256": [
+          "011212cda3da5be00050d6558534938cd8581a4789eaa9ba7bfe95ebfe47b0ba",
+          "abe008132fc7096621b50c7c61b65332d6f470fecdea08ecd2503398b5731864",
+          "043d0130235776049c5773b90c27fb843de6cab811a5c9d555d087bfab54a4c8"
+        ],
+        "pixelSha256": "788ae0147bdf979a6575938ca2d7d440 (identical across all three)"
+      },
+      "consequence": "AE-F0's 'byte-for-byte equal' gate is defined over the decoded strip payload. A file digest would have reported a pixel defect that does not exist, and a reviewer would have chased a timestamp."
+    },
+    {
+      "id": "R2",
+      "finding": "After Effects does not declare its alpha association in the TIFF it writes: ExtraSamples is present with value 0, 'unspecified', rather than 1 (associated/premultiplied) or 2 (unassociated/straight).",
+      "consequence": "Alpha semantics cannot be read from the container. They must be established from pixels — a premultiplied buffer can never carry a colour channel above its alpha — which means the fixture corpus has to contain partially transparent pixels for the question to be answerable at all."
+    },
+    {
+      "id": "R3",
+      "finding": "The fixture Shared/adobe-common-schema/tests/fixtures/aep/Layer-01.aep renders nothing. Frames 0, 1 and 2 of 'Comp 01' are 100% transparent with zero colour: one distinct alpha value across all 2,073,600 pixels, no pixel with colour where alpha is zero.",
+      "why": "It is a layer-flag parser fixture. Its seventeen layers are named after AE layer flags (Transformations Collapsed, Effects Enabled, Motion Blur, Locked, Shy, Adjustment, 3D, Solo, Guide, ... Default) and carry no renderable source. It was authored to exercise the .aep reader, not the renderer.",
+      "consequence": "It is a valid target for the geometry and zero-alpha cases and useless for everything else. Channel order and premultiplication cannot be proven against an all-zero payload, so AE-F0's alpha gate depends on the BO0a fixture corpus — opaque, zero-alpha, hard edge, antialiased edge, 50% gradient, coloured translucent shadow, premultiplied-black edge — which the phase plan already lists as a prerequisite."
+    }
+  ],
+  "provenSoFar": [
+    "aerender renders a named composition headlessly from a project path with pinned templates, exit code 0.",
+    "The reference is uncompressed 8-bit RGBA at the composition's authored 1920x1080, one strip, payload size exactly width x height x samples.",
+    "The pixel payload is stable across repeat renders of an unchanged frame; only container metadata moves."
+  ],
+  "notProvenYet": [
+    "Channel order agreement between the reference and a checked-out frame — needs non-zero colour.",
+    "Premultiplied versus straight alpha — needs partially transparent pixels.",
+    "16-bit and 32-bit float world types, and non-integer frame rates.",
+    "Any adapter-side checkout at all: AEGP_RenderAndCheckoutFrame has not been called yet."
+  ]
+}

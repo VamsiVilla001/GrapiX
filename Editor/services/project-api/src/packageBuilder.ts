@@ -10,7 +10,9 @@ import {
 import { createHash } from "node:crypto";
 import path from "node:path";
 import JSZip from "jszip";
+import { readFile } from "node:fs/promises";
 import { readStoredAssetContent } from "./storage.js";
+import { resolveProjectAssetPath } from "./projectAssets.js";
 
 export interface BuiltScenePackage {
   buffer: Buffer;
@@ -106,7 +108,7 @@ export async function buildScenePackage(scene: SceneDocument): Promise<BuiltScen
   return {
     buffer,
     preflight,
-    fileName: `${slugify(scene.name)}.gfxpkg`,
+    fileName: `${slugify(scene.name)}.gpxpkg`,
     manifest,
     checksums
   };
@@ -191,6 +193,25 @@ async function resolveAssetBytes(asset: SceneDocument["assets"][number]): Promis
   const dataUrl = dataUrlToBytes(asset.source);
   if (dataUrl) return dataUrl;
 
+  /*
+   * A file in the project's own asset folders.
+   *
+   * These have no record in the content-addressed store — the library is the directory, and the
+   * bytes were never imported through it — so the lookup below would report "no locally stored
+   * bytes" for an asset the operator can see in the panel and in Explorer. Packaging reads the
+   * file where it lives.
+   *
+   * No checksum comparison against the document. A project asset is deliberately replaceable in
+   * place: the point of path identity is that dropping a new `lower-third-bg.png` over the old one
+   * keeps every binding, so a package must carry whatever is in the folder now. The manifest still
+   * records the hash of exactly the bytes it packaged, which is what Playout verifies.
+   */
+  const projectPath = asset.sourcePath ?? inferProjectAssetPath(asset.source);
+  if (projectPath) {
+    const resolved = await resolveProjectAssetPath(projectPath);
+    if (resolved) return readFile(resolved);
+  }
+
   const storageAssetId = asset.storageAssetId ?? inferStorageAssetId(asset.source) ?? asset.assetId;
   const stored = await readStoredAssetContent(storageAssetId);
   if (!stored) {
@@ -209,6 +230,21 @@ async function resolveAssetBytes(asset: SceneDocument["assets"][number]): Promis
 function inferStorageAssetId(source: string): string | undefined {
   const match = source.match(/\/api\/assets\/([a-zA-Z0-9_-]+)\/content(?:[?#].*)?$/);
   return match?.[1];
+}
+
+/**
+ * The project-relative path inside a project asset content URL, if the source is one.
+ *
+ * The path is read out of the query string rather than pattern-matched out of the URL, because it
+ * legitimately contains separators and spaces — `Assets/Images/Show A/bg.png` — and a regular
+ * expression that tried to accept those would also accept the traversal forms
+ * `resolveProjectAssetPath` exists to refuse. Parsing and then re-checking is the safe order.
+ */
+function inferProjectAssetPath(source: string): string | undefined {
+  const query = source.indexOf("?");
+  if (query < 0) return undefined;
+  if (!source.slice(0, query).endsWith("/api/project/assets/content")) return undefined;
+  return new URLSearchParams(source.slice(query + 1)).get("path") ?? undefined;
 }
 
 function packagedAssetPath(kind: AssetKind, assetId: string, name: string, mimeType?: string): string {

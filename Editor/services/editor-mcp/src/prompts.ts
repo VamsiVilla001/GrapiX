@@ -141,7 +141,7 @@ export function registerPrompts(server: McpServer, context: PromptContext): void
             "",
             "Then give me a go / no-go with the specific blocking items. Do not publish yet.",
             "",
-            "Remember what publishing is and is not: it builds a checksum-addressed .gfxpkg. It does",
+            "Remember what publishing is and is not: it builds a checksum-addressed .gpxpkg. It does",
             "not put anything on air. Playout stages, validates and promotes the package, and an",
             "operator takes it."
           ].join("\n")

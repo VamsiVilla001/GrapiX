@@ -5,6 +5,7 @@ import {
   CircleDashed,
   Crosshair,
   Edit3,
+  Feather,
   MousePointer2,
   Move,
   PenLine,
@@ -52,6 +53,7 @@ const SINGLE_TOOLS: ToolDescriptor[] = [
   { id: "scale", name: "Scale Tool", icon: <Scaling size={15} /> },
   { id: "pivot", name: "Pivot Tool", icon: <Crosshair size={15} /> },
   { id: "pen", name: "Pen Tool", icon: <PenLine size={15} /> },
+  { id: "feather", name: "Mask Feather Tool", icon: <Feather size={15} /> },
   { id: "brush", name: "Brush Tool", icon: <Brush size={15} /> },
   { id: "eyedropper", name: "Eyedropper Tool", icon: <Pipette size={15} /> }
 ];
@@ -83,7 +85,8 @@ export function DesignToolToolbar() {
   return (
     <div className="design-tools" ref={rootRef}>
       <div className="tool-toggle" role="toolbar" aria-label="Drawing and editing tools">
-        {SINGLE_TOOLS.slice(0, 6).map((tool) => (
+        {/* Through the Feather tool, which belongs beside the pen: both edit a path's edge. */}
+        {SINGLE_TOOLS.slice(0, 7).map((tool) => (
           <SingleToolButton active={activeTool === tool.id} key={tool.id} tool={tool} onSelect={setActiveTool} />
         ))}
         <GroupedToolButton
@@ -102,7 +105,7 @@ export function DesignToolToolbar() {
           onOpen={() => setOpenGroup((current) => current === "type" ? null : "type")}
           onSelect={(tool) => { setActiveTool(tool); setOpenGroup(null); }}
         />
-        {SINGLE_TOOLS.slice(6).map((tool) => (
+        {SINGLE_TOOLS.slice(7).map((tool) => (
           <SingleToolButton active={activeTool === tool.id} key={tool.id} tool={tool} onSelect={setActiveTool} />
         ))}
         <GroupedToolButton
@@ -260,14 +263,16 @@ export function ToolOptionsBar() {
   const commitHistory = useEditorStore((state) => state.commitHistory);
   const addShapePoint = useEditorStore((state) => state.addShapePoint);
   const removeShapePoints = useEditorStore((state) => state.removeShapePoints);
-  const setShapePointsSmooth = useEditorStore((state) => state.setShapePointsSmooth);
+  const setShapeAnchorKind = useEditorStore((state) => state.setShapeAnchorKind);
   const convertObjectToShape = useEditorStore((state) => state.convertObjectToShape);
   const closeShapePath = useEditorStore((state) => state.closeShapePath);
   const duplicateObject = useEditorStore((state) => state.duplicateObject);
   const deleteObject = useEditorStore((state) => state.deleteObject);
-  const setSelectedPaths = useUiStore((state) => state.setSelectedPaths);
   const moveObjectInStack = useEditorStore((state) => state.moveObjectInStack);
-  const selectedPaths = useUiStore((state) => state.selectedPathObjectIds);
+  // The one selection. It used to read `uiStore.selectedPathObjectIds`, which the label still
+  // called "paths" even though the marquee filled it with any object.
+  const selectedPaths = useEditorStore((state) => state.selectedObjectIds);
+  const selectObject = useEditorStore((state) => state.selectObject);
   const selectedAnchors = useUiStore((state) => state.selectedAnchorIndices);
   const setSelectedAnchors = useUiStore((state) => state.setSelectedAnchors);
 
@@ -348,7 +353,9 @@ export function ToolOptionsBar() {
       <strong>{toolName(activeTool)}</strong>
       {activeTool === "path-selection" ? (
         <>
-          <span>{selectedPaths.length || (selected ? 1 : 0)} paths</span>
+          {/* "selected", not "paths": the marquee fills this with any object, and it is now the
+              same selection the Object Manager shows. */}
+          <span>{selectedPaths.length || (selected ? 1 : 0)} selected</span>
           <button disabled={selectedPaths.length < 2} onClick={() => alignPaths("x")} type="button">Align left</button>
           <button disabled={selectedPaths.length < 2} onClick={() => alignPaths("y")} type="button">Align top</button>
           <button disabled={selectedPaths.length < 3} onClick={distributePaths} type="button">Distribute</button>
@@ -361,7 +368,7 @@ export function ToolOptionsBar() {
             beginHistory("delete paths");
             selectedPaths.forEach(deleteObject);
             commitHistory();
-            setSelectedPaths([]);
+            selectObject(null);
           }} type="button">Delete</button>
           <button disabled={!selectedObjectId} onClick={() => selectedObjectId && moveObjectInStack(selectedObjectId, "front")} type="button">Bring to front</button>
           <button disabled={!selectedObjectId} onClick={() => selectedObjectId && moveObjectInStack(selectedObjectId, "back")} type="button">Send to back</button>
@@ -381,18 +388,33 @@ export function ToolOptionsBar() {
             removeShapePoints(selected.id, selectedAnchors);
             setSelectedAnchors([]);
           }} type="button">Delete point</button>
-          <button disabled={selected?.type !== "shape" || selectedAnchors.length === 0} onClick={() => {
-            if (selected?.type === "shape") setShapePointsSmooth(selected.id, selectedAnchors, false);
-          }} type="button">Corner</button>
-          <button disabled={selected?.type !== "shape" || selectedAnchors.length === 0} onClick={() => {
-            if (selected?.type === "shape") setShapePointsSmooth(selected.id, selectedAnchors, true, true);
-          }} type="button">Smooth</button>
-          <button disabled={selected?.type !== "shape" || selectedAnchors.length === 0} onClick={() => {
-            if (selected?.type === "shape") setShapePointsSmooth(selected.id, selectedAnchors, true, true);
-          }} type="button">Link handles</button>
-          <button disabled={selected?.type !== "shape" || selectedAnchors.length === 0} onClick={() => {
-            if (selected?.type === "shape") setShapePointsSmooth(selected.id, selectedAnchors, true, false);
-          }} type="button">Break handles</button>
+          {/*
+            Corner and Smooth are the whole conversion. "Link handles" used to issue the identical
+            call to Smooth — a button that could not do anything Smooth had not already done — and
+            "Break handles" rewrote the outgoing handle from the anchor's neighbours, which changed
+            the curve rather than breaking a link. Handle linkage is now read from the anchor's own
+            geometry as it is dragged, so there is nothing left for a button to toggle.
+          */}
+          <button
+            disabled={selected?.type !== "shape" || selectedAnchors.length === 0}
+            onClick={() => {
+              if (selected?.type === "shape") setShapeAnchorKind(selected.id, selectedAnchors, "corner");
+            }}
+            title="Remove both handles so the path turns sharply through this anchor"
+            type="button"
+          >
+            Corner
+          </button>
+          <button
+            disabled={selected?.type !== "shape" || selectedAnchors.length === 0}
+            onClick={() => {
+              if (selected?.type === "shape") setShapeAnchorKind(selected.id, selectedAnchors, "smooth");
+            }}
+            title="Give the anchor opposed handles so the curve runs smoothly through it; dragging one handle then moves the other"
+            type="button"
+          >
+            Smooth
+          </button>
           <button disabled={selected?.type !== "shape" || selected.path.closed} onClick={() => {
             beginHistory("close path");
             if (selected?.type === "shape") closeShapePath(selected.id);
@@ -463,6 +485,12 @@ export function ToolOptionsBar() {
             <i style={{ background: PEN_SHAPE_STROKE, opacity: penOptions.strokeEnabled ? 1 : 0.25 }} />
           </span>
           <span>{penTarget === "mask" ? "Drawing a mask" : "Drawing a shape"}</span>
+          {penTarget === "shape" && selected?.type === "shape" ? (
+            <span className="tool-option-hint">
+              On the selected path: click the line to add a point, an anchor to remove it,
+              Alt-click an anchor to switch corner ↔ tangent.
+            </span>
+          ) : null}
           {penTarget === "shape" && !penOptions.fillEnabled && !penOptions.strokeEnabled ? (
             <span className="tool-option-warning">
               With both off the path is invisible; it is still selectable in Object Manager.
@@ -470,6 +498,7 @@ export function ToolOptionsBar() {
           ) : null}
         </>
       ) : null}
+      {activeTool === "feather" ? <FeatherToolOptions /> : null}
       {activeTool === "brush" ? (
         <>
           <label>Mode <select value={brush.mode} onChange={(event) => updateBrush({ mode: event.target.value as typeof brush.mode })}>
@@ -540,6 +569,75 @@ export function ToolOptionsBar() {
         </>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Feather and expansion for the mask under the Feather tool.
+ *
+ * It edits the mask the operator has selected in the Inspector, falling back to the object's
+ * first mask, because a tool that silently picked a different mask than the one highlighted would
+ * be worse than one that does nothing.
+ */
+function FeatherToolOptions() {
+  const options = useUiStore((state) => state.featherOptions);
+  const updateOptions = useUiStore((state) => state.updateFeatherOptions);
+  const selectedMaskId = useUiStore((state) => state.selectedMaskId);
+  const setSelectedMaskId = useUiStore((state) => state.setSelectedMaskId);
+  const selected = useEditorStore((state) => state.scene.objects.find((object) => object.id === state.selectedObjectId));
+  const updateMask = useEditorStore((state) => state.updateMask);
+  const addRectMask = useEditorStore((state) => state.addRectMask);
+
+  const masks = selected?.masks ?? [];
+  const mask = masks.find((item) => item.id === selectedMaskId) ?? masks[0] ?? null;
+
+  if (!selected) return <span>Select an object to feather its mask.</span>;
+
+  if (!mask) {
+    return (
+      <>
+        <span>{selected.name} has no mask.</span>
+        <button onClick={() => setSelectedMaskId(addRectMask(selected.id))} type="button">
+          Add a rectangular mask
+        </button>
+      </>
+    );
+  }
+
+  const setFeather = (axis: "x" | "y", value: number) => {
+    const next = Math.max(0, value);
+    updateMask(selected.id, mask.id, {
+      feather: options.linked
+        ? { x: next, y: next }
+        : { ...mask.feather, [axis]: next }
+    });
+  };
+
+  return (
+    <>
+      <label>Mask <select value={mask.id} onChange={(event) => setSelectedMaskId(event.target.value)}>
+        {masks.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+      </select></label>
+      <NumericOption label="Feather X" min={0} max={500} value={mask.feather.x} onChange={(value) => setFeather("x", value)} />
+      <NumericOption label="Feather Y" min={0} max={500} value={mask.feather.y} onChange={(value) => setFeather("y", value)} />
+      <label><input checked={options.linked} onChange={(event) => updateOptions({ linked: event.target.checked })} type="checkbox" /> Link X/Y</label>
+      <NumericOption
+        label="Expansion"
+        min={-500}
+        max={500}
+        value={mask.expansion}
+        onChange={(expansion) => updateMask(selected.id, mask.id, { expansion })}
+      />
+      <span className="tool-option-hint">
+        Drag on the canvas to feather; hold Shift to expand. Negative expansion contracts the mask.
+      </span>
+      {masks.length > 1 ? (
+        <span className="tool-option-warning">
+          {masks.length} masks on this object share one blur — the viewport feathers by the largest
+          value, so per-mask feather is not yet independent.
+        </span>
+      ) : null}
+    </>
   );
 }
 

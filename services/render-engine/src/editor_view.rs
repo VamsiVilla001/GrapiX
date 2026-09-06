@@ -201,7 +201,7 @@ pub fn render_editor_view(
             picked_object_id,
             frame: request.frame,
         },
-        pixels: video.data,
+        pixels: video.data.as_slice().to_vec(),
     })
 }
 

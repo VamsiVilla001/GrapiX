@@ -1,0 +1,349 @@
+{
+  "composition": {
+    "itemId": 1,
+    "displayName": "LOWER_THIRD"
+  },
+  "layerIds": {
+    "SCORE": 21,
+    "PLAYER_NAME": 20,
+    "TEAM_COLOR": 17,
+    "PLAYER_IMAGE": 19
+  },
+  "discovered": {
+    "SCORE": [
+      {
+        "canonical": "ADBE Opacity",
+        "valueType": "number",
+        "writable": true,
+        "readOnlyReason": null,
+        "timeVarying": false,
+        "expressionEnabled": false,
+        "surface": "aegp-sdk",
+        "structuralFingerprint": "ADBE Opacity:0"
+      },
+      {
+        "canonical": "ADBE Rotate Z",
+        "valueType": "number",
+        "writable": true,
+        "readOnlyReason": null,
+        "timeVarying": false,
+        "expressionEnabled": false,
+        "surface": "aegp-sdk",
+        "structuralFingerprint": "ADBE Rotate Z:0"
+      },
+      {
+        "canonical": "ADBE Text Properties/ADBE Text Document",
+        "valueType": "text",
+        "writable": true,
+        "readOnlyReason": null,
+        "timeVarying": false,
+        "expressionEnabled": false,
+        "surface": "aegp-sdk",
+        "structuralFingerprint": "ADBE Text Properties/ADBE Text Document:0"
+      }
+    ],
+    "PLAYER_NAME": [
+      {
+        "canonical": "ADBE Opacity",
+        "valueType": "number",
+        "writable": true,
+        "readOnlyReason": null,
+        "timeVarying": false,
+        "expressionEnabled": false,
+        "surface": "aegp-sdk",
+        "structuralFingerprint": "ADBE Opacity:0"
+      },
+      {
+        "canonical": "ADBE Rotate Z",
+        "valueType": "number",
+        "writable": true,
+        "readOnlyReason": null,
+        "timeVarying": false,
+        "expressionEnabled": false,
+        "surface": "aegp-sdk",
+        "structuralFingerprint": "ADBE Rotate Z:0"
+      },
+      {
+        "canonical": "ADBE Text Properties/ADBE Text Document",
+        "valueType": "text",
+        "writable": true,
+        "readOnlyReason": null,
+        "timeVarying": false,
+        "expressionEnabled": false,
+        "surface": "aegp-sdk",
+        "structuralFingerprint": "ADBE Text Properties/ADBE Text Document:0"
+      }
+    ],
+    "TEAM_COLOR": [
+      {
+        "canonical": "ADBE Opacity",
+        "valueType": "number",
+        "writable": true,
+        "readOnlyReason": null,
+        "timeVarying": false,
+        "expressionEnabled": false,
+        "surface": "aegp-sdk",
+        "structuralFingerprint": "ADBE Opacity:0"
+      },
+      {
+        "canonical": "ADBE Rotate Z",
+        "valueType": "number",
+        "writable": true,
+        "readOnlyReason": null,
+        "timeVarying": false,
+        "expressionEnabled": false,
+        "surface": "aegp-sdk",
+        "structuralFingerprint": "ADBE Rotate Z:0"
+      },
+      {
+        "canonical": "ADBE Effect Parade/ADBE Fill/ADBE Fill-0002",
+        "valueType": "color",
+        "writable": true,
+        "readOnlyReason": null,
+        "timeVarying": false,
+        "expressionEnabled": false,
+        "surface": "aegp-sdk",
+        "structuralFingerprint": "ADBE Effect Parade/ADBE Fill/ADBE Fill-0002:0"
+      }
+    ],
+    "PLAYER_IMAGE": [
+      {
+        "canonical": "ADBE Opacity",
+        "valueType": "number",
+        "writable": true,
+        "readOnlyReason": null,
+        "timeVarying": false,
+        "expressionEnabled": false,
+        "surface": "aegp-sdk",
+        "structuralFingerprint": "ADBE Opacity:0"
+      },
+      {
+        "canonical": "ADBE Rotate Z",
+        "valueType": "number",
+        "writable": true,
+        "readOnlyReason": null,
+        "timeVarying": false,
+        "expressionEnabled": false,
+        "surface": "aegp-sdk",
+        "structuralFingerprint": "ADBE Rotate Z:0"
+      }
+    ]
+  },
+  "effects": {
+    "SCORE": [],
+    "PLAYER_NAME": [],
+    "TEAM_COLOR": [
+      {
+        "index": 0,
+        "matchName": "ADBE Fill",
+        "displayName": "Fill"
+      }
+    ],
+    "PLAYER_IMAGE": []
+  },
+  "before": {
+    "SCORE": {
+      "value": "042",
+      "valueType": "text"
+    },
+    "PLAYER_NAME": {
+      "value": "ghckhgcvg",
+      "valueType": "text"
+    },
+    "TEAM_COLOR": {
+      "value": "#0557FF",
+      "valueType": "color"
+    },
+    "PLAYER_IMAGE": {
+      "value": 100,
+      "valueType": "number"
+    }
+  },
+  "readOnlyProbe": null,
+  "expressionReadOnlyProbe": null,
+  "footageReplacementRefusal": {
+    "ok": false,
+    "code": "OPERATION_UNSUPPORTED"
+  },
+  "setTime": {
+    "quantised": {
+      "ok": false,
+      "code": "TIME_NOT_REPRESENTABLE"
+    },
+    "onFrame": {
+      "ok": true,
+      "result": {
+        "time": {
+          "value": "800",
+          "scale": "23976"
+        },
+        "requested": {
+          "value": "800",
+          "scale": "23976"
+        }
+      }
+    },
+    "zero": {
+      "ok": true,
+      "result": {
+        "time": {
+          "value": "0",
+          "scale": "23976"
+        },
+        "requested": {
+          "value": "0",
+          "scale": "30000"
+        }
+      }
+    },
+    "negative": {
+      "ok": false,
+      "code": "INVALID_PAYLOAD"
+    }
+  },
+  "revision": {
+    "ok": true,
+    "applied": [
+      {
+        "target": {
+          "compositionItemId": 1,
+          "layerId": 21,
+          "sourceItemId": null,
+          "path": [
+            {
+              "matchName": "ADBE Text Properties",
+              "ordinal": 0
+            },
+            {
+              "matchName": "ADBE Text Document",
+              "ordinal": 0
+            }
+          ]
+        },
+        "previous": {
+          "value": "042",
+          "valueType": "text"
+        },
+        "current": {
+          "value": "137",
+          "valueType": "text"
+        }
+      },
+      {
+        "target": {
+          "compositionItemId": 1,
+          "layerId": 20,
+          "sourceItemId": null,
+          "path": [
+            {
+              "matchName": "ADBE Text Properties",
+              "ordinal": 0
+            },
+            {
+              "matchName": "ADBE Text Document",
+              "ordinal": 0
+            }
+          ]
+        },
+        "previous": {
+          "value": "ghckhgcvg",
+          "valueType": "text"
+        },
+        "current": {
+          "value": "GRAPIX LIVE",
+          "valueType": "text"
+        }
+      },
+      {
+        "target": {
+          "compositionItemId": 1,
+          "layerId": 17,
+          "sourceItemId": null,
+          "path": [
+            {
+              "matchName": "ADBE Effect Parade",
+              "ordinal": 0
+            },
+            {
+              "matchName": "ADBE Fill",
+              "ordinal": 0
+            },
+            {
+              "matchName": "ADBE Fill-0002",
+              "ordinal": 0
+            }
+          ]
+        },
+        "previous": {
+          "value": "#0557FF",
+          "valueType": "color"
+        },
+        "current": {
+          "value": "#1E90FF",
+          "valueType": "color"
+        }
+      }
+    ]
+  },
+  "afterRevision": {
+    "SCORE": {
+      "value": "137",
+      "valueType": "text"
+    },
+    "PLAYER_NAME": {
+      "value": "GRAPIX LIVE",
+      "valueType": "text"
+    },
+    "TEAM_COLOR": {
+      "value": "#1E90FF",
+      "valueType": "color"
+    },
+    "PLAYER_IMAGE": {
+      "value": 100,
+      "valueType": "number"
+    }
+  },
+  "refusedBatch": {
+    "ok": false,
+    "code": "INVALID_PAYLOAD"
+  },
+  "afterRefused": {
+    "SCORE": {
+      "value": "137",
+      "valueType": "text"
+    },
+    "PLAYER_NAME": {
+      "value": "GRAPIX LIVE",
+      "valueType": "text"
+    },
+    "TEAM_COLOR": {
+      "value": "#1E90FF",
+      "valueType": "color"
+    },
+    "PLAYER_IMAGE": {
+      "value": 100,
+      "valueType": "number"
+    }
+  },
+  "restored": {
+    "ok": true
+  },
+  "afterRestore": {
+    "SCORE": {
+      "value": "042",
+      "valueType": "text"
+    },
+    "PLAYER_NAME": {
+      "value": "ghckhgcvg",
+      "valueType": "text"
+    },
+    "TEAM_COLOR": {
+      "value": "#0557FF",
+      "valueType": "color"
+    },
+    "PLAYER_IMAGE": {
+      "value": 100,
+      "valueType": "number"
+    }
+  }
+}

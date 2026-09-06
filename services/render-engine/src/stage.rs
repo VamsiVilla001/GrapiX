@@ -15,6 +15,7 @@
 //! subtraction, and `f32_error` exists so the improvement is asserted by tests
 //! rather than assumed.
 
+use crate::protocol::AeExactTime;
 use serde::{Deserialize, Serialize};
 
 /// Largest logical canvas dimension the architecture commits to supporting.
@@ -459,6 +460,27 @@ impl FrameRate {
             / u128::from(self.numerator)) as u64
     }
 
+    /// Map a non-negative decimal AE rational `value / scale` to its exact Program frame.
+    ///
+    /// There is intentionally no float conversion: an instant between Program frames is refused,
+    /// rather than rounded to a frame the operator did not declare.
+    pub fn exact_time_to_frame(&self, value: &str, scale: &str) -> Option<u64> {
+        if self.numerator == 0 || self.denominator == 0 {
+            return None;
+        }
+        let value = parse_exact_decimal(value)?;
+        let scale = parse_exact_decimal(scale)?;
+        if scale == 0 {
+            return None;
+        }
+        let numerator = value.checked_mul(u128::from(self.numerator))?;
+        let denominator = scale.checked_mul(u128::from(self.denominator))?;
+        if numerator % denominator != 0 {
+            return None;
+        }
+        u64::try_from(numerator / denominator).ok()
+    }
+
     /// Decimal rate. Display only — never use it for scheduling.
     pub fn approximate(&self) -> f64 {
         if self.denominator == 0 {
@@ -466,6 +488,128 @@ impl FrameRate {
         }
         f64::from(self.numerator) / f64::from(self.denominator)
     }
+}
+
+fn parse_exact_decimal(value: &str) -> Option<u128> {
+    if value.is_empty() || (value.len() > 1 && value.starts_with('0')) || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    value.parse().ok()
+}
+
+/// AE composition time base, parsed from the decimal strings carried on the wire.
+///
+/// A composition's time scale is independent of the declared Program rate. Both
+/// values must be positive canonical decimal integers before they are trusted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AeCompositionClock {
+    frame_duration: u128,
+    time_scale: u128,
+}
+
+/// Why an exact time cannot be reconciled with a composition clock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AeCompositionClockRefusal {
+    InvalidClock,
+    InvalidRate,
+    RateNotInCompositionScale,
+    NotOnCompositionFrame,
+    InvalidTime,
+}
+
+impl AeCompositionClock {
+    pub fn from_decimal_strings(frame_duration: &str, time_scale: &str) -> Option<Self> {
+        let frame_duration = parse_exact_decimal(frame_duration)?;
+        let time_scale = parse_exact_decimal(time_scale)?;
+        if frame_duration == 0 || time_scale == 0 {
+            return None;
+        }
+        Some(Self {
+            frame_duration,
+            time_scale,
+        })
+    }
+
+    /// The composition's native frame rate, reduced to the `FrameRate` wire form.
+    pub fn composition_rate(&self) -> Option<FrameRate> {
+        let divisor = gcd_u128(self.time_scale, self.frame_duration);
+        Some(FrameRate {
+            numerator: u32::try_from(self.time_scale / divisor).ok()?,
+            denominator: u32::try_from(self.frame_duration / divisor).ok()?,
+        })
+    }
+
+    /// Refuse a declared rate that cannot be represented by this composition's
+    /// own time base before attempting to schedule any individual cue.
+    pub fn reconcile(
+        &self,
+        rate: FrameRate,
+    ) -> Result<FrameRate, AeCompositionClockRefusal> {
+        if rate.numerator == 0 || rate.denominator == 0 {
+            return Err(AeCompositionClockRefusal::InvalidRate);
+        }
+        let composition_rate = self
+            .composition_rate()
+            .ok_or(AeCompositionClockRefusal::InvalidClock)?;
+        let composition_product = u128::from(composition_rate.numerator)
+            .checked_mul(u128::from(rate.denominator))
+            .ok_or(AeCompositionClockRefusal::InvalidRate)?;
+        let declared_product = u128::from(rate.numerator)
+            .checked_mul(u128::from(composition_rate.denominator))
+            .ok_or(AeCompositionClockRefusal::InvalidRate)?;
+        if composition_product != declared_product {
+            return Err(AeCompositionClockRefusal::RateNotInCompositionScale);
+        }
+        Ok(composition_rate)
+    }
+
+    /// Restate a Program frame in the composition's own time scale.
+    pub fn program_frame_to_composition_time(&self, frame: u64) -> Option<AeExactTime> {
+        let value = u128::from(frame).checked_mul(self.frame_duration)?;
+        Some(AeExactTime {
+            value: value.to_string(),
+            scale: self.time_scale.to_string(),
+        })
+    }
+
+    /// Restate an exact AE time in the composition's time scale, refusing an
+    /// instant that lands between composition frames rather than rounding it.
+    pub fn time_in_composition_scale(
+        &self,
+        time: &AeExactTime,
+    ) -> Result<(AeExactTime, u64), AeCompositionClockRefusal> {
+        let value =
+            parse_exact_decimal(&time.value).ok_or(AeCompositionClockRefusal::InvalidTime)?;
+        let scale =
+            parse_exact_decimal(&time.scale).ok_or(AeCompositionClockRefusal::InvalidTime)?;
+        if scale == 0 {
+            return Err(AeCompositionClockRefusal::InvalidTime);
+        }
+        let numerator = value
+            .checked_mul(self.time_scale)
+            .ok_or(AeCompositionClockRefusal::InvalidTime)?;
+        let denominator = scale
+            .checked_mul(self.frame_duration)
+            .ok_or(AeCompositionClockRefusal::InvalidTime)?;
+        if numerator % denominator != 0 {
+            return Err(AeCompositionClockRefusal::NotOnCompositionFrame);
+        }
+        let composition_frame = u64::try_from(numerator / denominator)
+            .map_err(|_| AeCompositionClockRefusal::InvalidTime)?;
+        let composition_time = self
+            .program_frame_to_composition_time(composition_frame)
+            .ok_or(AeCompositionClockRefusal::InvalidTime)?;
+        Ok((composition_time, composition_frame))
+    }
+}
+
+fn gcd_u128(mut left: u128, mut right: u128) -> u128 {
+    while right != 0 {
+        let remainder = left % right;
+        left = right;
+        right = remainder;
+    }
+    left
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -967,6 +1111,7 @@ impl StageDocument {
         }
 
         // Warnings.
+
         for region in &self.regions {
             if !stage.contains_rect(&region.bounds) && !region.bounds.is_empty() {
                 issues.push(StageIssue {
@@ -992,5 +1137,248 @@ impl StageDocument {
             .iter()
             .any(|issue| issue.severity == IssueSeverity::Error);
         StageValidation { valid, issues }
+    }
+}
+#[cfg(test)]
+mod exact_time_vectors {
+    use super::{AeCompositionClock, AeCompositionClockRefusal, FrameRate};
+    use crate::protocol::AeExactTime;
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Fixture {
+        cue_map: CueMapFixture,
+        rate_vectors: Vec<RateVectorFixture>,
+        composition_clocks: Vec<CompositionClockFixture>,
+        composition_refusals: Vec<CompositionRefusalFixture>,
+        composition_scale_restatements: Vec<CompositionScaleRestatementFixture>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct CueMapFixture {
+        rate: RateFixture,
+        markers: Vec<CueMarkerFixture>,
+    }
+
+    #[derive(Deserialize)]
+    struct CueMarkerFixture {
+        time: ExactTimeFixture,
+        frame: u64,
+        #[serde(rename = "deadlineNanos")]
+        deadline_nanos: u64,
+    }
+
+    #[derive(Deserialize)]
+    struct ExactTimeFixture {
+        value: String,
+        scale: String,
+    }
+
+    #[derive(Deserialize)]
+    struct RateVectorFixture {
+        rate: RateFixture,
+        vectors: Vec<DeadlineFixture>,
+    }
+
+    #[derive(Deserialize)]
+    struct RateFixture {
+        numerator: u32,
+        denominator: u32,
+    }
+
+    #[derive(Deserialize)]
+    struct DeadlineFixture {
+        frame: u64,
+        #[serde(rename = "deadlineNanos")]
+        deadline_nanos: u64,
+    }
+
+    #[derive(Deserialize)]
+    struct CompositionClockFixture {
+        clock: ClockFixture,
+        rate: RateFixture,
+        frames: Vec<CompositionFrameFixture>,
+    }
+
+    #[derive(Deserialize)]
+    struct ClockFixture {
+        #[serde(rename = "frameDuration")]
+        frame_duration: String,
+        #[serde(rename = "timeScale")]
+        time_scale: String,
+    }
+
+    #[derive(Deserialize)]
+    struct CompositionFrameFixture {
+        frame: u64,
+        #[serde(rename = "compositionTime")]
+        composition_time: ExactTimeFixture,
+        #[serde(rename = "deadlineNanos")]
+        deadline_nanos: u64,
+    }
+
+    #[derive(Deserialize)]
+    struct CompositionRefusalFixture {
+        clock: ClockFixture,
+        rate: RateFixture,
+        refusal: String,
+    }
+
+    #[derive(Deserialize)]
+    struct CompositionScaleRestatementFixture {
+        time: ExactTimeFixture,
+        clock: ClockFixture,
+        refusal: Option<String>,
+        #[serde(rename = "compositionTime")]
+        composition_time: Option<ExactTimeFixture>,
+        #[serde(rename = "compositionFrame")]
+        composition_frame: Option<u64>,
+    }
+
+    #[test]
+    fn shared_ae_cue_vectors_are_exact_in_rust() {
+        let fixture: Fixture = serde_json::from_str(include_str!(
+            "../../../Shared/animation-engine/fixtures/ae-cue-vectors.json"
+        ))
+        .expect("shared cue vector fixture must be valid JSON");
+        let cue_rate = FrameRate {
+            numerator: fixture.cue_map.rate.numerator,
+            denominator: fixture.cue_map.rate.denominator,
+        };
+
+        for marker in fixture.cue_map.markers {
+            let frame = cue_rate
+                .exact_time_to_frame(&marker.time.value, &marker.time.scale)
+                .expect("fixture cue must land on a Program frame");
+            assert_eq!(frame, marker.frame);
+            assert_eq!(cue_rate.deadline_nanos(frame), marker.deadline_nanos);
+        }
+
+        for rate_vector in fixture.rate_vectors {
+            let rate = FrameRate {
+                numerator: rate_vector.rate.numerator,
+                denominator: rate_vector.rate.denominator,
+            };
+            for vector in rate_vector.vectors {
+                assert_eq!(rate.deadline_nanos(vector.frame), vector.deadline_nanos);
+            }
+        }
+
+        for composition_clock in fixture.composition_clocks {
+            let clock = AeCompositionClock::from_decimal_strings(
+                &composition_clock.clock.frame_duration,
+                &composition_clock.clock.time_scale,
+            )
+            .expect("fixture composition clock must be valid");
+            let rate = FrameRate {
+                numerator: composition_clock.rate.numerator,
+                denominator: composition_clock.rate.denominator,
+            };
+            assert_eq!(
+                clock
+                    .reconcile(rate)
+                    .expect("fixture rate must agree with its composition clock"),
+                rate
+            );
+
+            for frame in composition_clock.frames {
+                let composition_time = clock
+                    .program_frame_to_composition_time(frame.frame)
+                    .expect("fixture composition frame must fit exactly");
+                assert_eq!(composition_time.value, frame.composition_time.value);
+                assert_eq!(composition_time.scale, frame.composition_time.scale);
+                assert_eq!(rate.deadline_nanos(frame.frame), frame.deadline_nanos);
+            }
+        }
+
+        for refusal in fixture.composition_refusals {
+            assert_eq!(refusal.refusal, "RATE_NOT_IN_COMPOSITION_SCALE");
+            let clock = AeCompositionClock::from_decimal_strings(
+                &refusal.clock.frame_duration,
+                &refusal.clock.time_scale,
+            )
+            .expect("fixture composition clock must be valid");
+            let rate = FrameRate {
+                numerator: refusal.rate.numerator,
+                denominator: refusal.rate.denominator,
+            };
+            assert_eq!(
+                clock.reconcile(rate),
+                Err(AeCompositionClockRefusal::RateNotInCompositionScale)
+            );
+        }
+
+        for restatement in fixture.composition_scale_restatements {
+            let clock = AeCompositionClock::from_decimal_strings(
+                &restatement.clock.frame_duration,
+                &restatement.clock.time_scale,
+            )
+            .expect("fixture composition clock must be valid");
+            let time = AeExactTime {
+                value: restatement.time.value,
+                scale: restatement.time.scale,
+            };
+            match restatement.refusal.as_deref() {
+                Some("NOT_ON_FRAME") => assert_eq!(
+                    clock.time_in_composition_scale(&time),
+                    Err(AeCompositionClockRefusal::NotOnCompositionFrame)
+                ),
+                None => {
+                    let (composition_time, composition_frame) = clock
+                        .time_in_composition_scale(&time)
+                        .expect("fixture time must land on a composition frame");
+                    let expected_time = restatement
+                        .composition_time
+                        .expect("successful restatement must include composition time");
+                    let expected_frame = restatement
+                        .composition_frame
+                        .expect("successful restatement must include composition frame");
+                    assert_eq!(composition_time.value, expected_time.value);
+                    assert_eq!(composition_time.scale, expected_time.scale);
+                    assert_eq!(composition_frame, expected_frame);
+                }
+                Some(refusal) => panic!("unexpected composition restatement refusal: {refusal}"),
+            }
+        }
+    }
+
+    #[test]
+    fn exact_time_refuses_off_frame_and_invalid_decimal_values() {
+        let rate = FrameRate {
+            numerator: 30_000,
+            denominator: 1_001,
+        };
+        assert_eq!(rate.exact_time_to_frame("1001", "30000"), Some(1));
+        assert_eq!(rate.exact_time_to_frame("1", "2"), None);
+        assert_eq!(rate.exact_time_to_frame("01", "30000"), None);
+        assert_eq!(rate.exact_time_to_frame("1001", "0"), None);
+    }
+
+    #[test]
+    fn measured_bo0a_clock_refuses_declared_ntsc_rate() {
+        let clock = AeCompositionClock::from_decimal_strings("800", "23976")
+            .expect("measured BO0a clock must be valid");
+        let declared_rate = FrameRate {
+            numerator: 30_000,
+            denominator: 1_001,
+        };
+        assert_eq!(
+            clock.reconcile(declared_rate),
+            Err(AeCompositionClockRefusal::RateNotInCompositionScale)
+        );
+
+        let measured_rate = FrameRate {
+            numerator: 2_997,
+            denominator: 100,
+        };
+        assert_eq!(clock.reconcile(measured_rate), Ok(measured_rate));
+        assert_eq!(clock.composition_rate(), Some(measured_rate));
+
+        assert!(AeCompositionClock::from_decimal_strings("", "23976").is_none());
+        assert!(AeCompositionClock::from_decimal_strings("800", "023976").is_none());
+        assert!(AeCompositionClock::from_decimal_strings("800", "0").is_none());
+        assert!(AeCompositionClock::from_decimal_strings("800", "abc").is_none());
     }
 }

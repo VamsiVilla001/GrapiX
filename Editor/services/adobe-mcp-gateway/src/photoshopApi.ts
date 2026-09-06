@@ -35,11 +35,29 @@ export interface PsApiFile {
 
 /** The parts of the SDK client this bridge uses. Narrow on purpose, so it can be faked. */
 export interface PhotoshopApiClient {
-  getDocumentManifest(input: PsApiFile): Promise<PsApiJob>;
+  getDocumentManifest(input: PsApiFile, options?: PsApiManifestOptions): Promise<PsApiJob>;
   createRendition(input: PsApiFile, outputs: unknown): Promise<PsApiJob>;
   modifyDocument(input: PsApiFile, outputs: unknown, options: unknown): Promise<PsApiJob>;
   replaceSmartObject(input: PsApiFile, outputs: unknown, options: unknown): Promise<PsApiJob>;
   createDocument(outputs: unknown, options: unknown): Promise<PsApiJob>;
+}
+
+interface PsApiManifestOptions {
+  thumbnails?: { type: "image/png" };
+}
+
+interface PsApiRenditionOutput {
+  href: string;
+  storage: "adobe";
+  type: "image/png";
+  trimToCanvas: "true" | "false";
+  layers?: { id: number }[];
+}
+
+interface PsApiRendition {
+  href?: string;
+  type?: string;
+  layers?: { id?: number }[];
 }
 
 export interface PsApiJob {
@@ -49,9 +67,11 @@ export interface PsApiJob {
 
 export interface PsApiJobOutput {
   status?: string;
+  /** Adobe calls this singular `layer`; `layers` keeps older bridge fakes compatible. */
+  layer?: PsApiLayer[];
   layers?: PsApiLayer[];
   document?: { name?: string; width?: number; height?: number };
-  _links?: unknown;
+  _links?: { renditions?: PsApiRendition[] };
   errors?: unknown;
 }
 
@@ -71,6 +91,7 @@ export interface PsApiLayer {
     paragraphStyles?: { alignment?: string }[];
   };
   smartObject?: { type?: string; instanceId?: string; linked?: boolean };
+  thumbnail?: string;
   children?: PsApiLayer[];
 }
 
@@ -192,9 +213,26 @@ export class PhotoshopApiBridge {
   private async documentStructure(args: Record<string, unknown>): Promise<AdobeImportDocument> {
     const input = requireFile(args, "href");
     const client = await this.connected();
-    const job = await client.getDocumentManifest(input);
+    const job = await client.getDocumentManifest(input, { thumbnails: { type: "image/png" } });
     const output = firstOutput(job, "getDocumentManifest");
-    return manifestToImportDocument(output, String(args.href));
+    const renditions = await this.importRenditions(client, input, output);
+    return manifestToImportDocument(output, input.href, renditions);
+  }
+
+  private async importRenditions(
+    client: PhotoshopApiClient,
+    input: PsApiFile,
+    manifest: PsApiJobOutput
+  ): Promise<PsImportRenditions> {
+    try {
+      return importRenditionsFromJob(await client.createRendition(input, renditionOutputs(manifest)));
+    } catch (error) {
+      return {
+        attempted: true,
+        layerUrls: new Map(),
+        failure: error instanceof Error ? error.message : String(error)
+      };
+    }
   }
 
   private async exportPreview(args: Record<string, unknown>): Promise<unknown> {
@@ -249,8 +287,38 @@ function requireFile(args: Record<string, unknown>, key: string): PsApiFile {
   if (typeof href !== "string" || !href) {
     throw new Error(`the Photoshop API transport needs a ${key} pointing at the PSD`);
   }
+  validateExternalHref(href, key);
   const storage = typeof args.storage === "string" ? args.storage : "external";
   return { href, storage };
+}
+
+function validateExternalHref(href: string, key: string): void {
+  let url: URL;
+  try {
+    url = new URL(href);
+  } catch {
+    throw new Error(`the Photoshop API transport needs ${key} to be a valid HTTPS URL`);
+  }
+  const hostname = url.hostname.toLowerCase();
+  if (
+    url.protocol !== "https:"
+    || url.username
+    || url.password
+    || hostname === "localhost"
+    || hostname.endsWith(".localhost")
+    || hostname === "internal"
+    || hostname.endsWith(".internal")
+    || hostname === "local"
+    || hostname.endsWith(".local")
+    || /^(?:0|10|127)\./u.test(hostname)
+    || /^169\.254\./u.test(hostname)
+    || /^172\.(?:1[6-9]|2\d|3[01])\./u.test(hostname)
+    || /^192\.168\./u.test(hostname)
+    || hostname === "[::1]"
+    || /^\[fe[89ab][0-9a-f]*:/iu.test(hostname)
+  ) {
+    throw new Error(`the Photoshop API transport requires ${key} to be a public HTTPS URL`);
+  }
 }
 
 function firstOutput(job: PsApiJob, operation: string): PsApiJobOutput {
@@ -262,6 +330,67 @@ function firstOutput(job: PsApiJob, operation: string): PsApiJobOutput {
   return output;
 }
 
+interface PsImportRenditions {
+  attempted: true;
+  documentUrl?: string;
+  layerUrls: Map<string, string>;
+  failure?: string;
+}
+
+function importRenditionsFromJob(job: PsApiJob): PsImportRenditions {
+  if (!job.outputs?.length) throw new Error("createRendition returned no output");
+
+  const renditions: PsImportRenditions = { attempted: true, layerUrls: new Map() };
+  for (const output of job.outputs) {
+    if (output.status && output.status !== "succeeded") {
+      throw new Error(`createRendition finished as "${output.status}"`);
+    }
+    for (const rendition of output._links?.renditions ?? []) {
+      if (!rendition.href) continue;
+      const layerIds = rendition.layers?.flatMap((layer) =>
+        typeof layer.id === "number" ? [String(layer.id)] : []
+      ) ?? [];
+      if (layerIds.length) {
+        for (const id of layerIds) renditions.layerUrls.set(id, rendition.href);
+      } else if (!renditions.documentUrl) {
+        renditions.documentUrl = rendition.href;
+      }
+    }
+  }
+  return renditions;
+}
+
+function manifestLayers(output: PsApiJobOutput): PsApiLayer[] {
+  return output.layer ?? output.layers ?? [];
+}
+
+function renditionOutputs(manifest: PsApiJobOutput): PsApiRenditionOutput[] {
+  const outputs: PsApiRenditionOutput[] = [
+    {
+      href: "/files/GrapiX/$ReqID/preview.png",
+      storage: "adobe",
+      type: "image/png",
+      trimToCanvas: "true"
+    }
+  ];
+
+  for (const layer of flattenManifestLayers(manifestLayers(manifest))) {
+    if (layer.type !== "layer" || typeof layer.id !== "number") continue;
+    outputs.push({
+      href: `/files/GrapiX/$ReqID/layer-${layer.id}.png`,
+      storage: "adobe",
+      type: "image/png",
+      trimToCanvas: "false",
+      layers: [{ id: layer.id }]
+    });
+  }
+  return outputs;
+}
+
+function flattenManifestLayers(layers: PsApiLayer[]): PsApiLayer[] {
+  return layers.flatMap((layer) => [layer, ...flattenManifestLayers(layer.children ?? [])]);
+}
+
 /**
  * Turn a Photoshop API document manifest into the shared Adobe import document.
  *
@@ -271,13 +400,44 @@ function firstOutput(job: PsApiJob, operation: string): PsApiJobOutput {
  * render time — an operator learns about a rasterised adjustment layer during import,
  * not when the graphic is on air.
  */
-export function manifestToImportDocument(output: PsApiJobOutput, sourceHref: string): AdobeImportDocument {
+export function manifestToImportDocument(
+  output: PsApiJobOutput,
+  sourceHref: string,
+  importRenditions?: PsImportRenditions
+): AdobeImportDocument {
   const warnings: ImportWarning[] = [];
   const assets: AdobeAsset[] = [
     { id: "source", name: output.document?.name ?? "document.psd", kind: "source", url: sourceHref }
   ];
+  const manifest = manifestLayers(output);
+  const layerAssetIds = addLayerRenditionAssets(manifest, importRenditions, assets, warnings);
 
-  const layers = (output.layers ?? []).map((layer) => convertLayer(layer, undefined, warnings));
+  if (importRenditions) {
+    if (importRenditions.documentUrl) {
+      assets.push({
+        id: "preview",
+        name: `${output.document?.name ?? "document"} preview.png`,
+        kind: "image",
+        mimeType: "image/png",
+        url: importRenditions.documentUrl
+      });
+    } else {
+      warnings.push({
+        code: "photoshop.rendition.preview",
+        message: "Adobe returned no flattened PNG preview; the source PSD remains available.",
+        status: "Rasterised"
+      });
+    }
+    if (importRenditions.failure) {
+      warnings.push({
+        code: "photoshop.rendition.failed",
+        message: `Adobe could not create PNG renditions: ${importRenditions.failure}`,
+        status: "Rasterised"
+      });
+    }
+  }
+
+  const layers = manifest.map((layer) => convertLayer(layer, undefined, warnings, layerAssetIds));
 
   return {
     source: "photoshop",
@@ -291,10 +451,55 @@ export function manifestToImportDocument(output: PsApiJobOutput, sourceHref: str
   };
 }
 
+function addLayerRenditionAssets(
+  layers: PsApiLayer[],
+  importRenditions: PsImportRenditions | undefined,
+  assets: AdobeAsset[],
+  warnings: ImportWarning[]
+): Map<string, string> {
+  const assetIds = new Map<string, string>();
+  const visit = (layer: PsApiLayer): void => {
+    const id = String(layer.id ?? layer.index ?? layer.name ?? "layer");
+    const name = layer.name ?? `Layer ${id}`;
+    const fullRendition = importRenditions?.layerUrls.get(id);
+    const fallbackThumbnail = layer.thumbnail;
+    const url = fullRendition ?? fallbackThumbnail;
+
+    if (url) {
+      const assetId = `layer-${id}`;
+      assetIds.set(id, assetId);
+      assets.push({
+        id: assetId,
+        name: `${name}.png`,
+        kind: "image",
+        mimeType: "image/png",
+        url
+      });
+    }
+
+    if (importRenditions && layer.type === "layer" && !fullRendition) {
+      warnings.push({
+        code: "photoshop.rendition.layer",
+        message: fallbackThumbnail
+          ? `"${name}" has no full PNG rendition; its manifest thumbnail is used instead.`
+          : `"${name}" has no PNG rendition or manifest thumbnail; no pixel asset was imported.`,
+        layerId: id,
+        layerName: name,
+        status: "Rasterised"
+      });
+    }
+
+    for (const child of layer.children ?? []) visit(child);
+  };
+  for (const layer of layers) visit(layer);
+  return assetIds;
+}
+
 function convertLayer(
   layer: PsApiLayer,
   parentId: string | undefined,
-  warnings: ImportWarning[]
+  warnings: ImportWarning[],
+  layerAssetIds: ReadonlyMap<string, string>
 ): AdobeLayer {
   const id = String(layer.id ?? layer.index ?? layer.name ?? "layer");
   const name = layer.name ?? `Layer ${id}`;
@@ -348,6 +553,7 @@ function convertLayer(
     },
     blendMode: blend.mode,
     status: fidelity,
+    assetId: layerAssetIds.get(id),
     textData: layer.text
       ? {
           text: layer.text.content ?? "",
@@ -357,7 +563,7 @@ function convertLayer(
           align: PS_PARAGRAPH_ALIGNMENT[paragraph?.alignment ?? "left"] ?? "left"
         }
       : undefined,
-    children: (layer.children ?? []).map((child) => convertLayer(child, id, warnings))
+    children: (layer.children ?? []).map((child) => convertLayer(child, id, warnings, layerAssetIds))
   };
 }
 

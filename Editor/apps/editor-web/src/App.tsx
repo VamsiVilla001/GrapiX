@@ -1,31 +1,46 @@
-import { Group, Panel, Separator, type Layout } from "react-resizable-panels";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CanvasStage } from "./components/CanvasStage";
 import { AutomationPanel } from "./components/AutomationPanel";
+import { AeControlsPanel } from "./components/AeControlsPanel";
 import { RenderEnginePanel } from "./components/RenderEnginePanel";
-import { DockArea } from "./components/DockWorkspace";
+import { DockWorkspace } from "./components/DockWorkspace";
 import { MenuBar } from "./components/MenuBar";
 import { FontManagerPanel } from "./components/FontManagerPanel";
 import { ObjectLibrary } from "./components/ObjectLibrary";
 import { ReferenceTopBar } from "./components/ReferenceTopBar";
 import { ObjectManager } from "./components/ObjectManager";
 import { ObjectInspector } from "./modules/object-inspector/components/ObjectInspector";
-import { SequencerPanel } from "./components/SequencerPanel";
 import { StatusBar } from "./components/StatusBar";
 import { TemplatesPanel } from "./components/TemplatesPanel";
 import { TimelinePanel } from "./components/TimelinePanel";
 import { MaterialManagerPanel } from "./modules/material-manager";
-import { useSceneAutosave } from "./hooks/useSceneAutosave";
 import { useSceneFonts } from "./hooks/useSceneFonts";
+import { resolveHistoryIntent } from "./lib/historyShortcut";
 import type { DockPanelId } from "./store/dockStore";
 import { useEditorStore } from "./store/editorStore";
 import { useTemplateStore } from "./store/templateStore";
 import { AssistantPanel } from "./components/AssistantPanel";
 import { useAssistantStore } from "./store/assistantStore";
+import { DiagnosticsConsole } from "./components/DiagnosticsConsole";
+import { LoginScreen } from "./components/LoginScreen";
+import { onAuthChange, currentUser, type SignedInUser } from "./lib/auth";
 
 export function App() {
-  useSceneAutosave();
+  // Sign-in gates the whole workspace. The gate lives outside the editor body so that no
+  // scene, autosave or engine connection exists before there is a verified user to own it -
+  // an author who has not signed in has nothing to author with.
+  const [user, setUser] = useState<SignedInUser | null>(() => currentUser());
+  useEffect(() => onAuthChange(setUser), []);
+  if (!user) return <LoginScreen />;
+  return <EditorWorkspace />;
+}
+
+function EditorWorkspace() {
+  // Autosave is started once at bootstrap in `main.tsx`, not mounted here: it must outlive
+  // any component and must not be re-armed by a re-render.
   useSceneFonts();
+  // The console drawer: opened from the status-bar chip, the View menu, or Ctrl+Alt+C.
+  const [consoleOpen, setConsoleOpen] = useState(false);
   const scene = useEditorStore((state) => state.scene);
   const openedTemplateId = useTemplateStore((state) => state.openedTemplateId);
   const selectedTemplate = useTemplateStore((state) =>
@@ -70,6 +85,40 @@ export function App() {
         event.preventDefault();
         useAssistantStore.getState().toggleOpen();
       }
+      if (event.ctrlKey && event.altKey && event.key.toLowerCase() === "c") {
+        event.preventDefault();
+        setConsoleOpen((current) => !current);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    const onToggleConsole = () => setConsoleOpen((current) => !current);
+    window.addEventListener("grapix:toggle-console", onToggleConsole);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("grapix:toggle-console", onToggleConsole);
+    };
+  }, []);
+
+  /**
+   * Ctrl+Z / Ctrl+Shift+Z (and Ctrl+Y) for the open scene's history.
+   *
+   * On `window`, because undo is not a panel's command — every module edits one `SceneDocument` and
+   * there is one history over it, so the key has to work wherever the author's hands are. What keeps
+   * that from crossing panel ownership the way a global Delete would is that undo is not
+   * destructive-in-place: it takes the document back a step, whichever panel made that step, and the
+   * menu and each panel's control name the step so nothing is reverted silently.
+   *
+   * Two refusals live in `resolveHistoryIntent`: a text-entry target keeps the browser's own text
+   * undo, and an Alt chord belongs to the assistant and the console above.
+   */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const intent = resolveHistoryIntent(event);
+      if (!intent) return;
+      event.preventDefault();
+      const store = useEditorStore.getState();
+      if (intent === "undo") store.undo();
+      else store.redo();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -79,44 +128,14 @@ export function App() {
     <div className="app-shell reference-editor-shell">
       <MenuBar />
       <ReferenceTopBar />
-      <Group
-        className="reference-main-layout"
-        defaultLayout={readLayout("grapix-reference-main-v2", { left: 18, center: 52, right: 30 })}
-        id="grapix-reference-main-v2"
-        onLayoutChanged={(layout) => saveLayout("grapix-reference-main-v2", layout)}
-        orientation="horizontal"
-      >
-        <Panel id="left" minSize="15%" maxSize="28%">
-          <div className="reference-left-area">
-            <DockArea areaId="left" childrenForPanel={renderDockPanel} />
-          </div>
-        </Panel>
-        <Separator className="panel-resize-handle panel-resize-handle-vertical" />
-        <Panel id="center" minSize="42%">
-          <Group
-            className="reference-center-layout"
-            defaultLayout={readLayout("grapix-reference-center-v2", { upper: 62, timeline: 38 })}
-            id="grapix-reference-center-v2"
-            onLayoutChanged={(layout) => saveLayout("grapix-reference-center-v2", layout)}
-            orientation="vertical"
-          >
-            <Panel id="upper" minSize="38%">
-              <main className="viewport-column">
-                <CanvasStage />
-              </main>
-            </Panel>
-            <Separator className="panel-resize-handle panel-resize-handle-horizontal" />
-            <Panel id="timeline" minSize="18%" maxSize="48%">
-              <DockArea areaId="bottom" childrenForPanel={renderDockPanel} />
-            </Panel>
-          </Group>
-        </Panel>
-        <Separator className="panel-resize-handle panel-resize-handle-vertical" />
-        <Panel id="right" minSize="18%" maxSize="46%">
-          <DockArea areaId="right" childrenForPanel={renderDockPanel} />
-        </Panel>
-      </Group>
+      {/*
+        One free-form dock for the whole workspace. The viewport is a panel inside it rather than a
+        fixed centre column, which is what lets an author split against it, float a panel over it,
+        or move it to a second monitor.
+      */}
+      <DockWorkspace childrenForPanel={renderDockPanel} viewport={<CanvasStage />} />
       <StatusBar />
+      <DiagnosticsConsole open={consoleOpen} onClose={() => setConsoleOpen(false)} />
       <AssistantPanel />
     </div>
   );
@@ -136,25 +155,13 @@ function renderDockPanel(panelId: DockPanelId) {
       return <MaterialManagerPanel />;
     case "font-manager":
       return <FontManagerPanel />;
+    case "ae-controls":
+      return <AeControlsPanel />;
     case "automation":
       return <AutomationPanel />;
     case "render-engine":
       return <RenderEnginePanel />;
     case "timeline":
       return <TimelinePanel />;
-    case "sequencer":
-      return <SequencerPanel />;
   }
-}
-
-function readLayout(key: string, fallback: Layout): Layout {
-  try {
-    return JSON.parse(localStorage.getItem(key) ?? "") as Layout;
-  } catch {
-    return fallback;
-  }
-}
-
-function saveLayout(key: string, layout: Layout): void {
-  localStorage.setItem(key, JSON.stringify(layout));
 }

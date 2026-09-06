@@ -21,6 +21,8 @@ use grapix_render_engine::security::{
 };
 
 const VALID_TOKEN: &str = "0123456789abcdef0123456789abcdef";
+/// At least 32 characters, matching what the TypeScript issuer enforces.
+const VALID_SECRET: &str = "0123456789abcdef0123456789abcdef";
 
 fn env(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
     pairs
@@ -218,7 +220,7 @@ fn cli_parses_every_documented_flag() {
         "RTX".to_string(),
         "--preferred-backend".to_string(),
         "vulkan".to_string(),
-        "--token-file".to_string(),
+        "--signing-secret-file".to_string(),
         "engine.token".to_string(),
         "--ipc".to_string(),
         "pipe".to_string(),
@@ -290,15 +292,15 @@ fn a_bad_env_value_is_reported_rather_than_ignored() {
 fn a_network_reachable_engine_without_a_token_refuses_to_start() {
     let mut engine_config = EngineConfig::default();
     engine_config.network.bind_address = "0.0.0.0".to_string();
-    engine_config.auth.token = None;
-    engine_config.auth.token_file = None;
+    engine_config.auth.signing_secret = None;
+    engine_config.auth.signing_secret_file = None;
 
     // Silently exposing an unauthenticated renderer to a venue network is the one
     // mistake no default may permit, so this is an error rather than a warning.
     let error = engine_config
         .validate()
         .expect_err("must refuse an unauthenticated remote bind");
-    assert!(error.to_string().contains("no auth token is configured"));
+    assert!(error.to_string().contains("no token signing secret is configured"));
 }
 
 #[test]
@@ -306,7 +308,7 @@ fn a_remote_bind_forces_authentication_on() {
     let mut engine_config = EngineConfig::default();
     engine_config.network.bind_address = "10.0.0.5".to_string();
     engine_config.auth.required = false;
-    engine_config.auth.token = Some(VALID_TOKEN.to_string());
+    engine_config.auth.signing_secret = Some(VALID_SECRET.to_string());
 
     let warnings = engine_config.validate().expect("validate");
 
@@ -425,16 +427,17 @@ fn ndi_pool_slots_stay_within_the_fixed_handoff_bound() {
 fn tokens_are_validated_for_length_and_shape() {
     let mut engine_config = EngineConfig::default();
 
-    engine_config.auth.token = Some("short".to_string());
-    assert!(engine_config.resolve_token().is_err());
+    engine_config.auth.signing_secret = Some("short".to_string());
+    assert!(engine_config.resolve_signing_key().is_err());
 
-    engine_config.auth.token = Some("has whitespace in the middle".to_string());
-    assert!(engine_config.resolve_token().is_err());
+    // A secret one character under the floor is still refused: the boundary is the point.
+    engine_config.auth.signing_secret = Some("0123456789abcdef0123456789abcde".to_string());
+    assert!(engine_config.resolve_signing_key().is_err());
 
-    engine_config.auth.token = Some(VALID_TOKEN.to_string());
+    engine_config.auth.signing_secret = Some(VALID_SECRET.to_string());
     assert_eq!(
-        engine_config.resolve_token().expect("resolve"),
-        Some(VALID_TOKEN.to_string())
+        engine_config.resolve_signing_key().expect("resolve"),
+        Some(VALID_SECRET.as_bytes().to_vec())
     );
 }
 
@@ -442,14 +445,14 @@ fn tokens_are_validated_for_length_and_shape() {
 fn a_token_file_is_read_and_trimmed() {
     let directory = tempfile::tempdir().expect("tempdir");
     let path = directory.path().join("engine.token");
-    fs::write(&path, format!("{VALID_TOKEN}\n")).expect("write token");
+    fs::write(&path, format!("{VALID_SECRET}\n")).expect("write secret");
 
     let mut engine_config = EngineConfig::default();
-    engine_config.auth.token_file = Some(path.to_string_lossy().to_string());
+    engine_config.auth.signing_secret_file = Some(path.to_string_lossy().to_string());
 
     assert_eq!(
-        engine_config.resolve_token().expect("resolve"),
-        Some(VALID_TOKEN.to_string())
+        engine_config.resolve_signing_key().expect("resolve"),
+        Some(VALID_SECRET.as_bytes().to_vec())
     );
 }
 

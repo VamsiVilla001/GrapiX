@@ -4,8 +4,9 @@ import type {
   PublishedSceneMetadata,
   SceneDocument
 } from "@grapix/shared-types";
+import { currentAccessToken } from "./auth";
 
-const apiRoot =
+export const apiRoot =
   import.meta.env.VITE_GRAPIX_PLAYOUT_API_URL ?? "http://127.0.0.1:4300";
 
 /**
@@ -61,6 +62,24 @@ export interface EngineHealthView {
   maxTextureDimension: number | null;
   tileRendering: boolean | null;
   pendingResyncSceneIds: string[];
+}
+
+/**
+ * A published After Effects graphic Playout can launch and attach to the render engine.
+ */
+export interface AePackageView {
+  graphicId: string;
+  name: string;
+  latestVersion: number;
+  versionRoot: string;
+  ingestedAt: string;
+  mainComposition: {
+    itemId: string;
+    name: string;
+    width: number;
+    height: number;
+  };
+  thumbnail?: string;
 }
 
 /**
@@ -121,6 +140,69 @@ export interface ConfigureOutputRequest {
   start?: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Diagnostics — mirrors `diagnostics.ts` in the control service
+// ---------------------------------------------------------------------------
+
+export type DiagnosticLevel = "error" | "warning" | "info";
+
+/**
+ * The structured half of a failure.
+ *
+ * The banner shows `summary`; the console shows all of it. Everything but `summary` is
+ * optional because it is only present when it is genuinely known — a console that invented a
+ * remedy would be worse than one that admits it has none.
+ */
+export interface PlayoutDiagnosticDetail {
+  code: string;
+  summary: string;
+  cause?: string;
+  remedy?: string;
+  context?: Record<string, unknown>;
+  causeChain?: string[];
+  stack?: string;
+}
+
+export interface DiagnosticRecord {
+  sequence: number;
+  at: string;
+  level: DiagnosticLevel;
+  source: string;
+  message: string;
+  detail?: PlayoutDiagnosticDetail;
+}
+
+export interface DiagnosticsPage {
+  records: DiagnosticRecord[];
+  latestSequence: number;
+  capacity: number;
+}
+
+/**
+ * A refused request, with everything the service said about it.
+ *
+ * `message` stays the human summary so existing `error.message` paths keep working, and
+ * `detail` carries the cause, the remedy and the identifiers the console renders.
+ */
+export class PlayoutRequestError extends Error {
+  constructor(
+    message: string,
+    readonly route: string,
+    readonly httpStatus: number,
+    readonly detail?: PlayoutDiagnosticDetail,
+    /**
+     * Sequence of the record the control service already wrote for this failure.
+     *
+     * Present whenever the service answered. The console then opens on that record rather
+     * than the UI keeping a second copy of the same failure under a different origin.
+     */
+    readonly diagnosticSequence?: number
+  ) {
+    super(message);
+    this.name = "PlayoutRequestError";
+  }
+}
+
 export const playoutApi = {
   listScenes: () =>
     request<PublishedSceneMetadata[]>("/api/playout/scenes"),
@@ -134,6 +216,14 @@ export const playoutApi = {
       `/api/playout/scenes/${encodeURIComponent(sceneId)}${force ? "?force=true" : ""}`,
       { method: "DELETE" }
     ),
+  listAePackages: () =>
+    request<{ ok: true; packages: AePackageView[] }>("/api/playout/ae-packages").then(
+      ({ packages }) => packages
+    ),
+  loadAePackage: (graphicId: string) =>
+    request<{ ok: true }>(`/api/playout/ae-packages/${encodeURIComponent(graphicId)}/load`, {
+      method: "POST"
+    }),
   syncFromEditor: () =>
     request<{
       syncedCount: number;
@@ -200,7 +290,15 @@ export const playoutApi = {
   cue: (rundownId: string, itemId: string) =>
     control("cue", rundownId, itemId),
   take: (rundownId: string, itemId: string) =>
-    control("take", rundownId, itemId)
+    control("take", rundownId, itemId),
+
+  /** The service-side console tail. `since` is the highest sequence already held. */
+  diagnostics: (since = 0) =>
+    request<DiagnosticsPage>(`/api/playout/diagnostics${since > 0 ? `?since=${since}` : ""}`),
+  clearDiagnostics: () =>
+    request<{ cleared: number; latestSequence: number }>("/api/playout/diagnostics", {
+      method: "DELETE"
+    })
 };
 
 function control(
@@ -215,42 +313,92 @@ function control(
 }
 
 async function request<T>(route: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${apiRoot}${route}`, {
-    ...init,
-    headers: {
-      // Only claim a JSON body when one is actually sent. Fastify answers a
-      // body-less request that declares application/json with
-      // FST_ERR_CTP_EMPTY_JSON_BODY ("Body cannot be empty when content-type
-      // is set to application/json"), which broke output start/stop, take-out
-      // and engine reconnect.
-      ...(init?.body === undefined ? {} : { "content-type": "application/json" }),
-      ...init?.headers
-    }
-  });
-  const result = (await response.json()) as unknown;
-  if (!response.ok) {
-    const message =
-      typeof result === "object" &&
-      result !== null &&
-      "error" in result &&
-      typeof result.error === "string"
-        ? result.error
-        : undefined;
-    throw new Error(
-      message ?? `Playout request failed (${response.status})`
+  // The access token minted at sign-in, read per request so a mid-session refresh is picked
+  // up by the very next call.
+  const token = currentAccessToken();
+  let response: Response;
+  try {
+    response = await fetch(`${apiRoot}${route}`, {
+      ...init,
+      headers: {
+        // Only claim a JSON body when one is actually sent. Fastify answers a
+        // body-less request that declares application/json with
+        // FST_ERR_CTP_EMPTY_JSON_BODY ("Body cannot be empty when content-type
+        // is set to application/json"), which broke output start/stop, take-out
+        // and engine reconnect.
+        ...(init?.body === undefined ? {} : { "content-type": "application/json" }),
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        ...init?.headers
+      }
+    });
+  } catch (cause) {
+    // `fetch` rejects with "Failed to fetch" and nothing else — no URL, no reason. On its
+    // own that is indistinguishable from a bug in the UI, when it means the control service
+    // is not running.
+    throw new PlayoutRequestError(
+      `The Playout control service at ${apiRoot} did not answer`,
+      route,
+      0,
+      {
+        code: "control-service.unreachable",
+        summary: `The Playout control service at ${apiRoot} did not answer`,
+        cause: cause instanceof Error ? cause.message : String(cause),
+        remedy:
+          "Start it with `npm run dev:playout`. If it runs on another host or port, set VITE_GRAPIX_PLAYOUT_API_URL for this UI.",
+        context: { apiRoot, route, method: init?.method ?? "GET" }
+      }
     );
   }
-  return result as T;
+
+  // Not every failure answers in JSON: a proxy, a crashed process mid-reply or a wrong port
+  // returns HTML or nothing, and parsing that used to throw a SyntaxError that hid the status.
+  const raw = await response.text();
+  let parsed: unknown;
+  try {
+    parsed = raw.length > 0 ? JSON.parse(raw) : undefined;
+  } catch {
+    parsed = undefined;
+  }
+
+  if (!response.ok) {
+    const body = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
+    const detail =
+      typeof body.detail === "object" && body.detail !== null
+        ? (body.detail as PlayoutDiagnosticDetail)
+        : {
+            code: `http.${response.status}`,
+            summary:
+              typeof body.error === "string" && body.error
+                ? body.error
+                : `${init?.method ?? "GET"} ${route} failed with HTTP ${response.status} ${response.statusText}`,
+            ...(raw && typeof body.error !== "string" ? { cause: raw.slice(0, 400) } : {}),
+            context: { route, httpStatus: response.status, method: init?.method ?? "GET" }
+          };
+    throw new PlayoutRequestError(
+      detail.summary,
+      route,
+      response.status,
+      detail,
+      typeof body.diagnosticSequence === "number" ? body.diagnosticSequence : undefined
+    );
+  }
+
+  return parsed as T;
 }
 
 /** What the control service pushes. Mirrors `PlayoutEventKind` in the control service. */
-export type PlayoutEventKind = "library.changed" | "sequence.changed" | "runtime.changed";
+export type PlayoutEventKind =
+  | "library.changed"
+  | "sequence.changed"
+  | "runtime.changed"
+  | "diagnostics.logged";
 
 /** Every event kind the control service pushes. */
 const PLAYOUT_EVENT_KINDS: readonly PlayoutEventKind[] = [
   "library.changed",
   "sequence.changed",
-  "runtime.changed"
+  "runtime.changed",
+  "diagnostics.logged"
 ];
 
 interface Listener {

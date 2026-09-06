@@ -2,12 +2,13 @@
 
 use std::path::PathBuf;
 
-use grapix_render_core::output::VideoFrame;
+use grapix_render_core::output::{VideoFrame, VideoFramePool};
 use grapix_render_engine::outputs::{
-    create_sink, validate_ndi_options, OutputAlphaMode, OutputFormat, OutputInstance, OutputSink,
+    create_sink, validate_ndi_format, validate_ndi_options, OutputAlphaMode, OutputFormat, OutputInstance, OutputSink,
     OutputState,
 };
 use grapix_render_engine::stage::FrameRate;
+use grapix_render_engine::protocol::AeFrameColorFormat;
 
 fn cache() -> PathBuf {
     std::env::temp_dir().join("grapix-engine-ndi-output-tests")
@@ -21,19 +22,46 @@ fn format() -> OutputFormat {
             numerator: 60,
             denominator: 1,
         },
+        color_format: AeFrameColorFormat::Bgra8,
         alpha_mode: OutputAlphaMode::Premultiplied,
         color_space: "rec709".to_string(),
     }
 }
 
 fn frame() -> VideoFrame {
+    let pool = VideoFramePool::new(1, 4 * 2 * 4).expect("test frame pool");
     VideoFrame {
         width: 4,
         height: 2,
-
-        data: vec![0; 4 * 2 * 4],
+        data: pool.try_acquire().expect("test frame lease"),
         frame_index: 1,
     }
+}
+
+#[test]
+fn ndi_refuses_non_bgra8_or_non_premultiplied_format_with_actual_values() {
+    let mut non_bgra = format();
+    non_bgra.color_format = AeFrameColorFormat::Rgba8;
+    let error = validate_ndi_format(&non_bgra).expect_err("rgba8 must be refused");
+    assert!(error.contains("Rgba8"), "error must name the received color format: {error}");
+
+    let mut straight = format();
+    straight.alpha_mode = OutputAlphaMode::Straight;
+    let error = validate_ndi_format(&straight).expect_err("straight alpha must be refused");
+    assert!(error.contains("Straight"), "error must name the received alpha mode: {error}");
+}
+
+#[test]
+fn output_format_defaults_color_format_for_older_documents() {
+    let parsed: OutputFormat = serde_json::from_value(serde_json::json!({
+        "width": 4,
+        "height": 2,
+        "frameRate": { "numerator": 60, "denominator": 1 },
+        "alphaMode": "premultiplied",
+        "colorSpace": "rec709"
+    }))
+    .expect("older format without colorFormat remains valid");
+    assert_eq!(parsed.color_format, AeFrameColorFormat::Bgra8);
 }
 #[test]
 fn ndi_source_name_validation_enforces_network_identifier_boundary() {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { scrubNumericValue } from "../src/modules/object-manager/services/numericScrub";
+import { scrubNumericValue } from "../src/lib/numericGesture";
 
 test("transform value scrubbing increases and decreases across zero", () => {
   assert.equal(scrubNumericValue(5, 20, 0.1), 7);

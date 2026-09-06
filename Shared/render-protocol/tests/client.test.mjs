@@ -100,7 +100,8 @@ function createFakeEngine(transport, options = {}) {
               softwareVersion: "0.2.0",
               protocolVersion: 3,
               state: "connecting",
-              authenticationRequired: options.authenticationRequired ?? false
+              authenticationRequired: options.authenticationRequired ?? false,
+              ...(options.connectionRole ? { connectionRole: options.connectionRole } : {})
             },
             message.requestId
           );
@@ -286,11 +287,18 @@ test("an engine that requires authentication is authenticated before capabilitie
   assert.equal(auth.requiresAck, true);
 });
 
-test("connecting without a token to an engine that needs one fails loudly", async () => {
+test("an operator client granted only editor authority fails loudly", async () => {
+  // `authenticationRequired` is an engine-level fact, so it cannot decide this on its own.
+  // What makes a connection unusable is being granted less authority than the work needs: a
+  // client that intends to drive Program and is handed an Editor session would otherwise
+  // discover it one refused Take at a time.
   const transport = new MemoryEngineTransport();
   const clock = createClock();
-  const client = createClient(transport, clock); // no authToken
-  const engine = createFakeEngine(transport, { authenticationRequired: true });
+  const client = createClient(transport, clock, { clientRole: "playout" }); // no authToken
+  const engine = createFakeEngine(transport, {
+    authenticationRequired: true,
+    connectionRole: "editor"
+  });
 
   const promise = client.connect();
   for (let i = 0; i < 6; i += 1) {
@@ -299,8 +307,42 @@ test("connecting without a token to an engine that needs one fails loudly", asyn
     await Promise.resolve();
   }
 
-  await assert.rejects(promise, /requires authentication but no token/);
+  await assert.rejects(promise, /cannot drive operator verbs/);
   assert.equal(client.state, "error");
+  assert.throws(
+    () => transport.send("still-open"),
+    /transport is not open/,
+    "a failed negotiation must release the engine connection slot"
+  );
+});
+
+test("a local editor connects to a token-secured engine without a token", async () => {
+  // The Editor holds no operator credential and does not need one. Refusing here is what made
+  // a token-secured engine impossible to author into - the deployment every Playout install
+  // creates.
+  const transport = new MemoryEngineTransport();
+  const clock = createClock();
+  const client = createClient(transport, clock); // editor, no authToken
+  const engine = createFakeEngine(transport, {
+    authenticationRequired: true,
+    connectionRole: "editor"
+  });
+
+  const promise = client.connect();
+  for (let i = 0; i < 6; i += 1) {
+    engine.drain();
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+
+  await promise;
+  assert.equal(client.state, "synchronising");
+  assert.equal(
+    engine.received.length > 0 &&
+      transport.sentMessages().some((message) => message.type === "connection.authenticate"),
+    false,
+    "an Editor session must not send a credential it does not have"
+  );
 });
 
 test("an error reply rejects the request rather than resolving it", async () => {
@@ -927,4 +969,87 @@ test("taking an unprepared scene online requires an explicit override flag", asy
     overrideUnprepared: true
   });
   assert.equal(transport.lastSent().payload.overrideUnprepared, true);
+});
+
+test("a frame past the engine's advertised message limit is refused before it is sent", async () => {
+  const transport = new MemoryEngineTransport();
+  const clock = createClock();
+  const client = createClient(transport, clock);
+  const engine = createFakeEngine(transport);
+
+  const capabilities = await completeConnect(client, engine);
+  const limit = capabilities.limits.maxMessageBytes;
+  assert.ok(limit > 0, "the engine advertises a message limit");
+
+  const before = transport.sentMessages().length;
+
+  // A scene carrying inline asset bytes: the shape that reached an operator as a dead connection.
+  const scene = {
+    id: "scene_big",
+    revision: 1,
+    assets: [{ assetId: "asset_1", source: `data:image/png;base64,${"A".repeat(limit)}` }]
+  };
+
+  assert.throws(
+    () => client.send("scene.load", { scene, prepare: false }),
+    (error) => {
+      // The two numbers that explain it, and where the bytes should have gone.
+      assert.match(error.message, /scene\.load is \d+ bytes/);
+      assert.ok(error.message.includes(String(limit)), `limit missing from: ${error.message}`);
+      assert.match(error.message, /asset\.upload/);
+      return true;
+    }
+  );
+
+  assert.equal(
+    transport.sentMessages().length,
+    before,
+    "and nothing went to the engine, so the connection is still usable"
+  );
+
+  // Proof it is not simply refusing everything: a small frame still goes.
+  client.send("scene.unload", { sceneId: "scene_big" });
+  assert.equal(transport.sentMessages().length, before + 1);
+});
+
+test("a frame within the limit is sent even when it is close to it", async () => {
+  const transport = new MemoryEngineTransport();
+  const clock = createClock();
+  const client = createClient(transport, clock);
+  const engine = createFakeEngine(transport);
+
+  const capabilities = await completeConnect(client, engine);
+  const before = transport.sentMessages().length;
+
+  // Half the limit of payload: comfortably under once the envelope is added.
+  client.send("scene.load", {
+    scene: { id: "scene_ok", revision: 1, assets: [{ assetId: "a", source: "x".repeat(Math.floor(capabilities.limits.maxMessageBytes / 2)) }] },
+    prepare: false
+  });
+
+  assert.equal(transport.sentMessages().length, before + 1);
+});
+
+test("a refused frame leaves no gap in the outbound sequence", async () => {
+  const transport = new MemoryEngineTransport();
+  const clock = createClock();
+  const client = createClient(transport, clock);
+  const engine = createFakeEngine(transport);
+
+  const capabilities = await completeConnect(client, engine);
+  const lastSequence = transport.sentMessages().at(-1).sequence;
+
+  assert.throws(() => client.send("scene.load", {
+    scene: {
+      id: "scene_big",
+      revision: 1,
+      assets: [{ assetId: "a", source: `data:image/png;base64,${"A".repeat(capabilities.limits.maxMessageBytes)}` }]
+    },
+    prepare: false
+  }));
+
+  // The receiver parks a message that arrives with a gap ahead of it, waiting for one that will
+  // never come — so the next real frame has to be the very next number, or it is never answered.
+  client.send("scene.unload", { sceneId: "scene_big" });
+  assert.equal(transport.sentMessages().at(-1).sequence, lastSequence + 1);
 });

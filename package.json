@@ -24,14 +24,13 @@
     "dev:assistant": "npm run dev -w @grapix/editor-assistant",
     "dev:adobe": "npm run dev -w @grapix/adobe-mcp-gateway",
     "dev:electron": "npm run dev -w @grapix/desktop-electron",
-
     "clean:dist": "node tools/architecture/clean-dist.mjs",
     "build": "npm run clean:dist && npm run build:shared && npm run build:editor && npm run build:playout && npm run stage:runtime",
     "stage:runtime": "node tools/packaging/stage-node.mjs && node tools/packaging/stage-native-deps.mjs",
     "build:shared": "npm run build -w @grapix/shared-workspace",
     "build:editor": "npm run build -w @grapix/editor-workspace",
     "build:playout": "npm run build -w @grapix/playout-workspace",
-
+    "build:figma-bridge": "node tools/figma-motion-bridge/scripts/build.mjs",
     "typecheck": "npm run typecheck -w @grapix/shared-workspace && npm run typecheck -w @grapix/editor-workspace && npm run typecheck -w @grapix/playout-workspace",
     "test": "npm run test:shared && npm run test:editor && npm run test:playout",
     "test:shared": "npm run verify -w @grapix/shared-workspace",
@@ -42,7 +41,9 @@
     "check:engine": "cargo check --manifest-path services/render-engine/Cargo.toml --all-targets",
     "check:boundaries": "node tools/architecture/check-workspace-boundaries.mjs",
     "pack:mcp": "npm pack -w @grapix/editor-mcp",
-
+    "ship": "npm run build && set CI=true&& npm run build -w @grapix/desktop-tauri && npm run build -w @grapix/playout-desktop",
+    "ship:editor": "npm run build && set CI=true&& npm run build -w @grapix/desktop-tauri",
+    "ship:playout": "npm run build && set CI=true&& npm run build -w @grapix/playout-desktop",
     "certify:engine": "node tools/certification/run-engine-e2e.mjs",
     "certify:animation": "node tools/certification/run-animation-proof.mjs",
     "certify:playout-engine": "node tools/certification/run-playout-engine-e2e.mjs",
@@ -52,14 +53,26 @@
     "certify:ipc": "node tools/certification/run-ipc-e2e.mjs",
     "certify:parity": "node tools/certification/run-pixel-parity.mjs",
     "certify:materials": "npm test -w @grapix/shared-types && cargo test --manifest-path services/render-daemon/Cargo.toml --no-default-features",
-    "certify:render-core": "cargo test --manifest-path services/render-daemon/Cargo.toml --test certification_project"
+    "certify:render-core": "cargo test --manifest-path services/render-daemon/Cargo.toml --test certification_project",
+    "certify:ae-runtime-fixtures": "npm --prefix Playout/services/playout-control run build && sh tools/certification/ae-runtime-fixtures/run-edge-corpus.sh compare && sh tools/certification/ae-runtime-fixtures/run-lower-third.sh"
+  },
+  "//overrides": "One copy of React, and one copy of its types, across the whole workspace. Two copies are not merely wasteful: hoisted packages (lucide-react, dockview-react) resolve the root copy, so they build elements with one React while an app renders them with the other — which surfaced as `Objects are not valid as a React child` from react-dom/server the moment the apps moved to 19. Two copies of the types fail the same way at compile time, because each declares its own `ReactNode`.",
+  "overrides": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5"
   },
   "engines": {
     "node": ">=22.12.0"
   },
+  "//devDependencies": "React is declared at the root as well as in each app because hoisted packages (zustand, lucide-react, dockview-react) resolve it from here. Without a root copy they cannot find React at all; with a root copy at a *different* major they build elements the apps cannot render. So it is pinned to the same major as the apps, and `overrides` above keeps every transitive request on it.",
   "devDependencies": {
+    "@rolldown/plugin-babel": "^0.2.3",
     "@tauri-apps/cli": "^2.11.4",
     "@vitejs/plugin-react": "^6.0.3",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "vite": "^8.1.4"
   }
 }

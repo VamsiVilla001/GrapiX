@@ -222,6 +222,10 @@ impl SceneRenderer {
             }
         }
 
+        let lease = self
+            .target
+            .try_acquire_frame()
+            .ok_or_else(|| "bounded video frame pool is exhausted".to_string())?;
         let mut video = self
             .target
             .render_and_read_back(
@@ -232,6 +236,7 @@ impl SceneRenderer {
                 &self.mesh_pipeline,
                 self.mesh_frame.as_ref(),
                 frame_index,
+                lease,
             )
             .map_err(|error| format!("render failed: {error}"))?;
 

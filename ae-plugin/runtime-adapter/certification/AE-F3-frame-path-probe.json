@@ -1,0 +1,55 @@
+{
+  "phase": "AE-F3",
+  "kind": "frame-path-throughput-probe",
+  "recordedAt": "2026-08-19T04:03:12.229Z",
+  "claim": "Measures the sustainable rate and per-frame cost of the current checkout path on the licensed host. It is not the AE-F3 soak and closes no gate.",
+  "host": {
+    "afterEffectsPid": 17196,
+    "driver": "126.3",
+    "stateDir": "C:\\Users\\CG\\AppData\\Local\\GrapiX\\ae-adapter"
+  },
+  "request": {
+    "composition": "LOWER_THIRD",
+    "frames": 300,
+    "ringMode": false,
+    "ringConsumerAttached": false,
+    "pinnedRate": "2997/100",
+    "targetFps": 29.97
+  },
+  "measured": {
+    "completed": 298,
+    "failed": 2,
+    "elapsedSeconds": 24.115,
+    "sustainedFps": 12.357,
+    "realTimeRatio": 0.412,
+    "roundTripMs": {
+      "p50": 46.489,
+      "p95": 50.168,
+      "p99": 64.327,
+      "max": 79.335
+    },
+    "aeRenderMs": {
+      "p50": 0,
+      "p95": 0,
+      "max": 0
+    },
+    "payloadBytesWritten": 2471731200,
+    "payloadBytesPerFrame": 8294400
+  },
+  "ring": null,
+  "failures": [
+    {
+      "frame": 176,
+      "reason": "timed out waiting for sequence 191 (checkout LOWER_THIRD 176 8 premul-black argb)"
+    },
+    {
+      "frame": 280,
+      "reason": "timed out waiting for sequence 295 (checkout LOWER_THIRD 280 8 premul-black argb)"
+    }
+  ],
+  "extrapolation": {
+    "thirtyMinutesAtPinnedRate": 53946,
+    "framesThirtyMinutesWouldTakeAtMeasuredRate": 22243,
+    "payloadBytesForThirtyMinutesAtPinnedRate": 447449702400
+  }
+}

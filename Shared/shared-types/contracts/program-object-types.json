@@ -1,0 +1,40 @@
+{
+  "$comment": [
+    "Object types the native Program renderer prepares. One machine-readable claim, read by both",
+    "languages, so the Editor cannot promise on-air support the renderer does not provide.",
+    "",
+    "TypeScript side: PROGRAM_OBJECT_TYPES in Shared/shared-types/src/propertyRendererSupport.ts, held",
+    "against this file by Shared/shared-types/tests/property-renderer-support.test.mjs.",
+    "",
+    "Rust side: services/render-daemon/tests/program_object_types.rs feeds one object of every declared",
+    "SceneObjectType through prepare_scene and asserts that exactly these types avoid the",
+    "'are NOT rendered' warning. That test asserts behaviour rather than a mirrored list, so the two",
+    "sides cannot drift without one of them failing.",
+    "",
+    "Adding a type here without teaching the renderer to prepare it breaks the Rust test, which is the",
+    "point: this file records what is, not what is planned."
+  ],
+  "programObjectTypes": [
+    "rect",
+    "ellipse",
+    "text",
+    "shape",
+    "mesh",
+    "light"
+  ],
+  "notRenderedByProgram": [
+    "image",
+    "line",
+    "paint",
+    "camera",
+    "layer",
+    "marker",
+    "group"
+  ],
+  "$note": [
+    "layer and group are containers: they are never drawn themselves, and resolveSceneObjectHierarchy",
+    "folds their transform into their descendants before publication, so their placement does reach a",
+    "published frame indirectly. They are listed as not-rendered because prepare_scene skips them, and",
+    "the property contract exempts them from the type-level Preview-only downgrade for that reason."
+  ]
+}

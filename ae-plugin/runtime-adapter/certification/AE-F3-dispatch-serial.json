@@ -1,0 +1,37 @@
+{
+  "phase": "AE-F3",
+  "kind": "pipe-dispatch-throughput-probe",
+  "recordedAt": "2026-08-19T04:44:19.414Z",
+  "claim": "Measures how many runtime-protocol operations the adapter completes per second, away from the render path, at a given client pipelining depth.",
+  "adapter": {
+    "sha256": "19a48a7cb6dc6ddaa78d8c76448fdb540f10d5791ffce7c312d6e6c349465237",
+    "aeVersion": "26.3",
+    "idleMaxOpsPerCallback": 8,
+    "idleBudgetMicros": 24000
+  },
+  "request": {
+    "operation": "HEALTH",
+    "operations": 400,
+    "inFlight": 1
+  },
+  "measured": {
+    "completed": 400,
+    "refused": 0,
+    "elapsedSeconds": 18.75,
+    "operationsPerSecond": 21.333,
+    "latencyMs": {
+      "p50": 46.292,
+      "p95": 49.097,
+      "p99": 50.025,
+      "max": 50.17
+    }
+  },
+  "idleCadence": {
+    "callbacks": 401,
+    "elapsedMicros": 18796435,
+    "meanPeriodMicros": 46874,
+    "maxGapMicrosSinceLoad": 185654,
+    "operationsPerCallback": 1
+  },
+  "refusalCodes": []
+}

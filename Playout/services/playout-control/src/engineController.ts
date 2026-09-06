@@ -23,6 +23,7 @@ import {
   isEngineOperational,
   normalizeEngineProfile,
   WebSocketEngineTransport,
+  type AeContainerLoadPayload,
   type EngineCapabilities,
   type EngineChannel,
   type EngineConnectionEvent,
@@ -37,6 +38,8 @@ import {
   type SceneRef
 } from "@grapix/render-protocol";
 import type { AssetLibraryItem, SceneDocument } from "@grapix/shared-types";
+import { PlayoutOperationError } from "./diagnostics.js";
+import { assetContext, readAssetBytes } from "./sceneAssets.js";
 
 /**
  * Reply budget for the scene lifecycle: load, prepare, take.
@@ -47,6 +50,41 @@ import type { AssetLibraryItem, SceneDocument } from "@grapix/shared-types";
  * ~49 MB for a real PSD - and a cold Take that legitimately takes 20 s must not be
  * reported as a dead engine.
  */
+
+/**
+ * The same scene, with inline asset bytes removed.
+ *
+ * A scene document is a control message: it names what to draw. The bytes reach the engine through
+ * `asset.register` + `asset.upload`, chunked to a size the engine chose, and the engine declares a
+ * scene's assets from `assets[].assetId` — it never reads `source`. Leaving a data URL in place
+ * therefore sends every image twice and, past the engine's message limit, not at all.
+ *
+ * The reference that survives is the asset id, which is what both sides already agree on. Playout's
+ * own stored copy keeps the bytes, so nothing is lost here: this is only what goes on the wire.
+ */
+export function withoutInlineAssetBytes(scene: SceneDocument): SceneDocument {
+  /** Every inlined source, mapped to the reference that replaces it. */
+  const references = new Map<string, string>();
+
+  const assets = scene.assets.map((asset) => {
+    if (!asset.source?.startsWith("data:")) return asset;
+    const reference = `asset:${asset.assetId}`;
+    references.set(asset.source, reference);
+    return { ...asset, source: reference };
+  });
+
+  if (references.size === 0) return scene;
+
+  // A scene published by an older Editor carries the same bytes on the object too.
+  const objects = scene.objects.map((object) => {
+    if (object.type !== "image" || !object.src) return object;
+    const reference = references.get(object.src);
+    return reference ? { ...object, src: reference } : object;
+  });
+
+  return { ...scene, assets, objects };
+}
+
 function publishedSceneRef(sceneId: string, revision = 0, projectId = "default"): SceneRef {
   return { projectId, domain: "published", sceneId, revision };
 }
@@ -107,6 +145,16 @@ export interface TakeResult {
  */
 export class PlayoutEngineController {
   private readonly registry = new EngineRegistry();
+  /**
+   * The profiles as registered.
+   *
+   * The registry deliberately does not keep `authToken` or `secure` — its records are
+   * reported to operator UIs, and a bearer token has no business in one. So `connect` used to
+   * rebuild a profile from the record and lost both, which meant Playout could never reach an
+   * engine that requires auth: the socket was opened with no `bearer.` subprotocol and the
+   * engine rejected the upgrade, reported only as "could not connect".
+   */
+  private readonly profiles = new Map<string, EngineProfile>();
   private readonly connections = new Map<string, EngineConnection>();
   /**
    * Event subscribers that outlive any single connection.
@@ -127,17 +175,14 @@ export class PlayoutEngineController {
   // -------------------------------------------------------------------------
 
   register(profile: EngineProfile): EngineRecord {
-    const record = this.registry.register(
-      normalizeEngineProfile(profile),
-      "profile",
-      Date.now()
-    );
-    return record;
+    const normalized = normalizeEngineProfile(profile);
+    this.profiles.set(normalized.profileId, normalized);
+    return this.registry.register(normalized, "profile", Date.now());
   }
 
   async connect(profileId: string): Promise<EngineCapabilities> {
-    const record = this.registry.get(profileId);
-    if (!record) {
+    const profile = this.profiles.get(profileId);
+    if (!profile) {
       throw new Error(`no engine profile ${profileId}`);
     }
 
@@ -146,14 +191,6 @@ export class PlayoutEngineController {
     // its own retry loop alive — the engine then accumulates phantom clients that
     // never go away.
     this.disconnect(profileId, "reconnecting");
-
-    const profile = normalizeEngineProfile({
-      profileId,
-      host: record.host,
-      port: record.port,
-      label: record.label,
-      role: record.role
-    });
 
     const transport =
       this.options.createTransport?.(profile)
@@ -358,15 +395,35 @@ export class PlayoutEngineController {
   // Operational commands — the complete set, and nothing else
   // -------------------------------------------------------------------------
 
-  /** Load a published scene. Playout supplies it; it never authors it. */
+  /**
+   * Load a published scene. Playout supplies it; it never authors it.
+   *
+   * The document that goes over the wire carries no asset bytes. `ensureSceneAssets` has already
+   * uploaded them by checksum, in chunks the engine sized itself, and the engine declares a scene's
+   * assets from `assets[].assetId` — so an embedded copy is both redundant and fatal: a published
+   * scene with eight inlined images was 13 MiB against an 8 MiB message limit, and the engine
+   * rejected the frame with `MESSAGE_TOO_LARGE`. An operator saw "connection closed: reconnecting"
+   * on Take.
+   */
   async load(profileId: string, scene: SceneDocument, stageId?: string): Promise<void> {
     const connection = this.requireConnection(profileId);
-    await this.ensureSceneAssets(connection, scene.assets);
+    await this.ensureSceneAssets(connection, scene);
     await connection.request(
       "scene.load",
-      { scene, ...(stageId ? { stageId } : {}), prepare: false },
+      { scene: withoutInlineAssetBytes(scene), ...(stageId ? { stageId } : {}), prepare: false },
       { sceneRef: publishedSceneRef(scene.id, scene.revision ?? 0), timeoutMs: SCENE_LIFECYCLE_TIMEOUT_MS }
     );
+  }
+
+  /**
+   * Attach the AE runtime Playout launched to Program.
+   *
+   * The adapter cannot render until its pipe creates and warms a shared-memory mapping,
+   * so it receives the same lifecycle reply budget as a cold scene load.
+   */
+  async attachAeContainer(profileId: string, payload: AeContainerLoadPayload): Promise<void> {
+    const connection = this.requireConnection(profileId);
+    await connection.request("ae.container.load", payload, { timeoutMs: SCENE_LIFECYCLE_TIMEOUT_MS });
   }
 
   /**
@@ -381,21 +438,40 @@ export class PlayoutEngineController {
    * renderer shows its missing-texture state for the objects that used it. An asset
    * claiming `READY` with no checksum is a different thing - a producer wrote a scene
    * that cannot be verified - and that still refuses the load.
+   *
+   * Takes the whole scene rather than `scene.assets`: every failure here is only
+   * actionable if the operator is told which scene was being loaded, and this is the last
+   * frame that still knows.
    */
   private async ensureSceneAssets(
     connection: EngineConnection,
-    assets: AssetLibraryItem[]
+    scene: SceneDocument
   ): Promise<void> {
-    for (const asset of assets) {
+    const sceneContext = {
+      sceneId: scene.id,
+      sceneName: scene.name,
+      sceneRevision: scene.revision ?? 0
+    };
+
+    for (const asset of scene.assets) {
       if (!asset.checksum) {
         if (asset.status === "MISSING" || !asset.source) continue;
-        throw new Error(
-          `asset ${asset.assetId} (${asset.name}) is READY but has no checksum, so the render engine cannot verify it. Re-import it with embedded assets, or mark it missing.`
-        );
+        throw new PlayoutOperationError({
+          code: "asset.checksum-missing",
+          summary: `"${asset.name}" in scene "${scene.name}" is marked ready but has no checksum, so the render engine cannot verify it`,
+          remedy:
+            "Re-import the asset in the Editor (which records a SHA-256) and publish the scene again, or mark the asset missing to air the scene without it.",
+          context: { ...sceneContext, ...assetContext(asset) }
+        });
       }
       const registered = await connection.request("asset.register", {
         assetId: asset.assetId,
-        uri: asset.source,
+        /*
+         * A reference, never the bytes. `transport: "upload"` tells the engine the content arrives
+         * through `asset.upload`, so `uri` is provenance only — and an inlined image put its whole
+         * base64 payload in this one field, which is the same message-limit failure one step earlier.
+         */
+        uri: asset.source?.startsWith("data:") ? `asset:${asset.assetId}` : asset.source,
         transport: "upload",
         mimeType: asset.mimeType ?? "application/octet-stream",
         sizeBytes: asset.sizeBytes ?? 0,
@@ -407,7 +483,7 @@ export class PlayoutEngineController {
       };
       if (registration.alreadyCached) continue;
 
-      const bytes = await readAssetBytes(asset);
+      const bytes = await readAssetBytes(asset, sceneContext);
       const chunkBytes = Math.max(1, registration.maxChunkBytes ?? 256 * 1024);
       const chunkCount = Math.max(1, Math.ceil(bytes.byteLength / chunkBytes));
       for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
@@ -806,17 +882,6 @@ export class PlayoutEngineController {
     return connection;
   }
 }
-async function readAssetBytes(asset: AssetLibraryItem): Promise<Uint8Array> {
-  const dataUrl = asset.source.match(/^data:[^,]*?(;base64)?,(.*)$/s);
-  if (dataUrl) {
-    if (dataUrl[1]) return new Uint8Array(Buffer.from(dataUrl[2] ?? "", "base64"));
-    const decoded = decodeURIComponent(dataUrl[2] ?? "");
-    return Uint8Array.from(decoded, (character) => character.charCodeAt(0));
-  }
 
-  const response = await fetch(asset.source);
-  if (!response.ok) {
-    throw new Error(`asset ${asset.assetId} returned HTTP ${response.status}`);
-  }
-  return new Uint8Array(await response.arrayBuffer());
-}
+/** The narrow engine boundary needed by AE attach orchestration. */
+export type EngineController = Pick<PlayoutEngineController, "attachAeContainer">;

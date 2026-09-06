@@ -1,0 +1,167 @@
+<!--
+  The bridge's picker.
+
+  Deliberately plain: this window exists to choose frames and produce a file, and every judgement
+  about what the motion means happens in the importer, where it can be reported to the author in
+  GrapiX's own language. A frame's animated-layer count is shown because it is the one thing an
+  author cannot tell from the frame name — an export that returns nothing should be explainable
+  before it is run, not after.
+-->
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0;
+    padding: 12px;
+    font: 11px/1.45 Inter, "SF Pro Text", system-ui, sans-serif;
+    color: var(--figma-color-text, #1a1a1a);
+    background: var(--figma-color-bg, #fff);
+  }
+  h1 { margin: 0 0 2px; font-size: 12px; }
+  p.hint { margin: 0 0 10px; color: var(--figma-color-text-secondary, #666); }
+  .toolbar { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+  .toolbar button { font-size: 10px; padding: 3px 8px; }
+  ul { list-style: none; margin: 0 0 10px; padding: 0; max-height: 300px; overflow-y: auto;
+       border: 1px solid var(--figma-color-border, #e5e5e5); border-radius: 4px; }
+  li { display: flex; gap: 8px; align-items: center; padding: 6px 8px;
+       border-bottom: 1px solid var(--figma-color-border, #f0f0f0); }
+  li:last-child { border-bottom: none; }
+  li.empty-frame { opacity: 0.55; }
+  .frame-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .frame-page { color: var(--figma-color-text-secondary, #888); }
+  .count { font-variant-numeric: tabular-nums; color: var(--figma-color-text-secondary, #888); }
+  button.primary {
+    width: 100%; padding: 8px; font-size: 11px; font-weight: 600; cursor: pointer;
+    border: none; border-radius: 5px;
+    background: var(--figma-color-bg-brand, #0d99ff); color: var(--figma-color-text-onbrand, #fff);
+  }
+  button.primary:disabled { opacity: 0.45; cursor: default; }
+  .status { margin-top: 8px; min-height: 28px; }
+  .status.error { color: var(--figma-color-text-danger, #d1293d); }
+  .status a { color: inherit; }
+  .empty { padding: 16px 8px; color: var(--figma-color-text-secondary, #666); text-align: center; }
+</style>
+
+<h1>GrapiX Motion Bridge</h1>
+<p class="hint">Export Motion timelines as <code>grapix-figma-motion.json</code>, then choose it in the Editor's Import Design dialog.</p>
+
+<div class="toolbar">
+  <button id="all" type="button">All</button>
+  <button id="animated" type="button">Animated only</button>
+  <button id="none" type="button">None</button>
+</div>
+
+<ul id="frames"><li class="empty">Reading the document…</li></ul>
+
+<button class="primary" id="export" type="button" disabled>Export motion</button>
+<div class="status" id="status"></div>
+
+<script>
+  const framesList = document.getElementById("frames");
+  const statusBox = document.getElementById("status");
+  const exportButton = document.getElementById("export");
+  let frames = [];
+
+  function post(message) {
+    parent.postMessage({ pluginMessage: message }, "*");
+  }
+
+  function selectedIds() {
+    return [...framesList.querySelectorAll("input:checked")].map((input) => input.value);
+  }
+
+  function refreshExportState() {
+    exportButton.disabled = selectedIds().length === 0;
+  }
+
+  function render() {
+    if (!frames.length) {
+      framesList.innerHTML = '<li class="empty">This file has no top-level frames or components.</li>';
+      return;
+    }
+
+    framesList.innerHTML = "";
+    for (const frame of frames) {
+      const row = document.createElement("li");
+      if (!frame.animatedNodeCount) row.className = "empty-frame";
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = frame.id;
+      // Frames that animate are pre-selected, because they are what the author came to export.
+      // Frames that do not stay selectable: a frame can be the destination of a Smart Animate
+      // transition and carry no tracks of its own.
+      checkbox.checked = frame.animatedNodeCount > 0;
+      checkbox.addEventListener("change", refreshExportState);
+
+      const label = document.createElement("label");
+      label.className = "frame-name";
+      label.append(checkbox, document.createTextNode(" " + frame.name));
+
+      const page = document.createElement("span");
+      page.className = "frame-page";
+      page.textContent = frame.pageName;
+
+      const count = document.createElement("span");
+      count.className = "count";
+      count.textContent = frame.animatedNodeCount
+        ? frame.animatedNodeCount + (frame.animatedNodeCount === 1 ? " layer" : " layers")
+        : "no motion";
+
+      row.append(label, page, count);
+      framesList.append(row);
+    }
+    refreshExportState();
+  }
+
+  function setChecked(predicate) {
+    const inputs = [...framesList.querySelectorAll("input")];
+    inputs.forEach((input, index) => { input.checked = predicate(frames[index]); });
+    refreshExportState();
+  }
+
+  document.getElementById("all").addEventListener("click", () => setChecked(() => true));
+  document.getElementById("none").addEventListener("click", () => setChecked(() => false));
+  document.getElementById("animated").addEventListener("click", () => setChecked((frame) => frame.animatedNodeCount > 0));
+
+  exportButton.addEventListener("click", () => {
+    statusBox.className = "status";
+    statusBox.textContent = "Reading timelines…";
+    post({ type: "export", frameIds: selectedIds() });
+  });
+
+  onmessage = (event) => {
+    const message = event.data.pluginMessage;
+    if (!message) return;
+
+    if (message.type === "frames") {
+      frames = message.frames;
+      render();
+      return;
+    }
+
+    if (message.type === "error") {
+      statusBox.className = "status error";
+      statusBox.textContent = message.message;
+      return;
+    }
+
+    if (message.type === "manifest") {
+      // A plugin cannot write to disk, so the file is handed over as a download from the iframe.
+      const blob = new Blob([message.json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "grapix-figma-motion.json";
+      link.click();
+      URL.revokeObjectURL(url);
+
+      const { timelines, nodes, tracks } = message.summary;
+      statusBox.className = "status";
+      statusBox.textContent = timelines
+        ? `Exported ${timelines} timeline${timelines === 1 ? "" : "s"}, ${nodes} layer${nodes === 1 ? "" : "s"}, ${tracks} track${tracks === 1 ? "" : "s"}.`
+        : "None of the selected frames carry Motion timelines, so the file has no timelines in it.";
+    }
+  };
+
+  post({ type: "request-frames" });
+</script>

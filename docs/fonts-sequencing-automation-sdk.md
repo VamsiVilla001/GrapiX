@@ -47,13 +47,16 @@ A `RundownDocument` owns multiple `SequenceDocument` values. Each sequence has:
 - conditional trigger rules.
 
 Rundowns are stored atomically under the project data root with monotonic
-revisions. The Sequencer panel can create multiple sequences and place saved
-scenes on its Program track. Scene-local object animation remains in
-`SceneDocument.timeline`; cross-scene playout belongs to the rundown.
+revisions. Scene-local object animation remains in `SceneDocument.timeline`;
+cross-scene playout belongs to the rundown.
 
-The future on-air sequencer process—not the editor tab—must own the active
-rundown cursor, timecode lock, retry/idempotency state, and automatic cue
-advancement.
+**The Editor has no Sequencer panel.** It was removed on 2026-08-04: a running
+order of cues across scenes, on a Program track, with conditional Takes, is an
+operator's document, and authoring one in a tool with no Program authority
+invited exactly the confusion the product boundary exists to prevent. The
+operator surface is Playout's Scene Manager and Take List. `RundownDocument`
+remains the authoring-time model behind `@grapix/sdk` and the Editor's
+scene-automation evaluation, which returns a plan and never executes it.
 
 ## Transition scope
 

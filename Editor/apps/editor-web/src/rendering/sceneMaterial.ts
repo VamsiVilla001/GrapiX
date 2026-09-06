@@ -175,7 +175,17 @@ export function isResolvedMaterialPreviewSupported(
   );
 }
 
-export function isVideoSource(source: string): boolean {
+/**
+ * Whether a source should be drawn as a moving picture.
+ *
+ * The extension is the weaker signal of the two. An asset served by the project service is a bare
+ * `/api/assets/<id>/content` with no extension at all, so a collected movie looked exactly like a
+ * still and was handed to the image loader, which produced nothing. The MIME the asset library
+ * records is authoritative and is checked first.
+ */
+export function isVideoSource(source: string, mimeHint?: string): boolean {
+  if (mimeHint?.startsWith("video/")) return true;
+
   const normalizedSource = source.toLowerCase();
 
   return (

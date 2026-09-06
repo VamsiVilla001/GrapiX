@@ -34,6 +34,10 @@ base64 = "0.22"
 bytemuck = { version = "1", features = ["derive"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 getrandom = "0.3"
+# HMAC-SHA256, for access-token verification. Pairs with the sha2 already here. The token
+# format is specified once in `Shared/auth-contract` and verified identically in `auth.rs`;
+# a checked-in conformance fixture proves the two implementations agree.
+hmac = "0.12"
 glam = "0.29"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 serde = { version = "1", features = ["derive"] }
@@ -43,6 +47,20 @@ thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "io-util", "fs"] }
 tokio-tungstenite = "0.26"
 toml = "0.8"
+
+# The AE-F1 frame ring is a Windows named shared-memory mapping. The consumer below
+# mirrors `ae-plugin/runtime-adapter/src/frame_ring.h` exactly and never calls an Adobe SDK.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_Memory",
+  "Win32_System_Threading",
+  # The engine's own client for the AE runtime pipe polls reads rather than blocking on them.
+  "Win32_System_Pipes",
+  # `CreateNamedPipeW`'s open mode is a FILE_FLAGS_AND_ATTRIBUTES, which lives here.
+  "Win32_Storage_FileSystem",
+] }
+
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Pinned to the same verified major as the render core. wgpu majors change APIs

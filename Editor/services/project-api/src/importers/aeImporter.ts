@@ -1,3 +1,13 @@
+import {
+  parseAepToManifest,
+  parseAepxToManifest,
+  RifxFormatError
+} from "@grapix/adobe-common-schema";
+import type { AeManifest } from "@grapix/shared-types";
+const STATIC_INSPECTOR_DISCLAIMER =
+  "AEP Static Inspector performs static inspection only; it makes no renderability, fidelity, or scene-conversion determination.";
+
+
 export interface AeImportReport {
   sourceType: "aep" | "lottie" | "alpha-video" | "image-sequence";
   accepted: boolean;
@@ -14,16 +24,55 @@ export interface AeImportReport {
     mediaStreams: number;
     score: "low" | "medium" | "high";
   };
+  inspection?: {
+    producer: string;
+    compositions: number;
+    layers: number;
+    evidence: string;
+  };
 }
 
 export function inspectAeImport(fileName: string, document?: unknown): AeImportReport {
   const extension = fileName.toLowerCase().split(".").pop() ?? "";
   if (extension === "aep") {
-    return report("aep", false, {
-      unsupportedItems: [
-        "Direct .aep runtime execution is forbidden; export Lottie, alpha video, an image sequence, or a structured GrapiX conversion."
-      ]
-    });
+    if (!Buffer.isBuffer(document) || document.length === 0) {
+      return report("aep", false, {
+        unsupportedItems: ["An AEP Static Inspector report requires a non-empty binary project body."]
+      });
+    }
+    try {
+      return inspectAeManifest(
+        parseAepToManifest(document, fileName.replace(/^.*[\\/]/, "").replace(/\.[^.]+$/, "") || "After Effects Project", fileName)
+      );
+    } catch (error) {
+      if (error instanceof RifxFormatError) {
+        return report("aep", false, {
+          unsupportedItems: [`AEP parse diagnostic: ${error.message}`],
+          colorWarnings: [STATIC_INSPECTOR_DISCLAIMER]
+        });
+      }
+      return report("aep", false, {
+        unsupportedItems: [`AEP inspection failed: ${error instanceof Error ? error.message : "unknown parser error"}`],
+        colorWarnings: [STATIC_INSPECTOR_DISCLAIMER]
+      });
+    }
+  }
+  if (extension === "aepx") {
+    const xml = Buffer.isBuffer(document)
+      ? document.toString("utf8")
+      : typeof document === "string"
+        ? document
+        : "";
+    if (!xml) {
+      return report("aep", false, {
+        unsupportedItems: ["An AEPX Static Inspector report requires a non-empty XML project body."]
+      });
+    }
+    return inspectAeManifest(parseAepxToManifest(
+      xml,
+      fileName.replace(/^.*[\\/]/, "").replace(/\.[^.]+$/, "") || "After Effects Project",
+      fileName
+    ));
   }
   if (extension === "json") return inspectLottie(document);
   if (["mov", "webm", "mp4"].includes(extension)) {
@@ -38,6 +87,59 @@ export function inspectAeImport(fileName: string, document?: unknown): AeImportR
   });
 }
 
+function inspectAeManifest(manifest: AeManifest): AeImportReport {
+  const layers = manifest.compositions.flatMap((composition) => composition.layers);
+  const partialRead = manifest.warnings.some((warning) =>
+    /ended early|declared more data than its container held|truncat/i.test(warning)
+  );
+  const importedItems = [
+    ...manifest.compositions.map((composition) =>
+      `Composition: ${composition.name} (${composition.width}×${composition.height}, ${composition.frameRate} fps)`
+    ),
+    ...manifest.compositions.flatMap((composition) =>
+      composition.layers.map((layer) => `Layer: ${composition.name} / ${layer.name} (${layer.type})`)
+    )
+  ];
+  const missingFonts = [...new Set(manifest.fonts.map((font) =>
+    font.style ? `${font.family} ${font.style}` : font.family
+  ))];
+  const missingFootage = [...new Set(
+    manifest.assets
+      .filter((asset) => asset.kind === "footage" && asset.missing)
+      .map((asset) => asset.sourcePath ? `${asset.name} (${asset.sourcePath})` : asset.name)
+  )];
+  const mediaStreams = layers.filter((layer) =>
+    ["video", "image", "image-sequence", "audio"].includes(layer.type)
+  ).length;
+  const layerCount = layers.length;
+
+  return {
+    sourceType: "aep",
+    accepted: false,
+    importedItems,
+    convertedItems: [],
+    bakedItems: [],
+    unsupportedItems: [],
+    missingFonts,
+    missingFootage,
+    colorWarnings: [...manifest.warnings, STATIC_INSPECTOR_DISCLAIMER],
+    estimatedRuntimeCost: {
+      layers: layerCount,
+      vectorPaths: 0,
+      mediaStreams,
+      score: layerCount + mediaStreams * 10 > 100 ? "high" : layerCount > 20 ? "medium" : "low"
+    },
+    inspection: {
+      producer: manifest.producer,
+      compositions: manifest.compositions.length,
+      layers: layerCount,
+      evidence: partialRead
+        ? "partial read: the parser retained structures readable before the truncated project data."
+        : `Parsed ${manifest.compositions.length} compositions and ${layerCount} layers from the uploaded project bytes.`
+    }
+  };
+}
+
 function inspectLottie(document: unknown): AeImportReport {
   if (!isRecord(document) || typeof document.v !== "string" || !Array.isArray(document.layers)) {
     return report("lottie", false, { unsupportedItems: ["JSON is not a valid Lottie document."] });
@@ -50,7 +152,6 @@ function inspectLottie(document: unknown): AeImportReport {
   const missingFootage: string[] = [];
   let vectorPaths = 0;
   let mediaStreams = 0;
-
   for (const [index, rawLayer] of document.layers.entries()) {
     if (!isRecord(rawLayer)) continue;
     const name = typeof rawLayer.nm === "string" ? rawLayer.nm : `layer ${index + 1}`;

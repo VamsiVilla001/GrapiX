@@ -16,5 +16,6 @@
  */
 
 export * from "./clock.js";
+export * from "./aeCueMap.js";
 export * from "./playback.js";
 export * from "./determinism.js";

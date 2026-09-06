@@ -1,0 +1,25 @@
+{
+  "$comment": [
+    "Numeric bounds the native renderer enforces on read, declared once so the Editor can enforce the",
+    "same ones on write. Without this the scene stores a value the renderer refuses: typing 500 into a",
+    "spot light's cone angle saved 500, showed 500 and drew 179 — three numbers for one property.",
+    "",
+    "TypeScript side: PROPERTY_CONSTRAINTS in Shared/shared-types/src/propertyConstraints.ts, held",
+    "against this file by Shared/shared-types/tests/property-constraints-contract.test.mjs.",
+    "",
+    "Rust side: services/render-daemon/tests/renderer_clamps.rs feeds out-of-range values through",
+    "prepare_scene and asserts the prepared light matches the bounds below. It asserts behaviour rather",
+    "than re-reading a constant, so a clamp that moves in the renderer fails the test.",
+    "",
+    "Only the properties the *native* renderer clamps belong here. Camera and slab bounds are enforced by",
+    "the browser Preview alone today (the native renderer does not prepare cameras at all), so they live",
+    "in the TypeScript table with their source cited and are not claimed as cross-language."
+  ],
+  "light": {
+    "coneAngleDeg": { "min": 1, "max": 179, "fallback": 45 },
+    "penumbra": { "min": 0, "max": 1, "fallback": 0.25 },
+    "intensity": { "min": 0, "fallback": 1 },
+    "range": { "min": 0, "fallback": 0 },
+    "decay": { "min": 0, "fallback": 2 }
+  }
+}

@@ -57,8 +57,15 @@ export function importPsdDocument(
     useImageData: true,
     skipThumbnail: true,
     throwForMissingFeatures: false,
-    logMissingFeatures: false
+    logMissingFeatures: true
   });
+  reportImportWarning(
+    report,
+    "PSD feature checking was enabled while parsing. ag-psd reports unsupported constructs to its parser log but does not expose an enumerable callback, so unsupported constructs may have been omitted.",
+    "warning",
+    sourceName,
+    "Parser feature-check notice"
+  );
   const assets = new Map<string, NormalizedDesignAsset>();
   for (const linked of psd.linkedFiles ?? []) {
     const assetId = `psd-linked-${safeId(linked.id || linked.name)}`;

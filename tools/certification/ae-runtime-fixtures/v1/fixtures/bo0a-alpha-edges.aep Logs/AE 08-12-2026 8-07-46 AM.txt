@@ -1,0 +1,12 @@
+Adobe After Effects v26.3 Windows 64 render log for project “bo0a-alpha-edges.aep”
+
+Rendering started on 08/12/2026 at 8:07:46 AM
+
+  08/12/2026 8:07:46 AM: Starting composition “BO0a-ZeroAlpha”.
+
+  Render Settings: Best Settings  Quality: Best  Resolution: Full  Size: 640 x 360  Proxy Use: Use No Proxies  Effects: Current Settings  Disk Cache: Read Only  Color Depth: Current Settings  Frame Blending: On for Checked Layers  Field Render: Off  Pulldown: Off  Motion Blur: On for Checked Layers     Solos: Current Settings     Time Span: Custom  Start: 0:00:00:00  End: 0:00:00:00  Duration: 0:00:00:01  Frame Rate: 25.00 (comp)  Guide Layers: All Off  Skip Existing Files: Off    Output Module: TIFF Sequence with Alpha  Output To: D:\Project KK\Personal projects\GrapiX\tools\certification\ae-runtime-fixtures\v1\references\BO0a-ZeroAlpha\frames\frame_[#####].tif  Format: Photoshop Sequence  Output Info: -  Start Frame: 0  Output Audio: -  Channels: RGB + Alpha  Depth: Millions of Colors+  Color: Premultiplied  Resize: -  Crop: -  Final Size: 640 x 360  Profile: -  Embed Profile:      Post-Render Action: None             0:00:00:00 (1): 0 Seconds  08/12/2026 8:07:46 AM: Finished composition “BO0a-ZeroAlpha”.
+
+
+  Total Time Elapsed: 0 Seconds
+Log closed on 08/12/2026 at 8:07:46 AM
+

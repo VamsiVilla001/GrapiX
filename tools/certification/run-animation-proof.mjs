@@ -21,6 +21,9 @@ import { EngineConnection, WebSocketEngineTransport, engineUrl } from "@grapix/r
 
 const HOST = process.env.ENGINE_HOST ?? "127.0.0.1";
 const PORT = Number(process.env.ENGINE_PORT ?? 4400);
+// No bearer: a local peer without one is the Editor, which is the authority authoring and
+// the Editor view need. A token here would make this connection an operator instead.
+const url = engineUrl(HOST, PORT, { secure: false });
 
 const pass = [];
 const fail = [];
@@ -35,7 +38,6 @@ function check(label, condition, detail = "") {
   }
 }
 
-const url = engineUrl(HOST, PORT, { secure: false });
 console.log(`\nConnecting to ${url}\n`);
 
 const client = new EngineConnection({
@@ -217,27 +219,81 @@ async function load(document) {
   const reply = await client.request(
     "scene.load",
     { scene: document, prepare: true },
-    { sceneId: document.id, sceneRevision: 1 }
+    { sceneRef: { projectId: "certification", domain: "authoring", sceneId: document.id, revision: 1 } }
   );
   if (reply.type !== "reply.scenePrepared") {
     throw new Error(`${document.id} did not prepare: ${reply.type}`);
   }
 }
 
-/** Render one frame and digest the returned image so frames can be compared exactly. */
-async function digestAt(sceneId, frame) {
-  const reply = await client.request("preview.request", {
-    channel: "preview",
-    sceneId,
-    frame,
-    source: { type: "scaled-stage", maxWidth: 640, maxHeight: 360 },
-    encoding: "png"
-  });
-  const data = reply.payload?.data;
-  if (typeof data !== "string" || data.length < 512) {
-    throw new Error(`frame ${frame} returned no usable image (${reply.type})`);
+/**
+ * Render one frame and digest it so frames can be compared exactly.
+ *
+ * This runs as the Editor role, so it uses `editor.view.request`, not `preview.request` —
+ * the latter is a Playout capability (invariant 4) and the engine refuses it from an editor
+ * connection. The editor view returns raw premultiplied BGRA, which is *more* than enough for
+ * this proof: it only ever compares frames for equality, and a digest of the raw pixels
+ * changes wherever the picture changes. The frame is `[4-byte big-endian metadata length,
+ * UTF-8 JSON metadata, pixels]`, decoded here rather than assumed.
+ */
+function digestEditorFrame(data) {
+  if (!(data instanceof Uint8Array) || data.length < 4) {
+    throw new Error("editor view returned no binary frame");
   }
-  return createHash("sha256").update(data).digest("hex").slice(0, 12);
+  const headerLength = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
+  const metadata = JSON.parse(Buffer.from(data.slice(4, 4 + headerLength)).toString("utf8"));
+  const pixels = data.slice(4 + headerLength);
+  if (pixels.length === 0) {
+    throw new Error(`frame ${metadata.frame} returned no pixels`);
+  }
+  return createHash("sha256").update(pixels).digest("hex").slice(0, 12);
+}
+
+function digestAt(sceneId, frame) {
+  const viewId = `proof-${sceneId}`;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      unsubscribe();
+      reject(new Error(`timed out waiting for the editor view frame at frame ${frame}`));
+    }, 15_000);
+    const unsubscribe = client.on((event) => {
+      if (event.type !== "binary-frame") return;
+      try {
+        const metadata = JSON.parse(
+          Buffer.from(
+            event.data.slice(4, 4 + ((event.data[0] << 24) | (event.data[1] << 16) | (event.data[2] << 8) | event.data[3]))
+          ).toString("utf8")
+        );
+        // Only this scene's view, and only this generation, pairs with this request.
+        if (metadata.viewId !== viewId || metadata.frame !== frame) return;
+        clearTimeout(timer);
+        unsubscribe();
+        resolve(digestEditorFrame(event.data));
+      } catch (error) {
+        clearTimeout(timer);
+        unsubscribe();
+        reject(error);
+      }
+    });
+
+    client.request(
+      "editor.view.request",
+      {
+        sceneRef: { projectId: "certification", domain: "authoring", sceneId, revision: 1 },
+        viewId,
+        viewGeneration: 1,
+        bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+        pixelWidth: 640,
+        pixelHeight: 360,
+        frame
+      },
+      { sceneRef: { projectId: "certification", domain: "authoring", sceneId, revision: 1 } }
+    ).catch((error) => {
+      clearTimeout(timer);
+      unsubscribe();
+      reject(error);
+    });
+  });
 }
 
 async function digests(sceneId, frames) {
@@ -331,12 +387,22 @@ check(
 );
 
 console.log("\n— clean up —");
+// Addressed by SceneRef, not a bare id: the envelope carries the runtime address, and an
+// unload that names only `sceneId` releases nothing. Six scenes then survive every run until
+// the engine hits its eight-scene ceiling and refuses the *next* harness's first load.
+let unloaded = 0;
 for (const id of [MOVING.id, FADING.id, LEGACY.id, STILL.id, MESH.id, MESH_STILL.id]) {
-  await client
-    .request("scene.unload", { sceneId: id, force: true }, { sceneId: id })
-    .catch(() => undefined);
+  const released = await client
+    .request(
+      "scene.unload",
+      { sceneId: id, force: true },
+      { sceneRef: { projectId: "certification", domain: "authoring", sceneId: id, revision: 1 } }
+    )
+    .then(() => true)
+    .catch(() => false);
+  if (released) unloaded += 1;
 }
-check("proof scenes unloaded", true);
+check("proof scenes unloaded", unloaded === 6, `${unloaded}/6 released`);
 
 client.disconnect("animation proof finished");
 

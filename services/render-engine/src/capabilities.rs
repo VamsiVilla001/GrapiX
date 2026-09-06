@@ -46,31 +46,54 @@ impl ConnectionRole {
 
 /// Immutable, credential-derived authority for one connection.
 ///
-/// A loopback session without an operational bearer credential is deliberately an
-/// Editor session. A successfully verified bearer credential is the only currently
-/// configured way to obtain the Playout authority. Keeping this assignment at the
-/// transport boundary makes a forged `clientRole` claim harmless.
+/// Two shapes, and the difference matters:
+///
+/// - **Identified** - the connection presented a valid access token, so there is a real user
+///   behind every request it makes. `identity` carries who, and the permission set the token
+///   was minted with. This is the only shape a production engine accepts.
+/// - **Anonymous** - a development engine running without authentication. There is no user,
+///   only a product role, and every audit row it produces says so rather than inventing a
+///   name. Refused outright when `auth.required` is set.
+///
+/// Keeping this assignment at the transport boundary is what makes a forged `clientRole`
+/// claim in a `Hello` harmless: a peer may describe itself, but never authorise itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectionPrincipal {
     role: ConnectionRole,
     connection_id: String,
     authenticated: bool,
+    identity: Option<crate::auth::VerifiedIdentity>,
 }
 
 impl ConnectionPrincipal {
+    /// A development session with no credential. Editor authority, no user.
     pub fn loopback_editor(connection_id: impl Into<String>) -> Self {
         Self {
             role: ConnectionRole::Editor,
             connection_id: connection_id.into(),
             authenticated: false,
+            identity: None,
         }
     }
 
-    pub fn authenticated_playout(connection_id: impl Into<String>) -> Self {
+    /// A session that presented a valid access token.
+    ///
+    /// The product role follows from the account role: an Editor account drives an Editor
+    /// link, an operator drives a Playout link, and an Admin drives whichever the connection
+    /// is being used for - so Admin maps to Playout, the wider of the two capability sets,
+    /// and is then narrowed per request by its permissions like everyone else.
+    pub fn identified(connection_id: impl Into<String>, identity: crate::auth::VerifiedIdentity) -> Self {
+        let role = match identity.role {
+            crate::auth::UserRole::Editor => ConnectionRole::Editor,
+            crate::auth::UserRole::PlayoutOperator | crate::auth::UserRole::Admin => {
+                ConnectionRole::Playout
+            }
+        };
         Self {
-            role: ConnectionRole::Playout,
+            role,
             connection_id: connection_id.into(),
             authenticated: true,
+            identity: Some(identity),
         }
     }
 
@@ -86,70 +109,142 @@ impl ConnectionPrincipal {
         self.authenticated
     }
 
+    /// The user behind this connection, when there is one.
+    pub fn identity(&self) -> Option<&crate::auth::VerifiedIdentity> {
+        self.identity.as_ref()
+    }
+
+    pub fn user_id(&self) -> Option<&str> {
+        self.identity.as_ref().map(|identity| identity.user_id.as_str())
+    }
+
+    pub fn username(&self) -> Option<&str> {
+        self.identity.as_ref().map(|identity| identity.username.as_str())
+    }
+
+    pub fn session_id(&self) -> Option<&str> {
+        self.identity.as_ref().map(|identity| identity.session_id.as_str())
+    }
+
+    /// Does this connection carry the permission a request needs?
+    ///
+    /// An anonymous development session has no permission set, so it falls back to the role
+    /// capability matrix - which is the pre-auth behaviour, and is why a development engine
+    /// still works with no accounts configured. An identified session is checked against the
+    /// token, every request, so a role change or a narrowed token takes effect immediately
+    /// rather than at the next reconnect.
+    pub fn allows_permission(&self, permission: crate::auth::Permission) -> bool {
+        match &self.identity {
+            Some(identity) => identity.allows(permission),
+            None => true,
+        }
+    }
     /// Closed capability matrix. New request types are denied until deliberately
     /// classified here; no role receives authority merely because it connected.
+    ///
+    /// A principal identified as an Admin holds the union of both products' permissions, so it
+    /// may drive either an authoring or an operator link. That union is why the per-command
+    /// permission check in the engine matters: the role gate says which *link* a request may
+    /// arrive on, and the permission gate says whether *this user* may send it. An anonymous
+    /// development principal has no permissions to check, so the role matrix is its only gate,
+    /// exactly as before auth existed.
     pub fn allows(&self, request: crate::protocol::RequestType) -> bool {
         use crate::protocol::RequestType::*;
 
-        match self.role {
-            ConnectionRole::Editor => matches!(
-                request,
-                Hello
-                    | Authenticate
-                    | Heartbeat
-                    | Capabilities
-                    | Disconnect
-                    | StageLoad
-                    | StageUnload
-                    | SceneLoad
-                    | SceneUnload
-                    | SceneFullSync
-                    | SceneApplyPatch
-                    | SceneValidate
-                    | ScenePrepare
-                    | AssetRegister
-                    | AssetUpload
-                    | AssetValidate
-                    | AssetPreload
-                    | AssetRelease
-                    | GetStatus
-                    | GetDiagnostics
-                    | GetCapabilities
-                    | OutputList
-                    | EditorViewRequest
-            ),
-            ConnectionRole::Playout => matches!(
-                request,
-                Hello
-                    | Authenticate
-                    | Heartbeat
-                    | Capabilities
-                    | Disconnect
-                    | Cue
-                    | TakeOnline
-                    | TakeOffline
-                    | Continue
-                    | Update
-                    | Stop
-                    | Clear
-                    | Replace
-                    | Transition
-                    | PreviewRequest
-                    | PreviewStreamStart
-                    | PreviewStreamStop
-                    | PreviewSetViewport
-                    | GetStatus
-                    | GetDiagnostics
-                    | GetCapabilities
-                    | SetConfiguration
-                    | RestartRenderer
-                    | OutputList
-                    | OutputConfigure
-                    | OutputStart
-                    | OutputStop
-                    | OutputRemove
-            ),
+        // Admin spans both products. Its per-command permissions are still checked in the
+        // engine, so widening the role gate here does not widen the account.
+        let is_admin = matches!(
+            self.identity.as_ref().map(|identity| identity.role),
+            Some(crate::auth::UserRole::Admin)
+        );
+        if is_admin {
+            return role_matrix(ConnectionRole::Editor, request)
+                || role_matrix(ConnectionRole::Playout, request);
         }
+        role_matrix(self.role, request)
+    }
+}
+
+/// The capability set for one product link.
+///
+/// Separated from `allows` so the Admin union can consult both without duplicating either
+/// arm. New request types are denied until deliberately classified here.
+fn role_matrix(role: ConnectionRole, request: crate::protocol::RequestType) -> bool {
+    use crate::protocol::RequestType::*;
+    match role {
+        ConnectionRole::Editor => matches!(
+            request,
+            Hello
+                | Authenticate
+                | Heartbeat
+                | Capabilities
+                | Disconnect
+                | StageLoad
+                | StageUnload
+                | SceneLoad
+                | SceneUnload
+                | SceneFullSync
+                | SceneApplyPatch
+                | SceneValidate
+                | ScenePrepare
+                | AssetRegister
+                | AssetUpload
+                | AssetValidate
+                | AssetPreload
+                | AssetRelease
+                | GetStatus
+                | GetDiagnostics
+                | GetCapabilities
+                | OutputList
+                | EditorViewRequest
+        ),
+        ConnectionRole::Playout => matches!(
+            request,
+            Hello
+                | Authenticate
+                | Heartbeat
+                | Capabilities
+                | Disconnect
+                // Scene delivery. Playout supplies a published scene and its bytes; it
+                // never authors one. Without these its own controller could not put
+                // anything on air: `engineController.load` calls `scene.load`, and
+                // `ensureSceneAssets` calls `asset.register`/`asset.upload`, so a
+                // token-secured engine refused every take. `SceneApplyPatch` stays out -
+                // mutating a document is authoring, and Playout republishes instead.
+                | SceneLoad
+                | SceneFullSync
+                | ScenePrepare
+                | SceneUnload
+                | AssetRegister
+                | AssetUpload
+                | Cue
+                | TakeOnline
+                | TakeOffline
+                | Continue
+                | Update
+                | Stop
+                | Clear
+                | Replace
+                | Transition
+                | PreviewRequest
+                | PreviewStreamStart
+                | PreviewStreamStop
+                | PreviewSetViewport
+                | GetStatus
+                | GetDiagnostics
+                | GetCapabilities
+                | SetConfiguration
+                | RestartRenderer
+                | OutputList
+                | OutputConfigure
+                | OutputStart
+                | OutputStop
+                | OutputRemove
+                // Attaching a live After Effects container is an operations act: Playout launched the
+                // host and holds its session token. The Editor role must never reach it.
+                | AeContainerLoad
+                | AeContainerUnload
+        ),
     }
 }
 
@@ -786,8 +881,18 @@ impl ResourceGovernor {
 /// A preallocated output/readback handoff slab. `acquire` and `release` only
 /// move indexes inside pre-reserved vectors and never grow the heap on tick.
 #[derive(Debug)]
+pub struct PooledVideoFrame {
+    pub width: u32,
+    pub height: u32,
+    pub data: Box<[u8]>,
+    pub frame_index: u64,
+}
+
+/// A preallocated output/readback handoff slab. `acquire` and `release` only
+/// move indexes inside pre-reserved vectors and never grow the heap on tick.
+#[derive(Debug)]
 pub struct VideoFramePool {
-    slots: Vec<grapix_render_core::output::VideoFrame>,
+    slots: Vec<PooledVideoFrame>,
     free: Vec<usize>,
     leased: Vec<bool>,
 }
@@ -801,10 +906,10 @@ impl VideoFramePool {
         let mut free = Vec::with_capacity(slot_count);
         let mut leased = Vec::with_capacity(slot_count);
         for index in 0..slot_count {
-            slots.push(grapix_render_core::output::VideoFrame {
+            slots.push(PooledVideoFrame {
                 width,
                 height,
-                data: vec![0; byte_len],
+                data: vec![0; byte_len].into_boxed_slice(),
                 frame_index: 0,
             });
             free.push(slot_count - index - 1);
@@ -823,10 +928,7 @@ impl VideoFramePool {
         Some(index)
     }
 
-    pub fn frame_mut(
-        &mut self,
-        index: usize,
-    ) -> Option<&mut grapix_render_core::output::VideoFrame> {
+    pub fn frame_mut(&mut self, index: usize) -> Option<&mut PooledVideoFrame> {
         self.leased.get(index).copied().filter(|leased| *leased)?;
         self.slots.get_mut(index)
     }
@@ -847,7 +949,7 @@ impl VideoFramePool {
     pub fn bytes(&self) -> u64 {
         self.slots
             .iter()
-            .map(|frame| frame.data.capacity() as u64)
+            .map(|frame| frame.data.len() as u64)
             .sum()
     }
 }
@@ -1308,4 +1410,83 @@ fn output_adapter_capabilities(config: &EngineConfig) -> Vec<OutputAdapterCapabi
             },
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::{permissions_for_role, UserRole, VerifiedIdentity};
+    use crate::protocol::RequestType;
+
+    /// A principal for a real account of the given role, carrying that role's full permissions.
+    fn principal_for(role: UserRole) -> ConnectionPrincipal {
+        ConnectionPrincipal::identified(
+            "peer",
+            VerifiedIdentity {
+                user_id: "usr_test".to_string(),
+                username: "test".to_string(),
+                role,
+                session_id: "sess_test".to_string(),
+                permissions: permissions_for_role(role),
+            },
+        )
+    }
+
+    /// Playout's own controller calls these. Before they were classified here, a
+    /// token-secured engine refused every one of them, so Playout could not put a published
+    /// scene on air at all - it could cue a scene it had no way to deliver.
+    #[test]
+    fn playout_may_deliver_a_published_scene() {
+        let playout = principal_for(UserRole::PlayoutOperator);
+        for request in [
+            RequestType::SceneLoad,
+            RequestType::SceneFullSync,
+            RequestType::ScenePrepare,
+            RequestType::SceneUnload,
+            RequestType::AssetRegister,
+            RequestType::AssetUpload,
+        ] {
+            assert!(
+                playout.allows(request),
+                "playout must be able to deliver a scene: {request:?}"
+            );
+        }
+    }
+
+    /// Delivery is not authoring. Playout resends a document; it never edits one in place,
+    /// and it never defines the stage.
+    #[test]
+    fn playout_may_not_author() {
+        let playout = principal_for(UserRole::PlayoutOperator);
+        for request in [
+            RequestType::SceneApplyPatch,
+            RequestType::StageLoad,
+            RequestType::StageUnload,
+            RequestType::EditorViewRequest,
+        ] {
+            assert!(
+                !playout.allows(request),
+                "authoring must stay with the Editor: {request:?}"
+            );
+        }
+    }
+
+    /// The other half of the split: authoring authority is not operator authority. An Editor
+    /// session must never be able to reach Program.
+    #[test]
+    fn the_editor_never_reaches_program() {
+        let editor = principal_for(UserRole::Editor);
+        for request in [
+            RequestType::Cue,
+            RequestType::TakeOnline,
+            RequestType::Transition,
+            RequestType::OutputConfigure,
+            RequestType::PreviewRequest,
+        ] {
+            assert!(
+                !editor.allows(request),
+                "the Editor has no operator authority: {request:?}"
+            );
+        }
+    }
 }

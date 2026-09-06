@@ -12,15 +12,89 @@ pub mod recording;
 #[cfg(feature = "ndi")]
 pub mod ndi;
 
+use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
+
 use crate::config::{OutputBackend, OutputConfig};
 
-/// One rendered frame: tightly packed BGRA (width * 4 bytes per row),
-/// sRGB-encoded bytes, premultiplied alpha — per the shader contract.
-#[derive(Debug, Clone)]
+/// A fixed-capacity frame slab returned to its producer when the output thread
+/// drops the frame. This is a lease, not a growing per-frame `Vec`.
+#[derive(Debug)]
+pub struct VideoFrameLease {
+    bytes: Option<Box<[u8]>>,
+    return_tx: SyncSender<Box<[u8]>>,
+}
+
+impl VideoFrameLease {
+    pub fn as_slice(&self) -> &[u8] {
+        self.bytes.as_deref().expect("frame lease must own bytes")
+    }
+
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        self.bytes.as_deref_mut().expect("frame lease must own bytes")
+    }
+}
+
+impl std::ops::Deref for VideoFrameLease {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        self.as_slice()
+    }
+}
+
+impl std::ops::DerefMut for VideoFrameLease {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.as_mut_slice()
+    }
+}
+
+impl Drop for VideoFrameLease {
+    fn drop(&mut self) {
+        if let Some(bytes) = self.bytes.take() {
+            let _ = self.return_tx.try_send(bytes);
+        }
+    }
+}
+
+/// Preallocates a bounded number of exactly-sized output slabs at configure
+/// time. A full pool refuses the next render rather than allocating or growing.
+pub struct VideoFramePool {
+    free_rx: Receiver<Box<[u8]>>,
+    return_tx: SyncSender<Box<[u8]>>,
+    byte_length: usize,
+}
+
+impl VideoFramePool {
+    pub fn new(slot_count: usize, byte_length: usize) -> anyhow::Result<Self> {
+        anyhow::ensure!(slot_count > 0, "frame pool needs at least one slot");
+        anyhow::ensure!(byte_length > 0, "frame pool byte length must be positive");
+        let (return_tx, free_rx) = mpsc::sync_channel(slot_count);
+        for _ in 0..slot_count {
+            return_tx.send(vec![0_u8; byte_length].into_boxed_slice())
+                .map_err(|_| anyhow::anyhow!("frame pool initialization failed"))?;
+        }
+        Ok(Self { free_rx, return_tx, byte_length })
+    }
+
+    pub fn try_acquire(&self) -> Option<VideoFrameLease> {
+        match self.free_rx.try_recv() {
+            Ok(bytes) => Some(VideoFrameLease { bytes: Some(bytes), return_tx: self.return_tx.clone() }),
+            Err(TryRecvError::Empty | TryRecvError::Disconnected) => None,
+        }
+    }
+
+    pub fn byte_length(&self) -> usize {
+        self.byte_length
+    }
+}
+
+/// One rendered frame holding a lease from the bounded renderer/output pool.
+/// The output must not retain it after `send_frame` returns.
+#[derive(Debug)]
 pub struct VideoFrame {
     pub width: u32,
     pub height: u32,
-    pub data: Vec<u8>,
+    pub data: VideoFrameLease,
     pub frame_index: u64,
 }
 

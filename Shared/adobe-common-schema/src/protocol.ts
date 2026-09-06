@@ -197,7 +197,8 @@ export const AFTER_EFFECTS_TOOLS = [
   "aftereffects.updateLayerTransform",
   "aftereffects.createKeyframes",
   "aftereffects.exportComposition",
-  "aftereffects.renderPreview"
+  "aftereffects.renderPreview",
+  "aftereffects.exportProjectManifest"
 ] as const;
 
 /**

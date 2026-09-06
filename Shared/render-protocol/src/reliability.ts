@@ -189,6 +189,20 @@ export class SequenceGenerator {
     return this.value;
   }
 
+  /**
+   * Give back a number that never went out.
+   *
+   * The receiver tracks sequences to detect loss and reordering, and it *parks* a message that
+   * arrives with a gap ahead of it — waiting for one that will never come. So a frame the sender
+   * builds and then refuses to send must not consume a number: the next real frame would land in the
+   * hole's place and be held rather than answered, which reads to an operator as a dead connection.
+   *
+   * Only the number just issued can be released, so nothing can rewind history.
+   */
+  release(sequence: number): void {
+    if (sequence === this.value && this.value > 0) this.value -= 1;
+  }
+
   get current(): number {
     return this.value;
   }

@@ -1,0 +1,201 @@
+{
+  "phase": "AE-F0",
+  "title": "Pinned pixel-world checkout and alpha contract — first execution",
+  "recordedAt": "2026-08-12T03:40:00+05:30",
+  "verdict": "PASS. A composition frame is checked out of a live After Effects through the AEGP render path on the host callback thread, and the alpha contract is settled by measurement: AE's world is natively ARGB, AEGP_MatteMode_PREMUL_BLACK produces premultiplied pixels that are byte-for-byte identical to an independently exported Render Queue reference, and AEGP_MatteMode_STRAIGHT differs exactly where it must. One serious trap found: requesting a non-native channel order corrupts repeat checkouts.",
+  "environment": {
+    "host": "After Effects 2026 (26.3), Windows, vendored SDK ae25.6_61",
+    "suites": [
+      "AEGP Render Options Suite v4 (kAEGPRenderOptionsSuiteVersion4)",
+      "AEGP Render Suite v5 (kAEGPRenderSuiteVersion5, whose value is 8)",
+      "AEGP World Suite v3"
+    ],
+    "call": "AEGP_RenderAndCheckoutFrame -> AEGP_GetReceiptWorld -> AEGP_GetBaseAddr8/16/32 -> AEGP_CheckinFrame",
+    "verb": "checkout <compIndex> <frame> [8|16|32] [straight|premul-black|premul-bg] [argb|bgra]"
+  },
+  "proven": [
+    "A frame is checked out and checked back in with no error: AEGP_CheckinFrame returned 0 on every call.",
+    "The render runs on the adapter's own hook thread: threadId equalled the thread recorded at the first idle tick, so onHookThread was true for every checkout. Nothing touched a worker thread.",
+    "Geometry is exact and unpadded at every depth: 8-bit rowBytes 7680, 16-bit 15360, 32-bit 30720, each exactly width x bytesPerPixel, so rowPadding was 0 throughout.",
+    "All three world types are real: AEGP_SetWorldType(8|16|32) was honoured and the matching type-specific base address returned a payload of 8,294,400 / 16,588,800 / 33,177,600 bytes.",
+    "Both matte modes and both channel orders were accepted by AEGP_SetMatteMode and AEGP_SetChannelOrder; none was refused.",
+    "The checkout is deterministic: two consecutive checkouts of one unchanged frame produced identical pixel digests.",
+    "Byte-for-byte agreement with the independent reference: the 8-bit payload equals the Render Queue TIFF's strip payload exactly — 8,294,400 bytes, zero differing bytes, pixel SHA-256 788ae0147bdf979a6575938ca2d7d440 on both sides.",
+    "Frame-to-time conversion uses AEGP_GetCompFrameDuration as an exact rational, so a 30000/1001 composition cannot drift off frame boundaries."
+  ],
+  "findings": [
+    {
+      "id": "C1",
+      "finding": "AEGP_NewFromItem inherits the composition's *current* render options, including the Composition panel's downsample factor. The very first checkout returned 480x270 for a 1920x1080 composition because the panel sat at quarter resolution.",
+      "consequence": "Resolution must be stated, never inherited: the adapter now calls AEGP_SetDownsampleFactor(1,1) and AEGP_SetRenderQuality(BEST) on every checkout. Without it a pixel gate would fail — or silently pass — on an operator's zoom level.",
+      "severity": "would have invalidated every comparison in this phase"
+    },
+    {
+      "id": "C2",
+      "finding": "A frame index far beyond the composition's duration is not refused. Requesting frame 99999 of a 3600-frame composition returned A_Err_NONE and a full 1920x1080 frame.",
+      "consequence": "Range checking belongs to the caller. A runtime that trusts After Effects to reject an out-of-range request will silently present clamped pixels as the frame it asked for — so AE-F2's frame path must validate the index against the composition before it asks."
+    },
+    {
+      "id": "C3",
+      "finding": "Byte-level alpha reasoning does not survive a change of depth. A first version derived the packed row from a hardcoded 4 bytes per pixel and reported a correct 16-bit row as half padding.",
+      "consequence": "Stride comes from the world type, and the 16- and 32-bit payloads are written while their alpha statistics are reported as unavailable rather than computed with 8-bit assumptions."
+    },
+    {
+      "id": "C4",
+      "finding": "Requesting a non-native channel order corrupts repeat checkouts. With AEGP_SetChannelOrder(BGRA), consecutive checkouts of the same unchanged frame alternate between BGRA and ARGB layout: five identical requests returned BGRA, ARGB, BGRA, ARGB, BGRA. The flip follows the number of calls, not the request — alternating the requested order produced the same alternation, and changing the frame did not stop it. Requesting the native ARGB order is stable across repeats.",
+      "mechanism": "[INFERENCE] The swizzle appears to be applied in place to After Effects' cached world, so each checkout re-swizzles a buffer that was already swizzled. The measurements are direct; this explanation of them is not.",
+      "consequence": "A runtime that asks for BGRA gets correct pixels on odd calls and channel-swapped pixels on even ones — a defect that would pass a single-frame test and then corrupt live output. GrapiX must request ARGB and perform its own swizzle to the BGRA8 consumer contract. AE-F1's ring descriptor must therefore carry the observed layout, not the requested one.",
+      "severity": "would have shipped channel-swapped frames"
+    }
+  ],
+  "notProvenYet": [
+    "16-bit and 32-bit agreement against a reference: no 16/32-bit reference has been exported yet.",
+    "World lifetime after check-in. The SDK states the world is read-only and not owned by the plugin; that contract was respected rather than tested, because testing it means reading freed memory inside the host.",
+    "Cancellation: AEGP_RenderAndCheckoutFrame was called with a null cancel function, so the cancel path is unexercised.",
+    "Any frame that costs real time. Every render here reported 0-16 ms because the frames are empty, so no timing or deadline claim can be made.",
+    "Whether the channel-order toggle also affects 16- and 32-bit worlds, and whether forcing a fresh render defeats it. Only the 8-bit path was measured.",
+    "Antialiased and gradient edges, coloured translucent shadows, and premultiplied-black edge cases: the probe covers opaque, uniform 50% and zero alpha only. The wider corpus is BO0a's."
+  ],
+  "measurements": {
+    "depths": [
+      {
+        "requested": "8",
+        "actual": "8",
+        "bytesPerPixel": 4,
+        "rowBytes": 7680,
+        "packedRowBytes": 7680,
+        "rowPadding": 0,
+        "payloadBytes": 8294400,
+        "alphaStatsAvailable": true
+      },
+      {
+        "requested": "16",
+        "actual": "16",
+        "bytesPerPixel": 8,
+        "rowBytes": 15360,
+        "packedRowBytes": 15360,
+        "rowPadding": 0,
+        "payloadBytes": 16588800,
+        "alphaStatsAvailable": false
+      },
+      {
+        "requested": "32",
+        "actual": "32",
+        "bytesPerPixel": 16,
+        "rowBytes": 30720,
+        "packedRowBytes": 30720,
+        "rowPadding": 0,
+        "payloadBytes": 33177600,
+        "alphaStatsAvailable": false
+      }
+    ],
+    "renderedRegion": {
+      "left": 0,
+      "top": 0,
+      "right": 1920,
+      "bottom": 1080
+    },
+    "alphaObserved": {
+      "opaque": 0,
+      "transparent": 2073600,
+      "partial": 0,
+      "colourAboveAlpha": 0,
+      "colourAtZeroAlpha": 0,
+      "channelMin": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "channelMax": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "note": "A fully transparent frame satisfies the premultiplied invariant trivially. It is evidence of geometry and of the zero-alpha case, and evidence of nothing else."
+    }
+  },
+  "references": "ae-plugin/runtime-adapter/certification/AE-F0-references.json",
+  "alphaContract": {
+    "fixture": {
+      "path": "ae-plugin/runtime-adapter/references/fixtures/alpha-probe.aep",
+      "authoredBy": "the adapter's own `fixture` verb, because this repository's .aep files are parser fixtures whose layers carry no renderable source — every frame they render is uniformly transparent, and every alpha hypothesis fits that equally well",
+      "composition": "AlphaProbe, 640x360, 25/1 fps, 1 s",
+      "regions": {
+        "topLeft": "320x180 pure red solid at 100% opacity — opaque, and identifies the red channel",
+        "topRight": "320x180 pure green solid at 50% opacity — the decisive case: green must be ~128 if premultiplied and 255 if straight",
+        "bottomHalf": "nothing — alpha 0"
+      }
+    },
+    "proven": {
+      "nativeChannelOrder": "ARGB, matching PF_Pixel {alpha, red, green, blue}. Five consecutive checkouts requesting ARGB returned channelMax [255,255,128,0] every time.",
+      "premultipliedRequest": "premul-black: the 50% quadrant reads A=128 G=128, and zero pixels in the frame carry a colour channel above their alpha (colourAboveAlpha 0).",
+      "straightRequest": "straight: the same quadrant reads A=128 G=255, and exactly 57,600 pixels — the quadrant's pixel count — carry colour above alpha, worst excess 127.",
+      "referenceAgreement": "The premul-black checkout, mapped ARGB->RGBA, is byte-for-byte identical to the aerender TIFF: 921,600 bytes, zero differing bytes. The straight checkout differs on exactly 57,600 bytes with worst delta 127, so the comparison is sensitive enough for the identical result to mean something.",
+      "renderQueueAlpha": "After Effects' own 'TIFF Sequence with Alpha' output is PREMULTIPLIED: its 50% quadrant is [R 0, G 128, B 0, A 128]. It still declares ExtraSamples = 0, 'unspecified' — so the container's silence is not a hint that the pixels are straight."
+    },
+    "sampledRegions": {
+      "referenceRGBA": {
+        "topLeft": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "topRight": [
+          0,
+          128,
+          0,
+          128
+        ],
+        "bottomHalf": [
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "checkoutARGBPremul": {
+        "topLeft": [
+          255,
+          255,
+          0,
+          0
+        ],
+        "topRight": [
+          128,
+          0,
+          128,
+          0
+        ],
+        "bottomHalf": [
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "checkoutARGBStraight": {
+        "topLeft": [
+          255,
+          255,
+          0,
+          0
+        ],
+        "topRight": [
+          128,
+          0,
+          255,
+          0
+        ],
+        "bottomHalf": [
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    }
+  }
+}

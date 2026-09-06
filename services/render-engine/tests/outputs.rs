@@ -6,12 +6,13 @@
 
 use std::path::PathBuf;
 
-use grapix_render_core::output::VideoFrame;
+use grapix_render_core::output::{VideoFrame, VideoFramePool};
 use grapix_render_engine::outputs::{
     create_sink, is_live_adapter, OutputAlphaMode, OutputFormat, OutputInstance, OutputSink,
     OutputState, VirtualSink, LIVE_ADAPTER_IDS,
 };
 use grapix_render_engine::stage::FrameRate;
+use grapix_render_engine::protocol::AeFrameColorFormat;
 
 fn format() -> OutputFormat {
     OutputFormat {
@@ -21,16 +22,18 @@ fn format() -> OutputFormat {
             numerator: 50,
             denominator: 1,
         },
+        color_format: AeFrameColorFormat::Bgra8,
         alpha_mode: OutputAlphaMode::Premultiplied,
         color_space: "rec709".to_string(),
     }
 }
 
 fn frame(index: u64) -> VideoFrame {
+    let pool = VideoFramePool::new(1, 4 * 2 * 4).expect("test frame pool");
     VideoFrame {
         width: 4,
         height: 2,
-        data: vec![0u8; 4 * 2 * 4],
+        data: pool.try_acquire().expect("test frame lease"),
         frame_index: index,
     }
 }

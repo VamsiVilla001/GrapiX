@@ -16,7 +16,12 @@
 import type { FastifyReply } from "fastify";
 
 /** What the UI is told about. Each name maps to one thing the UI should refetch. */
-export type PlayoutEventKind = "library.changed" | "sequence.changed" | "runtime.changed";
+export type PlayoutEventKind =
+  | "library.changed"
+  | "sequence.changed"
+  | "runtime.changed"
+  /** A diagnostic was recorded. The operator console fetches the tail. */
+  | "diagnostics.logged";
 
 export interface PlayoutEvent {
   kind: PlayoutEventKind;

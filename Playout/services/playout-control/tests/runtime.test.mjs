@@ -71,7 +71,7 @@ test("an unknown take ID is refused rather than airing something else", async (t
 
   await assert.rejects(
     () => runtime.take({ kind: "scene", takeId: 999 }),
-    /no published scene has take ID 999/
+    /No published scene has take ID 999/
   );
   assert.equal(runtime.getStatus().programRef, null);
   assert.deepEqual(engine.actions, [], "nothing reached the engine");

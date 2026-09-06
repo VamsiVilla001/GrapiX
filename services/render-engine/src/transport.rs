@@ -35,7 +35,7 @@ use crate::config::EngineConfig;
 use crate::engine::Engine;
 use crate::protocol::{self, now_ms, Envelope, ErrorCode, ProtocolError, RequestType};
 use crate::security::{
-    tokens_match, MessageDeduplicator, RateLimiter, SequenceTracker, SequenceVerdict,
+    MessageDeduplicator, RateLimiter, SequenceTracker, SequenceVerdict,
 };
 
 /// Subprotocol the client must offer, so a stray browser tab cannot connect.
@@ -43,11 +43,38 @@ const ENGINE_SUBPROTOCOL: &str = "grapix-engine-v3";
 const BEARER_PREFIX: &str = "bearer.";
 
 struct HandshakeSecurity {
-    /// `None` means a loopback engine running without authentication.
-    auth_token: Option<String>,
+    /// HMAC key for verifying access tokens. `None` leaves the engine unable to verify any
+    /// token, which is only tenable on a development engine that requires none.
+    signing_key: Option<Vec<u8>>,
     auth_required: bool,
     allowed_origins: HashSet<String>,
     client_allowlist: HashSet<String>,
+}
+
+/// What the handshake proved about a connection, and therefore the authority it carries.
+///
+/// Authority is credential-derived. A production engine (`auth.required`) recognises exactly
+/// one credential - a valid access token - and issues no authority without it, from any
+/// address including this machine's own. The unauthenticated shape exists only for a
+/// development engine that has been deliberately configured without authentication.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum HandshakeGrant {
+    /// A verified access token: authority is whatever the token's user carries.
+    Identified(Box<crate::auth::VerifiedIdentity>),
+    /// No credential, on a development engine that requires none. Editor authority, no user.
+    AnonymousLocalEditor,
+}
+
+/// Whether a `host:port` peer string names this machine.
+fn is_loopback_peer(peer: &str) -> bool {
+    let host = match peer.rsplit_once(':') {
+        Some((host, _)) => host,
+        None => peer,
+    };
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    host.parse::<std::net::IpAddr>()
+        .map(|address| address.is_loopback())
+        .unwrap_or(false)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -87,12 +114,12 @@ pub async fn serve(config: EngineConfig, engine: Arc<Mutex<Engine>>) -> anyhow::
         config.network.bind_address, config.network.websocket_port
     );
 
-    let auth_token = config
-        .resolve_token()
-        .context("failed to resolve the engine auth token")?;
+    let signing_key = config
+        .resolve_signing_key()
+        .context("failed to resolve the engine token signing secret")?;
 
     let security = Arc::new(HandshakeSecurity {
-        auth_token,
+        signing_key,
         auth_required: config.auth.required,
         allowed_origins: config.network.allowed_origins.iter().cloned().collect(),
         client_allowlist: config.network.client_allowlist.iter().cloned().collect(),
@@ -157,20 +184,26 @@ async fn handle_connection(
         .peer_addr()
         .map(|address| address.to_string())
         .unwrap_or_else(|_| "unknown".to_string());
-    // The WebSocket handshake is the authentication boundary. Hello may report a
-    // client role for diagnostics, but it can never alter this principal.
-    let mut principal = if security.auth_required {
-        ConnectionPrincipal::authenticated_playout(peer.clone())
-    } else {
-        ConnectionPrincipal::loopback_editor(peer.clone())
-    };
+    // The WebSocket handshake is the authentication boundary, and it is what decides the
+    // authority: a verified access token names a user and the permissions they carry. Hello
+    // may report a client role for diagnostics, but it can never alter this principal.
+    //
+    // The grant has to cross a closure boundary because tungstenite validates the request
+    // inside a callback, so it is parked in a mutex the callback fills and the connection
+    // reads once the socket is accepted.
+    let grant_cell: Arc<std::sync::Mutex<Option<HandshakeGrant>>> =
+        Arc::new(std::sync::Mutex::new(None));
     let handshake_security = Arc::clone(&security);
     let peer_for_callback = peer.clone();
+    let grant_slot = Arc::clone(&grant_cell);
 
     let callback =
         move |request: &Request, mut response: Response| -> Result<Response, ErrorResponse> {
             match validate_handshake(request, &handshake_security, &peer_for_callback) {
-                Ok(()) => {
+                Ok(grant) => {
+                    if let Ok(mut slot) = grant_slot.lock() {
+                        *slot = Some(grant);
+                    }
                     // Echo the subprotocol, which tungstenite requires for the client
                     // to accept the connection.
                     response.headers_mut().insert(
@@ -186,6 +219,35 @@ async fn handle_connection(
     let websocket = tokio_tungstenite::accept_hdr_async(stream, callback)
         .await
         .context("websocket handshake failed")?;
+
+    // Set by the handshake callback above, which has run by the time the socket is accepted.
+    // An absent grant means the callback did not run, which cannot happen on an accepted
+    // socket - failing closed rather than defaulting to an authority nobody granted.
+    let grant = grant_cell
+        .lock()
+        .ok()
+        .and_then(|mut slot| slot.take())
+        .context("the handshake produced no authority")?;
+    let mut principal = match grant {
+        HandshakeGrant::Identified(identity) => {
+            tracing::info!(
+                %peer,
+                user = %identity.username,
+                user_id = %identity.user_id,
+                role = identity.role.as_str(),
+                session = %identity.session_id,
+                "authenticated a connection"
+            );
+            ConnectionPrincipal::identified(peer.clone(), *identity)
+        }
+        HandshakeGrant::AnonymousLocalEditor => {
+            tracing::warn!(
+                %peer,
+                "accepted an unauthenticated local connection; this engine requires no authentication"
+            );
+            ConnectionPrincipal::loopback_editor(peer.clone())
+        }
+    };
 
     let (mut sink, mut source) = websocket.split();
     let mut events = engine.lock().await.subscribe_events();
@@ -338,8 +400,20 @@ pub(crate) async fn process_frame(
     let envelope = match protocol::decode(text, config.security.max_message_bytes) {
         Ok(envelope) => envelope,
         Err(error) => {
-            tracing::debug!(%client_id, code = error.code.as_str(), "rejected a frame");
-            return vec![make_error(error, None)];
+            tracing::debug!(
+                %client_id,
+                code = error.code.as_str(),
+                reason = %error.message,
+                "rejected a frame"
+            );
+            /*
+             * A refusal the client cannot match to its request is not an answer. An oversized frame
+             * is rejected before parsing — deliberately, so an unbounded frame is never a denial of
+             * service — which used to mean the caller waited out its own timeout and reported
+             * "connection closed: reconnecting" instead of the limit it had exceeded. Recovering
+             * the id costs a bounded scan of the head of the frame, never a parse of all of it.
+             */
+            return vec![make_error(error, request_id_from_frame_head(text))];
         }
     };
 
@@ -371,18 +445,34 @@ pub(crate) async fn process_frame(
         )];
     }
 
-    // 3. IPC obtains its principal here; WebSocket obtains it in its authenticated
-    // handshake. The credential is verified before it can elevate a session.
-    if request == RequestType::Authenticate && config.auth.required && !principal.is_authenticated()
-    {
+    // 3. IPC obtains its principal here; WebSocket obtains it in its authenticated handshake.
+    // The credential is verified before it can change the session's authority, and the same
+    // verifier is used on both transports so there is one place to audit.
+    if request == RequestType::Authenticate && !principal.is_authenticated() {
         let presented = envelope
             .payload
             .get("token")
             .and_then(serde_json::Value::as_str);
-        let expected = config.resolve_token().ok().flatten();
-        match (expected.as_deref(), presented) {
-            (Some(expected), Some(presented)) if tokens_match(expected, presented) => {
-                *principal = ConnectionPrincipal::authenticated_playout(client_id);
+        let key = config.resolve_signing_key().ok().flatten();
+        match (key, presented) {
+            (Some(key), Some(presented)) => {
+                match crate::auth::verify_access_token(presented, &key, now_seconds()) {
+                    Ok(identity) => {
+                        tracing::info!(
+                            user = %identity.username,
+                            role = identity.role.as_str(),
+                            session = %identity.session_id,
+                            "authenticated a session"
+                        );
+                        *principal = ConnectionPrincipal::identified(client_id, identity);
+                    }
+                    Err(error) => {
+                        return vec![make_error(
+                            ProtocolError::new(ErrorCode::Unauthenticated, error.as_str()),
+                            request_id,
+                        )];
+                    }
+                }
             }
             _ => {
                 return vec![make_error(
@@ -396,12 +486,20 @@ pub(crate) async fn process_frame(
         }
     }
 
-    if config.auth.required && !principal.is_authenticated() && !request.allowed_unauthenticated() {
+    // An identified principal is the only kind a production engine acts on.
+    //
+    // The WebSocket handshake already refuses a credential-less connection when auth is
+    // required, and IPC has no handshake at all - so this is where an IPC session that never
+    // authenticated is stopped. "Including localhost" is the requirement and the pipe is as
+    // local as it gets: a local process is not a person, and a scene that reached air with
+    // nobody's name on it is exactly what the audit trail exists to prevent.
+    if config.auth.required && !principal.is_authenticated() && !request.allowed_unauthenticated()
+    {
         return vec![make_error(
             ProtocolError::new(
                 ErrorCode::Unauthenticated,
                 format!(
-                    "{} requires authentication; send connection.authenticate first",
+                    "{} requires an authenticated session; send connection.authenticate with an access token",
                     envelope.message_type
                 ),
             ),
@@ -535,7 +633,7 @@ fn validate_handshake(
     request: &Request,
     security: &HandshakeSecurity,
     peer: &str,
-) -> Result<(), HandshakeRejection> {
+) -> Result<HandshakeGrant, HandshakeRejection> {
     // Origin: only relevant for browser clients, and only checked when configured.
     if !security.allowed_origins.is_empty() {
         let origin = request
@@ -566,31 +664,239 @@ fn validate_handshake(
     if !protocols.contains(&ENGINE_SUBPROTOCOL) {
         return Err(HandshakeRejection::SubprotocolMissing);
     }
-
-    if !security.auth_required {
-        return Ok(());
-    }
-
-    let Some(expected) = &security.auth_token else {
-        // Auth required with no token configured is a misconfiguration the config
-        // validator already refuses; failing closed here is the safe backstop.
-        return Err(HandshakeRejection::AuthenticationFailed);
-    };
-
-    // The token travels as a subprotocol rather than a query parameter: query
-    // strings end up in proxy logs and browser history.
+    // The token travels as a subprotocol rather than a query parameter: query strings end up
+    // in proxy logs and browser history.
     let presented = protocols
         .iter()
         .find_map(|value| value.strip_prefix(BEARER_PREFIX));
 
-    match presented {
-        Some(token) if tokens_match(expected, token) => Ok(()),
-        _ => Err(HandshakeRejection::AuthenticationFailed),
+    // Order matters. A development engine that *can* verify a token identifies the user when
+    // one is presented, but still serves a local peer without one - otherwise the developer
+    // convenience would require every test and local tool to mint a credential. A production
+    // engine verifies when a token is presented and refuses everything else, from any
+    // address including this machine's own.
+    if !security.auth_required && is_loopback_peer(peer) {
+        match (presented, &security.signing_key) {
+            (Some(token), Some(key)) => match crate::auth::verify_access_token(token, key, now_seconds()) {
+                Ok(identity) => return Ok(HandshakeGrant::Identified(Box::new(identity))),
+                // An unverifiable token is noise on a dev engine, not authority. Falling
+                // through to the anonymous session keeps development possible without
+                // pretending the credential checked out.
+                Err(_) => return Ok(HandshakeGrant::AnonymousLocalEditor),
+            },
+            _ => return Ok(HandshakeGrant::AnonymousLocalEditor),
+        }
     }
+
+    // From here the engine requires authentication.
+    if let Some(token) = presented {
+        let Some(key) = &security.signing_key else {
+            // auth.required with no key is a misconfiguration the validator already refuses;
+            // failing closed is the backstop.
+            return Err(HandshakeRejection::AuthenticationFailed);
+        };
+        return match crate::auth::verify_access_token(token, key, now_seconds()) {
+            Ok(identity) => Ok(HandshakeGrant::Identified(Box::new(identity))),
+            Err(error) => {
+                tracing::warn!(%peer, reason = error.as_str(), "refused a connection token");
+                Err(HandshakeRejection::AuthenticationFailed)
+            }
+        };
+    }
+
+    // No credential on an engine that requires one. "Including localhost" is the requirement:
+    // a local process is not a person, and an audit trail that cannot name who cued a scene
+    // is not an audit trail.
+    Err(HandshakeRejection::AuthenticationFailed)
+}
+
+/// Seconds since the epoch, for token expiry.
+fn now_seconds() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0)
 }
 
 fn handshake_error(status: StatusCode, message: &str) -> ErrorResponse {
     let mut response = ErrorResponse::new(Some(message.to_string()));
     *response.status_mut() = status;
     response
+}
+
+/// Pull `requestId` out of the head of a frame that was refused before parsing.
+///
+/// Bounded on purpose: a refused frame may be enormous, and the reason it was refused is that the
+/// engine will not spend the memory to parse it. The envelope writes its metadata first, so the id
+/// is within the first few hundred bytes of anything this codebase sends; if it is not there, the
+/// reply carries no id, exactly as before.
+fn request_id_from_frame_head(raw: &str) -> Option<String> {
+    const SCAN_BYTES: usize = 2048;
+
+    let head = raw.get(..raw.len().min(SCAN_BYTES)).unwrap_or(raw);
+    let key = "\"requestId\"";
+    let start = head.find(key)? + key.len();
+    let rest = head.get(start..)?.trim_start();
+    let rest = rest.strip_prefix(':')?.trim_start();
+    let rest = rest.strip_prefix('"')?;
+    let end = rest.find('"')?;
+    let id = &rest[..end];
+
+    if id.is_empty() {
+        None
+    } else {
+        Some(id.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine as _;
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    const SECRET: &str = "a-thirty-two-character-test-secret-01234";
+
+    fn security(auth_required: bool) -> HandshakeSecurity {
+        HandshakeSecurity {
+            signing_key: Some(SECRET.as_bytes().to_vec()),
+            auth_required,
+            allowed_origins: HashSet::new(),
+            client_allowlist: HashSet::new(),
+        }
+    }
+
+    /// Mint a token the way the TypeScript issuer does. The format is proven identical by
+    /// `Shared/auth-contract/tests/conformance.test.mjs`; this just needs a valid one.
+    fn token_for(role: &str, perms: &[&str], exp: u64) -> String {
+        let perms = perms
+            .iter()
+            .map(|p| format!("\"{p}\""))
+            .collect::<Vec<_>>()
+            .join(",");
+        let payload = format!(
+            r#"{{"sub":"usr_1","usr":"ada","role":"{role}","perms":[{perms}],"sid":"sess_1","typ":"access","iat":1,"exp":{exp}}}"#
+        );
+        let encoded = URL_SAFE_NO_PAD.encode(payload.as_bytes());
+        let signing_input = format!("gx1.{encoded}");
+        let mut mac = Hmac::<Sha256>::new_from_slice(SECRET.as_bytes()).expect("key");
+        mac.update(signing_input.as_bytes());
+        format!(
+            "{signing_input}.{}",
+            URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())
+        )
+    }
+
+    fn handshake(
+        peer: &str,
+        protocols: &str,
+        security: &HandshakeSecurity,
+    ) -> Result<HandshakeGrant, HandshakeRejection> {
+        let request = Request::builder()
+            .header("sec-websocket-protocol", protocols)
+            .body(())
+            .expect("request");
+        validate_handshake(&request, security, peer)
+    }
+
+    #[test]
+    fn a_production_engine_refuses_localhost_without_a_token() {
+        // The requirement, stated as a test: "including localhost". A local process is not a
+        // person, and an audit trail that cannot name who cued a scene is not an audit trail.
+        assert_eq!(
+            handshake("127.0.0.1:51000", ENGINE_SUBPROTOCOL, &security(true)),
+            Err(HandshakeRejection::AuthenticationFailed)
+        );
+        assert_eq!(
+            handshake("[::1]:51000", ENGINE_SUBPROTOCOL, &security(true)),
+            Err(HandshakeRejection::AuthenticationFailed)
+        );
+    }
+
+    #[test]
+    fn a_valid_token_carries_its_user_onto_the_connection() {
+        let protocols = format!(
+            "{ENGINE_SUBPROTOCOL}, {BEARER_PREFIX}{}",
+            token_for("editor", &["scene.write"], 9_999_999_999)
+        );
+        match handshake("10.0.0.7:51000", &protocols, &security(true)) {
+            Ok(HandshakeGrant::Identified(identity)) => {
+                assert_eq!(identity.username, "ada");
+                assert_eq!(identity.role, crate::auth::UserRole::Editor);
+                assert!(identity.allows(crate::auth::Permission::SceneWrite));
+                assert!(!identity.allows(crate::auth::Permission::PlayoutProgram));
+            }
+            other => panic!("expected an identified grant, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_forged_or_expired_token_is_refused_from_loopback_too() {
+        let forged = format!("{ENGINE_SUBPROTOCOL}, {BEARER_PREFIX}gx1.YWJj.ZGVm");
+        assert_eq!(
+            handshake("127.0.0.1:51000", &forged, &security(true)),
+            Err(HandshakeRejection::AuthenticationFailed)
+        );
+
+        let expired = format!(
+            "{ENGINE_SUBPROTOCOL}, {BEARER_PREFIX}{}",
+            token_for("admin", &["playout.program"], 100)
+        );
+        assert_eq!(
+            handshake("127.0.0.1:51000", &expired, &security(true)),
+            Err(HandshakeRejection::AuthenticationFailed)
+        );
+    }
+
+    #[test]
+    fn a_development_engine_still_serves_a_local_peer_with_no_token() {
+        assert_eq!(
+            handshake("127.0.0.1:51000", ENGINE_SUBPROTOCOL, &security(false)),
+            Ok(HandshakeGrant::AnonymousLocalEditor)
+        );
+    }
+
+    #[test]
+    fn a_development_engine_is_still_not_an_open_door() {
+        // No authentication configured is a developer convenience, not an invitation to the
+        // network. A remote peer is refused whatever the mode.
+        assert_eq!(
+            handshake("10.0.0.7:51000", ENGINE_SUBPROTOCOL, &security(false)),
+            Err(HandshakeRejection::AuthenticationFailed)
+        );
+    }
+
+    #[test]
+    fn a_dev_engine_identifies_a_verified_token_and_ignores_a_forged_one() {
+        // On a development engine a good token still identifies its user - the audit rows
+        // carry a real name - and a forged one simply grants no authority, falling back to
+        // the same anonymous session a tokenless peer would have had. Refusing it instead
+        // would make a development engine require a credential it was configured not to.
+        let good = format!(
+            "{ENGINE_SUBPROTOCOL}, {BEARER_PREFIX}{}",
+            token_for("admin", &["playout.program"], 9_999_999_999)
+        );
+        match handshake("127.0.0.1:51000", &good, &security(false)) {
+            Ok(HandshakeGrant::Identified(identity)) => {
+                assert_eq!(identity.role, crate::auth::UserRole::Admin);
+            }
+            other => panic!("expected an identified grant, got {other:?}"),
+        }
+
+        let forged = format!("{ENGINE_SUBPROTOCOL}, {BEARER_PREFIX}gx1.YWJj.ZGVm");
+        assert_eq!(
+            handshake("127.0.0.1:51000", &forged, &security(false)),
+            Ok(HandshakeGrant::AnonymousLocalEditor)
+        );
+    }
+
+    #[test]
+    fn loopback_is_recognised_in_both_address_families() {
+        assert!(is_loopback_peer("127.0.0.1:4400"));
+        assert!(is_loopback_peer("[::1]:4400"));
+        assert!(!is_loopback_peer("10.0.0.7:4400"));
+        assert!(!is_loopback_peer("unknown"));
+    }
 }

@@ -1,0 +1,6 @@
+# Rendered reference pixels are regenerable and large (24 MB for three 1920x1080 RGBA TIFFs).
+# The committed artefact is `manifest.json`, which carries each frame's pixelSha256 — the digest
+# the comparison actually uses — plus the project digest, AE build and pinned templates needed to
+# reproduce the frames with `export-references.sh`. Committing the pixels would add tens of
+# megabytes per fixture while proving nothing the manifest does not already pin.
+*/frames/

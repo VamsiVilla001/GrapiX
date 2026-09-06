@@ -1,0 +1,145 @@
+{
+  "camera": [
+    "x",
+    "y"
+  ],
+  "ellipse": [
+    "opacity",
+    "x",
+    "y",
+    "rotationX",
+    "rotationY",
+    "rotation",
+    "rotationZ",
+    "scaleX",
+    "scaleY",
+    "scaleZ"
+  ],
+  "group": [
+    "opacity",
+    "x",
+    "y",
+    "rotationX",
+    "rotationY",
+    "rotation",
+    "rotationZ",
+    "scaleX",
+    "scaleY",
+    "scaleZ"
+  ],
+  "image": [
+    "opacity",
+    "x",
+    "y",
+    "rotationX",
+    "rotationY",
+    "rotation",
+    "rotationZ",
+    "scaleX",
+    "scaleY",
+    "scaleZ"
+  ],
+  "layer": [
+    "opacity",
+    "x",
+    "y",
+    "rotationX",
+    "rotationY",
+    "rotation",
+    "rotationZ",
+    "scaleX",
+    "scaleY",
+    "scaleZ"
+  ],
+  "light": [
+    "opacity",
+    "x",
+    "y"
+  ],
+  "line": [
+    "opacity",
+    "x",
+    "y",
+    "rotationX",
+    "rotationY",
+    "rotation",
+    "rotationZ",
+    "scaleX",
+    "scaleY",
+    "scaleZ"
+  ],
+  "marker": [
+    "opacity",
+    "x",
+    "y",
+    "rotationX",
+    "rotationY",
+    "rotation",
+    "rotationZ",
+    "scaleX",
+    "scaleY",
+    "scaleZ"
+  ],
+  "mesh": [
+    "opacity",
+    "x",
+    "y",
+    "zDepth",
+    "rotationX",
+    "rotationY",
+    "rotation",
+    "rotationZ",
+    "scaleX",
+    "scaleY",
+    "scaleZ"
+  ],
+  "paint": [
+    "opacity",
+    "x",
+    "y",
+    "rotationX",
+    "rotationY",
+    "rotation",
+    "rotationZ",
+    "scaleX",
+    "scaleY",
+    "scaleZ"
+  ],
+  "rect": [
+    "opacity",
+    "x",
+    "y",
+    "rotationX",
+    "rotationY",
+    "rotation",
+    "rotationZ",
+    "scaleX",
+    "scaleY",
+    "scaleZ"
+  ],
+  "shape": [
+    "opacity",
+    "x",
+    "y",
+    "zDepth",
+    "rotationX",
+    "rotationY",
+    "rotation",
+    "rotationZ",
+    "scaleX",
+    "scaleY",
+    "scaleZ"
+  ],
+  "text": [
+    "opacity",
+    "x",
+    "y",
+    "rotationX",
+    "rotationY",
+    "rotation",
+    "rotationZ",
+    "scaleX",
+    "scaleY",
+    "scaleZ"
+  ]
+}

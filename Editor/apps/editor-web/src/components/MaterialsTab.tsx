@@ -2,13 +2,18 @@ import {
   getBindableFaces,
   getMaterialBindingId,
   isMaterialCompatibleWithFace,
-  type Material,
+  normalizePrimitiveMaterialBinding,
+  resolvePrimitiveMaterial,
   type MaterialFace,
+  type ResolvedMaterial,
   type SceneDocument
 } from "@grapix/shared-types";
-import { Link2, Unlink } from "lucide-react";
+import { ExternalLink, Link2, Unlink } from "lucide-react";
 import { useEffect, useState, type MouseEvent } from "react";
 import { useEditorStore } from "../store/editorStore";
+import { useDockStore } from "../store/dockStore";
+import { useMaterialManagerStore } from "../modules/material-manager";
+import { resolveProjectAssetUrl } from "../lib/projectAssets";
 
 /**
  * Object Inspector "Materials" tab. Shows the object's bindable faces/elements
@@ -27,6 +32,8 @@ export function MaterialsTab() {
   const assignAssetToFaces = useEditorStore((state) => state.assignAssetToFaces);
   const unbindMaterialFromFaces = useEditorStore((state) => state.unbindMaterialFromFaces);
   const materialActionError = useEditorStore((state) => state.materialActionError);
+  const activatePanel = useDockStore((state) => state.activatePanel);
+  const selectMaterialManagerItem = useMaterialManagerStore((state) => state.select);
 
   const object = scene.objects.find((item) => item.id === selectedObjectId);
   const [menu, setMenu] = useState<{ x: number; y: number; faceIndex: number } | null>(null);
@@ -35,9 +42,9 @@ export function MaterialsTab() {
 
   if (!object) {
     return (
-      <section className="property-tab-panel">
+      <div className="property-tab-panel">
         <div className="empty-panel">Select an object to bind materials</div>
-      </section>
+      </div>
     );
   }
 
@@ -55,17 +62,37 @@ export function MaterialsTab() {
   }
 
   return (
-    <section className="property-tab-panel" onClick={() => menu && setMenu(null)}>
+    <section aria-labelledby="inspector-materials-heading" className="property-tab-panel" onClick={() => menu && setMenu(null)}>
       <div className="property-tab-header">
-        <h2>Materials</h2>
+        <h2 id="inspector-materials-heading">Materials</h2>
         <span>{object.name}</span>
       </div>
 
       <div className="materials-face-list" role="listbox" aria-label="Bindable material faces">
         {faces.map((face) => {
-          const materialId = getMaterialBindingId(object.materialSlots[face.slotKey]);
-          const material = scene.materials.find((item) => item.materialId === materialId);
+          const binding = normalizePrimitiveMaterialBinding(object.materialSlots[face.slotKey]);
+          const material = scene.materials.find((item) => item.materialId === binding?.materialId);
+          const instance = binding?.instanceId
+            ? (scene.materialInstances ?? []).find((item) => item.materialInstanceId === binding.instanceId)
+            : undefined;
+          const resolved = resolvePrimitiveMaterial(scene, object, face.slotKey);
+          const compatibleInstances = (scene.materialInstances ?? []).flatMap((candidate) => {
+            const base = scene.materials.find((item) => item.materialId === candidate.baseMaterialId);
+            return base && isMaterialCompatibleWithFace(base, object, face.index)
+              ? [{ instance: candidate, base }]
+              : [];
+          });
           const selected = selectedFaceIndices.includes(face.index);
+          const assignmentValue = binding?.instanceId
+            ? `instance:${binding.instanceId}`
+            : material
+              ? `material:${material.materialId}`
+              : "";
+          const assignmentName = instance
+            ? `${instance.name} · instance of ${material?.name ?? instance.baseMaterialId}`
+            : binding?.instanceId
+              ? `Missing instance · ${binding.instanceId}`
+              : material?.name ?? "Unbound";
           return (
             <div
               key={face.slotKey}
@@ -80,18 +107,18 @@ export function MaterialsTab() {
                 setMenu({ x: event.clientX, y: event.clientY, faceIndex: face.index });
               }}
             >
-              <FaceThumb material={material} scene={scene} />
+              <FaceThumb resolved={resolved} scene={scene} />
               <div className="materials-face-label">
                 <strong>
                   {face.label}
                   <span className="materials-face-kind">{face.kind}</span>
                 </strong>
-                <span>{material ? material.name : "Unbound"}</span>
+                <span>{assignmentName}</span>
               </div>
               <select
                 aria-label={`Assignment for ${face.label}`}
                 className="materials-face-assignment"
-                value={materialId ?? ""}
+                value={assignmentValue}
                 onClick={(event) => event.stopPropagation()}
                 onChange={(event) => {
                   event.stopPropagation();
@@ -100,21 +127,44 @@ export function MaterialsTab() {
                     unbindMaterialFromFaces(object.id, [face.index]);
                   } else if (value.startsWith("asset:")) {
                     assignAssetToFaces(object.id, [face.index], value.slice("asset:".length));
-                  } else {
-                    assignMaterialToFaces(object.id, [face.index], value);
+                  } else if (value.startsWith("instance:")) {
+                    const nextInstanceId = value.slice("instance:".length);
+                    const nextInstance = (scene.materialInstances ?? []).find(
+                      (candidate) => candidate.materialInstanceId === nextInstanceId
+                    );
+                    if (nextInstance) {
+                      assignMaterialToFaces(object.id, [face.index], {
+                        materialId: nextInstance.baseMaterialId,
+                        instanceId: nextInstance.materialInstanceId
+                      });
+                    }
+                  } else if (value.startsWith("material:")) {
+                    assignMaterialToFaces(object.id, [face.index], value.slice("material:".length));
                   }
                 }}
               >
                 <option value="">Unbound</option>
+                {binding?.instanceId && !instance ? (
+                  <option value={`instance:${binding.instanceId}`}>Missing instance: {binding.instanceId}</option>
+                ) : null}
                 <optgroup label="Reusable materials">
                   {scene.materials
                     .filter((candidate) => isMaterialCompatibleWithFace(candidate, object, face.index))
                     .map((candidate) => (
-                      <option value={candidate.materialId} key={candidate.materialId}>
+                      <option value={`material:${candidate.materialId}`} key={candidate.materialId}>
                         {candidate.name}
                       </option>
                     ))}
                 </optgroup>
+                {compatibleInstances.length ? (
+                  <optgroup label="Material instances">
+                    {compatibleInstances.map(({ instance: candidate, base }) => (
+                      <option value={`instance:${candidate.materialInstanceId}`} key={candidate.materialInstanceId}>
+                        {candidate.name} — {base.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
                 {usableImageAssets.length ? (
                   <optgroup label="Images and textures">
                     {usableImageAssets.map((asset) => (
@@ -126,7 +176,21 @@ export function MaterialsTab() {
                 ) : null}
               </select>
               <span className={`materials-face-state ${material ? "on" : "off"}`}>
-                {material ? <Link2 size={13} /> : null}
+                {instance ? (
+                  <button
+                    aria-label={`Inspect material instance ${instance.name}`}
+                    className="materials-face-instance-route"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      selectMaterialManagerItem({ kind: "instance", id: instance.materialInstanceId });
+                      activatePanel("material-manager");
+                    }}
+                    title="Open instance in Material Manager"
+                    type="button"
+                  >
+                    <ExternalLink size={13} />
+                  </button>
+                ) : material ? <Link2 size={13} /> : null}
               </span>
             </div>
           );
@@ -161,19 +225,20 @@ export function MaterialsTab() {
   );
 }
 
-function FaceThumb({ material, scene }: { material: Material | undefined; scene: SceneDocument }) {
-  if (!material) {
+function FaceThumb({ resolved, scene }: { resolved: ResolvedMaterial | null; scene: SceneDocument }) {
+  if (!resolved) {
     return <div className="materials-face-thumb checkerboard empty" />;
   }
-  const assetId = material.textureSlots?.[0]?.assetId ?? material.assetId;
+  const assetId = resolved.textureSlots[0]?.assetId ?? resolved.material.assetId;
   const asset = assetId ? scene.assets.find((item) => item.assetId === assetId) : undefined;
   if (asset && ["image", "svg"].includes(asset.kind) && asset.status !== "MISSING") {
     return (
       <div className="materials-face-thumb checkerboard">
-        <img src={asset.thumbnailSource ?? asset.source} alt="" />
+        <img src={resolveProjectAssetUrl(asset.thumbnailSource ?? asset.source)} alt="" />
       </div>
     );
   }
-  const swatch = String(material.parameters?.baseColor ?? material.color ?? "#46586d");
+  const color = resolved.parameters.baseColor ?? resolved.material.color;
+  const swatch = typeof color === "string" ? color : "#46586d";
   return <div className="materials-face-thumb" style={{ background: swatch }} />;
 }

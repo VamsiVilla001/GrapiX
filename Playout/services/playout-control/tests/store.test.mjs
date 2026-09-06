@@ -5,6 +5,38 @@ import path from "node:path";
 import test from "node:test";
 import { PlayoutStore } from "../dist/store.js";
 
+test("Editor sync forwards the authenticated operator token to every protected scene request", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "grapix-playout-sync-auth-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const seen = [];
+  globalThis.fetch = async (input, init) => {
+    seen.push(new Headers(init?.headers).get("authorization"));
+    const url = String(input);
+    if (url.endsWith("/api/scenes")) {
+      return Response.json({
+        scenes: [{ id: "scene_synced", name: "Synced", updatedAt: "2026-08-22T10:00:00.000Z" }]
+      });
+    }
+    if (url.endsWith("/api/scenes/scene_synced")) {
+      return Response.json({ scene: sceneFixture("scene_synced", "2026-08-22T10:00:00.000Z") });
+    }
+    return new Response(null, { status: 404 });
+  };
+
+  const result = await new PlayoutStore(root).syncFromEditor(
+    "http://127.0.0.1:4100",
+    "operator-access-token"
+  );
+
+  assert.equal(result.syncedCount, 1);
+  assert.deepEqual(seen, ["Bearer operator-access-token", "Bearer operator-access-token"]);
+});
+
 test("publishes immutable monotonic scene versions and restores them after restart", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "grapix-playout-store-"));
   t.after(() => rm(root, { recursive: true, force: true }));

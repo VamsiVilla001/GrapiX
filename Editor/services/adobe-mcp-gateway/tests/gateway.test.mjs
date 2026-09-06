@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import { WebSocket } from "ws";
 
 import { AdobeGateway } from "../dist/gateway.js";
+import { loadGatewayConfig } from "../dist/config.js";
 import { AdobeClient } from "@grapix/adobe-client";
+
+// Production startup requires this value; tests declare it instead of relying on any fallback.
+process.env.GRAPIX_ADOBE_GATEWAY_TOKEN = "test-token-abcdef";
 
 const TOKEN = "test-token-abcdef";
 
@@ -84,9 +88,16 @@ function makeClient(url, overrides = {}) {
     autoReconnect: false,
     callTimeoutMs: 5_000,
     webSocketImpl: WebSocket,
+
     ...overrides
   });
 }
+test("gateway configuration refuses a missing or short authentication secret", () => {
+  assert.throws(
+    () => loadGatewayConfig({ token: "short" }),
+    /GRAPIX_ADOBE_GATEWAY_TOKEN must be set to at least 16 characters/
+  );
+});
 
 test("a client with a bad token is refused rather than silently idle", async () => {
   const { gateway, url } = await startGateway();
@@ -317,7 +328,7 @@ test("the log ring records connections and stays bounded", async () => {
   }
 });
 
-test("the operator can approve and then withdraw document mutation for a session", async () => {
+test("a client cannot approve or revoke its own mutation permission", async () => {
   const { gateway, url } = await startGateway();
   const client = makeClient(url);
   try {
@@ -326,15 +337,47 @@ test("the operator can approve and then withdraw document mutation for a session
       "photoshop.createLayer": () => ({ layerId: "layer-9" })
     });
 
-    assert.equal(await client.setApproval(true), true);
-    const layer = await client.call("photoshop.createLayer", { name: "Strap" });
-    assert.equal(layer.layerId, "layer-9");
-
-    assert.equal(await client.setApproval(false), false);
+    assert.equal(await client.setApproval(true), false);
     await assert.rejects(
-      () => client.call("photoshop.createLayer", { name: "Strap 2" }),
+      () => client.call("photoshop.createLayer", { name: "Strap" }),
       (error) => error.code === "approval_required"
     );
+
+    assert.equal(gateway.approveSession(client.peerId), true, "only the operator/configuration path can approve");
+    assert.equal((await client.call("photoshop.createLayer", { name: "Strap" })).layerId, "layer-9");
+    assert.equal(await client.setApproval(false), false, "a client cannot revoke its own approval either");
+    assert.equal((await client.call("photoshop.createLayer", { name: "Strap 2" })).layerId, "layer-9");
+
+
+    bridge.socket.removeAllListeners("close");
+    bridge.socket.close();
+  } finally {
+    client.disconnect();
+    await gateway.close();
+  }
+});
+test("a registered bridge can approve a named client session", async () => {
+  const { gateway, url } = await startGateway();
+  const client = makeClient(url);
+  try {
+    await client.connect();
+    const bridge = await connectBridge(url, "photoshop", {
+      "photoshop.createLayer": () => ({ layerId: "bridge-approved" })
+    });
+    const approval = new Promise((resolve) => {
+      bridge.socket.on("message", (raw) => {
+        const message = JSON.parse(raw.toString());
+        if (message.type === "session.approval" && message.requestId === "bridge-approve") resolve(message);
+      });
+    });
+    bridge.socket.send(JSON.stringify({
+      type: "session.approve",
+      requestId: "bridge-approve",
+      clientId: client.peerId,
+      approved: true
+    }));
+    assert.equal((await approval).approved, true);
+    assert.equal((await client.call("photoshop.createLayer", { name: "Bridge approved" })).layerId, "bridge-approved");
 
     bridge.socket.removeAllListeners("close");
     bridge.socket.close();
@@ -405,6 +448,56 @@ test("a second bridge for one application replaces the first rather than racing 
     second.socket.removeAllListeners("close");
     second.socket.close();
     first.socket.close();
+  } finally {
+    client.disconnect();
+    await gateway.close();
+  }
+});
+
+test("HTTP status rejects URL tokens and accepts only a bearer authorization header", async () => {
+  const { gateway, port } = await startGateway();
+  const baseUrl = `http://127.0.0.1:${port}/status`;
+  try {
+    const queryToken = await fetch(`${baseUrl}?token=${TOKEN}`);
+    assert.equal(queryToken.status, 400);
+    assert.match((await queryToken.json()).error, /Authorization: Bearer/);
+
+    const missingToken = await fetch(baseUrl);
+    assert.equal(missingToken.status, 401);
+
+    const authorized = await fetch(baseUrl, { headers: { authorization: `Bearer ${TOKEN}` } });
+    assert.equal(authorized.status, 200);
+    assert.equal((await authorized.json()).protocol, "grapix-adobe/1");
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("cloud errors redact caller URLs before entering the shared log ring", async () => {
+  const gateway = new AdobeGateway(
+    {
+      port: 0,
+      host: "127.0.0.1",
+      token: TOKEN,
+      allowPublic: false,
+      photoshopApi: { clientId: "id", clientSecret: "secret", orgId: "org", scopes: [] }
+    },
+    async () => {
+      throw new Error("Adobe could not read https://signed.example.test/private.psd?signature=caller-secret");
+    }
+  );
+  const port = await gateway.listen();
+  const client = makeClient(`ws://127.0.0.1:${port}`);
+  try {
+    await client.connect();
+    await assert.rejects(
+      () => client.call("photoshop.getDocumentStructure", { href: "https://signed.example.test/private.psd" }, { transport: "cloud" }),
+      (error) => error.code === "cloud_error"
+    );
+    const entry = gateway.logs.recent().find((item) => item.message.includes("failed over the Photoshop API"));
+    assert.ok(entry);
+    assert.match(entry.message, /https:\/\/signed\.example\.test/);
+    assert.doesNotMatch(entry.message, /private\.psd|signature=caller-secret/);
   } finally {
     client.disconnect();
     await gateway.close();

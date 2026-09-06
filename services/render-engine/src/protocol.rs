@@ -71,6 +71,51 @@ impl SceneDomain {
     }
 }
 
+/// Exact AE time represented as decimal integers so JSON cannot lose precision.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct AeExactTime {
+    pub value: String,
+    pub scale: String,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AeFrameColorFormat {
+    #[default]
+    Bgra8,
+    Rgba8,
+    Argb8,
+}
+
+/// State of an evaluated frame when it was published into the adapter ring.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AeFrameStatus {
+    Ready,
+    Late,
+    Missed,
+}
+
+/// Metadata for one frame in the adapter-owned shared-memory ring. Never carries pixels.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AeFrameDescriptor {
+    pub ring_generation: u64,
+    pub slot_index: u32,
+    pub frame_id: u64,
+    pub data_revision: u64,
+    pub composition_item_id: i64,
+    pub requested_time: AeExactTime,
+    pub evaluated_time: AeExactTime,
+    pub presentation_deadline_nanos: u64,
+    pub width: u32,
+    pub height: u32,
+    pub stride: u32,
+    pub color_format: AeFrameColorFormat,
+    pub alpha_mode: String,
+    pub color_space: String,
+    pub status: AeFrameStatus,
+}
+
 /// Every message, in both directions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Envelope {
@@ -330,6 +375,13 @@ pub enum RequestType {
     OutputStart,
     OutputStop,
     OutputRemove,
+    /// Attach a live After Effects container to this engine, and detach it again (`PL3`).
+    ///
+    /// `LOAD` is what makes the frame path reachable from a running engine rather than from a test: it
+    /// installs ingress, opens the adapter's ring and connects the requester that carries the schedule's
+    /// `RENDER_FRAME`s. Playout only — attaching a container is an operations act, never authoring.
+    AeContainerLoad,
+    AeContainerUnload,
 }
 
 impl RequestType {
@@ -377,6 +429,8 @@ impl RequestType {
             "output.start" => RequestType::OutputStart,
             "output.stop" => RequestType::OutputStop,
             "output.remove" => RequestType::OutputRemove,
+            "ae.container.load" => RequestType::AeContainerLoad,
+            "ae.container.unload" => RequestType::AeContainerUnload,
             _ => return None,
         })
     }
@@ -401,6 +455,7 @@ impl RequestType {
                 "engine"
             }
             OutputList | OutputConfigure | OutputStart | OutputStop | OutputRemove => "output",
+            AeContainerLoad | AeContainerUnload => "ae-container",
         }
     }
 

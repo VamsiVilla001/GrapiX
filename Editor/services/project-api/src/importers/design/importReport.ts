@@ -3,7 +3,9 @@ import {
   type DesignImportIssue,
   type DesignImportIssueKind,
   type DesignImportReport,
-  type DesignSourceFormat
+  type DesignSourceFormat,
+  type NormalizedDesignDocument,
+  type NormalizedDesignNode
 } from "@grapix/shared-types";
 
 export function createDesignImportReport(
@@ -25,7 +27,19 @@ export function createDesignImportReport(
     visualDifferences: [],
     errors: [],
     warnings: [],
-    issues: []
+    issues: [],
+    counts: {
+      nodes: 0,
+      native: 0,
+      genericContainers: 0,
+      flattened: 0,
+      clippedContainers: 0,
+      syntheticLayers: 0,
+      masks: 0,
+      assetsDownloaded: 0,
+      assetsFailed: 0,
+      missingNodes: []
+    }
   };
 }
 
@@ -101,6 +115,45 @@ export function pruneDesignImportIssues(
 export function completeDesignImportReport(report: DesignImportReport, importedItems: number): void {
   report.importedItems = importedItems;
   report.completedAt = new Date().toISOString();
+}
+
+/**
+ * Rebuild the mutually exclusive node-outcome counters from the document that will
+ * be converted. Adapters may annotate a node before normalization, but filtering,
+ * masking, and hierarchy policy decide which nodes actually arrive; this is the one
+ * point all import sources share.
+ */
+export function populateDesignImportCounts(
+  document: NormalizedDesignDocument,
+  report: DesignImportReport
+): void {
+  const prior = report.counts;
+  report.counts = {
+    nodes: 0,
+    native: 0,
+    genericContainers: 0,
+    flattened: 0,
+    clippedContainers: prior.clippedContainers,
+    syntheticLayers: prior.syntheticLayers,
+    masks: prior.masks,
+    assetsDownloaded: prior.assetsDownloaded,
+    assetsFailed: prior.assetsFailed,
+    missingNodes: prior.missingNodes
+  };
+
+  const walk = (nodes: NormalizedDesignNode[]): void => {
+    for (const node of nodes) {
+      report.counts.nodes += 1;
+      // `flattened` is a marker — the node was also raster-rendered by the source tool —
+      // not a third outcome. Every node partitions into native or generic container,
+      // and a flattened node still belongs to one of the two.
+      if (node.flattenedFromFigma) report.counts.flattened += 1;
+      if (node.genericContainer) report.counts.genericContainers += 1;
+      else report.counts.native += 1;
+      walk(node.children);
+    }
+  };
+  document.pages.forEach((page) => walk(page.nodes));
 }
 
 function pushUnique(values: string[], value: string): void {

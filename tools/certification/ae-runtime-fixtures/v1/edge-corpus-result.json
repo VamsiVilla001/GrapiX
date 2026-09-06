@@ -1,0 +1,257 @@
+{
+  "phase": "BO0a",
+  "recordedAt": "2026-08-19T09:25:07.125Z",
+  "verdict": "PASS",
+  "fixture": "bo0a-alpha-edges.aep",
+  "fixtureSha256": "1cdfb5f808c0104bcd22fadc6c28639d868782d3405a5bd60ce870c882739a06",
+  "aeBuild": "26.3",
+  "contract": {
+    "width": 640,
+    "height": 360,
+    "pixelAspect": "1/1",
+    "frameRate": "25/1",
+    "frame": 0,
+    "bitDepth": 8,
+    "checkoutChannelOrder": "argb",
+    "sourceAlphaMode": "premultiplied-black",
+    "expectedFill": "RGBA colour premultiplied against black",
+    "expectedKey": "alpha channel from the same frame",
+    "renderSettingsTemplate": "Best Settings",
+    "outputModuleTemplate": "TIFF Sequence with Alpha",
+    "referencePath": "After Effects Render Queue through aerender.exe; never adapter checkout"
+  },
+  "tolerance": {
+    "comparableUnit": "decoded RGBA pixel bytes, excluding TIFF metadata and row padding",
+    "maxChannelDelta": 0,
+    "maxDifferingPixels": 0,
+    "premultipliedInvariant": "R <= A && G <= A && B <= A for every pixel",
+    "straightFalsification": "Cases with requireStraightDifference=true must differ from the premultiplied reference"
+  },
+  "independence": "Every reference was exported through aerender.exe before this comparator started AE checkout. The comparator only reads those references and invokes adapter checkout.",
+  "cases": [
+    {
+      "id": "opaque",
+      "composition": "BO0a-Opaque",
+      "outcome": "pass",
+      "failures": [],
+      "referencePixelSha256": "0f29a3fc9a39c1a5bbdedbbbb43dd97136c24ed03af690278c8c3395527a43a2",
+      "checkoutPixelSha256": "0f29a3fc9a39c1a5bbdedbbbb43dd97136c24ed03af690278c8c3395527a43a2",
+      "stats": {
+        "opaque": 230400,
+        "transparent": 0,
+        "partial": 0,
+        "colourAboveAlpha": 0,
+        "colourAtZeroAlpha": 0,
+        "distinctAlphaValues": 1,
+        "alphaAt128": 0
+      },
+      "premulAgreement": {
+        "bytesEqual": true,
+        "differingBytes": 0,
+        "differingPixels": 0,
+        "worstDelta": 0
+      },
+      "straightContrast": {
+        "bytesEqual": true,
+        "differingBytes": 0,
+        "differingPixels": 0,
+        "worstDelta": 0
+      },
+      "renderMs": 0,
+      "onHookThread": true,
+      "checkinError": 0
+    },
+    {
+      "id": "zero-alpha",
+      "composition": "BO0a-ZeroAlpha",
+      "outcome": "pass",
+      "failures": [],
+      "referencePixelSha256": "0b150fd32588b1daca5569992ebe559c0102c837306b1af4c44d35128ec58366",
+      "checkoutPixelSha256": "0b150fd32588b1daca5569992ebe559c0102c837306b1af4c44d35128ec58366",
+      "stats": {
+        "opaque": 0,
+        "transparent": 230400,
+        "partial": 0,
+        "colourAboveAlpha": 0,
+        "colourAtZeroAlpha": 0,
+        "distinctAlphaValues": 1,
+        "alphaAt128": 0
+      },
+      "premulAgreement": {
+        "bytesEqual": true,
+        "differingBytes": 0,
+        "differingPixels": 0,
+        "worstDelta": 0
+      },
+      "straightContrast": {
+        "bytesEqual": true,
+        "differingBytes": 0,
+        "differingPixels": 0,
+        "worstDelta": 0
+      },
+      "renderMs": 0,
+      "onHookThread": true,
+      "checkinError": 0
+    },
+    {
+      "id": "hard-edge",
+      "composition": "BO0a-HardEdge",
+      "outcome": "pass",
+      "failures": [],
+      "referencePixelSha256": "1933159c2ced02375e2238a214d0cc0b412c4137146072accbcd73b35dcca76c",
+      "checkoutPixelSha256": "1933159c2ced02375e2238a214d0cc0b412c4137146072accbcd73b35dcca76c",
+      "stats": {
+        "opaque": 48000,
+        "transparent": 182400,
+        "partial": 0,
+        "colourAboveAlpha": 0,
+        "colourAtZeroAlpha": 0,
+        "distinctAlphaValues": 2,
+        "alphaAt128": 0
+      },
+      "premulAgreement": {
+        "bytesEqual": true,
+        "differingBytes": 0,
+        "differingPixels": 0,
+        "worstDelta": 0
+      },
+      "straightContrast": {
+        "bytesEqual": true,
+        "differingBytes": 0,
+        "differingPixels": 0,
+        "worstDelta": 0
+      },
+      "renderMs": 0,
+      "onHookThread": true,
+      "checkinError": 0
+    },
+    {
+      "id": "antialiased-edge",
+      "composition": "BO0a-AntialiasedEdge",
+      "outcome": "pass",
+      "failures": [],
+      "referencePixelSha256": "5aca43990adbd4fbf0eea915d8f0cf4d37f2e06436b7fa52c4fbed27373cadea",
+      "checkoutPixelSha256": "5aca43990adbd4fbf0eea915d8f0cf4d37f2e06436b7fa52c4fbed27373cadea",
+      "stats": {
+        "opaque": 38496,
+        "transparent": 191014,
+        "partial": 890,
+        "colourAboveAlpha": 0,
+        "colourAtZeroAlpha": 0,
+        "distinctAlphaValues": 241,
+        "alphaAt128": 6
+      },
+      "premulAgreement": {
+        "bytesEqual": true,
+        "differingBytes": 0,
+        "differingPixels": 0,
+        "worstDelta": 0
+      },
+      "straightContrast": {
+        "bytesEqual": false,
+        "differingBytes": 1780,
+        "differingPixels": 890,
+        "worstDelta": 254
+      },
+      "renderMs": 0,
+      "onHookThread": true,
+      "checkinError": 0
+    },
+    {
+      "id": "gradient-50",
+      "composition": "BO0a-Gradient50",
+      "outcome": "pass",
+      "failures": [],
+      "referencePixelSha256": "dc37b60c3685c2bafc2c8b83379ad934b7b66a0f07761f7d30ee8ce0cba98f9a",
+      "checkoutPixelSha256": "dc37b60c3685c2bafc2c8b83379ad934b7b66a0f07761f7d30ee8ce0cba98f9a",
+      "stats": {
+        "opaque": 0,
+        "transparent": 97532,
+        "partial": 132868,
+        "colourAboveAlpha": 0,
+        "colourAtZeroAlpha": 0,
+        "distinctAlphaValues": 252,
+        "alphaAt128": 464
+      },
+      "premulAgreement": {
+        "bytesEqual": true,
+        "differingBytes": 0,
+        "differingPixels": 0,
+        "worstDelta": 0
+      },
+      "straightContrast": {
+        "bytesEqual": false,
+        "differingBytes": 280000,
+        "differingPixels": 140000,
+        "worstDelta": 255
+      },
+      "renderMs": 0,
+      "onHookThread": true,
+      "checkinError": 0
+    },
+    {
+      "id": "coloured-translucent-shadow",
+      "composition": "BO0a-ColouredTranslucentShadow",
+      "outcome": "pass",
+      "failures": [],
+      "referencePixelSha256": "4382214da3cfaa1cea3e402b9c4d0d5263bf178a7b6197cfa35ccc14f4c4375d",
+      "checkoutPixelSha256": "4382214da3cfaa1cea3e402b9c4d0d5263bf178a7b6197cfa35ccc14f4c4375d",
+      "stats": {
+        "opaque": 29536,
+        "transparent": 143802,
+        "partial": 57062,
+        "colourAboveAlpha": 0,
+        "colourAtZeroAlpha": 0,
+        "distinctAlphaValues": 197,
+        "alphaAt128": 514
+      },
+      "premulAgreement": {
+        "bytesEqual": true,
+        "differingBytes": 0,
+        "differingPixels": 0,
+        "worstDelta": 0
+      },
+      "straightContrast": {
+        "bytesEqual": false,
+        "differingBytes": 194444,
+        "differingPixels": 64818,
+        "worstDelta": 255
+      },
+      "renderMs": 0,
+      "onHookThread": true,
+      "checkinError": 0
+    },
+    {
+      "id": "premultiplied-black-edge",
+      "composition": "BO0a-PremultipliedBlackEdge",
+      "outcome": "pass",
+      "failures": [],
+      "referencePixelSha256": "7f579d682e64c0a7f200ceeb9e38ae5ff90096c420553718965014bdcdaebf5d",
+      "checkoutPixelSha256": "7f579d682e64c0a7f200ceeb9e38ae5ff90096c420553718965014bdcdaebf5d",
+      "stats": {
+        "opaque": 22528,
+        "transparent": 151560,
+        "partial": 56312,
+        "colourAboveAlpha": 0,
+        "colourAtZeroAlpha": 0,
+        "distinctAlphaValues": 256,
+        "alphaAt128": 22
+      },
+      "premulAgreement": {
+        "bytesEqual": true,
+        "differingBytes": 0,
+        "differingPixels": 0,
+        "worstDelta": 0
+      },
+      "straightContrast": {
+        "bytesEqual": false,
+        "differingBytes": 185514,
+        "differingPixels": 61838,
+        "worstDelta": 255
+      },
+      "renderMs": 0,
+      "onHookThread": true,
+      "checkinError": 0
+    }
+  ]
+}

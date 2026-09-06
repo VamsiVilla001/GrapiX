@@ -5,6 +5,8 @@ import { WebSocketServer, type WebSocket } from "ws";
 
 import { LogRing } from "./logs.js";
 import { BridgeRegistry } from "./registry.js";
+import { findAfterEffects, exportProjectManifest } from "./aeBridge.js";
+import type { AeManifest } from "@grapix/shared-types";
 import { PhotoshopApiBridge, PHOTOSHOP_CLOUD_TOOLS, type PhotoshopApiClientFactory } from "./photoshopApi.js";
 import {
   GATEWAY_PROTOCOL,
@@ -45,6 +47,23 @@ function tokenMatches(supplied: unknown, expected: string): boolean {
   // timingSafeEqual throws on a length mismatch, which would itself leak length.
   if (a.length !== b.length) return false;
   return timingSafeEqual(a, b);
+}
+
+function readBearerToken(request: IncomingMessage): string | undefined {
+  const authorization = request.headers.authorization;
+  if (typeof authorization !== "string") return undefined;
+  const match = /^Bearer\s+(.+)$/iu.exec(authorization);
+  return match?.[1];
+}
+
+function redactUrls(detail: string): string {
+  return detail.replace(/https?:\/\/[^\s"'<>]+/giu, (value) => {
+    try {
+      return new URL(value).origin;
+    } catch {
+      return "[redacted-url]";
+    }
+  });
 }
 
 export class AdobeGateway {
@@ -112,11 +131,27 @@ export class AdobeGateway {
   }
 
   /**
+   * Whether After Effects is installed, and the manifest exporter for the `.aep` path.
+   *
+   * The `.aep` binary is never parsed; when AE is present this runs it headless with the
+   * bundled ExtendScript exporter. Exposed on the gateway so the project-api can ask for a
+   * manifest without holding a second AE-integration code path.
+   */
+  async afterEffectsInstalled(): Promise<boolean> {
+    return (await findAfterEffects()) !== undefined;
+  }
+
+  async exportAeProjectManifest(projectPath: string): Promise<AeManifest> {
+    return exportProjectManifest(projectPath);
+  }
+
+  /**
    * The operator approving a session is what separates "a model suggested an edit" from
    * "a model rewrote the open document". Approval is per client session and dies with it.
    */
   approveSession(clientId: string): boolean {
-    if (!this.peers.has(clientId)) return false;
+    const client = this.peers.get(clientId);
+    if (!client || client.role !== "client") return false;
     this.approved.add(clientId);
     this.logs.push("info", "gateway", `session ${clientId} approved for document mutation`);
     return true;
@@ -149,8 +184,13 @@ export class AdobeGateway {
       return;
     }
 
-    // Everything below reports connection state, which names open documents.
-    if (!tokenMatches(url.searchParams.get("token"), this.config.token)) {
+    // Query tokens leak through browser history, proxy logs, and copied diagnostic URLs.
+    if (url.searchParams.has("token")) {
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: "token query parameters are deprecated; use Authorization: Bearer <token>" }));
+      return;
+    }
+    if (!tokenMatches(readBearerToken(request), this.config.token)) {
       response.writeHead(401, { "content-type": "application/json" });
       response.end(JSON.stringify({ error: "invalid token" }));
       return;
@@ -352,13 +392,40 @@ export class AdobeGateway {
       }
 
       case "session.approve": {
-        if (peer.role !== "client") return;
+        if (peer.role === "client") {
+          // A client owns no authority to change its own mutation permission. Keep the
+          // protocol reply so older clients settle their control request, and also emit
+          // an explicit error for callers that surface gateway errors directly.
+          peer.socket.send(
+            JSON.stringify({
+              type: "session.approval",
+              requestId: message.requestId,
+              approved: false
+            })
+          );
+          this.sendError(
+            peer,
+            message.requestId,
+            "role_denied",
+            "session approval must be granted by the local bridge/operator or gateway configuration"
+          );
+          return;
+        }
+
+        const clientId = isMessageObject(message) && typeof message.clientId === "string"
+          ? message.clientId
+          : undefined;
+        if (!clientId) {
+          this.sendError(peer, message.requestId, "invalid_request", "session.approve from a bridge requires a clientId");
+          return;
+        }
         const approved = message.approved === true;
-        if (approved) this.approveSession(peer.id);
-        else this.revokeSession(peer.id);
-        peer.socket.send(
-          JSON.stringify({ type: "session.approval", requestId: message.requestId, approved })
-        );
+        const changed = approved ? this.approveSession(clientId) : (this.revokeSession(clientId), true);
+        if (!changed) {
+          this.sendError(peer, message.requestId, "invalid_request", "session.approve clientId does not identify a connected client");
+          return;
+        }
+        peer.socket.send(JSON.stringify({ type: "session.approval", requestId: message.requestId, approved }));
         return;
       }
 
@@ -483,7 +550,7 @@ export class AdobeGateway {
       const detail = cause instanceof Error ? cause.message : String(cause);
       if (!this.peers.has(peer.id)) return;
       this.sendError(peer, requestId, "cloud_error", detail);
-      this.logs.push("error", "photoshop", `${tool} failed over the Photoshop API: ${detail}`);
+      this.logs.push("error", "photoshop", `${tool} failed over the Photoshop API: ${redactUrls(detail)}`);
     }
   }
 

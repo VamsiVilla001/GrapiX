@@ -35,7 +35,7 @@ use serde::{Deserialize, Serialize};
 
 use grapix_render_core::output::VideoFrame;
 
-use crate::stage::FrameRate;
+use crate::{protocol::AeFrameColorFormat, stage::FrameRate};
 
 // ---------------------------------------------------------------------------
 // Format and state
@@ -57,6 +57,9 @@ pub struct OutputFormat {
     pub height: u32,
     #[serde(default)]
     pub frame_rate: FrameRate,
+    /// Byte layout supplied to the output adapter. Older documents default to BGRA8.
+    #[serde(default)]
+    pub color_format: AeFrameColorFormat,
     #[serde(default)]
     pub alpha_mode: OutputAlphaMode,
     /// Project colour space, carried through so an adapter can tag its stream.
@@ -75,6 +78,7 @@ impl Default for OutputFormat {
             height: 1080,
             frame_rate: FrameRate::default(),
             alpha_mode: OutputAlphaMode::Premultiplied,
+            color_format: AeFrameColorFormat::Bgra8,
             color_space: default_color_space(),
         }
     }
@@ -153,8 +157,13 @@ pub fn validate_ndi_options(options: &serde_json::Value) -> Result<(), String> {
 /// Program renderer, while this contract validates its alpha, colour tag, and
 /// rational rate before any resources are reserved.
 pub fn validate_ndi_format(format: &OutputFormat) -> Result<(), String> {
-    if format.alpha_mode != OutputAlphaMode::Premultiplied {
-        return Err("NDI v1 requires premultiplied BGRA8 alpha".to_string());
+    if format.alpha_mode != OutputAlphaMode::Premultiplied
+        || format.color_format != AeFrameColorFormat::Bgra8
+    {
+        return Err(format!(
+            "NDI v1 requires premultiplied bgra8; got alphaMode {:?}, colorFormat {:?}",
+            format.alpha_mode, format.color_format
+        ));
     }
     if !matches!(format.color_space.as_str(), "rec709" | "srgb") {
         return Err("NDI v1 requires an explicit rec709 or srgb colorSpace".to_string());
@@ -277,10 +286,17 @@ impl OutputSink for NullSink {
 ///
 /// That guarantee is why it is always available: an operator can verify a take
 /// without an SDK, a device, or any risk of hitting air.
+pub struct RetainedVideoFrame {
+    pub width: u32,
+    pub height: u32,
+    pub data: Box<[u8]>,
+    pub frame_index: u64,
+}
+
 pub struct VirtualSink {
     format: OutputFormat,
     /// The most recent frame, for inspection. Exactly one, never a growing buffer.
-    last_frame: Option<VideoFrame>,
+    last_frame: Option<RetainedVideoFrame>,
     retain_frames: bool,
 }
 
@@ -293,8 +309,7 @@ impl VirtualSink {
         }
     }
 
-    /// The most recent rendered frame, if retention is on.
-    pub fn last_frame(&self) -> Option<&VideoFrame> {
+    pub fn last_frame(&self) -> Option<&RetainedVideoFrame> {
         self.last_frame.as_ref()
     }
 }
@@ -337,7 +352,12 @@ impl OutputSink for VirtualSink {
 
     fn send(&mut self, frame: &VideoFrame) -> Result<bool, String> {
         if self.retain_frames {
-            self.last_frame = Some(frame.clone());
+            self.last_frame = Some(RetainedVideoFrame {
+                width: frame.width,
+                height: frame.height,
+                data: frame.data.as_slice().to_vec().into_boxed_slice(),
+                frame_index: frame.frame_index,
+            });
         }
         Ok(true)
     }
@@ -408,7 +428,7 @@ impl OutputSink for RecordingSink {
         let path = self
             .directory
             .join(format!("{}-{:06}.bgra", self.name, frame.frame_index));
-        std::fs::write(&path, &frame.data)
+        std::fs::write(&path, frame.data.as_slice())
             .map_err(|error| format!("could not write {}: {error}", path.display()))?;
         self.frames_written += 1;
         Ok(true)

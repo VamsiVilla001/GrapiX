@@ -80,12 +80,125 @@ test("the selected root frame becomes the scene origin and the scene size", () =
   assert.deepEqual({ x: nested.x, y: nested.y }, { x: 50, y: 50 });
 });
 
+test("Figma relative transforms retain a rotated and scaled hierarchy in local space", () => {
+  const report = createDesignImportReport("figma-json", "transform.json");
+  const document = importFigmaDocument({
+    document: {
+      type: "DOCUMENT",
+      children: [{
+        type: "CANVAS",
+        children: [{
+          id: "1:1",
+          name: "Root",
+          type: "FRAME",
+          absoluteBoundingBox: { x: 0, y: 0, width: 500, height: 500 },
+          size: { x: 500, y: 500 },
+          relativeTransform: [[1, 0, 0], [0, 1, 0]],
+          children: [{
+            id: "1:2",
+            name: "Rotated parent",
+            type: "GROUP",
+            absoluteBoundingBox: { x: 0, y: 50, width: 100, height: 200 },
+            size: { x: 100, y: 50 },
+            relativeTransform: [[0, -2, 100], [2, 0, 50]],
+            children: [{
+              id: "1:3",
+              name: "Nested child",
+              type: "RECTANGLE",
+              absoluteBoundingBox: { x: 40, y: 90, width: 30, height: 20 },
+              size: { x: 20, y: 40 },
+              relativeTransform: [[1.5, 0, 20], [0, 0.5, 30]]
+            }]
+          }]
+        }]
+      }]
+    }
+  }, "transform.json", report, "figma-json");
+
+  const parent = document.pages[0].nodes[0].children[0];
+  const child = parent.children[0];
+  assert.deepEqual(
+    { x: parent.x, y: parent.y, scaleX: parent.scaleX, scaleY: parent.scaleY, rotation: parent.rotation },
+    { x: 100, y: 50, scaleX: 2, scaleY: 2, rotation: 90 }
+  );
+  assert.deepEqual(
+    { x: child.x, y: child.y, scaleX: child.scaleX, scaleY: child.scaleY, rotation: child.rotation },
+    { x: 20, y: 30, scaleX: 1.5, scaleY: 0.5, rotation: 0 }
+  );
+});
+
+test("Figma gradient stop opacity includes paint opacity exactly once", () => {
+  const report = createDesignImportReport("figma-json", "gradient.json");
+  const document = importFigmaDocument({
+    document: {
+      type: "DOCUMENT",
+      children: [{
+        type: "CANVAS",
+        children: [{
+          id: "2:1",
+          name: "Gradient",
+          type: "RECTANGLE",
+          absoluteBoundingBox: { x: 0, y: 0, width: 100, height: 100 },
+          fills: [{
+            type: "GRADIENT_LINEAR",
+            opacity: 0.5,
+            gradientStops: [
+              { position: 0, color: { r: 1, g: 0, b: 0, a: 0.8 } },
+              { position: 1, color: { r: 0, g: 0, b: 1, a: 1 } }
+            ],
+            gradientHandlePositions: [{ x: 0, y: 0 }, { x: 1, y: 0 }]
+          }]
+        }]
+      }]
+    }
+  }, "gradient.json", report, "figma-json");
+  const gradient = document.pages[0].nodes[0].fills[0];
+  assert.equal(gradient.type, "linear-gradient");
+  assert.deepEqual(gradient.stops.map((stop) => stop.opacity), [0.4, 0.5]);
+  assert.deepEqual(gradient.stops.map((stop) => stop.color), ["#ff0000", "#0000ff"]);
+});
+
+test("Figma mixed text and per-side strokes are preserved with fidelity warnings", () => {
+  const report = createDesignImportReport("figma-json", "fidelity.json");
+  const document = importFigmaDocument({
+    document: {
+      type: "DOCUMENT",
+      children: [{
+        type: "CANVAS",
+        children: [{
+          id: "3:1",
+          name: "Mixed label",
+          type: "TEXT",
+          absoluteBoundingBox: { x: 0, y: 0, width: 100, height: 20 },
+          characters: "AB",
+          style: { fontFamily: "Inter", fontSize: 16 },
+          characterStyleOverrides: [0, 1],
+          styleOverrideTable: { "1": { fontWeight: 700 } }
+        }, {
+          id: "3:2",
+          name: "Border",
+          type: "RECTANGLE",
+          absoluteBoundingBox: { x: 0, y: 30, width: 100, height: 100 },
+          strokeWeight: 1,
+          individualStrokeWeights: { top: 1, right: 2, bottom: 1, left: 2 }
+        }]
+      }]
+    }
+  }, "fidelity.json", report, "figma-json");
+  const [label, border] = document.pages[0].nodes;
+  assert.deepEqual(label.sourceData.characterStyleOverrides, [0, 1]);
+  assert.deepEqual(label.sourceData.styleOverrideTable, { "1": { fontWeight: 700 } });
+  assert.deepEqual(border.sourceData.individualStrokeWeights, { top: 1, right: 2, bottom: 1, left: 2 });
+  assert.ok(report.visualDifferences.some((message) => message.includes("mixed Figma text styles")));
+  assert.ok(report.visualDifferences.some((message) => message.includes("per-side Figma stroke weights")));
+});
+
 test("the converted scene places the imported frame at the canvas origin", () => {
   const report = createDesignImportReport("figma-json", "offset.json");
   const [scene] = convertDesignDocumentToScenes(
     normalizeDesignDocument(
       importFigmaDocument(pageWithOffsetRootFrame(), "offset.json", report, "figma-json"),
-      DEFAULT_DESIGN_IMPORT_OPTIONS
+      DEFAULT_DESIGN_IMPORT_OPTIONS, report
     ),
     DEFAULT_DESIGN_IMPORT_OPTIONS,
     report
@@ -101,7 +214,7 @@ test("the converted scene places the imported frame at the canvas origin", () =>
   const [flattened] = convertDesignDocumentToScenes(
     normalizeDesignDocument(
       importFigmaDocument(pageWithOffsetRootFrame(), "offset.json", report, "figma-json"),
-      { ...DEFAULT_DESIGN_IMPORT_OPTIONS, preserveHierarchy: false }
+      { ...DEFAULT_DESIGN_IMPORT_OPTIONS, preserveHierarchy: false }, report
     ),
     { ...DEFAULT_DESIGN_IMPORT_OPTIONS, preserveHierarchy: false },
     report

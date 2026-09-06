@@ -52,7 +52,7 @@ export const AUTHORITY_BOUNDARY: AuthorityBoundary = {
     "create, read and modify authoring scenes, objects, materials, timelines and data contexts",
     "import assets, fonts, 3D models, media, scene scripts and design files",
     "evaluate automation triggers as a dry run, to show an author what a trigger would do",
-    "run publish preflight and build a checksum-addressed .gfxpkg scene package"
+    "run publish preflight and build a checksum-addressed .gpxpkg scene package"
   ],
   editorMayNot: [
     "Cue, Take, Continue or Clear Program — those belong to Playout alone (invariant 4)",

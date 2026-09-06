@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://grapix.local/schemas/ae-runtime-edge-corpus-v1.json",
+  "title": "GrapiX After Effects alpha edge corpus",
+  "type": "object",
+  "required": ["version", "id", "phase", "fixture", "render", "comparison", "cases"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": 1 },
+    "id": { "type": "string", "minLength": 1 },
+    "phase": { "const": "BO0a" },
+    "scope": { "type": "string" },
+    "fixture": {
+      "type": "object",
+      "required": ["file", "sha256", "aeBuild", "pluginSet", "fonts", "media", "declaredControls", "cueMap", "expectedDependencies"],
+      "properties": {
+        "file": { "type": "string", "pattern": "\\.aep$" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "authoringCommand": { "type": "string" },
+        "aeBuild": { "type": "string", "minLength": 1 },
+        "pluginSet": { "type": "array", "items": { "type": "string" } },
+        "fonts": { "type": "array", "items": { "type": "object" } },
+        "media": { "type": "array", "items": { "type": "object" } },
+        "declaredControls": { "type": "array", "items": { "type": "object" } },
+        "acceptedControlValues": { "type": "object" },
+        "cueMap": { "type": "array", "items": { "type": "object" } },
+        "expectedDependencies": { "type": "object" }
+      },
+      "additionalProperties": true
+    },
+    "render": {
+      "type": "object",
+      "required": ["width", "height", "pixelAspect", "frameRate", "frame", "bitDepth", "checkoutChannelOrder", "sourceAlphaMode", "expectedFill", "expectedKey", "renderSettingsTemplate", "outputModuleTemplate", "referencePath"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "pixelAspect": { "type": "string", "pattern": "^[1-9][0-9]*/[1-9][0-9]*$" },
+        "frameRate": { "type": "string", "pattern": "^[1-9][0-9]*/[1-9][0-9]*$" },
+        "frame": { "type": "integer", "minimum": 0 },
+        "bitDepth": { "enum": [8, 16, 32] },
+        "checkoutChannelOrder": { "enum": ["argb", "bgra"] },
+        "sourceAlphaMode": { "enum": ["straight", "premultiplied-black", "premultiplied-background"] },
+        "expectedFill": { "type": "string" },
+        "expectedKey": { "type": "string" },
+        "renderSettingsTemplate": { "type": "string" },
+        "outputModuleTemplate": { "type": "string" },
+        "referencePath": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "comparison": {
+      "type": "object",
+      "required": ["comparableUnit", "maxChannelDelta", "maxDifferingPixels", "premultipliedInvariant", "straightFalsification"],
+      "properties": {
+        "comparableUnit": { "type": "string" },
+        "maxChannelDelta": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "maxDifferingPixels": { "type": "integer", "minimum": 0 },
+        "premultipliedInvariant": { "type": "string" },
+        "straightFalsification": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 7,
+      "items": {
+        "type": "object",
+        "required": ["id", "composition", "vector", "expect"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "composition": { "type": "string", "pattern": "^BO0a-" },
+          "vector": { "type": "string" },
+          "expect": {
+            "type": "object",
+            "required": ["opaque", "transparent", "partial", "requireStraightDifference"],
+            "properties": {
+              "opaque": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "enum": ["some", "all"] }] },
+              "transparent": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "enum": ["some", "all"] }] },
+              "partial": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "enum": ["some", "all"] }] },
+              "alphaIncludes": { "type": "integer", "minimum": 0, "maximum": 255 },
+              "minDistinctAlphaValues": { "type": "integer", "minimum": 1, "maximum": 256 },
+              "requireStraightDifference": { "type": "boolean" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "expectedFailure": { "type": ["object", "null"] }
+  },
+  "additionalProperties": false
+}

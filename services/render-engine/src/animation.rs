@@ -85,40 +85,89 @@ impl AnimatedProperty {
         }
     }
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Easing {
-    Linear,
-    EaseIn,
-    EaseOut,
-    EaseInOut,
+
+/// Resolve a document's easing name against the shared specification.
+///
+/// An absent easing is `linear`, which is what every key without one has always meant. A name
+/// that is *present but unimplemented* resolves to `None` and the sampler holds the outgoing
+/// key's value: substituting linear, which this used to do, animates a scene along a curve the
+/// designer never chose and says nothing about it.
+///
+/// The result is an interned `&'static str` from the shared table, so a `Key` stays `Copy` and
+/// per-frame sampling costs a table lookup rather than a string compare chain.
+fn parse_easing(value: Option<&str>) -> Option<&'static str> {
+    let Some(name) = value else {
+        return Some("linear");
+    };
+    crate::easing::SCENE_KEYFRAME_EASINGS
+        .iter()
+        .find(|candidate| **candidate == name)
+        .copied()
 }
 
-impl Easing {
-    fn parse(value: Option<&str>) -> Self {
-        match value {
-            Some("ease-in") => Self::EaseIn,
-            Some("ease-out") => Self::EaseOut,
-            Some("ease-in-out") => Self::EaseInOut,
-            _ => Self::Linear,
+/// Every easing in a document that this build does not implement, as operator-readable lines.
+///
+/// Reported at preparation time, where a client already receives a scene's warnings, so a
+/// bogus easing reaches the Editor's and Playout's consoles rather than only this process's
+/// log. Sampling holds the previous value regardless; this is how anyone finds out why.
+///
+/// A pure scan of the two places an easing can appear, so it costs one pass over the document
+/// once per preparation and nothing per frame.
+pub fn collect_unknown_easings(document: &Value) -> Vec<String> {
+    let mut warnings: Vec<String> = Vec::new();
+    let mut record = |name: &str, where_: String| {
+        let message = format!(
+            "easing \"{name}\" is not implemented by this build ({where_}); the previous value is held"
+        );
+        if !warnings.contains(&message) {
+            warnings.push(message);
+        }
+    };
+
+    if let Some(keyframes) = document
+        .pointer("/timeline/keyframes")
+        .and_then(Value::as_array)
+    {
+        for keyframe in keyframes {
+            let Some(name) = keyframe.get("easing").and_then(Value::as_str) else {
+                continue;
+            };
+            if parse_easing(Some(name)).is_none() {
+                let object = keyframe
+                    .get("objectId")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown object");
+                record(name, format!("object {object}"));
+            }
         }
     }
 
-    /// `easeKeyframeT` in `Shared/shared-types`.
-    fn apply(self, t: f64) -> f64 {
-        let c = t.clamp(0.0, 1.0);
-        match self {
-            Self::EaseIn => c * c,
-            Self::EaseOut => 1.0 - (1.0 - c) * (1.0 - c),
-            Self::EaseInOut => {
-                if c < 0.5 {
-                    2.0 * c * c
-                } else {
-                    1.0 - (-2.0 * c + 2.0).powi(2) / 2.0
+    if let Some(objects) = document.get("objects").and_then(Value::as_array) {
+        for object in objects {
+            let object_id = object
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown object");
+            let Some(animation) = object.get("animation").and_then(Value::as_object) else {
+                continue;
+            };
+            for (property, channel) in animation {
+                let Some(keys) = channel.get("keys").and_then(Value::as_array) else {
+                    continue;
+                };
+                for key in keys {
+                    let Some(name) = key.get("easing").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    if parse_easing(Some(name)).is_none() {
+                        record(name, format!("object {object_id}, property {property}"));
+                    }
                 }
             }
-            Self::Linear => c,
         }
     }
+
+    warnings
 }
 
 /// One key on a channel. Tangents are the temporal bezier handles from the curve editor,
@@ -127,7 +176,8 @@ impl Easing {
 struct Key {
     frame: f64,
     value: f64,
-    easing: Easing,
+    /// `None` when the document named an easing this build does not implement.
+    easing: Option<&'static str>,
     out_tangent: Option<(f64, f64)>,
     in_tangent: Option<(f64, f64)>,
 }
@@ -199,7 +249,12 @@ impl Channel {
         let eased = if lo.out_tangent.is_some() || hi.in_tangent.is_some() {
             bezier_ease(t, lo.out_tangent, hi.in_tangent, span)
         } else {
-            lo.easing.apply(t)
+            match lo.easing.and_then(|name| crate::easing::apply_easing(name, t)) {
+                Some(eased) => eased,
+                // An easing this build does not implement holds the outgoing key rather than
+                // substituting linear. The name was already reported when the document was read.
+                None => return Some(lo.value),
+            }
         };
         Some(lo.value + (hi.value - lo.value) * eased)
     }
@@ -242,7 +297,19 @@ impl SceneAnimation {
                 let Some(frame) = keyframe.get("frame").and_then(Value::as_f64) else {
                     continue;
                 };
-                let easing = Easing::parse(keyframe.get("easing").and_then(Value::as_str));
+                let raw_easing = keyframe.get("easing").and_then(Value::as_str);
+                let easing = parse_easing(raw_easing);
+                if easing.is_none() {
+                    // Reported once per key at read time, not per frame: a 50 fps sampler would
+                    // otherwise write this line fifty times a second for the length of a show.
+                    tracing::warn!(
+                        code = "animation.unknown-easing",
+                        object_id = object_id,
+                        frame = frame,
+                        value = raw_easing.unwrap_or_default(),
+                        "easing is not implemented by this build; the previous value is held"
+                    );
+                }
                 let Some(properties) = keyframe.get("properties").and_then(Value::as_object) else {
                     continue;
                 };
@@ -319,7 +386,21 @@ impl SceneAnimation {
                         parsed.keys.push(Key {
                             frame,
                             value,
-                            easing: Easing::parse(key.get("easing").and_then(Value::as_str)),
+                            easing: {
+                                let raw = key.get("easing").and_then(Value::as_str);
+                                let resolved = parse_easing(raw);
+                                if resolved.is_none() {
+                                    tracing::warn!(
+                                        code = "animation.unknown-easing",
+                                        object_id = object_id,
+                                        property = name.as_str(),
+                                        frame = frame,
+                                        value = raw.unwrap_or_default(),
+                                        "easing is not implemented by this build; the previous value is held"
+                                    );
+                                }
+                                resolved
+                            },
                             out_tangent: read_tangent(key.get("outTangent")),
                             in_tangent: read_tangent(key.get("inTangent")),
                         });
@@ -584,15 +665,17 @@ mod tests {
 
     #[test]
     fn each_easing_curve_matches_the_typescript_shape() {
-        // Values taken from easeKeyframeT in Shared/shared-types.
-        assert!((Easing::Linear.apply(0.5) - 0.5).abs() < 1e-12);
-        assert!((Easing::EaseIn.apply(0.5) - 0.25).abs() < 1e-12);
-        assert!((Easing::EaseOut.apply(0.5) - 0.75).abs() < 1e-12);
-        assert!((Easing::EaseInOut.apply(0.25) - 0.125).abs() < 1e-12);
-        assert!((Easing::EaseInOut.apply(0.75) - 0.875).abs() < 1e-12);
+        // The three names scenes on disk already use are quadratic and their shape is frozen;
+        // the full conformance sweep against the shared fixture lives in `easing.rs`.
+        use crate::easing::apply_easing;
+        assert!((apply_easing("linear", 0.5).unwrap() - 0.5).abs() < 1e-12);
+        assert!((apply_easing("ease-in", 0.5).unwrap() - 0.25).abs() < 1e-12);
+        assert!((apply_easing("ease-out", 0.5).unwrap() - 0.75).abs() < 1e-12);
+        assert!((apply_easing("ease-in-out", 0.25).unwrap() - 0.125).abs() < 1e-12);
+        assert!((apply_easing("ease-in-out", 0.75).unwrap() - 0.875).abs() < 1e-12);
         // Clamped, not extrapolated.
-        assert_eq!(Easing::Linear.apply(-1.0), 0.0);
-        assert_eq!(Easing::Linear.apply(2.0), 1.0);
+        assert_eq!(apply_easing("linear", -1.0), Some(0.0));
+        assert_eq!(apply_easing("linear", 2.0), Some(1.0));
     }
 
     #[test]
@@ -1057,6 +1140,91 @@ mod tests {
         assert_eq!(rects[0].rotation_degrees, pristine.rotation_degrees);
     }
 
+    /// The authoring gate in `Shared/shared-types` and the match arms in this module are one
+    /// specification. `isPropertyAnimatable` decides which stopwatches the Editor offers; the arms
+    /// below decide which channels Program applies. When they disagree an author animates something
+    /// that does nothing on air — which is exactly what `zDepth` on a rect used to do.
+    ///
+    /// So this reads the emitted table and checks it against what this module actually does, rather
+    /// than against a second copy of the same list.
+    #[test]
+    fn the_animatability_table_matches_what_this_module_applies() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../Shared/shared-types/fixtures/animatable-properties.json"
+        );
+        let raw = std::fs::read_to_string(path).unwrap_or_else(|error| {
+            panic!(
+                "failed to read the animatability table at {path}: {error}\n\
+                 regenerate it with: npm run fixtures:emit -w @grapix/shared-types"
+            )
+        });
+        let table: std::collections::BTreeMap<String, Vec<String>> =
+            serde_json::from_str(&raw).expect("the animatability table must be valid JSON");
+        assert!(!table.is_empty(), "the table must cover every object kind");
+
+        // A property this module cannot even name is a rename on the TypeScript side.
+        for (object_type, properties) in &table {
+            for property in properties {
+                assert!(
+                    AnimatedProperty::parse(property).is_some(),
+                    "{object_type}.{property} is in the table but this module cannot parse it"
+                );
+            }
+        }
+
+        // `shape` is on the mesh path because a bezier shape is tessellated into a `PreparedMesh`,
+        // so it is patched by `mesh_transforms` and animates Z like a mesh does.
+        for (object_type, properties) in &table {
+            let on_mesh_path = object_type == "mesh" || object_type == "shape";
+            assert_eq!(
+                properties.iter().any(|property| property == "zDepth"),
+                on_mesh_path,
+                "{object_type}: the table and the mesh-path rule disagree about zDepth"
+            );
+        }
+
+        // Both sides of that split, proven here rather than asserted: a mesh moves, a quad does not.
+        let document = json!({
+            "objects": [{ "id": "subject", "animation": {
+                "zDepth": { "keys": [{ "frame": 0, "value": 0.0 }, { "frame": 10, "value": 9.0 }] }
+            } }],
+            "timeline": { "keyframes": [] }
+        });
+        let animation = SceneAnimation::from_document(&document);
+
+        let prepared_mesh = mesh("subject", REST);
+        let transforms = animation.mesh_transforms(10, (0.0, 0.0), &[prepared_mesh.clone()]);
+        assert_eq!(
+            transforms["subject"],
+            MeshTransform { z: 9.0, ..REST }.to_matrix(),
+            "a mesh must apply zDepth as a real Z translation"
+        );
+
+        let pristine = PreparedRect {
+            object_id: "subject".to_string(),
+            x: 10.0,
+            y: 20.0,
+            width: 30.0,
+            height: 40.0,
+            rotation_degrees: 0.0,
+            scale_x: 1.0,
+            scale_y: 1.0,
+            anchor_x: 0.0,
+            anchor_y: 0.0,
+            fill_linear_premultiplied: [0.1, 0.2, 0.3, 1.0],
+            gradient: Default::default(),
+            blend_mode: 0,
+            primitive_kind: 0,
+        };
+        let mut rects = vec![pristine.clone()];
+        animation.apply(10, (0.0, 0.0), &mut rects, &mut []);
+        assert_eq!(
+            rects[0].x, pristine.x,
+            "a quad must ignore zDepth: paint order is resolved during preparation"
+        );
+    }
+
     #[test]
     fn rotation_z_wins_the_shared_axis_over_rotation() {
         // Preparation uses `rotationZ ?? rotation` and the Editor uses the same fallback, so a
@@ -1098,5 +1266,66 @@ mod tests {
         let sampled = animation.sample_object("mesh_1", 5.0).expect("animated");
         assert_eq!(sampled.len(), 1);
         assert_eq!(sampled[0], (AnimatedProperty::Rotation, 90.0));
+    }
+
+    /// A scene naming an easing this build lacks must hold, not animate along a guess — and the
+    /// name must reach a client, because a graphic that silently stops moving is otherwise
+    /// indistinguishable from one that was authored still.
+    #[test]
+    fn an_unknown_easing_holds_the_previous_value_and_is_reported() {
+        let document = json!({
+            "objects": [{
+                "id": "rect_1",
+                "animation": {
+                    "x": { "keys": [
+                        { "frame": 0, "value": 0.0, "easing": "ease-in-out-quintic-ish" },
+                        { "frame": 10, "value": 100.0, "easing": "linear" }
+                    ] }
+                }
+            }],
+            "timeline": { "keyframes": [] }
+        });
+
+        let animation = SceneAnimation::from_document(&document);
+        let midpoint = animation.sample_object("rect_1", 5.0).expect("animated")[0].1;
+        // Held at the outgoing key. Linear substitution — the old behaviour — would give 50.
+        assert_eq!(midpoint, 0.0);
+
+        let warnings = collect_unknown_easings(&document);
+        assert_eq!(warnings.len(), 1, "got {warnings:?}");
+        assert!(warnings[0].contains("ease-in-out-quintic-ish"), "{}", warnings[0]);
+        assert!(warnings[0].contains("rect_1"), "{}", warnings[0]);
+        assert!(warnings[0].contains("property x"), "{}", warnings[0]);
+    }
+
+    /// A legacy whole-object keyframe carries an easing too, and the same rule applies.
+    #[test]
+    fn a_legacy_keyframe_with_a_bogus_easing_is_reported_once() {
+        let document = json!({
+            "objects": [{ "id": "rect_1" }],
+            "timeline": { "keyframes": [
+                { "objectId": "rect_1", "frame": 0, "properties": { "x": 0.0 }, "easing": "swoosh" },
+                { "objectId": "rect_1", "frame": 10, "properties": { "x": 100.0 }, "easing": "swoosh" }
+            ] }
+        });
+        let warnings = collect_unknown_easings(&document);
+        // Deduplicated: one bad name repeated across keys is one thing to fix, not twenty lines.
+        assert_eq!(warnings.len(), 1, "got {warnings:?}");
+        assert!(warnings[0].contains("swoosh"));
+    }
+
+    /// Every easing the shared table implements must pass the scan untouched.
+    #[test]
+    fn a_scene_using_the_implemented_set_reports_nothing() {
+        let keys: Vec<_> = crate::easing::SCENE_KEYFRAME_EASINGS
+            .iter()
+            .enumerate()
+            .map(|(index, name)| json!({ "frame": index, "value": index as f64, "easing": name }))
+            .collect();
+        let document = json!({
+            "objects": [{ "id": "rect_1", "animation": { "x": { "keys": keys } } }],
+            "timeline": { "keyframes": [] }
+        });
+        assert!(collect_unknown_easings(&document).is_empty());
     }
 }

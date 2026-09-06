@@ -13,13 +13,19 @@
  *    `requestAnimationFrame`, which is paced by a compositor that knows nothing
  *    about the show.
  *
- * `deadlineNanos(n) = round(n * 1e9 * denominator / numerator)` is computed from
- * the frame number every time, so error never accumulates: frame one million is
- * as accurate as frame one.
+ * `deadlineNanos(n) = trunc(n * 1e9 * denominator / numerator)` is computed with bigint
+ * intermediates from the frame number every time, so error never accumulates. It deliberately
+ * matches `render-engine` frame-for-frame: `Math.round` disagreed on 33,333 of the first 100,000
+ * frames at `60000/1001`.
  */
 
-import type { RationalFrameRate } from "@grapix/shared-types";
+import {
+  exactDeadlineNanos,
+  exactFrameDurationNanos,
+  type RationalFrameRate
+} from "@grapix/shared-types";
 
+/** Compatibility export for clock consumers; exact scheduling uses the bigint reference below. */
 export const NANOS_PER_SECOND = 1_000_000_000;
 
 /** The standard broadcast rates, exactly. */
@@ -96,16 +102,16 @@ export function approximateFps(rate: RationalFrameRate): number {
 /**
  * Absolute deadline of a frame, in nanoseconds from the clock's start.
  *
- * Computed from `frame` rather than accumulated, which is what makes the
- * schedule drift-free.
+ * This deliberately truncates in integer arithmetic. The old `Math.round` implementation disagreed
+ * with the Rust scheduler for 33,333 of the first 100,000 frames at `60000/1001`; do not restore it.
  */
 export function deadlineNanos(rate: RationalFrameRate, frame: number): number {
-  return Math.round((frame * NANOS_PER_SECOND * rate.denominator) / rate.numerator);
+  return exactDeadlineNanos(rate, frame);
 }
 
-/** Nominal duration of one frame, in nanoseconds. */
+/** Nominal duration of one frame in nanoseconds, truncated by the shared exact reference. */
 export function frameDurationNanos(rate: RationalFrameRate): number {
-  return Math.round((NANOS_PER_SECOND * rate.denominator) / rate.numerator);
+  return exactFrameDurationNanos(rate);
 }
 
 export function frameDurationMs(rate: RationalFrameRate): number {

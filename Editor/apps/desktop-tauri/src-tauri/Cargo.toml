@@ -21,5 +21,12 @@ tauri-build = { version = "2.6.3", features = [] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
+# OS entropy for the token signing secret the supervisor provisions on first run. Already in
+# the tree transitively, so naming it here adds a direct edge rather than a new dependency.
+getrandom = "0.3"
 tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
+# The native file dialog behind `pick_ae_project`. A custom command rather than
+# tauri-plugin-dialog: the shell needs exactly one dialog, and a plugin would add a frontend
+# package and a capability permission to reach the same call. `rfd` is what that plugin uses.
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }

@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Node-only. Token minting and password hashing use `node:crypto`, and nothing here may
+    // ever be pulled into a browser bundle: shipping the signing key to a client would hand
+    // every user the ability to mint an Admin token. Dropping DOM from `lib` makes an
+    // accidental import from a web app a compile error rather than a security incident.
+    //
+    // The web apps need the *types* (roles, permissions, claim shape) but never the signer;
+    // those live in `types.ts`, which is pure type declarations with no runtime import.
+    "lib": ["ES2024"],
+    "declaration": true,
+    "emitDeclarationOnly": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    "noEmit": false
+  },
+  "include": ["src"]
+}

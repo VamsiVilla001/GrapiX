@@ -1,0 +1,59 @@
+{
+  "phase": "AE-A3",
+  "recordedAt": "2026-08-18T10:34:27Z",
+  "host": {
+    "afterEffectsVersion": "26.3",
+    "os": "Windows 10 Pro x64",
+    "pid": 4804,
+    "ownership": "attached"
+  },
+  "adapter": {
+    "file": "GrapiXRuntimeAdapter.aex",
+    "sha256": "e6078ea9e43d0043382fb8d8655b35e0b78da5651d8ee3ea597740fd7d41a001"
+  },
+  "projects": {
+    "startedWith": {
+      "path": "tools/certification/ae-runtime-fixtures/v1/fixtures/lower-third.aep",
+      "sha256": "5415da25002194a28aece42f5be2bf391e86cd28980ee19035d599bdef009469"
+    },
+    "requestedOpen": {
+      "path": "tools/certification/ae-runtime-fixtures/v1/fixtures/bo0a-alpha-edges.aep",
+      "sha256": "1cdfb5f808c0104bcd22fadc6c28639d868782d3405a5bd60ce870c882739a06"
+    }
+  },
+  "supervisor": {
+    "initialStatus": {
+      "state": "ready",
+      "ownership": "attached",
+      "aeBuild": "26.3"
+    },
+    "request": {
+      "operation": "OPEN_PROJECT",
+      "accepted": true,
+      "lifecycleRequestId": "lifecycle-1",
+      "expectedEvent": "PROJECT_LOADED",
+      "lifecycleTimeoutMs": 5000
+    },
+    "failure": {
+      "name": "AeRuntimeLifecycleSilentError",
+      "code": "LIFECYCLE_SILENT",
+      "message": "OPEN_PROJECT was accepted but the runtime channel went silent before lifecycle completion"
+    },
+    "finalStatus": {
+      "state": "degraded",
+      "lastSuccessfulCommand": "OPEN_PROJECT",
+      "lastError": "LIFECYCLE_SILENT: OPEN_PROJECT accepted (lifecycle-1) without PROJECT_LOADED",
+      "remedy": "The runtime accepted a project lifecycle command but stopped reporting completion; inspect the adapter and restart it if health checks remain silent."
+    }
+  },
+  "hostAfterTimeout": {
+    "responding": false,
+    "mainWindowTitle": "Adobe After Effects 2026",
+    "projectLoadedEventObserved": false
+  },
+  "verdict": {
+    "outcome": "pass",
+    "claim": "The licensed host reproduced finding F2 and the production supervisor converted the missing lifecycle completion into the explicit LIFECYCLE_SILENT degraded state.",
+    "doesNotClaim": "OPEN_PROJECT completed, After Effects remained usable, or project lifecycle is safe on the idle path."
+  }
+}

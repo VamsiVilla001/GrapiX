@@ -3,11 +3,27 @@ import type {
   PlayoutTakeList,
   SceneDocument
 } from "@grapix/shared-types";
-import Fastify from "fastify";
+import {
+  AeDataRevisionRefusal,
+  AePackageReadError,
+  readAePackage,
+  type AeDataRevisionRequest,
+  type AeDynamicControl
+} from "@grapix/ae-runtime-contract";
+import Fastify, { type FastifyReply } from "fastify";
+import { randomBytes, randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { EngineSupervisor } from "./engineSupervisor.js";
+import { AeRuntimeSupervisor } from "./aeRuntimeSupervisor.js";
+import { AeControlRefusal, AeControlService } from "./aeControlService.js";
+import { AeContainerStore } from "./aeContainerStore.js";
+import { AeCueService, AeCueServiceRefusal } from "./aeCueService.js";
+import { AePackageStore } from "./aePackageStore.js";
+import { attachAeContainerToEngine } from "./aeEngineAttach.js";
+import { AeDataRevisionTracker } from "./aeDataRevisionTracker.js";
+import { AeRevisionService } from "./aeRevisionService.js";
 import { readAllowedPlayoutOrigins } from "./origins.js";
 import { PlayoutEventBus } from "./events.js";
 import {
@@ -19,6 +35,18 @@ import {
 import { duplicateInstanceMessage, inspectPort } from "./preflight.js";
 import { PlayoutRuntime, type PlayoutTarget } from "./runtime.js";
 import { PlayoutStore, SceneRemovalRefused, type PublishSceneOptions } from "./store.js";
+import { DiagnosticsLog, describeError, PlayoutOperationError } from "./diagnostics.js";
+import { PlayoutDiscovery } from "./discovery.js";
+import {
+  createPlayoutAuth,
+  PUBLIC_ROUTES,
+  recordPlayoutAudit,
+  requirePermission,
+  requireUser
+} from "./auth.js";
+
+/** Published in the mDNS TXT record. Kept by hand: the bundled service ships without a manifest. */
+const SERVICE_VERSION = "0.2.0";
 
 const serviceDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(serviceDirectory, "../../../..");
@@ -49,10 +77,40 @@ const buildAtMs = await stat(fileURLToPath(import.meta.url))
 
 const store = new PlayoutStore(dataRoot);
 
-// The standalone render engine (protocol v3). Playout owns this connection so
-// Program keeps rendering when the Editor closes. It reconnects indefinitely, and
-// a missing engine never stops the control service from starting.
-const engine = new EngineSupervisor();
+// Everything the operator console shows. Populated by every route that refuses a command
+// and by the engine link, so a failure that flashed past during a take can still be read
+// afterwards. In memory only, bounded, and never on the path of a frame.
+const diagnostics = new DiagnosticsLog();
+
+// Identity and audit are created before the renderer connection because that connection is a
+// long-lived Playout service actor. It receives a newly minted, short-lived credential on every
+// connection attempt; it never borrows an operator's browser session and no static bearer is
+// stored on disk.
+const auth = await createPlayoutAuth();
+if (auth.bootstrapPassword) {
+  console.warn(
+    `[auth] created the first administrator 'admin' with password: ${auth.bootstrapPassword}\n` +
+      "       change it at first sign-in; it is shown this once and stored nowhere."
+  );
+}
+
+// The standalone render engine (protocol v3). Playout owns this connection so Program keeps
+// rendering when the Editor closes. The credential provider renews authority on every retry,
+// including a reconnect days after the process started.
+const engine = new EngineSupervisor({
+  diagnostics,
+  authTokenFactory: auth.issueEngineAccessToken
+});
+const aeRuntime = new AeRuntimeSupervisor({
+  dataRoot: path.join(dataRoot, "ae-runtime"),
+  diagnostics
+});
+const aeContainers = new AeContainerStore(dataRoot);
+const aePackages = new AePackageStore(dataRoot, aeContainers);
+const aeControls = new AeControlService(aeRuntime);
+const aeCues = new AeCueService(aeRuntime);
+const aeRevisions = new AeDataRevisionTracker(dataRoot);
+const aeRevisionService = new AeRevisionService(aeControls, aeRevisions, aeRuntime);
 
 // Rundown operations run against the engine and nothing else. Constructed after the
 // supervisor because the runtime consults it on every cue and take.
@@ -61,6 +119,18 @@ const runtime = new PlayoutRuntime(store, engine);
 // The live link to every attached operator UI. Publishes and other library changes are
 // pushed, so the UI never shows a stale library waiting for someone to press refresh.
 const events = new PlayoutEventBus();
+
+// The console is live for the same reason the library is: an operator watching a take fail
+// should not have to press anything to see why. Only the sequence travels — the UI fetches
+// the records, so a missed event costs one stale render rather than a lost diagnostic.
+diagnostics.onRecord((record) => {
+  events.emit({ kind: "diagnostics.logged", detail: { sequence: record.sequence, level: record.level } });
+});
+
+// Local-link discovery. Announces this control service and finds Editors, so the two halves can
+// still address each other with no DNS, no DHCP and no router — or on one machine with no network
+// at all. Started below, after the port is bound, and it never blocks startup.
+const discovery = new PlayoutDiscovery({ port, version: SERVICE_VERSION, diagnostics });
 
 // Channel monitoring. Frames only flow while an operator is watching a panel, so this
 // costs nothing on an unattended station. Started before any engine exists: the
@@ -74,7 +144,101 @@ const allowedOrigins = readAllowedPlayoutOrigins();
 await app.register(cors, {
   origin: (origin, callback) => {
     callback(null, origin === undefined || allowedOrigins.has(origin));
+  },
+  // Declared, not defaulted. The default preflight answer here was `GET,HEAD,POST`, so every
+  // DELETE route this service serves — removing a published scene, clearing the diagnostics
+  // log — was blocked by the browser before it was sent, and surfaced in the operator UI as a
+  // bare "Failed to fetch" with no status to point at the cause.
+  methods: ["GET", "HEAD", "POST", "DELETE"]
+});
+
+// Every non-public route needs a verified user. `requireUser` either attaches it or sends
+// the 401 itself; the check runs per request so an expired session is refused the moment it
+// is used, not whenever the operator next opens the window.
+app.addHook("onRequest", async (request, reply) => {
+  const route = request.url.split("?")[0];
+  if (PUBLIC_ROUTES.has(route)) return;
+  if (!requireUser(auth, request, reply)) return reply;
+});
+
+app.addHook("onClose", async () => {
+  await aeRuntime.stop();
+  await auth.audit.close();
+});
+
+// ---------------------------------------------------------------------------
+// Authentication
+//
+// The login that issues the tokens everything else requires. A failed login is audited with
+// the attempt and the address, never the password.
+// ---------------------------------------------------------------------------
+
+app.post<{ Body: { identifier?: string; password?: string } }>("/api/auth/login", async (request, reply) => {
+  const identifier = request.body?.identifier?.trim() ?? "";
+  const password = request.body?.password ?? "";
+  if (!identifier || !password) {
+    return reply.code(400).send({ ok: false, error: "a username or email and a password are required" });
   }
+  const outcome = await auth.auth.login(identifier, password);
+  if ("failure" in outcome) {
+    recordPlayoutAudit(auth, request, {
+      action: "auth.login-failed",
+      result: "failure",
+      username: identifier,
+      detail: { reason: outcome.failure }
+    });
+    return reply.code(401).send({ ok: false, error: "incorrect username or password" });
+  }
+  recordPlayoutAudit(auth, request, {
+    action: "auth.login",
+    result: "success",
+    userId: outcome.session.user.id,
+    username: outcome.session.user.username,
+    role: outcome.session.user.role,
+    sessionId: outcome.session.id
+  });
+  return {
+    ok: true,
+    user: outcome.session.user,
+    sessionId: outcome.session.id,
+    accessToken: outcome.tokens.accessToken,
+    refreshToken: outcome.tokens.refreshToken,
+    expiresAt: outcome.tokens.accessClaims.exp
+  };
+});
+
+app.post<{ Body: { refreshToken?: string } }>("/api/auth/refresh", async (request, reply) => {
+  const refreshToken = request.body?.refreshToken?.trim() ?? "";
+  if (!refreshToken) {
+    return reply.code(400).send({ ok: false, error: "a refresh token is required" });
+  }
+  const outcome = await auth.auth.refresh(refreshToken);
+  if ("failure" in outcome) {
+    return reply.code(401).send({ ok: false, error: "session is not valid; sign in again" });
+  }
+  recordPlayoutAudit(auth, request, {
+    action: "auth.refresh",
+    result: "success",
+    userId: outcome.session.user.id,
+    username: outcome.session.user.username,
+    role: outcome.session.user.role,
+    sessionId: outcome.session.id
+  });
+  return {
+    ok: true,
+    user: outcome.session.user,
+    sessionId: outcome.session.id,
+    accessToken: outcome.tokens.accessToken,
+    refreshToken: outcome.tokens.refreshToken,
+    expiresAt: outcome.tokens.accessClaims.exp
+  };
+});
+
+app.post<{ Body: { sessionId?: string } }>("/api/auth/logout", async (request) => {
+  const sessionId = request.body?.sessionId ?? request.grapixUser?.sessionId ?? "";
+  const ended = sessionId ? auth.auth.logout(sessionId) : false;
+  if (ended) recordPlayoutAudit(auth, request, { action: "auth.logout", result: "success" });
+  return { ok: true, ended };
 });
 
 /**
@@ -131,7 +295,11 @@ app.post<{
     });
     return reply.code(201).send(metadata);
   } catch (error) {
-    return reply.code(400).send({ error: errorMessage(error) });
+    return refuse(reply, 400, error, {
+      source: "library/publish",
+      fallbackCode: "scene.publish-rejected",
+      context: { sceneId: request.body?.scene?.id, sceneName: request.body?.scene?.name }
+    });
   }
 });
 
@@ -174,30 +342,76 @@ app.delete<{ Params: { sceneId: string }; Querystring: { force?: string } }>(
       return removal;
     } catch (error) {
       if (error instanceof SceneRemovalRefused) {
-        return reply
-          .code(error.reason === "NOT_FOUND" ? 404 : 409)
-          .send({ error: error.message, reason: error.reason });
+        return refuse(reply, error.reason === "NOT_FOUND" ? 404 : 409, error, {
+          source: "library/remove",
+          fallbackCode: `scene.remove-refused.${error.reason.toLowerCase()}`,
+          remedy:
+            error.reason === "ON_AIR"
+              ? "Take the scene off Program first, then remove it."
+              : "Remove the take-list entries that reference it, or repeat the removal with force.",
+          context: { sceneId, force, reason: error.reason },
+          // `reason` stays a top-level field: the operator UI already branches on it.
+          body: { reason: error.reason }
+        });
       }
-      return reply.code(400).send({ error: errorMessage(error) });
+      return refuse(reply, 400, error, {
+        source: "library/remove",
+        fallbackCode: "scene.remove-failed",
+        context: { sceneId, force }
+      });
     }
   }
 );
 
 /**
- * Sync scenes from the Editor project service (port 4100) into Playout.
+ * Sync scenes from the Editor project service into Playout.
+ *
+ * The address is resolved rather than assumed: configured first, then what worked last, then this
+ * machine, then whatever announced itself on the link. That is what lets an operator still fetch
+ * from an Editor on the same switch when DNS, DHCP or the gateway is gone — the failure this whole
+ * discovery path exists for.
  */
-app.post("/api/playout/scenes/sync-editor", async (_request, reply) => {
+app.post("/api/playout/scenes/sync-editor", async (request, reply) => {
+  const endpoint = await discovery.resolveEditor();
+  if (!endpoint) {
+    return refuse(
+      reply,
+      502,
+      new PlayoutOperationError({
+        code: "editor.not-found",
+        summary: "No Editor project service answered, at its configured address or anywhere on this link",
+        remedy:
+          "Start the Editor (`npm run dev`). If it runs on another machine, check that machine is on the same switch — Playout will find it by name announcement even without DNS — or set GRAPIX_EDITOR_API_URL.",
+        context: {
+          configured: process.env.GRAPIX_EDITOR_API_URL || "http://127.0.0.1:4100",
+          discovery: discovery.status()
+        }
+      }),
+      { source: "library/sync-editor" }
+    );
+  }
+
   try {
-    const result = await store.syncFromEditor();
+    const bearer = /^Bearer\s+(.+)$/i.exec(request.headers.authorization ?? "")?.[1]?.trim();
+    const result = await store.syncFromEditor(endpoint.url, bearer);
     if (result.syncedCount > 0 || result.updatedCount > 0) {
       events.emit({
         kind: "library.changed",
         detail: { reason: "synced-editor", count: result.syncedCount + result.updatedCount }
       });
     }
-    return result;
+    return { ...result, route: endpoint.route, isFallback: endpoint.isFallback };
   } catch (error) {
-    return reply.code(502).send({ error: errorMessage(error) });
+    // The endpoint answered a health check and then failed a real request, so it is no longer
+    // trustworthy: the next attempt re-proves instead of returning here out of habit.
+    await discovery.forgetEditor();
+    return refuse(reply, 502, error, {
+      source: "library/sync-editor",
+      fallbackCode: "editor.sync-failed",
+      remedy:
+        "Start the Editor project service (`npm run dev` in the Editor, port 4100) — or set GRAPIX_EDITOR_API_URL if it runs elsewhere — then press Fetch again. Scenes already published to Playout are unaffected.",
+      context: { editorUrl: endpoint.url, route: endpoint.route }
+    });
   }
 });
 
@@ -210,6 +424,56 @@ app.post("/api/playout/scenes/sync-editor", async (_request, reply) => {
 app.get("/api/playout/events", async (request, reply) => {
   events.subscribe(reply);
   return reply;
+});
+
+// ---------------------------------------------------------------------------
+// Diagnostics — what the operator console reads
+// ---------------------------------------------------------------------------
+
+/**
+ * The diagnostics tail.
+ *
+ * `?since=` is the highest sequence the console already holds, so a live console asks for
+ * what it does not have rather than re-fetching the buffer on every event. `latestSequence`
+ * is returned even when nothing matched, so a client can tell "up to date" from "the service
+ * restarted and its log is empty".
+ */
+app.get<{ Querystring: { since?: string; limit?: string } }>(
+  "/api/playout/diagnostics",
+  async (request) => {
+    const since = Number(request.query.since);
+    const limit = Number(request.query.limit);
+    return {
+      records: diagnostics.list({
+        ...(Number.isSafeInteger(since) && since > 0 ? { since } : {}),
+        ...(Number.isSafeInteger(limit) && limit > 0 ? { limit } : {})
+      }),
+      latestSequence: diagnostics.latestSequence(),
+      capacity: DiagnosticsLog.CAPACITY
+    };
+  }
+);
+
+app.delete("/api/playout/diagnostics", async () => ({
+  cleared: diagnostics.clear(),
+  latestSequence: diagnostics.latestSequence()
+}));
+
+// ---------------------------------------------------------------------------
+// Local-link discovery
+// ---------------------------------------------------------------------------
+
+/**
+ * What discovery knows.
+ *
+ * Exposed because "which Editor is this library coming from?" becomes a real question the moment a
+ * fallback address can be in use, and an operator should be able to read the answer rather than
+ * infer it. `?refresh=true` re-proves the endpoint instead of answering from the trust window.
+ */
+app.get<{ Querystring: { refresh?: string } }>("/api/playout/discovery", async (request) => {
+  if (request.query.refresh === "true") await discovery.forgetEditor();
+  const editor = await discovery.resolveEditor();
+  return { ...discovery.status(), editor };
 });
 
 // ---------------------------------------------------------------------------
@@ -332,7 +596,11 @@ app.post<{ Body: PlayoutTakeList }>(
       });
       return saved;
     } catch (error) {
-      return reply.code(400).send({ error: errorMessage(error) });
+      return refuse(reply, 400, error, {
+        source: "take-list/save",
+        fallbackCode: "take-list.save-rejected",
+        context: { takeListId: request.body?.takeListId, entries: request.body?.entries?.length }
+      });
     }
   }
 );
@@ -354,10 +622,18 @@ app.post<{
 }>("/api/playout/control/:action", async (request, reply) => {
   const { action } = request.params;
 
+  // Putting something on Program is `playout.program`, checked per command, not only at
+  // login - an operator whose role was narrowed since they signed in must be refused here.
+  if (!requirePermission(auth, request, reply, "playout.program")) return reply;
+
+  const auditAction =
+    action === "cue" ? "playout.cue" : action === "take" ? "playout.take-online" : "playout.take-offline";
+
   try {
     if (action === "take-out") {
       const status = await runtime.takeOut();
       events.emit({ kind: "runtime.changed", detail: { action } });
+      recordPlayoutAudit(auth, request, { action: "playout.take-offline", result: "success" });
       return status;
     }
 
@@ -383,11 +659,28 @@ app.post<{
 
     const status = action === "cue" ? await runtime.cue(target) : await runtime.take(target);
     events.emit({ kind: "runtime.changed", detail: { action } });
+    recordPlayoutAudit(auth, request, {
+      action: auditAction,
+      result: "success",
+      detail: {
+        target: target.kind === "scene" ? `take:${target.takeId}` : `${target.takeListId}/${target.entryId}`
+      }
+    });
     return status;
   } catch (error) {
-    return reply.code(503).send({
-      error: errorMessage(error),
-      status: runtime.getStatus()
+    return refuse(reply, 503, error, {
+      source: `control/${action}`,
+      fallbackCode: `control.${action}-failed`,
+      context: {
+        action,
+        ...(request.body?.takeId !== undefined ? { takeId: request.body.takeId } : {}),
+        ...(request.body?.takeListId ? { takeListId: request.body.takeListId } : {}),
+        ...(request.body?.entryId ? { entryId: request.body.entryId } : {}),
+        engine: engine.status().url,
+        engineState: engine.status().state
+      },
+      // The UI applies this to its transport state, so a failed take still shows the truth.
+      body: { status: runtime.getStatus() }
     });
   }
 });
@@ -395,6 +688,377 @@ app.post<{
 // ---------------------------------------------------------------------------
 // Render engine (protocol v3)
 // ---------------------------------------------------------------------------
+
+// An AE package is immutable at its publisher; ingest records the verified version Playout
+// accepted, then the operator can load that exact project without resolving a shared root again.
+app.post<{ Body: { versionRoot?: string } }>(
+  "/api/playout/ae-packages/ingest",
+  async (request, reply) => {
+    if (!requirePermission(auth, request, reply, "playout.program")) return reply;
+    const versionRoot = request.body?.versionRoot;
+    if (typeof versionRoot !== "string" || !versionRoot.trim()) {
+      return refuse(
+        reply,
+        422,
+        new PlayoutOperationError({
+          code: "ae-package.version-root-invalid",
+          summary: "An AE package ingest needs an absolute versionRoot",
+          remedy: "Publish the graphic from Editor again and send the version directory it returns."
+        }),
+        { source: "ae-package/ingest" }
+      );
+    }
+
+    try {
+      const ingested = await aePackages.ingest(versionRoot);
+      events.emit({
+        kind: "library.changed",
+        detail: {
+          graphicId: ingested.manifest.id,
+          version: ingested.manifest.version,
+          reason: "ae-package-ingested"
+        }
+      });
+      recordPlayoutAudit(auth, request, {
+        action: "ae-package.ingest",
+        result: "success",
+        detail: {
+          graphicId: ingested.manifest.id,
+          version: ingested.manifest.version,
+          containerId: ingested.container.id
+        }
+      });
+      return {
+        ok: true,
+        graphicId: ingested.manifest.id,
+        version: ingested.manifest.version,
+        containerId: ingested.container.id
+      };
+    } catch (error) {
+      return refuse(reply, error instanceof AePackageReadError ? 422 : 503, error, {
+        source: "ae-package/ingest",
+        fallbackCode: error instanceof AePackageReadError
+          ? `ae-package.${error.code.toLowerCase()}`
+          : "ae-package.ingest-failed",
+        context: { versionRoot }
+      });
+    }
+  }
+);
+
+app.get("/api/playout/ae-packages", async () => ({
+  ok: true,
+  packages: await aePackages.list()
+}));
+
+app.get<{ Params: { graphicId: string } }>(
+  "/api/playout/ae-packages/:graphicId",
+  async (request, reply) => {
+    const graphic = await aePackages.read(request.params.graphicId);
+    if (!graphic) {
+      return reply.code(404).send({
+        ok: false,
+        code: "AE_PACKAGE_NOT_FOUND",
+        error: "Published AE package not found"
+      });
+    }
+    return { ok: true, package: graphic };
+  }
+);
+
+app.post<{ Params: { graphicId: string } }>(
+  "/api/playout/ae-packages/:graphicId/load",
+  async (request, reply) => {
+    if (!requirePermission(auth, request, reply, "playout.program")) return reply;
+    const graphic = await aePackages.read(request.params.graphicId);
+    if (!graphic) {
+      return reply.code(404).send({
+        ok: false,
+        code: "AE_PACKAGE_NOT_FOUND",
+        error: "Published AE package not found"
+      });
+    }
+
+    const container = await aeContainers.read(graphic.graphicId);
+    if (!container) {
+      return reply.code(404).send({
+        ok: false,
+        code: "CONTAINER_NOT_FOUND",
+        error: "AE runtime container not found"
+      });
+    }
+
+    try {
+      const verified = await readAePackage(graphic.versionRoot);
+      const composition = verified.manifest.compositions.find(
+        (candidate) => candidate.itemId === verified.manifest.mainComposition.itemId
+      );
+      if (!composition) {
+        throw new PlayoutOperationError({
+          code: "ae-package.main-composition-missing",
+          summary: "The published AE package does not contain its declared main composition",
+          remedy: "Republish the graphic from Editor after selecting a main composition.",
+          context: { graphicId: graphic.graphicId, version: graphic.latestVersion }
+        });
+      }
+
+      // The same per-launch credentials start AE and authorize the engine's shared-memory link.
+      const sessionId = randomUUID();
+      const token = randomBytes(32).toString("hex");
+      const state = await aeRuntime.start({
+        projectPath: verified.projectPath,
+        projectDigest: verified.manifest.projectDigest,
+        sessionId,
+        token
+      });
+      await attachAeContainerToEngine(engine.engineController, engine.id, {
+        sessionId,
+        token,
+        compositionItemId: verified.manifest.mainComposition.itemId,
+        clock: composition.clock,
+        format: {
+          width: verified.manifest.mainComposition.width,
+          height: verified.manifest.mainComposition.height
+        }
+      });
+      await aeContainers.write({
+        ...container,
+        status: "ready",
+        updatedAt: new Date().toISOString()
+      });
+      recordPlayoutAudit(auth, request, {
+        action: "ae-package.load",
+        result: "success",
+        detail: {
+          graphicId: graphic.graphicId,
+          version: graphic.latestVersion,
+          containerId: container.id,
+          compositionItemId: composition.itemId
+        }
+      });
+      return { ok: true, state };
+    } catch (error) {
+      return refuse(reply, error instanceof AePackageReadError ? 422 : 503, error, {
+        source: "ae-package/load",
+        fallbackCode: error instanceof AePackageReadError
+          ? `ae-package.${error.code.toLowerCase()}`
+          : "ae-package.load-failed",
+        context: {
+          graphicId: graphic.graphicId,
+          version: graphic.latestVersion,
+          containerId: container.id
+        }
+      });
+    }
+  }
+);
+
+app.get("/api/playout/ae-runtime/containers", async () => ({
+  ok: true,
+  containers: await aeContainers.list()
+}));
+
+/**
+ * Drive a published graphic to one of its declared cue points.
+ *
+ * This is the operator's animation control: CUE parks on the pre-roll, IN plays the entrance, OUT
+ * the exit, CONTINUE:<id> interrupts a hold. Every seek is digest-pinned — the cue map recorded at
+ * ingest must still resolve to the same digest, or the project moved and the old timings are
+ * refused rather than played.
+ */
+app.post<{
+  Params: { graphicId: string };
+  Body: { role?: "CUE" | "IN" | "HOLD" | "CONTINUE" | "UPDATE" | "OUT" | "END"; id?: string | null };
+}>("/api/playout/ae-packages/:graphicId/cue", async (request, reply) => {
+  if (!requirePermission(auth, request, reply, "playout.program")) return reply;
+  const graphic = await aePackages.read(request.params.graphicId);
+  if (!graphic) {
+    return reply.code(404).send({ ok: false, code: "AE_PACKAGE_NOT_FOUND", error: "Published AE package not found" });
+  }
+  const container = await aeContainers.read(graphic.graphicId);
+  if (!container) {
+    return reply.code(404).send({ ok: false, code: "CONTAINER_NOT_FOUND", error: "AE runtime container not found" });
+  }
+  const recorded = await aePackages.readCueMap(graphic.graphicId);
+  if (!recorded) {
+    return reply.code(422).send({
+      ok: false,
+      code: "CUE_MAP_NOT_DECLARED",
+      error: "This graphic declared no GRAPIX: cue markers, so there is no cue to drive to"
+    });
+  }
+  const role = request.body?.role;
+  if (!role) return reply.code(400).send({ ok: false, error: "role is required" });
+
+  try {
+    const result = await aeCues.setTime(container, recorded, {
+      cueMapDigest: recorded.cueMapDigest,
+      role,
+      ...(request.body?.id !== undefined ? { id: request.body.id } : {})
+    });
+    recordPlayoutAudit(auth, request, {
+      action: "ae-runtime.control-write",
+      result: "success",
+      detail: { graphicId: graphic.graphicId, containerId: container.id, role, id: request.body?.id ?? null }
+    });
+    return { ok: true, result };
+  } catch (error) {
+    recordPlayoutAudit(auth, request, {
+      action: "ae-runtime.control-refused",
+      result: "denied",
+      detail: {
+        graphicId: graphic.graphicId,
+        containerId: container.id,
+        role,
+        code: error instanceof AeCueServiceRefusal ? error.code : "CUE_FAILED"
+      }
+    });
+    return reply.code(error instanceof AeCueServiceRefusal ? 422 : 503).send({
+      ok: false,
+      code: error instanceof AeCueServiceRefusal ? error.code : "CUE_FAILED",
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+app.post<{
+  Params: { containerId: string };
+  Body: { controlId?: string; value?: unknown; policy?: AeDynamicControl["updatePolicy"]; revision?: number };
+}>("/api/playout/ae-runtime/containers/:containerId/controls", async (request, reply) => {
+  if (!requirePermission(auth, request, reply, "playout.program")) return reply;
+  const container = await aeContainers.read(request.params.containerId);
+  if (!container) return reply.code(404).send({ ok: false, code: "CONTAINER_NOT_FOUND", error: "Runtime container not found" });
+  const controlId = request.body?.controlId ?? "";
+  try {
+    const result = await aeControls.write(container, {
+      controlId,
+      value: request.body?.value,
+      policy: request.body?.policy ?? "immediate",
+      ...(request.body?.revision !== undefined ? { revision: request.body.revision } : {})
+    });
+    await aeContainers.write({ ...container, updatedAt: new Date().toISOString() });
+    recordPlayoutAudit(auth, request, {
+      action: "ae-runtime.control-write",
+      result: "success",
+      detail: { containerId: container.id, controlId, revision: request.body?.revision ?? null }
+    });
+    return { ok: true, result, container };
+  } catch (error) {
+    const code = error instanceof AeControlRefusal ? error.code : "CONTROL_VALIDATION_FAILED";
+    recordPlayoutAudit(auth, request, {
+      action: "ae-runtime.control-refused",
+      result: "denied",
+      detail: { containerId: container.id, controlId, code }
+    });
+    return reply.code(error instanceof AeControlRefusal ? 422 : 503).send({
+      ok: false,
+      code,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+app.get<{ Params: { containerId: string } }>(
+  "/api/playout/ae-runtime/containers/:containerId/revision",
+  async (request, reply) => {
+    if (!requirePermission(auth, request, reply, "playout.program")) return reply;
+    const container = await aeContainers.read(request.params.containerId);
+    if (!container) return reply.code(404).send({ ok: false, code: "CONTAINER_NOT_FOUND", error: "Runtime container not found" });
+    return { ok: true, state: await aeRevisions.read(container.id) };
+  }
+);
+
+app.post<{
+  Params: { containerId: string };
+  Body: Partial<AeDataRevisionRequest>;
+}>("/api/playout/ae-runtime/containers/:containerId/revision", async (request, reply) => {
+  if (!requirePermission(auth, request, reply, "playout.program")) return reply;
+  const container = await aeContainers.read(request.params.containerId);
+  if (!container) return reply.code(404).send({ ok: false, code: "CONTAINER_NOT_FOUND", error: "Runtime container not found" });
+
+  const body = request.body ?? {};
+  if (
+    typeof body.baseRevision !== "number" ||
+    typeof body.revision !== "number" ||
+    typeof body.idempotencyKey !== "string" ||
+    body.idempotencyKey.length < 8 ||
+    body.dataContext === null ||
+    typeof body.dataContext !== "object" ||
+    Array.isArray(body.dataContext)
+  ) {
+    return reply.code(422).send({
+      ok: false,
+      code: "REVISION_MEMBER_INVALID",
+      error: "a revision needs baseRevision, revision, an idempotency key and a complete data context"
+    });
+  }
+
+  const revisionRequest: AeDataRevisionRequest = {
+    baseRevision: body.baseRevision,
+    revision: body.revision,
+    idempotencyKey: body.idempotencyKey,
+    dataContext: body.dataContext as Record<string, unknown>
+  };
+
+  try {
+    const { application, reservation } = await aeRevisionService.apply(container, revisionRequest, {
+      reserve: (count) => auth.audit.reserve("ae-runtime.revision-applied", count)
+    });
+
+    if (application.duplicate) {
+      // A recognised retry is acknowledged, not re-applied, and says so rather than reporting a write.
+      return { ok: true, duplicate: true, state: application.state, result: null };
+    }
+
+    try {
+      for (const member of application.members) {
+        recordPlayoutAudit(auth, request, {
+          action: "ae-runtime.revision-applied",
+          result: "success",
+          revision: application.state.acceptedRevision,
+          detail: {
+            containerId: container.id,
+            controlId: member.control.controlId,
+            dataPath: member.dataPath,
+            updatePolicy: member.control.updatePolicy
+          }
+        }, reservation);
+      }
+      recordPlayoutAudit(auth, request, {
+        action: "ae-runtime.revision-applied",
+        result: "success",
+        revision: application.state.acceptedRevision,
+        detail: { containerId: container.id, members: application.members.length, idempotencyKey: revisionRequest.idempotencyKey }
+      }, reservation);
+    } finally {
+      reservation?.release();
+    }
+
+    await aeContainers.write({ ...container, updatedAt: new Date().toISOString() });
+    events.emit({ kind: "runtime.changed", detail: { action: "ae-runtime.revision" } });
+    return { ok: true, duplicate: false, state: application.state, result: application.result };
+  } catch (error) {
+    const refusal = error instanceof AeDataRevisionRefusal ? error : null;
+    recordPlayoutAudit(auth, request, {
+      action: "ae-runtime.revision-refused",
+      result: "denied",
+      revision: revisionRequest.revision,
+      detail: {
+        containerId: container.id,
+        code: refusal?.code ?? "REVISION_MEMBER_INVALID",
+        controlId: refusal?.controlId ?? null
+      }
+    });
+    return reply.code(refusal ? 409 : 503).send({
+      ok: false,
+      code: refusal?.code ?? "REVISION_MEMBER_INVALID",
+      error: error instanceof Error ? error.message : String(error),
+      ...(refusal?.controlId ? { controlId: refusal.controlId } : {})
+    });
+  }
+});
+
+app.get("/api/playout/ae-runtime", async () => aeRuntime.status());
 
 app.get("/api/playout/engine", async () => engine.status());
 
@@ -412,7 +1076,7 @@ app.get("/api/playout/engine/status", async (_request, reply) => {
   try {
     return await engine.requireConnected().status(engine.id);
   } catch (error) {
-    return reply.code(503).send({ error: errorMessage(error) });
+    return refuse(reply, 503, error, { source: "engine/status", fallbackCode: "engine.status-failed" });
   }
 });
 
@@ -425,7 +1089,11 @@ app.get<{ Querystring: { tiles?: string } }>(
       const includeTiles = request.query.tiles === "true";
       return await controller.diagnostics(engine.id, includeTiles);
     } catch (error) {
-      return reply.code(503).send({ error: errorMessage(error) });
+      return refuse(reply, 503, error, {
+        source: "engine/diagnostics",
+        fallbackCode: "engine.diagnostics-failed",
+        context: { includeTiles: request.query.tiles === "true" }
+      });
     }
   }
 );
@@ -433,9 +1101,19 @@ app.get<{ Querystring: { tiles?: string } }>(
 app.post("/api/playout/engine/connect", async (_request, reply) => {
   const connected = await engine.connect();
   if (!connected) {
-    return reply
-      .code(503)
-      .send({ error: engine.status().lastError ?? "connection failed" });
+    const status = engine.status();
+    return refuse(
+      reply,
+      503,
+      new PlayoutOperationError({
+        code: "engine.connect-failed",
+        summary: `Cannot reach the render engine at ${status.url}`,
+        ...(status.lastError ? { cause: status.lastError } : {}),
+        remedy: "Start the engine with `npm run dev:engine`, then press Connect again.",
+        context: { url: status.url, reconnectAttempts: status.reconnectAttempts }
+      }),
+      { source: "engine/connect" }
+    );
   }
   return engine.status();
 });
@@ -463,7 +1141,11 @@ app.post<{ Body: { sceneId: string; version?: number; stageId?: string } }>(
       await controller.prepare(engine.id, scene.scene.id);
       return { loaded: scene.scene.id, revision: scene.scene.revision ?? 0 };
     } catch (error) {
-      return reply.code(503).send({ error: errorMessage(error) });
+      return refuse(reply, 503, error, {
+        source: "engine/load-scene",
+        fallbackCode: "engine.load-failed",
+        context: { sceneId: request.body.sceneId, version: request.body.version ?? "latest" }
+      });
     }
   }
 );
@@ -481,7 +1163,7 @@ app.get("/api/playout/engine/outputs", async (_request, reply) => {
   try {
     return await engine.requireConnected().outputs(engine.id);
   } catch (error) {
-    return reply.code(503).send({ error: errorMessage(error) });
+    return refuse(reply, 503, error, { source: "engine/outputs", fallbackCode: "engine.outputs-failed" });
   }
 });
 
@@ -538,8 +1220,23 @@ app.post<{
     // The engine refusing an adapter the deployment did not enable is correct
     // behaviour, not a service fault.
     const message = errorMessage(error);
-    const code = message.includes("not enabled") || message.includes("exceeds") ? 409 : 503;
-    return reply.code(code).send({ error: message });
+    const refusedByEngine = message.includes("not enabled") || message.includes("exceeds");
+    return refuse(reply, refusedByEngine ? 409 : 503, error, {
+      source: "engine/configure-output",
+      fallbackCode: refusedByEngine ? "output.refused" : "output.configure-failed",
+      ...(refusedByEngine
+        ? {
+            remedy:
+              "The engine will not carry this output as asked. Enable the adapter in the engine's configuration, or lower the format to within the limit named above."
+          }
+        : {}),
+      context: {
+        outputId: body.outputId,
+        adapterId: body.adapterId,
+        format: `${body.width}x${body.height}`,
+        startRequested: body.start === true
+      }
+    });
   }
 });
 
@@ -573,8 +1270,13 @@ app.post<{
   } catch (error) {
     const message = errorMessage(error);
     // "live and running; stop it before removing it" is a deliberate refusal.
-    const code = message.includes("live and running") ? 409 : 503;
-    return reply.code(code).send({ error: message });
+    const liveRefusal = message.includes("live and running");
+    return refuse(reply, liveRefusal ? 409 : 503, error, {
+      source: `engine/output-${action}`,
+      fallbackCode: liveRefusal ? "output.remove-refused" : `output.${action}-failed`,
+      ...(liveRefusal ? { remedy: "Stop the output first, then remove it." } : {}),
+      context: { outputId, action }
+    });
   }
 });
 
@@ -712,13 +1414,25 @@ app.post<{
 
     return engine.status();
   } catch (error) {
-    return reply.code(503).send({ error: errorMessage(error) });
+    return refuse(reply, 503, error, {
+      source: `engine/command-${action}`,
+      fallbackCode: `engine.${action}-failed`,
+      context: { action }
+    });
   }
 });
 
-app.setErrorHandler((error, _request, reply) => {
+app.setErrorHandler((error, request, reply) => {
   app.log.error(error);
-  reply.code(500).send({ error: errorMessage(error) });
+  // An error that reaches here was not anticipated by a route, which makes it the one most
+  // worth keeping: the console gets the stack, and the reply still carries the summary.
+  const detail = describeError(error, "internal");
+  const record = diagnostics.record({
+    level: "error",
+    source: `http${request.url ? ` ${request.method} ${request.url}` : ""}`,
+    detail
+  });
+  reply.code(500).send({ error: detail.summary, detail, diagnosticSequence: record.sequence });
 });
 
 await store.ensure();
@@ -742,12 +1456,18 @@ try {
   throw error;
 }
 
+// After the port is bound, so the announcement carries an address that is actually accepting
+// connections. Never awaited for success: discovery being unavailable is a degraded fallback, not
+// a failed service, and it says so in the console either way.
+await discovery.start();
+
 const shutdown = async () => {
   // Event streams first: an open SSE socket keeps node alive, so closing Fastify while one
   // is attached hangs the shutdown instead of ending it. An MJPEG monitor is the same
   // shape of problem, and it also owes the engine a streamStop.
   events.close();
   await monitors.close();
+  await discovery.stop();
   engine.close();
   runtime.close();
   await app.close();
@@ -757,6 +1477,44 @@ process.once("SIGTERM", shutdown);
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Refuse a request, and make sure the operator can still find out why.
+ *
+ * Two failures used to be possible at every one of these catch sites: the UI received one
+ * string with no context, and once the operator dismissed the banner the reason was gone. So
+ * every refusal does both halves — it answers with structured `detail`, and it appends a
+ * record to the console log.
+ *
+ * `remedy` and `context` here are the route's contribution. A detail that already carries
+ * them (a `PlayoutOperationError` thrown deeper, which knows more) keeps its own.
+ */
+function refuse(
+  reply: FastifyReply,
+  status: number,
+  error: unknown,
+  where: {
+    source: string;
+    fallbackCode?: string;
+    remedy?: string;
+    context?: Record<string, unknown>;
+    /** Extra fields the existing response shape promises, e.g. `status` on a control refusal. */
+    body?: Record<string, unknown>;
+  }
+): FastifyReply {
+  const described = describeError(error, where.fallbackCode ?? "internal");
+  const detail = {
+    ...described,
+    ...(described.remedy === undefined && where.remedy !== undefined ? { remedy: where.remedy } : {}),
+    ...(where.context ? { context: { ...where.context, ...described.context } } : {})
+  };
+  // The sequence travels with the refusal so the operator UI can open its console straight
+  // on this record instead of keeping a second copy of the same failure.
+  const record = diagnostics.record({ level: "error", source: where.source, detail });
+  return reply
+    .code(status)
+    .send({ error: detail.summary, detail, diagnosticSequence: record.sequence, ...where.body });
 }
 
 /**

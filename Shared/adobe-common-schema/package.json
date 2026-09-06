@@ -17,7 +17,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@grapix/shared-types": "0.1.0"
+    "@grapix/shared-types": "0.1.0",
+    "fast-xml-parser": "^5.9.0"
   },
   "devDependencies": {
     "typescript": "^5.5.4"

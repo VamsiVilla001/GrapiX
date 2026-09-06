@@ -1,0 +1,343 @@
+{
+  "phase": "AE-A0",
+  "title": "Resident adapter kill experiment",
+  "recordedAt": "2026-08-12T04:20:00+05:30",
+  "verdict": "PASS with one named reliability gap. The resident-control premise holds, the lifecycle is closed, and 29 of 30 launch/command/shutdown cycles completed cleanly. The thirtieth failed on the graceful quit and was recovered by the next cycle, so the shutdown path needs a bounded retry before AE-A2 depends on it. Kill gate K1 is not triggered.",
+  "scopeNote": "Development and testing on the owner's own licensed installation, which is the slice authorised by docs/ae-runtime-licensing-decision-request.md §9. Nothing here was distributed.",
+  "environment": {
+    "host": {
+      "os": "Windows 10 Pro, build 10.0.19045",
+      "cpu": "Intel Core i7-10700K",
+      "gpu": "NVIDIA GeForce RTX 3070 Ti"
+    },
+    "afterEffects": {
+      "product": "Adobe After Effects 2026",
+      "fileVersion": "26.3",
+      "installPath": "C:/Program Files/Adobe/Adobe After Effects 2026",
+      "aegpDriverImplementationVersion": "126.3",
+      "pluginIdAssigned": 38
+    },
+    "sdk": {
+      "package": "ae25.6_61.64bit.AfterEffectsSDK",
+      "path": "vendor/adobe/sdk/ae25.6_61.64bit.AfterEffectsSDK",
+      "redistributed": false,
+      "versionSkew": "SDK 25.6_61 against AE 26.3 — a skew the phase plan says to record, not to assume away. Every suite below acquired at the version the SDK header freezes, and no call failed because of it."
+    },
+    "toolchain": {
+      "compiler": "MSVC 14.44.35207 (Visual Studio 2022 Professional), x64",
+      "resourceCompiler": "Windows Kits 10.0.26100.0 rc.exe",
+      "piplTool": "Examples/Resources/PiPLtool.exe from the vendored SDK",
+      "buildScript": "ae-plugin/runtime-adapter/build.sh"
+    }
+  },
+  "artefact": {
+    "name": "GrapiXRuntimeAdapter.aex",
+    "bytes": 59904,
+    "exports": [
+      "EntryPointFunc"
+    ],
+    "sections": [
+      ".data",
+      ".pdata",
+      ".rdata",
+      ".reloc",
+      ".rsrc",
+      ".text"
+    ],
+    "piplPresent": true,
+    "installedTo": "C:/Program Files/Adobe/Adobe After Effects 2026/Support Files/Plug-ins/GrapiX/",
+    "installNeededElevation": true
+  },
+  "suiteAcquisition": [
+    {
+      "suite": "AEGP Proj Suite",
+      "version": 9,
+      "acquired": true
+    },
+    {
+      "suite": "AEGP Item Suite",
+      "version": 14,
+      "acquired": true
+    },
+    {
+      "suite": "AEGP Comp Suite",
+      "version": 26,
+      "acquired": true
+    },
+    {
+      "suite": "AEGP Layer Suite",
+      "version": 15,
+      "acquired": true
+    },
+    {
+      "suite": "AEGP Stream Suite",
+      "version": 11,
+      "acquired": true
+    },
+    {
+      "suite": "AEGP Keyframe Suite",
+      "version": 5,
+      "acquired": true
+    },
+    {
+      "suite": "AEGP Utility Suite",
+      "version": 13,
+      "acquired": true
+    },
+    {
+      "suite": "AEGP Memory Suite",
+      "version": 1,
+      "acquired": true
+    },
+    {
+      "suite": "AEGP Register Suite",
+      "version": 6,
+      "acquired": true
+    }
+  ],
+  "proven": [
+    {
+      "claim": "A GrapiX-owned AEGP loads into a licensed After Effects and its entry point runs.",
+      "evidence": "Load marker written at entry, before any command: {\"event\":\"loaded\",\"pluginId\":38,\"driverMajor\":126,\"driverMinor\":3}. Reproduced across three separate AE launches."
+    },
+    {
+      "claim": "The adapter stays resident and executes bounded commands while AE remains open.",
+      "evidence": "ping → {\"resident\":true,\"driverMajor\":126,\"driverMinor\":3,\"pluginId\":38}, executed on AE's idle callback."
+    },
+    {
+      "claim": "A project can be opened through the SDK rather than the UI.",
+      "evidence": "open of a copy of Layer-01.aep → {\"projectName\":\"Layer-01-copy (converted).aep\"}. See caveat F2: the call succeeded but wedged idle processing."
+    },
+    {
+      "claim": "Discovery works: project items, compositions, layers, by name.",
+      "evidence": "list returned 1 composition \"Comp 01\" with 17 layers whose names match the AE-authored fixture exactly — \"Transformations Collapsed\" through \"Default\"."
+    },
+    {
+      "claim": "Writability is a fact the adapter reports rather than assumes.",
+      "evidence": "probe 0 16 opacity → {\"keyframes\":0,\"timeVarying\":false,\"setStreamValueLegal\":true}, which is the SDK's own precondition for AEGP_SetStreamValue."
+    },
+    {
+      "claim": "A declared property can be changed from outside AE, with no UI interaction, and read back.",
+      "evidence": "set 0 16 opacity 42.5 → {\"previous\":0.0,\"requested\":42.5,\"readback\":42.5}; an independent read on a fresh stream reference returned 42.5. Wrapped in one undo group."
+    },
+    {
+      "claim": "The command path is repeatable.",
+      "evidence": "20 consecutive probe commands, 20/20 ok, 11.07 s total. The ~553 ms mean is dominated by the harness's 1 s file poll, not by AE."
+    },
+    {
+      "claim": "The authored source project is never modified.",
+      "evidence": "Layer-01.aep SHA-256 658da9de…3363a before and after; AE operated on a copy and its own conversion dialog states \"The original file will be unchanged\"."
+    }
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "high",
+      "finding": "After Effects 2026 blocks startup behind a chain of modal dialogs, and plugins are loaded before its main window exists. Observed chain: System Compatibility Report → Crash Repair Options → project conversion notice.",
+      "consequence": "An unattended supervisor must detect and clear these before the runtime is usable, and must never let the crash dialog land on Start in Safe Mode or Manage Plugins — either would disable the adapter it depends on. AE-A2 owns this.",
+      "evidence": "Two launches sat with an empty MainWindowTitle and ~3 s CPU for 90 s; screenshots captured the Crash Repair Options and conversion dialogs. Dismissing them let the adapter load and the idle hook fire."
+    },
+    {
+      "id": "F2",
+      "severity": "high",
+      "finding": "AEGP_OpenProjectFromPath called from the idle hook returned A_Err_NONE and opened the project, but no idle callback fired afterwards — the command channel went silent while AE stayed responsive and its CPU flat.",
+      "consequence": "Project-lifecycle calls are not safe on the idle path. AE-A1/AE-A3 must place open/close on a different host callback, or drive them through a command hook, and the supervisor must treat channel silence as a state to detect rather than a hang to wait out.",
+      "evidence": "Session 1: ping ok, open ok, then list and a second ping both timed out with flat CPU and no new log line."
+    },
+    {
+      "id": "F3",
+      "severity": "medium",
+      "finding": "The idle hook only fires once AE has reached its normal idle UI state. It is not a general-purpose scheduler.",
+      "consequence": "A production adapter cannot rely on the idle hook alone for playout-rate work. This is direct input to AE-F0/AE-F2, where frames must arrive on a Program deadline.",
+      "evidence": "No command completed in any session before AE's main window existed."
+    },
+    {
+      "id": "F4",
+      "severity": "medium",
+      "finding": "AEGP_GetUniqueStreamID returned 0 for the layer streams probed.",
+      "consequence": "The stable-identity plan for AE-A3 cannot assume this call yields a usable id for transform streams. Identity will need item/layer ids plus a canonical match-name path, with this call verified per stream class first.",
+      "evidence": "probe and read both reported \"uniqueStreamId\":0 on an opacity stream that was otherwise fully readable and writable."
+    },
+    {
+      "id": "F5",
+      "severity": "low",
+      "finding": "Installing into the AE Plug-ins folder requires elevation.",
+      "consequence": "Deployment needs an elevated installer step; the build and test loop does not.",
+      "evidence": "Non-elevated copy refused; an elevated mkdir plus copy succeeded."
+    },
+    {
+      "id": "F6",
+      "severity": "low",
+      "finding": "AE 2026 converts an AE 16 project on open and marks the document dirty.",
+      "consequence": "The runtime must never save, and the supervisor must expect a dirty-document state it did not cause. Certification fixtures should be authored on the profile under test rather than converted.",
+      "evidence": "Window title \"Layer-01-copy (converted).aep *\"."
+    },
+    {
+      "id": "F7",
+      "finding": "Force-killing After Effects invalidates its plugin cache and arms the crash dialog, so the next unattended start inherits a modal chain.",
+      "consequence": "The graceful quit is not a nicety — it is what keeps unattended operation working. A supervisor's kill path must be a last resort with the consequence recorded.",
+      "movesTo": "AE-A2"
+    },
+    {
+      "id": "F8",
+      "finding": "AEGP_NewProject discards a dirty project with no save prompt and leaves the idle channel alive, unlike AEGP_OpenProjectFromPath.",
+      "consequence": "It is the clean-shutdown primitive: reach a clean project before asking AE to close, because the save prompt is unanswerable.",
+      "movesTo": "AE-A1/AE-A2"
+    },
+    {
+      "id": "F9",
+      "finding": "The AEGP death hook fires on a graceful quit and never on a force-kill.",
+      "consequence": "An orderly shutdown is observable from inside the runtime; an abrupt one is only observable from outside.",
+      "movesTo": "AE-A2"
+    },
+    {
+      "id": "F10",
+      "finding": "The file-based command channel carries no process identity; a second After Effects with the adapter installed answers on the same channel.",
+      "consequence": "Every reply now stamps hostPid, and lifecycle authority is gated on a launch-time claim rather than on the channel.",
+      "movesTo": "AE-A1/AE-A2"
+    },
+    {
+      "id": "F11",
+      "finding": "A fully commandable After Effects can have no editor window at all (MainWindowHandle == 0).",
+      "consequence": "Readiness and health must be channel facts, never window facts.",
+      "movesTo": "AE-A2"
+    },
+    {
+      "id": "F12",
+      "finding": "AE's startup modals are #32770 shells with one DroverLord pane: no automatable controls, usually empty window text, sometimes never painted, and deaf to synthetic keystrokes. Until they are answered AE's idle loop does not run, so the adapter loads while no command can reach it.",
+      "consequence": "They must be found by window class and answered with WM_CLOSE per handle. WM_CLOSE takes each dialog's non-destructive default: after clearing a chain containing Crash Repair Options — neighbours 'Start in Safe Mode' and 'Manage Plugins' — this adapter still loaded and answered, which is the only evidence that licenses doing it. A start from a host with five modals queued reached a commandable channel in 12 s.",
+      "movesTo": "AE-A2"
+    },
+    {
+      "id": "F13",
+      "finding": "A host with broken third-party plugins (a Resolume DXV install here) raises a plugin-load-failure modal on every cold plugin scan.",
+      "consequence": "Host provisioning is a prerequisite for unattended operation, not a detail: the runtime cannot fix a broken plugin, it can only survive the modal.",
+      "movesTo": "AE-A2"
+    },
+    {
+      "id": "F14",
+      "finding": "A single WM_CLOSE to the editor window is not always enough to end an After Effects session. One cycle in thirty did not exit inside the graceful-quit window despite a clean project and a live channel.",
+      "consequence": "The graceful stop needs a bounded retry — re-assert the close, then escalate deliberately — because the fallback is a kill, and a kill arms the modal chain that costs the next start. AE-A2's stop path must count and surface this rather than treating quit as a single attempt that either works or justifies a kill.",
+      "movesTo": "AE-A2"
+    }
+  ],
+  "notProvenYet": [
+    "macOS, which the phase plan explicitly does not require for this gate.",
+    "Pixel checkout: no frame has been checked out of After Effects yet. That is AE-F0, and its reference frames must come from AE's own Render Queue rather than through the adapter.",
+    "Deliberate adapter loss and reconnect mid-session, and restart backoff exhaustion — AE-A2's exit gate, not this card's."
+  ],
+  "commandLog": [
+    {
+      "sequence": 0,
+      "verb": "load-marker",
+      "ok": true
+    },
+    {
+      "sequence": 1,
+      "verb": "ping",
+      "ok": true
+    },
+    {
+      "sequence": 2,
+      "verb": "list",
+      "ok": true,
+      "result": "1 composition, 17 layers"
+    },
+    {
+      "sequence": 3,
+      "verb": "probe",
+      "ok": true,
+      "result": "keyframes 0, setStreamValueLegal true"
+    },
+    {
+      "sequence": 4,
+      "verb": "read",
+      "ok": true,
+      "result": "opacity 0.0"
+    },
+    {
+      "sequence": 5,
+      "verb": "set",
+      "ok": true,
+      "result": "opacity 0.0 → 42.5, readback 42.5"
+    },
+    {
+      "sequence": 6,
+      "verb": "read",
+      "ok": true,
+      "result": "opacity 42.5"
+    },
+    {
+      "sequence": "7-26",
+      "verb": "probe ×20",
+      "ok": true,
+      "result": "20/20 in 11.07 s"
+    }
+  ],
+  "invariantsHeld": [
+    "No socket, no listener, no remote reachability: the channel is a file in this user's own LOCALAPPDATA.",
+    "No eval, script text, shell command or caller-supplied filesystem path is accepted by any verb.",
+    "No frame, preview, Program or output call exists in the adapter.",
+    "No Adobe SDK material was copied into the repository or into any build artefact beyond the PiPL blob this build generates.",
+    "The authored fixture's bytes are unchanged.",
+    "Across 30 launch/command/shutdown cycles the authored fixture and the working copy both kept SHA-256 658da9de5485e952da983700130ee3c7c78c4448e6c8a0edc1d2cfe2a0a3363a — including the cycle whose quit failed and was killed.",
+    "No cycle saved a project: every dirty state was discarded, never written.",
+    "The 30 cycles ran in 30 distinct host processes, so no cycle inherited a previous one's state.",
+    "No After Effects process was left running when the run finished."
+  ],
+  "lifecycle": {
+    "recordedAt": "2026-08-12T02:30:00+05:30",
+    "harness": [
+      "ae-plugin/runtime-adapter/supervise.sh",
+      "ae-plugin/runtime-adapter/ae-window.ps1"
+    ],
+    "gracefulQuit": {
+      "sequence": [
+        "dirty",
+        "discard (AEGP_NewProject)",
+        "WM_CLOSE on the editor window",
+        "death hook",
+        "process exit"
+      ],
+      "measured": "~3 s from request to exit; no save prompt reached; the adapter's death hook fires on this path and never on a kill.",
+      "whyDiscardFirst": "A save prompt cannot be answered: AE dialogs expose no automatable controls and WM_CLOSE on that prompt means Cancel. AEGP_NewProject discards a dirty project with no modal at all and, unlike AEGP_OpenProjectFromPath (finding F2), leaves the idle channel alive."
+    },
+    "ownership": {
+      "rule": "Ownership is a claim written at launch holding the pid the adapter itself reported. A live process whose reported pid does not match the claim — or a process with no claim — is attached, not owned.",
+      "owned": "Full lifecycle allowed. Verified: attach reported 'owned 27564', a property write succeeded, and quit ran the graceful path to a clean exit.",
+      "attached": "Reads and property writes allowed; discard and quit refused. Verified twice against real foreign processes, including one started by hand outside the harness.",
+      "whyNeeded": "The channel is a file pair in a fixed state directory and carries no process identity, so any After Effects with this adapter installed answers on it. Every reply therefore stamps hostPid."
+    },
+    "cycles": {
+      "requested": 30,
+      "passed": 29,
+      "failed": 1,
+      "stallsDetectedAndRestarted": 0,
+      "restartsTotal": 0,
+      "secondsMin": 70,
+      "secondsMedian": 71,
+      "secondsMax": 85,
+      "secondsMean": 72.4,
+      "distinctHostPids": 30,
+      "everyCycleProved": "launch -> commandable channel -> set opacity 42.5 on layer 0 with readback 42.500000 -> graceful quit -> process gone",
+      "log": "ae-plugin/runtime-adapter/certification/AE-A0-cycles-20260811T212936Z.log",
+      "evidenceCorrection": {
+        "what": "The original 30/30 run's per-cycle log was destroyed by a later 3-cycle smoke test. `cycle` wrote to one fixed path and truncated it on every run, so a smoke test against a different fixture erased a completed gate's evidence.",
+        "fix": "The harness now writes one log per run, named by UTC start time, with a header recording the cycle count, project and probe layer. Nothing truncates a previous run.",
+        "alsoFixed": "The per-cycle probe targeted layer 16, which only exists in the Layer-01 fixture; on a two-layer fixture every cycle reported command-failed. The probe layer is now configurable and defaults to layer 0, which exists in any composition that has layers.",
+        "consequence": "The 30/30 figures below were re-measured on a fresh run after both fixes rather than reconstructed from the transcript. The first run's summary (30 passed, 0 failed, 0 stalls, 0 restarts, 28/71/73 s min/median/max, 30 distinct host pids) was observed and reported at the time, but its per-cycle file no longer exists, so this record cites the re-run."
+      },
+      "failureDetail": "cycle 12 reported quit-failed: the property write succeeded (readback 42.500000) but After Effects did not exit within the graceful-quit window, so the harness force-killed it. Cycle 13 then passed in 85 s — longer than the 71 s median, consistent with the kill arming the crash dialog and the dialog-clearing loop absorbing it. Recovery worked; the quit did not.",
+      "propertyWritesProven": 30,
+      "probeLayer": 0
+    },
+    "readiness": {
+      "definition": "A command round-trip through AE's callback, and nothing else.",
+      "rejected": [
+        "A PID: the process exists long before it can be commanded.",
+        "A window title: a fully commandable AE here had MainWindowHandle == 0.",
+        "The adapter's own load marker: result.json is the reply slot, so the first successful command overwrites it — an earlier gate watched for a file that no longer existed while the channel was live."
+      ]
+    }
+  }
+}

@@ -29,6 +29,37 @@
   --r-lg: 7px;
   --ctl-h: 28px;
 
+  /* ---- The blue-grey scale the panels are actually drawn in ----------------
+     The tokens above are a neutral grey ramp, and much of the UI is not grey:
+     the panels, docks and inspectors were skinned in a cool blue-grey written
+     as literal hex, 526 times, so none of it could be retinted. These name the
+     values already in use, byte for byte, so adopting a token changes nothing
+     on screen — it only makes the colour addressable. Ordered darkest surface
+     to brightest text, which is the order a reskin walks them in. */
+  --surface-deep: #0d131b;
+  --surface-sunken: #111820;
+  --surface-line: #2a3138;
+  --surface-line-strong: #33404e;
+  --ink-bright: #dce6f4;
+  --ink: #b8c7d7;
+  --ink-soft: #9cacbf;
+  --ink-dim: #8a949e;
+  --ink-muted: #8193a7;
+  --ink-faint: #74869a;
+  --accent-blue: #3c86d8;
+  --accent-amber: #f5b942;
+
+  /* ---- Names that were used before they existed ---------------------------
+     Each of these was referenced by `var()` in this file with no fallback,
+     which makes the whole declaration invalid and silently drops the colour.
+     `--border-subtle` and `--text-muted` take the exact value their own
+     fallbacks use a few rules away, so those cases are unchanged and the bare
+     ones start working. `--muted` had no fallback anywhere: the save-state pill
+     it colours has been inheriting body text instead of reading as status. */
+  --border-subtle: var(--surface-line);
+  --text-muted: var(--ink-faint);
+  --muted: var(--text-dim);
+
   color: var(--text);
   background: var(--bg-app);
   font-family:
@@ -49,7 +80,7 @@
   gap: 2px;
   padding: 0 10px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: #111820;
+  background: var(--surface-sunken);
 }
 
 .menu-brand {
@@ -99,7 +130,7 @@
   height: 28px;
   border: 1px solid rgba(255, 255, 255, 0.11);
   border-radius: 5px;
-  color: #dce6f4;
+  color: var(--ink-bright);
   background: rgba(255, 255, 255, 0.055);
 }
 
@@ -192,7 +223,7 @@
 .right-dock,
 .bottom-workbench,
 .status-bar {
-  background: #111820;
+  background: var(--surface-sunken);
 }
 
 .project-manager {
@@ -913,7 +944,7 @@
   min-width: 0;
   min-height: 0;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
-  background: #111820;
+  background: var(--surface-sunken);
 }
 
 .workbench-tabs {
@@ -1097,7 +1128,7 @@
 .collapsible-panel {
   min-width: 0;
   min-height: 0;
-  background: #111820;
+  background: var(--surface-sunken);
 }
 
 .collapsible-panel.open {
@@ -1176,7 +1207,7 @@
   height: 26px;
   padding: 0 6px;
   border-radius: 5px;
-  color: #dce6f4;
+  color: var(--ink-bright);
   font-size: 11px;
   font-weight: 900;
   text-transform: uppercase;
@@ -1213,7 +1244,7 @@
   height: 28px;
   margin-left: auto;
   border-radius: 6px 6px 0 0;
-  color: #dce6f4;
+  color: var(--ink-bright);
   background: rgba(255, 255, 255, 0.06);
   cursor: pointer;
 }
@@ -1228,9 +1259,14 @@
   background: var(--bg-app);
 }
 
+/*
+   Tools are left-aligned and take whatever width they need; only Save/Publish are pinned right.
+   The middle column used to be centred, which moved every control sideways as the alignment group
+   enabled and disabled itself — a toolbar that shifts under the cursor is worse than a cramped one.
+*/
 .reference-topbar {
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) auto minmax(240px, 1fr);
+  grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 12px;
   padding: 0 12px;
@@ -1240,12 +1276,24 @@
 }
 
 .topbar-left,
+.topbar-tools,
 .topbar-center,
 .topbar-right {
   display: flex;
   align-items: center;
   gap: 7px;
   min-width: 0;
+}
+
+/* Scrolls rather than wrapping or clipping when the window is narrow. */
+.topbar-tools {
+  justify-content: flex-start;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.topbar-tools::-webkit-scrollbar {
+  display: none;
 }
 
 .topbar-center {
@@ -1285,6 +1333,76 @@
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
 }
 
+/* ---------------------------------------------------------------------------
+   Alignment and distribution group
+
+   Buttons are grouped tightly and the groups separated, so the six alignment
+   directions read as one control rather than twelve loose icons.
+   --------------------------------------------------------------------------- */
+
+.alignment-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.alignment-group {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 1px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+}
+
+.align-reference {
+  height: 24px;
+  max-width: 116px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  background: var(--bg-input);
+  font: inherit;
+  font-size: 11px;
+}
+
+.alignment-overflow {
+  position: relative;
+}
+
+.alignment-overflow-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 60;
+  display: grid;
+  min-width: 232px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-panel);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+}
+
+.alignment-overflow-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 3px;
+  color: var(--text);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  text-align: left;
+}
+
+.alignment-overflow-menu button:hover:not(:disabled) { background: var(--bg-hover); }
+.alignment-overflow-menu button:disabled { opacity: 0.4; cursor: not-allowed; }
+
 .topbar-left strong {
   font-size: 12.5px;
   font-weight: 700;
@@ -1320,6 +1438,32 @@
   border: 1px solid var(--border);
 }
 
+/* Save state pill. Reads as status, not as a control: no border, no hover, not focusable. */
+.save-state {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.save-state-saving {
+  color: var(--text);
+}
+
+.save-state-saved {
+  color: var(--accent);
+}
+
+/* A failed save is the one state that must not be quiet. */
+.save-state-error {
+  color: var(--red, #e07a7a);
+  font-weight: 700;
+}
+
 .publish-button {
   padding: 0 12px;
   color: var(--accent-ink);
@@ -1329,228 +1473,162 @@
 
 .publish-button:hover { filter: brightness(1.08); }
 
-.reference-main-layout,
-.reference-center-layout,
-.reference-upper-layout {
-  min-width: 0;
-  min-height: 0;
-}
+/* ── The workspace dock ───────────────────────────────────────────────────────
+   The layout is dockview's: a free grid of groups the author arranges, plus floating groups and
+   popout windows. What lives here is only the theming that makes it read as GrapiX chrome rather
+   than as a generic IDE.
 
-.dock-area {
-  display: flex;
+   The old three-area dock (`.dock-area-left/right/bottom`, `.dockable-panel`, `.dock-tab`,
+   `.dock-actions`) is gone with the store that drove it: a panel is no longer bound to one of three
+   regions, so there are no per-region rules left to write. */
+
+.grapix-dock {
   width: 100%;
   height: 100%;
   min-width: 0;
   min-height: 0;
-  gap: 6px;
-  padding: 6px;
-  background: var(--bg-dock);
+  overflow: hidden;
+
+  /* dockview's own theme variables, retuned to the Editor's palette. Setting these rather than
+     overriding its selectors means floating groups and popout windows inherit the same look
+     without a second set of rules chasing them. */
+  --dv-background-color: #0f141b;
+  --dv-group-view-background-color: #0f141b;
+  --dv-tabs-and-actions-container-background-color: #141b24;
+  --dv-activegroup-visiblepanel-tab-background-color: #1b2431;
+  --dv-activegroup-hiddenpanel-tab-background-color: #141b24;
+  --dv-inactivegroup-visiblepanel-tab-background-color: #171e28;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: #141b24;
+  --dv-activegroup-visiblepanel-tab-color: #e7eef7;
+  --dv-activegroup-hiddenpanel-tab-color: var(--ink-muted);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--ink);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--ink-faint);
+  --dv-tab-divider-color: #0f141b;
+  --dv-separator-border: #232d3a;
+  --dv-drag-over-background-color: rgba(60, 134, 216, 0.22);
+  --dv-drag-over-border-color: var(--accent-blue);
+  --dv-active-sash-color: var(--accent-blue);
+  --dv-floating-box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  --dv-icon-hover-background-color: rgba(255, 255, 255, 0.08);
 }
 
-.dock-area-left,
-.dock-area-right {
-  flex-direction: column;
+/* Dense chrome: a broadcast tool shows more panels than an IDE, so the tab strip is the height of
+   a label rather than of a comfortable click target. */
+.grapix-dock .dv-tabs-and-actions-container {
+  height: 26px;
+  min-height: 26px;
+  font-size: 10px;
 }
 
-.dock-area-bottom {
-  flex-direction: row;
-  border-top: 1px solid #27313c;
+.grapix-dock .dv-tab {
+  padding: 0 9px;
+  font-size: 10px;
+  letter-spacing: 0.02em;
 }
 
-.dock-empty {
+/* The active tab carries the accent line the old panel header used, so the eye still finds the
+   focused module the same way. */
+.grapix-dock .dv-active-group .dv-tab.dv-active-tab {
+  box-shadow: inset 0 2px 0 0 var(--accent-blue);
+}
+
+/* Undo/redo plus the layout actions, rendered once per group beside the tabs. */
+.dock-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 4px;
+}
+
+.dock-layout-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.dock-layout-actions button {
   display: grid;
   place-items: center;
-  flex: 1 1 auto;
-  min-width: 140px;
-  min-height: 92px;
-  border: 1px dashed #314050;
-  border-radius: 6px;
-  color: #718399;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.dock-panel-group {
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  min-height: 0;
-}
-
-.dockable-panel {
-  display: grid;
-  grid-template-rows: 30px 30px minmax(0, 1fr);
-  flex: 1 1 0;
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  min-height: 120px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--bg-panel);
-}
-
-.dock-area-bottom .dockable-panel {
-  min-width: 280px;
-}
-
-.dock-resize-handle {
-  flex: 0 0 auto;
-  background: transparent;
-  transition: background 0.15s ease;
-}
-
-.dock-resize-handle:hover,
-.dock-resize-handle[data-resize-handle-active] {
-  background: var(--accent);
-}
-
-.dock-resize-handle-vertical {
-  width: 5px;
-  cursor: col-resize;
-}
-
-.dock-resize-handle-horizontal {
-  height: 5px;
-  cursor: row-resize;
-}
-
-.dockable-panel-header {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  height: 30px;
-  padding: 0 8px;
-  border-bottom: 1px solid var(--border);
-  color: var(--text-dim);
-  background: var(--bg-panel-2);
-  cursor: grab;
-  user-select: none;
-}
-
-.dockable-panel-header:active {
-  cursor: grabbing;
-}
-
-.dockable-panel-header strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-}
-
-.dock-tab-strip {
-  display: flex;
-  align-items: end;
-  gap: 2px;
-  min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding: 4px 6px 0;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-panel-2);
-  scrollbar-width: thin;
-}
-
-.dock-tab {
-  display: block;
-  flex: 0 1 auto;
-  min-width: 58px;
-  max-width: 148px;
-  height: 25px;
-  padding: 0 10px;
-  border: 1px solid transparent;
-  border-bottom: 0;
-  border-radius: var(--r-sm) var(--r-sm) 0 0;
-  color: var(--text-dim);
+  width: 20px;
+  height: 20px;
+  border-radius: var(--r-sm);
+  color: var(--ink-muted);
   background: transparent;
   cursor: pointer;
-  font-size: 11px;
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   transition: background 0.12s ease, color 0.12s ease;
 }
 
-.dock-tab:hover {
-  color: var(--text);
-  background: var(--bg-hover);
+.dock-layout-actions button:hover {
+  color: #e7eef7;
+  background: rgba(255, 255, 255, 0.09);
 }
 
-.dock-tab.active {
-  color: var(--text);
-  background: var(--bg-panel);
-  box-shadow: inset 0 2px 0 var(--accent);
+/* The viewport is a dock panel, so it needs the same fill contract as any other content. */
+.dock-viewport-host {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
-.dock-grip {
-  display: grid;
-  place-items: center;
-  color: #7f91a7;
-}
-
-.dock-actions {
+/* Each module's own undo/redo, sitting between its title and the dock buttons. Reuses the dock
+   button shape so it reads as panel chrome rather than as content. */
+.history-controls {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
+  margin-left: auto;
+  padding-right: 6px;
 }
 
-.dock-actions button {
+.history-controls button {
   display: grid;
   place-items: center;
-  width: 22px;
-  height: 22px;
   border-radius: var(--r-sm);
   color: var(--text-dim);
-  background: var(--bg-hover);
+  background: transparent;
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease;
 }
 
-.dock-actions button:hover {
+.history-controls.compact button {
+  width: 20px;
+  height: 20px;
+}
+
+.history-controls button:hover:not(:disabled) {
   color: var(--accent-ink);
   background: var(--accent);
 }
 
-.dock-actions button:disabled {
+.history-controls button:disabled {
   cursor: not-allowed;
-  opacity: 0.35;
+  opacity: 0.3;
 }
 
-.dockable-panel-body {
+/* Panel content fills its dock group. dockview gives the panel a definite box; these rules stop
+   content that was written to sit in a bordered frame from adding a second border inside one. */
+.dock-panel-body {
+  width: 100%;
+  height: 100%;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
 
-.dockable-panel-body > .templates-panel,
-.dockable-panel-body > .properties-sidebar,
-.dockable-panel-body > .object-inspector,
-.dockable-panel-body > .timeline-panel {
+.dock-panel-body > .templates-panel,
+.dock-panel-body > .properties-sidebar,
+.dock-panel-body > .object-inspector,
+.dock-panel-body > .timeline-panel {
   width: 100%;
   height: 100%;
   border: 0;
 }
 
-.dockable-panel-body > .scene-manager {
+.dock-panel-body > .scene-manager {
   width: 100%;
   height: 100%;
-}
-
-.reference-left-area {
-  display: block;
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  min-height: 0;
-  background: #0f141b;
 }
 
 .templates-panel {
@@ -1612,6 +1690,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
+  margin-left: auto;
 }
 
 .text-action.danger {
@@ -2012,6 +2091,8 @@
   height: 100%;
   padding: 0;
   background: var(--bg-app);
+  container-name: editor-stage;
+  container-type: inline-size;
 }
 
 .reference-editor-shell .stage-toolbar {
@@ -2097,7 +2178,13 @@
   --viewport-ui-scale: 1;
   --viewport-ruler-size: calc(23px * var(--viewport-ui-scale));
   position: relative;
-  transform-origin: center;
+  /*
+   * Scale from the top-left and centre with auto margins. Scaling from the centre pushes the
+   * canvas equally into negative space, and negative overflow cannot be scrolled to — the
+   * rulers and the top-left of the artwork became unreachable the moment you zoomed past fit.
+   */
+  transform-origin: top left;
+  margin: auto;
 }
 
 .viewport-chrome.with-rulers {
@@ -2128,8 +2215,8 @@
 .viewport-ruler-corner {
   grid-column: 1;
   grid-row: 1;
-  border-right: 1px solid #33404e;
-  border-bottom: 1px solid #33404e;
+  border-right: 1px solid var(--surface-line-strong);
+  border-bottom: 1px solid var(--surface-line-strong);
   cursor: crosshair;
 }
 
@@ -2141,14 +2228,14 @@
 .viewport-ruler-horizontal {
   grid-column: 2;
   grid-row: 1;
-  border-bottom: 1px solid #33404e;
+  border-bottom: 1px solid var(--surface-line-strong);
   cursor: ns-resize;
 }
 
 .viewport-ruler-vertical {
   grid-column: 1;
   grid-row: 2;
-  border-right: 1px solid #33404e;
+  border-right: 1px solid var(--surface-line-strong);
   cursor: ew-resize;
 }
 
@@ -2401,6 +2488,12 @@
   background: var(--accent);
 }
 
+.properties-tab:focus-visible {
+  z-index: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .properties-sidebar .inspector {
   height: 100%;
   padding: 14px;
@@ -2442,6 +2535,10 @@
 }
 
 .snapping-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   height: 24px;
   padding: 0 10px;
   border: 1px solid var(--border);
@@ -2619,6 +2716,33 @@
   gap: 8px;
 }
 
+.inspector-disclosure-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.inspector-disclosure-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.inspector-disclosure-content {
+  display: grid;
+  gap: 9px;
+}
+
+.inspector-disclosure-content[hidden] {
+  display: none;
+}
+
 .inspector-control-section > .two-column {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2647,6 +2771,94 @@
   font-size: 10.5px;
   line-height: 1.45;
   color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------------------
+   Where a value came from.
+
+   A field states its source only when the source is not the authored field, so
+   these lines are the exception and not the rule. The bound-and-disagreeing case
+   is a parity note instead, because Preview and Program drawing different numbers
+   is the same class of fact as a Preview-only feature.
+   --------------------------------------------------------------------------- */
+
+.field-source-note {
+  grid-column: 1 / -1;
+  margin: 4px 0 0;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--text-faint);
+}
+
+.field-source-note[data-state="binding-missing"],
+.field-source-note[data-state="binding-type-mismatch"] {
+  color: var(--warn, #d7a33a);
+}
+
+.animated-number-field input:disabled {
+  /* Bound, not broken: the value is live and the author edits it where it comes from. */
+  opacity: 0.75;
+  cursor: not-allowed;
+}
+
+.binding-row-group {
+  display: grid;
+  gap: 2px;
+  padding: 4px 0;
+}
+
+.binding-resolution {
+  margin: 0;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--text-faint);
+}
+
+.binding-resolution[data-state="bound"] {
+  color: var(--accent);
+}
+
+.binding-resolution[data-state="binding-missing"],
+.binding-resolution[data-state="binding-type-mismatch"] {
+  color: var(--warn, #d7a33a);
+}
+
+.binding-empty {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+.scene-data-editor textarea {
+  width: 100%;
+  margin-top: 6px;
+  padding: 8px;
+  border: 1px solid #293441;
+  border-radius: 6px;
+  color: #b9c6d7;
+  background: #0f151c;
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.scene-data-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.scene-data-error {
+  font-size: 10.5px;
+  color: var(--warn, #d7a33a);
+}
+
+.binding-empty code {
+  font-family: var(--mono, monospace);
+  font-size: 10.5px;
 }
 
 .inspector-point-row {
@@ -2684,7 +2896,39 @@
   margin: 8px 0 0;
   font-size: 11px;
   font-weight: 600;
-  color: var(--text-secondary, #8a949e);
+  color: var(--text-secondary, var(--ink-dim));
+}
+
+.shape-subpath-editor {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.shape-subpath-toolbar {
+  display: flex;
+  align-items: end;
+  gap: 7px;
+}
+
+.shape-subpath-toolbar > .field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.shape-subpath-actions {
+  display: inline-flex;
+  gap: 3px;
+  padding-bottom: 1px;
+}
+
+.inspector-empty-copy {
+  margin: 2px 0 0;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .field :disabled,
@@ -2826,6 +3070,67 @@
   text-align: center;
 }
 
+/*
+  The Inspector with a set selected.
+
+  The counts come first and are deliberately loud: the defect this replaced showed an ordinary-looking
+  panel that edited one object out of twelve, so the first thing an author must see is how many they
+  are about to change.
+*/
+.selection-count {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.selection-count strong {
+  color: var(--accent);
+  font-size: 15px;
+}
+
+.selection-breakdown {
+  margin: 2px 0 0;
+  color: #6c7f8d;
+  font-size: 10.5px;
+}
+
+.selection-commands {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.selection-refusals {
+  margin: 0;
+  padding-left: 16px;
+  color: #6c7f8d;
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+.selection-refusals strong {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+/*
+  A field standing for several different values.
+
+  Empty, not the active object's number: showing one target's value invites the author to accept it and
+  write it onto the rest. The placeholder says how many values it stands for, and the dotted edge marks
+  it as unlike any field that holds a real value.
+*/
+.field-mixed input {
+  border-style: dashed;
+  color: var(--text-dim);
+}
+
+.field-mixed input::placeholder {
+  color: var(--accent);
+  font-style: italic;
+  opacity: 0.75;
+}
+
 .property-tab-panel {
   display: grid;
   align-content: start;
@@ -2877,20 +3182,6 @@
   border: 1px solid #293441;
   border-radius: 6px;
   background: #10161d;
-}
-
-.binding-preview {
-  max-height: 180px;
-  margin: 0;
-  overflow: auto;
-  padding: 10px;
-  border: 1px solid #293441;
-  border-radius: 6px;
-  color: #b9c6d7;
-  background: #0f151c;
-  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
-  font-size: 11px;
-  line-height: 1.45;
 }
 
 .empty-panel.compact {
@@ -3053,7 +3344,7 @@ button {
   display: grid;
   place-items: center;
   border-radius: 8px;
-  color: #dce6f4;
+  color: var(--ink-bright);
   background: rgba(255, 255, 255, 0.07);
   cursor: pointer;
 }
@@ -3172,11 +3463,21 @@ button {
   padding: 0 2px;
 }
 
+/*
+ * The viewport frame scrolls once the canvas is larger than it.
+ *
+ * `place-items: start` with `margin: auto` on the child, rather than `place-items: center`:
+ * a centred grid item that outgrows its container overflows in *both* directions, and the
+ * top-left half of it can never be scrolled to. This pair centres the canvas while it fits
+ * and keeps every edge reachable once it does not — which is what makes Ctrl+scroll zoom
+ * usable past the point where the canvas fills the frame.
+ */
 .stage-frame {
   display: grid;
-  place-items: center;
+  place-items: start;
   min-width: 0;
   min-height: 0;
+  overflow: auto;
 }
 
 .stage {
@@ -3212,7 +3513,12 @@ button {
   white-space: nowrap;
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: thin;
+  scrollbar-width: none;
+}
+
+.stage-toolbar::-webkit-scrollbar,
+.tool-options-bar::-webkit-scrollbar {
+  display: none;
 }
 
 .stage-toolbar > span:first-child,
@@ -3304,7 +3610,7 @@ button {
   color: var(--text-dim);
   background: var(--bg-input);
   font-size: 10px;
-  scrollbar-width: thin;
+  scrollbar-width: none;
 }
 
 .tool-options-bar strong {
@@ -3351,6 +3657,11 @@ button {
 
 .tool-options-bar .tool-option-warning {
   color: #f0c674;
+}
+
+/* What the tool will do under the cursor. Dimmer than a warning: it is guidance, not a problem. */
+.tool-options-bar .tool-option-hint {
+  color: var(--text-faint);
 }
 
 .tool-options-bar input {
@@ -3401,7 +3712,7 @@ button {
 }
 
 .direct-anchor.selected {
-  fill: #f5b942;
+  fill: var(--accent-amber);
 }
 
 .direct-handle-line {
@@ -3420,7 +3731,7 @@ button {
 }
 
 .gradient-handles line {
-  stroke: #f5b942;
+  stroke: var(--accent-amber);
   stroke-width: 2;
   vector-effect: non-scaling-stroke;
 }
@@ -3431,7 +3742,7 @@ button {
 
 .gradient-handles circle {
   fill: #ffffff;
-  stroke: #f5b942;
+  stroke: var(--accent-amber);
   stroke-width: 2;
   cursor: move;
   vector-effect: non-scaling-stroke;
@@ -3984,6 +4295,13 @@ h3 {
   border-radius: 0;
 }
 
+/* Holds the stopwatch column open on a field that cannot be animated, so Position Z stays aligned
+   with X and Y instead of the number jumping left. */
+.field-animation-controls .field-stopwatch-absent {
+  width: 24px;
+  height: 30px;
+}
+
 .field-animation-controls .field-stopwatch.active {
   color: var(--accent);
 }
@@ -4180,7 +4498,7 @@ h3 {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #dce6f4;
+  color: var(--ink-bright);
   font-size: 13px;
 }
 
@@ -4227,7 +4545,7 @@ h3 {
   flex-direction: column;
   min-width: 0;
   height: 100%;
-  color: #dce6f4;
+  color: var(--ink-bright);
   background: #0c121a;
 }
 
@@ -4261,7 +4579,7 @@ h3 {
   padding: 0 8px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 4px;
-  color: #dce6f4;
+  color: var(--ink-bright);
   background: #182330;
   font-size: 11px;
   cursor: pointer;
@@ -4671,6 +4989,63 @@ h3 {
   background: #121c27;
 }
 
+/* Sign-in gate. Full-viewport, centred, and deliberately not dismissable: there is no
+   workspace behind it to return to before there is a verified user. */
+.login-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  background: radial-gradient(120% 120% at 50% 0%, #16222f 0%, #0b121b 100%);
+}
+
+.login-dialog {
+  width: min(380px, calc(100vw - 40px));
+  gap: 15px;
+}
+
+.login-dialog > header {
+  justify-content: center;
+  font-size: 17px;
+}
+
+.login-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.login-field > span {
+  font-size: 12px;
+  color: #9fb3cc;
+}
+
+.login-field > input {
+  padding: 9px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 5px;
+  color: #e5edf8;
+  background: #0d1620;
+  font-size: 14px;
+}
+
+.login-field > input:focus {
+  outline: none;
+  border-color: #2f7fe0;
+  box-shadow: 0 0 0 2px rgba(47, 127, 224, 0.25);
+}
+
+.login-dialog > footer {
+  justify-content: center;
+}
+
+.login-dialog > footer .primary {
+  width: 100%;
+  padding: 10px 14px;
+}
+
 .material-create-dialog > header,
 .material-create-dialog > footer {
   display: flex;
@@ -4698,7 +5073,7 @@ h3 {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  color: #9cacbf;
+  color: var(--ink-soft);
   font-size: 11px;
 }
 
@@ -4785,7 +5160,7 @@ h3 {
 .design-import-option-grid label {
   display: grid;
   gap: 4px;
-  color: #9cacbf;
+  color: var(--ink-soft);
   font-size: 10px;
 }
 
@@ -4832,6 +5207,79 @@ h3 {
   padding: 10px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 5px;
+}
+
+/*
+ * Motion sits in its own fieldset rather than among the import options, because it is not an
+ * option: it decides whether a second source file is read at all.
+ */
+.design-import-motion {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
+}
+
+.design-import-motion > label {
+  display: grid;
+  gap: 3px;
+  color: #c2cfdd;
+  font-size: 10px;
+}
+
+.design-import-motion .design-file-drop {
+  min-height: 34px;
+}
+
+.design-import-motion-report {
+  display: grid;
+  gap: 7px;
+  max-height: 250px;
+  overflow: auto;
+}
+
+.design-import-motion-report > section {
+  display: grid;
+  gap: 4px;
+}
+
+.design-import-motion-report > section > strong {
+  color: var(--ink-muted);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.design-import-motion-report article {
+  display: grid;
+  gap: 2px;
+  padding: 6px 7px;
+  border-left: 2px solid transparent;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.035);
+  font-size: 10px;
+}
+
+.design-import-motion-report article.severity-warning {
+  border-left-color: #d8a13c;
+}
+
+.design-import-motion-report article.severity-info {
+  border-left-color: var(--accent-blue);
+}
+
+.design-import-motion-report article strong {
+  color: #e7f0fb;
+}
+
+.design-import-motion-report article span {
+  color: var(--ink);
+}
+
+.design-import-motion-report article small {
+  color: #63778d;
+  font-size: 9px;
 }
 
 .design-import-checks {
@@ -4904,7 +5352,7 @@ h3 {
 
 .design-import-scene > label small {
   grid-column: 2;
-  color: #74869a;
+  color: var(--ink-faint);
 }
 
 .design-import-scene {
@@ -4928,7 +5376,7 @@ h3 {
   gap: 5px;
   min-height: 23px;
   padding: 2px 5px;
-  color: #b8c7d7;
+  color: var(--ink);
   font-size: 10px;
 }
 
@@ -4958,7 +5406,7 @@ h3 {
 }
 
 .design-import-report dt {
-  color: #8193a7;
+  color: var(--ink-muted);
   font-size: 9px;
 }
 
@@ -5017,7 +5465,7 @@ h3 {
 .viewport-margin-grid label {
   display: grid;
   gap: 5px;
-  color: #9cacbf;
+  color: var(--ink-soft);
   font-size: 10px;
 }
 
@@ -5052,6 +5500,91 @@ h3 {
   line-height: 1.45;
 }
 
+/* --- Preferences and autosave recovery ------------------------------------- */
+
+.preferences-dialog,
+.autosave-recovery-dialog {
+  width: min(520px, 92vw);
+}
+
+.preferences-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+/* Label / field / unit on one baseline, so "Save every [10] minutes" reads as a sentence. */
+.preferences-grid label {
+  display: grid;
+  grid-template-columns: auto minmax(52px, 68px) auto;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-soft);
+  font-size: 10.5px;
+}
+
+.preferences-unit {
+  color: #7d8ea1;
+}
+
+/* A disabled interval must read as inactive, not as broken. */
+.preferences-grid input:disabled {
+  opacity: 0.45;
+}
+
+.autosave-list {
+  display: grid;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.autosave-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
+  background: #182430;
+}
+
+.autosave-entry {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.autosave-entry strong {
+  color: #d6e2f0;
+  font-size: 11px;
+}
+
+.autosave-entry small {
+  color: #8b9caf;
+  font-size: 10px;
+}
+
+/* Restoring a revision older than the open scene risks putting superseded graphics to
+   air, so it is called out in amber rather than left to the operator to notice. */
+.autosave-stale {
+  color: var(--amber, #e29e9e) !important;
+}
+
+.material-dialog-error {
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid rgba(226, 158, 158, 0.35);
+  border-radius: 5px;
+  color: #e6b4b4;
+  background: rgba(226, 92, 92, 0.09);
+  font-size: 10.5px;
+}
+
 .material-create-dialog fieldset {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -5064,7 +5597,7 @@ h3 {
 
 .material-create-dialog legend {
   padding: 0 5px;
-  color: #9cacbf;
+  color: var(--ink-soft);
   font-size: 10px;
 }
 
@@ -5197,6 +5730,24 @@ h3 {
   color: #7fd0a3;
 }
 
+.materials-face-instance-route {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid rgba(127, 208, 163, 0.32);
+  border-radius: 4px;
+  color: #7fd0a3;
+  background: rgba(127, 208, 163, 0.08);
+  cursor: pointer;
+}
+
+.materials-face-instance-route:hover {
+  border-color: rgba(127, 208, 163, 0.7);
+  background: rgba(127, 208, 163, 0.16);
+}
+
 .materials-face-message {
   margin: 2px 0 6px;
   padding: 6px 8px;
@@ -5258,7 +5809,7 @@ h3 {
   min-height: 30px;
   padding: 0 8px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  color: #dce6f4;
+  color: var(--ink-bright);
   font-size: 11px;
 }
 
@@ -5505,15 +6056,15 @@ h3 {
   }
 }
 .font-manager-panel,
-.automation-panel,
-.sequencer-panel {
+.automation-panel {
   display: flex;
   flex-direction: column;
   gap: 8px;
   height: 100%;
   min-height: 0;
   padding: 9px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .font-manager-panel {
@@ -5563,6 +6114,7 @@ h3 {
 
 .automation-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
 }
@@ -5580,6 +6132,12 @@ h3 {
   justify-content: center;
   gap: 5px;
   min-height: 26px;
+}
+
+.automation-toolbar button {
+  flex: 1 1 120px;
+  min-width: 0;
+  white-space: normal;
 }
 
 .automation-grid {
@@ -5912,43 +6470,6 @@ h3 {
   white-space: pre-wrap;
 }
 
-.sequence-track {
-  display: grid;
-  grid-template-columns: 86px minmax(0, 1fr);
-  min-height: 66px;
-  border: 1px solid var(--border);
-  background: #10151e;
-}
-
-.sequence-track > strong {
-  padding: 8px;
-  border-right: 1px solid var(--border);
-  font-size: 10px;
-}
-
-.sequence-cues {
-  display: flex;
-  align-items: stretch;
-  gap: 3px;
-  padding: 4px;
-  overflow-x: auto;
-}
-
-.sequence-cue {
-  display: flex;
-  flex: 0 0 126px;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  border-color: #285b82;
-  background: #183d5a;
-}
-
-.sequence-cue span {
-  color: #9fc9e5;
-  font-size: 9px;
-}
-
 /* ---- XPression-style integrated Scene Inspector ----------------------- */
 
 .scene-inspector-panel {
@@ -6020,16 +6541,24 @@ h3 {
 
 .scene-inspector-object-view {
   display: grid;
-  grid-template-rows: 36px minmax(0, 1fr);
+  /* Four visible regions live here: the property-mode ribbon, object actions, scene caption,
+     and the scrollable treegrid. This used to declare only two rows, so CSS placed the toolbar
+     in the flexible 1fr track and pushed the caption/table to implicit rows at the bottom of the
+     dock. The result was a toolbar floating in hundreds of pixels of empty space. */
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
 }
 
 .scene-inspector-toolbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 180px) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
+  min-height: 36px;
   padding: 4px 6px;
   border-bottom: 1px solid var(--border);
   background: #121922;
@@ -6039,6 +6568,13 @@ h3 {
   display: inline-flex;
   align-items: center;
   gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.scene-order-controls::-webkit-scrollbar {
+  display: none;
 }
 
 .scene-toolbar-separator {
@@ -6081,7 +6617,8 @@ h3 {
   display: flex;
   align-items: center;
   gap: 5px;
-  width: min(150px, 34%);
+  width: 100%;
+  min-width: 0;
   height: 26px;
   padding: 0 6px;
   border: 1px solid var(--border);
@@ -6104,10 +6641,16 @@ h3 {
   min-width: 0;
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
 }
 
+/*
+  The template comes from the component, because the number of property columns is the author's
+  choice. Header, object rows, mask rows and layer bands all read the same variable — three
+  stylesheets computing the width independently is how a header stops lining up with its body.
+*/
 .scene-property-grid {
-  min-width: 986px;
+  min-width: var(--object-grid-min-width, 262px);
   font-family: "Segoe UI", Arial, sans-serif;
   font-size: 10.5px;
 }
@@ -6117,9 +6660,17 @@ h3 {
 .scene-inspector-mask-row,
 .scene-inspector-layer-row {
   display: grid;
-  grid-template-columns: 180px 30px 48px repeat(10, 72px);
+  grid-template-columns: var(--object-grid-template, 180px 30px 52px);
   align-items: stretch;
-  min-width: 986px;
+  min-width: var(--object-grid-min-width, 262px);
+}
+
+/* With no property columns the tree is the panel, so let the name column take the width. */
+.scene-property-grid.no-columns .scene-grid-header,
+.scene-property-grid.no-columns .scene-inspector-object-row,
+.scene-property-grid.no-columns .scene-inspector-mask-row,
+.scene-property-grid.no-columns .scene-inspector-layer-row {
+  grid-template-columns: minmax(140px, 1fr) 30px 52px;
 }
 
 .scene-grid-header {
@@ -6150,32 +6701,41 @@ h3 {
   background: #202a36;
 }
 
-.scene-grid-flag-heading {
-  word-spacing: 2px;
+.scene-grid-status-heading {
+  font-size: 8.5px;
+  letter-spacing: 0.03em;
 }
 
-.scene-grid-scene-row {
-  min-width: 986px;
-  height: 26px;
+/*
+  The scene's name. It was a one-cell grid row, which counted as a row to a reader and to every row
+  index; it names the grid, so it sits above it.
+*/
+.scene-grid-caption {
+  margin: 0;
+  padding: 6px 9px;
   border-bottom: 1px solid var(--border);
   color: #e8edf4;
   background: #273447;
+  font-size: 10.5px;
   font-weight: 700;
-}
-
-.scene-grid-scene-row > div {
-  position: sticky;
-  left: 0;
-  width: max-content;
-  max-width: 420px;
-  padding: 6px 9px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.scene-grid-layer {
-  min-width: 986px;
+.scene-grid-caption:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/*
+  One tab stop, so it has to be visible. Every cell can hold it, and a cell that has it without
+  showing it is a keyboard the author cannot follow.
+*/
+.scene-property-grid [data-cell]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  z-index: 1;
 }
 
 .scene-inspector-layer-row {
@@ -6219,24 +6779,110 @@ h3 {
 }
 
 .scene-inspector-object-row {
-  min-height: 29px;
+  position: relative;
+  /* A fixed height, not a minimum: the Object Manager only mounts the rows on screen, and it finds
+     which those are by adding row heights up. A row free to grow would put every offset below it
+     out by however much it grew, so the row that scrolls under the cursor would not be the row the
+     grid thinks is there. Nothing in a row wants to be taller — the name cell clips a 186-character
+     name at this height today — so pinning it costs nothing and keeps the arithmetic true. */
+  height: 29px;
   border-bottom: 1px solid #252f3b;
   color: #d9e2ee;
   background: #151c25;
   cursor: default;
 }
 
-.scene-inspector-object-row:nth-child(odd) {
+/* Striping is computed, not `nth-child`. Mask rows are siblings of object rows, so counting children
+   inverted the stripe below every object that owned a mask — and no selector can say "nth of this
+   class", which is why the parity comes from the row's index in the visible order instead. */
+.scene-inspector-object-row.stripe {
   background: #171f29;
+}
+
+/* A locked row still reads, but says it cannot be moved: it is not a drag source and refuses an
+   `into` drop, so it must not look draggable either. */
+.scene-inspector-object-row.locked .scene-object-name {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+/* In-place rename. Sized to the name cell so the row does not reflow while typing. */
+.scene-object-name-input,
+.layer-rename-input {
+  min-width: 0;
+  padding: 2px 4px;
+  border-radius: var(--r-sm);
+  color: #fff;
+  background: var(--surface-deep);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.scene-object-name-input.invalid,
+.layer-rename-input.invalid {
+  box-shadow: inset 0 0 0 1px var(--danger);
+}
+
+/* The band rename shows the slug it will become, or the reason it cannot. Replaces a `window.alert`
+   that quoted the raw draft while the collision was decided on the normalised id. */
+.layer-rename-field {
+  display: inline-grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.layer-rename-hint {
+  color: var(--text-faint);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.layer-rename-hint.invalid {
+  color: var(--danger);
+}
+
+/* The name column's resize handle, in the header. */
+.scene-grid-name-heading {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.scene-grid-name-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.scene-grid-name-resize:hover {
+  background: var(--accent);
+}
+
+/* A mask sits under its object, and its indent must not read as another level of object nesting: a
+   mask under a depth-0 object used to land on exactly the same 38px as a depth-2 object. */
+.scene-mask-lock-spacer,
+.scene-layer-status-spacer {
+  display: block;
 }
 
 .scene-inspector-object-row:hover {
   background: #202b38;
 }
 
+/* A member of the selection: the fill. */
 .scene-inspector-object-row.selected {
   color: #fff;
   background: #293b57;
+}
+
+/* The active member — the one the Inspector edits and the alignment tools align to — adds the
+   accent bar. A single selection is a member that is also active, so it renders exactly as it did
+   when there was only ever one selected row. */
+.scene-inspector-object-row.selected.active {
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
@@ -6245,7 +6891,8 @@ h3 {
 }
 
 .scene-inspector-mask-row {
-  min-height: 27px;
+  /* Fixed for the same reason as the object row: the windowing offsets are a sum of row heights. */
+  height: 27px;
   border-bottom: 1px solid #252f3b;
   color: #aebccd;
   background: #101720;
@@ -6254,7 +6901,7 @@ h3 {
 .scene-inspector-mask-row.selected {
   color: #ffffff;
   background: #25434b;
-  box-shadow: inset 3px 0 0 #f5b942;
+  box-shadow: inset 3px 0 0 var(--accent-amber);
 }
 
 .scene-inspector-mask-row > * {
@@ -6298,33 +6945,12 @@ h3 {
   background: transparent;
 }
 
-.scene-mask-property {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-faint);
-  font-size: 9px;
-}
 
-.alpha-mask-material-control input {
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  padding: 0 3px;
-  border: 0;
-  outline: 0;
-  color: #f5b942;
-  background: transparent;
-  font-family: "Cascadia Mono", Consolas, monospace;
-  font-size: 9px;
-  text-align: right;
-  appearance: textfield;
-}
 
 .alpha-mask-material-control input:focus {
   color: #fff;
-  background: #0d131b;
-  box-shadow: inset 0 0 0 1px #f5b942;
+  background: var(--surface-deep);
+  box-shadow: inset 0 0 0 1px var(--accent-amber);
 }
 
 .scene-object-tree-cell {
@@ -6372,29 +6998,203 @@ h3 {
   border-radius: 0;
 }
 
-.scene-object-flags {
+/*
+  Status, as three dots that are lit or not. The letters M/K/P they replace needed a legend in a
+  tooltip to decode, and each dot now carries its own title and accessible label.
+*/
+.scene-object-status {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 5px;
 }
 
-.scene-object-flags i {
+.scene-object-status .status-dot {
+  width: 7px;
+  height: 7px;
+  border: 1px solid #3b4757;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.scene-object-status .status-dot.material.on { border-color: #49d98d; background: #49d98d; }
+.scene-object-status .status-dot.animation.on { border-color: #d86aff; background: #d86aff; }
+.scene-object-status .status-dot.binding.on { border-color: #55baff; background: #55baff; }
+
+/* ---- Object Manager ribbon -------------------------------------------- */
+
+.object-manager-ribbon {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+  background: #131b25;
+}
+
+.object-property-filter {
+  display: inline-flex;
+  height: 21px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-deep);
+}
+
+.object-property-filter button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 3px;
+  color: var(--text-faint);
+  background: transparent;
+  font-size: 9.5px;
+  cursor: pointer;
+}
+
+.object-property-filter button.active {
+  color: #071515;
+  background: var(--accent);
+}
+
+.object-ribbon-note {
+  color: var(--text-faint);
+  font-size: 9px;
+}
+
+.object-ribbon-note.warn {
+  color: var(--gold);
+}
+
+/* ---- Column picker ---------------------------------------------------- */
+
+.object-column-picker {
+  position: relative;
+  display: inline-flex;
+}
+
+.column-picker-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  font-size: 9px;
+}
+
+.column-picker-button.active {
+  color: var(--accent);
+}
+
+.column-picker-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 40;
+  width: 232px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: #141c26;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.5);
+}
+
+.column-picker-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 2px 6px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.column-picker-heading span {
+  color: var(--text-faint);
+  font-size: 9px;
+}
+
+.column-picker-option {
   display: grid;
-  place-items: center;
-  width: 14px;
-  height: 14px;
-  border-radius: 2px;
-  color: #536173;
-  background: rgba(255, 255, 255, 0.03);
-  font-size: 8px;
-  font-style: normal;
-  font-weight: 800;
+  grid-template-columns: 16px 56px 1fr;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  cursor: pointer;
 }
 
-.scene-object-flags i.active.material { color: #102b21; background: #49d98d; }
-.scene-object-flags i.active.key { color: #241434; background: #d86aff; }
-.scene-object-flags i.active.binding { color: #11283a; background: #55baff; }
+.column-picker-option:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.column-picker-description {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.column-picker-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.column-picker-actions button {
+  flex: 1;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-faint);
+  background: transparent;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.column-picker-actions button:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+/* ---- Mask row values -------------------------------------------------- */
+
+.scene-mask-values {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px;
+  overflow: hidden;
+}
+
+.scene-mask-values label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-faint);
+  font-size: 9px;
+}
+
+.scene-mask-values input {
+  width: 46px;
+  height: 18px;
+  padding: 0 3px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--text);
+  background: var(--surface-deep);
+  font-size: 9.5px;
+}
+
+.scene-mask-readout {
+  color: var(--text-faint);
+  font-size: 9px;
+  white-space: nowrap;
+}
 
 .scene-transform-cell {
   position: relative;
@@ -6428,7 +7228,7 @@ h3 {
 
 .scene-transform-cell input:focus {
   color: #fff;
-  background: #0d131b;
+  background: var(--surface-deep);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
@@ -6516,8 +7316,14 @@ h3 {
   padding-left: 30px;
 }
 
+/* A cell with no stopwatch has nothing to leave room for: Z-Pos on 2D content is editable but not
+   animatable, so the number takes the whole cell rather than sitting behind a gap. */
+.scene-transform-cell.no-stopwatch input {
+  padding-left: 6px;
+}
+
 .scene-grid-empty {
-  min-width: 986px;
+  min-width: var(--object-grid-min-width, 262px);
   padding: 18px;
   color: var(--text-faint);
   text-align: center;
@@ -6527,24 +7333,79 @@ h3 {
   box-shadow: inset 0 0 0 1px #49d98d;
 }
 
-.scene-inspector-object-row.material-drop-blocked {
+/* One danger declaration, two meanings: an incompatible material and a refused object drop. Adding a
+   selector here rather than a second rule is what stops a third fork of the same colour. */
+.scene-inspector-object-row.material-drop-blocked,
+.scene-inspector-object-row.object-drop-invalid,
+.scene-inspector-layer-row.object-drop-invalid {
   box-shadow: inset 0 0 0 1px var(--danger);
+}
+
+/* Where a dragged object will land.
+
+   The insertion line is indented to the depth the object lands at, so its left edge answers "which
+   parent" — the only unambiguous way to show a reparent in a flat list. It is drawn on the row rather
+   than in the sticky name cell so it survives horizontal scrolling, and it sits above both the cell
+   (z-index 3) and the band cell (4). */
+.scene-inspector-object-row.object-drop-before::after,
+.scene-inspector-object-row.object-drop-after::after {
+  position: absolute;
+  left: var(--object-drop-indent, 8px);
+  right: 0;
+  z-index: 5;
+  height: 2px;
+  background: var(--accent);
+  content: "";
+  pointer-events: none;
+}
+
+.scene-inspector-object-row.object-drop-before::after {
+  top: -1px;
+}
+
+.scene-inspector-object-row.object-drop-after::after {
+  bottom: -1px;
+}
+
+/* `into` is a ring in the accent colour, which already means "container" in this panel's badge
+   language — so the mapping is inherited rather than invented. Green stays material. */
+.scene-inspector-object-row.object-drop-into,
+.scene-inspector-layer-row.object-drop-into {
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 /* ---- Draggable timeline and speed graph -------------------------------- */
 
 .advanced-timeline {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   height: 100%;
   overflow: hidden;
   container-name: timeline;
   container-type: inline-size;
 }
 
+/*
+  The ribbon and notice are optional, so this panel cannot use a fixed two-row grid: when the
+  ribbon is present it would occupy the flexible row and push the actual tracks into an implicit
+  row at the bottom of the dock. Keep chrome content-sized and give the active editor the rest.
+*/
+.advanced-timeline > .timeline-titlebar,
+.advanced-timeline > .timeline-ribbon,
+.advanced-timeline > .timeline-notice {
+  flex: 0 0 auto;
+}
+
+.advanced-timeline > .timeline-grid,
+.advanced-timeline > .speed-graph-editor,
+.advanced-timeline > .timeline-empty-state {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .timeline-titlebar {
   display: grid;
-  grid-template-columns: minmax(100px, 1fr) auto minmax(100px, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px;
   min-width: 0;
 }
@@ -6563,12 +7424,12 @@ h3 {
 
 .timeline-mode-switch {
   display: inline-flex;
-  justify-self: center;
+  justify-self: start;
   height: 26px;
   padding: 2px;
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: #0d131b;
+  background: var(--surface-deep);
 }
 
 .timeline-mode-switch button {
@@ -6604,7 +7465,7 @@ h3 {
   border: 1px solid var(--border);
   border-radius: 3px;
   color: var(--text);
-  background: #0d131b;
+  background: var(--surface-deep);
   font-size: 10px;
 }
 
@@ -6614,7 +7475,7 @@ h3 {
 }
 
 .advanced-key-grid {
-  height: 100%;
+  height: auto;
   min-height: 0;
   overflow: auto;
   align-items: stretch;
@@ -6789,13 +7650,137 @@ h3 {
   transform: translateX(-2px);
 }
 
+/*
+  The head is the only part of the playhead that takes pointer events: the line runs the full
+  height of the track area, and making that draggable would swallow every marquee that started
+  near the current frame.
+*/
+.advanced-key-grid .playhead span {
+  pointer-events: auto;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.advanced-key-grid .timeline-tick-row {
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.advanced-key-grid .timeline-tick-row:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* ---- Timeline ribbon -------------------------------------------------- */
+
+.timeline-ribbon {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+  background: #131b25;
+}
+
+.timeline-row-filter {
+  display: inline-flex;
+  height: 22px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-deep);
+}
+
+.timeline-row-filter button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 3px;
+  color: var(--text-faint);
+  background: transparent;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.timeline-row-filter button.active {
+  color: #071515;
+  background: var(--accent);
+}
+
+.timeline-ribbon-count {
+  color: var(--text-faint);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.timeline-ribbon-selection {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  font-size: 10px;
+}
+
+.timeline-ribbon-selection strong {
+  color: var(--gold);
+}
+
+.timeline-ribbon-hint,
+.timeline-notice {
+  color: var(--text-faint);
+  font-size: 9px;
+}
+
+.timeline-ribbon-clear {
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-faint);
+  background: transparent;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.timeline-notice {
+  margin: 0;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 196, 74, 0.08);
+  color: var(--gold);
+}
+
+/* The rubber band. Non-interactive so it never eats the pointer move that is drawing it. */
+.timeline-marquee {
+  position: absolute;
+  z-index: 5;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: rgba(23, 185, 168, 0.14);
+  pointer-events: none;
+}
+
+.timeline-ruler.marquee-active {
+  cursor: crosshair;
+}
+
+.keyframe-marker.mask-key.selected,
+.keyframe-marker.legacy.selected {
+  border-color: #fff2bc;
+  background: var(--gold);
+  box-shadow: 0 0 0 3px rgba(255, 196, 74, 0.16);
+}
+
 .speed-graph-editor {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: #0d131b;
+  background: var(--surface-deep);
 }
 
 .speed-graph-toolbar {
@@ -6847,7 +7832,7 @@ h3 {
   border: 1px solid var(--border);
   border-radius: 3px;
   color: var(--text);
-  background: #0d131b;
+  background: var(--surface-deep);
   font-size: 9.5px;
 }
 
@@ -6862,7 +7847,7 @@ h3 {
   overflow: visible;
   background:
     linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-    #0d131b;
+    var(--surface-deep);
   background-size: 10% 100%;
   touch-action: none;
 }
@@ -6914,7 +7899,7 @@ h3 {
 }
 
 .speed-handle {
-  fill: #0d131b;
+  fill: var(--surface-deep);
   stroke: #ffc44a;
   stroke-width: 2;
   cursor: grab;
@@ -6951,6 +7936,30 @@ h3 {
   min-height: 0;
 }
 
+/* Keep the canvas controls usable without showing a browser-style white scrollbar through the
+   editor chrome. Metadata is repeated in the status bar, so it yields before authoring tools do. */
+@container editor-stage (max-width: 900px) {
+  .stage-toolbar > span:first-child,
+  .stage-toolbar > span:last-child {
+    display: none;
+  }
+}
+
+@container editor-stage (max-width: 760px) {
+  .stage-toolbar > .renderer-status {
+    display: none;
+  }
+
+  .stage-toolbar > .snapping-toggle {
+    width: 28px;
+    padding: 0;
+  }
+
+  .stage-toolbar > .snapping-toggle span {
+    display: none;
+  }
+}
+
 .properties-tabs {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
@@ -6958,10 +7967,6 @@ h3 {
 @container timeline (max-width: 600px) {
   .timeline-titlebar {
     grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .timeline-titlebar > span {
-    display: none;
   }
 
   .timeline-mode-switch {
@@ -7006,6 +8011,9 @@ h3 {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
   padding: 12px;
   overflow-y: auto;
   font-size: 12px;
@@ -7023,7 +8031,7 @@ h3 {
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--text-secondary, #8a949e);
+  color: var(--text-secondary, var(--ink-dim));
 }
 
 .engine-add-row {
@@ -7036,7 +8044,7 @@ h3 {
   min-width: 0;
   padding: 5px 7px;
   background: var(--surface-sunken, #14181c);
-  border: 1px solid var(--border-subtle, #2a3138);
+  border: 1px solid var(--border-subtle, var(--surface-line));
   border-radius: 3px;
   color: var(--text-primary, #e6ebf0);
   font: inherit;
@@ -7079,8 +8087,8 @@ h3 {
   text-align: center;
   padding: 2px 4px;
   border-radius: 2px;
-  background: #2a3138;
-  color: #8a949e;
+  background: var(--surface-line);
+  color: var(--ink-dim);
 }
 
 /* Operational states read calm; anything needing attention reads loud. */
@@ -7103,7 +8111,7 @@ h3 {
 }
 
 .engine-url {
-  color: var(--text-secondary, #8a949e);
+  color: var(--text-secondary, var(--ink-dim));
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 11px;
 }
@@ -7116,7 +8124,7 @@ h3 {
 }
 
 .engine-facts dt {
-  color: var(--text-secondary, #8a949e);
+  color: var(--text-secondary, var(--ink-dim));
 }
 
 .engine-facts dd {
@@ -7143,14 +8151,14 @@ h3 {
 .engine-preview {
   width: 100%;
   height: auto;
-  border: 1px solid var(--border-subtle, #2a3138);
+  border: 1px solid var(--border-subtle, var(--surface-line));
   border-radius: 3px;
   /* Transparent engine output reads against the same neutral grey the viewport
      uses, so alpha is visible rather than looking black. */
   background: #202020;
 }
 
-.engine-muted { margin: 0; color: var(--text-secondary, #8a949e); }
+.engine-muted { margin: 0; color: var(--text-secondary, var(--ink-dim)); }
 .engine-message { margin: 0; color: #4ade80; }
 .engine-warning { margin: 0; color: #fbbf24; }
 .engine-error { margin: 0; color: #ff8f96; }
@@ -7175,7 +8183,7 @@ h3 {
 }
 
 .project-fieldset {
-  border: 1px solid var(--border-subtle, #2a3138);
+  border: 1px solid var(--border-subtle, var(--surface-line));
   border-radius: 4px;
   padding: 10px 12px 12px;
   margin: 0;
@@ -7190,7 +8198,7 @@ h3 {
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--text-secondary, #8a949e);
+  color: var(--text-secondary, var(--ink-dim));
 }
 
 .project-field {
@@ -7202,14 +8210,14 @@ h3 {
 }
 
 .project-field > span {
-  color: var(--text-secondary, #8a949e);
+  color: var(--text-secondary, var(--ink-dim));
 }
 
 .project-field input,
 .project-field select {
   padding: 5px 7px;
   background: var(--surface-sunken, #14181c);
-  border: 1px solid var(--border-subtle, #2a3138);
+  border: 1px solid var(--border-subtle, var(--surface-line));
   border-radius: 3px;
   color: var(--text-primary, #e6ebf0);
   font: inherit;
@@ -7239,14 +8247,14 @@ h3 {
 
 .project-times {
   padding-bottom: 6px;
-  color: var(--text-secondary, #8a949e);
+  color: var(--text-secondary, var(--ink-dim));
 }
 
 .project-hint {
   margin: 0;
   font-size: 11px;
   line-height: 1.45;
-  color: var(--text-secondary, #8a949e);
+  color: var(--text-secondary, var(--ink-dim));
 }
 
 .project-mismatch {
@@ -7268,7 +8276,7 @@ h3 {
   gap: 6px;
   padding-bottom: 6px;
   font-size: 12px;
-  color: var(--text-secondary, #8a949e);
+  color: var(--text-secondary, var(--ink-dim));
 }
 
 .convert-mode-row {
@@ -7287,14 +8295,14 @@ h3 {
 .convert-mode-row small {
   font-size: 11px;
   line-height: 1.45;
-  color: var(--text-secondary, #8a949e);
+  color: var(--text-secondary, var(--ink-dim));
 }
 
 .project-mismatch-list {
   margin: 0;
   padding-left: 18px;
   font-size: 11px;
-  color: var(--text-secondary, #8a949e);
+  color: var(--text-secondary, var(--ink-dim));
 }
 
 .project-issues {
@@ -7764,4 +8772,864 @@ h3 {
 }
 .adobe-log-error {
   color: #ff8f8f;
+}
+
+/* ---------------------------------------------------------------------------
+   Diagnostics console — the author-facing failure drawer.
+   Same surface as Playout's operator console, drawn with editor tokens.
+   --------------------------------------------------------------------------- */
+
+.diagnostics-console {
+  display: flex;
+  flex-direction: column;
+  max-height: 42vh;
+  min-height: 160px;
+  margin: 0 5px 5px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--bg-panel-2);
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.5);
+}
+
+.diagnostics-console > header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  height: 31px;
+  padding: 0 7px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(#262626, #1c1c1c);
+  font-size: 11px;
+}
+
+.console-count {
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+.console-filters {
+  display: flex;
+  gap: 3px;
+  margin-left: auto;
+}
+
+.console-chip {
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-input);
+  color: var(--text-dim);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.console-chip.active {
+  border-color: var(--accent);
+  color: var(--text);
+  background: rgba(23, 185, 168, 0.14);
+}
+
+.console-search {
+  width: 240px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 10px;
+}
+
+.console-note {
+  margin: 0;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--gold);
+  font-size: 10px;
+}
+
+.console-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-color: #3a3a3a #181818;
+  scrollbar-width: thin;
+}
+
+.console-record {
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid #3a3a3a;
+}
+
+.console-record.error {
+  border-left-color: var(--danger);
+}
+
+.console-record.warning {
+  border-left-color: var(--gold);
+}
+
+.console-record.info {
+  border-left-color: var(--accent);
+}
+
+.console-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.console-row:hover {
+  background: var(--bg-hover);
+}
+
+.console-record.error .console-level-icon {
+  color: var(--danger);
+}
+
+.console-record.warning .console-level-icon {
+  color: var(--gold);
+}
+
+.console-record.info .console-level-icon {
+  color: var(--accent);
+}
+
+.console-row time {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.console-source {
+  flex: 0 0 auto;
+  max-width: 190px;
+  overflow: hidden;
+  color: #7fb4c9;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.console-message {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.console-code {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text-faint);
+  font-size: 9px;
+}
+
+.console-detail {
+  padding: 2px 8px 9px 27px;
+  background: var(--bg-input);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.console-detail p {
+  display: flex;
+  gap: 8px;
+  margin: 4px 0;
+}
+
+.console-label {
+  flex: 0 0 62px;
+  color: var(--text-faint);
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.console-value {
+  flex: 1 1 auto;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+/* The remedy is the reason this panel exists, so it does not look like another field. */
+.console-remedy .console-value {
+  padding: 5px 7px;
+  border-left: 2px solid var(--accent);
+  border-radius: 2px;
+  background: rgba(23, 185, 168, 0.1);
+  color: #cdeee9;
+  font-style: normal;
+}
+
+.console-context {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  margin: 6px 0 0;
+  gap: 2px 10px;
+}
+
+.console-context div {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.console-context dt {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+}
+
+.console-context dd {
+  flex: 1 1 auto;
+  margin: 0;
+  color: var(--text-dim);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 9px;
+  overflow-wrap: anywhere;
+}
+
+.console-stack {
+  max-height: 150px;
+  margin: 7px 0 0;
+  padding: 6px 7px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: #101010;
+  color: var(--text-dim);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.console-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.console-origin {
+  flex: 1 1 auto;
+  color: var(--text-faint);
+  font-size: 9px;
+}
+
+.console-empty {
+  margin: 0;
+  padding: 16px 12px;
+  color: var(--text-faint);
+  font-size: 10px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+/* Status-bar entry point: quiet when nothing is wrong, loud when something is. */
+.console-chip-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.console-chip-button:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.console-chip-button.has-errors {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.console-chip-button.has-warnings {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+/* ---- After Effects import ---- */
+
+.ae-compat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.ae-compat-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 3px;
+  background: var(--bg-input);
+}
+
+.ae-compat-chip strong {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.ae-compat-chip span {
+  color: var(--text-dim);
+  font-size: 9px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.ae-compat-native-editable { border-left-color: var(--accent); }
+.ae-compat-native-editable strong { color: var(--accent); }
+.ae-compat-translated { border-left-color: #6db3f2; }
+.ae-compat-translated strong { color: #6db3f2; }
+.ae-compat-sampled { border-left-color: #b48ef2; }
+.ae-compat-sampled strong { color: #b48ef2; }
+.ae-compat-baked { border-left-color: var(--gold); }
+.ae-compat-baked strong { color: var(--gold); }
+.ae-compat-missing-plugin,
+.ae-compat-missing-asset { border-left-color: var(--danger); }
+.ae-compat-missing-plugin strong,
+.ae-compat-missing-asset strong { color: var(--danger); }
+.ae-compat-unsupported { border-left-color: var(--text-faint); }
+.ae-compat-unsupported strong { color: var(--text-faint); }
+
+.ae-issue-block {
+  margin: 6px 0;
+}
+
+.ae-issue-block h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  color: var(--gold);
+  font-size: 11px;
+}
+
+.ae-issue-block ul,
+.ae-warning-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-dim);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+/* The AE import window reuses the material dialog shell; these are the parts it adds:
+   a scrolling body, a two-column choose step, and a right-aligned action row. */
+
+.ae-import-dialog {
+  width: min(860px, calc(100vw - 40px));
+}
+
+.ae-import-dialog .modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ae-import-dialog .modal-header h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.ae-import-dialog .modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: calc(100vh - 190px);
+  overflow-y: auto;
+}
+
+.ae-import-dialog .field-section {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.ae-import-dialog .field-section h3 {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ae-import-dialog .field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.ae-import-dialog .field.field-toggle {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.ae-import-dialog .field.field-toggle input {
+  width: auto;
+}
+
+/* The action row sits below the scrolling body, never inside it, so the primary
+   button stays reachable on a long report. */
+.ae-import-dialog .modal-actions {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.ae-import-dialog .modal-actions button {
+  min-height: 28px;
+  padding: 0 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--text);
+  background: var(--bg-elevated);
+  cursor: pointer;
+}
+
+.ae-import-dialog .modal-actions button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.ae-import-dialog .modal-actions button.primary {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  background: var(--accent);
+  font-weight: 600;
+}
+
+.ae-import-dialog .modal-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.ae-controls-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.ae-controls-toolbar { display: flex; gap: 6px; padding: 8px; border-bottom: 1px solid var(--border-subtle); }
+.ae-controls-toolbar select { min-width: 0; flex: 1; }
+.ae-controls-toolbar button { display: inline-flex; align-items: center; gap: 4px; }
+.ae-controls-list { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 8px; display: grid; gap: 6px; align-content: start; }
+.ae-runtime-empty { flex: 1 1 auto; min-height: 0; margin: 8px; padding: 14px; text-align: center; }
+.ae-runtime-empty strong { color: var(--text); font-size: 11px; }
+.ae-runtime-empty span { max-width: 300px; color: var(--text-faint); font-size: 10px; line-height: 1.45; }
+.ae-control-row { display: grid; grid-template-columns: minmax(90px, 1fr) auto auto; gap: 4px 8px; padding: 8px; border: 1px solid var(--border-subtle); border-radius: 4px; }
+.ae-control-row div { display: flex; flex-direction: column; min-width: 0; }
+.ae-control-row small, .ae-control-row code { color: var(--text-muted); font-size: 10px; }
+.ae-control-row code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; grid-column: 1; }
+.ae-control-row button { align-self: center; }
+.ae-control-binding.is-unbound { color: #7d7d7d; font-style: italic; }
+.ae-control-status { font-size: 10px; text-transform: uppercase; color: var(--text-muted); }
+.ae-control-status.is-valid { color: #74c98d; }
+.ae-control-status.is-stale, .ae-control-status.is-rebind-required { color: #e1ae63; }
+.ae-controls-error { margin: 8px; padding: 7px; color: #ff9c9c; background: rgb(90 18 18 / 35%); border-radius: 4px; }
+
+/* ── After Effects connector ──────────────────────────────────────────────
+   A picker over a production project: hundreds of compositions, one of which
+   the author publishes. Density matters more than decoration here — the list
+   is the feature. */
+.ae-connector {
+  display: grid;
+  grid-template-rows: auto auto auto 1fr;
+  gap: 7px;
+  min-height: 0;
+  padding: 8px;
+  font-size: 10px;
+}
+
+.ae-connector-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.ae-connector-head strong {
+  overflow: hidden;
+  color: #e7f0fb;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ae-connector-head button {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.ae-connector-head button:last-child { margin-left: auto; }
+
+.ae-connector-sub,
+.ae-connector .ae-meta { color: var(--ink-faint); font-size: 9px; }
+
+.ae-connector-busy {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px;
+  border-radius: 3px;
+  color: #b8cce0;
+  background: rgba(34, 111, 142, 0.16);
+}
+
+.ae-spin { animation: ae-spin 900ms linear infinite; }
+@keyframes ae-spin { to { transform: rotate(360deg); } }
+
+.ae-connector-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ae-connector-filter > label:first-child {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 5px;
+  min-width: 140px;
+  padding: 3px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+  color: var(--ink-faint);
+}
+
+.ae-connector-filter input[type="text"],
+.ae-connector-filter input:not([type]) {
+  width: 100%;
+  border: none;
+  color: #d6e6f5;
+  background: transparent;
+  outline: none;
+}
+
+.ae-connector-filter > label:not(:first-child) {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ink);
+}
+
+.ae-connector-list {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.ae-connector-list > li {
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+}
+
+.ae-connector-list > li > button {
+  display: grid;
+  width: 100%;
+  gap: 1px;
+  padding: 5px 7px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.ae-connector-list > li > button:hover {
+  border-color: rgba(90, 160, 220, 0.5);
+  background: rgba(90, 160, 220, 0.12);
+}
+
+.ae-connector-list > li > .ae-import-scene {
+  display: flex;
+  flex: none;
+  align-items: center;
+  width: auto;
+  gap: 4px;
+  padding: 5px 8px;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.ae-import-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.ae-import-into {
+  border-color: rgba(140, 180, 240, 0.3) !important;
+  background: rgba(140, 180, 240, 0.08) !important;
+}
+
+.ae-active-imports {
+  display: grid;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 1px solid rgba(90, 160, 220, 0.3);
+  border-radius: 4px;
+  background: rgba(90, 160, 220, 0.08);
+}
+
+.ae-active-imports > strong {
+  color: #d6e6f5;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ae-active-imports ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ae-active-imports li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 6px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.ae-remove-import-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 1px solid rgba(240, 90, 90, 0.4);
+  border-radius: 3px;
+  color: #ff9999;
+  background: rgba(240, 90, 90, 0.12);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.ae-remove-import-btn:hover {
+  background: rgba(240, 90, 90, 0.25);
+}
+
+.ae-import-success {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border: 1px solid rgba(80, 200, 140, 0.4);
+  border-radius: 3px;
+  color: #bfe9d2;
+  background: rgba(80, 200, 140, 0.1);
+  line-height: 1.4;
+}
+
+.ae-import-success code { color: #e7f0fb; }
+.ae-import-success button { display: grid; place-items: center; margin-left: auto; padding: 2px; border: none; color: var(--ink-faint); background: transparent; }
+
+.ae-connector .ae-name { color: #e7f0fb; }
+
+.ae-connector-empty {
+  padding: 10px 7px;
+  color: var(--ink-faint);
+  line-height: 1.5;
+}
+
+.ae-connector-author {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.ae-connector-author > section { display: grid; gap: 4px; }
+.ae-connector-author > section > strong { color: var(--ink-muted); font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em; }
+
+.ae-control-list, .ae-layer-list {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ae-control-list > li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 7px;
+  border-left: 2px solid var(--accent-blue);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.ae-control-list button {
+  display: grid;
+  place-items: center;
+  padding: 2px;
+  border: none;
+  color: var(--ink-muted);
+  background: transparent;
+}
+.ae-control-list button:hover { color: #ffb6bc; }
+
+.ae-layer-list > li {
+  display: grid;
+  gap: 3px;
+  padding: 5px 7px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.ae-layer-head { display: flex; align-items: center; gap: 6px; }
+
+.ae-badge {
+  padding: 1px 5px;
+  border-radius: 8px;
+  color: #d8a13c;
+  background: rgba(216, 161, 60, 0.16);
+  font-size: 8px;
+}
+
+.ae-layer-text {
+  color: var(--ink);
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ae-expose-row { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* Cue points: the GRAPIX: markers a composition declares, shown as the actions they become. */
+.ae-cue-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ae-cue-list > li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  border-left: 2px solid #3cd8a0;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.ae-cue-list .ae-badge { color: #3cd8a0; background: rgba(60, 216, 160, 0.16); }
+
+/* Keyframes: a compact strip per animated property, one diamond per keyframe, coloured by easing. */
+.ae-stream-list { display: grid; gap: 2px; padding: 2px 0; }
+
+.ae-stream { display: flex; align-items: center; gap: 7px; }
+
+.ae-keyframes { display: inline-flex; align-items: center; gap: 3px; }
+
+.ae-keyframe {
+  width: 6px;
+  height: 6px;
+  transform: rotate(45deg);
+  background: var(--ink-muted);
+}
+
+.ae-keyframe-bezier { background: var(--accent-blue); }
+.ae-keyframe-hold { background: #d8a13c; border-radius: 1px; }
+.ae-keyframe-linear { background: var(--ink-muted); }
+
+
+.ae-expose-row button {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  color: var(--ink);
+  background: transparent;
+  font-size: 9px;
+}
+
+.ae-expose-row button:hover { border-color: var(--accent-blue); color: #e7f0fb; background: rgba(60, 134, 216, 0.16); }
+
+.ae-connector-actions { display: flex; gap: 7px; }
+.ae-connector-actions button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; padding: 6px; }
+
+.ae-publish-ok, .ae-publish-bad {
+  display: grid;
+  gap: 4px;
+  padding: 7px;
+  border-radius: 4px;
+}
+.ae-publish-ok { color: #a9e5b8; background: rgba(38, 106, 58, 0.22); }
+.ae-publish-bad { color: #ffb6bc; background: rgba(112, 24, 32, 0.25); }
+.ae-verdict { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.ae-refusal, .ae-warning { margin: 0; line-height: 1.45; }
+.ae-refusal em { color: #d8c39c; font-style: normal; }
+.ae-warning { color: #d8c39c; }
+
+.ae-add-project { display: flex; flex-wrap: wrap; gap: 6px; }
+.ae-add-project input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+  color: #d6e6f5;
+  background: rgba(255, 255, 255, 0.04);
+}
+.ae-add-project button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 3px;
+  color: #d6e6f5;
+  background: rgba(255, 255, 255, 0.06);
 }

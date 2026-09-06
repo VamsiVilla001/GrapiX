@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SceneObject } from "@grapix/shared-types";
+import { isBindingAssignable } from "@grapix/shared-types";
 import {
   bindablePropertiesFor,
   isPropertySupported
@@ -66,4 +67,46 @@ test("the bindable list keeps declaration order and drops what the type cannot u
   assert.equal(properties.includes("src"), false);
   assert.equal(properties.includes("rotationX"), false);
   assert.deepEqual(properties.slice(0, 4), ["fill", "stroke", "visible", "x"]);
+});
+
+/*
+ * The container binding row, removed.
+ *
+ * The gate allows two outcomes and no third: a layer/group `scaleZ` binding either moves a mesh child
+ * or is not offered. It cannot move one — `assignBoundValue` writes `scaleZ` for meshes only, and the
+ * native renderer resolves no bindings — so it is not offered.
+ *
+ * The *column* is a different question and stays: setting a layer's `scaleZ` by hand does reach the
+ * child, because hierarchy inheritance is not binding assignment.
+ */
+
+for (const containerType of ["layer", "group"] as const) {
+  test(`a ${containerType} offers no scaleZ binding row`, () => {
+    const properties = bindablePropertiesFor(objectOfType(containerType));
+    assert.equal(properties.includes("scaleZ"), false);
+  });
+
+  test(`a ${containerType} still supports scaleZ for direct editing`, () => {
+    // The grid cell keeps working: this is the half that was right all along.
+    assert.equal(isPropertySupported(objectOfType(containerType), "scaleZ"), true);
+  });
+}
+
+test("a mesh keeps its scaleZ binding row, because the applier writes it", () => {
+  assert.equal(bindablePropertiesFor(objectOfType("mesh")).includes("scaleZ"), true);
+});
+
+test("no object is offered a binding row the applier would refuse", () => {
+  // The general form of the same rule, so the next advertised-but-inert option fails here.
+  const types = ["text", "rect", "ellipse", "image", "line", "shape", "paint", "mesh", "light", "camera", "layer", "group", "marker"] as const;
+  for (const type of types) {
+    const object = objectOfType(type);
+    for (const property of bindablePropertiesFor(object)) {
+      assert.equal(
+        isBindingAssignable(object, property),
+        true,
+        `${type} is offered a ${property} binding the applier will not write`
+      );
+    }
+  }
 });

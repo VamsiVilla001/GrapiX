@@ -21,7 +21,11 @@ await build({
   target: "node22",
   external: ["@napi-rs/canvas"],
   banner: {
-    js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);"
+    // `require` for Fastify/avvio's dynamic requires; `__filename`/`__dirname` for the
+    // inlined TypeScript compiler (sceneScriptImporter) — its `getNodeSystem` reads
+    // `__filename` at module load, which does not exist in an ESM bundle and crashed
+    // every packaged boot of this service.
+    js: "import { createRequire as __cr } from 'node:module'; import { fileURLToPath as __fup } from 'node:url'; import { dirname as __dn } from 'node:path'; const require = __cr(import.meta.url); const __filename = __fup(import.meta.url); const __dirname = __dn(__filename);"
   },
   logLevel: "warning"
 });

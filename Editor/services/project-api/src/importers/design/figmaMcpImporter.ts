@@ -8,6 +8,7 @@ import {
   type NormalizedDesignPage
 } from "@grapix/shared-types";
 import { addDesignImportIssue } from "./importReport.js";
+import { parseFigmaLink, type FigmaLinkTarget } from "./figmaRestImporter.js";
 
 const DEFAULT_FIGMA_MCP_ENDPOINT = "http://127.0.0.1:3845/mcp";
 
@@ -29,6 +30,8 @@ export interface FigmaMcpCapture {
   metadata: string;
   imageBase64: string;
   mimeType: string;
+  /** Figma file key when Desktop MCP exposes it in the metadata. */
+  fileKey?: string;
   /** The frame's own size. This is the scene size; it never includes the frame position. */
   width: number;
   height: number;
@@ -41,7 +44,7 @@ export async function importFigmaMcpDocument(
   source: FigmaDesignImportSource,
   report: DesignImportReport
 ): Promise<NormalizedDesignDocument> {
-  if (!source.url.trim()) throw new Error("A Figma Dev Mode link is required.");
+  const { target, nodeIds } = validateFigmaMcpImportSource(source);
   const endpoint = resolveFigmaMcpEndpoint();
   const client = new Client({ name: "grapix-figma-import", version: "0.1.0" });
 
@@ -54,25 +57,25 @@ export async function importFigmaMcpDocument(
       }
     }
 
-    let nodeIds = parseFigmaMcpNodeIds(source);
-    if (!nodeIds.length) {
-      const discovery = await callFigmaTool(client, "get_metadata", {});
-      nodeIds = selectedNodeIds(discovery);
-    }
-    if (!nodeIds.length) {
-      throw new Error(
-        "The link has no node-id and Figma MCP reported no selected node. Select a frame in Figma Desktop or paste a Dev Mode link containing node-id."
-      );
-    }
-
     const captures: FigmaMcpCapture[] = [];
+    let identityVerified = false;
     for (const nodeId of nodeIds) {
       const metadataResult = await callFigmaTool(client, "get_metadata", { nodeId });
       const screenshotResult = await callFigmaTool(client, "get_screenshot", {
         nodeId,
         contentsOnly: true
       });
-      captures.push(captureFromResults(nodeId, metadataResult, screenshotResult));
+      const capture = captureFromResults(nodeId, metadataResult, screenshotResult, target.fileKey);
+      identityVerified ||= capture.fileKey === target.fileKey;
+      captures.push(capture);
+    }
+    if (!identityVerified) {
+      addDesignImportIssue(report, {
+        kind: "warning",
+        severity: "warning",
+        message: `Figma Desktop MCP metadata did not expose a file key, so the screenshots could not be verified as belonging to linked file ${target.fileKey}.`,
+        fallback: "Unverified desktop-MCP provenance"
+      });
     }
 
     return documentFromFigmaMcpCaptures(source, captures, report, endpoint.toString());
@@ -88,19 +91,46 @@ export async function importFigmaMcpDocument(
   }
 }
 
+export interface ValidatedFigmaMcpImportSource {
+  target: FigmaLinkTarget;
+  nodeIds: string[];
+}
+
+/**
+ * Desktop MCP has no file-picker authority: only a Figma link/bare key plus
+ * explicit node targeting can prove what the operator intended to capture.
+ */
+export function validateFigmaMcpImportSource(
+  source: FigmaDesignImportSource
+): ValidatedFigmaMcpImportSource {
+  if (!source.url.trim()) throw new Error("A Figma Dev Mode link is required.");
+  const target = parseFigmaLink(source.url);
+  const nodeIds = parseFigmaMcpNodeIds(source);
+  if (!nodeIds.length) {
+    throw new Error(
+      "Figma Desktop MCP will not import its active selection without an explicit node-id. Paste a Figma link containing node-id or provide source.nodeIds."
+    );
+  }
+  return { target, nodeIds };
+}
+
 export function parseFigmaMcpNodeIds(source: FigmaDesignImportSource): string[] {
   const explicit = (source.nodeIds ?? []).map(normalizeNodeId).filter(Boolean);
-  if (explicit.length) return [...new Set(explicit)];
-
   const input = source.url.trim();
-  if (/^\d+[:-]\d+$/.test(input)) return [normalizeNodeId(input)];
-  try {
-    const url = new URL(input);
-    const nodeId = url.searchParams.get("node-id");
-    return nodeId ? [normalizeNodeId(nodeId)] : [];
-  } catch {
-    return [];
-  }
+  const linked = /^\d+[:-]\d+$/.test(input)
+    ? [normalizeNodeId(input)]
+    : (() => {
+        try {
+          const url = new URL(input);
+          return [...url.searchParams.getAll("node-id"), ...url.searchParams.getAll("node_id")]
+            .flatMap((value) => value.split(","))
+            .map(normalizeNodeId)
+            .filter(Boolean);
+        } catch {
+          return [];
+        }
+      })();
+  return [...new Set([...explicit, ...linked])];
 }
 
 export function documentFromFigmaMcpCaptures(
@@ -217,10 +247,15 @@ async function callFigmaTool(
 function captureFromResults(
   requestedNodeId: string,
   metadataResult: McpToolResult,
-  screenshotResult: McpToolResult
+  screenshotResult: McpToolResult,
+  expectedFileKey: string
 ): FigmaMcpCapture {
   const metadata = textContent(metadataResult);
   const root = rootMetadata(metadata);
+  const fileKey = metadataFileKey(metadata);
+  if (fileKey && fileKey !== expectedFileKey) {
+    throw new Error(`Figma Desktop MCP metadata identifies file ${fileKey}, but the link targets ${expectedFileKey}. Open the linked file in Figma Desktop and retry.`);
+  }
   if (root.id && normalizeNodeId(root.id) !== normalizeNodeId(requestedNodeId)) {
     throw new Error(`Figma MCP returned node ${root.id} while ${requestedNodeId} was requested.`);
   }
@@ -241,6 +276,7 @@ function captureFromResults(
     metadata,
     imageBase64: image.data,
     mimeType,
+    ...(fileKey ? { fileKey } : {}),
     width,
     height,
     absoluteX: Number(root.x) || 0,
@@ -267,12 +303,12 @@ function rootMetadata(metadata: string): Record<string, string> {
   return elements.find((element) => positive(element.width) && positive(element.height)) ?? elements[0] ?? {};
 }
 
-function selectedNodeIds(result: McpToolResult): string[] {
-  const firstText = result.content?.find((item) => item.type === "text")?.text ?? "";
-  const values = [...firstText.matchAll(/^\s*-\s+(\d+[:-]\d+)(?::|\s|$)/gm)]
-    .map((match) => normalizeNodeId(match[1]));
-  return [...new Set(values)];
+/** Figma Desktop MCP has used both `fileKey` and `file-key` across builds. */
+function metadataFileKey(metadata: string): string | undefined {
+  const match = /\b(?:fileKey|file-key|file_id|file-id)="([^"]+)"/i.exec(metadata);
+  return match?.[1]?.replace(/[^A-Za-z0-9_-]/g, "") || undefined;
 }
+
 
 function textContent(result: McpToolResult): string {
   return (result.content ?? [])

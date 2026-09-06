@@ -7,6 +7,7 @@ import {
   type AssetLibraryItem,
   type Material,
   type MaterialInstance,
+  type ProjectAssetReference,
   type ShaderDefinition
 } from "@grapix/shared-types";
 import {
@@ -36,6 +37,8 @@ import {
   useMaterialManagerStore
 } from "../stores/materialManagerStore";
 import { placeMaterialContextMenu } from "./materialContextMenu";
+import { projectAssetLibraryItem, resolveProjectAssetUrl } from "../../../lib/projectAssets";
+import { useProjectAssetStore, watchProjectAssets } from "../../../store/projectAssetStore";
 
 type LibraryItem =
   | { kind: "material"; id: string; name: string; material: Material }
@@ -75,7 +78,23 @@ export function MaterialLibrary(props: MaterialLibraryProps) {
   const toggleSelection = useMaterialManagerStore((state) => state.toggleSelection);
   const openContextMenu = useMaterialManagerStore((state) => state.openContextMenu);
   const [newMaterialDialogOpen, setNewMaterialDialogOpen] = useState(false);
-  const items = useMemo(() => createItems(scene, filter, search), [filter, scene, search]);
+  const projectAssets = useProjectAssetStore((state) => state.assets);
+
+  /*
+   * Read the project's asset folders now, and again on every window focus.
+   *
+   * The filesystem raises no event we could subscribe to, and the way an asset usually arrives is
+   * that the author alt-tabs to Explorer, drops a file in, and comes back — so returning focus is
+   * the moment the panel is most likely to be wrong. A directory watcher was the alternative and
+   * is worse: it holds handles on folders the operator is editing, which on Windows is how a
+   * directory becomes undeletable.
+   */
+  useEffect(() => watchProjectAssets(), []);
+
+  const items = useMemo(
+    () => createItems(scene, filter, search, projectAssets),
+    [filter, projectAssets, scene, search]
+  );
 
   function choose(item: LibraryItem, event?: MouseEvent) {
     const selection = toSelection(item);
@@ -625,7 +644,7 @@ function Thumbnail({ item }: { item: LibraryItem }) {
     return (
       <div className="material-thumb checkerboard">
         {["image", "svg"].includes(item.asset.kind) && item.asset.status !== "MISSING"
-          ? <img src={item.asset.thumbnailSource ?? item.asset.source} alt="" />
+          ? <img src={resolveProjectAssetUrl(item.asset.thumbnailSource ?? item.asset.source)} alt="" />
           : item.asset.kind === "model" ? <Box size={28} /> : <FileImage size={28} />}
       </div>
     );
@@ -642,10 +661,40 @@ function StatusBadge({ item }: { item: LibraryItem }) {
   return null;
 }
 
-function createItems(scene: ReturnType<typeof useEditorStore.getState>["scene"], filter: string, search: string): LibraryItem[] {
+/**
+ * Every asset the library offers: the ones the scene carries, then the rest of the project's
+ * asset folders.
+ *
+ * The scene's own entry wins where both exist. It is the same file — they share an id derived from
+ * the path — but the scene's copy carries what the author did to it: the name they gave it, their
+ * tags, an alpha mode they chose. Preferring the folder's plain entry would make those edits
+ * disappear from the panel every time it refreshed.
+ *
+ * Folder entries are appended rather than interleaved so the assets this scene actually uses stay
+ * together at the top, instead of being scattered through everything else in the project.
+ */
+function libraryAssets(
+  scene: ReturnType<typeof useEditorStore.getState>["scene"],
+  projectAssets: readonly ProjectAssetReference[]
+): AssetLibraryItem[] {
+  const carried = new Set(scene.assets.map((asset) => asset.assetId));
+  return [
+    ...scene.assets,
+    ...projectAssets
+      .map(projectAssetLibraryItem)
+      .filter((asset) => !carried.has(asset.assetId))
+  ];
+}
+
+function createItems(
+  scene: ReturnType<typeof useEditorStore.getState>["scene"],
+  filter: string,
+  search: string,
+  projectAssets: readonly ProjectAssetReference[]
+): LibraryItem[] {
   const materials = scene.materials.map((material): LibraryItem => ({ kind: "material", id: material.materialId, name: material.name, material }));
   const instances = (scene.materialInstances ?? []).map((instance): LibraryItem => ({ kind: "instance", id: instance.materialInstanceId, name: instance.name, instance, base: scene.materials.find((material) => material.materialId === instance.baseMaterialId) }));
-  const assets = scene.assets.map((asset): LibraryItem => ({ kind: "asset", id: asset.assetId, name: asset.name, asset }));
+  const assets = libraryAssets(scene, projectAssets).map((asset): LibraryItem => ({ kind: "asset", id: asset.assetId, name: asset.name, asset }));
   // Hide load-compatibility shader aliases (e.g. the legacy "Basic Lit Mesh",
   // which is the same WGSL as the Standard Material). Scenes authored before the
   // unified material still reference them, but showing them would re-introduce

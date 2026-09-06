@@ -1,0 +1,78 @@
+{
+  "phase": "AE-F2a",
+  "recordedAt": "2026-08-18T08:05:00Z",
+  "host": {
+    "aeVersion": "26.3",
+    "adapterVersion": "1.0.0",
+    "adapterSha256": "d9a3e2fceea2c0bbb397cc8346a12613a1746a77a0cb056268ea0ba4e440b942",
+    "installedAdapterSha256": "d9a3e2fceea2c0bbb397cc8346a12613a1746a77a0cb056268ea0ba4e440b942",
+    "faultInjection": null
+  },
+  "fixture": {
+    "id": "bo0a-lower-third-v1",
+    "file": "tools/certification/ae-runtime-fixtures/v1/fixtures/lower-third.aep",
+    "composition": "LOWER_THIRD",
+    "compositionItemId": 1,
+    "frame": 1,
+    "requestedTime": "800/23976",
+    "evaluatedTime": "800/23976",
+    "presentationDeadlineNanos": 33366700,
+    "width": 1920,
+    "height": 1080,
+    "stride": 7680,
+    "matteMode": "premul-black",
+    "pixelFormat": "bgra8",
+    "colorSpace": "sRGB"
+  },
+  "findings": [
+    {
+      "id": "install",
+      "outcome": "pass",
+      "detail": "Installed the current adapter into AE 2026 Plug-ins with an administrator prompt. The host's git-bash `if exist` path lookup is unreliable; PowerShell `Test-Path` and SHA-256 comparison were used instead. The installed artifact hash matches the built adapter exactly."
+    },
+    {
+      "id": "fault-injection",
+      "outcome": "pass",
+      "detail": "Managed runtime fingerprint reported `faultInjection: null`; the adapter was not armed."
+    },
+    {
+      "id": "channel-order-parity",
+      "outcome": "pass",
+      "detail": "Odd/even consecutive `checkout 0 1 8 premul-black bgra` requests returned payloads with different SHA-256 hashes (`FBEAF731...`, `8121A2AD...`) and the alpha statistics flipped between the valid premultiplied profile and a colour-above-alpha profile on the bad parity sample. The stable `argb` request reproduced `8121A2AD...` exactly. Finding C4 remains true: request ARGB and swizzle locally."
+    },
+    {
+      "id": "ring-publish",
+      "outcome": "pass",
+      "detail": "Managed AE published `LOWER_THIRD` frame 1 into `Local\\GrapiX-AeFrameRing-v1-ae-f2a-live-20260818` with `ringPublish.outcome=published`, slot 0 generation 1 on the first publish, then slot 1 generation 1 on re-publication."
+    },
+    {
+      "id": "program-delivery",
+      "outcome": "pass",
+      "detail": "A new live Windows ring consumer in `services/render-engine/src/ae_ring_source.rs` opened the mapping, claimed the consumer owner id, acquired the published slot, validated generation/revision/checksum/geometry, and delivered the frame through `render_program_frame` into a running RecordingSink. The opt-in live integration test `live_ae_ring_frame_reaches_recording_sink_byte_identically` passed."
+    },
+    {
+      "id": "colour-space-contract",
+      "outcome": "pass",
+      "detail": "The live adapter publishes `sRGB` while the engine originally required exact `srgb`. The engine now accepts case-insensitive `sRGB`/`srgb` at egress; the live descriptor used `sRGB` and the negotiated session matched it exactly."
+    },
+    {
+      "id": "runbook-defects",
+      "outcome": "pass",
+      "detail": "Two README runbook defects were fixed by execution, not assumed: ring checkout requires all three optional render arguments, and the composition selector is `<compIndex>`, not a name. The working command is `checkout 0 1 8 premul-black argb ring <requestId> <revision> <frameId> <deadline>`."
+    }
+  ],
+  "evidence": {
+    "checkoutResultSha256": "050dc88aad1cf3f853e8b4a2ed1ede0c5f5361ba586f067ce8bcf625f4d8ecec",
+    "checkoutPixelSha256": "a65efbe47a3fe7faa1facb01a220b6cdb7c4ab8dbe5292ed1046044af45d3a67",
+    "oddBgraRequestSha256": "fbeaf731194ab32f4c128d3dd80f009f3afb5e89a081a6488f93c9e5665862a6",
+    "evenBgraRequestSha256": "8121a2ad4d1f21726ed36f5a2cd9a00f7d369b053d36dc0af9b323d3a5e69454",
+    "stableArgbRequestSha256": "8121a2ad4d1f21726ed36f5a2cd9a00f7d369b053d36dc0af9b323d3a5e69454",
+    "adapterResultJson": "%LOCALAPPDATA%/GrapiX/ae-adapter/result.json",
+    "adapterFramePayload": "%LOCALAPPDATA%/GrapiX/ae-adapter/frames/LOWER_THIRD-frame1-8bpc.raw"
+  },
+  "limitations": [
+    "The live proof uses the deterministic RecordingSink, not NDI. NDI/hardware readiness is unchanged and still not certified.",
+    "The live integration test is ignored by default because it requires a managed AE runtime with a published ring frame; it is opt-in evidence, not part of the normal suite.",
+    "Only one frame was delivered. AE-F2b still owns lead-time pipelining, backpressure policy, and the operational counter surface."
+  ]
+}

@@ -252,6 +252,7 @@ function convertSvgChildren(
     }] : [];
     const childArray = raw[tag] ?? [];
     const text = tag === "text" ? textContent(childArray) : "";
+    const blend = mapSvgBlend(style["mix-blend-mode"]);
     const node: NormalizedDesignNode = {
       ...baseNode(id, style["data-name"] ?? style.id ?? tag, type),
       x: x + bounds.x + parentOrigin.x,
@@ -264,7 +265,7 @@ function convertSvgChildren(
       opacity: dimension(style.opacity, 1),
       visible: style.display !== "none" && style.visibility !== "hidden",
       locked: style["data-locked"] === "true",
-      blendMode: mapSvgBlend(style["mix-blend-mode"]),
+      blendMode: blend.mode,
       fills: fill ? [fill] : [],
       strokes: stroke ? [stroke] : [],
       strokeWidth: dimension(style["stroke-width"]),
@@ -300,6 +301,16 @@ function convertSvgChildren(
         markerEnd: style["marker-end"]
       }
     };
+    if (!blend.exact) {
+      reportImportWarning(
+        report,
+        `SVG blend mode "${style["mix-blend-mode"]}" on ${node.name} was approximated as "${blend.mode}".`,
+        "visual-difference",
+        node.name,
+        `Blend mode ${blend.mode}`,
+        node.sourceId
+      );
+    }
     result.push(node);
   }
   return result;
@@ -500,8 +511,8 @@ function collectComponents(nodes: NormalizedDesignNode[]) {
   return result;
 }
 
-function mapSvgBlend(value: string | undefined): NormalizedDesignNode["blendMode"] {
-  return resolveSourceBlendMode(value).mode;
+function mapSvgBlend(value: string | undefined) {
+  return resolveSourceBlendMode(value);
 }
 
 function viewBox(attrs: Attributes): number[] {

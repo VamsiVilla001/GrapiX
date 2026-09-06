@@ -79,12 +79,12 @@ fn run(cli: CliOptions) -> anyhow::Result<ExitCode> {
     let state_directory = state_directory(&engine_config);
     let engine_id = resolve_engine_id(&engine_config, &state_directory);
 
-    // Resolve the token before touching the GPU: misconfigured auth should fail
-    // in milliseconds, not after a device initialisation.
-    let token = engine_config.resolve_token()?;
-    if engine_config.auth.required && token.is_none() {
+    // Resolve the signing key before touching the GPU: misconfigured auth should fail in
+    // milliseconds, not after a device initialisation.
+    let signing_key = engine_config.resolve_signing_key()?;
+    if engine_config.auth.required && signing_key.is_none() {
         anyhow::bail!(
-            "auth.required is set but no token could be resolved; set auth.token-file or GRAPIX_ENGINE_TOKEN"
+            "auth.required is set but no token signing secret could be resolved; set auth.signing-secret-file or GRAPIX_ENGINE_AUTH_SECRET"
         );
     }
 

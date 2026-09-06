@@ -20,7 +20,26 @@ use grapix_render_engine::config::EngineConfig;
 use grapix_render_engine::engine::{Channel, Engine};
 use grapix_render_engine::protocol::PROTOCOL_VERSION;
 
-const TOKEN: &str = "0123456789abcdef0123456789abcdef";
+/// The signing secret the test engine verifies tokens against.
+const SECRET: &str = "0123456789abcdef0123456789abcdef";
+
+/// A real access token, minted the way the TypeScript issuer mints them. The format is proven
+/// identical across both languages by `Shared/auth-contract/tests/conformance.test.mjs`; this
+/// only needs one that verifies, so the server test exercises the real credential path rather
+/// than a shared secret that no longer exists.
+fn access_token() -> String {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine as _;
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    let payload = r#"{"sub":"usr_test","usr":"test","role":"admin","perms":["scene.read","scene.write","scene.publish","stage.write","asset.write","editor.view","playout.preview","playout.program","output.manage","engine.configure","engine.diagnose","user.manage","audit.read"],"sid":"sess_test","typ":"access","iat":1,"exp":9999999999}"#;
+    let encoded = URL_SAFE_NO_PAD.encode(payload.as_bytes());
+    let signing_input = format!("gx1.{encoded}");
+    let mut mac = Hmac::<Sha256>::new_from_slice(SECRET.as_bytes()).expect("key");
+    mac.update(signing_input.as_bytes());
+    format!("{signing_input}.{}", URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes()))
+}
 
 /// Build an engine with no GPU.
 ///
@@ -117,9 +136,12 @@ fn base_config(port: u16, auth: bool) -> EngineConfig {
     config.network.bind_address = "127.0.0.1".to_string();
     config.network.websocket_port = port;
     config.auth.required = auth;
-    if auth {
-        config.auth.token = Some(TOKEN.to_string());
-    }
+    // Every test server gets a signing key, not only the authenticating one. The dev path
+    // (`required = false`) still *accepts* a credential-less local connection - which is what
+    // the tests below that connect without a token exercise - but it must also be able to
+    // *verify* one, because the test client mints an access token for every connection and
+    // only a verified token carries the permissions the command gate checks.
+    config.auth.signing_secret = Some(SECRET.to_string());
     config.assets.roots = vec!["assets".to_string()];
     // A cache directory of its own, per test and per run. The asset cache is content
     // addressed, so a shared one would make one test's upload appear as another's
@@ -157,7 +179,21 @@ struct Client {
 }
 
 impl Client {
+    /// Connect as an identified user, minting an access token as the TypeScript issuer does.
+    ///
+    /// Almost every test in this file was written against one anonymous development principal
+    /// that could drive both authoring and Program verbs. That principal never had a user and
+    /// could not hold a permission, so it cannot exercise the per-command gate these tests are
+    /// now protected by. Minting the token here keeps the whole suite meaningful under the new
+    /// model without rewriting each call site; the `token` argument overrides, which is what
+    /// the refusal tests use to prove a bad credential is still rejected.
     async fn connect(port: u16, token: Option<&str>) -> anyhow::Result<Self> {
+        let credential = token.map(ToOwned::to_owned).unwrap_or_else(access_token);
+        Self::connect_with_credential(port, Some(&credential)).await
+    }
+
+    /// Connect with an explicit credential string, or none at all.
+    async fn connect_with_credential(port: u16, token: Option<&str>) -> anyhow::Result<Self> {
         let mut request = format!("ws://127.0.0.1:{port}").into_client_request()?;
 
         let protocols = match token {
@@ -186,12 +222,64 @@ impl Client {
         self.request_with(message_type, payload, None, None).await
     }
 
+    /// Like `request`, but addresses a specific scene instead of deriving one.
+    async fn request_for(&mut self, message_type: &str, payload: Value, scene_ref: Value) -> Value {
+        self.request_with_ref(message_type, payload, None, None, Some(scene_ref)).await
+    }
+
+    /// Load a scene and deliver its published copy, mirroring what Playout does.
+    ///
+    /// Program and Preview accept only a `published` SceneRef, and the engine's authority split
+    /// is real now: an authoring copy is a *different scene address*, and cueing it is a
+    /// SCENE_NOT_FOUND, not a cue. These tests were written before that boundary existed and
+    /// load a single copy, so this delivers both - the authoring copy the authoring verbs
+    /// touch, and the published copy the operator verbs need - at the same revision.
+    /// Load the authoring copy only. Most scene-verb tests need exactly this: one scene, at a
+    /// known revision, that patches and prepares touch. Returns the load reply.
+    async fn load_authoring(&mut self, scene: Value) -> Value {
+        let id = scene["id"].as_str().expect("scene id").to_string();
+        let revision = scene["revision"].as_u64().unwrap_or(1);
+        let authoring_ref = json!({
+            "projectId": "protocol-test", "domain": "authoring", "sceneId": id, "revision": revision
+        });
+        self.request_for("scene.load", json!({ "scene": scene }), authoring_ref).await
+    }
+
+    /// Load a scene and deliver its published copy, mirroring what Playout does.
+    ///
+    /// Program and Preview accept only a `published` SceneRef, and the engine's authority split
+    /// is real now: an authoring copy is a *different scene address*, and cueing it is a
+    /// SCENE_NOT_FOUND, not a cue. Tests that drive operator verbs need the published copy to
+    /// exist; tests that only author do not, and would see two scenes where they expect one.
+    async fn load_scene(&mut self, scene: Value) -> Value {
+        let id = scene["id"].as_str().expect("scene id").to_string();
+        let revision = scene["revision"].as_u64().unwrap_or(1);
+        let published_ref = json!({
+            "projectId": "protocol-test", "domain": "published", "sceneId": id, "revision": revision
+        });
+        let reply = self.load_authoring(scene.clone()).await;
+        self.request_for("scene.load", json!({ "scene": scene }), published_ref).await;
+        reply
+    }
+
     async fn request_with(
         &mut self,
         message_type: &str,
         payload: Value,
         force_sequence: Option<u64>,
         force_message_id: Option<String>,
+    ) -> Value {
+        self.request_with_ref(message_type, payload, force_sequence, force_message_id, None)
+            .await
+    }
+
+    async fn request_with_ref(
+        &mut self,
+        message_type: &str,
+        payload: Value,
+        force_sequence: Option<u64>,
+        force_message_id: Option<String>,
+        explicit_scene_ref: Option<Value>,
     ) -> Value {
         self.sequence += 1;
         self.message_id += 1;
@@ -200,14 +288,91 @@ impl Client {
         let message_id = force_message_id.unwrap_or_else(|| format!("test-{}", self.message_id));
         let request_id = format!("req-{}", self.message_id);
 
+        // These tests predate mandatory SceneRef addressing. Rather than rewrite every call,
+        // address the scene they load: Program/Preview verbs need the `published` domain and
+        // authoring verbs the `authoring` one, and the split lives here, not in forty places.
+        // Program is what makes the two domains real, which is why one blanket default would
+        // be wrong.
+        // The scene id sits in different places depending on the verb: bare on cue/stop, in
+        // `scene.id` on load, and in `patch.sceneId` on a patch. Deriving from all three keeps
+        // this helper usable for every call site rather than only the conveniently shaped ones.
+        let scene_id = payload
+            .get("sceneId")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .or_else(|| {
+                payload
+                    .get("incomingSceneId")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+            })
+            .or_else(|| {
+                payload
+                    .get("scene")
+                    .and_then(|scene| scene.get("id"))
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+            })
+            .or_else(|| {
+                payload
+                    .get("patch")
+                    .and_then(|patch| patch.get("sceneId"))
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+            });
+        let derived_scene_ref = scene_id.map(|scene_id| {
+            // The revision is the *address* of the scene on the engine - the revision it was
+            // loaded at - not a content revision a command names. Load and fullSync carry the
+            // load revision in `scene.revision`; a patch carries its base in `patch.baseRevision`;
+            // an explicit `sceneRevision` is a content check, not the address, so it is the
+            // last resort rather than the first.
+            // A patch addresses the scene's runtime key, which is the *load* revision - the
+            // document's revision as loaded - not `patch.baseRevision`, which is the content
+            // revision the gate inside `apply_patch` compares against. They coincide for a
+            // first patch (base == load) and diverge after one lands, so the wrong choice
+            // silently keys a scene that does not exist. These tests always load at the
+            // revision the patch then bases on, so the address is the base revision; the
+            // engine's revision check is what actually gates.
+            let revision = if message_type == "scene.fullSync" {
+                // fullSync replaces the scene *already on the engine*, so its address is that
+                // scene's load revision, not the incoming document's. These tests load at
+                // revision 1, so that is the address; the new revision is the payload's.
+                1
+            } else {
+                payload
+                    .get("scene")
+                    .and_then(|scene| scene.get("revision"))
+                    .and_then(Value::as_u64)
+                    .or_else(|| {
+                        payload
+                            .get("patch")
+                            .and_then(|patch| patch.get("baseRevision"))
+                            .and_then(Value::as_u64)
+                    })
+                    .or_else(|| payload.get("incomingSceneRevision").and_then(Value::as_u64))
+                    .or_else(|| payload.get("sceneRevision").and_then(Value::as_u64))
+                    .unwrap_or(1)
+            };
+            let domain = if message_type.starts_with("playout.") || message_type.starts_with("preview.") {
+                "published"
+            } else {
+                "authoring"
+            };
+            json!({
+                "projectId": "protocol-test",
+                "domain": domain,
+                "sceneId": scene_id,
+                "revision": revision,
+            })
+        });
+
         let envelope = json!({
             "protocolVersion": PROTOCOL_VERSION,
             "messageId": message_id,
             "requestId": request_id,
             "engineId": Value::Null,
             "projectId": Value::Null,
-            "sceneId": payload.get("sceneId").cloned().unwrap_or(Value::Null),
-            "sceneRevision": payload.get("sceneRevision").cloned().unwrap_or(Value::Null),
+            "sceneRef": explicit_scene_ref.or(derived_scene_ref).unwrap_or(Value::Null),
             "timestampMs": 1_700_000_000_000u64,
             "type": message_type,
             "requiresAck": true,
@@ -415,17 +580,18 @@ async fn an_authenticating_engine_refuses_a_client_with_no_token() {
     // The token is checked in the handshake, so an unauthenticated client never
     // reaches the message loop.
     assert!(
-        Client::connect(port, None).await.is_err(),
+        Client::connect_with_credential(port, None).await.is_err(),
         "a tokenless client must be refused at the handshake"
     );
     assert!(
-        Client::connect(port, Some("wrong-token-wrong-token"))
+        Client::connect_with_credential(port, Some("wrong-token-wrong-token"))
             .await
             .is_err(),
         "a wrong token must be refused at the handshake"
     );
 
-    let mut client = Client::connect(port, Some(TOKEN)).await.expect("connect");
+    let token = access_token();
+    let mut client = Client::connect(port, Some(&token)).await.expect("connect");
     let hello = client.request("connection.hello", hello_payload()).await;
     assert_eq!(hello["payload"]["authenticationRequired"], true);
 }
@@ -531,16 +697,32 @@ async fn a_scene_loads_and_prepares_and_reports_its_state() {
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
 
-    let reply = client
-        .request("scene.load", json!({ "scene": scene("scene_1", 3) }))
-        .await;
+    let reply = client.load_scene(json!(scene("scene_1", 3))).await;
     assert_eq!(reply["type"], "reply.ack", "{reply}");
-    assert_eq!(engine.lock().await.scene_count(), 1);
+    // Both copies are resident: the authoring one this load created and the published one
+    // `load_scene` delivers alongside it, exactly as an Editor and Playout would hold them.
+    assert_eq!(engine.lock().await.scene_count(), 2);
 
     let status = client.request("engine.getStatus", json!({})).await;
     let scenes = status["payload"]["scenes"].as_array().unwrap();
-    assert_eq!(scenes.len(), 1);
-    assert_eq!(scenes[0]["sceneId"], "scene_1");
+    assert_eq!(scenes.len(), 2);
+    let authoring = scenes
+        .iter()
+        .find(|scene| {
+            scene["sceneId"]
+                .as_str()
+                .map(|key| key.contains("|9:authoring|"))
+                .unwrap_or(false)
+        })
+        .expect("an authoring copy");
+    assert!(
+        authoring["sceneId"]
+            .as_str()
+            .map(|key| scene_key_is(key, "scene_1"))
+            .unwrap_or(false),
+        "expected the loaded scene under its runtime key, got {}",
+        authoring["sceneId"]
+    );
     assert_eq!(scenes[0]["revision"], 3);
     // Loaded is not prepared, and not prepared is not take-ready.
     assert_eq!(scenes[0]["preparationState"], "loading");
@@ -573,17 +755,19 @@ async fn loading_more_scenes_than_configured_is_refused() {
     client.request("connection.hello", hello_payload()).await;
 
     for index in 0..2 {
-        let reply = client
-            .request(
-                "scene.load",
-                json!({ "scene": scene(&format!("scene_{index}"), 1) }),
-            )
-            .await;
+        let reply = client.load_scene(json!(scene(&format!("scene_{index}"), 1))).await;
         assert_eq!(reply["type"], "reply.ack");
     }
 
+    // The ceiling is on published copies - the render targets an operator sees - so a third
+    // *published* load is what must be refused, even though its authoring copy would still
+    // load. Delivering the published copy directly is what makes that distinction legible.
+    let overflow = json!(scene("scene_overflow", 1));
+    let published_ref = json!({
+        "projectId": "protocol-test", "domain": "published", "sceneId": "scene_overflow", "revision": 1
+    });
     let refused = client
-        .request("scene.load", json!({ "scene": scene("scene_overflow", 1) }))
+        .request_for("scene.load", json!({ "scene": overflow }), published_ref)
         .await;
     assert_eq!(refused["type"], "reply.error");
     assert_eq!(refused["payload"]["code"], "ENGINE_BUSY");
@@ -610,9 +794,7 @@ async fn an_unprepared_scene_cannot_go_online_without_an_explicit_override() {
     let (port, engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
 
     // Requirement 14: refused, and the refusal names the blockers.
     let refused = client
@@ -649,9 +831,7 @@ async fn replace_refuses_an_unprepared_or_stale_incoming_scene() {
     let (port, engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 2) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 2))).await;
 
     let unprepared = client
         .request(
@@ -686,9 +866,7 @@ async fn cue_targets_preview_and_refuses_program() {
     let (port, _engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
 
     let preview = client
         .request(
@@ -718,9 +896,7 @@ async fn a_command_naming_the_wrong_revision_is_refused() {
     let (port, _engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 5) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 5))).await;
 
     let reply = client
         .request(
@@ -738,9 +914,7 @@ async fn an_unimplemented_transition_is_refused_rather_than_substituted() {
     let (port, _engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
 
     let reply = client
         .request(
@@ -780,9 +954,7 @@ async fn clearing_program_returns_the_engine_to_ready() {
     let (port, engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
     client
         .request(
             "playout.takeOnline",
@@ -803,9 +975,7 @@ async fn a_scene_on_program_cannot_be_unloaded_without_force() {
     let (port, _engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
     client
         .request(
             "playout.takeOnline",
@@ -813,9 +983,14 @@ async fn a_scene_on_program_cannot_be_unloaded_without_force() {
         )
         .await;
 
-    // Unloading what is on Program puts black on air.
+    // Program holds the published copy, so it is the published copy whose unload would put
+    // black on air. Addressing the authoring copy would be a different scene and prove
+    // nothing about the guard.
+    let published_ref = json!({
+        "projectId": "protocol-test", "domain": "published", "sceneId": "scene_1", "revision": 1
+    });
     let refused = client
-        .request("scene.unload", json!({ "sceneId": "scene_1" }))
+        .request_for("scene.unload", json!({ "sceneId": "scene_1" }), published_ref.clone())
         .await;
     assert_eq!(refused["payload"]["code"], "OUTPUT_ERROR");
     assert!(refused["payload"]["message"]
@@ -824,9 +999,10 @@ async fn a_scene_on_program_cannot_be_unloaded_without_force() {
         .contains("force"));
 
     let forced = client
-        .request(
+        .request_for(
             "scene.unload",
             json!({ "sceneId": "scene_1", "force": true }),
+            published_ref,
         )
         .await;
     assert_eq!(forced["type"], "reply.ack");
@@ -933,9 +1109,7 @@ async fn replies_and_events_never_share_a_message_id() {
 
     // Loading a scene and taking it online emits several lifecycle and channel
     // events alongside their replies.
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
     client
         .request(
             "playout.takeOnline",
@@ -1115,9 +1289,7 @@ async fn a_client_disconnecting_never_disturbs_program() {
     {
         let mut client = Client::connect(port, None).await.expect("connect");
         client.request("connection.hello", hello_payload()).await;
-        client
-            .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-            .await;
+        client.load_scene(json!(scene("scene_1", 1))).await;
         client
             .request(
                 "playout.takeOnline",
@@ -1140,7 +1312,8 @@ async fn a_client_disconnecting_never_disturbs_program() {
     let guard = engine.lock().await;
     assert_eq!(guard.connected_clients, 0);
     assert_eq!(guard.state(), EngineState::OnAir);
-    assert_eq!(guard.scene_count(), 1);
+    // Both copies survive the disconnect: the authoring one and the published one on Program.
+    assert_eq!(guard.scene_count(), 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -1368,11 +1541,15 @@ async fn a_scene_declaring_an_absent_asset_cannot_be_taken() {
         { "assetId": "asset_missing", "name": "Crest", "kind": "image" }
     ]);
 
-    client
-        .request("scene.load", json!({ "scene": scene_with_asset }))
-        .await;
+    client.load_scene(json!(scene_with_asset)).await;
+    // The take acts on the published copy, so that is the copy that must be prepared for this
+    // to prove anything about going on air. Preparing the authoring copy and taking the
+    // published one would test the wrong scene.
+    let published_ref = json!({
+        "projectId": "protocol-test", "domain": "published", "sceneId": "scene_assets", "revision": 1
+    });
     let prepared = client
-        .request("scene.prepare", json!({ "sceneId": "scene_assets" }))
+        .request_for("scene.prepare", json!({ "sceneId": "scene_assets" }), published_ref)
         .await;
 
     // A scene that goes on air without its logo shows a hole, and the operator finds out
@@ -1405,9 +1582,7 @@ async fn an_asset_a_loaded_scene_needs_cannot_be_released_without_force() {
     scene_with_asset["assets"] = json!([
         { "assetId": "asset_held", "name": "Crest", "kind": "image" }
     ]);
-    client
-        .request("scene.load", json!({ "scene": scene_with_asset }))
-        .await;
+    client.load_scene(json!(scene_with_asset)).await;
     client
         .request("scene.prepare", json!({ "sceneId": "scene_holder" }))
         .await;
@@ -1552,9 +1727,7 @@ async fn a_patch_is_applied_and_reports_what_it_invalidated() {
     let (port, engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 2) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 2))).await;
 
     let reply = client
         .request(
@@ -1573,7 +1746,7 @@ async fn a_patch_is_applied_and_reports_what_it_invalidated() {
         )
         .await;
 
-    assert_eq!(reply["type"], "reply.ack");
+    assert_eq!(reply["type"], "reply.ack", "scene.applyPatch refused: {}", reply);
     assert_eq!(reply["payload"]["sceneRevision"], 3);
     assert_eq!(reply["payload"]["operationsApplied"], 1);
     assert_eq!(reply["payload"]["objectsTouched"][0], "rect_1");
@@ -1591,9 +1764,7 @@ async fn a_patch_based_on_the_wrong_revision_is_refused_and_counted_as_a_resync(
     let (port, engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 2) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 2))).await;
 
     let stale = client
         .request(
@@ -1630,9 +1801,7 @@ async fn a_patch_that_fails_part_way_leaves_the_engine_on_its_previous_revision(
     let (port, _engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
 
     let reply = client
         .request(
@@ -1667,9 +1836,7 @@ async fn a_structural_patch_says_it_invalidated_the_whole_scene() {
     let (port, _engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
 
     // A data change can be read by any binding, and the document carries no reverse
     // index, so it cannot be localised to objects.
@@ -1699,9 +1866,7 @@ async fn an_operation_this_engine_does_not_implement_is_named_in_the_refusal() {
     let (port, _engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
 
     let reply = client
         .request(
@@ -1729,9 +1894,7 @@ async fn a_full_sync_replaces_the_scene_and_is_counted() {
     let (port, engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
 
     let reply = client
         .request(
@@ -1743,7 +1906,18 @@ async fn a_full_sync_replaces_the_scene_and_is_counted() {
 
     let status = client.request("engine.getStatus", json!({})).await;
     let scenes = status["payload"]["scenes"].as_array().unwrap();
-    assert_eq!(scenes[0]["revision"], 7);
+    // The authoring copy is the one fullSync replaced; the published copy is a separate
+    // address and is untouched by an authoring-side sync.
+    let authoring = scenes
+        .iter()
+        .find(|scene| {
+            scene["sceneId"]
+                .as_str()
+                .map(|key| key.contains("|9:authoring|"))
+                .unwrap_or(false)
+        })
+        .expect("an authoring copy");
+    assert_eq!(authoring["revision"], 7);
     assert!(engine.lock().await.resync_count > 0);
 }
 
@@ -1756,9 +1930,7 @@ async fn diagnostics_include_the_tile_table_only_when_asked() {
     let (port, _engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
 
     let compact = client
         .request("engine.getDiagnostics", json!({ "includeTiles": false }))
@@ -1934,9 +2106,7 @@ async fn taking_a_scene_online_starts_the_outputs_and_taking_it_offline_stops_th
     let (port, engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
 
     configure_virtual(&mut client, "out_virtual").await;
 
@@ -2011,9 +2181,7 @@ async fn a_take_with_no_output_configured_says_it_is_rendering_nowhere() {
     let (port, _engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
 
     let take = client
         .request(
@@ -2044,9 +2212,7 @@ async fn clearing_program_also_stops_the_outputs() {
     let (port, engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
     configure_virtual(&mut client, "out_virtual").await;
     client
         .request(
@@ -2200,9 +2366,7 @@ async fn a_preview_stream_registers_and_reports_its_cadence() {
     let (port, engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
 
     let reply = client
         .request(
@@ -2241,9 +2405,7 @@ async fn a_stream_rate_above_the_engine_ceiling_is_clamped_and_says_so() {
     let (port, _engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
 
     let reply = client
         .request(
@@ -2275,9 +2437,7 @@ async fn a_stream_encoding_this_engine_cannot_produce_is_refused_not_substituted
     let (port, _engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
 
     let reply = client
         .request(
@@ -2305,9 +2465,7 @@ async fn a_stream_over_the_pixel_budget_is_refused_when_it_is_asked_for() {
     let (port, _engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
 
     // Refused at registration, not thirty times a second afterwards.
     let reply = client
@@ -2333,9 +2491,7 @@ async fn there_is_a_limit_on_concurrent_streams() {
     let (port, _engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
 
     for index in 0..4 {
         let reply = client
@@ -2378,9 +2534,7 @@ async fn a_client_cannot_take_over_another_clients_preview_stream_id() {
     let (port, engine) = start(false).await;
     let mut owner = Client::connect(port, None).await.expect("owner connects");
     owner.request("connection.hello", hello_payload()).await;
-    owner
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    owner.load_scene(scene("scene_1", 1)).await;
     owner
         .request(
             "preview.streamStart",
@@ -2434,9 +2588,7 @@ async fn a_stream_can_be_repointed_without_restarting_it() {
     let (port, _engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
     client
         .request(
             "preview.streamStart",
@@ -2485,9 +2637,7 @@ async fn streams_are_dropped_when_their_client_disconnects() {
     let (port, engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
     client
         .request(
             "preview.streamStart",
@@ -2527,9 +2677,7 @@ async fn a_renderer_restart_rebuilds_state_and_is_honest_about_what_it_cannot_do
     let (port, engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
 
     let reply = client
         .request(
@@ -2539,7 +2687,7 @@ async fn a_renderer_restart_rebuilds_state_and_is_honest_about_what_it_cannot_do
         .await;
 
     assert_eq!(reply["type"], "reply.ack");
-    assert_eq!(reply["payload"]["scenesReset"], 1);
+    assert_eq!(reply["payload"]["scenesReset"], 2);
     assert_eq!(reply["payload"]["rendererRestarts"], 1);
 
     let warnings: Vec<String> = reply["payload"]["warnings"]
@@ -2584,6 +2732,20 @@ async fn a_renderer_restart_rebuilds_state_and_is_honest_about_what_it_cannot_do
 // The tests below protect both halves: animation advances with no output, and cueing the same
 // scene never rewinds what is already on air.
 
+/// True when a runtime scene key names this scene.
+///
+/// The engine reports scenes under their runtime `SceneRef` key - length-prefixed segments
+/// ending in `:<id>|<revision>` - never under the bare document id. Comparing against the
+/// bare id is never true, so these helpers match on the trailing segment instead.
+fn scene_key_is(runtime_key: &str, scene_id: &str) -> bool {
+    // Split off the trailing revision, then compare the id segment: `…|9:scene_1|3` → `scene_1`.
+    let address = runtime_key.rsplit_once('|').map(|(head, _)| head).unwrap_or(runtime_key);
+    address
+        .rsplit_once('|')
+        .map(|(_, id_segment)| id_segment.rsplit_once(':').map(|(_, id)| id).unwrap_or(id_segment) == scene_id)
+        .unwrap_or(false)
+}
+
 /// Read a scene's playhead the way a diagnostic client would.
 async fn playhead(client: &mut Client, scene_id: &str) -> u64 {
     let status = client.request("engine.getStatus", json!({})).await;
@@ -2593,7 +2755,18 @@ async fn playhead(client: &mut Client, scene_id: &str) -> u64 {
         .clone();
     scenes
         .iter()
-        .find(|scene| scene["sceneId"] == scene_id)
+        .find(|scene| {
+            scene["sceneId"]
+                .as_str()
+                .map(|key| {
+                    // Program and Preview are the published copy, which is the one these
+                    // assertions are about. Both copies carry the same id, so without the
+                    // domain filter this reads the authoring copy, whose frame never advances
+                    // and which every take assertion then misattributes.
+                    scene_key_is(key, scene_id) && key.contains("|9:published|")
+                })
+                .unwrap_or(false)
+        })
         .and_then(|scene| scene["frame"].as_u64())
         .expect("scene reports a frame")
 }
@@ -2603,9 +2776,7 @@ async fn preview_and_program_have_independent_animation_playheads() {
     let (port, engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
 
     // Preview starts where Cue asks and advances on its authored clock without touching
     // Program's frame. This remains true even when no output is configured.
@@ -2641,9 +2812,7 @@ async fn a_cued_preview_advances_without_program_or_outputs() {
     let (port, engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
     client
         .request(
             "playout.cue",
@@ -2667,9 +2836,7 @@ async fn the_program_playhead_advances_without_any_output() {
     let (port, engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
     client
         .request(
             "playout.takeOnline",
@@ -2699,9 +2866,7 @@ async fn cueing_a_scene_that_is_already_on_air_does_not_rewind_program() {
     let (port, engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
     client
         .request(
             "playout.takeOnline",
@@ -2732,9 +2897,7 @@ async fn advancing_the_playhead_with_nothing_on_air_does_nothing() {
     let (port, engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
 
     // Loaded but never taken: an idle engine must not animate a scene nobody put on air.
     engine.lock().await.advance_program_playhead(25);
@@ -2756,9 +2919,7 @@ async fn stopping_a_scene_returns_its_playhead_to_the_start() {
     let (port, engine) = start(false).await;
     let mut client = Client::connect(port, None).await.expect("connect");
     client.request("connection.hello", hello_payload()).await;
-    client
-        .request("scene.load", json!({ "scene": scene("scene_1", 1) }))
-        .await;
+    client.load_scene(json!(scene("scene_1", 1))).await;
     client
         .request(
             "playout.takeOnline",

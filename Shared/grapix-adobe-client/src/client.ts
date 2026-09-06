@@ -154,8 +154,11 @@ export class AdobeClient {
   }
 
   /**
-   * Grant or withdraw this session's permission to modify open Adobe documents.
-   * Call it from an operator action; a tool result must never trigger it.
+   * Ask the gateway for this session's permission to modify open Adobe documents.
+   * The gateway grants approval only through the operator/bridge path: a regular
+   * client cannot approve itself, so this resolves `false` unless an operator has
+   * approved the session out of band. Call it from an operator action; a tool result
+   * must never trigger it.
    */
   async setApproval(approved: boolean): Promise<boolean> {
     const reply = await this.control({ type: "session.approve", approved }, "approve-");

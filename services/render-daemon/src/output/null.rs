@@ -3,6 +3,8 @@
 
 use crate::config::OutputConfig;
 use crate::output::{VideoFrame, VideoOutput};
+#[cfg(test)]
+use crate::output::VideoFramePool;
 
 #[derive(Debug, Default)]
 pub struct NullOutput {
@@ -89,10 +91,11 @@ mod tests {
         let mut output = NullOutput::default();
         output.configure(&test_config()).unwrap();
 
+        let pool = VideoFramePool::new(1, 64 * 36 * 4).unwrap();
         let frame = VideoFrame {
             width: 64,
             height: 36,
-            data: vec![0; 64 * 36 * 4],
+            data: pool.try_acquire().unwrap(),
             frame_index: 0,
         };
 

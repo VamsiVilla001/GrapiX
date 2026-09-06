@@ -215,6 +215,21 @@ impl IpcClient {
     }
 
     async fn request(&mut self, message_type: &str, payload: Value) -> Value {
+        self.request_scoped(message_type, payload, Value::Null).await
+    }
+
+    /*
+     * A scene-bearing command carries a canonical SceneRef, and the engine refuses one that does
+     * not — the same rule the WebSocket clients follow. This used to be untestable: an envelope
+     * rejected before parsing was answered without a `requestId`, so this client waited for a reply
+     * it could never match and the test hung instead of failing.
+     */
+    async fn request_scoped(
+        &mut self,
+        message_type: &str,
+        payload: Value,
+        scene_ref: Value,
+    ) -> Value {
         self.sequence += 1;
         self.message_id += 1;
 
@@ -224,6 +239,7 @@ impl IpcClient {
             "requestId": format!("req-{}", self.message_id),
             "engineId": Value::Null,
             "projectId": Value::Null,
+            "sceneRef": scene_ref,
             "sceneId": payload.get("sceneId").cloned().unwrap_or(Value::Null),
             "sceneRevision": payload.get("sceneRevision").cloned().unwrap_or(Value::Null),
             "timestampMs": 1_700_000_000_000u64,
@@ -268,7 +284,7 @@ async fn start(name: &str, auth: bool) -> (String, Arc<Mutex<Engine>>) {
     config.network.websocket_port = 0;
     config.auth.required = auth;
     if auth {
-        config.auth.token = Some("0123456789abcdef0123456789abcdef".to_string());
+        config.auth.signing_secret = Some("0123456789abcdef0123456789abcdef".to_string());
     }
 
     let engine = test_engine(&config);
@@ -368,7 +384,16 @@ async fn a_scene_loads_and_commands_work_over_ipc() {
     });
 
     let loaded = client
-        .request("scene.load", json!({ "scene": scene }))
+        .request_scoped(
+            "scene.load",
+            json!({ "scene": scene }),
+            json!({
+                "projectId": "default",
+                "domain": "published",
+                "sceneId": "scene_ipc",
+                "revision": 1
+            }),
+        )
         .await;
     assert!(
         loaded["type"] == "reply.ack" || loaded["type"] == "reply.scenePrepared",
@@ -377,7 +402,7 @@ async fn a_scene_loads_and_commands_work_over_ipc() {
 
     // A patch over IPC behaves exactly as it does over WebSocket.
     let patched = client
-        .request(
+        .request_scoped(
             "scene.applyPatch",
             json!({
                 "patch": {
@@ -389,9 +414,16 @@ async fn a_scene_loads_and_commands_work_over_ipc() {
                     ]
                 }
             }),
+            // The ref names the scene being patched, which is still at the base revision.
+            json!({
+                "projectId": "default",
+                "domain": "published",
+                "sceneId": "scene_ipc",
+                "revision": 1
+            }),
         )
         .await;
-    assert_eq!(patched["payload"]["sceneRevision"], 2);
+    assert_eq!(patched["payload"]["sceneRevision"], 2, "{patched}");
 
     let status = client.request("engine.getStatus", json!({})).await;
     assert_eq!(status["payload"]["scenes"][0]["revision"], 2);

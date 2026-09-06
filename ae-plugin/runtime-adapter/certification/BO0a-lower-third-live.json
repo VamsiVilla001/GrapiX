@@ -1,0 +1,109 @@
+{
+  "phase": "BO0a",
+  "fixture": "bo0a-lower-third-v1",
+  "fixtureSha256": "5415da25002194a28aece42f5be2bf391e86cd28980ee19035d599bdef009469",
+  "recordedAt": "2026-08-19T07:37:11.834Z",
+  "verdict": "FAIL",
+  "rows": [
+    {
+      "type": "composition-clock",
+      "id": "LOWER_THIRD",
+      "outcome": "pass",
+      "expected": {
+        "frameDuration": "800",
+        "timeScale": "23976"
+      },
+      "actual": {
+        "frameDuration": "800",
+        "timeScale": "23976"
+      }
+    },
+    {
+      "type": "control",
+      "id": "PLAYER_NAME",
+      "outcome": "pass"
+    },
+    {
+      "type": "control",
+      "id": "SCORE",
+      "outcome": "pass"
+    },
+    {
+      "type": "control",
+      "id": "PLAYER_IMAGE",
+      "outcome": "not-run",
+      "reason": "CONTROL_TARGET_STALE: canonical property target was not found"
+    },
+    {
+      "type": "control",
+      "id": "TEAM_COLOR",
+      "outcome": "pass"
+    },
+    {
+      "type": "revision",
+      "id": "declared-controls",
+      "outcome": "not-run",
+      "reason": "REVISION_MEMBER_INVALID: PLAYER_IMAGE: canonical property target was not found"
+    },
+    {
+      "type": "dependencies",
+      "id": "live-report",
+      "outcome": "pass",
+      "expected": [
+        "ADBE Fill"
+      ],
+      "actual": [
+        "ADBE Fill"
+      ]
+    },
+    {
+      "type": "comparison",
+      "id": "LOWER_THIRD-baseline-frame-0",
+      "outcome": "fail",
+      "differingPixels": 221745,
+      "maxChannelDelta": 255,
+      "tolerance": {
+        "maxChannelDelta": 0,
+        "maxDifferingPixels": 0
+      },
+      "referencePixelSha256": "a88d2bd6a9f12fd25d1c01c14946b5c2003fbda5657a7c1bb1e8bf1277b63194",
+      "checkoutPixelSha256": "88126fbc9f9bc567b92ef4413bdc65c2ed222d4b867a96245b769cdf5fef8c13"
+    },
+    {
+      "type": "external-gate",
+      "id": "AE-CD3 validated media preload and rollback: PLAYER_IMAGE declares ADBE Layer Source, which is footage replacement and outside the declared property surface; the fixture layer is a solid, so no replaceable footage exists to drive",
+      "outcome": "not-run",
+      "reason": "upstream or external prerequisite remains open"
+    },
+    {
+      "type": "external-gate",
+      "id": "composition markers cannot be authored or read through the current adapter; cue map is declared-not-authored",
+      "outcome": "not-run",
+      "reason": "upstream or external prerequisite remains open"
+    },
+    {
+      "type": "external-gate",
+      "id": "approved licensed third-party plugin provisioned and rendering",
+      "outcome": "not-run",
+      "reason": "upstream or external prerequisite remains open"
+    },
+    {
+      "type": "external-gate",
+      "id": "LIST_COMPOSITIONS must emit the composition's exact AEGP_GetCompFrameDuration rational before the declared rate can be reconciled against a live composition automatically",
+      "outcome": "not-run",
+      "reason": "upstream or external prerequisite remains open"
+    },
+    {
+      "type": "external-gate",
+      "id": "AE-F2 checkout-to-Program ingress",
+      "outcome": "not-run",
+      "reason": "upstream or external prerequisite remains open"
+    },
+    {
+      "type": "external-gate",
+      "id": "AE-F3 30-minute POC soak",
+      "outcome": "not-run",
+      "reason": "upstream or external prerequisite remains open"
+    }
+  ]
+}

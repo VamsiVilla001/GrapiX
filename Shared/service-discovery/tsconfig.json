@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Node-only: this package opens a UDP socket and reads network interfaces, and nothing in it
+    // may ever touch the DOM — a browser cannot speak mDNS, and a web UI that imported this
+    // would fail at run time rather than at build time. Dropping DOM from `lib` is what makes
+    // that a compile error.
+    //
+    // ES2024 rather than the workspace's ES2022, for `Promise.withResolvers`. Safe here because
+    // the only runtime is Node >= 22.12, which has it.
+    "lib": ["ES2024"],
+    "declaration": true,
+    "emitDeclarationOnly": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    "noEmit": false
+  },
+  "include": ["src"]
+}

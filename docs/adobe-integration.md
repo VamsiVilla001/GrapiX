@@ -54,11 +54,13 @@ Both models are taken from Adobe's own SDKs rather than guessed.
 The library behind [`adobe/adobe-photoshop-api-sdk`](https://github.com/adobe/adobe-photoshop-api-sdk),
 installed as a real dependency of the gateway. `Shared/adobe-common-schema/src/photoshop.ts`
 mirrors its `LayerType`, `BlendMode`, `ParagraphAlignment`, `Storage`, `MimeType` and
-`JobOutputStatus` vocabularies, and both transports speak it — a PSD imported over the
-cloud and the same PSD imported through the plugin must produce the same GrapiX scene.
+`JobOutputStatus` vocabularies. Cloud manifests preserve the PSD layer hierarchy and editable
+text metadata, while cloud pixel layers are PNG renditions rather than editable PSD pixels.
+The import adds a flattened PNG preview and requests a PNG per pixel layer; a manifest thumbnail
+is used only as a reported fallback when Adobe does not return that layer's rendition.
 
-Cloud operations implemented: `getDocumentStructure` (`getDocumentManifest`),
-`exportPreview` (`createRendition`), `updateTextLayer` (`modifyDocument`),
+Cloud operations implemented: `getDocumentStructure` (`getDocumentManifest` plus import
+renditions), `exportPreview` (`createRendition`), `updateTextLayer` (`modifyDocument`),
 `replaceSmartObject`, `createDocument` and `importGrapixScene`.
 
 Refused, each naming the missing capability rather than saying "unsupported":
@@ -170,9 +172,62 @@ approval toggle, and the real `@adobe/aio-lib-ims` path reaching Adobe (which re
 deliberately invalid credentials with `invalid_client`, proving the SDK path is wired
 rather than stubbed).
 
+## After Effects modes and AEP Static Inspector
+
+The earlier direct-project conversion work is historical parser research, not a shipped
+project-import fidelity path. GrapiX has two non-interchangeable modes:
+
+| Mode | Renderer | Boundary |
+| --- | --- | --- |
+| **AE Runtime Mode** | A locally installed After Effects runtime | Planned runtime boundary. It is the mode for rendering an AE project; it is not evidence that the adapter, frame bridge, output, or certification exists. |
+| **GrapiX Native Mode** | The GrapiX wgpu renderer | It renders only an explicitly converted GrapiX scene and reports conversion compatibility. It does not render an `.aep` project or imply AE fidelity. |
+
+The **AEP/AEPX Static Inspector** is the retained reader research boundary. It reads uploaded
+project bytes and examines project structure for inspection and evidence only; it makes no renderability, fidelity, or
+scene-conversion determination. The existing `POST /api/import/after-effects` inspection
+endpoint remains reachable for that report. There is no browser `.aep` or `.aepx` upload and
+no After Effects project-import command in the Editor.
+
+### Historical parser evidence
+
+An `.aep` is a RIFX file — RIFF with big-endian integers — whose form type is `Egg!`.
+Adobe publishes no specification. The retained research reader uses `rifx.ts` for the
+container, `aepParser.ts` for chunk semantics, and `cos.ts` for the PDF-style COS object
+graph in the `btdk` chunk.
+
+The corpus and its limitations are evidence, not a supported conversion matrix. Fixtures
+verify some offsets against After-Effects-authored files; keyframes and masks have weaker,
+synthetic evidence. The inspected fields include item and composition structure, layer
+identity and timing, some transforms, masks, effects, markers, text documents and footage
+paths. Missing or unestablished fields remain absent rather than being inferred.
+
+The known format traps remain relevant to inspection:
+
+- After Effects may omit a property that retains its default.
+- `ldta` transfer-mode numbering is not blend-menu ordering.
+- Adjustment layers also set the null bit.
+
+### Compatibility reports
+
+The historical converter labels observed features `native-editable`, `translated`, `sampled`,
+`baked`, `missing-plugin`, `missing-asset`, or `unsupported`. Those labels are compatibility
+research, not a promise that a scene renders like its AE source. Rendered-fallback baking is
+not implemented; a `baked` label preserves and reports the issue rather than rasterising it.
+
+### Planned runtime boundary
+
+AE Runtime Mode is the planned route for an AE project's rendering. GrapiX Native Mode is a
+separate, explicit conversion decision with a compatibility report. The GrapiX renderer
+operates on GrapiX scenes; it does not render After Effects projects. Neither statement grants
+the Editor Take, Program, or output authority.
+
 ## Not built yet
 
-Phase 2 (Photoshop UXP plugin), Phase 3 (After Effects ExtendScript bridge) and Phase 4
-(compatibility reports in the import UI, asset deduplication, missing-font detection,
-cancellation, connection recovery) remain. Until a plugin exists, the local transport has
-nothing to route to and the panel says so rather than implying an application is idle.
+Phase 2 (Photoshop UXP plugin) and Phase 4 (connection recovery) remain. Rendered-fallback
+baking for `baked` effects is not implemented.
+
+The historical `.aepx` parser has not read an After Effects-authored project. It navigates an
+invented `<Project><ItemList><Item><name>` PropertyList tree and its fixture repeats that shape;
+a real `.aepx` serialises the RIFX chunk tree as 4CC elements with hex `bdata` payloads. That
+finding is evidence for the AEP Static Inspector boundary, not an invitation to expose an
+import path.

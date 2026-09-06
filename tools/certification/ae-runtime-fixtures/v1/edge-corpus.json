@@ -1,0 +1,92 @@
+{
+  "$schema": "../edge-corpus.schema.json",
+  "version": 1,
+  "id": "bo0a-alpha-edge-corpus-v1",
+  "phase": "BO0a",
+  "scope": "Alpha-vector subset only. LOWER_THIRD controls, cue map and approved third-party plugin remain separate BO0a work.",
+  "fixture": {
+    "file": "fixtures/bo0a-alpha-edges.aep",
+    "sha256": "1cdfb5f808c0104bcd22fadc6c28639d868782d3405a5bd60ce870c882739a06",
+    "authoringCommand": "fixture <absolute path> edge-corpus",
+    "aeBuild": "26.3",
+    "pluginSet": ["GrapiXRuntimeAdapter.aex"],
+    "fonts": [],
+    "media": [],
+    "declaredControls": [],
+    "acceptedControlValues": {},
+    "cueMap": [],
+    "expectedDependencies": {
+      "fonts": [],
+      "media": [],
+      "effects": [],
+      "missing": []
+    }
+  },
+  "render": {
+    "width": 640,
+    "height": 360,
+    "pixelAspect": "1/1",
+    "frameRate": "25/1",
+    "frame": 0,
+    "bitDepth": 8,
+    "checkoutChannelOrder": "argb",
+    "sourceAlphaMode": "premultiplied-black",
+    "expectedFill": "RGBA colour premultiplied against black",
+    "expectedKey": "alpha channel from the same frame",
+    "renderSettingsTemplate": "Best Settings",
+    "outputModuleTemplate": "TIFF Sequence with Alpha",
+    "referencePath": "After Effects Render Queue through aerender.exe; never adapter checkout"
+  },
+  "comparison": {
+    "comparableUnit": "decoded RGBA pixel bytes, excluding TIFF metadata and row padding",
+    "maxChannelDelta": 0,
+    "maxDifferingPixels": 0,
+    "premultipliedInvariant": "R <= A && G <= A && B <= A for every pixel",
+    "straightFalsification": "Cases with requireStraightDifference=true must differ from the premultiplied reference"
+  },
+  "cases": [
+    {
+      "id": "opaque",
+      "composition": "BO0a-Opaque",
+      "vector": "opaque",
+      "expect": { "opaque": "all", "transparent": 0, "partial": 0, "requireStraightDifference": false }
+    },
+    {
+      "id": "zero-alpha",
+      "composition": "BO0a-ZeroAlpha",
+      "vector": "zero alpha",
+      "expect": { "opaque": 0, "transparent": "all", "partial": 0, "requireStraightDifference": false }
+    },
+    {
+      "id": "hard-edge",
+      "composition": "BO0a-HardEdge",
+      "vector": "axis-aligned saturated hard edge",
+      "expect": { "opaque": "some", "transparent": "some", "partial": 0, "requireStraightDifference": false }
+    },
+    {
+      "id": "antialiased-edge",
+      "composition": "BO0a-AntialiasedEdge",
+      "vector": "rotated saturated hard edge rasterised by AE",
+      "expect": { "opaque": "some", "transparent": "some", "partial": "some", "requireStraightDifference": true }
+    },
+    {
+      "id": "gradient-50",
+      "composition": "BO0a-Gradient50",
+      "vector": "large feathered mask producing a multi-value alpha gradient through 50%",
+      "expect": { "opaque": 0, "transparent": "some", "partial": "some", "alphaIncludes": 128, "minDistinctAlphaValues": 200, "requireStraightDifference": true }
+    },
+    {
+      "id": "coloured-translucent-shadow",
+      "composition": "BO0a-ColouredTranslucentShadow",
+      "vector": "violet 62% opacity feathered shadow behind an opaque orange caster",
+      "expect": { "opaque": "some", "transparent": "some", "partial": "some", "requireStraightDifference": true }
+    },
+    {
+      "id": "premultiplied-black-edge",
+      "composition": "BO0a-PremultipliedBlackEdge",
+      "vector": "bright white through a narrow feathered mask on transparent black",
+      "expect": { "opaque": "some", "transparent": "some", "partial": "some", "requireStraightDifference": true }
+    }
+  ],
+  "expectedFailure": null
+}

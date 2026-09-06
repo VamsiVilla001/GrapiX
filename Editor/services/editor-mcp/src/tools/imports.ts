@@ -138,7 +138,7 @@ The result is a converted document — it is not yet a stored scene. Review the 
 
 Args:
   - file_path (string) or file_base64 + file_name (string): the design file.
-  - options (object): importer options, e.g. { "rasterizeEffects": false, "flattenGroups": false }.
+  - options (object): importer options. Supported keys: preserveHierarchy, keepTextEditable, importHiddenLayers, assetMode ("embed" | "link"), convertComponents, missingFontPolicy ("preserve-name" | "replace"), replacementFontFamily, unsupportedFeaturePolicy ("closest-editable" | "nested-composition" | "rasterize-layer"), scale, targetWidth, targetHeight, selectedPageIds, selectedNodeIds. Unknown keys are rejected.
   - response_format ('markdown' | 'json'): output format (default: 'json' is usually more useful).
 
 Returns:
@@ -148,7 +148,7 @@ Error handling: an unsupported or corrupt file returns 422 DESIGN_IMPORT_FAILED 
     inputSchema: z
       .object({
         ...fileSourceFields,
-        options: z.record(z.unknown()).optional().describe("Design importer options."),
+        options: z.record(z.unknown()).optional().describe("Strict DesignImportOptions object; unknown keys are rejected by the API."),
         response_format: responseFormatField
       })
       .strict(),
@@ -188,7 +188,7 @@ The file key and node ids are extracted from the link, so paste it as copied. Br
 
 Args:
   - source (object): { "url": "https://www.figma.com/design/<key>/<name>?node-id=1-2", "nodeIds": ["3:4"], "transport": "auto" | "rest" | "desktop-mcp", "accessToken": "figd_...", "tokenKind": "personal" | "oauth" }.
-    url is required. nodeIds adds to whatever the link carries; with none, the whole file is imported (REST) or the current Figma selection is used (MCP).
+    url is required. nodeIds are unioned with IDs in the link (explicit IDs first; duplicates removed). With no IDs, REST imports the whole file; Desktop MCP rejects the request rather than importing the current Figma selection. Desktop MCP also verifies the linked file key when its metadata exposes one and reports unverified provenance otherwise.
     transport defaults to "auto": REST when a token is available, Desktop MCP otherwise.
     accessToken is used for this request only and is never stored; FIGMA_ACCESS_TOKEN on the project service works instead.
   - options (object): importer options.
@@ -228,7 +228,7 @@ Transport differences that matter: **REST** returns Figma's own document JSON, s
     title: "Import a scene script",
     description: `Import a JavaScript scene script, statically inspected against the SDK trust boundary.
 
-Scripts run in a control sandbox with declared permissions — they can read and write scene data and respond to events, they cannot reach the renderer, the network or the file system. The inspection rejects a script that tries, before it is ever stored.
+Scripts run in a control sandbox with declared permissions — they can read and write scene data and respond to events, they cannot reach the renderer, the network or the file system. The source is parsed into an AST (TypeScript compiler) and walked for forbidden globals and APIs, including computed access such as globalThis['pro'+'cess'] — it is not a regex over the raw text. Inspection is a strong static gate, not a proof: it rejects the known escape hatches before the script is ever stored, and the sandbox is the second line of defense.
 
 Args:
   - file_path (string) or file_base64 + file_name (string): the .js/.mjs file.

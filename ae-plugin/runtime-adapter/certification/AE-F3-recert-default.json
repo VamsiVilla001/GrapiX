@@ -1,0 +1,58 @@
+{
+  "phase": "AE-F3",
+  "kind": "render-frame-throughput-probe",
+  "recordedAt": "2026-08-19T07:19:58.194Z",
+  "claim": "Measures 1920x1080 RENDER_FRAME throughput over the runtime protocol, pipelined, with the ring drained by ae-ring-drain. It is not the 30-minute soak and closes no gate.",
+  "adapter": {
+    "sha256": "a24f2b1be3f29b596960e6506dab1cb72485ae34c05b6d26713f03aa14a63ba0",
+    "aeVersion": "26.3",
+    "idleMaxOpsPerCallback": 16,
+    "idleBudgetMicros": 45000
+  },
+  "request": {
+    "composition": "LOWER_THIRD",
+    "compositionItemId": 1,
+    "geometry": "1920x1080",
+    "clock": {
+      "frameDuration": "800",
+      "timeScale": "23976"
+    },
+    "frames": 1200,
+    "inFlight": 8,
+    "pinnedRate": "2997/100",
+    "targetFps": 29.97
+  },
+  "measured": {
+    "completed": 1200,
+    "rendered": 1200,
+    "refused": 0,
+    "elapsedSeconds": 14.288,
+    "framesPerSecond": 83.984,
+    "realTimeRatio": 2.802,
+    "latencyMs": {
+      "p50": 81.341,
+      "p95": 120.463,
+      "p99": 126.701,
+      "max": 166.956
+    }
+  },
+  "idleCadence": {
+    "callbacks": 241,
+    "meanPeriodMicros": 59518,
+    "framesPerCallback": 4.98,
+    "maxGapMicros": 199365
+  },
+  "ring": {
+    "published": 1184,
+    "backpressure": 16
+  },
+  "renderEvents": {
+    "ready": 1184,
+    "failed": 16,
+    "failureCodes": [
+      "FRAME_RING_BACKPRESSURE"
+    ]
+  },
+  "refusalCodes": [],
+  "payloadWritten": false
+}

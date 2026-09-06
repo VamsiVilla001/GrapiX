@@ -5,6 +5,9 @@ import type {
   FontLoadStatus
 } from "@grapix/shared-types";
 
+import { apiBaseUrl } from "../lib/apiClient";
+import { fetchProjectAsset, resolveProjectAssetUrl } from "../lib/projectAssets";
+
 export interface RuntimeFontFaceState {
   faceId: string;
   status: FontLoadStatus;
@@ -130,7 +133,8 @@ export class ProjectFontRegistry {
         browserFace = undefined;
       }
       if (!browserFace) {
-        const response = await fetch(url);
+        // The content route requires the session bearer; fetchProjectAsset attaches it.
+        const response = await fetchProjectAsset(url);
         if (!response.ok) {
           throw new Error(`Font asset ${assetId} returned HTTP ${response.status}`);
         }
@@ -170,7 +174,11 @@ export const projectFontRegistry = new ProjectFontRegistry();
 function resolveAssetUrl(assetId: string, assets: AssetLibraryItem[]): string | undefined {
   const asset = assets.find((item) => item.assetId === assetId);
   if (!asset) return undefined;
-  return asset.source || `http://127.0.0.1:4100/api/assets/${encodeURIComponent(assetId)}/content`;
+  // A project font is stored like any other asset, so its source resolves the same way: a relative
+  // path against the service that owns it, an absolute URL untouched.
+  return asset.source
+    ? resolveProjectAssetUrl(asset.source)
+    : `${apiBaseUrl}/api/assets/${encodeURIComponent(assetId)}/content`;
 }
 
 function fontShorthand(face: FontFaceDefinition): string {

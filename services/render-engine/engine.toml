@@ -22,7 +22,7 @@ websocket-port = 4400
 # on Windows, a socket path elsewhere.
 # ipc-endpoint = "\\\\.\\pipe\\grapix-render-engine"
 allowed-origins = []
-# Clients permitted to connect. Empty means any that presents a valid token.
+# Clients permitted to connect. Empty means any that presents a valid access token.
 client-allowlist = []
 # TLS is terminated at a reverse proxy today; the transport is ready for in-process
 # TLS but does not yet do it. TLS/mTLS is V2; see docs/architecture.md.
@@ -30,13 +30,19 @@ client-allowlist = []
 # tls-private-key-path = "certs/engine.key"
 
 [auth]
-# A loopback engine may run without a token. Any non-loopback bind-address forces
-# this on, and the engine refuses to start without one — silently exposing an
-# unauthenticated renderer to a venue network is the one mistake no default may
-# permit.
+# With `required = true`, every connection - on every transport, including loopback and the
+# local pipe - must present a valid access token, and every command is checked against the
+# permissions that token carries. Any non-loopback bind-address forces it on, and the engine
+# refuses to start without a signing secret: silently exposing an unauthenticated renderer to
+# a venue network is the one mistake no default may permit.
+#
+# With `required = false` a local peer may connect without a credential as an anonymous Editor,
+# which is the development convenience. Remote peers are refused whatever the mode.
 required = false
-# Prefer token-file over token: an inline secret ends up in version control.
-# token-file = "../../data/render-engine.token"
+# The HMAC key access tokens are verified against, shared with whichever service mints them.
+# Prefer signing-secret-file: an inline secret ends up in version control, and a signing key
+# in git is every account in the facility.
+# signing-secret-file = "../../data/render-engine.signing-secret"
 
 [gpu]
 # No window, no surface. Required on a server; correct almost everywhere.
@@ -153,14 +159,14 @@ ndi-frame-pool-slots = 4
 #
 # Remote network engine (a token is mandatory; put TLS in front of it):
 #   grapix-render-engine --config engine.toml \
-#     --bind 0.0.0.0 --port 4400 --token-file /etc/grapix/engine.token
+#     --bind 0.0.0.0 --port 4400 --signing-secret-file /etc/grapix/engine.signing-secret
 #
 # Dedicated GPU workstation, adapter pinned:
 #   grapix-render-engine --config engine.toml \
 #     --bind 0.0.0.0 --preferred-gpu RTX --preferred-backend vulkan
 #
 # Headless server:
-#   GRAPIX_ENGINE_TOKEN_FILE=/etc/grapix/engine.token \
+#   GRAPIX_ENGINE_AUTH_SECRET_FILE=/etc/grapix/engine.signing-secret \
 #   grapix-render-engine --config engine.toml --bind 0.0.0.0 --headless true
 #
 # Three render nodes from one file, each with its own identity and port:

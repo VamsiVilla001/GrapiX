@@ -284,14 +284,44 @@ test("WGSL assets are protected while shader definitions reference their source 
   assert.deepEqual(findAssetUsageDetails(document, "asset_shader"), { materialIds: [], shaderIds: [shader.shaderId], objectIds: [] });
 });
 
-test("scene history performs reversible undo and redo snapshots", () => {
+test("scene history performs reversible undo and redo snapshots, carrying each step's description", () => {
   const original = scene([], []);
   const changed = { ...original, name: "Changed" };
-  const undoStack = appendSceneHistory([], original);
+  // An entry is the document *before* a change, labelled with the change it reverts, so a caller can
+  // say "Undo Rename scene" rather than undoing anonymously.
+  const undoStack = appendSceneHistory([], {
+    scene: original,
+    label: "Rename scene",
+    scope: "scene-manager"
+  });
+
   const undone = undoSceneHistory(changed, undoStack, []);
   assert.equal(undone.scene.name, "Material Test");
+  assert.equal(undone.applied.label, "Rename scene");
+  assert.equal(undone.applied.scope, "scene-manager");
+  // Redo re-applies the same change, so it is described the same way.
+  assert.equal(undone.redoStack.at(-1).label, "Rename scene");
+
   const redone = redoSceneHistory(undone.scene, undone.undoStack, undone.redoStack);
   assert.equal(redone.scene.name, "Changed");
+  assert.equal(redone.applied.label, "Rename scene");
+  assert.equal(redone.undoStack.at(-1).label, "Rename scene");
+});
+
+test("scene history refuses to move past either end", () => {
+  const original = scene([], []);
+  assert.equal(undoSceneHistory(original, [], []), null);
+  assert.equal(redoSceneHistory(original, [], []), null);
+});
+
+test("scene history is bounded, dropping the oldest step first", () => {
+  const original = scene([], []);
+  let stack = [];
+  for (let index = 0; index < 5; index += 1) {
+    stack = appendSceneHistory(stack, { scene: original, label: `step ${index}` }, 3);
+  }
+  assert.equal(stack.length, 3);
+  assert.deepEqual(stack.map((entry) => entry.label), ["step 2", "step 3", "step 4"]);
 });
 
 test("TypeScript and Rust consume the declared 304-byte gradient-capable uniform contract", async () => {

@@ -1,0 +1,410 @@
+{
+  "cueMap": {
+    "rate": {
+      "numerator": 60000,
+      "denominator": 1001
+    },
+    "markers": [
+      {
+        "text": "GRAPIX:CUE",
+        "time": {
+          "value": "0",
+          "scale": "60000"
+        },
+        "frame": 0,
+        "deadlineNanos": 0
+      },
+      {
+        "text": "GRAPIX:IN",
+        "time": {
+          "value": "1001",
+          "scale": "60000"
+        },
+        "frame": 1,
+        "deadlineNanos": 16683333
+      },
+      {
+        "text": "GRAPIX:HOLD",
+        "time": {
+          "value": "2002",
+          "scale": "60000"
+        },
+        "frame": 2,
+        "deadlineNanos": 33366666
+      },
+      {
+        "text": "GRAPIX:CONTINUE:1",
+        "time": {
+          "value": "3003",
+          "scale": "60000"
+        },
+        "frame": 3,
+        "deadlineNanos": 50050000
+      },
+      {
+        "text": "GRAPIX:OUT",
+        "time": {
+          "value": "4004",
+          "scale": "60000"
+        },
+        "frame": 4,
+        "deadlineNanos": 66733333
+      },
+      {
+        "text": "GRAPIX:END",
+        "time": {
+          "value": "5005",
+          "scale": "60000"
+        },
+        "frame": 5,
+        "deadlineNanos": 83416666
+      }
+    ]
+  },
+  "rateVectors": [
+    {
+      "rate": {
+        "numerator": 25,
+        "denominator": 1
+      },
+      "vectors": [
+        {
+          "frame": 0,
+          "deadlineNanos": 0
+        },
+        {
+          "frame": 1,
+          "deadlineNanos": 40000000
+        },
+        {
+          "frame": 25,
+          "deadlineNanos": 1000000000
+        }
+      ]
+    },
+    {
+      "rate": {
+        "numerator": 30000,
+        "denominator": 1001
+      },
+      "vectors": [
+        {
+          "frame": 0,
+          "deadlineNanos": 0
+        },
+        {
+          "frame": 1,
+          "deadlineNanos": 33366666
+        },
+        {
+          "frame": 30000,
+          "deadlineNanos": 1001000000000
+        }
+      ]
+    },
+    {
+      "rate": {
+        "numerator": 60000,
+        "denominator": 1001
+      },
+      "vectors": [
+        {
+          "frame": 2,
+          "deadlineNanos": 33366666
+        },
+        {
+          "frame": 215784,
+          "deadlineNanos": 3599996400000
+        }
+      ]
+    }
+  ],
+  "compositionClocks": [
+    {
+      "id": "LOWER_THIRD-measured-29.97",
+      "note": "The pinned BO0a fixture, as AEGP_GetCompFrameDuration reported it. Scale 23976, frame duration 800: exactly 29.97.",
+      "clock": {
+        "frameDuration": "800",
+        "timeScale": "23976"
+      },
+      "rate": {
+        "numerator": 2997,
+        "denominator": 100
+      },
+      "frames": [
+        {
+          "frame": 0,
+          "compositionTime": {
+            "value": "0",
+            "scale": "23976"
+          },
+          "deadlineNanos": 0
+        },
+        {
+          "frame": 1,
+          "compositionTime": {
+            "value": "800",
+            "scale": "23976"
+          },
+          "deadlineNanos": 33366700
+        },
+        {
+          "frame": 2,
+          "compositionTime": {
+            "value": "1600",
+            "scale": "23976"
+          },
+          "deadlineNanos": 66733400
+        },
+        {
+          "frame": 3,
+          "compositionTime": {
+            "value": "2400",
+            "scale": "23976"
+          },
+          "deadlineNanos": 100100100
+        },
+        {
+          "frame": 4,
+          "compositionTime": {
+            "value": "3200",
+            "scale": "23976"
+          },
+          "deadlineNanos": 133466800
+        },
+        {
+          "frame": 5,
+          "compositionTime": {
+            "value": "4000",
+            "scale": "23976"
+          },
+          "deadlineNanos": 166833500
+        },
+        {
+          "frame": 6,
+          "compositionTime": {
+            "value": "4800",
+            "scale": "23976"
+          },
+          "deadlineNanos": 200200200
+        },
+        {
+          "frame": 300,
+          "compositionTime": {
+            "value": "240000",
+            "scale": "23976"
+          },
+          "deadlineNanos": 10010010010
+        }
+      ]
+    },
+    {
+      "id": "ntsc-30000-1001-native-scale",
+      "note": "A composition whose own scale does carry 30000/1001, so the declared rate and the scale are one clock.",
+      "clock": {
+        "frameDuration": "1001",
+        "timeScale": "30000"
+      },
+      "rate": {
+        "numerator": 30000,
+        "denominator": 1001
+      },
+      "frames": [
+        {
+          "frame": 0,
+          "compositionTime": {
+            "value": "0",
+            "scale": "30000"
+          },
+          "deadlineNanos": 0
+        },
+        {
+          "frame": 1,
+          "compositionTime": {
+            "value": "1001",
+            "scale": "30000"
+          },
+          "deadlineNanos": 33366666
+        },
+        {
+          "frame": 2,
+          "compositionTime": {
+            "value": "2002",
+            "scale": "30000"
+          },
+          "deadlineNanos": 66733333
+        },
+        {
+          "frame": 30000,
+          "compositionTime": {
+            "value": "30030000",
+            "scale": "30000"
+          },
+          "deadlineNanos": 1001000000000
+        }
+      ]
+    },
+    {
+      "id": "pal-25",
+      "note": "An integer rate, where scale and rate agree trivially.",
+      "clock": {
+        "frameDuration": "1",
+        "timeScale": "25"
+      },
+      "rate": {
+        "numerator": 25,
+        "denominator": 1
+      },
+      "frames": [
+        {
+          "frame": 0,
+          "compositionTime": {
+            "value": "0",
+            "scale": "25"
+          },
+          "deadlineNanos": 0
+        },
+        {
+          "frame": 1,
+          "compositionTime": {
+            "value": "1",
+            "scale": "25"
+          },
+          "deadlineNanos": 40000000
+        },
+        {
+          "frame": 25,
+          "compositionTime": {
+            "value": "25",
+            "scale": "25"
+          },
+          "deadlineNanos": 1000000000
+        }
+      ]
+    }
+  ],
+  "compositionRefusals": [
+    {
+      "id": "declared-ntsc-against-29.97-scale",
+      "note": "The measured BO0a failure: asking a 29.97 composition for a 30000/1001 cue. AE quantised 1001/30000 to 800/23976 - 24 apart under cross-multiplication - so the rate is refused before any SET_TIME.",
+      "clock": {
+        "frameDuration": "800",
+        "timeScale": "23976"
+      },
+      "rate": {
+        "numerator": 30000,
+        "denominator": 1001
+      },
+      "refusal": "RATE_NOT_IN_COMPOSITION_SCALE"
+    },
+    {
+      "id": "declared-25-against-29.97-scale",
+      "note": "An unrelated rate against the same composition.",
+      "clock": {
+        "frameDuration": "800",
+        "timeScale": "23976"
+      },
+      "rate": {
+        "numerator": 25,
+        "denominator": 1
+      },
+      "refusal": "RATE_NOT_IN_COMPOSITION_SCALE"
+    }
+  ],
+  "compositionScaleRestatements": [
+    {
+      "id": "authored-in-30000ths-is-off-composition-frame",
+      "note": "The exact instant AE refused as TIME_NOT_REPRESENTABLE, quantising it to 800/23976.",
+      "time": {
+        "value": "1001",
+        "scale": "30000"
+      },
+      "clock": {
+        "frameDuration": "800",
+        "timeScale": "23976"
+      },
+      "refusal": "NOT_ON_FRAME"
+    },
+    {
+      "id": "one-second-is-off-composition-frame",
+      "note": "A whole second is composition frame 29.97 at this scale, so it is not a frame.",
+      "time": {
+        "value": "1",
+        "scale": "1"
+      },
+      "clock": {
+        "frameDuration": "800",
+        "timeScale": "23976"
+      },
+      "refusal": "NOT_ON_FRAME"
+    },
+    {
+      "id": "composition-frame-1-round-trips",
+      "note": "The instant AE accepted and echoed back unchanged.",
+      "time": {
+        "value": "800",
+        "scale": "23976"
+      },
+      "clock": {
+        "frameDuration": "800",
+        "timeScale": "23976"
+      },
+      "compositionTime": {
+        "value": "800",
+        "scale": "23976"
+      },
+      "compositionFrame": 1
+    },
+    {
+      "id": "zero-is-representable-in-any-scale",
+      "note": "AE accepted a requested 0/30000 and reported 0/23976.",
+      "time": {
+        "value": "0",
+        "scale": "30000"
+      },
+      "clock": {
+        "frameDuration": "800",
+        "timeScale": "23976"
+      },
+      "compositionTime": {
+        "value": "0",
+        "scale": "23976"
+      },
+      "compositionFrame": 0
+    },
+    {
+      "id": "coarser-authored-scale-restates-exactly",
+      "note": "A marker authored in 2997ths of a second is composition frame 1, restated into the composition's scale.",
+      "time": {
+        "value": "100",
+        "scale": "2997"
+      },
+      "clock": {
+        "frameDuration": "800",
+        "timeScale": "23976"
+      },
+      "compositionTime": {
+        "value": "800",
+        "scale": "23976"
+      },
+      "compositionFrame": 1
+    },
+    {
+      "id": "whole-second-on-a-composition-frame",
+      "note": "100 seconds is exactly composition frame 2997 at 29.97.",
+      "time": {
+        "value": "100",
+        "scale": "1"
+      },
+      "clock": {
+        "frameDuration": "800",
+        "timeScale": "23976"
+      },
+      "compositionTime": {
+        "value": "2397600",
+        "scale": "23976"
+      },
+      "compositionFrame": 2997
+    }
+  ]
+}

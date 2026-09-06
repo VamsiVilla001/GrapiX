@@ -1,0 +1,21 @@
+{
+  "phase": "BO0a",
+  "role": "independent reference frames, exported through After Effects Render Queue",
+  "recordedAt": "2026-08-17T05:38:52Z",
+  "aeProductVersion": "26.3",
+  "aerender": "C:/Program Files/Adobe/Adobe After Effects 2026/Support Files/aerender.exe",
+  "project": "lower-third.aep",
+  "projectSha256": "903406290b24405d3b1ff1bbd5a6c9999dc3e1e66c53989647d5eb695a06439c",
+  "composition": "LOWER_THIRD",
+  "startFrame": 0,
+  "endFrame": 0,
+  "renderSettingsTemplate": "Best Settings",
+  "outputModuleTemplate": "TIFF Sequence with Alpha",
+  "aerenderExitCode": 0,
+  "frameCount": 1,
+  "independence": "Frames come from AE's Render Queue through aerender.exe, not through the adapter's checkout path. The GrapiX adapter is resident in the render process because it lives in the Plug-ins folder, but it issues no command during an export and contributes no pixels.",
+  "comparableUnit": "pixelSha256 — the decoded strip payload. Never fileSha256: After Effects embeds per-render XMP metadata, so three renders of one unchanged frame produced three different file digests over byte-identical pixels. A file digest would report a pixel defect that does not exist.",
+  "frames": [
+    {"file":"frame_00000.tif","fileBytes":8314100,"fileSha256":"f42a948d941ff51df873deb9d681221beb2840075df259f40d187d6198fc97f5","pixelSha256":"a88d2bd6a9f12fd25d1c01c14946b5c2003fbda5657a7c1bb1e8bf1277b63194","payloadBytes":8294400,"width":1920,"height":1080,"bitsPerSample":[8,8,8,8],"samplesPerPixel":4,"photometricInterpretation":2,"planarConfiguration":1,"declaredAlphaAssociation":"unspecified","software":"Adobe After Effects 2026 (Windows)","payloadMatchesGeometry":true}
+  ]
+}

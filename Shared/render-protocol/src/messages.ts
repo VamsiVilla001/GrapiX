@@ -7,7 +7,7 @@
  * renderer internals" by the compiler rather than by review.
  */
 
-import type { SceneDocument } from "@grapix/shared-types";
+import type { AeExactTime, SceneDocument } from "@grapix/shared-types";
 import type { StageDocument } from "@grapix/stage-model";
 import type { ScenePatch } from "@grapix/scene-model";
 
@@ -62,8 +62,19 @@ export interface HelloReplyPayload {
   softwareVersion: string;
   protocolVersion: number;
   state: EngineState;
-  /** True when the engine wants `connection.authenticate` before anything else. */
+  /**
+   * True when this engine grants operator authority only to a bearer credential.
+   *
+   * An engine-level fact, not an instruction to this connection: a local IPC session is
+   * already a valid Editor session and needs no credential. Read it together with
+   * `connectionRole`, which names the authority this connection actually received.
+   */
   authenticationRequired: boolean;
+  /**
+   * The authority the engine granted this connection, derived from the credential and the
+   * transport - never from the `clientRole` the client asked for.
+   */
+  connectionRole?: "editor" | "playout";
 }
 
 export interface AuthenticatePayload {
@@ -609,10 +620,34 @@ export function isLiveOutputAdapter(adapterId: string): boolean {
   return (LIVE_OUTPUT_ADAPTER_IDS as readonly string[]).includes(adapterId);
 }
 
+export const AE_FRAME_COLOR_FORMATS = ["bgra8", "rgba8", "argb8"] as const;
+export type AeFrameColorFormat = (typeof AE_FRAME_COLOR_FORMATS)[number];
+
+/** Metadata for one frame in the adapter-owned shared-memory ring. Never carries pixels. */
+export interface AeFrameDescriptor {
+  ringGeneration: number;
+  slotIndex: number;
+  frameId: number;
+  dataRevision: number;
+  compositionItemId: number;
+  requestedTime: AeExactTime;
+  evaluatedTime: AeExactTime;
+  presentationDeadlineNanos: number;
+  width: number;
+  height: number;
+  stride: number;
+  colorFormat: AeFrameColorFormat;
+  alphaMode: "premultiplied" | "straight" | "opaque";
+  colorSpace: string;
+  status: "ready" | "late" | "missed";
+}
+
 export interface EngineOutputFormat {
   width: number;
   height: number;
   frameRate: { numerator: number; denominator: number };
+  /** Defaults to bgra8 when an older configuration omits it. */
+  colorFormat?: AeFrameColorFormat;
   alphaMode?: "premultiplied" | "straight" | "opaque";
   /** Project colour space, so an adapter can tag its stream. */
   colorSpace?: string;
@@ -677,6 +712,30 @@ export interface OutputsReplyPayload {
   }[];
 }
 
+/** Playout attaches the runtime it launched; the session secret never enters persistent state. */
+export interface AeContainerLoadPayload {
+  sessionId: string;
+  token: string;
+  compositionItemId: number;
+  clock: { frameDuration: string; timeScale: string };
+  format: { width: number; height: number; colorSpace?: string; alphaMode?: string };
+  dataRevision?: number;
+  warmUpFrame?: number;
+}
+
+export interface AeContainerLoadedReplyPayload {
+  sessionId: string;
+  compositionItemId: number;
+  ringGeneration: number;
+  ringSlots: number;
+  dataRevision: number;
+  warmUpFrame: number;
+  warmUpRequested: boolean;
+  geometry: { width: number; height: number; stride: number };
+  clock: { frameDuration: string; timeScale: string };
+  programFrameRate: { numerator: number; denominator: number };
+}
+
 // ---------------------------------------------------------------------------
 // Payload map
 // ---------------------------------------------------------------------------
@@ -734,6 +793,8 @@ export interface EnginePayloadMap {
   "output.stop": OutputStopPayload;
   "output.remove": OutputRemovePayload;
 
+  "ae.container.load": AeContainerLoadPayload;
+
   "reply.ack": AckPayload;
   "reply.error": EngineErrorPayload;
   "reply.hello": HelloReplyPayload;
@@ -746,6 +807,7 @@ export interface EnginePayloadMap {
   "reply.preview": PreviewReplyPayload;
   "reply.editorView": EditorViewFrameMetadata;
   "reply.outputs": OutputsReplyPayload;
+  "ae.container.loaded": AeContainerLoadedReplyPayload;
 
   "event.engineState": EngineStateEventPayload;
   "event.sceneLifecycle": SceneLifecycleEventPayload;

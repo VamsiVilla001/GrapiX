@@ -3,7 +3,7 @@
  *
  * "Publish" here means exactly what `docs/architecture.md` says it means:
  * validate the mutable scene, then build a versioned, checksum-addressed
- * `.gfxpkg`. It does **not** load anything into the engine, promote a revision,
+ * `.gpxpkg`. It does **not** load anything into the engine, promote a revision,
  * or put a graphic on air. Playout stages and independently validates the
  * package, promotes the immutable revision, and only then can an operator take
  * it. Publishing never patches a Program instance in place (invariant 6).
@@ -129,7 +129,7 @@ Returns:
   defineTool({
     name: "publish_scene",
     title: "Build a publishable scene package",
-    description: `Validate a stored scene and build a versioned, checksum-addressed .gfxpkg package.
+    description: `Validate a stored scene and build a versioned, checksum-addressed .gpxpkg package.
 
 What this does: runs preflight, saves the scene, builds the package, and stores it in the project's package directory. The package manifest pins the video profile, frame rate, colour space, required fonts, shaders and codecs, and a SHA-256 for every packaged file.
 

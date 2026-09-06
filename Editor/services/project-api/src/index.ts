@@ -8,8 +8,15 @@ import {
   type RundownDocument,
   type SceneDocument
 } from "@grapix/shared-types";
+import {
+  AePackageError,
+  AeRuntimeContainerError,
+  type AePackageAnimationAction,
+  type CreateAeRuntimeContainerRequest,
+  type UpdateAeRuntimeContainerRequest
+} from "@grapix/ae-runtime-contract";
 import Fastify, { type FastifyInstance } from "fastify";
-import { timingSafeEqual } from "node:crypto";
+
 import { pathToFileURL } from "node:url";
 import { inspectAeImport } from "./importers/aeImporter.js";
 import { validateImportedAsset } from "./importers/assetValidation.js";
@@ -21,8 +28,32 @@ import { inspectMediaImport } from "./importers/mediaImporter.js";
 import { inspectSceneScript } from "./importers/sceneScriptImporter.js";
 import {
   DesignImportManager,
-  parseDesignImportOptions
+  parseDesignImportOptions,
+  parseMotionMode
 } from "./importers/design/designImportManager.js";
+import {
+  listAeGraphicVersions,
+  publishAeContainer,
+  validateAeContainerPublish
+} from "./ae/aePublishService.js";
+import { pushAePackageToPlayout } from "./ae/aePlayoutPush.js";
+import {
+  importAeCompositionAsScene,
+  inspectAeProject,
+  listAeProjects,
+  readAeComposition
+} from "./ae/aeProjectBrowser.js";
+import {
+  closeProject,
+  createOrOpenProject,
+  currentProject,
+  ProjectWorkspaceError
+} from "./projectWorkspace.js";
+import { releaseImportFootage } from "./ae/aeImportFootage.js";
+import { PROJECT_FILE_EXTENSION, projectAssetMimeType } from "@grapix/shared-types";
+import nodePath from "node:path";
+import { readFile as nodeReadFile, stat as nodeStat } from "node:fs/promises";
+import { listProjectAssets, resolveProjectAssetPath } from "./projectAssets.js";
 import {
   createFileFontDefinition,
   createLinkedFontDefinition,
@@ -35,22 +66,57 @@ import {
 } from "./fonts/remoteFontResolver.js";
 import { inspectFontFile } from "./fonts/fontMetadata.js";
 import { buildScenePackage } from "./packageBuilder.js";
-import { recordOperatorAction } from "./audit.js";
+
 import {
+  autosaveScene,
+  createAeRuntimeContainer,
   ensureStorage,
+  forgetAeProjectRoot,
   importAssetBuffer,
+  listAeRuntimeContainers,
   listRundowns,
+  listSceneAutosaves,
   listScenes,
+  readAeRuntimeContainer,
+  readProjectImage,
   readRundown,
   readScene,
-  recoverScene,
+  readSceneAutosave,
   readStoredAsset,
   readStoredAssetContent,
+  recoverScene,
+  registerAeProjectPath,
   savePackage,
   saveRundown,
   saveScene,
+  updateAeRuntimeContainer,
   updateScene
 } from "./storage.js";
+import { EditorDiscovery } from "./discovery.js";
+import { describeError, DiagnosticsLog, type DiagnosticRecord } from "./diagnostics.js";
+import {
+  createAuthContext,
+  PUBLIC_ROUTES,
+  recordAudit,
+  requirePermission,
+  requireUser
+} from "./auth.js";
+
+/**
+ * Published in the mDNS TXT record, so a peer can see what it found.
+ *
+ * A literal rather than a read of `package.json`: the bundled service is a single file with no
+ * manifest beside it, and a version that resolves in development but not in an installed build is
+ * worse than one that is maintained by hand.
+ */
+const SERVICE_VERSION = "0.1.0";
+
+declare module "fastify" {
+  interface FastifyInstance {
+    /** The first administrator's generated password, present only on the run that created it. */
+    bootstrapAdminPassword: string | null;
+  }
+}
 
 export interface ApiServerOptions {
   host?: string;
@@ -58,11 +124,53 @@ export interface ApiServerOptions {
   logger?: boolean;
 }
 
-export async function createApiServer(options: Pick<ApiServerOptions, "logger"> = {}): Promise<FastifyInstance> {
+/**
+ * A slot the listener fills once it knows its port.
+ *
+ * `createApiServer` is also used by tests and by embedded callers that never listen, and a service
+ * with no port has nothing to advertise — so discovery cannot be built here. A caller-owned holder
+ * keeps the reference typed and explicit; the alternatives were a Fastify decorator read back
+ * through `Reflect`, or every route taking a parameter it does not use.
+ */
+export interface DiscoveryHolder {
+  current: EditorDiscovery | null;
+}
+
+export interface CreateApiServerOptions extends Pick<ApiServerOptions, "logger"> {
+  discovery?: DiscoveryHolder;
+  /** Test-only: lets a suite stand the service up without a configured signing secret. */
+  signingSecret?: string;
+}
+
+export async function createApiServer(options: CreateApiServerOptions = {}): Promise<FastifyInstance> {
   const app = Fastify({
     logger: options.logger ?? true,
     bodyLimit: 512 * 1024 * 1024
   });
+
+  // Identity and audit, before any route reads a token. If the signing secret is missing the
+  // service cannot verify a single login, so starting anyway would only defer the failure to
+  // the first operator who tries to sign in - fail fast instead.
+  const auth = await createAuthContext({ ...(options.signingSecret ? { signingSecret: options.signingSecret } : {}) });
+  if (auth.bootstrapPassword) {
+    // Surfaced once, on the console, for whoever provisions the facility. Never logged to the
+    // audit sink, never stored, and the bootstrap admin is expected to change it on first
+    // sign-in.
+    console.warn(
+      `[auth] created the first administrator 'admin' with password: ${auth.bootstrapPassword}\n` +
+        "       change it at first sign-in; it is shown this once and stored nowhere."
+    );
+  }
+
+  app.addHook("onClose", async () => {
+    await auth.audit.close();
+  });
+
+  // For whoever provisions the service: the generated password for the first administrator,
+  // available exactly once, in memory, on the instance that just created it. Not logged, not
+  // persisted - a process that wants it reads it here; one that restarts loses it, which is
+  // why the operator is told to change it on first sign-in.
+  app.decorate("bootstrapAdminPassword", auth.bootstrapPassword);
 
   app.addContentTypeParser(
     "application/octet-stream",
@@ -73,12 +181,50 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
   const allowedOrigins = readAllowedApiOrigins();
   const patchWindows = new Map<string, { startedAt: number; count: number }>();
   const sequenceEngines = new Map<string, GrapixSequenceEngine>();
+  const discoveryHolder: DiscoveryHolder = options.discovery ?? { current: null };
   const designImportManager = new DesignImportManager();
+
+  // The author console's service-side half. In memory only, bounded, and never on the path
+  // of a frame: a diagnostic is an aid to the author in front of the machine, and the log is
+  // read back through /api/diagnostics.
+  const diagnostics = new DiagnosticsLog();
+
+  // One SSE stream per open console panel. Written on every record so an open console is live
+  // and a closed one costs nothing; a missed event costs one fetch, not a lost record, because
+  // the UI reconciles with `?since=` against the log itself. Clients that leave without
+  // closing are evicted by heartbeat timeout below.
+  const diagnosticsClients = new Set<(record: DiagnosticRecord) => void>();
+  diagnostics.onRecord((record) => {
+    for (const client of diagnosticsClients) {
+      try {
+        client(record);
+      } catch {
+        // A dead client loses this record; its next poll reconciles from the log.
+      }
+    }
+  });
+
+  // Every uncaught route failure becomes a record before the generic 500 is sent, so the
+  // console shows the throw the route could not explain rather than the UI's "API request
+  // failed with 500".
+  app.setErrorHandler((error, request, reply) => {
+    const detail = describeError(error, "internal");
+    diagnostics.record({
+      level: "error",
+      source: `http ${request.method} ${request.url.split("?")[0]}`,
+      detail
+    });
+    void reply.code(500).send({ ok: false, error: detail.summary });
+  });
 
   await app.register(cors, {
     origin: (origin, callback) => {
       callback(null, origin === undefined || allowedOrigins.has(origin));
-    }
+    },
+    // Declared, not defaulted. The default preflight answer here was `GET,HEAD,POST`, which
+    // blocks the console's DELETE before the browser sends it — the same refusal Playout hit
+    // on its own diagnostics route (see playout-control's CORS registration).
+    methods: ["GET", "HEAD", "POST", "PATCH", "DELETE"]
   });
 
   app.addHook("onRequest", async (request, reply) => {
@@ -91,12 +237,12 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
       });
     }
 
-    const apiToken = process.env.GRAPIX_API_TOKEN?.trim();
-    if (apiToken && request.url !== "/health") {
-      const supplied = readApiToken(request.headers.authorization, request.headers["x-grapix-token"]);
-      if (!safeTokenEqual(apiToken, supplied)) {
-        return reply.code(401).send({ ok: false, error: "API authentication failed" });
-      }
+    // Everything except the public routes needs a verified user. `requireUser` either
+    // attaches it or sends the 401 itself; the check runs on every request, not once at
+    // connect, so an expired or revoked session is refused the moment it is used.
+    const path = request.url.split("?")[0];
+    if (!PUBLIC_ROUTES.has(path) && !requireUser(auth, request, reply)) {
+      return reply;
     }
 
     if (isReadOnlyShowMode() && isMutation(request.method) && !isAllowedShowControl(request.url)) {
@@ -113,21 +259,254 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
     service: "grapix-api",
     time: new Date().toISOString(),
     showMode: isReadOnlyShowMode() ? "read-only" : "edit",
-    authenticationRequired: Boolean(process.env.GRAPIX_API_TOKEN?.trim())
+    authenticationRequired: true,
+    auditDropped: auth.audit.droppedCounts()
   }));
 
+  // ---------------------------------------------------------------------------
+  // Authentication
+  //
+  // The login that issues the tokens everything else requires. A failed login is audited with
+  // the attempt and the address it came from, but never the password that was tried.
+  // ---------------------------------------------------------------------------
+
+  app.post<{ Body: { identifier?: string; password?: string } }>("/api/auth/login", async (request, reply) => {
+    const identifier = request.body?.identifier?.trim() ?? "";
+    const password = request.body?.password ?? "";
+    if (!identifier || !password) {
+      return reply.code(400).send({ ok: false, error: "a username or email and a password are required" });
+    }
+
+    const outcome = await auth.auth.login(identifier, password);
+    if ("failure" in outcome) {
+      // One message for every failure: distinguishing "no such user" from "wrong password" is
+      // a user-enumeration oracle, and the reason is already known to whoever typed it.
+      recordAudit(auth, request, {
+        action: "auth.login-failed",
+        result: "failure",
+        username: identifier,
+        detail: { reason: outcome.failure }
+      });
+      return reply.code(401).send({ ok: false, error: "incorrect username or password" });
+    }
+
+    recordAudit(auth, request, {
+      action: "auth.login",
+      result: "success",
+      userId: outcome.session.user.id,
+      username: outcome.session.user.username,
+      role: outcome.session.user.role,
+      sessionId: outcome.session.id
+    });
+    return {
+      ok: true,
+      user: outcome.session.user,
+      sessionId: outcome.session.id,
+      accessToken: outcome.tokens.accessToken,
+      refreshToken: outcome.tokens.refreshToken,
+      expiresAt: outcome.tokens.accessClaims.exp
+    };
+  });
+
+  app.post<{ Body: { refreshToken?: string } }>("/api/auth/refresh", async (request, reply) => {
+    const refreshToken = request.body?.refreshToken?.trim() ?? "";
+    if (!refreshToken) {
+      return reply.code(400).send({ ok: false, error: "a refresh token is required" });
+    }
+    const outcome = await auth.auth.refresh(refreshToken);
+    if ("failure" in outcome) {
+      return reply.code(401).send({ ok: false, error: "session is not valid; sign in again" });
+    }
+    recordAudit(auth, request, {
+      action: "auth.refresh",
+      result: "success",
+      userId: outcome.session.user.id,
+      username: outcome.session.user.username,
+      role: outcome.session.user.role,
+      sessionId: outcome.session.id
+    });
+    return {
+      ok: true,
+      user: outcome.session.user,
+      sessionId: outcome.session.id,
+      accessToken: outcome.tokens.accessToken,
+      refreshToken: outcome.tokens.refreshToken,
+      expiresAt: outcome.tokens.accessClaims.exp
+    };
+  });
+
+  app.post<{ Body: { sessionId?: string } }>("/api/auth/logout", async (request) => {
+    // Logout needs the user's session to know what to end, so it is authenticated like
+    // everything else; the hook has already attached the user.
+    const sessionId = request.body?.sessionId ?? request.grapixUser?.sessionId ?? "";
+    const ended = sessionId ? auth.auth.logout(sessionId) : false;
+    if (ended) {
+      recordAudit(auth, request, { action: "auth.logout", result: "success" });
+    }
+    return { ok: true, ended };
+  });
+
+  app.get("/api/auth/me", async (request) => ({
+    ok: true,
+    user: request.grapixUser
+  }));
+
+  // ---------------------------------------------------------------------------
+  // Diagnostics
+  //
+  // The tail the author console reads. `?since=` is the highest sequence the console already
+  // holds, so a live console asks for what it does not have rather than re-fetching the
+  // buffer on every event. `latestSequence` is returned even on an empty page so the client
+  // can tell "nothing new" from "empty log".
+  // ---------------------------------------------------------------------------
+
+  app.get<{ Querystring: { since?: string; limit?: string } }>("/api/diagnostics", async (request) => {
+    const since = Number(request.query.since);
+    const limit = Number(request.query.limit);
+    return {
+      ok: true,
+      records: diagnostics.list({
+        ...(Number.isSafeInteger(since) && since > 0 ? { since } : {}),
+        ...(Number.isSafeInteger(limit) && limit > 0 ? { limit } : {})
+      }),
+      latestSequence: diagnostics.latestSequence(),
+      capacity: DiagnosticsLog.CAPACITY
+    };
+  });
+
+  app.delete("/api/diagnostics", async () => ({
+    ok: true,
+    cleared: diagnostics.clear(),
+    latestSequence: diagnostics.latestSequence()
+  }));
+
+  app.get("/api/diagnostics/events", (request, reply) => {
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      connection: "keep-alive",
+      // The route sits behind the same CORS check as everything else; the header is what a
+      // browser EventSource requires to accept the stream cross-origin.
+      ...(request.headers.origin ? { "access-control-allow-origin": request.headers.origin } : {})
+    });
+    reply.raw.write(`event: ready\ndata: ${JSON.stringify({ latestSequence: diagnostics.latestSequence() })}\n\n`);
+
+    const send = (record: DiagnosticRecord) => {
+      reply.raw.write(
+        `event: diagnostics.logged\ndata: ${JSON.stringify({ sequence: record.sequence, level: record.level })}\n\n`
+      );
+    };
+    diagnosticsClients.add(send);
+
+    // A client that closed without the close event firing — a killed tab, a sleeping laptop —
+    // stops answering heartbeats and is evicted, so the set cannot grow with ghosts.
+    const heartbeat = setInterval(() => {
+      try {
+        reply.raw.write(`: heartbeat\n\n`);
+      } catch {
+        // close handler below does the cleanup.
+      }
+    }, 25_000);
+
+    const drop = () => {
+      clearInterval(heartbeat);
+      diagnosticsClients.delete(send);
+    };
+    request.raw.on("close", drop);
+    reply.raw.on("error", drop);
+  });
+
+  // -------------------------------------------------------------------------
+  // Local-link discovery
+  //
+  // The browser UI cannot speak mDNS — there is no multicast API in a page — so it asks this
+  // service where Playout is. That keeps one discovery implementation in the repository instead
+  // of a second, weaker one written against whatever a page can reach.
+  // -------------------------------------------------------------------------
+
+  app.get("/api/discovery", async () => ({
+    ok: true,
+    discovery: discoveryHolder.current?.status() ?? {
+      advertising: false,
+      instance: null,
+      interfaces: [],
+      unavailableReason: "discovery was not started (this service is running without a listener)",
+      playout: null,
+      discoveredPlayout: []
+    }
+  }));
+
+  /**
+   * Where Playout is.
+   *
+   * `?refresh=true` re-proves rather than answering from the trust window — what the Editor UI
+   * sends after a publish has just failed, because the failure is better evidence than the cache.
+   */
+  app.get<{ Querystring: { refresh?: string } }>("/api/discovery/playout", async (request, reply) => {
+    const discovery = discoveryHolder.current;
+    if (!discovery) {
+      return reply.code(503).send({
+        ok: false,
+        error: "This project service is not running a discovery listener, so it cannot locate Playout."
+      });
+    }
+    if (request.query.refresh === "true") await discovery.forgetPlayout();
+
+    const endpoint = await discovery.resolvePlayout();
+    if (!endpoint) {
+      return reply.code(404).send({
+        ok: false,
+        error:
+          "No Playout control service answered — not at its configured address, not on this machine, and nothing on the local link announced one.",
+        remedy:
+          "Start Playout (`npm run dev:playout`). If it runs on another machine, check that machine is on the same switch, or set GRAPIX_PLAYOUT_API_URL here.",
+        discovery: discovery.status()
+      });
+    }
+    return { ok: true, endpoint };
+  });
+
+  // Registered here, before `listen`: Fastify refuses `addHook` on a started instance, and adding
+  // it after listening crashed the service on boot. The goodbye matters — a peer that is not told
+  // keeps offering an operator an Editor that has closed, for the full record lifetime.
+  app.addHook("onClose", async () => {
+    await discoveryHolder.current?.stop();
+  });
+
+  // Authoring and operations, audited. The hook sees the *result*, which is what makes the
+  // log worth keeping: not "a scene was touched" but "this scene edit, by this user, from
+  // this machine, succeeded" - or failed, with the status that explains why.
   app.addHook("onResponse", async (request, reply) => {
     if (!isMutation(request.method)) return;
-    await recordOperatorAction({
-      timestamp: new Date().toISOString(),
-      requestId: request.id,
-      method: request.method,
-      route: request.routeOptions.url ?? request.url.split("?")[0],
-      statusCode: reply.statusCode,
-      actor: isLoopbackAddress(request.ip) ? "local" : "authenticated-remote",
-      remoteAddress: request.ip,
-      contentLength: Number(request.headers["content-length"] ?? 0)
-    });
+    const route = (request.routeOptions.url ?? request.url.split("?")[0]).toLowerCase();
+    const ok = reply.statusCode < 400;
+
+    let action: Parameters<typeof recordAudit>[2]["action"] | null = null;
+    let sceneId: string | null = null;
+    let revision: number | null = null;
+
+    const body = request.body as Record<string, unknown> | undefined;
+    if (route.includes("/api/scenes") && route.includes("publish")) action = "scene.publish";
+    else if (route.includes("/api/scenes") || route.includes("/api/projects")) action = "scene.edit";
+    else if (route.includes("/api/assets")) action = "asset.upload";
+    else if (route.includes("/api/settings") || route.includes("/api/config")) action = "settings.change";
+    else if (route.includes("/api/auth/users")) action = "user.change";
+
+    if (typeof body?.sceneId === "string") sceneId = body.sceneId;
+    if (typeof body?.id === "string") sceneId = sceneId ?? body.id;
+    if (typeof body?.revision === "number") revision = body.revision;
+
+    if (action) {
+      recordAudit(auth, request, {
+        action,
+        result: ok ? "success" : "failure",
+        sceneId,
+        revision,
+        ...(ok ? {} : { error: { code: `HTTP_${reply.statusCode}`, message: `${request.method} ${route}` } }),
+        detail: { route: `${request.method} ${route}`, status: reply.statusCode }
+      });
+    }
   });
 
   app.post<{
@@ -330,6 +709,14 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
     if (!fileName) {
       return reply.code(400).send({ ok: false, error: "fileName is required" });
     }
+    const extension = fileName.toLowerCase().split(".").pop();
+    if ((extension === "aep" || extension === "aepx") &&
+        (!Buffer.isBuffer(request.body) || request.body.length === 0)) {
+      return reply.code(400).send({
+        ok: false,
+        error: "A non-empty binary After Effects project body is required."
+      });
+    }
     const report = inspectAeImport(fileName, request.body);
     return reply.code(report.accepted ? 200 : 422).send({
       ok: report.accepted,
@@ -338,8 +725,10 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
     });
   });
 
+
+
   app.post<{
-    Querystring: { fileName?: string; options?: string };
+    Querystring: { fileName?: string; options?: string; motionMode?: string };
     Body: Buffer;
   }>("/api/import/design-file", async (request, reply) => {
     const fileName = request.query.fileName?.trim();
@@ -347,10 +736,17 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
       return reply.code(400).send({ ok: false, error: "A non-empty PSD, AI/PDF, SVG, or exported Figma JSON file is required." });
     }
     try {
+      /*
+       * Only the mode travels here, never a manifest: this route's body is the design's raw
+       * bytes, so there is nowhere for a second file to ride. That costs nothing for an exported
+       * Figma document, which carries its own prototype data — `design-and-prototype-motion`
+       * works on it unchanged. A bridge manifest needs the Figma route, whose body is JSON.
+       */
       const result = await designImportManager.importFile(
         request.body,
         fileName,
-        parseDesignImportOptions(request.query.options)
+        parseDesignImportOptions(request.query.options),
+        { motionMode: parseMotionMode(request.query.motionMode) }
       );
       return { ok: true, result };
     } catch (error) {
@@ -389,7 +785,531 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
     const asset = await readStoredAssetContent(request.params.assetId);
     if (!asset) return reply.code(404).send({ ok: false, error: "Asset content not found" });
 
-    return reply.type(asset.record.mimeType).send(asset.bytes);
+    // The checksum is the bytes' identity, so it is the etag: a replaced asset (same id, new
+    // bytes) must not satisfy a cache keyed on the URL. Clients that hold decoded bytes — the
+    // Editor's preview blob-URL cache is one — key on this, not on the address.
+    return reply
+      .type(asset.record.mimeType)
+      .header("etag", `"${asset.record.checksum}"`)
+      .send(asset.bytes);
+  });
+
+  /**
+   * Serve a project image by its own path.
+   *
+   * Imported design images live at `images/<scene>/<file>` and the scene references them by exactly
+   * that path — no asset id, no expiring URL. The editor preview, the thumbnail renderer and
+   * Playout's publish all read them through here, so one path in the document works everywhere.
+   *
+   * Wildcard rather than `:scene/:file` so a nested folder is possible later; `readProjectImage`
+   * re-validates every segment, because this route reads whatever the scene tells it to.
+   */
+  app.get<{ Params: { "*": string } }>("/images/*", async (request, reply) => {
+    const image = await readProjectImage(`images/${request.params["*"]}`);
+    if (!image) return reply.code(404).send({ ok: false, error: "Project image not found" });
+
+    // Immutable in practice: a re-import writes a new name when the bytes differ, so a cached copy
+    // can never be the wrong picture.
+    return reply
+
+      .type(image.mimeType)
+      .header("cache-control", "public, max-age=31536000, immutable")
+      .send(image.bytes);
+  });
+  const aeContainerFailure = (error: unknown, reply: Parameters<Parameters<typeof app.setErrorHandler>[0]>[2]) => {
+    if (!(error instanceof AeRuntimeContainerError)) throw error;
+    const status = error.code === "CONTAINER_NOT_FOUND" || error.code === "PROJECT_NOT_FOUND"
+      ? 404
+      : error.code === "PROJECT_DIGEST_MISMATCH" || error.code === "CONTAINER_ALREADY_EXISTS"
+        ? 409
+        : 400;
+    return reply.code(status).send({ ok: false, code: error.code, error: error.message });
+  };
+
+  app.post<{ Body: CreateAeRuntimeContainerRequest }>("/api/ae-runtime/containers", async (request, reply) => {
+    if (!requirePermission(auth, request, reply, "scene.write")) return reply;
+    try {
+      const container = await createAeRuntimeContainer(request.body);
+      recordAudit(auth, request, {
+        action: "scene.edit",
+        result: "success",
+        detail: {
+          containerId: container.id,
+          projectUri: container.projectUri,
+          projectDigest: container.projectDigest
+        }
+      });
+      return reply.code(201).send({ ok: true, container });
+    } catch (error) {
+      return aeContainerFailure(error, reply);
+    }
+  });
+
+  app.get("/api/ae-runtime/containers", async (request, reply) => {
+    if (!requirePermission(auth, request, reply, "scene.write")) return reply;
+    try {
+      return { ok: true, containers: await listAeRuntimeContainers() };
+    } catch (error) {
+      return aeContainerFailure(error, reply);
+    }
+  });
+
+  app.get<{ Params: { containerId: string } }>("/api/ae-runtime/containers/:containerId", async (request, reply) => {
+    if (!requirePermission(auth, request, reply, "scene.write")) return reply;
+    try {
+      const container = await readAeRuntimeContainer(request.params.containerId);
+      return container
+        ? { ok: true, container }
+        : reply.code(404).send({ ok: false, code: "CONTAINER_NOT_FOUND", error: "Runtime container not found" });
+    } catch (error) {
+      return aeContainerFailure(error, reply);
+    }
+  });
+
+  app.patch<{
+    Params: { containerId: string };
+    Body: UpdateAeRuntimeContainerRequest;
+  }>("/api/ae-runtime/containers/:containerId", async (request, reply) => {
+    if (!requirePermission(auth, request, reply, "scene.write")) return reply;
+    try {
+      const container = await updateAeRuntimeContainer(request.params.containerId, request.body ?? {});
+      if (!container) {
+        return reply.code(404).send({
+          ok: false,
+          code: "CONTAINER_NOT_FOUND",
+          error: "Runtime container not found"
+        });
+      }
+      recordAudit(auth, request, {
+        action: "scene.edit",
+        result: "success",
+        detail: { containerId: container.id, status: container.status }
+      });
+      return { ok: true, container };
+    } catch (error) {
+      return aeContainerFailure(error, reply);
+    }
+  });
+
+  /*
+   * Publishing an After Effects graphic.
+   *
+   * `validate` writes nothing and is safe to call as often as an author edits; `publish` allocates
+   * the next immutable version. Both take a container id rather than a project path: the container
+   * is what carries the declared controls and the digest the publish is checked against, and a
+   * path-addressed publish could package a project no container ever validated.
+   */
+  const aePackageFailure = (error: unknown, reply: Parameters<Parameters<typeof app.setErrorHandler>[0]>[2]) => {
+    if (error instanceof AeRuntimeContainerError) return aeContainerFailure(error, reply);
+    if (!(error instanceof AePackageError)) throw error;
+    const status = error.code === "CONTAINER_NOT_FOUND"
+      ? 404
+      : error.code === "VERSION_ALREADY_EXISTS"
+        ? 409
+        : error.code === "VALIDATION_FAILED"
+          ? 422
+          : 400;
+    return reply.code(status).send({
+      ok: false,
+      code: error.code,
+      error: error.message,
+      // The refusals travel with the failure: an author told only "publish refused" has to go
+      // looking for the reason that was already computed.
+      validation: error.validation ?? undefined
+    });
+  };
+
+  /*
+   * The design-time browser: which projects exist, what is inside one, and what a composition's
+   * layers offer. Read from the binary rather than from a running After Effects, so an author can
+   * choose what to publish without a licensed application open.
+   */
+  app.get("/api/ae/projects", async (request, reply) => {
+    if (!requirePermission(auth, request, reply, "scene.write")) return reply;
+    try {
+      return { ok: true, projects: await listAeProjects() };
+    } catch (error) {
+      return aePackageFailure(error, reply);
+    }
+  });
+
+  /*
+   * Choosing a project is what makes it readable.
+   *
+   * The allowlist still refuses everything outside it; this is the act that adds to it, so an
+   * author can point GrapiX at a project without an environment variable having been set before the
+   * service started. It takes the path of a `.aep` and registers the folder that holds it — never a
+   * folder the caller names directly.
+   */
+  app.post<{ Body: { path?: string } }>("/api/ae/projects/register", async (request, reply) => {
+    if (!requirePermission(auth, request, reply, "scene.write")) return reply;
+    const projectPath = request.body?.path?.trim();
+    if (!projectPath) return reply.code(400).send({ ok: false, error: "path is required" });
+    try {
+      const registered = await registerAeProjectPath(projectPath);
+      recordAudit(auth, request, {
+        action: "scene.edit",
+        result: "success",
+        detail: { registeredAeRoot: registered.root, projectUri: registered.projectUri }
+      });
+      return reply.code(201).send({ ok: true, ...registered });
+    } catch (error) {
+      return aePackageFailure(error, reply);
+    }
+  });
+
+  app.post<{ Body: { root?: string } }>("/api/ae/projects/forget", async (request, reply) => {
+    if (!requirePermission(auth, request, reply, "scene.write")) return reply;
+    const root = request.body?.root?.trim();
+    if (!root) return reply.code(400).send({ ok: false, error: "root is required" });
+    try {
+      await forgetAeProjectRoot(root);
+      return { ok: true };
+    } catch (error) {
+      return aePackageFailure(error, reply);
+    }
+  });
+  /* ── Project Workspace routes ────────────────────────────────────────────────────────── */
+
+  app.get("/api/project", async (request, reply) => {
+    if (!requirePermission(auth, request, reply, "scene.read")) return reply;
+    try {
+      return { ok: true, project: await currentProject() };
+    } catch (error) {
+      return reply.code(500).send({ ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  /*
+   * Open a project, or create one where the operator pointed.
+   *
+   * `root` may be either the project directory or the `.gpxpkg` file inside it, because the two
+   * dialogs that reach here answer different questions: "choose a folder" gives a directory, and
+   * "save project as" gives a file that does not exist yet. Normalising here keeps that difference
+   * out of every caller.
+   */
+  app.post<{ Body: { root?: string; name?: string } }>("/api/project/open", async (request, reply) => {
+    if (!requirePermission(auth, request, reply, "scene.write")) return reply;
+    const chosen = request.body?.root?.trim();
+    if (!chosen) return reply.code(400).send({ ok: false, error: "a project folder or .gpxpkg path is required" });
+    const isProjectFile = chosen.toLowerCase().endsWith(PROJECT_FILE_EXTENSION);
+    const root = isProjectFile ? nodePath.dirname(chosen) : chosen;
+    try {
+      const project = await createOrOpenProject(root, request.body?.name, isProjectFile ? chosen : undefined);
+      recordAudit(auth, request, { action: "settings.change", result: "success", detail: { openProject: root } });
+      return { ok: true, project };
+    } catch (error) {
+      const statusCode = error instanceof ProjectWorkspaceError && error.code === "ROOT_NOT_FOUND" ? 404 : 400;
+      return reply.code(statusCode).send({ ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/project/close", async (request, reply) => {
+    if (!requirePermission(auth, request, reply, "scene.write")) return reply;
+    try {
+      await closeProject();
+      return { ok: true };
+    } catch (error) {
+      return reply.code(500).send({ ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  /*
+   * The project's asset folders, as the Material Manager's library.
+   *
+   * A read of the directories every time rather than a cached index. The panel refreshes on focus
+   * and after an import, and a designer who drops files in with the file manager gets no event we
+   * could invalidate a cache with — so the only index that cannot go stale is the one we do not
+   * keep. A project with a few thousand assets costs a directory walk, which is cheap next to
+   * being wrong about what the operator can see in Explorer.
+   *
+   * With no project this answers `200` with an empty library and `projectOpen: false`, the same
+   * way `listScenes` answers `[]`. A read is a question, and "what is in the library" has a true
+   * answer before a project exists. The flag is what lets the panel say *why* it is empty —
+   * "save the project first" rather than "no assets" — without making the caller catch an error
+   * to find out.
+   */
+  app.get("/api/project/assets", async (request, reply) => {
+    if (!requirePermission(auth, request, reply, "scene.read")) return reply;
+    try {
+      return { ok: true, projectOpen: true, assets: await listProjectAssets() };
+    } catch (error) {
+      if (error instanceof ProjectWorkspaceError && error.code === "NO_PROJECT_OPEN") {
+        return { ok: true, projectOpen: false, assets: [] };
+      }
+      return reply.code(500).send({ ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  /*
+   * Serve one project asset by the path the library gave out.
+   *
+   * The path is in the query string rather than the URL path because an asset path contains
+   * separators and spaces — `Assets/Images/Show A/bg.png` — and encoding that into a route
+   * parameter means every consumer has to agree on the encoding. One decode, one containment
+   * check, one answer.
+   *
+   * A single 404 covers every refusal. Distinguishing "outside the project" from "does not exist"
+   * would let a caller map the filesystem one request at a time.
+   */
+  app.get<{ Querystring: { path?: string } }>("/api/project/assets/content", async (request, reply) => {
+    if (!requirePermission(auth, request, reply, "scene.read")) return reply;
+    const requested = request.query?.path;
+    if (!requested) return reply.code(400).send({ ok: false, error: "a project-relative path is required" });
+
+    const resolved = await resolveProjectAssetPath(requested);
+    if (!resolved) return reply.code(404).send({ ok: false, error: "Asset not found" });
+
+    const info = await nodeStat(resolved);
+    return reply
+      .type(projectAssetMimeType(nodePath.basename(resolved)))
+      // Size and mtime, not a content hash: this route must not read a 400 MB video to answer a
+      // conditional request. Replacing the file in place changes both, which is the case that has
+      // to invalidate a cached texture.
+      .header("etag", `"${info.size.toString(16)}-${Math.trunc(info.mtimeMs).toString(16)}"`)
+      .header("cache-control", "no-cache")
+      .send(await nodeReadFile(resolved));
+  });
+
+
+  app.post<{ Body: { projectUri?: string } }>("/api/ae/projects/inspect", async (request, reply) => {
+    if (!requirePermission(auth, request, reply, "scene.write")) return reply;
+    const projectUri = request.body?.projectUri?.trim();
+    if (!projectUri) return reply.code(400).send({ ok: false, error: "projectUri is required" });
+    try {
+      return { ok: true, project: await inspectAeProject(projectUri) };
+    } catch (error) {
+      return aePackageFailure(error, reply);
+    }
+  });
+
+  app.post<{ Body: { projectUri?: string; compositionId?: string } }>(
+    "/api/ae/projects/composition",
+    async (request, reply) => {
+      if (!requirePermission(auth, request, reply, "scene.write")) return reply;
+      const projectUri = request.body?.projectUri?.trim();
+      const compositionId = request.body?.compositionId?.trim();
+      if (!projectUri || !compositionId) {
+        return reply.code(400).send({ ok: false, error: "projectUri and compositionId are required" });
+      }
+      try {
+        return { ok: true, ...(await readAeComposition(projectUri, compositionId)) };
+      } catch (error) {
+        return aePackageFailure(error, reply);
+      }
+    }
+  );
+
+  /*
+   * Design-time import: one composition becomes a new, editable scene.
+   *
+   * Unlike the publish path below — which packages a container for Playout and never touches the
+   * Object Manager — this materializes the composition as a native scene the author edits: layers
+   * become objects, keyframed transforms become timeline channels. The converted scene is saved
+   * through the ordinary scene path so it carries a revision and a backup like any authored scene.
+   */
+  app.post<{ Body: { projectUri?: string; compositionId?: string; sceneName?: string } }>(
+    "/api/ae/projects/import-scene",
+    async (request, reply) => {
+      if (!requirePermission(auth, request, reply, "scene.write")) return reply;
+      const projectUri = request.body?.projectUri?.trim();
+      const compositionId = request.body?.compositionId?.trim();
+      if (!projectUri || !compositionId) {
+        return reply.code(400).send({ ok: false, error: "projectUri and compositionId are required" });
+      }
+      try {
+        const imported = await importAeCompositionAsScene(projectUri, compositionId);
+        if (request.body?.sceneName?.trim()) imported.scene.name = request.body.sceneName.trim();
+        const summary = await saveScene(imported.scene);
+        recordAudit(auth, request, {
+          action: "scene.edit",
+          result: "success",
+          detail: { importedAeScene: imported.scene.id, fromComposition: compositionId, projectUri }
+        });
+        return reply.code(201).send({
+          ok: true,
+          sceneId: imported.scene.id,
+          scene: imported.scene,
+          summary,
+          warnings: imported.warnings,
+          convertedLayers: imported.convertedLayers
+        });
+      } catch (error) {
+        return aePackageFailure(error, reply);
+      }
+    }
+  );
+  /*
+   * Import composition as a removable subtree into an existing scene / template.
+   */
+  app.post<{ Body: { projectUri?: string; compositionId?: string; targetSceneId?: string } }>(
+    "/api/ae/projects/import-into-scene",
+    async (request, reply) => {
+      if (!requirePermission(auth, request, reply, "scene.write")) return reply;
+      const projectUri = request.body?.projectUri?.trim();
+      const compositionId = request.body?.compositionId?.trim();
+      const targetSceneId = request.body?.targetSceneId?.trim();
+      if (!projectUri || !compositionId || !targetSceneId) {
+        return reply.code(400).send({ ok: false, error: "projectUri, compositionId, and targetSceneId are required" });
+      }
+      try {
+        const targetScene = await readScene(targetSceneId);
+        if (!targetScene) return reply.code(404).send({ ok: false, error: `target scene ${targetSceneId} not found` });
+
+        const imported = await importAeCompositionAsScene(projectUri, compositionId);
+        const nextObjects = [...targetScene.objects, ...imported.scene.objects];
+        const updatedScene = { ...targetScene, objects: nextObjects };
+        const summary = await saveScene(updatedScene);
+
+        recordAudit(auth, request, {
+          action: "scene.edit",
+          result: "success",
+          detail: { targetSceneId, fromComposition: compositionId, importId: imported.importId }
+        });
+        return reply.code(200).send({
+          ok: true,
+          sceneId: targetSceneId,
+          scene: updatedScene,
+          importId: imported.importId,
+          summary,
+          warnings: imported.warnings,
+          convertedLayers: imported.convertedLayers
+        });
+      } catch (error) {
+        return aePackageFailure(error, reply);
+      }
+    }
+  );
+
+  /*
+   * Remove an imported composition group subtree from a scene and release its collected assets.
+   */
+  app.post<{ Body: { sceneId?: string; importId?: string } }>(
+    "/api/ae/projects/remove-import",
+    async (request, reply) => {
+      if (!requirePermission(auth, request, reply, "scene.write")) return reply;
+      const sceneId = request.body?.sceneId?.trim();
+      const importId = request.body?.importId?.trim();
+      if (!sceneId || !importId) {
+        return reply.code(400).send({ ok: false, error: "sceneId and importId are required" });
+      }
+      try {
+        const scene = await readScene(sceneId);
+        if (!scene) return reply.code(404).send({ ok: false, error: `scene ${sceneId} not found` });
+
+        const rootGroupId = `ae-import-${importId}`;
+        const rootGroup = scene.objects.find(
+          (obj) => obj.id === rootGroupId || obj.importedDesign?.raw?.importId === importId
+        );
+        if (!rootGroup) {
+          return reply.code(404).send({ ok: false, error: `imported composition ${importId} not found in scene ${sceneId}` });
+        }
+
+        // Collect all object IDs in the group subtree
+        const toRemove = new Set<string>();
+        const collectSubtree = (objId: string) => {
+          if (toRemove.has(objId)) return;
+          toRemove.add(objId);
+          const obj = scene.objects.find((o) => o.id === objId);
+          if (obj && "childIds" in obj && Array.isArray(obj.childIds)) {
+            for (const childId of obj.childIds) collectSubtree(childId);
+          }
+        };
+        collectSubtree(rootGroup.id);
+
+        // Remove collected objects and update parent childIds
+        const remainingObjects = scene.objects
+          .filter((obj) => !toRemove.has(obj.id))
+          .map((obj) => {
+            if ("childIds" in obj && Array.isArray(obj.childIds)) {
+              return { ...obj, childIds: obj.childIds.filter((cid: string) => !toRemove.has(cid)) };
+            }
+            return obj;
+          });
+
+        const updatedScene = { ...scene, objects: remainingObjects };
+        await saveScene(updatedScene);
+        const releaseResult = await releaseImportFootage(importId).catch(() => ({ deleted: [], retained: [] }));
+
+        recordAudit(auth, request, {
+          action: "scene.edit",
+          result: "success",
+          detail: { removedImportId: importId, sceneId, deletedObjects: toRemove.size }
+        });
+        return reply.code(200).send({
+          ok: true,
+          sceneId,
+          scene: updatedScene,
+          importId,
+          deletedObjectCount: toRemove.size,
+          releasedFootage: releaseResult
+        });
+      } catch (error) {
+        return aePackageFailure(error, reply);
+      }
+    }
+  );
+
+  app.post<{ Body: { containerId?: string } }>("/api/ae/publish/validate", async (request, reply) => {
+    if (!requirePermission(auth, request, reply, "scene.write")) return reply;
+    const containerId = request.body?.containerId?.trim();
+    if (!containerId) return reply.code(400).send({ ok: false, error: "containerId is required" });
+    try {
+      const validation = await validateAeContainerPublish({ containerId });
+      return { ok: true, validation };
+    } catch (error) {
+      return aePackageFailure(error, reply);
+    }
+  });
+
+  app.post<{
+    Body: {
+      containerId?: string;
+      actions?: AePackageAnimationAction[];
+      cueMapDigest?: string;
+      collectedFootageDir?: string;
+    };
+  }>("/api/ae/publish", async (request, reply) => {
+    if (!requirePermission(auth, request, reply, "scene.write")) return reply;
+    const containerId = request.body?.containerId?.trim();
+    if (!containerId) return reply.code(400).send({ ok: false, error: "containerId is required" });
+    try {
+      const built = await publishAeContainer({
+        containerId,
+        actions: request.body?.actions,
+        cueMapDigest: request.body?.cueMapDigest,
+        collectedFootageDir: request.body?.collectedFootageDir
+      });
+      recordAudit(auth, request, {
+        action: "scene.publish",
+        result: "success",
+        detail: { containerId, version: built.version, files: built.fileCount, bytes: built.totalBytes }
+      });
+      // The publish is already durable; this is the announcement to Playout. It is awaited so the
+      // response can say whether Playout now sees the graphic, but a failed push never fails the
+      // publish — the author is told to re-sync instead.
+      const playout = await pushAePackageToPlayout(discoveryHolder.current, built.directory);
+      return reply.code(201).send({
+        ok: true,
+        version: built.version,
+        manifest: built.manifest,
+        validation: built.validation,
+        fileCount: built.fileCount,
+        totalBytes: built.totalBytes,
+        playout
+      });
+    } catch (error) {
+      return aePackageFailure(error, reply);
+    }
+  });
+
+  app.get<{ Params: { graphicId: string } }>("/api/ae/packages/:graphicId/versions", async (request, reply) => {
+    if (!requirePermission(auth, request, reply, "scene.write")) return reply;
+    try {
+      return { ok: true, versions: await listAeGraphicVersions(request.params.graphicId) };
+    } catch (error) {
+      return aePackageFailure(error, reply);
+    }
   });
 
   app.get("/api/scenes", async () => ({
@@ -450,6 +1370,72 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
     }
     return { ok: true, scene, recovered: true };
   });
+
+  /**
+   * Take an autosave snapshot of the posted scene.
+   *
+   * The body is the in-memory scene, not a scene id: the whole point is to capture work that
+   * has *not* been saved. Writing to `scenes/` here would defeat the exercise.
+   */
+  app.post<{
+    Params: { sceneId: string };
+    Body: { scene?: SceneDocument; maxVersions?: number };
+  }>("/api/scenes/:sceneId/autosave", async (request, reply) => {
+    const scene = request.body?.scene;
+    if (!scene || typeof scene !== "object") {
+      return reply.code(400).send({ ok: false, error: "An autosave requires a scene document" });
+    }
+    if (scene.id !== request.params.sceneId) {
+      return reply
+        .code(400)
+        .send({ ok: false, error: "Scene id in the body does not match the request path" });
+    }
+
+    try {
+      const entry = await autosaveScene(scene, request.body?.maxVersions ?? 10);
+      return { ok: true, autosave: entry };
+    } catch (error) {
+      return reply.code(400).send({
+        ok: false,
+        error: error instanceof Error ? error.message : "Autosave failed"
+      });
+    }
+  });
+
+  /**
+   * A scene's snapshots, with the revision the service currently holds for it.
+   *
+   * The revision travels with the list because the comparison it exists for — is this
+   * snapshot older than what is stored, and therefore dangerous to restore and publish — is
+   * between two numbers this service owns. A client that tracked it instead would be
+   * comparing against whatever revision its document was loaded with.
+   */
+  app.get<{ Params: { sceneId: string } }>("/api/scenes/:sceneId/autosaves", async (request) => {
+    const [autosaves, scene] = await Promise.all([
+      listSceneAutosaves(request.params.sceneId),
+      readScene(request.params.sceneId)
+    ]);
+    return { ok: true, autosaves, sceneRevision: scene?.revision ?? 0 };
+  });
+
+  /**
+   * Read one snapshot without restoring it, so the operator can compare revisions before
+   * choosing. Restoring is an ordinary save of the returned document.
+   */
+  app.get<{ Params: { sceneId: string; version: string } }>(
+    "/api/scenes/:sceneId/autosaves/:version",
+    async (request, reply) => {
+      const version = Number(request.params.version);
+      if (!Number.isInteger(version)) {
+        return reply.code(400).send({ ok: false, error: "Autosave version must be an integer" });
+      }
+      const scene = await readSceneAutosave(request.params.sceneId, version);
+      if (!scene) {
+        return reply.code(404).send({ ok: false, error: "No such autosave" });
+      }
+      return { ok: true, scene };
+    }
+  );
 
   app.patch<{
     Params: { sceneId: string; objectId: string };
@@ -891,31 +1877,71 @@ export async function startApiServer(options: ApiServerOptions = {}): Promise<Fa
   if (!isLoopbackHost(host) && !process.env.GRAPIX_API_TOKEN?.trim()) {
     throw new Error("GRAPIX_API_TOKEN is required when the API binds beyond loopback");
   }
+  const discoveryHolder: DiscoveryHolder = { current: null };
   const app = await createApiServer({
-    logger: options.logger
+    logger: options.logger,
+    discovery: discoveryHolder
   });
 
   await app.listen({ port, host });
 
+  // After listening, so the advertisement carries the port that is actually bound rather than the
+  // one that was requested — they differ whenever the caller passes 0.
+  const discovery = new EditorDiscovery({
+    port: addressPort(app) ?? port,
+    version: SERVICE_VERSION,
+    onWarning: (message, error) => app.log.warn({ err: error }, `[discovery] ${message}`),
+    onRouteChange: (endpoint, previous) => {
+      app.log.info(
+        `[discovery] Playout is at ${endpoint.url} (${endpoint.route})${
+          previous ? `, was ${previous.url} (${previous.route})` : ""
+        }`
+      );
+    }
+  });
+  discoveryHolder.current = discovery;
+
+  if (await discovery.start()) {
+    app.log.info(`[discovery] announcing this Editor on the local link as ${discovery.status().instance}`);
+  }
+
   return app;
 }
 
+/**
+ * Close cleanly on a signal.
+ *
+ * The service had no signal handling at all, so every stop was a hard kill: Fastify's `onClose`
+ * hooks never ran, and with discovery that means the mDNS goodbye was never sent — a peer kept
+ * offering an operator an Editor that had shut down until the record expired two minutes later.
+ * Registered only for a direct run, so an embedded caller keeps control of its own lifecycle.
+ */
+function closeOnSignal(app: FastifyInstance): void {
+  let closing = false;
+  const close = async () => {
+    if (closing) return;
+    closing = true;
+    try {
+      await app.close();
+    } finally {
+      process.exit(0);
+    }
+  };
+  process.once("SIGINT", close);
+  process.once("SIGTERM", close);
+}
+
+
+
+/** The port Fastify actually bound, when it can be read. */
+function addressPort(app: FastifyInstance): number | null {
+  const address = app.server.address();
+  return typeof address === "object" && address !== null ? address.port : null;
+}
+
+
 function isLoopbackHost(host: string): boolean {
   return host === "127.0.0.1" || host === "::1" || host === "localhost";
-}
-
-function readApiToken(
-  authorization: string | undefined,
-  header: string | string[] | undefined
-): string {
-  if (authorization?.startsWith("Bearer ")) return authorization.slice(7).trim();
-  return Array.isArray(header) ? header[0] ?? "" : header?.trim() ?? "";
-}
-
-function safeTokenEqual(expected: string, supplied: string): boolean {
-  const left = Buffer.from(expected);
-  const right = Buffer.from(supplied);
-  return left.length === right.length && timingSafeEqual(left, right);
 }
 
 function isReadOnlyShowMode(): boolean {
@@ -932,12 +1958,8 @@ function isAllowedShowControl(url: string): boolean {
     || /^\/api\/rundowns\/[a-zA-Z0-9_-]+\/events$/.test(path);
 }
 
-function isLoopbackAddress(address: string): boolean {
-  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
-}
-
 if (isDirectRun()) {
-  await startApiServer();
+  closeOnSignal(await startApiServer());
 }
 
 function isDirectRun(): boolean {

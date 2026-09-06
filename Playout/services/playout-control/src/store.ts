@@ -278,21 +278,34 @@ export class PlayoutStore {
   }
 
   /**
-   * Fetch scenes from the Editor project service (port 4100) and publish/update them into Playout.
+   * Fetch scenes from the Editor project service and publish/update them into Playout.
+   *
+   * The address is passed in rather than read from the environment here: the caller resolves it,
+   * which is what lets a discovered Editor be used when the configured one does not answer. It is
+   * echoed back in the result so a caller can report *which* Editor the library came from — with a
+   * fallback in play that is no longer a foregone conclusion.
    */
   async syncFromEditor(
-    editorUrl = process.env.GRAPIX_EDITOR_API_URL || "http://127.0.0.1:4100"
+    editorUrl = process.env.GRAPIX_EDITOR_API_URL || "http://127.0.0.1:4100",
+    accessToken?: string
   ): Promise<{
     syncedCount: number;
     updatedCount: number;
     totalScenes: number;
     scenes: PublishedSceneMetadata[];
+    editorUrl: string;
   }> {
     await this.ensure();
     const endpoint = editorUrl.replace(/\/+$/, "");
+    const authenticatedHeaders = accessToken
+      ? { authorization: `Bearer ${accessToken}` }
+      : undefined;
     let listResponse: Response;
     try {
-      listResponse = await fetch(`${endpoint}/api/scenes`, { signal: AbortSignal.timeout(5000) });
+      listResponse = await fetch(`${endpoint}/api/scenes`, {
+        signal: AbortSignal.timeout(5000),
+        ...(authenticatedHeaders ? { headers: authenticatedHeaders } : {})
+      });
     } catch (cause) {
       throw new Error(`Editor project service is not reachable at ${endpoint}: ${errorMessage(cause)}`);
     }
@@ -328,7 +341,10 @@ export class PlayoutStore {
         try {
           const docResponse = await fetch(
             `${endpoint}/api/scenes/${encodeURIComponent(editorSceneSummary.id)}`,
-            { signal: AbortSignal.timeout(10000) }
+            {
+              signal: AbortSignal.timeout(10000),
+              ...(authenticatedHeaders ? { headers: authenticatedHeaders } : {})
+            }
           );
           if (!docResponse.ok) continue;
           const docPayload = (await docResponse.json()) as { scene?: SceneDocument };
@@ -347,7 +363,13 @@ export class PlayoutStore {
     }
 
     const updatedLibrary = await this.listScenes();
-    return { syncedCount, updatedCount, totalScenes: updatedLibrary.length, scenes: updatedLibrary };
+    return {
+      syncedCount,
+      updatedCount,
+      totalScenes: updatedLibrary.length,
+      scenes: updatedLibrary,
+      editorUrl: endpoint
+    };
   }
 
   async listTakeLists(): Promise<PlayoutTakeList[]> {

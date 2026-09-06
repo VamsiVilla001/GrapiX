@@ -23,15 +23,15 @@ const CREDENTIALS = {
 function fakePhotoshopApi(overrides = {}) {
   const calls = [];
   const client = {
-    getDocumentManifest: async (input) => {
-      calls.push(["getDocumentManifest", input]);
+    getDocumentManifest: async (input, options) => {
+      calls.push(["getDocumentManifest", input, options]);
       return {
         jobId: "job-1",
         outputs: [
           {
             status: "succeeded",
             document: { name: "Election.psd", width: 1920, height: 1080 },
-            layers: [
+            layer: [
               {
                 id: 3,
                 name: "Headline",
@@ -65,6 +65,12 @@ function fakePhotoshopApi(overrides = {}) {
                 children: [
                   { id: 7, name: "Logo", type: "smartObject", blendOptions: { opacity: 100, blendMode: "multiply" } }
                 ]
+              },
+              {
+                id: 8,
+                name: "Background",
+                type: "layer",
+                blendOptions: { opacity: 100, blendMode: "normal" }
               }
             ]
           }
@@ -73,7 +79,24 @@ function fakePhotoshopApi(overrides = {}) {
     },
     createRendition: async (input, outputs) => {
       calls.push(["createRendition", input, outputs]);
-      return { jobId: "job-2", outputs: [{ status: "succeeded" }] };
+      return {
+        jobId: "job-2",
+        outputs: [
+          {
+            status: "succeeded",
+            _links: {
+              renditions: [
+                { href: "https://renditions.example.test/Election-preview.png", type: "image/png" },
+                {
+                  href: "https://renditions.example.test/Election-Glow.png",
+                  type: "image/png",
+                  layers: [{ id: 4 }]
+                }
+              ]
+            }
+          }
+        ]
+      };
     },
     modifyDocument: async (input, outputs, options) => {
       calls.push(["modifyDocument", input, outputs, options]);
@@ -202,9 +225,56 @@ test("reading a document structure over the cloud converts Adobe's manifest to G
     assert.equal(group.children[0].type, "smart-object");
     assert.equal(group.children[0].parentId, "6");
 
+    assert.equal(glow.assetId, "layer-4");
+    assert.deepEqual(
+      document.assets.find((asset) => asset.id === "layer-4"),
+      {
+        id: "layer-4",
+        name: "Glow.png",
+        kind: "image",
+        mimeType: "image/png",
+        url: "https://renditions.example.test/Election-Glow.png"
+      }
+    );
+    assert.equal(
+      document.assets.find((asset) => asset.id === "preview")?.url,
+      "https://renditions.example.test/Election-preview.png"
+    );
+    const missingRendition = document.warnings.find((entry) => entry.layerId === "8" && entry.code === "photoshop.rendition.layer");
+    assert.ok(missingRendition, "a pixel layer without an Adobe rendition must be reported");
+    assert.match(missingRendition.message, /Background/);
+
+    assert.deepEqual(api.calls[1], [
+      "createRendition",
+      { href: "https://example.test/Election.psd", storage: "external" },
+      [
+        {
+          href: "/files/GrapiX/$ReqID/preview.png",
+          storage: "adobe",
+          type: "image/png",
+          trimToCanvas: "true"
+        },
+        {
+          href: "/files/GrapiX/$ReqID/layer-4.png",
+          storage: "adobe",
+          type: "image/png",
+          trimToCanvas: "false",
+          layers: [{ id: 4 }]
+        },
+        {
+          href: "/files/GrapiX/$ReqID/layer-8.png",
+          storage: "adobe",
+          type: "image/png",
+          trimToCanvas: "false",
+          layers: [{ id: 8 }]
+        }
+      ]
+    ]);
+
     assert.deepEqual(api.calls[0], [
       "getDocumentManifest",
-      { href: "https://example.test/Election.psd", storage: "external" }
+      { href: "https://example.test/Election.psd", storage: "external" },
+      { thumbnails: { type: "image/png" } }
     ]);
   } finally {
     client.disconnect();
@@ -334,7 +404,8 @@ test("a cloud mutation still needs operator approval, and reaches Adobe only aft
       "an unapproved edit must never reach Adobe"
     );
 
-    await client.setApproval(true);
+    assert.ok(client.peerId);
+    assert.equal(gateway.approveSession(client.peerId), true);
     const job = await client.call("photoshop.updateTextLayer", {
       href: "https://example.test/a.psd",
       layerName: "Headline",
@@ -355,7 +426,8 @@ test("a missing argument is refused before any Adobe call is made", async () => 
   const client = makeClient(url);
   try {
     await client.connect();
-    await client.setApproval(true);
+    assert.ok(client.peerId);
+    assert.equal(gateway.approveSession(client.peerId), true);
 
     await assert.rejects(
       () => client.call("photoshop.replaceSmartObject", { href: "https://example.test/a.psd" }),

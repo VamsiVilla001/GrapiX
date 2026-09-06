@@ -4,19 +4,26 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+const TEST_SIGNING_SECRET = "test-signing-secret-that-is-long-enough-for-auth";
+
 test("stores multi-sequence rundowns and evaluates conditional scene/rundown events", async (context) => {
   const root = await mkdtemp(path.join(tmpdir(), "grapix-automation-test-"));
   process.env.GRAPIX_DATA_ROOT = root;
+  process.env.GRAPIX_PROJECT_ROOT = `${root}-project`;
   const { createApiServer } = await import("../dist/index.js");
-  const app = await createApiServer({ logger: false });
+  const { authenticatedInject } = await import("./authHelpers.mjs");
+  const app = await createApiServer({ logger: false, signingSecret: TEST_SIGNING_SECRET });
   context.after(async () => {
     await app.close();
     await rm(root, { recursive: true, force: true });
   });
 
+  // The auth gate protects these routes; every call below carries the session token.
+  const inject = await authenticatedInject(app);
+
   const fontBytes = Buffer.alloc(16);
   fontBytes.writeUInt32BE(0x00010000, 0);
-  const fontResponse = await app.inject({
+  const fontResponse = await inject({
     method: "POST",
     url: "/api/fonts/import?fileName=Score.ttf&family=Score%20Sans&weight=700",
     headers: { "content-type": "application/octet-stream" },
@@ -25,7 +32,7 @@ test("stores multi-sequence rundowns and evaluates conditional scene/rundown eve
   assert.equal(fontResponse.statusCode, 415);
   assert.equal(fontResponse.json().code, "FONT_INVALID");
 
-  const adobeResponse = await app.inject({
+  const adobeResponse = await inject({
     method: "POST",
     url: "/api/fonts/link",
     payload: { source: "adobe-fonts", family: "Acumin Pro", projectId: "abc123" }
@@ -33,7 +40,7 @@ test("stores multi-sequence rundowns and evaluates conditional scene/rundown eve
   assert.equal(adobeResponse.statusCode, 200);
   assert.equal(adobeResponse.json().font.faces[0].source.url, "https://use.typekit.net/abc123.css");
 
-  const scriptResponse = await app.inject({
+  const scriptResponse = await inject({
     method: "POST",
     url: "/api/import/scene-script?fileName=score.mjs&permissions=read-data,emit-event",
     headers: { "content-type": "application/octet-stream" },
@@ -82,9 +89,9 @@ test("stores multi-sequence rundowns and evaluates conditional scene/rundown eve
     createdAt: timestamp,
     updatedAt: timestamp
   };
-  assert.equal((await app.inject({ method: "POST", url: "/api/scenes", payload: scene })).statusCode, 200);
+  assert.equal((await inject({ method: "POST", url: "/api/scenes", payload: scene })).statusCode, 200);
 
-  const missingObject = await app.inject({
+  const missingObject = await inject({
     method: "PATCH",
     url: "/api/scenes/score_scene/objects/missing",
     payload: { x: 10 }
@@ -92,7 +99,7 @@ test("stores multi-sequence rundowns and evaluates conditional scene/rundown eve
   assert.equal(missingObject.statusCode, 404);
   assert.equal(missingObject.json().error, "Object not found");
 
-  const missingMaterial = await app.inject({
+  const missingMaterial = await inject({
     method: "PATCH",
     url: "/api/scenes/score_scene/materials/missing",
     payload: { opacity: 0.5 }
@@ -100,7 +107,7 @@ test("stores multi-sequence rundowns and evaluates conditional scene/rundown eve
   assert.equal(missingMaterial.statusCode, 404);
   assert.equal(missingMaterial.json().error, "Material not found");
 
-  const unsafeDataPath = await app.inject({
+  const unsafeDataPath = await inject({
     method: "PATCH",
     url: "/api/scenes/score_scene/data-patches",
     payload: { path: "__proto__.polluted", value: true }
@@ -153,10 +160,10 @@ test("stores multi-sequence rundowns and evaluates conditional scene/rundown eve
     createdAt: timestamp,
     updatedAt: timestamp
   };
-  const saved = await app.inject({ method: "POST", url: "/api/rundowns", payload: rundown });
+  const saved = await inject({ method: "POST", url: "/api/rundowns", payload: rundown });
   assert.equal(saved.statusCode, 200);
 
-  const rundownEvent = await app.inject({
+  const rundownEvent = await inject({
     method: "POST",
     url: "/api/rundowns/game_day/events",
     payload: {
@@ -167,7 +174,7 @@ test("stores multi-sequence rundowns and evaluates conditional scene/rundown eve
   assert.deepEqual(rundownEvent.json().evaluation.actions, [{ type: "preview-scene", sceneId: "score_scene" }]);
   assert.equal(rundownEvent.json().dryRun, true);
 
-  const sceneEvent = await app.inject({
+  const sceneEvent = await inject({
     method: "POST",
     url: "/api/scenes/score_scene/events",
     payload: {

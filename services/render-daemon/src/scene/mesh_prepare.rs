@@ -375,6 +375,15 @@ struct ShapeObjectDto {
     path: BezierPathDto,
     #[serde(default)]
     compound_paths: Vec<BezierPathDto>,
+    /// AE-style Trim Paths: percentages of the path length the stroke draws between,
+    /// rotated by `trim_offset`. Absent = the whole stroke, which is why the fields
+    /// default rather than fail: an old scene has no trim and must draw untouched.
+    #[serde(default)]
+    trim_start: Option<f64>,
+    #[serde(default)]
+    trim_end: Option<f64>,
+    #[serde(default)]
+    trim_offset: Option<f64>,
     #[serde(default)]
     fill_enabled: bool,
     #[serde(default)]
@@ -1375,25 +1384,299 @@ fn tessellate_shape_fill(shape: &ShapeObjectDto) -> Result<RawSurface, String> {
 }
 
 fn tessellate_shape_stroke(shape: &ShapeObjectDto) -> Result<RawSurface, String> {
-    let path = shape_path(shape, false)?;
     let mut geometry: VertexBuffers<[f32; 2], u32> = VertexBuffers::new();
     let options = StrokeOptions::default()
         .with_line_width(shape.stroke_width as f32)
         .with_line_cap(LineCap::Round)
         .with_line_join(LineJoin::Round);
-    StrokeTessellator::new()
-        .tessellate_path(
-            &path,
-            &options,
-            &mut BuffersBuilder::new(&mut geometry, |vertex: StrokeVertex| {
-                vertex.position().to_array()
-            }),
-        )
-        .map_err(|error| error.to_string())?;
+
+    if trim_active(shape.trim_start, shape.trim_end, shape.trim_offset) {
+        // Trim Paths: the stroke is the start–end window only, in the same flatten-and-cut
+        // math the editor viewport uses (`trimFlattenedPath` in shared-types). The fill is
+        // untouched: AE's rule is that a trim reveals the outline, never the area.
+        let start = shape.trim_start.unwrap_or(0.0);
+        let end = shape.trim_end.unwrap_or(100.0);
+        let offset = shape.trim_offset.unwrap_or(0.0);
+        let mut any = false;
+        for path in std::iter::once(&shape.path).chain(shape.compound_paths.iter()) {
+            let flattened = flatten_bezier_path(path, 0.5);
+            for piece in trim_flattened_path(&flattened, path.closed, start, end, offset) {
+                if piece.len() < 2 {
+                    continue;
+                }
+                any = true;
+                let mut builder = LyonPath::builder();
+                builder.begin(point(
+                    piece[0].x as f32 - shape.anchor.x as f32,
+                    piece[0].y as f32 - shape.anchor.y as f32,
+                ));
+                for vertex in &piece[1..] {
+                    builder.line_to(point(
+                        vertex.x as f32 - shape.anchor.x as f32,
+                        vertex.y as f32 - shape.anchor.y as f32,
+                    ));
+                }
+                builder.end(false);
+                StrokeTessellator::new()
+                    .tessellate_path(
+                        &builder.build(),
+                        &options,
+                        &mut BuffersBuilder::new(&mut geometry, |vertex: StrokeVertex| {
+                            vertex.position().to_array()
+                        }),
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+        if !any {
+            // A zero-width window is an authored "nothing on air", not a failure.
+            return Ok(tessellated_surface("stroke", geometry));
+        }
+    } else {
+        let path = shape_path(shape, false)?;
+        StrokeTessellator::new()
+            .tessellate_path(
+                &path,
+                &options,
+                &mut BuffersBuilder::new(&mut geometry, |vertex: StrokeVertex| {
+                    vertex.position().to_array()
+                }),
+            )
+            .map_err(|error| error.to_string())?;
+    }
     if geometry.indices.is_empty() {
         return Err("path produced no triangles".to_string());
     }
     Ok(tessellated_surface("stroke", geometry))
+}
+
+// --- Trim Paths -------------------------------------------------------------
+// The Rust half of `trimFlattenedPath` in Shared/shared-types. The two are one
+// definition in two languages, the same contract as `resolveTextureFit` /
+// `resolve_texture_fit`: Preview and Program must cut a curve at the same point,
+// so neither renderer is allowed its own flattening or window math.
+
+fn trim_active(start: Option<f64>, end: Option<f64>, offset: Option<f64>) -> bool {
+    let s = start.unwrap_or(0.0);
+    let e = end.unwrap_or(100.0);
+    let o = offset.unwrap_or(0.0);
+    !(s == 0.0 && e == 100.0 && o % 100.0 == 0.0)
+}
+
+/// Flatten one bezier path to a polyline, adaptive on flatness — the same de Casteljau
+/// subdivision and 16-deep bound as the TypeScript definition.
+fn flatten_bezier_path(path: &BezierPathDto, tolerance: f64) -> Vec<Vec2Dto> {
+    let count = path.vertices.len();
+    if count == 0 {
+        return Vec::new();
+    }
+    let mut points = vec![path.vertices[0]];
+    let segments = if path.closed { count } else { count - 1 };
+    for index in 0..segments {
+        let from = path.vertices[index];
+        let to = path.vertices[(index + 1) % count];
+        let outgoing = path.out_tangents[index];
+        let incoming = path.in_tangents[(index + 1) % count];
+        flatten_cubic_segment(
+            from,
+            Vec2Dto { x: from.x + outgoing.x, y: from.y + outgoing.y },
+            Vec2Dto { x: to.x + incoming.x, y: to.y + incoming.y },
+            to,
+            tolerance,
+            &mut points,
+            0,
+        );
+    }
+    points
+}
+
+#[allow(clippy::too_many_arguments)]
+fn flatten_cubic_segment(
+    p0: Vec2Dto,
+    p1: Vec2Dto,
+    p2: Vec2Dto,
+    p3: Vec2Dto,
+    tolerance: f64,
+    out: &mut Vec<Vec2Dto>,
+    depth: u32,
+) {
+    if depth >= 16 || cubic_is_flat(p0, p1, p2, p3, tolerance) {
+        out.push(p3);
+        return;
+    }
+    let mid = |a: Vec2Dto, b: Vec2Dto| Vec2Dto { x: (a.x + b.x) / 2.0, y: (a.y + b.y) / 2.0 };
+    let p01 = mid(p0, p1);
+    let p12 = mid(p1, p2);
+    let p23 = mid(p2, p3);
+    let p012 = mid(p01, p12);
+    let p123 = mid(p12, p23);
+    let p0123 = mid(p012, p123);
+    flatten_cubic_segment(p0, p01, p012, p0123, tolerance, out, depth + 1);
+    flatten_cubic_segment(p0123, p123, p23, p3, tolerance, out, depth + 1);
+}
+
+fn cubic_is_flat(p0: Vec2Dto, p1: Vec2Dto, p2: Vec2Dto, p3: Vec2Dto, tolerance: f64) -> bool {
+    let chord_x = p3.x - p0.x;
+    let chord_y = p3.y - p0.y;
+    let chord_length = (chord_x * chord_x + chord_y * chord_y).sqrt();
+    if chord_length == 0.0 {
+        return (p1.x - p0.x).hypot(p1.y - p0.y) <= tolerance
+            && (p2.x - p0.x).hypot(p2.y - p0.y) <= tolerance;
+    }
+    let distance = |p: Vec2Dto| (chord_x * (p0.y - p.y) - (p0.x - p.x) * chord_y).abs() / chord_length;
+    distance(p1) <= tolerance && distance(p2) <= tolerance
+}
+
+fn flattened_length(points: &[Vec2Dto], closed: bool) -> f64 {
+    let mut length = 0.0;
+    for index in 1..points.len() {
+        length += (points[index].x - points[index - 1].x).hypot(points[index].y - points[index - 1].y);
+    }
+    if closed && points.len() > 2 {
+        length += (points[0].x - points[points.len() - 1].x)
+            .hypot(points[0].y - points[points.len() - 1].y);
+    }
+    length
+}
+
+fn point_at_distance(
+    points: &[Vec2Dto],
+    closed: bool,
+    total: f64,
+    distance: f64,
+) -> (Vec2Dto, usize) {
+    let d = if closed {
+        distance.rem_euclid(total)
+    } else {
+        distance.clamp(0.0, total)
+    };
+    let mut walked = 0.0;
+    let count = points.len();
+    let segments = if closed { count } else { count - 1 };
+    for index in 0..segments {
+        let from = points[index];
+        let to = points[(index + 1) % count];
+        let step = (to.x - from.x).hypot(to.y - from.y);
+        if walked + step >= d {
+            let t = if step == 0.0 { 0.0 } else { (d - walked) / step };
+            return (
+                Vec2Dto { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t },
+                index + 1,
+            );
+        }
+        walked += step;
+    }
+    (points[if closed { 0 } else { points.len() - 1 }], if closed { 1 } else { points.len() })
+}
+
+/// Re-walk a closed path starting `distance` along it: one open polyline covering the loop
+/// exactly once, the cut point at both ends. Slicing it as open is the wrapped-window case.
+fn rotate_closed_walk(points: &[Vec2Dto], distance: f64) -> Vec<Vec2Dto> {
+    let total = flattened_length(points, true);
+    let (start_point, start_index) = point_at_distance(points, true, total, distance);
+    let mut walked = vec![start_point];
+    let mut covered = 0.0;
+    for offset in 0..points.len() {
+        if covered >= total {
+            break;
+        }
+        let vertex = points[(start_index + offset) % points.len()];
+        let last = *walked.last().unwrap();
+        let step = (vertex.x - last.x).hypot(vertex.y - last.y);
+        if covered + step >= total {
+            let t = if step == 0.0 { 0.0 } else { (total - covered) / step };
+            walked.push(Vec2Dto {
+                x: last.x + (vertex.x - last.x) * t,
+                y: last.y + (vertex.y - last.y) * t,
+            });
+            break;
+        }
+        walked.push(vertex);
+        covered += step;
+    }
+    walked
+}
+
+fn slice_flattened_path(
+    points: &[Vec2Dto],
+    closed: bool,
+    total: f64,
+    from: f64,
+    to: f64,
+) -> Vec<Vec2Dto> {
+    if to <= from {
+        return Vec::new();
+    }
+    let (start_point, _) = point_at_distance(points, closed, total, from);
+    let (end_point, _) = point_at_distance(points, closed, total, to);
+    let mut between = Vec::new();
+    let mut walked = 0.0;
+    let count = points.len();
+    let segments = if closed { count } else { count - 1 };
+    for index in 0..segments {
+        let a = points[index];
+        let b = points[(index + 1) % count];
+        let step = (b.x - a.x).hypot(b.y - a.y);
+        let next = walked + step;
+        if next > from && next < to {
+            between.push(b);
+        }
+        walked = next;
+    }
+    let mut result = vec![start_point];
+    result.extend(between);
+    result.push(end_point);
+    result
+}
+
+/// Cut the `start`–`end` window out of a flattened path, rotated by `offset`. AE semantics,
+/// mirroring the TypeScript definition: an inverted range returns the complement as two
+/// pieces, an empty window returns nothing, and a closed path's window may wrap the seam.
+fn trim_flattened_path(
+    points: &[Vec2Dto],
+    closed: bool,
+    start: f64,
+    end: f64,
+    offset: f64,
+) -> Vec<Vec<Vec2Dto>> {
+    if points.len() < 2 {
+        return Vec::new();
+    }
+    let total = flattened_length(points, closed);
+    if total <= 0.0 {
+        return Vec::new();
+    }
+    let rotation = offset.rem_euclid(100.0);
+    let rotated = closed && rotation != 0.0;
+    let base: Vec<Vec2Dto> = if rotated {
+        rotate_closed_walk(points, rotation / 100.0 * total)
+    } else {
+        points.to_vec()
+    };
+    let slice_closed = if rotated { false } else { closed };
+
+    let clamp = |percent: f64| percent.clamp(0.0, 100.0) / 100.0 * total;
+    let inverted = start > end;
+    let (from, to) = if inverted {
+        (clamp(end), clamp(start))
+    } else {
+        (clamp(start), clamp(end))
+    };
+
+    if !inverted {
+        let window = slice_flattened_path(&base, slice_closed, total, from, to);
+        return if window.len() >= 2 { vec![window] } else { Vec::new() };
+    }
+    let mut pieces = Vec::new();
+    let head = slice_flattened_path(&base, slice_closed, total, 0.0, from);
+    let tail = slice_flattened_path(&base, slice_closed, total, to, total);
+    if head.len() >= 2 {
+        pieces.push(head);
+    }
+    if tail.len() >= 2 {
+        pieces.push(tail);
+    }
+    pieces
 }
 
 fn flat_color_material(color: &str, object_opacity: f32) -> Option<PreparedMeshMaterial> {
@@ -2622,6 +2905,67 @@ mod tests {
         }
     }
 
+    fn square_path() -> BezierPathDto {
+        // A 100-unit closed square: perimeter 400, so 25% of length is one side.
+        BezierPathDto {
+            closed: true,
+            vertices: vec![
+                Vec2Dto { x: 0.0, y: 0.0 },
+                Vec2Dto { x: 100.0, y: 0.0 },
+                Vec2Dto { x: 100.0, y: 100.0 },
+                Vec2Dto { x: 0.0, y: 100.0 },
+            ],
+            in_tangents: vec![Vec2Dto { x: 0.0, y: 0.0 }; 4],
+            out_tangents: vec![Vec2Dto { x: 0.0, y: 0.0 }; 4],
+        }
+    }
+
+    fn line_path() -> BezierPathDto {
+        // A 100-unit straight run, open.
+        BezierPathDto {
+            closed: false,
+            vertices: vec![
+                Vec2Dto { x: 0.0, y: 0.0 },
+                Vec2Dto { x: 50.0, y: 0.0 },
+                Vec2Dto { x: 100.0, y: 0.0 },
+            ],
+            in_tangents: vec![Vec2Dto { x: 0.0, y: 0.0 }; 3],
+            out_tangents: vec![Vec2Dto { x: 0.0, y: 0.0 }; 3],
+        }
+    }
+
+    #[test]
+    fn trim_paths_cut_the_same_window_as_the_typescript_definition() {
+        // The trim math is one specification in two languages (see `trimFlattenedPath` in
+        // Shared/shared-types); these are the same cases the TypeScript tests pin, so a drift
+        // on either side fails one suite and names the divergence.
+
+        // A straight open path cuts at exact percentages of its length.
+        let line = flatten_bezier_path(&line_path(), 0.5);
+        let first = &trim_flattened_path(&line, false, 0.0, 50.0, 0.0)[0];
+        assert!((first[0].x - 0.0).abs() < 1e-9);
+        assert!((first[first.len() - 1].x - 50.0).abs() < 1e-9);
+
+        // A zero-width window is an authored blank, not a dot.
+        assert!(trim_flattened_path(&line, false, 50.0, 50.0, 0.0).is_empty());
+
+        // A closed path's window wraps the seam as two pieces, and offset rotates it into one.
+        let square = flatten_bezier_path(&square_path(), 0.5);
+        assert_eq!(trim_flattened_path(&square, true, 87.5, 12.5, 0.0).len(), 2);
+        assert_eq!(trim_flattened_path(&square, true, 0.0, 25.0, 87.5).len(), 1);
+
+        // start > end inverts: the complement, as two pieces.
+        let pieces = trim_flattened_path(&line, false, 75.0, 25.0, 0.0);
+        assert_eq!(pieces.len(), 2);
+        assert!((pieces[0][pieces[0].len() - 1].x - 25.0).abs() < 1e-9);
+        assert!((pieces[1][0].x - 75.0).abs() < 1e-9);
+
+        // The untrimmed default reports inactive so the renderer keeps the cheap path.
+        assert!(!trim_active(None, None, None));
+        assert!(!trim_active(Some(0.0), Some(100.0), Some(200.0)));
+        assert!(trim_active(Some(10.0), Some(100.0), Some(0.0)));
+    }
+
     #[test]
     fn unimplemented_and_degenerate_fits_resolve_to_identity() {
         // Unimplemented modes must keep the previous behaviour rather than invent a crop, and a
@@ -2652,5 +2996,103 @@ mod tests {
                 ([1.0, 1.0], [0.0, 0.0])
             );
         }
+    }
+    /// A square with a same-winding square inside it: the one path where the two fill rules differ.
+    ///
+    /// Non-zero counts winding, so the inner region has winding 2 and stays filled — one solid square.
+    /// Even-odd counts crossings, so the inner region is unfilled — a square annulus. Any test that
+    /// merely compared vertex counts could pass by coincidence, so this measures the **tessellated
+    /// area**, which is the thing an operator sees.
+    fn square_in_square(fill_rule: &str) -> ShapeObjectDto {
+        let ring = |size: f64| {
+            json!({
+                "closed": true,
+                "vertices": [
+                    { "x": -size, "y": -size },
+                    { "x": size, "y": -size },
+                    { "x": size, "y": size },
+                    { "x": -size, "y": size }
+                ],
+                "inTangents": [
+                    { "x": 0, "y": 0 }, { "x": 0, "y": 0 }, { "x": 0, "y": 0 }, { "x": 0, "y": 0 }
+                ],
+                "outTangents": [
+                    { "x": 0, "y": 0 }, { "x": 0, "y": 0 }, { "x": 0, "y": 0 }, { "x": 0, "y": 0 }
+                ]
+            })
+        };
+
+        serde_json::from_value(json!({
+            "id": "shape_fill_rule",
+            "x": 0.0,
+            "y": 0.0,
+            "fill": "#ffffff",
+            "fillEnabled": true,
+            "strokeEnabled": false,
+            "fillRule": fill_rule,
+            "path": ring(100.0),
+            "compoundPaths": [ring(50.0)]
+        }))
+        .expect("shape fixture must deserialise")
+    }
+
+    /// Total area of a tessellated surface, from the triangles themselves.
+    fn tessellated_area(surface: &RawSurface) -> f64 {
+        surface
+            .indices
+            .chunks_exact(3)
+            .map(|triangle| {
+                let a = surface.vertices[triangle[0] as usize].position;
+                let b = surface.vertices[triangle[1] as usize].position;
+                let c = surface.vertices[triangle[2] as usize].position;
+                // Shoelace, absolute so winding does not cancel neighbouring triangles.
+                let area = (b[0] - a[0]) as f64 * (c[1] - a[1]) as f64
+                    - (c[0] - a[0]) as f64 * (b[1] - a[1]) as f64;
+                area.abs() / 2.0
+            })
+            .sum()
+    }
+
+    #[test]
+    fn even_odd_leaves_the_inner_square_unfilled_and_non_zero_does_not() {
+        let outer = 200.0 * 200.0;
+        let inner = 100.0 * 100.0;
+
+        let non_zero = tessellate_shape_fill(&square_in_square("nonzero"))
+            .expect("non-zero fill must tessellate");
+        let even_odd = tessellate_shape_fill(&square_in_square("evenodd"))
+            .expect("even-odd fill must tessellate");
+
+        let non_zero_area = tessellated_area(&non_zero);
+        let even_odd_area = tessellated_area(&even_odd);
+
+        // Non-zero fills the whole outer square; even-odd knocks the inner square out of it.
+        assert!(
+            (non_zero_area - outer).abs() < 1.0,
+            "non-zero should fill {outer}, filled {non_zero_area}"
+        );
+        assert!(
+            (even_odd_area - (outer - inner)).abs() < 1.0,
+            "even-odd should fill {}, filled {even_odd_area}",
+            outer - inner
+        );
+
+        // The Object Inspector tells the operator this rule is Program-only, which is only true while
+        // the two rules actually produce different pixels here.
+        assert!(
+            (non_zero_area - even_odd_area).abs() > inner / 2.0,
+            "the two fill rules must not agree on this path"
+        );
+    }
+
+    #[test]
+    fn an_unknown_fill_rule_falls_back_to_non_zero_rather_than_failing() {
+        // `fillRule` arrives from a document that may predate the field. Falling back keeps an old
+        // scene rendering as it always did instead of refusing to prepare.
+        let legacy = tessellate_shape_fill(&square_in_square("something-else"))
+            .expect("an unknown fill rule must still tessellate");
+        let non_zero = tessellate_shape_fill(&square_in_square("nonzero"))
+            .expect("non-zero fill must tessellate");
+        assert!((tessellated_area(&legacy) - tessellated_area(&non_zero)).abs() < 1.0);
     }
 }

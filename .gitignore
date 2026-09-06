@@ -48,3 +48,19 @@ artifacts/
 # What GrapiX depends on is transcribed into Shared/adobe-common-schema with the
 # header and line each value came from; nothing in the build reads this directory.
 vendor/adobe/
+
+# Adobe SDK archives and guides dropped in for reference. Same licence terms as
+# vendor/adobe/ above: "No part of this publication ... may be reproduced or
+# transmitted, in any form or by any means ... without the prior written consent
+# of Adobe Systems Incorporated." The extracted SDK the build actually reads lives
+# in vendor/adobe/; this folder is the delivery it came from and must not be
+# committed either.
+SDK docs/
+
+# --- Session scratch --------------------------------------------------------
+# Working directories written during a run: probe output, staged fixture copies
+# and pre-flight scratch. Reproducible from the tools that made them, and large
+# enough that committing them would dominate the history.
+tmp/
+output/
+.tmp-*

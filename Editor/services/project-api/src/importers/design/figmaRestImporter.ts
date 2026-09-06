@@ -107,8 +107,21 @@ export async function importFigmaRestDocument(
       )
     : await figmaRequest(call, token, `/v1/files/${target.fileKey}?geometry=paths`);
 
-  const imageUrls = await fetchImageFillUrls(call, token, target.fileKey);
+  const imageMap = await fetchImageFillUrls(call, token, target.fileKey, report);
   const sourceName = String((document as Record<string, unknown>).name ?? target.fileKey);
+  const rawDocument = document as Record<string, unknown>;
+  if (
+    Object.keys(rawDocument.variables ?? {}).length > 0
+    || Object.keys(rawDocument.localVariables ?? {}).length > 0
+    || hasFigmaBoundVariables(rawDocument)
+  ) {
+    addDesignImportIssue(report, {
+      kind: "visual-difference",
+      severity: "warning",
+      message: "Figma variables and bound variables were imported as their current static values; GrapiX does not create live variable bindings from this REST response.",
+      fallback: "Static source values with variables retained in provenance"
+    });
+  }
 
   addDesignImportIssue(report, {
     kind: "converted",
@@ -124,11 +137,168 @@ export async function importFigmaRestDocument(
     sourceName,
     report,
     "figma-json",
-    imageUrls
+    imageMap.urls,
+    imageMap.available
   );
 
   await resolveUnmappedImageFills(normalized, call, token, target.fileKey, report);
+  await renderFallbackNodes(normalized, call, token, target.fileKey, report);
+  countImportedNodes(normalized, report);
   return normalized;
+}
+
+/**
+ * Ask Figma to draw what GrapiX cannot.
+ *
+ * Three kinds of node end up here, and every one of them would otherwise arrive as an empty box:
+ *
+ * - a type with no GrapiX equivalent and no children of its own — a sticky note, a connector, a
+ *   table cell, or whatever Figma ships next;
+ * - a vector or boolean operation whose outline Figma did not return, which happens with some
+ *   library instances even with `geometry=paths`;
+ * - an alpha or luminance mask, where the masking layer's *pixels* are the mask and an outline is
+ *   only an approximation of it.
+ *
+ * Vectors are asked for as SVG so they stay resolution-independent; the rest as PNG, because a
+ * sticky note or a pixel mask is not a vector and pretending otherwise produces a worse asset. One
+ * batched request per format, because `/v1/images` accepts many ids and a request per node turns a
+ * board full of annotations into a hundred round trips.
+ */
+async function renderFallbackNodes(
+  document: NormalizedDesignDocument,
+  call: typeof fetch,
+  token: { value: string; kind: "personal" | "oauth" },
+  fileKey: string,
+  report: DesignImportReport
+): Promise<void> {
+  const wanted = new Map<string, { node: NormalizedDesignNode; format: "svg" | "png"; reason: string }>();
+
+  const walk = (nodes: NormalizedDesignNode[]): void => {
+    for (const node of nodes) {
+      const need = fallbackReason(node);
+      if (need && node.sourceId) wanted.set(node.sourceId, { node, ...need });
+      walk(node.children);
+    }
+  };
+  document.pages.forEach((page) => walk(page.nodes));
+  if (wanted.size === 0) return;
+
+  for (const format of ["svg", "png"] as const) {
+    const ids = [...wanted.entries()].filter(([, entry]) => entry.format === format).map(([id]) => id);
+    if (ids.length === 0) continue;
+
+    let images: Record<string, string | null> = {};
+    try {
+      const payload = await figmaRequest(
+        call,
+        token,
+        `/v1/images/${fileKey}?ids=${encodeURIComponent(ids.join(","))}&format=${format}${format === "png" ? "&scale=2" : ""}`
+      ) as { images?: Record<string, string | null>; err?: string };
+      images = payload.images ?? {};
+    } catch (error) {
+      // A failed render costs those layers their pixels, not the import.
+      addDesignImportIssue(report, {
+        kind: "missing-asset",
+        severity: "warning",
+        message: `Figma could not render ${ids.length} layer(s) as ${format.toUpperCase()}: ${message(error)}. They import with their bounds and metadata but no pixels.`,
+        fallback: "Empty object with source metadata"
+      });
+      report.counts.assetsFailed += ids.length;
+      continue;
+    }
+
+    for (const id of ids) {
+      const entry = wanted.get(id);
+      if (!entry) continue;
+      const url = images[id];
+      if (!url) {
+        report.counts.assetsFailed += 1;
+        addDesignImportIssue(report, {
+          kind: "missing-asset",
+          severity: "warning",
+          message: `Figma returned no ${format.toUpperCase()} render for ${entry.node.name} (${entry.reason}), so it imports with its bounds but no pixels.`,
+          sourceNodeId: id,
+          sourceNodeName: entry.node.name,
+          fallback: "Empty object with source metadata"
+        });
+        continue;
+      }
+
+      const assetId = `figma-render-${id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+      document.assets.push({
+        id: assetId,
+        name: `${entry.node.name}.${format}`,
+        kind: format === "svg" ? "svg" : "image",
+        mimeType: format === "svg" ? "image/svg+xml" : "image/png",
+        sourceUrl: url,
+        linked: false,
+        width: entry.node.width,
+        height: entry.node.height
+      });
+
+      entry.node.renderedAssetId = assetId;
+      entry.node.flattenedFromFigma = true;
+      // A container keeps its children and only borrows the render for reference; a leaf becomes
+      // the render, because there is nothing else to draw it with. Outcome counts are not
+      // touched here: `countImportedNodes` runs once the document is finished, and counting
+      // here as well would count the layer twice.
+      if (entry.node.children.length === 0) entry.node.assetId = assetId;
+
+      addDesignImportIssue(report, {
+        kind: "rasterized",
+        severity: "info",
+        message: `${entry.node.name} was rendered by Figma as ${format.toUpperCase()} because ${entry.reason}. It is marked as flattened from Figma, so it can be re-rendered from source later.`,
+        sourceNodeId: id,
+        sourceNodeName: entry.node.name,
+        fallback: `Figma ${format.toUpperCase()} render`
+      });
+    }
+  }
+}
+
+/** Why a node needs Figma to draw it, and in which format. Null when GrapiX can draw it itself. */
+function fallbackReason(node: NormalizedDesignNode): { format: "svg" | "png"; reason: string } | null {
+  if (node.isMask && node.maskType && node.maskType !== "vector") {
+    return {
+      format: "png",
+      reason: `it is a ${node.maskType} mask, where the masking layer's pixels are the mask`
+    };
+  }
+  if ((node.type === "path" || node.type === "boolean-operation") && !node.path) {
+    return { format: "svg", reason: "Figma returned no vector outline for it" };
+  }
+  if (node.genericContainer) {
+    return {
+      format: "png",
+      reason: `a Figma ${node.sourceType ?? node.type} has no GrapiX equivalent`
+    };
+  }
+  return null;
+}
+
+/** Fill in the report's per-outcome counts by walking the finished document.
+ *
+ * Runs only when the caller will not count again: `DesignImportManager.importFigma`
+ * recounts after normalization with `populateDesignImportCounts`, which resets every
+ * outcome counter first, so the two never double-count. */
+function countImportedNodes(document: NormalizedDesignDocument, report: DesignImportReport): void {
+  if (report.counts.nodes !== 0) return;
+  const walk = (nodes: NormalizedDesignNode[]): void => {
+    for (const node of nodes) {
+      report.counts.nodes += 1;
+      // Same partition as `populateDesignImportCounts`: `flattened` marks a node that was
+      // also raster-rendered; the node itself still counts as native or generic container.
+      if (node.flattenedFromFigma) report.counts.flattened += 1;
+      if (node.genericContainer) report.counts.genericContainers += 1;
+      else report.counts.native += 1;
+      walk(node.children);
+    }
+  };
+  document.pages.forEach((page) => walk(page.nodes));
+}
+
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /**
@@ -228,6 +398,17 @@ function resolveFigmaToken(source: FigmaDesignImportSource): { value: string; ki
   return { value, kind };
 }
 
+class FigmaApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly retryAfter: string | null,
+    message: string
+  ) {
+    super(message);
+    this.name = "FigmaApiError";
+  }
+}
+
 async function figmaRequest(
   call: typeof fetch,
   token: { value: string; kind: "personal" | "oauth" },
@@ -240,7 +421,9 @@ async function figmaRequest(
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
   });
 
-  if (!response.ok) throw new Error(await figmaErrorMessage(response, path));
+  if (!response.ok) {
+    throw new FigmaApiError(response.status, response.headers.get("retry-after"), await figmaErrorMessage(response, path));
+  }
   const payload = await response.json() as Record<string, unknown>;
   // The REST API answers 200 with an `err`/`error` body for some failures.
   const embedded = payload.err ?? (payload.error === true ? payload.status : undefined);
@@ -249,6 +432,21 @@ async function figmaRequest(
 }
 
 /** Map REST failures onto the thing the operator has to change. */
+function hasFigmaBoundVariables(value: Record<string, unknown>): boolean {
+  const pending: unknown[] = [value];
+  while (pending.length) {
+    const current = pending.pop();
+    if (!current || typeof current !== "object") continue;
+    const record = current as Record<string, unknown>;
+    if (record.boundVariables && typeof record.boundVariables === "object" && Object.keys(record.boundVariables).length > 0) return true;
+    for (const child of Object.values(record)) {
+      if (Array.isArray(child)) pending.push(...child);
+      else if (child && typeof child === "object") pending.push(child);
+    }
+  }
+  return false;
+}
+
 async function figmaErrorMessage(response: Response, path: string): Promise<string> {
   const detail = await response.text().catch(() => "");
   const trimmed = detail.slice(0, 300);
@@ -292,6 +490,7 @@ function nodesResponseAsDocument(
           message: `Figma returned no node ${id}; it was deleted, moved, or is outside what this token can read.`,
           sourceNodeId: id
         });
+        report.counts.missingNodes.push(id);
         return null;
       }
       return entry.document as Record<string, unknown>;
@@ -333,22 +532,33 @@ function nodesResponseAsDocument(
  *
  * A REST document references raster fills by `imageRef` only;
  * `/v1/files/:key/images` is the map from those refs to short-lived S3 URLs, which
- * the asset pass then stores. Failing to read it costs image fills, not the import,
- * so it degrades to an empty map with a warning.
+ * the asset pass then stores. Authentication and rate-limit failures are actionable
+ * import failures; other endpoint failures keep importing with an explicit warning.
  */
 async function fetchImageFillUrls(
   call: typeof fetch,
   token: { value: string; kind: "personal" | "oauth" },
-  fileKey: string
-): Promise<Record<string, string>> {
+  fileKey: string,
+  report: DesignImportReport
+): Promise<{ urls: Record<string, string>; available: boolean }> {
   try {
     const payload = await figmaRequest(call, token, `/v1/files/${fileKey}/images`) as Record<string, any>;
     const images = payload?.meta?.images ?? {};
-    return Object.fromEntries(
-      Object.entries(images)
-        .filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].length > 0)
-    );
-  } catch {
-    return {};
+    return {
+      urls: Object.fromEntries(
+        Object.entries(images)
+          .filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].length > 0)
+      ),
+      available: true
+    };
+  } catch (error) {
+    if (error instanceof FigmaApiError && (error.status === 401 || error.status === 403 || error.status === 429)) throw error;
+    addDesignImportIssue(report, {
+      kind: "warning",
+      severity: "warning",
+      message: `Figma's file image map could not be read: ${message(error)}. Image references are retained, but fills missing from this map cannot be distinguished from an absent imageRef until Figma renders the node.`,
+      fallback: "Continue without the file image map"
+    });
+    return { urls: {}, available: false };
   }
 }

@@ -1,9 +1,23 @@
+use grapix_render_engine::auth::{permissions_for_role, UserRole, VerifiedIdentity};
 use grapix_render_engine::capabilities::ConnectionPrincipal;
 use grapix_render_engine::protocol::{decode, ErrorCode, RequestType, SceneDomain, SceneRef};
 
+fn principal_for(role: UserRole) -> ConnectionPrincipal {
+    ConnectionPrincipal::identified(
+        "verified-token-session",
+        VerifiedIdentity {
+            user_id: "usr_test".to_string(),
+            username: "test".to_string(),
+            role,
+            session_id: "sess_test".to_string(),
+            permissions: permissions_for_role(role),
+        },
+    )
+}
+
 #[test]
 fn hello_role_claim_cannot_grant_editor_playout_authority() {
-    let editor = ConnectionPrincipal::loopback_editor("editor-session");
+    let editor = principal_for(UserRole::Editor);
     assert!(!editor.allows(RequestType::Cue));
     assert!(!editor.allows(RequestType::TakeOnline));
     assert!(!editor.allows(RequestType::Continue));
@@ -14,7 +28,7 @@ fn hello_role_claim_cannot_grant_editor_playout_authority() {
     assert!(!editor.allows(RequestType::OutputRemove));
     assert!(editor.allows(RequestType::OutputList));
 
-    let playout = ConnectionPrincipal::authenticated_playout("verified-token-session");
+    let playout = principal_for(UserRole::PlayoutOperator);
     assert!(playout.allows(RequestType::Cue));
     assert!(playout.allows(RequestType::TakeOnline));
     assert!(playout.allows(RequestType::OutputConfigure));

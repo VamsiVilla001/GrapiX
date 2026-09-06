@@ -1,0 +1,4 @@
+# Build output of the AEGP adapter. The .aex links against the vendored Adobe SDK, so it is not
+# committed: per docs/ae-runtime-licensing-decision-request.md §9.2 nothing SDK-derived travels in
+# this repository, and external distribution is blocked until L1 closes Q2/Q3.
+build/

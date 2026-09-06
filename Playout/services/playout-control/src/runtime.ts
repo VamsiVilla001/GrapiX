@@ -6,6 +6,7 @@ import type {
 } from "@grapix/shared-types";
 import type { EngineSupervisor } from "./engineSupervisor.js";
 import type { PlayoutStore } from "./store.js";
+import { PlayoutOperationError } from "./diagnostics.js";
 
 /**
  * What an operator command acts on.
@@ -141,7 +142,24 @@ export class PlayoutRuntime {
         published.scene.revision ?? 0
       );
       if (!result.accepted) {
-        throw new Error(result.refusedReason ?? "the engine refused the take");
+        throw new PlayoutOperationError({
+          code: "engine.take-refused",
+          // The reason belongs in the summary as well as the cause: the banner shows only
+          // the summary, and "the engine refused" without the reason is not actionable.
+          summary: `The render engine refused to put "${published.name}" on Program${
+            result.refusedReason ? `: ${result.refusedReason}` : ""
+          }`,
+          ...(result.refusedReason ? { cause: result.refusedReason } : {}),
+          remedy:
+            "A refusal protects Program: the engine will not air a scene it has not prepared or cannot render. Cue the scene first and read the engine's reason above.",
+          context: {
+            sceneId: published.scene.id,
+            sceneName: published.name,
+            sceneRevision: published.scene.revision ?? 0,
+            takeId: published.takeId,
+            overridden: result.overridden
+          }
+        });
       }
       const previousProgram = this.status.programRef;
       if (previousProgram && previousProgram !== ref) {
@@ -216,18 +234,34 @@ export class PlayoutRuntime {
     if (target.kind === "scene") {
       const scene = await this.store.readSceneByTakeId(target.takeId);
       if (!scene) {
-        throw new Error(`no published scene has take ID ${target.takeId}`);
+        throw new PlayoutOperationError({
+          code: "scene.take-id-unknown",
+          summary: `No published scene has take ID ${target.takeId}`,
+          remedy:
+            "Check the Take ID in Scene Manager. If the scene was just published from the Editor, press Fetch to sync the library.",
+          context: { takeId: target.takeId }
+        });
       }
       return scene;
     }
 
     const takeList = await this.store.readTakeList(target.takeListId);
     if (!takeList) {
-      throw new Error(`take list ${target.takeListId} does not exist`);
+      throw new PlayoutOperationError({
+        code: "take-list.unknown",
+        summary: `Take list ${target.takeListId} does not exist`,
+        remedy: "Reload the operator window; the list this command names is not in the Playout store.",
+        context: { takeListId: target.takeListId }
+      });
     }
     const entry = takeList.entries.find((candidate) => candidate.entryId === target.entryId);
     if (!entry) {
-      throw new Error(`take list entry ${target.entryId} does not exist`);
+      throw new PlayoutOperationError({
+        code: "take-list.entry-unknown",
+        summary: `Take list "${takeList.name}" has no entry ${target.entryId}`,
+        remedy: "The entry was removed after this window loaded. Reload the operator window and select it again.",
+        context: { takeListId: target.takeListId, takeListName: takeList.name, entryId: target.entryId }
+      });
     }
     const scene = await this.store.readScene(
       entry.sceneId,
@@ -235,9 +269,21 @@ export class PlayoutRuntime {
     );
     if (!scene) {
       this.setTakeState(entry.entryId, "MISSING_ASSET");
-      throw new Error(
-        `published scene ${entry.sceneId} v${entry.sceneVersion} is unavailable`
-      );
+      throw new PlayoutOperationError({
+        code: "scene.version-unavailable",
+        summary: `"${entry.name}" points at published scene ${entry.sceneId} v${entry.sceneVersion}, which is not in the Playout library`,
+        remedy:
+          entry.versionPolicy === "pinned"
+            ? "This entry is pinned to one version, and that version has been removed. Re-publish it from the Editor, or set the entry to follow the latest version."
+            : "Publish the scene from the Editor and press Fetch in Scene Manager, or remove the entry.",
+        context: {
+          entryId: entry.entryId,
+          entryName: entry.name,
+          sceneId: entry.sceneId,
+          sceneVersion: entry.sceneVersion,
+          versionPolicy: entry.versionPolicy
+        }
+      });
     }
     return scene;
   }

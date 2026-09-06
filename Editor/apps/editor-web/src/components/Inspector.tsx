@@ -1,27 +1,47 @@
-import { useEffect, useState } from "react";
-import { getMaterialBindingId, isMaterialCompatible, isMaterialCompatibleWithFace, normalizeSlabProperties, sampleChannel, type AnimatableProperty, type MaskMode, type SceneObject, type SlabPropertiesInput } from "@grapix/shared-types";
+import { Fragment, useEffect, useState  } from "react";
+import { getMaterialBindingId, isMaterialCompatible, isMaterialCompatibleWithFace, isPropertyAnimatable, normalizeSlabProperties, sampleChannel, type AnimatableProperty, type MaskMode, type SceneObject, type SlabPropertiesInput } from "@grapix/shared-types";
 import { ArrowDown, ArrowUp, Clock3, Copy, Diamond, Eye, EyeOff, Lock, PenTool, Plus, Trash2, Unlock } from "lucide-react";
 import { ColorValueEditor } from "./ColorValueEditor";
 import { ObjectTypeProperties } from "./ObjectTypeProperties";
+import { importedDisclosures, inspectorControl } from "../modules/object-inspector/services/inspectorControls";
+import {
+  describePropertySource,
+  labelWithUnit,
+  propertyConstraint,
+  resolvePropertySource,
+  type PropertySource
+} from "@grapix/shared-types";
+import { useNumericGesture } from "../lib/numericGesture";
 import { TextFontControls } from "./TextFontControls";
 import {
   ColorField,
+  ConstrainedNumberField,
   NumberField,
   ParityNote,
+  ReadOnlyField,
   SelectField,
   TextField,
   ToggleField
 } from "./inspectorFields";
 import { useEditorStore } from "../store/editorStore";
 import { useUiStore } from "../store/uiStore";
+import { useObjectInspectorStore } from "../modules/object-inspector/stores/objectInspectorStore";
+import { InspectorDisclosureToggle } from "../modules/object-inspector/components/InspectorDisclosureToggle";
 
 export type InspectorScope = "type" | "transform";
 
-const MATERIAL_OBJECT_TYPES: ReadonlySet<SceneObject["type"]> = new Set([
-  "text", "rect", "ellipse", "image", "shape", "paint", "mesh"
-]);
+// Material eligibility now has one definition, `MATERIAL_SURFACE_TYPES`, shared with the tab
+// descriptors. This set had drifted from them and both admitted `paint`, which draws no material.
+/**
+ * Types whose width and height a renderer actually reads.
+ *
+ * `line`, `shape` and `paint` are absent because their geometry comes from points, a path and
+ * strokes: `drawLine`, `drawShape` and `drawPaint` read `object.width`/`object.height` zero times, so
+ * a size control on them resized nothing and reported success. `PROPERTY_RENDERER_SUPPORT` marks those
+ * six entries `neither`, and the Editor's audit fails if this set disagrees with it.
+ */
 const DIMENSION_OBJECT_TYPES: ReadonlySet<SceneObject["type"]> = new Set([
-  "text", "rect", "ellipse", "image", "line", "shape", "paint", "mesh"
+  "text", "rect", "ellipse", "image", "mesh"
 ]);
 const APPEARANCE_OBJECT_TYPES: ReadonlySet<SceneObject["type"]> = new Set([
   "text", "rect", "ellipse", "line", "shape"
@@ -35,20 +55,23 @@ const MASKABLE_OBJECT_TYPES: ReadonlySet<SceneObject["type"]> = new Set([
 
 export function Inspector({ scope = "type" }: { scope?: InspectorScope }) {
   const scene = useEditorStore((state) => state.scene);
+  // A binding resolves at the playhead, the same frame the viewport is showing.
+  const currentFrame = useUiStore((state) => state.currentFrame);
   const selectedObjectId = useEditorStore((state) => state.selectedObjectId);
   const updateObject = useEditorStore((state) => state.updateObject);
+  const beginHistory = useEditorStore((state) => state.beginHistory);
+  const cancelHistory = useEditorStore((state) => state.cancelHistory);
+  const commitHistory = useEditorStore((state) => state.commitHistory);
   const renameObject = useEditorStore((state) => state.renameObject);
   const setActiveCameraId = useEditorStore((state) => state.setActiveCameraId);
   const setContainerChild = useEditorStore((state) => state.setContainerChild);
   const assignMaterialSlot = useEditorStore((state) => state.assignMaterialSlot);
+  const convertObjectToShape = useEditorStore((state) => state.convertObjectToShape);
   const object = scene.objects.find((item) => item.id === selectedObjectId);
-  const supportsMaterial = MATERIAL_OBJECT_TYPES.has(object?.type ?? "marker");
   const supportsDimensions = DIMENSION_OBJECT_TYPES.has(object?.type ?? "marker");
   const supportsAppearance = APPEARANCE_OBJECT_TYPES.has(object?.type ?? "marker");
   const supportsFill = FILL_OBJECT_TYPES.has(object?.type ?? "marker");
   const supportsMasks = MASKABLE_OBJECT_TYPES.has(object?.type ?? "marker");
-  const supportsDetailedTransform = object?.type !== "camera" && object?.type !== "light";
-
   if (!object) {
     return (
       <aside className="inspector">
@@ -58,10 +81,26 @@ export function Inspector({ scope = "type" }: { scope?: InspectorScope }) {
     );
   }
 
+  /*
+   * The history transaction every numeric field opens.
+   *
+   * Spread into each `NumberField` rather than made implicit, so a control that should *not* scrub —
+   * one whose caller writes through its own transaction — simply does not receive it. With these two
+   * the field gains the Object Manager's grammar: scrub, Shift-fine, Enter commits, Escape reverts, and
+   * one undo step per gesture instead of one per keystroke.
+   */
+  const history = { onBeginEdit: beginHistory, onCancelEdit: cancelHistory, onCommitEdit: commitHistory };
+  const noteFor = (property: string) =>
+    object ? sourceNoteFor(object, property, scene.dataContext, currentFrame) : undefined;
+
   function patch(patchValue: Partial<SceneObject>) {
     updateObject(object!.id, patchValue);
   }
 
+
+  // Every parity verdict and its wording come from the shared contract, so a note cannot contradict
+  // what the renderers do — which is exactly how the shape fill-rule note came to say the opposite.
+  const textControl = (property: string) => inspectorControl("text", property);
 
   const slab = object.type === "mesh" && object.meshKind === "slab"
     ? normalizeSlabProperties(object.slab)
@@ -109,8 +148,8 @@ export function Inspector({ scope = "type" }: { scope?: InspectorScope }) {
         </div>
       </div>
 
-      <section className="field-section">
-        <h3>Object</h3>
+      <section aria-labelledby="inspector-object-heading" className="field-section">
+        <h3 id="inspector-object-heading">Object</h3>
         <ObjectNameField
           object={object}
           onRename={(name) => {
@@ -119,96 +158,97 @@ export function Inspector({ scope = "type" }: { scope?: InspectorScope }) {
             return false;
           }}
         />
-        {supportsMaterial ? (
-        <SelectField
-          label="Main Material"
-          value={getMaterialBindingId(object.materialSlots.main) ?? ""}
-          options={["", ...scene.materials
-            .filter((material) => object.type === "mesh"
-              ? isMaterialCompatibleWithFace(material, object, 0)
-              : isMaterialCompatible(material, object.type))
-            .map((material) => material.materialId)]}
-          renderOption={(value) =>
-            value ? scene.materials.find((material) => material.materialId === value)?.name ?? value : "None"
-          }
-          onChange={(value) => assignMaterialSlot(object.id, "main", value)}
-        />
-        ) : null}
+        {/*
+          No "Main Material" here.
+
+          It bound the same `main` face the Materials tab binds, so one relationship had two homes and
+          an author had to learn which. The Materials tab is the home: it lists every bindable face,
+          not just face 0, so the quick field was also the less capable of the two.
+        */}
         {object.type === "text" ? (
-          <TextField label="Text" value={object.text} onChange={(value) => patch({ text: value } as Partial<SceneObject>)} />
+          <TextField label="Text" sourceNote={noteFor("text")} value={object.text} onChange={(value) => patch({ text: value } as Partial<SceneObject>)} />
         ) : null}
         {object.type === "image" ? (
-          <TextField label="Image URL" value={object.src} onChange={(value) => patch({ src: value } as Partial<SceneObject>)} />
+          <TextField label="Image URL" sourceNote={noteFor("src")} value={object.src} onChange={(value) => patch({ src: value } as Partial<SceneObject>)} />
         ) : null}
       </section>
         </>
       ) : null}
 
       {scope === "transform" ? (
-      <section className="field-section two-column">
-        <h3>Transform</h3>
+      <section aria-labelledby="inspector-transform-heading" className="field-section two-column">
+        <h3 id="inspector-transform-heading">Transform</h3>
         <AnimatedNumberField label="X" object={object} property="x" value={object.x} />
         <AnimatedNumberField label="Y" object={object} property="y" value={object.y} />
         <AnimatedNumberField label="Position Z" object={object} property="zDepth" value={object.zDepth} />
         <TextField label="Layer" value={object.layerId} onChange={(value) => patch({ layerId: value || "main" })} />
         {supportsDimensions ? (
           <>
-        <NumberField label="W" value={object.width} onChange={(value) => patch({ width: value })} />
-        <NumberField label="H" value={object.height} onChange={(value) => patch({ height: value })} />
+        <ConstrainedNumberField {...history} label="W" objectType={object.type} property="width" sourceNote={noteFor("width")} value={object.width} onChange={(value) => patch({ width: value })} />
+        <ConstrainedNumberField {...history} label="H" objectType={object.type} property="height" sourceNote={noteFor("height")} value={object.height} onChange={(value) => patch({ height: value })} />
           </>
         ) : null}
         {object.type === "mesh" ? (
           <>
-            <NumberField label={object.meshKind === "slab" ? "Extrusion" : "Depth"} value={object.depth} min={0.01} onChange={(value) => patch({ depth: value } as Partial<SceneObject>)} />
+            <ConstrainedNumberField {...history} label={object.meshKind === "slab" ? "Extrusion" : "Depth"} objectType={object.type} property="depth" value={object.depth} onChange={(value) => patch({ depth: value } as Partial<SceneObject>)} />
             <AnimatedNumberField label="Rotation X" object={object} property="rotationX" value={object.rotationX ?? 0} />
             <AnimatedNumberField label="Rotation Y" object={object} property="rotationY" value={object.rotationY ?? 0} />
             <AnimatedNumberField label="Rotation Z" object={object} property="rotationZ" value={object.rotationZ ?? object.rotation} />
-            <AnimatedNumberField label="Scale X" object={object} property="scaleX" step={0.05} value={object.scaleX ?? 1} />
-            <AnimatedNumberField label="Scale Y" object={object} property="scaleY" step={0.05} value={object.scaleY ?? 1} />
-            <AnimatedNumberField label="Scale Z" object={object} property="scaleZ" step={0.05} value={object.scaleZ ?? 1} />
-            <NumberField
-              label="Anchor X"
+            <AnimatedNumberField label="Scale X" object={object} property="scaleX" value={object.scaleX ?? 1} />
+            <AnimatedNumberField label="Scale Y" object={object} property="scaleY" value={object.scaleY ?? 1} />
+            <AnimatedNumberField label="Scale Z" object={object} property="scaleZ" value={object.scaleZ ?? 1} />
+            <ConstrainedNumberField {...history}
+              label="Anchor X" objectType={object.type} property="fov"
               value={object.anchor3d?.x ?? object.width / 2}
               onChange={(value) => patch({ anchor3d: { x: value, y: object.anchor3d?.y ?? object.height / 2, z: object.anchor3d?.z ?? object.depth / 2 } } as Partial<SceneObject>)}
             />
-            <NumberField
+            <NumberField {...history}
               label="Anchor Y"
               value={object.anchor3d?.y ?? object.height / 2}
               onChange={(value) => patch({ anchor3d: { x: object.anchor3d?.x ?? object.width / 2, y: value, z: object.anchor3d?.z ?? object.depth / 2 } } as Partial<SceneObject>)}
             />
-            <NumberField
+            <NumberField {...history}
               label="Anchor Z"
               value={object.anchor3d?.z ?? object.depth / 2}
               onChange={(value) => patch({ anchor3d: { x: object.anchor3d?.x ?? object.width / 2, y: object.anchor3d?.y ?? object.height / 2, z: value } } as Partial<SceneObject>)}
             />
           </>
-        ) : supportsDetailedTransform ? (
+        ) : (
           <>
-            <AnimatedNumberField label="Rotate" object={object} property="rotation" value={object.rotation} />
-            <AnimatedNumberField label="Scale X" object={object} property="scaleX" step={0.05} value={object.scaleX ?? 1} />
-            <AnimatedNumberField label="Scale Y" object={object} property="scaleY" step={0.05} value={object.scaleY ?? 1} />
-            <NumberField
-              label="Anchor X"
-              value={object.anchor?.x ?? 0}
-              onChange={(value) => patch({ anchor: { x: value, y: object.anchor?.y ?? 0 } })}
-            />
-            <NumberField
-              label="Anchor Y"
-              value={object.anchor?.y ?? 0}
-              onChange={(value) => patch({ anchor: { x: object.anchor?.x ?? 0, y: value } })}
-            />
+            {/*
+              Per property, from the contract, rather than one `supportsDetailedTransform` flag for the
+              whole group. The flag meant "not a camera and not a light" and was right about six controls
+              and wrong about a seventh: a light's `opacity` scales its intensity in *both* renderers
+              (`ThreeSceneLayer.ts:412-413`, `document.rs:1092`), so hiding it hid a working dimmer while
+              `rotation` and the scales really are read by neither.
+            */}
+            {inspectorControl(object.type, "rotation").enabled ? (
+              <AnimatedNumberField label="Rotate" object={object} property="rotation" value={object.rotation} />
+            ) : null}
+            {inspectorControl(object.type, "scaleX").enabled ? (
+              <AnimatedNumberField label="Scale X" object={object} property="scaleX" value={object.scaleX ?? 1} />
+            ) : null}
+            {inspectorControl(object.type, "scaleY").enabled ? (
+              <AnimatedNumberField label="Scale Y" object={object} property="scaleY" value={object.scaleY ?? 1} />
+            ) : null}
+            {DIMENSION_OBJECT_TYPES.has(object.type) ? (
+              <>
+                <NumberField {...history}
+                  label="Anchor X"
+                  value={object.anchor?.x ?? 0}
+                  onChange={(value) => patch({ anchor: { x: value, y: object.anchor?.y ?? 0 } })}
+                />
+                <NumberField {...history}
+                  label="Anchor Y"
+                  value={object.anchor?.y ?? 0}
+                  onChange={(value) => patch({ anchor: { x: object.anchor?.x ?? 0, y: value } })}
+                />
+              </>
+            ) : null}
           </>
-        ) : null}
-        {supportsDetailedTransform ? (
-        <AnimatedNumberField
-          label="Opacity"
-          max={1}
-          min={0}
-          object={object}
-          property="opacity"
-          step={0.05}
-          value={object.opacity}
-        />
+        )}
+        {inspectorControl(object.type, "opacity").enabled ? (
+          <AnimatedNumberField label="Opacity" object={object} property="opacity" value={object.opacity} />
         ) : null}
       </section>
       ) : null}
@@ -217,23 +257,23 @@ export function Inspector({ scope = "type" }: { scope?: InspectorScope }) {
         <>
       {slab ? (
         <>
-          <section className="field-section">
-            <h3>Slab Shape</h3>
+          <section aria-labelledby="inspector-slab-shape-heading" className="field-section">
+            <h3 id="inspector-slab-shape-heading">Slab Shape</h3>
             <div className="two-column">
-              <NumberField
+              <NumberField {...history}
                 label="Corner Radius"
-                value={slab.cornerRadius}
                 min={0}
+                value={slab.cornerRadius}
                 onChange={(value) => patchSlab({ cornerRadius: Math.max(0, value) })}
               />
-              <NumberField
+              <NumberField {...history}
                 label="Corner Quality"
-                value={slab.cornerSegments}
-                min={1}
                 max={32}
+                min={1}
+                value={slab.cornerSegments}
                 onChange={(value) => patchSlab({ cornerSegments: Math.max(1, Math.min(32, Math.round(value))) })}
               />
-              <NumberField
+              <NumberField {...history}
                 label="Skew"
                 value={slab.skew}
                 onChange={(value) => patchSlab({ skew: value })}
@@ -257,8 +297,8 @@ export function Inspector({ scope = "type" }: { scope?: InspectorScope }) {
             </div>
           </section>
 
-          <section className="field-section">
-            <h3>Front Bevel</h3>
+          <section aria-labelledby="inspector-front-bevel-heading" className="field-section">
+            <h3 id="inspector-front-bevel-heading">Front Bevel</h3>
             <ToggleField
               label="Enabled"
               value={slab.frontBevel.enabled}
@@ -266,24 +306,24 @@ export function Inspector({ scope = "type" }: { scope?: InspectorScope }) {
             />
             {slab.frontBevel.enabled ? (
               <div className="two-column">
-                <NumberField
+                <NumberField {...history}
                   label="Size"
-                  value={slab.frontBevel.size}
                   min={0}
+                  value={slab.frontBevel.size}
                   onChange={(size) => patchSlab({ frontBevel: { size: Math.max(0, size) } })}
                 />
-                <NumberField
+                <NumberField {...history}
                   label="Depth"
-                  value={slab.frontBevel.depth}
                   min={0}
+                  value={slab.frontBevel.depth}
                   onChange={(depth) => patchSlab({ frontBevel: { depth: Math.max(0, depth) } })}
                 />
               </div>
             ) : null}
           </section>
 
-          <section className="field-section">
-            <h3>Back Bevel</h3>
+          <section aria-labelledby="inspector-back-bevel-heading" className="field-section">
+            <h3 id="inspector-back-bevel-heading">Back Bevel</h3>
             <ToggleField
               label="Enabled"
               value={slab.backBevel.enabled}
@@ -291,16 +331,16 @@ export function Inspector({ scope = "type" }: { scope?: InspectorScope }) {
             />
             {slab.backBevel.enabled ? (
               <div className="two-column">
-                <NumberField
+                <NumberField {...history}
                   label="Size"
-                  value={slab.backBevel.size}
                   min={0}
+                  value={slab.backBevel.size}
                   onChange={(size) => patchSlab({ backBevel: { size: Math.max(0, size) } })}
                 />
-                <NumberField
+                <NumberField {...history}
                   label="Depth"
-                  value={slab.backBevel.depth}
                   min={0}
+                  value={slab.backBevel.depth}
                   onChange={(depth) => patchSlab({ backBevel: { depth: Math.max(0, depth) } })}
                 />
               </div>
@@ -310,8 +350,8 @@ export function Inspector({ scope = "type" }: { scope?: InspectorScope }) {
       ) : null}
 
       {supportsAppearance ? (
-      <section className="field-section">
-        <h3>Appearance</h3>
+      <section aria-labelledby="inspector-appearance-heading" className="field-section">
+        <h3 id="inspector-appearance-heading">Appearance</h3>
         {supportsFill ? (
         <ColorValueEditor
           fallback={object.fill}
@@ -323,6 +363,7 @@ export function Inspector({ scope = "type" }: { scope?: InspectorScope }) {
           })}
         />
         ) : null}
+        {noteFor("fill")}
         <ColorValueEditor
           fallback={object.stroke}
           label="Stroke"
@@ -332,25 +373,49 @@ export function Inspector({ scope = "type" }: { scope?: InspectorScope }) {
             ...(strokeStyle.type === "solid" ? { stroke: strokeStyle.color } : {})
           })}
         />
+        {noteFor("stroke")}
         <div className="two-column">
-        <NumberField label="Stroke W" value={object.strokeWidth} min={0} onChange={(value) => patch({ strokeWidth: value })} />
+        <ConstrainedNumberField {...history} label="Stroke W" objectType={object.type} property="strokeWidth" value={object.strokeWidth} onChange={(value) => patch({ strokeWidth: value })} />
         {object.type === "rect" ? (
-          <NumberField label="Radius" value={object.radius} min={0} onChange={(value) => patch({ radius: value } as Partial<SceneObject>)} />
+          <ConstrainedNumberField {...history} label="Radius" objectType={object.type} property="radius" value={object.radius} onChange={(value) => patch({ radius: value } as Partial<SceneObject>)} />
         ) : null}
         </div>
+        {object.type === "rect" || object.type === "ellipse" ? (
+          <div style={{ marginTop: 8 }}>
+            <button
+              className="inspector-action-button"
+              onClick={() => convertObjectToShape(object.id)}
+              style={{
+                width: "100%",
+                padding: "6px 12px",
+                background: "var(--bg-card)",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--r-sm)",
+                color: "var(--text)",
+                cursor: "pointer",
+                fontSize: "12px",
+                fontWeight: 500
+              }}
+              type="button"
+            >
+              Convert to Editable Path
+            </button>
+          </div>
+        ) : null}
       </section>
       ) : null}
 
       <ObjectTypeProperties object={object} />
 
       {object.type === "text" ? (
-        <section className="field-section two-column">
-          <h3>Typography</h3>
+        <section aria-labelledby="inspector-typography-heading" className="field-section two-column">
+          <h3 id="inspector-typography-heading">Typography</h3>
           <TextFontControls object={object} patch={patch} />
-          <NumberField
+          <ConstrainedNumberField {...history}
             label="Font"
+            objectType={object.type}
+            property="fontSize"
             value={object.fontSize}
-            min={8}
             onChange={(value) => patch({ fontSize: value } as Partial<SceneObject>)}
           />
           <SelectField
@@ -383,16 +448,23 @@ export function Inspector({ scope = "type" }: { scope?: InspectorScope }) {
             options={["top", "middle", "bottom"]}
             onChange={(value) => patch({ verticalAlign: value } as Partial<SceneObject>)}
           />
-          <NumberField label="Line height" value={object.lineHeight ?? object.fontSize * 1.2} min={1} onChange={(value) => patch({ lineHeight: value } as Partial<SceneObject>)} />
-          <NumberField label="Letter space" value={object.letterSpacing ?? 0} onChange={(value) => patch({ letterSpacing: value } as Partial<SceneObject>)} />
-          <NumberField label="Word space" value={object.wordSpacing ?? 0} onChange={(value) => patch({ wordSpacing: value } as Partial<SceneObject>)} />
-          <NumberField label="Paragraph space" value={object.paragraphSpacing ?? 0} min={0} onChange={(value) => patch({ paragraphSpacing: value } as Partial<SceneObject>)} />
+          <ConstrainedNumberField {...history} label="Line height" objectType={object.type} property="lineHeight" value={object.lineHeight ?? object.fontSize * 1.2} onChange={(value) => patch({ lineHeight: value } as Partial<SceneObject>)} />
+          <ConstrainedNumberField {...history} label="Letter space" objectType={object.type} property="letterSpacing" value={object.letterSpacing ?? 0} onChange={(value) => patch({ letterSpacing: value } as Partial<SceneObject>)} />
+          <ConstrainedNumberField {...history} label="Word space" objectType={object.type} property="wordSpacing" value={object.wordSpacing ?? 0} onChange={(value) => patch({ wordSpacing: value } as Partial<SceneObject>)} />
+          <ParityNote>{textControl("wordSpacing").note}</ParityNote>
+          <ParityNote>{textControl("paragraphSpacing").note}</ParityNote>
+          <ConstrainedNumberField {...history}
+            disabled={!textControl("paragraphSpacing").enabled}
+            label="Paragraph space" objectType={object.type} property="paragraphSpacing"
+            value={object.paragraphSpacing ?? 0}
+            onChange={(value) => patch({ paragraphSpacing: value } as Partial<SceneObject>)}
+          />
         </section>
       ) : null}
 
       {object.type === "text" ? (
-        <section className="field-section inspector-control-section">
-          <h3>Decoration and flow</h3>
+        <section aria-labelledby="inspector-decoration-flow-heading" className="field-section inspector-control-section">
+          <h3 id="inspector-decoration-flow-heading">Decoration and flow</h3>
           <div className="two-column">
             <ToggleField
               label="Underline"
@@ -408,9 +480,9 @@ export function Inspector({ scope = "type" }: { scope?: InspectorScope }) {
                 textDecoration: { ...object.textDecoration, strikethrough }
               } as Partial<SceneObject>)}
             />
-            <NumberField
+            <ConstrainedNumberField {...history}
               disabled
-              label="First-line indent"
+              label="First-line indent" objectType={object.type} property="textIndent"
               value={object.textIndent ?? 0}
               onChange={(textIndent) => patch({ textIndent } as Partial<SceneObject>)}
             />
@@ -425,14 +497,25 @@ export function Inspector({ scope = "type" }: { scope?: InspectorScope }) {
           <ParityNote>
             Underline and strikethrough are drawn by the Editor viewport; the render engine's text
             renderer does not draw them yet, so a decorated caption will look different on Program.
-            Indent and overflow are disabled because neither renderer honours them.
           </ParityNote>
+          {/*
+            Reported because Preview is already applying it. Which values get reported, and the wording,
+            are decided by `importedDisclosures` so the behaviour can be proven without a browser.
+          */}
+          {importedDisclosures(object).map((disclosure) => (
+            <Fragment key={disclosure.property}>
+              <ReadOnlyField label={disclosure.label} value={disclosure.value} />
+              <ParityNote>{disclosure.note}</ParityNote>
+            </Fragment>
+          ))}
+          <ParityNote>{textControl("textIndent").note}</ParityNote>
+          <ParityNote>{textControl("overflow").note}</ParityNote>
         </section>
       ) : null}
 
       {object.type === "light" ? (
-        <section className="field-section inspector-control-section">
-          <h3>Light</h3>
+        <section aria-labelledby="inspector-light-heading" className="field-section inspector-control-section">
+          <h3 id="inspector-light-heading">Light</h3>
           <div className="two-column">
             <SelectField
               label="Kind"
@@ -445,61 +528,50 @@ export function Inspector({ scope = "type" }: { scope?: InspectorScope }) {
               value={object.color}
               onChange={(value) => patch({ color: value } as Partial<SceneObject>)}
             />
-            <NumberField
-              label="Intensity"
+            <ConstrainedNumberField {...history}
+              label="Intensity" objectType={object.type} property="intensity"
               value={object.intensity}
-              min={0}
-              step={0.1}
               onChange={(value) => patch({ intensity: value } as Partial<SceneObject>)}
             />
             {object.lightKind !== "directional" ? (
               <>
-                <NumberField
-                  label="Range"
+                <ConstrainedNumberField {...history}
+                  label="Range" objectType={object.type} property="range"
                   value={object.range ?? 0}
-                  min={0}
                   onChange={(value) => patch({ range: value } as Partial<SceneObject>)}
                 />
-                <NumberField
-                  label="Decay"
+                <ConstrainedNumberField {...history}
+                  label="Decay" objectType={object.type} property="decay"
                   value={object.decay ?? 2}
-                  min={0}
-                  step={0.1}
                   onChange={(value) => patch({ decay: value } as Partial<SceneObject>)}
                 />
               </>
             ) : null}
             {object.lightKind === "spot" ? (
               <>
-                <NumberField
-                  label="Cone °"
+                <ConstrainedNumberField {...history}
+                  label="Cone" objectType={object.type} property="coneAngleDeg"
                   value={object.coneAngleDeg ?? 42}
-                  min={1}
-                  max={179}
-                  step={1}
                   onChange={(value) => patch({ coneAngleDeg: value } as Partial<SceneObject>)}
                 />
-                <NumberField
-                  label="Penumbra"
+                <ConstrainedNumberField {...history}
+                  label="Penumbra" objectType={object.type} property="penumbra"
                   value={object.penumbra ?? 0.25}
-                  min={0}
-                  max={1}
-                  step={0.05}
                   onChange={(value) => patch({ penumbra: value } as Partial<SceneObject>)}
                 />
               </>
             ) : null}
-            <NumberField
+            <NumberField {...history}
               label="Target X"
               value={object.target?.x ?? scene.canvas.width / 2}
               onChange={(value) => patch({ target: { x: value, y: object.target?.y ?? scene.canvas.height / 2, z: object.target?.z ?? 0 } } as Partial<SceneObject>)}
             />
-            <NumberField
+            <NumberField {...history}
               label="Target Y"
               value={object.target?.y ?? scene.canvas.height / 2}
               onChange={(value) => patch({ target: { x: object.target?.x ?? scene.canvas.width / 2, y: value, z: object.target?.z ?? 0 } } as Partial<SceneObject>)}
             />
-            <NumberField
+            <NumberField {...history}
               label="Target Z"
               value={object.target?.z ?? 0}
               onChange={(value) => patch({ target: { x: object.target?.x ?? scene.canvas.width / 2, y: object.target?.y ?? scene.canvas.height / 2, z: value } } as Partial<SceneObject>)}
@@ -510,17 +582,20 @@ export function Inspector({ scope = "type" }: { scope?: InspectorScope }) {
               onChange={(value) => patch({ castShadow: value } as Partial<SceneObject>)}
             />
           </div>
+          <ParityNote>{inspectorControl("light", "castShadow").note}</ParityNote>
         </section>
       ) : null}
 
       {object.type === "camera" ? (
-        <section className="field-section inspector-control-section">
+        <section aria-labelledby="inspector-camera-heading" className="field-section inspector-control-section">
           <div className="inspector-section-heading">
-            <h3>Camera</h3>
+            <h3 id="inspector-camera-heading">Camera</h3>
             <button
               className={`mini-chip-button ${scene.activeCameraId === object.id ? "active" : ""}`}
               onClick={() => setActiveCameraId(scene.activeCameraId === object.id ? null : object.id)}
-              title={scene.activeCameraId === object.id ? "Stop using this as the program camera" : "Use this camera in the canvas"}
+              title={scene.activeCameraId === object.id
+                ? "Stop using this camera for the Editor preview"
+                : "Use this camera in the Editor preview"}
             >
               {scene.activeCameraId === object.id ? "Active camera" : "Make active"}
             </button>
@@ -533,75 +608,70 @@ export function Inspector({ scope = "type" }: { scope?: InspectorScope }) {
               onChange={(value) => patch({ cameraKind: value } as Partial<SceneObject>)}
             />
             {object.cameraKind === "perspective" ? (
-              <NumberField
+              <ConstrainedNumberField {...history}
                 label="Field of view"
+                objectType={object.type}
+                property="fov"
                 value={object.fov}
-                min={1}
-                max={179}
-                step={1}
                 onChange={(value) => patch({ fov: value } as Partial<SceneObject>)}
               />
             ) : null}
-            <NumberField
-              label="Zoom"
+            <ConstrainedNumberField {...history}
+              label="Zoom" objectType={object.type} property="zoom"
               value={object.zoom}
-              min={0.01}
-              step={0.05}
               onChange={(value) => patch({ zoom: value } as Partial<SceneObject>)}
             />
-            <NumberField
-              label="Near"
+            <ConstrainedNumberField {...history}
+              label="Near" objectType={object.type} property="near"
               value={object.near ?? 1}
-              min={0.01}
-              step={0.1}
               onChange={(value) => patch({ near: value } as Partial<SceneObject>)}
             />
-            <NumberField
-              label="Far"
+            <ConstrainedNumberField {...history}
+              label="Far" objectType={object.type} property="far"
               value={object.far ?? 20_000}
-              min={0.02}
               onChange={(value) => patch({ far: value } as Partial<SceneObject>)}
             />
-            <NumberField
+            <NumberField {...history}
               label="Target X"
               value={object.target?.x ?? scene.canvas.width / 2}
               onChange={(value) => patch({ target: { x: value, y: object.target?.y ?? scene.canvas.height / 2, z: object.target?.z ?? 0 } } as Partial<SceneObject>)}
             />
-            <NumberField
+            <NumberField {...history}
               label="Target Y"
               value={object.target?.y ?? scene.canvas.height / 2}
               onChange={(value) => patch({ target: { x: object.target?.x ?? scene.canvas.width / 2, y: value, z: object.target?.z ?? 0 } } as Partial<SceneObject>)}
             />
-            <NumberField
+            <NumberField {...history}
               label="Target Z"
               value={object.target?.z ?? 0}
               onChange={(value) => patch({ target: { x: object.target?.x ?? scene.canvas.width / 2, y: object.target?.y ?? scene.canvas.height / 2, z: value } } as Partial<SceneObject>)}
             />
-            <NumberField
+            <NumberField {...history}
               label="Up X"
               value={object.up?.x ?? 0}
               step={0.1}
               onChange={(value) => patch({ up: { x: value, y: object.up?.y ?? -1, z: object.up?.z ?? 0 } } as Partial<SceneObject>)}
             />
-            <NumberField
+            <NumberField {...history}
               label="Up Y"
               value={object.up?.y ?? -1}
               step={0.1}
               onChange={(value) => patch({ up: { x: object.up?.x ?? 0, y: value, z: object.up?.z ?? 0 } } as Partial<SceneObject>)}
             />
-            <NumberField
+            <NumberField {...history}
               label="Up Z"
               value={object.up?.z ?? 0}
               step={0.1}
               onChange={(value) => patch({ up: { x: object.up?.x ?? 0, y: object.up?.y ?? -1, z: value } } as Partial<SceneObject>)}
             />
           </div>
+          <ParityNote>{inspectorControl("camera", "fov").note}</ParityNote>
         </section>
       ) : null}
 
       {object.type === "layer" ? (
-        <section className="field-section inspector-control-section">
-          <h3>Layer contents</h3>
+        <section aria-labelledby="inspector-layer-contents-heading" className="field-section inspector-control-section">
+          <h3 id="inspector-layer-contents-heading">Layer contents</h3>
           <SelectField
             label="Layer kind"
             value={object.layerKind}
@@ -655,19 +725,28 @@ const MASK_MODES: MaskMode[] = ["add", "subtract", "intersect", "lighten", "dark
 function ImportedDesignSection({ object }: { object: SceneObject }) {
   const updateObject = useEditorStore((state) => state.updateObject);
   const metadata = object.importedDesign!;
+  const collapsed = useObjectInspectorStore((state) => state.collapsedDisclosures.includes("imported-design"));
+  const toggleDisclosure = useObjectInspectorStore((state) => state.toggleDisclosure);
+  const headingId = "inspector-imported-design-heading";
+  const contentId = "inspector-imported-design-content";
   const effects = metadata.effects ?? [];
   const layout = metadata.responsiveLayout ?? {};
   const patchMetadata = (patch: Partial<NonNullable<SceneObject["importedDesign"]>>) =>
     updateObject(object.id, { importedDesign: { ...metadata, ...patch } });
-  const patchEffect = (index: number, patch: Record<string, unknown>) =>
-    patchMetadata({ effects: effects.map((effect, effectIndex) => effectIndex === index ? { ...effect, ...patch } : effect) });
 
   return (
-    <section className="field-section imported-design-section">
+    <section aria-labelledby={headingId} className="field-section imported-design-section">
       <div className="inspector-section-heading">
-        <h3>Imported Design</h3>
+        <InspectorDisclosureToggle
+          contentId={contentId}
+          expanded={!collapsed}
+          headingId={headingId}
+          label="Imported Design"
+          onToggle={() => toggleDisclosure("imported-design")}
+        />
         <span>{metadata.sourceFormat.toUpperCase()}</span>
       </div>
+      <div className="inspector-disclosure-content" hidden={collapsed} id={contentId}>
       <div className="two-column">
         <TextField label="Source node" value={metadata.sourceNodeId ?? ""} onChange={(sourceNodeId) => patchMetadata({ sourceNodeId })} />
         <TextField label="Source type" value={metadata.sourceNodeType} onChange={(sourceNodeType) => patchMetadata({ sourceNodeType })} />
@@ -681,27 +760,40 @@ function ImportedDesignSection({ object }: { object: SceneObject }) {
           />
         ) : null}
         {typeof layout.gap === "number" ? (
-          <NumberField label="Layout gap" value={layout.gap} onChange={(gap) => patchMetadata({ responsiveLayout: { ...layout, gap } })} />
+          <NumberField {...history} label="Layout gap" value={layout.gap} onChange={(gap) => patchMetadata({ responsiveLayout: { ...layout, gap } })} />
         ) : null}
       </div>
+      {/*
+        Reported, not authored.
+
+        These were editable — an Enabled checkbox, opacity, radius, spread and colour — for effects
+        that **no GrapiX renderer draws**: `IMPLEMENTED_OBJECT_EFFECTS` is an empty list. So an author
+        could tune a drop shadow, see nothing change in Preview, and publish a frame with nothing
+        changed either. The values still round-trip; they are simply no longer offered as controls
+        until a renderer implements layer styles.
+      */}
       {effects.length ? (
         <div className="imported-effect-list">
           {effects.map((effect, index) => (
             <article key={`${String(effect.type)}-${index}`}>
               <div>
                 <strong>{String(effect.type ?? "Effect").replaceAll("-", " ")}</strong>
-                <label><input checked={effect.enabled !== false} onChange={(event) => patchEffect(index, { enabled: event.target.checked })} type="checkbox" /> Enabled</label>
+                <span className="imported-effect-state">
+                  {effect.enabled === false ? "disabled in source" : "enabled in source"}
+                </span>
               </div>
               <div className="two-column">
-                {typeof effect.opacity === "number" ? <NumberField label="Opacity" min={0} max={1} step={0.05} value={effect.opacity} onChange={(opacity) => patchEffect(index, { opacity })} /> : null}
-                {typeof effect.radius === "number" ? <NumberField label="Radius" min={0} value={effect.radius} onChange={(radius) => patchEffect(index, { radius })} /> : null}
-                {typeof effect.spread === "number" ? <NumberField label="Spread" min={0} value={effect.spread} onChange={(spread) => patchEffect(index, { spread })} /> : null}
-                {typeof effect.color === "string" ? <ColorField label="Colour" value={effect.color} onChange={(color) => patchEffect(index, { color })} /> : null}
+                {typeof effect.opacity === "number" ? <ReadOnlyField label="Opacity" value={String(effect.opacity)} /> : null}
+                {typeof effect.radius === "number" ? <ReadOnlyField label="Radius" value={String(effect.radius)} /> : null}
+                {typeof effect.spread === "number" ? <ReadOnlyField label="Spread" value={String(effect.spread)} /> : null}
+                {typeof effect.color === "string" ? <ReadOnlyField label="Colour" value={effect.color} /> : null}
               </div>
             </article>
           ))}
+          <ParityNote>{inspectorControl(object.type, "effects").note}</ParityNote>
         </div>
       ) : null}
+      </div>
     </section>
   );
 }
@@ -720,12 +812,22 @@ function MasksSection({ object }: { object: SceneObject }) {
   const setSelectedMaskId = useUiStore((state) => state.setSelectedMaskId);
   const currentFrame = useUiStore((state) => state.currentFrame);
   const masks = object.masks ?? [];
+  const collapsed = useObjectInspectorStore((state) => state.collapsedDisclosures.includes("masks"));
+  const toggleDisclosure = useObjectInspectorStore((state) => state.toggleDisclosure);
+  const headingId = "inspector-masks-heading";
+  const contentId = "inspector-masks-content";
 
   return (
-    <section className="field-section masks-section">
+    <section aria-labelledby={headingId} className="field-section masks-section">
       <div className="masks-header">
-        <h3>Masks</h3>
-        <div className="masks-actions">
+        <InspectorDisclosureToggle
+          contentId={contentId}
+          expanded={!collapsed}
+          headingId={headingId}
+          label="Masks"
+          onToggle={() => toggleDisclosure("masks")}
+        />
+        <div className="masks-actions" hidden={collapsed}>
           <button className="mini-chip-button" title="Add a rectangular mask" onClick={() => addRectMask(object.id)}>
             <Plus size={12} /> Rect
           </button>
@@ -744,6 +846,7 @@ function MasksSection({ object }: { object: SceneObject }) {
           </button>
         </div>
       </div>
+      <div className="inspector-disclosure-content" hidden={collapsed} id={contentId}>
       {masks.length === 0 ? <div className="empty-panel compact">No masks. Add one to clip this layer.</div> : null}
       {masks.map((mask) => (
         <div className={`mask-row ${selectedMaskId === mask.id ? "selected" : ""}`} key={mask.id} onClick={() => setSelectedMaskId(mask.id)}>
@@ -778,6 +881,7 @@ function MasksSection({ object }: { object: SceneObject }) {
           </div>
         </div>
       ))}
+      </div>
     </section>
   );
 }
@@ -837,37 +941,112 @@ function ObjectNameField(props: {
   );
 }
 
+/** Enough precision for a scrub, without rendering float dust. */
+function roundForDisplay(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
+/**
+ * The source note for a property whose field is not the animated kind.
+ *
+ * `width`, `height`, `fill`, `stroke`, `text` and `src` are bindable and have no animation channel,
+ * so they render through the plain primitives. Without this they were the one place a binding stayed
+ * invisible: the Data Binding tab knew, and the field the author was looking at did not.
+ */
+function sourceNoteFor(object: SceneObject, property: string, dataContext: Record<string, unknown>, frame: number) {
+  const source = resolvePropertySource(object, property, dataContext, frame);
+  if (source.kind === "static" || source.kind === "keyframed") return undefined;
+  return <PropertySourceNote source={source} />;
+}
+
 function AnimatedNumberField(props: {
   label: string;
   object: SceneObject;
   property: AnimatableProperty;
   value: number;
-  min?: number;
-  max?: number;
-  step?: number;
 }) {
   const currentFrame = useUiStore((state) => state.currentFrame);
+  const scene = useEditorStore((state) => state.scene);
   const setAnimationEnabled = useEditorStore((state) => state.setPropertyAnimationEnabled);
   const setAnimatedValue = useEditorStore((state) => state.setAnimatedPropertyValue);
   const addKeyframe = useEditorStore((state) => state.addPropertyKeyframe);
   const deleteKeyframe = useEditorStore((state) => state.deletePropertyKeyframe);
-  const channel = props.object.animation?.[props.property];
+  // The animation question is per object kind and is answered in one place, which package preflight
+  // consults too: Program discards a `zDepth` channel on 2D content because depth is paint order,
+  // resolved when the scene is prepared. So the field keeps its number and drops its stopwatch, and
+  // an existing channel is ignored here exactly as the evaluator now ignores it.
+  const animatable = isPropertyAnimatable(props.object.type, props.property);
+  const channel = animatable ? props.object.animation?.[props.property] : undefined;
   const currentKey = channel?.keys.find((key) => key.frame === currentFrame);
-  const value = channel ? sampleChannel(channel, currentFrame) : props.value;
+  // Named so a diagnostic this sample raises is the same fault the viewport's sampler reports,
+  // rather than a second, anonymous copy of it in the console.
+  const value = channel
+    ? sampleChannel(channel, currentFrame, { objectId: props.object.id, property: props.property })
+    : props.value;
+  // `sampleChannel` returns undefined for a channel with no keys, in which case the authored value is
+  // still the truth — the same fallback the input already relied on.
+  const authoredOrSampled = value ?? props.value;
+  /*
+   * Which value is actually in force, which is not always the one above.
+   *
+   * Preview prepares a scene as channels, then hierarchy, then bindings, so a binding **overwrites** a
+   * sampled keyframe. This field sampled only the channel, so a bound-and-keyframed property showed a
+   * number nothing drew — and said nothing about the binding at all. The resolver answers the whole
+   * question in one place, including that Program resolves no bindings and so draws something else.
+   */
+  const source = resolvePropertySource(props.object, props.property, scene.dataContext, currentFrame);
+  const displayValue = typeof source.preview === "number" ? source.preview : authoredOrSampled;
+  // A bound value is the data's, not the author's: typing over it would write a number the next data
+  // update discards, with no sign that it had.
+  const boundElsewhere = source.kind === "bound";
+
+  const beginHistory = useEditorStore((state) => state.beginHistory);
+  const cancelHistory = useEditorStore((state) => state.cancelHistory);
+  const commitHistory = useEditorStore((state) => state.commitHistory);
+  const write = (next: number) => {
+    if (!Number.isFinite(next)) return;
+    setAnimatedValue(props.object.id, props.property, next, currentFrame);
+  };
+  /*
+   * Range, step and unit are the property's, not this widget's — the same table the Object Manager's
+   * grid reads, and the same one the store clamps against. Call sites used to pass their own `step`
+   * (`0.05` for scale where the grid used `0.01`) and their own `min`/`max`, which is how one property
+   * came to have two editing speeds and two ranges depending on which panel was open.
+   */
+  const constraint = propertyConstraint(props.object.type, props.property);
+  const step = constraint?.step ?? 1;
+  const gesture = useNumericGesture({
+    label: `Edit ${props.label}`,
+    max: constraint?.max,
+    min: constraint?.min,
+    onBeginEdit: beginHistory,
+    onCancelEdit: cancelHistory,
+    onChange: write,
+    onCommitEdit: commitHistory,
+    step,
+    value: displayValue
+  });
 
   return (
     <label className={`field animated-number-field ${channel ? "animated" : ""}`}>
-      <span>{props.label}</span>
+      <span>{labelWithUnit(props.label, props.object.type, props.property)}</span>
       <span className={`field-animation-controls ${channel ? "animated" : ""}`}>
-        <button
-          aria-label={`${channel ? "Disable" : "Enable"} ${props.label} animation`}
-          className={`field-stopwatch ${channel ? "active" : ""}`}
-          onClick={() => setAnimationEnabled(props.object.id, props.property, !channel, currentFrame)}
-          title={channel ? "Disable property animation" : "Enable animation and add a key at the playhead"}
-          type="button"
-        >
-          <Clock3 size={12} />
-        </button>
+        {animatable ? (
+          <button
+            aria-label={`${channel ? "Disable" : "Enable"} ${props.label} animation`}
+            className={`field-stopwatch ${channel ? "active" : ""}`}
+            onClick={() => setAnimationEnabled(props.object.id, props.property, !channel, currentFrame)}
+            title={channel ? "Disable property animation" : "Enable animation and add a key at the playhead"}
+            type="button"
+          >
+            <Clock3 size={12} />
+          </button>
+        ) : (
+          <span
+            className="field-stopwatch-absent"
+            title={`Program resolves ${props.label} when the scene is prepared, so a ${props.object.type} object cannot animate it. The value is still editable.`}
+          />
+        )}
         {channel ? (
           <button
             aria-label={`${currentKey ? "Remove" : "Add"} ${props.label} keyframe at frame ${currentFrame}`}
@@ -881,21 +1060,53 @@ function AnimatedNumberField(props: {
             <Diamond size={10} />
           </button>
         ) : null}
+        {/*
+          The same gesture as the grid's cells and the plain fields: scrub, Shift for fine control,
+          Enter commits, Escape reverts, one undo step per gesture. This field had none of it — it wrote
+          through `setAnimatedPropertyValue` on every keystroke, so typing a coordinate deposited one
+          history entry per character and there was no way to drag a value at all.
+        */}
         <input
-          max={props.max}
-          min={props.min}
-          onChange={(event) => setAnimatedValue(
-            props.object.id,
-            props.property,
-            Number(event.target.value),
-            currentFrame
-          )}
-          step={props.step ?? 1}
+          disabled={boundElsewhere}
+          max={constraint?.max}
+          min={constraint?.min}
+          onBlur={gesture.handlers.onBlur}
+          onChange={(event) => write(Number(event.target.value))}
+          onFocus={gesture.handlers.onFocus}
+          onKeyDown={gesture.handlers.onKeyDown}
+          onPointerCancel={gesture.handlers.onPointerCancel}
+          onPointerDown={gesture.handlers.onPointerDown}
+          onPointerMove={gesture.handlers.onPointerMove}
+          onPointerUp={gesture.handlers.onPointerUp}
+          step={step}
+          title={boundElsewhere ? "This value comes from the scene's data. Clear the binding in the Data Binding tab to edit it." : undefined}
           type="number"
-          value={value}
+          value={roundForDisplay(displayValue)}
         />
       </span>
+      {/*
+        Where the number came from, stated where the number is. An empty string for a plain authored
+        value keeps the common case quiet — a note on every field is a note nobody reads.
+      */}
+      {source.kind === "static" ? null : (
+        <PropertySourceNote source={source} />
+      )}
     </label>
   );
+}
+
+/**
+ * One line under a field saying which value is in force and which renderer agrees.
+ *
+ * Two states are worth distinguishing visually: a binding that changes what Preview draws relative to
+ * Program (`agrees === false`) is a parity gap an author must know about before air, while a keyframe or
+ * a broken binding is merely information. So the parity case gets the same treatment as every other
+ * Preview-only disclosure in this panel, and the rest stay quiet.
+ */
+function PropertySourceNote(props: { source: PropertySource }) {
+  const sentence = describePropertySource(props.source);
+  if (!sentence) return null;
+  if (!props.source.agrees) return <ParityNote>{sentence}</ParityNote>;
+  return <p className="field-source-note" data-state={props.source.kind}>{sentence}</p>;
 }
 

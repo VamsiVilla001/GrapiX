@@ -6,13 +6,14 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -p tsconfig.json && vite build",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "tsx --import ./tests/register-vite-assets.mjs --test tests/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
     "@grapix/adobe-client": "0.1.0",
     "@grapix/adobe-common-schema": "0.1.0",
+    "@grapix/ae-runtime-contract": "0.1.0",
     "@grapix/animation-engine": "0.1.0",
     "@grapix/output-contracts": "0.1.0",
     "@grapix/render-protocol": "0.1.0",
@@ -25,19 +26,23 @@
     "@grapix/tile-system": "0.1.0",
     "@tauri-apps/api": "^2.8.0",
     "@vitejs/plugin-react": "^6.0.3",
+    "dockview": "^8.2.0",
+    "dockview-react": "^8.2.0",
     "jszip": "^3.10.1",
     "lucide-react": "^0.468.0",
     "pixi.js": "^8.19.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "react-resizable-panels": "^4.12.1",
     "three": "^0.185.1",
     "zustand": "^4.5.4"
   },
   "devDependencies": {
-    "@types/react": "^18.3.3",
-    "@types/react-dom": "^18.3.0",
+    "@rolldown/plugin-babel": "^0.2.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
     "@types/three": "^0.185.1",
+    "babel-plugin-react-compiler": "^1.0.0",
     "tsx": "^4.23.0",
     "typescript": "^5.5.4",
     "vite": "^8.1.4"

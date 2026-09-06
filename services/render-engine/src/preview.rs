@@ -368,7 +368,7 @@ fn render_single_pass(
     let target = CompositeTarget {
         width: frame_image.width,
         height: frame_image.height,
-        pixels: frame_image.data,
+        pixels: frame_image.data.as_slice().to_vec(),
         logical_bounds: resolved.logical,
         render_scale: resolved.render_scale,
     };

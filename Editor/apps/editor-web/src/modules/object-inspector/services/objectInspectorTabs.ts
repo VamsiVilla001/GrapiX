@@ -18,7 +18,7 @@ import type { SceneObject } from "@grapix/shared-types";
  */
 
 /** Tabs after the leading type tab. The type tab is always present and always first. */
-export const OPTIONAL_OBJECT_INSPECTOR_TABS = ["Transform", "Materials", "Text", "Data Binding"] as const;
+export const OPTIONAL_OBJECT_INSPECTOR_TABS = ["Transform", "Materials", "Data Binding"] as const;
 export type OptionalObjectInspectorTab = (typeof OPTIONAL_OBJECT_INSPECTOR_TABS)[number];
 
 interface TypeDescriptor {
@@ -45,7 +45,10 @@ const DESCRIPTORS: Record<SceneObject["type"], TypeDescriptor> = {
   ellipse: { typeTab: "Ellipse", optional: ["Transform", "Materials", "Data Binding"] },
   image: { typeTab: "Image", optional: ["Transform", "Materials", "Data Binding"] },
   shape: { typeTab: "Shape", optional: ["Transform", "Materials", "Data Binding"] },
-  paint: { typeTab: "Paint", optional: ["Transform", "Materials", "Data Binding"] },
+  // A brush layer is not a surface: every stroke draws from its own colour, opacity and flow, and
+  // `sceneMaterial.ts` excludes paint from face resolution — so a Materials tab here offered a
+  // binding that changed nothing. Same reason `line` never had one.
+  paint: { typeTab: "Paint", optional: ["Transform", "Data Binding"] },
   mesh: { typeTab: "Mesh", optional: ["Transform", "Materials", "Data Binding"] },
 
   // A stroke, not a surface: it has no material faces to bind, but its geometry and colour are
@@ -71,6 +74,42 @@ export interface ObjectInspectorTabs {
   typeTab: string;
 }
 
+export type ObjectInspectorTabNavigationKey =
+  | "ArrowLeft"
+  | "ArrowRight"
+  | "ArrowUp"
+  | "ArrowDown"
+  | "Home"
+  | "End";
+
+/**
+ * The next tab selected by the ARIA tab strip.
+ *
+ * This is intentionally only the strip's six navigation keys. Native Tab remains native form
+ * navigation, while field-owned Enter/Escape handlers keep their edit transactions.
+ */
+export function objectInspectorTabIndex(
+  currentIndex: number,
+  tabCount: number,
+  key: string
+): number | null {
+  if (tabCount <= 0 || currentIndex < 0 || currentIndex >= tabCount) return null;
+  switch (key as ObjectInspectorTabNavigationKey) {
+    case "ArrowLeft":
+    case "ArrowUp":
+      return (currentIndex - 1 + tabCount) % tabCount;
+    case "ArrowRight":
+    case "ArrowDown":
+      return (currentIndex + 1) % tabCount;
+    case "Home":
+      return 0;
+    case "End":
+      return tabCount - 1;
+    default:
+      return null;
+  }
+}
+
 /**
  * Tabs for the current selection.
  *
@@ -90,6 +129,28 @@ export function objectInspectorTabsFor(object: SceneObject | null): ObjectInspec
       (tab, index, all) => all.indexOf(tab) === index
     )
   };
+}
+
+/**
+ * Tabs for a selection of more than one object.
+ *
+ * The leading tab becomes **Selection** rather than a type, because a set of twelve is not "a Quad"
+ * however many quads are in it. Text and Data Binding do not appear at all: content belongs to one
+ * caption and a binding names one property of one object, so a batch of either would be nonsense
+ * dressed as a feature. Materials appears only when every target is a compatible surface.
+ */
+export function multiSelectionTabs(options: { materials: boolean }): ObjectInspectorTabs {
+  return {
+    typeTab: "Selection",
+    tabs: options.materials
+      ? ["Selection", "Transform", "Materials"]
+      : ["Selection", "Transform"]
+  };
+}
+
+/** The title for a selection, which says how many rather than naming a type it does not have. */
+export function multiSelectionTitle(sceneName: string, count: number): string {
+  return `Object Inspector - ${sceneName} - ${count} Objects`;
 }
 
 /** The contextual panel title, matching XPression's "Object Inspector - <scene> - Quad Object". */

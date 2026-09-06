@@ -1,11 +1,9 @@
 //! Off-screen render target and GPU->CPU frame readback.
 //!
-//! Readback path: render into a BGRA8-sRGB texture, copy to a mapped-readable
-//! staging buffer (rows padded to wgpu's 256-byte COPY_BYTES_PER_ROW_ALIGNMENT),
-//! then unpad into a tightly packed `Vec<u8>` for the video output. The
-//! staging buffer is reused across frames; only the tight copy allocates.
+//! staging buffer is reused across frames; the bounded output pool owns the
+//! fixed tight slabs and rejects a frame rather than allocating when exhausted.
 
-use crate::output::VideoFrame;
+use crate::output::{VideoFrame, VideoFrameLease, VideoFramePool};
 use crate::renderer::mesh::{MeshFrame, MeshPipeline};
 use crate::renderer::pipeline::{QuadPipeline, QuadUniforms, DEPTH_FORMAT, RENDER_FORMAT};
 
@@ -18,6 +16,7 @@ pub struct FrameTarget {
     depth_view: wgpu::TextureView,
     readback_buffer: wgpu::Buffer,
     padded_bytes_per_row: u32,
+    frame_pool: VideoFramePool,
 }
 
 /// Rows in copy operations must align to 256 bytes (wgpu constraint).
@@ -74,7 +73,17 @@ impl FrameTarget {
             _depth_texture: depth_texture,
             readback_buffer,
             padded_bytes_per_row: padded,
+            frame_pool: VideoFramePool::new(3, width as usize * height as usize * 4)
+                .expect("validated frame dimensions must fit bounded output slabs"),
         }
+    }
+
+    /// Render one frame and read it back. Blocking: waits for the GPU, which
+    /// is the intended behavior on the dedicated render thread (the frame
+    /// clock accounts for it; WebSocket handling runs elsewhere).
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_acquire_frame(&self) -> Option<VideoFrameLease> {
+        self.frame_pool.try_acquire()
     }
 
     /// Render one frame and read it back. Blocking: waits for the GPU, which
@@ -90,6 +99,7 @@ impl FrameTarget {
         mesh_pipeline: &MeshPipeline,
         mesh_frame: Option<&MeshFrame>,
         frame_index: u64,
+        mut data: VideoFrameLease,
     ) -> anyhow::Result<VideoFrame> {
         pipeline.upload(queue, quads);
 
@@ -165,12 +175,11 @@ impl FrameTarget {
             .map_err(|_| anyhow::anyhow!("frame readback callback dropped"))??;
 
         let tight_row = (self.width * 4) as usize;
-        let mut data = vec![0u8; tight_row * self.height as usize];
         {
             let mapped = slice.get_mapped_range();
             for row in 0..self.height as usize {
                 let src = row * self.padded_bytes_per_row as usize;
-                data[row * tight_row..(row + 1) * tight_row]
+                data.as_mut_slice()[row * tight_row..(row + 1) * tight_row]
                     .copy_from_slice(&mapped[src..src + tight_row]);
             }
         }

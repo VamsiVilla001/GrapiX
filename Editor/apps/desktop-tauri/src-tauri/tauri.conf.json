@@ -38,7 +38,8 @@
       "../../../../Editor/services/adobe-mcp-gateway/dist/bundle/grapix-adobe-mcp-gateway.mjs": "services/grapix-adobe-mcp-gateway.mjs",
       "../../../../Editor/services/editor-mcp/dist/bundle/grapix-editor-mcp.mjs": "services/grapix-editor-mcp.mjs",
       "../../../../Editor/services/editor-mcp/dist/knowledge-root/": "knowledge/",
-      "../../../../Editor/services/project-api/dist/bundle/node_modules/": "services/node_modules/"
+      "../../../../Editor/services/project-api/dist/bundle/node_modules/": "services/node_modules/",
+      "../../../../Editor/services/adobe-mcp-gateway/jsx/": "services/jsx/"
     },
     "windows": {
       "webviewInstallMode": {

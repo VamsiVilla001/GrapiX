@@ -7,21 +7,23 @@ import {
   type SceneKeyframeEasing,
   type SceneObject
 } from "@grapix/shared-types";
+import { capturePointer } from "../lib/pointerCapture";
 import {
   Activity,
   BarChart3,
   Diamond,
+  Layers,
   Pause,
   Play,
   SkipBack,
   Trash2
 } from "lucide-react";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type MouseEvent,
   type PointerEvent as ReactPointerEvent
 } from "react";
 import { useEditorStore } from "../store/editorStore";
@@ -31,18 +33,16 @@ import {
   frameToMarkerPosition,
   frameToPercent
 } from "./timelineMath";
-
-interface TimelineRow {
-  id: string;
-  object: SceneObject;
-  property?: AnimatableProperty;
-  maskId?: string;
-  maskName?: string;
-  maskProperty?: MaskTimelineProperty;
-  depth: number;
-}
-
-type MaskTimelineProperty = "path" | "opacity" | "feather" | "expansion";
+import { computeRowWindow, rowWindowSpacers } from "./rowWindow";
+import {
+  clampFrameDelta,
+  collectTimelineKeys,
+  createTimelineRows,
+  keysInMarquee,
+  type MaskTimelineProperty,
+  type TimelineKeyRef,
+  type TimelineMarquee
+} from "./timelineModel";
 
 interface SelectedPropertyKey {
   objectId: string;
@@ -52,16 +52,22 @@ interface SelectedPropertyKey {
 
 const ROW_HEIGHT = 28;
 const RULER_HEIGHT = 28;
+/** Pointer travel before a press becomes a drag, so a click does not micro-move a key. */
+const DRAG_THRESHOLD_PX = 3;
 
 export function TimelinePanel() {
   const scene = useEditorStore((state) => state.scene);
   const hasActiveScene = useEditorStore((state) => state.hasActiveScene);
   const selectedObjectId = useEditorStore((state) => state.selectedObjectId);
   const selectObject = useEditorStore((state) => state.selectObject);
+  const selectedObjectIds = useEditorStore((state) => state.selectedObjectIds);
+  const selectObjects = useEditorStore((state) => state.selectObjects);
   const updateObjectKeyframe = useEditorStore((state) => state.updateObjectKeyframe);
   const updatePropertyKeyframe = useEditorStore((state) => state.updatePropertyKeyframe);
   const deletePropertyKeyframe = useEditorStore((state) => state.deletePropertyKeyframe);
   const updateMaskKeyframeFrame = useEditorStore((state) => state.updateMaskKeyframeFrame);
+  const updateShapePathKeyframeFrame = useEditorStore((state) => state.updateShapePathKeyframeFrame);
+  const deleteShapePathKeyframe = useEditorStore((state) => state.deleteShapePathKeyframe);
   const timelinePlaying = useUiStore((state) => state.timelinePlaying);
   const currentFrame = useUiStore((state) => state.currentFrame);
   const toggleTimelinePlayback = useUiStore((state) => state.toggleTimelinePlayback);
@@ -70,15 +76,110 @@ export function TimelinePanel() {
   const setCurrentFrame = useUiStore((state) => state.setCurrentFrame);
   const selectedMaskId = useUiStore((state) => state.selectedMaskId);
   const setSelectedMaskId = useUiStore((state) => state.setSelectedMaskId);
+  const timelineRowFilter = useUiStore((state) => state.timelineRowFilter);
+  const setTimelineRowFilter = useUiStore((state) => state.setTimelineRowFilter);
+  const beginHistory = useEditorStore((state) => state.beginHistory);
+  const commitHistory = useEditorStore((state) => state.commitHistory);
+  const deleteObjectKeyframe = useEditorStore((state) => state.deleteObjectKeyframe);
   const [mode, setMode] = useState<"keys" | "speed">("keys");
   const [selectedPropertyKey, setSelectedPropertyKey] = useState<SelectedPropertyKey | null>(null);
+  const [selectedKeyIds, setSelectedKeyIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [marquee, setMarquee] = useState<TimelineMarquee | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const rulerRef = useRef<HTMLDivElement>(null);
   const durationFrames = scene.timeline.durationFrames;
-  const rows = useMemo(() => createTimelineRows(scene.objects), [scene.objects]);
+  const rows = useMemo(
+    () => createTimelineRows(scene.objects, timelineRowFilter),
+    [scene.objects, timelineRowFilter]
+  );
   const rowIndexById = useMemo(
     () => new Map(rows.map((row, index) => [row.id, index])),
     [rows]
   );
+  const timelineKeys = useMemo(
+    () => collectTimelineKeys(scene.objects, scene.timeline.keyframes),
+    [scene.objects, scene.timeline.keyframes]
+  );
+  /** Only keys on a visible row can be drawn, marquee'd or moved. */
+  const visibleKeys = useMemo(
+    () => timelineKeys.filter((key) => rowIndexById.has(key.rowId)),
+    [rowIndexById, timelineKeys]
+  );
+
+  /*
+   * Windowing. Only the rows on screen are mounted: a show-sized scene reaches thousands of channels
+   * and keyframe markers, and drawing all of them cost that on every scrub frame while the author
+   * could see forty. The scroller is the grid itself — in `advanced-key-grid` both columns scroll
+   * together — so one scrollTop drives the label gutter, the track lines and the markers alike.
+   */
+  const [viewport, setViewport] = useState({ scrollTop: 0, height: 0 });
+  const scrollObserver = useRef<ResizeObserver | null>(null);
+  /*
+   * A callback ref rather than an effect, because the scroller is conditionally rendered: with no
+   * scene open this panel shows an empty state and there is no grid to measure. An effect with `[]`
+   * deps ran once against a null ref, never retried, and left the height at zero — which the window
+   * reads as "unmeasured" and answers by drawing every row. Attaching on mount of the node itself is
+   * the only version that cannot miss it.
+   */
+  const attachScroller = useCallback((element: HTMLDivElement | null) => {
+    scrollObserver.current?.disconnect();
+    scrollObserver.current = null;
+    if (!element) return;
+    const measure = () => setViewport({ scrollTop: element.scrollTop, height: element.clientHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    scrollObserver.current = observer;
+  }, []);
+  const rowWindow = useMemo(
+    () =>
+      computeRowWindow({
+        scrollTop: viewport.scrollTop,
+        viewportHeight: viewport.height,
+        rowHeight: ROW_HEIGHT,
+        rowCount: rows.length,
+        headerHeight: RULER_HEIGHT,
+        // Six rows of margin: a marker the pointer reaches during a drag has to be mounted already,
+        // because one that mounts mid-drag never received the pointer capture.
+        overscan: 6
+      }),
+    [rows.length, viewport.height, viewport.scrollTop]
+  );
+  /** The windowed rows, carrying their true index so absolute positions stay correct. */
+  const windowedRows = useMemo(
+    () => rows.slice(rowWindow.first, rowWindow.last + 1).map((row, offset) => ({ row, index: rowWindow.first + offset })),
+    [rowWindow.first, rowWindow.last, rows]
+  );
+  const spacers = useMemo(
+    () => rowWindowSpacers(rowWindow, rows.length, ROW_HEIGHT),
+    [rowWindow, rows.length]
+  );
+  /** Markers are drawn only for rows that are mounted; the rest cannot be seen or grabbed. */
+  const windowedKeys = useMemo(
+    () => visibleKeys.filter((key) => {
+      const index = rowIndexById.get(key.rowId);
+      return index !== undefined && index >= rowWindow.first && index <= rowWindow.last;
+    }),
+    [rowIndexById, rowWindow.first, rowWindow.last, visibleKeys]
+  );
+
+  /**
+   * The live drag. A ref rather than state because it is written on every pointer move and
+   * nothing renders from it — and because the start frames must be the ones captured at
+   * pointer-down: reading them back from the scene mid-drag makes each move compound the last
+   * and the selection accelerates away from the cursor.
+   */
+  const keyDragRef = useRef<{
+    pointerId: number;
+    originFrame: number;
+    originClientX: number;
+    startFrames: Map<string, number>;
+    refs: TimelineKeyRef[];
+    appliedDelta: number;
+    moved: boolean;
+  } | null>(null);
+  const marqueeRef = useRef<{ pointerId: number; additive: boolean; base: ReadonlySet<string> } | null>(null);
+  const scrubRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!hasActiveScene || !timelinePlaying) return undefined;
@@ -130,50 +231,269 @@ export function TimelinePanel() {
     ? selectedChannel.keys.find((key) => key.id === selectedPropertyKey.keyframeId)
     : undefined;
 
-  function frameForClientX(clientX: number): number {
+  const frameForClientX = useCallback((clientX: number): number => {
     const rect = rulerRef.current?.getBoundingClientRect();
-    if (!rect) return currentFrame;
+    if (!rect) return 0;
     return frameFromClientX(clientX, rect.left, rect.width, durationFrames);
+  }, [durationFrames]);
+
+  /** Which track row a pointer is over. The ruler's own header occupies the first band. */
+  const rowForClientY = useCallback((clientY: number): number => {
+    const rect = rulerRef.current?.getBoundingClientRect();
+    if (!rect) return 0;
+    const offset = clientY - rect.top - RULER_HEIGHT;
+    return Math.max(0, Math.min(rows.length - 1, Math.floor(offset / ROW_HEIGHT)));
+  }, [rows.length]);
+
+  /** Write one key's frame, whichever kind of key it is. */
+  const applyKeyFrame = useCallback((key: TimelineKeyRef, frame: number) => {
+    switch (key.kind) {
+      case "property":
+        updatePropertyKeyframe(key.objectId, key.property, key.keyId, { frame });
+        return;
+      case "legacy":
+        updateObjectKeyframe(key.keyId, { frame });
+        return;
+      case "mask":
+        updateMaskKeyframeFrame(key.objectId, key.maskId, key.maskProperty, key.keyId, frame);
+        return;
+      case "shape-path":
+        updateShapePathKeyframeFrame(key.objectId, key.keyId, frame);
+    }
+  }, [
+    updateMaskKeyframeFrame,
+    updateObjectKeyframe,
+    updatePropertyKeyframe,
+    updateShapePathKeyframeFrame
+  ]);
+
+  function selectKeyRow(key: TimelineKeyRef) {
+    selectObject(key.objectId);
+    if (key.kind === "property") {
+      setSelectedPropertyKey({ objectId: key.objectId, property: key.property, keyframeId: key.keyId });
+    }
+    if (key.kind === "mask") setSelectedMaskId(key.maskId);
   }
 
-  function beginPropertyKeyDrag(
-    event: ReactPointerEvent<HTMLButtonElement>,
-    objectId: string,
-    property: AnimatableProperty,
-    key: PropertyKeyframe
-  ) {
+  /**
+   * Press on a key.
+   *
+   * Shift or Ctrl toggles membership and starts no drag — an author refining a selection is not
+   * asking to move it. Pressing an already-selected key keeps the whole group, so a five-key
+   * selection drags as five keys rather than collapsing to the one under the cursor.
+   */
+  function beginKeyDrag(event: ReactPointerEvent<HTMLButtonElement>, key: TimelineKeyRef) {
     event.preventDefault();
     event.stopPropagation();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    selectObject(objectId);
-    setSelectedPropertyKey({ objectId, property, keyframeId: key.id });
+    setNotice(null);
+
+    if (event.shiftKey || event.ctrlKey || event.metaKey) {
+      const next = new Set(selectedKeyIds);
+      if (next.has(key.id)) next.delete(key.id);
+      else next.add(key.id);
+      setSelectedKeyIds(next);
+      selectKeyRow(key);
+      return;
+    }
+
+    const selection = selectedKeyIds.has(key.id) ? new Set(selectedKeyIds) : new Set([key.id]);
+    setSelectedKeyIds(selection);
+    selectKeyRow(key);
     setCurrentFrame(key.frame, durationFrames);
+
+    const refs = visibleKeys.filter((candidate) => selection.has(candidate.id));
+    capturePointer(event.currentTarget, event.pointerId);
+    beginHistory(refs.length > 1 ? `Move ${refs.length} keyframes` : "Move keyframe");
+    keyDragRef.current = {
+      pointerId: event.pointerId,
+      originFrame: frameForClientX(event.clientX),
+      originClientX: event.clientX,
+      startFrames: new Map(refs.map((candidate) => [candidate.id, candidate.frame])),
+      refs,
+      appliedDelta: 0,
+      moved: false
+    };
   }
 
-  function dragPropertyKey(
-    event: ReactPointerEvent<HTMLButtonElement>,
-    objectId: string,
-    property: AnimatableProperty,
-    keyframeId: string
-  ) {
-    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-    const frame = frameForClientX(event.clientX);
-    updatePropertyKeyframe(objectId, property, keyframeId, { frame });
-    setCurrentFrame(frame, durationFrames);
+  function dragKeys(event: ReactPointerEvent<HTMLButtonElement>) {
+    const drag = keyDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (!drag.moved && Math.abs(event.clientX - drag.originClientX) < DRAG_THRESHOLD_PX) return;
+    drag.moved = true;
+
+    const delta = clampFrameDelta(
+      [...drag.startFrames.values()],
+      frameForClientX(event.clientX) - drag.originFrame,
+      durationFrames
+    );
+    if (delta === drag.appliedDelta) return;
+    drag.appliedDelta = delta;
+
+    for (const key of drag.refs) {
+      const start = drag.startFrames.get(key.id);
+      if (start !== undefined) applyKeyFrame(key, start + delta);
+    }
   }
 
-  function beginLegacyKeyDrag(event: ReactPointerEvent<HTMLButtonElement>, objectId: string, frame: number) {
+  /**
+   * End of any key drag. `commitHistory` is safe on a press that never moved: it compares the
+   * scene against the transaction's snapshot and leaves the undo stack alone when nothing
+   * changed, so a click does not deposit an empty undo step.
+   */
+  function endKeyDrag() {
+    if (!keyDragRef.current) return;
+    keyDragRef.current = null;
+    commitHistory();
+  }
+
+  function beginMarquee(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    // Only an empty stretch of track starts a box; markers stop propagation before this runs.
+    if (event.target !== event.currentTarget) return;
     event.preventDefault();
-    event.stopPropagation();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    selectObject(objectId);
-    setCurrentFrame(frame, durationFrames);
+    capturePointer(event.currentTarget, event.pointerId);
+    setNotice(null);
+
+    const additive = event.shiftKey || event.ctrlKey || event.metaKey;
+    marqueeRef.current = {
+      pointerId: event.pointerId,
+      additive,
+      base: additive ? new Set(selectedKeyIds) : new Set()
+    };
+    if (!additive) setSelectedKeyIds(new Set());
+
+    const frame = frameForClientX(event.clientX);
+    const row = rowForClientY(event.clientY);
+    setMarquee({ frameFrom: frame, frameTo: frame, rowFrom: row, rowTo: row });
   }
+
+  function dragMarquee(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = marqueeRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    setMarquee((current) => {
+      if (!current) return current;
+      const next = {
+        ...current,
+        frameTo: frameForClientX(event.clientX),
+        rowTo: rowForClientY(event.clientY)
+      };
+      const caught = keysInMarquee(visibleKeys, next, rowIndexById);
+      setSelectedKeyIds(new Set([...drag.base, ...caught]));
+      return next;
+    });
+  }
+
+  function endMarquee() {
+    marqueeRef.current = null;
+    setMarquee(null);
+  }
+
+  /**
+   * Delete the selection.
+   *
+   * Mask keys are excluded because no store action deletes one — reporting that is the point.
+   * Silently dropping them from the count would tell the author their selection was removed
+   * when four of its keys are still on the track.
+   */
+  function deleteSelectedKeys() {
+    const selected = visibleKeys.filter((key) => selectedKeyIds.has(key.id));
+    if (!selected.length) return;
+
+    const maskKeys = selected.filter((key) => key.kind === "mask").length;
+    beginHistory(`Delete ${selected.length - maskKeys} keyframes`);
+    for (const key of selected) {
+      if (key.kind === "property") deletePropertyKeyframe(key.objectId, key.property, key.keyId);
+      else if (key.kind === "legacy") deleteObjectKeyframe(key.keyId);
+      else if (key.kind === "shape-path") deleteShapePathKeyframe(key.objectId, key.keyId);
+    }
+    commitHistory();
+
+    setSelectedKeyIds(new Set());
+    setNotice(
+      maskKeys
+        ? `${maskKeys} mask key${maskKeys === 1 ? "" : "s"} kept — mask keyframes cannot be deleted from the timeline.`
+        : null
+    );
+  }
+
+  /**
+   * Scrubbing.
+   *
+   * Pointer capture is what makes it smooth in both directions: without it the pointer leaving
+   * the 28px ruler band ends the gesture, which is why dragging the playhead backwards used to
+   * stop the moment the cursor strayed. The frame follows the pointer for as long as the button
+   * is held, wherever it goes.
+   */
+  function beginScrub(event: ReactPointerEvent<HTMLElement>) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    capturePointer(event.currentTarget, event.pointerId);
+    scrubRef.current = event.pointerId;
+    setCurrentFrame(frameForClientX(event.clientX), durationFrames);
+  }
+
+  /**
+   * Tracked by the ref rather than by `hasPointerCapture`, so a capture the browser refused is
+   * not the difference between a scrubber that follows the pointer and one that moves once and
+   * then sticks.
+   */
+  function dragScrub(event: ReactPointerEvent<HTMLElement>) {
+    if (scrubRef.current !== event.pointerId) return;
+    setCurrentFrame(frameForClientX(event.clientX), durationFrames);
+  }
+
+  function endScrub() {
+    scrubRef.current = null;
+  }
+
+  function scrubFromKeyboard(event: { key: string; shiftKey: boolean; preventDefault: () => void }) {
+    const step = event.shiftKey ? 10 : 1;
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      setCurrentFrame(currentFrame - step, durationFrames);
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      setCurrentFrame(currentFrame + step, durationFrames);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setCurrentFrame(0, durationFrames);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setCurrentFrame(durationFrames, durationFrames);
+    }
+  }
+
+  // Delete works on the panel rather than on each marker: a marquee selection has no focused
+  // element, so a key handler bound to one diamond can never see the keystroke.
+  useEffect(() => {
+    if (!selectedKeyIds.size) return undefined;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Delete" && event.key !== "Backspace") return;
+      const target = event.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (!rulerRef.current?.closest(".timeline-panel")?.contains(target)) return;
+      event.preventDefault();
+      deleteSelectedKeys();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
+  // A key that disappears — undo, a deleted object, a filter change — must not stay selected,
+  // or the next group drag reports a count the timeline is not showing.
+  useEffect(() => {
+    setSelectedKeyIds((current) => {
+      if (!current.size) return current;
+      const live = new Set(visibleKeys.map((key) => key.id));
+      const next = new Set([...current].filter((id) => live.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [visibleKeys]);
 
   return (
     <section className="timeline-panel advanced-timeline">
       <div className="dock-panel-title timeline-titlebar">
-        <span>Timeline <em>{currentFrame}f</em></span>
         <div className="timeline-mode-switch" aria-label="Timeline editor mode">
           <button className={mode === "keys" ? "active" : ""} onClick={() => setMode("keys")} title="Keyframe timeline">
             <Diamond size={13} /><span>Keys</span>
@@ -206,6 +526,63 @@ export function TimelinePanel() {
           </button>
         </div>
       </div>
+
+      {hasActiveScene && mode === "keys" ? (
+        <div className="timeline-ribbon">
+          <div className="timeline-row-filter" role="group" aria-label="Timeline object filter">
+            <button
+              aria-pressed={timelineRowFilter === "all"}
+              className={timelineRowFilter === "all" ? "active" : ""}
+              onClick={() => setTimelineRowFilter("all")}
+              title="List every object in the scene"
+              type="button"
+            >
+              <Layers size={12} /><span>All objects</span>
+            </button>
+            <button
+              aria-pressed={timelineRowFilter === "keyframed"}
+              className={timelineRowFilter === "keyframed" ? "active" : ""}
+              onClick={() => setTimelineRowFilter("keyframed")}
+              title="List only objects that carry animation"
+              type="button"
+            >
+              <Diamond size={12} /><span>Keyframed only</span>
+            </button>
+          </div>
+
+          <span className="timeline-ribbon-count">
+            {rows.length ? `${rows.length} row${rows.length === 1 ? "" : "s"}` : "No rows"}
+            {timelineRowFilter === "keyframed" ? " · animated" : ""}
+          </span>
+
+          <div className="timeline-ribbon-selection">
+            {selectedKeyIds.size ? (
+              <>
+                <strong>{selectedKeyIds.size} selected</strong>
+                <button
+                  className="panel-icon-button danger"
+                  onClick={deleteSelectedKeys}
+                  title="Delete selected keyframes (Del)"
+                  type="button"
+                >
+                  <Trash2 size={13} />
+                </button>
+                <button
+                  className="timeline-ribbon-clear"
+                  onClick={() => setSelectedKeyIds(new Set())}
+                  type="button"
+                >
+                  Clear
+                </button>
+              </>
+            ) : (
+              <span className="timeline-ribbon-hint">Drag a box over the tracks to select keyframes</span>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {notice ? <p className="timeline-notice">{notice}</p> : null}
 
       {!hasActiveScene ? (
         <div className="empty-panel timeline-empty-state">Open a scene to view its objects and keyframes.</div>
@@ -243,10 +620,20 @@ export function TimelinePanel() {
           }}
         />
       ) : (
-        <div className="timeline-grid advanced-key-grid">
+        <div
+          className="timeline-grid advanced-key-grid"
+          onScroll={(event) => {
+            const element = event.currentTarget;
+            setViewport({ scrollTop: element.scrollTop, height: element.clientHeight });
+          }}
+          ref={attachScroller}
+        >
           <div className="timeline-object-list">
             <div className="timeline-list-heading">Object / Property</div>
-            {rows.map((row) => (
+            {/* Standing in for the rows above the window, so the scrollbar still measures the
+                whole list rather than only the part that is mounted. */}
+            {spacers.before > 0 ? <div aria-hidden="true" style={{ height: `${spacers.before}px` }} /> : null}
+            {windowedRows.map(({ row }) => (
               <button
                 className={`timeline-track-label ${
                   !row.property && !row.maskId && row.object.id === selectedObjectId ? "selected" : ""
@@ -257,7 +644,14 @@ export function TimelinePanel() {
                 } ${row.maskId === selectedMaskId ? "mask-selected" : ""}`}
                 key={row.id}
                 onClick={() => {
-                  selectObject(row.object.id);
+                  // Navigating the Timeline must not destroy a multi-selection made elsewhere.
+                  // Clicking a row that is already a member only moves the active object; clicking
+                  // a non-member replaces the selection, as it always did.
+                  if (selectedObjectIds.includes(row.object.id)) {
+                    selectObjects(selectedObjectIds, { active: row.object.id });
+                  } else {
+                    selectObject(row.object.id);
+                  }
                   if (row.property) setSelectedPropertyKey({ objectId: row.object.id, property: row.property });
                   if (row.maskId) setSelectedMaskId(row.maskId);
                 }}
@@ -267,6 +661,11 @@ export function TimelinePanel() {
                   <>
                     <BarChart3 size={11} />
                     <span>{propertyLabel(row.property)}</span>
+                  </>
+                ) : row.isShapePath ? (
+                  <>
+                    <Diamond size={10} />
+                    <span>Path</span>
                   </>
                 ) : row.maskProperty ? (
                   <>
@@ -286,14 +685,38 @@ export function TimelinePanel() {
                 )}
               </button>
             ))}
+            {spacers.after > 0 ? <div aria-hidden="true" style={{ height: `${spacers.after}px` }} /> : null}
           </div>
           <div
-            className="timeline-ruler"
-            onClick={(event) => setCurrentFrame(frameFromPointer(event, durationFrames))}
+            className={`timeline-ruler ${marquee ? "marquee-active" : ""}`}
+            onLostPointerCapture={endMarquee}
+            onPointerCancel={endMarquee}
+            onPointerDown={beginMarquee}
+            onPointerMove={dragMarquee}
+            onPointerUp={endMarquee}
             ref={rulerRef}
             style={{ minHeight: `${RULER_HEIGHT + rows.length * ROW_HEIGHT}px` }}
           >
-            <div className="timeline-tick-row">
+            <div
+              aria-label="Playhead"
+              aria-valuemax={durationFrames}
+              aria-valuemin={0}
+              aria-valuenow={currentFrame}
+              className="timeline-tick-row"
+              onKeyDown={scrubFromKeyboard}
+              onLostPointerCapture={endScrub}
+              onPointerCancel={endScrub}
+              onPointerDown={beginScrub}
+              onPointerMove={dragScrub}
+              onPointerUp={endScrub}
+              onWheel={(event) => {
+                // Wheel steps the playhead: a trackpad gives finer forward/back control than
+                // dragging when the whole scene is a few hundred pixels wide.
+                setCurrentFrame(currentFrame + Math.sign(event.deltaY) * (event.shiftKey ? 10 : 1), durationFrames);
+              }}
+              role="slider"
+              tabIndex={0}
+            >
               {Array.from({ length: 11 }, (_, index) => {
                 const frame = Math.round((index / 10) * durationFrames);
                 return (
@@ -307,138 +730,70 @@ export function TimelinePanel() {
                 );
               })}
             </div>
-            {rows.map((row, index) => (
+            {windowedRows.map(({ row, index }) => (
               <div
                 className={`timeline-track-line ${row.property || row.maskProperty ? "property" : "object"}`}
                 key={row.id}
                 style={{ top: `${RULER_HEIGHT + index * ROW_HEIGHT}px` }}
               />
             ))}
-            {scene.timeline.keyframes.map((keyframe) => {
-              const rowIndex = rowIndexById.get(`object:${keyframe.objectId}`);
+            {/*
+              One pass over every kind of key. The four separate passes this replaces each had
+              their own drag handler, and three of them moved a key to the pointer's absolute
+              frame — so grabbing a diamond anywhere but its centre teleported it.
+            */}
+            {windowedKeys.map((key) => {
+              const rowIndex = rowIndexById.get(key.rowId);
               if (rowIndex === undefined) return null;
               return (
                 <button
-                  className="keyframe-marker legacy"
-                  key={keyframe.id}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setCurrentFrame(keyframe.frame, durationFrames);
-                    selectObject(keyframe.objectId);
+                  className={`keyframe-marker ${markerClass(key)} ${selectedKeyIds.has(key.id) ? "selected" : ""}`}
+                  key={key.id}
+                  onDoubleClick={() => {
+                    if (key.kind === "property") setMode("speed");
                   }}
-                  onKeyDown={(event) => {
-                    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-                    event.preventDefault();
-                    const delta = (event.shiftKey ? 10 : 1) * (event.key === "ArrowRight" ? 1 : -1);
-                    const frame = Math.max(0, Math.min(durationFrames, keyframe.frame + delta));
-                    updateObjectKeyframe(keyframe.id, { frame });
-                    setCurrentFrame(frame, durationFrames);
-                  }}
-                  onPointerDown={(event) => beginLegacyKeyDrag(event, keyframe.objectId, keyframe.frame)}
-                  onPointerMove={(event) => {
-                    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-                    const frame = frameForClientX(event.clientX);
-                    updateObjectKeyframe(keyframe.id, { frame });
-                    setCurrentFrame(frame, durationFrames);
-                  }}
+                  onPointerCancel={endKeyDrag}
+                  onPointerDown={(event) => beginKeyDrag(event, key)}
+                  onPointerMove={dragKeys}
+                  onPointerUp={endKeyDrag}
                   style={{
-                    left: frameToMarkerPosition(keyframe.frame, durationFrames),
+                    left: frameToMarkerPosition(key.frame, durationFrames),
                     top: `${RULER_HEIGHT + rowIndex * ROW_HEIGHT + 9}px`
                   }}
-                  title={`Legacy all-property key · ${keyframe.frame}f · drag to move`}
+                  title={`${markerLabel(key)} · ${key.frame}f · drag to move, shift-click to add`}
+                  type="button"
                 />
               );
             })}
-            {scene.objects.flatMap((object) =>
-              ANIMATABLE_PROPERTIES.flatMap((property) => {
-                const channel = object.animation?.[property];
-                const rowIndex = rowIndexById.get(`property:${object.id}:${property}`);
-                if (!channel || rowIndex === undefined) return [];
-                return channel.keys.map((key) => (
-                  <button
-                    className={`keyframe-marker property-key ${
-                      selectedPropertyKey?.objectId === object.id &&
-                      selectedPropertyKey.property === property &&
-                      selectedPropertyKey.keyframeId === key.id
-                        ? "selected"
-                        : ""
-                    }`}
-                    key={`${object.id}:${property}:${key.id}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      selectObject(object.id);
-                      setSelectedPropertyKey({ objectId: object.id, property, keyframeId: key.id });
-                      setCurrentFrame(key.frame, durationFrames);
-                    }}
-                    onDoubleClick={() => setMode("speed")}
-                    onKeyDown={(event) => {
-                      if (event.key === "Delete" || event.key === "Backspace") {
-                        event.preventDefault();
-                        deletePropertyKeyframe(object.id, property, key.id);
-                        return;
-                      }
-                      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-                      event.preventDefault();
-                      const delta = (event.shiftKey ? 10 : 1) * (event.key === "ArrowRight" ? 1 : -1);
-                      const frame = Math.max(0, Math.min(durationFrames, key.frame + delta));
-                      updatePropertyKeyframe(object.id, property, key.id, { frame });
-                      setCurrentFrame(frame, durationFrames);
-                    }}
-                    onPointerDown={(event) => beginPropertyKeyDrag(event, object.id, property, key)}
-                    onPointerMove={(event) => dragPropertyKey(event, object.id, property, key.id)}
-                    style={{
-                      left: frameToMarkerPosition(key.frame, durationFrames),
-                      top: `${RULER_HEIGHT + rowIndex * ROW_HEIGHT + 9}px`
-                    }}
-                    title={`${propertyLabel(property)} · ${key.frame}f · ${key.value} · drag to move`}
-                  />
-                ));
-              })
-            )}
-            {scene.objects.flatMap((object) =>
-              (object.masks ?? []).flatMap((mask) =>
-                (["path", "opacity", "feather", "expansion"] as MaskTimelineProperty[]).flatMap((property) => {
-                  const rowIndex = rowIndexById.get(`mask-property:${object.id}:${mask.id}:${property}`);
-                  const keys = mask.animation?.[property] ?? [];
-                  if (rowIndex === undefined) return [];
-                  return keys.map((key) => (
-                    <button
-                      className="keyframe-marker mask-key"
-                      key={`${object.id}:${mask.id}:${property}:${key.id}`}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        selectObject(object.id);
-                        setSelectedMaskId(mask.id);
-                        setCurrentFrame(key.frame, durationFrames);
-                      }}
-                      onPointerDown={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        event.currentTarget.setPointerCapture(event.pointerId);
-                      }}
-                      onPointerMove={(event) => {
-                        if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-                        const frame = frameForClientX(event.clientX);
-                        updateMaskKeyframeFrame(object.id, mask.id, property, key.id, frame);
-                        setCurrentFrame(frame, durationFrames);
-                      }}
-                      style={{
-                        left: frameToMarkerPosition(key.frame, durationFrames),
-                        top: `${RULER_HEIGHT + rowIndex * ROW_HEIGHT + 9}px`
-                      }}
-                      title={`${mask.name} ${maskPropertyLabel(property)} · ${key.frame}f · drag to move`}
-                    />
-                  ));
-                })
-              )
-            )}
+            {marquee ? (
+              <div
+                className="timeline-marquee"
+                style={{
+                  left: `${frameToPercent(Math.min(marquee.frameFrom, marquee.frameTo), durationFrames)}%`,
+                  width: `${
+                    frameToPercent(Math.max(marquee.frameFrom, marquee.frameTo), durationFrames)
+                    - frameToPercent(Math.min(marquee.frameFrom, marquee.frameTo), durationFrames)
+                  }%`,
+                  top: `${RULER_HEIGHT + Math.min(marquee.rowFrom, marquee.rowTo) * ROW_HEIGHT}px`,
+                  height: `${(Math.abs(marquee.rowTo - marquee.rowFrom) + 1) * ROW_HEIGHT}px`
+                }}
+              />
+            ) : null}
             <div
               className={`playhead ${
                 currentFrame <= 0 ? "at-start" : currentFrame >= durationFrames ? "at-end" : ""
               }`}
               style={{ left: `${frameToPercent(currentFrame, durationFrames)}%` }}
             >
-              <span />
+              {/* The head is the grab target; the line below it stays transparent to pointers. */}
+              <span
+                onLostPointerCapture={endScrub}
+                onPointerCancel={endScrub}
+                onPointerDown={beginScrub}
+                onPointerMove={dragScrub}
+                onPointerUp={endScrub}
+                title="Drag to scrub"
+              />
             </div>
           </div>
         </div>
@@ -705,43 +1060,22 @@ function SpeedGraphEditor(props: {
   );
 }
 
-function createTimelineRows(objects: SceneObject[]): TimelineRow[] {
-  const rows: TimelineRow[] = [];
-  for (const object of objects) {
-    rows.push({ id: `object:${object.id}`, object, depth: 0 });
-    for (const property of ANIMATABLE_PROPERTIES) {
-      if (object.animation?.[property]) {
-        rows.push({
-          id: `property:${object.id}:${property}`,
-          object,
-          property,
-          depth: 1
-        });
-      }
-    }
-    for (const mask of object.masks ?? []) {
-      rows.push({
-        id: `mask:${object.id}:${mask.id}`,
-        object,
-        maskId: mask.id,
-        maskName: mask.name,
-        depth: 1
-      });
-      for (const maskProperty of ["path", "opacity", "feather", "expansion"] as MaskTimelineProperty[]) {
-        if (mask.animation?.[maskProperty]?.length) {
-          rows.push({
-            id: `mask-property:${object.id}:${mask.id}:${maskProperty}`,
-            object,
-            maskId: mask.id,
-            maskName: mask.name,
-            maskProperty,
-            depth: 2
-          });
-        }
-      }
-    }
+function markerClass(key: TimelineKeyRef): string {
+  switch (key.kind) {
+    case "property": return "property-key";
+    case "legacy": return "legacy";
+    case "mask": return "mask-key";
+    case "shape-path": return "mask-key shape-path-key";
   }
-  return rows;
+}
+
+function markerLabel(key: TimelineKeyRef): string {
+  switch (key.kind) {
+    case "property": return propertyLabel(key.property);
+    case "legacy": return "Legacy all-property key";
+    case "mask": return maskPropertyLabel(key.maskProperty);
+    case "shape-path": return "Shape Path";
+  }
 }
 
 function maskPropertyLabel(property: MaskTimelineProperty): string {
@@ -811,9 +1145,4 @@ function propertyLabel(property: AnimatableProperty): string {
     case "scaleY": return "Y Scale";
     case "scaleZ": return "Z Scale";
   }
-}
-
-function frameFromPointer(event: MouseEvent<HTMLDivElement>, durationFrames: number): number {
-  const rect = event.currentTarget.getBoundingClientRect();
-  return frameFromClientX(event.clientX, rect.left, rect.width, durationFrames);
 }

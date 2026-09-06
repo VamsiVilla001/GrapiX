@@ -80,7 +80,7 @@ export async function publishScenePackage(scene: SceneDocument): Promise<Publish
     }
   });
 
-  downloadBlob(blob, `${slugify(scene.name)}.gfxpkg`);
+  downloadBlob(blob, `${slugify(scene.name)}.gpxpkg`);
 
   return {
     preflight,

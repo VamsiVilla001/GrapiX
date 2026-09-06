@@ -126,7 +126,7 @@ test("REST import converts native document JSON into editable objects, not a scr
     { fetchImpl }
   );
   const [scene] = convertDesignDocumentToScenes(
-    normalizeDesignDocument(document, DEFAULT_DESIGN_IMPORT_OPTIONS),
+    normalizeDesignDocument(document, DEFAULT_DESIGN_IMPORT_OPTIONS, report),
     DEFAULT_DESIGN_IMPORT_OPTIONS,
     report
   );
@@ -253,26 +253,41 @@ test("an image fill missing from the file's image map is recovered by rendering 
   assert.deepEqual(report.rasterizedObjects, ["Hero"]);
 });
 
-test("an OAuth token is sent as a bearer, and image-fill failures cost fills but not the import", async () => {
-  let authorization = null;
+test("an unavailable image-map endpoint is reported separately from an absent image reference", async () => {
   const fetchImpl = stubFetch({
-    "/nodes?": (url, init) => {
-      authorization = init.headers.Authorization;
-      return jsonResponse(restNodesResponse());
-    },
-    "/images": () => jsonResponse({ err: "forbidden" }, 403)
+    "/nodes?": () => jsonResponse(restNodesResponse()),
+    "/files/abc123DEF456ghi789JK/images": () => jsonResponse({ err: "service unavailable" }, 500),
+    "/v1/images/": () => jsonResponse({ images: { "94:13016": "https://figma-alpha-api.s3.amazonaws.com/images/rendered-hero.png" } })
   });
-
   const report = createDesignImportReport("figma-json", "rest");
-  const document = await importFigmaRestDocument(
-    { url: "https://www.figma.com/design/abc123DEF456ghi789JK/Kit?node-id=94-13013", accessToken: "oauth-opaque-token" },
+  await importFigmaRestDocument(
+    { url: "https://www.figma.com/design/abc123DEF456ghi789JK/Kit?node-id=94-13013", accessToken: "figd_test-token" },
     report,
     { fetchImpl }
   );
+  assert.ok(report.warnings.some((message) => message.includes("file image map could not be read")));
+  assert.ok(report.issues.some((issue) => issue.message.includes("image-map endpoint failed")));
+});
 
+test("an OAuth token is sent as a bearer, and protected image-map failures stop the import", async () => {
+  let authorization = null;
+  for (const [status, expected] of [[403, /file_content:read/], [429, /rate-limited.*retry after 30s/]]) {
+    const fetchImpl = stubFetch({
+      "/nodes?": (url, init) => {
+        authorization = init.headers.Authorization;
+        return jsonResponse(restNodesResponse());
+      },
+      "/files/abc123DEF456ghi789JK/images": () => jsonResponse({ err: "forbidden" }, status, { "retry-after": "30" })
+    });
+
+    await assert.rejects(
+      importFigmaRestDocument(
+        { url: "https://www.figma.com/design/abc123DEF456ghi789JK/Kit?node-id=94-13013", accessToken: "oauth-opaque-token" },
+        createDesignImportReport("figma-json", "rest"),
+        { fetchImpl }
+      ),
+      expected
+    );
+  }
   assert.equal(authorization, "Bearer oauth-opaque-token");
-  const hero = document.pages[0].nodes[0].children.find((node) => node.name === "Hero");
-  const heroAsset = document.assets.find((asset) => asset.id === hero.assetId);
-  assert.equal(heroAsset.sourceUrl, undefined, "no URL, so the fill is reported missing rather than invented");
-  assert.ok(report.missingLinkedAssets.length > 0);
 });

@@ -107,6 +107,9 @@ pub fn render_single_frame(
     let quads = pipeline::QuadPipeline::build_frame_quads(scene);
     let meshes = mesh_pipeline.prepare_frame(&gpu.device, &gpu.queue, scene);
 
+    let lease = target
+        .try_acquire_frame()
+        .ok_or_else(|| anyhow::anyhow!("bounded video frame pool is exhausted"))?;
     let mut frame = target.render_and_read_back(
         &gpu.device,
         &gpu.queue,
@@ -115,6 +118,7 @@ pub fn render_single_frame(
         &mesh_pipeline,
         Some(&meshes),
         0,
+        lease,
     )?;
     text::NativeTextRenderer::new().composite(&mut frame, scene);
     Ok(frame)
@@ -164,8 +168,12 @@ pub fn spawn_render_loop(
             while !stop.load(Ordering::Relaxed) {
                 let scene = scene_rx.borrow().clone();
 
-                let frame = match &scene {
-                    Some(scene) => {
+                let frame = match (scene.as_ref(), target.try_acquire_frame()) {
+                    (_, None) => {
+                        stats.frames_dropped.fetch_add(1, Ordering::Relaxed);
+                        None
+                    }
+                    (Some(scene), Some(lease)) => {
                         let render_started = Instant::now();
                         let mut quads = pipeline::QuadPipeline::build_frame_quads(scene);
                         if cached_mesh_scene
@@ -179,7 +187,6 @@ pub fn spawn_render_loop(
                             ));
                             cached_mesh_scene = Some(Arc::clone(scene));
                         }
-
                         if quads.len() > pipeline::MAX_QUADS_PER_FRAME {
                             if !warned_overflow {
                                 tracing::warn!(
@@ -191,7 +198,6 @@ pub fn spawn_render_loop(
                             }
                             quads.truncate(pipeline::MAX_QUADS_PER_FRAME);
                         }
-
                         match target.render_and_read_back(
                             &gpu.device,
                             &gpu.queue,
@@ -200,8 +206,8 @@ pub fn spawn_render_loop(
                             &mesh_pipeline,
                             cached_mesh_frame.as_ref(),
                             frame_index,
-                        )
-                        {
+                            lease,
+                        ) {
                             Ok(mut frame) => {
                                 text_renderer.composite(&mut frame, scene);
                                 stats.record_render_duration(render_started.elapsed());
@@ -214,17 +220,16 @@ pub fn spawn_render_loop(
                             }
                         }
                     }
-                    None => {
+                    (None, Some(mut lease)) => {
                         if !warned_empty {
                             tracing::warn!("output running with no scene loaded; sending transparent frames");
                             warned_empty = true;
                         }
-                        // No scene: emit transparent frames so downstream
-                        // keying stays stable instead of freezing.
+                        lease.as_mut_slice().fill(0);
                         Some(VideoFrame {
                             width: config.width,
                             height: config.height,
-                            data: vec![0u8; (config.width * config.height * 4) as usize],
+                            data: lease,
                             frame_index,
                         })
                     }

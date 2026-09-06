@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+const TEST_SIGNING_SECRET = "test-signing-secret-that-is-long-enough-for-auth";
+
 /**
  * The Editor's desktop shell loads its UI in a WebView, and that WebView has an origin. If the
  * project service does not allow it, every request fails as a bare "Failed to fetch" — no
@@ -18,7 +20,7 @@ test("the packaged desktop WebView origins are allowed, and others are refused",
   const root = await mkdtemp(path.join(tmpdir(), "grapix-cors-test-"));
   process.env.GRAPIX_DATA_ROOT = root;
   const { createApiServer } = await import("../dist/index.js");
-  const app = await createApiServer({ logger: false });
+  const app = await createApiServer({ logger: false, signingSecret: TEST_SIGNING_SECRET });
   context.after(async () => {
     await app.close();
     await rm(root, { recursive: true, force: true });

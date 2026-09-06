@@ -91,6 +91,9 @@ export const OUTPUT_MESSAGE_TYPES = [
   "output.remove"
 ] as const;
 
+/** Container attach is a Playout-only operation: it connects an AE runtime to Program. */
+export const AE_CONTAINER_MESSAGE_TYPES = ["ae.container.load"] as const;
+
 export const ENGINE_REQUEST_TYPES = [
   ...CONNECTION_MESSAGE_TYPES,
   ...SCENE_MESSAGE_TYPES,
@@ -100,7 +103,8 @@ export const ENGINE_REQUEST_TYPES = [
   ...PREVIEW_MESSAGE_TYPES,
   ...EDITOR_VIEW_MESSAGE_TYPES,
   ...ENGINE_CONTROL_MESSAGE_TYPES,
-  ...OUTPUT_MESSAGE_TYPES
+  ...OUTPUT_MESSAGE_TYPES,
+  ...AE_CONTAINER_MESSAGE_TYPES
 ] as const;
 
 export type EngineRequestType = (typeof ENGINE_REQUEST_TYPES)[number];
@@ -118,7 +122,8 @@ export const ENGINE_REPLY_TYPES = [
   "reply.assetProgress",
   "reply.preview",
   "reply.editorView",
-  "reply.outputs"
+  "reply.outputs",
+  "ae.container.loaded",
 ] as const;
 
 export type EngineReplyType = (typeof ENGINE_REPLY_TYPES)[number];
@@ -228,7 +233,8 @@ const ACK_REQUIRED_TYPES = new Set<string>([
   "output.stop",
   "output.remove",
   "editor.view.request",
-  "editor.view.close"
+  "editor.view.close",
+  "ae.container.load",
 ]);
 
 export function messageRequiresAck(type: EngineMessageType): boolean {

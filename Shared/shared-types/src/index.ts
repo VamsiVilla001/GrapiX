@@ -13,10 +13,24 @@ export type SceneObjectType =
   | "marker"
   | "group";
 
-export * from "./designImport.js";
-export * from "./project.js";
+// A value import, not just a re-export: `isPropertyAnimatable` below asks the contract whether any
+// renderer reads a property. Safe despite the re-export cycle because it is read at call time —
+// `propertyRendererSupport.ts` imports only types from here, so nothing runs during this module's init.
+import { propertyRendererSupport } from "./propertyRendererSupport.js";
 
-export type MeshPrimitiveKind = "model" | "cube" | "sphere" | "cylinder" | "torus" | "slab";
+export * from "./designImport.js";
+export * from "./aeTime.js";
+export * from "./figmaMotion.js";
+export * from "./figmaMotionBridge.js";
+export * from "./project.js";
+export * from "./projectWorkspace.js";
+export * from "./bounds.js";
+export * from "./propertyRendererSupport.js";
+export * from "./propertyConstraints.js";
+export * from "./propertySource.js";
+
+export const MESH_PRIMITIVE_KINDS = ["model", "cube", "sphere", "cylinder", "torus", "slab"] as const;
+export type MeshPrimitiveKind = typeof MESH_PRIMITIVE_KINDS[number];
 export type LightKind = "directional" | "point" | "spot";
 export type CameraKind = "perspective" | "orthographic";
 export type LayerKind = "object" | "camera";
@@ -449,7 +463,11 @@ export interface MaterialFolder {
 
 export type MaterialSlotMap = Record<string, string | PrimitiveMaterialBinding>;
 
-export type SceneKeyframeEasing = "linear" | "ease-in" | "ease-out" | "ease-in-out";
+// Easing is one specification with a Rust twin; see `easing.ts`. Re-exported here so
+// `SceneKeyframeEasing` stays part of the scene contract's own surface, and imported because
+// `export *` does not bring the names into this module's scope.
+import { applyEasing, reportAnimationDiagnostic, type SceneKeyframeEasing } from "./easing.js";
+export * from "./easing.js";
 
 export interface SceneKeyframe {
   id: string;
@@ -491,6 +509,82 @@ export const ANIMATABLE_PROPERTIES: readonly AnimatableProperty[] = [
 ];
 
 /**
+ * Which object kinds Program animates through the **mesh** path.
+ *
+ * `mesh` is obvious. `shape` is not: a bezier shape is tessellated into a `PreparedMesh` like a
+ * real mesh is (`services/render-daemon/src/scene/mesh_prepare.rs`, the `type == "shape"` walk),
+ * so the engine patches it with `mesh_transforms` and it inherits every mesh rule. Anything
+ * else that draws becomes a `PreparedRect` or a `PreparedText`.
+ */
+const MESH_PATH_OBJECT_TYPES: readonly SceneObject["type"][] = ["mesh", "shape"];
+
+/**
+ * Whether a channel on this property, on this kind of object, is worth offering an author.
+ *
+ * **Two gates, not one**, and they exist for different reasons:
+ *
+ * 1. **Program discards the channel per frame.** `zDepth` on a 2D type is paint order, resolved during
+ *    preparation, and `services/render-engine/src/animation.rs` drops `AnimatedProperty::Z` rather than
+ *    move a value without re-sorting.
+ * 2. **No renderer reads the property at all.** A light's `rotation` and a camera's `scaleY` are read by
+ *    neither, animated or static, so a channel on them is a curve with no consumer anywhere.
+ *
+ * Either way the defect is the same and it is the one this rule prevents: the channel animates in the
+ * Editor, where `evaluateSceneAtFrame` patches the object and the preview re-resolves every frame, and
+ * does nothing on air. The author is shown their animation working. Same family as
+ * `IMPLEMENTED_TEXTURE_FIT_MODES`.
+ *
+ * What this deliberately does **not** decide: whether Program applies a channel to an object kind it
+ * animates nowhere. `animation.rs` has no light, camera, container or marker branch, so *no* channel
+ * reaches those on air — including a light's `opacity`, which both renderers do read as a dimmer when
+ * it is static. Gating every one of them here would delete controls to describe an engine gap, and the
+ * repair is an engine that animates them. Recorded as a finding rather than answered by deletion.
+ *
+ * The rule is the twin of the match arms in `services/render-engine/src/animation.rs`
+ * (`apply` for rects and texts, `mesh_transforms` for meshes) and changes with them, in one commit.
+ * `fixtures/animatable-properties.json` is the checked-in table both languages assert against.
+ *
+ * Currently one property is gated:
+ *
+ * - **`zDepth` on anything not on the mesh path.** For a rect or a text, depth is *paint order*,
+ *   resolved when the scene is prepared; the engine discards `AnimatedProperty::Z` for both rather
+ *   than move a value without re-sorting. On the mesh path it is a real Z translation and animates
+ *   correctly, so it stays authorable there.
+ *
+ * Deliberately **not** gated here, though the engine also ignores them per frame: `width`, `height`
+ * and `opacity` on the mesh path. Those are surface properties the engine bakes during preparation,
+ * they reach `shape` objects as well as meshes — where fading a logo is ordinary authoring the
+ * preview honours — and the honest repair is an engine that patches prepared surfaces per frame,
+ * not an Editor that removes the control. Tracked as a separate decision, not smuggled in here.
+ *
+ * Object kinds the engine never prepares at all (`camera`, `layer`, `group`, `marker`, `image`, `line`,
+ * `paint`) are not decided wholesale here: what a container's animation should mean on air is an open
+ * question, and answering it by quietly deleting controls would be a guess. Where a specific property
+ * of a specific kind is read by **no** renderer, the contract says so and this returns false — a
+ * light's `rotation`, a camera's `scaleY` — because that is a checked fact rather than a guess.
+ */
+export function isPropertyAnimatable(
+  objectType: SceneObject["type"],
+  property: AnimatableProperty
+): boolean {
+  if (property === "zDepth") return MESH_PATH_OBJECT_TYPES.includes(objectType);
+  /*
+   * A channel on a property no renderer reads is a curve that draws nothing.
+   *
+   * This used to return `true` for everything but `zDepth`, so the Timeline offered a camera's `scaleY`
+   * and a light's `rotation` — keys an author could set, ease and scrub, with no effect anywhere. The
+   * Inspector had reached the right answer separately by hiding those controls behind a
+   * `supportsDetailedTransform` flag, which is two homes for one question and is how they disagreed
+   * about a light's `opacity`: hidden by the panel, and honoured by *both* renderers as a dimmer.
+   *
+   * `PROPERTY_RENDERER_SUPPORT` is the home. `neither` means no renderer reads it, so there is nothing
+   * to animate; anything else — `both`, `preview`, `program`, `editor` — leaves a channel meaningful to
+   * at least one consumer, and the support note says which.
+   */
+  return propertyRendererSupport(objectType, property)?.support !== "neither";
+}
+
+/**
  * One key on a per-property channel. `inTangent`/`outTangent` are the temporal
  * bezier handles used by the curve / speed-graph editor, expressed as
  * (frames, value) offsets from this key. When absent the segment falls back to
@@ -529,8 +623,16 @@ export function readAnimatableProperty(object: SceneObject, property: Animatable
  * Sample one channel at a frame. Holds before the first / after the last key;
  * interpolates between with the outgoing key's easing (cubic-bezier temporal
  * handles are honoured when both sides define them).
+ *
+ * `context` names the object and property in any diagnostic the sample raises. It is optional
+ * because a caller sampling a bare channel has nothing to name, and a missing name is worth
+ * less than a missing report.
  */
-export function sampleChannel(channel: PropertyChannel, frame: number): number | undefined {
+export function sampleChannel(
+  channel: PropertyChannel,
+  frame: number,
+  context: { objectId?: string; property?: string } = {}
+): number | undefined {
   const keys = channel.keys;
   if (keys.length === 0) return undefined;
   if (frame <= keys[0].frame) return keys[0].value;
@@ -551,11 +653,20 @@ export function sampleChannel(channel: PropertyChannel, frame: number): number |
   const t = (frame - lo.frame) / span;
   const eased = lo.outTangent || hi.inTangent
     ? bezierEase(t, lo.outTangent, hi.inTangent, span)
-    : easeKeyframeT(t, lo.easing);
+    : easeKeyframeT(t, lo.easing, { frame, ...context });
+  // An unimplemented easing holds the outgoing key's value rather than guessing a curve.
+  if (eased === undefined) return lo.value;
   return lo.value + (hi.value - lo.value) * eased;
 }
 
-/** Sample every enabled numeric property channel on an object. */
+/**
+ * Sample every enabled numeric property channel on an object that Program actually honours.
+ *
+ * A channel `isPropertyAnimatable` rejects is skipped rather than patched, so Preview shows what
+ * Program will show. Skipping here rather than refusing to store the channel is deliberate: a scene
+ * authored before the gate keeps its keys, `preflightScenePackage` reports them, and the author
+ * decides — nothing is silently rewritten on load.
+ */
 export function evaluatePropertyChannelsAtFrame(
   object: SceneObject,
   frame: number
@@ -565,7 +676,8 @@ export function evaluatePropertyChannelsAtFrame(
   for (const property of ANIMATABLE_PROPERTIES) {
     const channel = object.animation?.[property];
     if (!channel) continue;
-    const value = sampleChannel(channel, frame);
+    if (!isPropertyAnimatable(object.type, property)) continue;
+    const value = sampleChannel(channel, frame, { objectId: object.id, property });
     if (value !== undefined) patch[property] = value;
   }
 
@@ -1012,18 +1124,31 @@ export interface PlayoutRuntimeStatus {
 // the typed per-property Animatable<T> model (see docs/3d-engine-architecture.md
 // §A) will extend this with typed values incl. animatable bezier paths.
 
-function easeKeyframeT(t: number, easing: SceneKeyframeEasing): number {
-  const c = Math.max(0, Math.min(1, t));
-  switch (easing) {
-    case "ease-in":
-      return c * c;
-    case "ease-out":
-      return 1 - (1 - c) * (1 - c);
-    case "ease-in-out":
-      return c < 0.5 ? 2 * c * c : 1 - Math.pow(-2 * c + 2, 2) / 2;
-    default:
-      return c;
+/**
+ * Ease a normalised segment position, reporting an easing nobody implements.
+ *
+ * Returns `undefined` for an unrecognised name so the caller can hold the previous value.
+ * Substituting linear was the old behaviour and it is the wrong one: a scene authored against
+ * an easing this build does not have then animates, smoothly and confidently, along a curve
+ * the designer never chose — and nothing anywhere says so.
+ */
+function easeKeyframeT(
+  t: number,
+  easing: SceneKeyframeEasing,
+  context: { frame: number; objectId?: string; property?: string }
+): number | undefined {
+  const eased = applyEasing(easing, t);
+  if (eased === undefined) {
+    reportAnimationDiagnostic({
+      code: "animation.unknown-easing",
+      message: `Easing "${String(easing)}" is not implemented by this build; the previous value is held.`,
+      value: String(easing),
+      frame: context.frame,
+      ...(context.objectId ? { objectId: context.objectId } : {}),
+      ...(context.property ? { property: context.property } : {})
+    });
   }
+  return eased;
 }
 
 function lerpNumber(a: number, b: number, t: number): number {
@@ -1154,8 +1279,15 @@ export function evaluateObjectPropertiesAtFrame(
       }
     }
     const span = hi.frame - lo.frame;
-    const t = span <= 0 ? 1 : easeKeyframeT((frame - lo.frame) / span, lo.easing);
-    patch[property] = interpolateKeyframeProperty(property, lo.properties[property], hi.properties[property], t);
+    const eased = span <= 0 ? 1 : easeKeyframeT((frame - lo.frame) / span, lo.easing, {
+      frame,
+      objectId: lo.objectId,
+      property
+    });
+    // Unknown easing holds the outgoing key, matching `sampleChannel`.
+    patch[property] = eased === undefined
+      ? lo.properties[property]
+      : interpolateKeyframeProperty(property, lo.properties[property], hi.properties[property], eased);
   }
   return patch;
 }
@@ -1174,6 +1306,12 @@ export function evaluateSceneAtFrame(scene: SceneDocument, frame: number): Scene
   }
   const hasPropertyChannels = scene.objects.some((object) =>
     ANIMATABLE_PROPERTIES.some((property) => Boolean(object.animation?.[property]?.keys.length))
+    || (object.type === "shape" && Boolean(object.pathAnimation?.length))
+    || (object.type === "shape" && Boolean(
+      object.trimAnimation?.start?.length
+      || object.trimAnimation?.end?.length
+      || object.trimAnimation?.offset?.length
+    ))
     || object.masks?.some((mask) => Boolean(
       mask.animation?.path?.length
       || mask.animation?.opacity?.length
@@ -1198,13 +1336,39 @@ export function evaluateSceneAtFrame(scene: SceneDocument, frame: number): Scene
       const evaluated = Object.keys(patch).length
         ? ({ ...object, ...patch } as SceneObject)
         : object;
-      return evaluated.masks?.some((mask) => mask.animation)
-        ? ({ ...evaluated, masks: evaluated.masks.map((mask) => evaluateMaskAtFrame(mask, frame)) } as SceneObject)
+      const shapeEvaluated = evaluated.type === "shape" && evaluated.pathAnimation?.length
+        ? ({ ...evaluated, path: sampleShapePath(evaluated.pathAnimation, frame) ?? evaluated.path } as SceneObject)
         : evaluated;
+      const trimEvaluated = shapeEvaluated.type === "shape" && shapeEvaluated.trimAnimation
+        ? ({
+            ...shapeEvaluated,
+            trimStart: sampleMaskNumber(shapeEvaluated.trimAnimation.start, frame) ?? shapeEvaluated.trimStart,
+            trimEnd: sampleMaskNumber(shapeEvaluated.trimAnimation.end, frame) ?? shapeEvaluated.trimEnd,
+            trimOffset: sampleMaskNumber(shapeEvaluated.trimAnimation.offset, frame) ?? shapeEvaluated.trimOffset
+          } as SceneObject)
+        : shapeEvaluated;
+      return trimEvaluated.masks?.some((mask) => mask.animation)
+        ? ({ ...trimEvaluated, masks: trimEvaluated.masks.map((mask) => evaluateMaskAtFrame(mask, frame)) } as SceneObject)
+        : trimEvaluated;
     })
   };
 }
 
+function sampleShapePath(keys: PathKeyframe[] | undefined, frame: number): BezierPath | undefined {
+  return sampleMaskKeys(keys, frame, (left, right, amount) => {
+    if (left.vertices.length !== right.vertices.length) return amount < 0.5 ? left : right;
+    const mixPoints = (a: Vec2[], b: Vec2[]) => a.map((point, index) => ({
+      x: point.x + ((b[index]?.x ?? point.x) - point.x) * amount,
+      y: point.y + ((b[index]?.y ?? point.y) - point.y) * amount
+    }));
+    return {
+      closed: amount < 0.5 ? left.closed : right.closed,
+      vertices: mixPoints(left.vertices, right.vertices),
+      inTangents: mixPoints(left.inTangents, right.inTangents),
+      outTangents: mixPoints(left.outTangents, right.outTangents)
+    };
+  });
+}
 function evaluateMaskAtFrame(mask: ObjectMask, frame: number): ObjectMask {
   if (!mask.animation) return mask;
   return {
@@ -1373,7 +1537,7 @@ export interface BaseSceneObject {
   blendingOptions?: ObjectBlendingOptions;
   /** Round-trippable source metadata retained by the professional design importer. */
   importedDesign?: {
-    sourceFormat: "psd" | "ai" | "svg" | "figma-json" | "figma-mcp";
+    sourceFormat: "psd" | "ai" | "svg" | "figma-json" | "figma-mcp" | "aep";
     sourceName: string;
     sourceNodeId?: string;
     sourceNodeType: string;
@@ -1414,6 +1578,14 @@ export interface TextSceneObject extends BaseSceneObject {
     underline?: boolean;
     strikethrough?: boolean;
   };
+  /**
+   * Case applied when the text is drawn, not when it is typed.
+   *
+   * The authored characters stay as they are, which is what separates this from retyping them: a data
+   * binding can replace the text and the case still applies, and switching it off returns the
+   * author's own capitalisation. `small-caps` is approximated as upper case by both renderers.
+   */
+  textCase?: "original" | "upper" | "lower" | "title" | "small-caps";
   lineHeight?: number;
   letterSpacing?: number;
   wordSpacing?: number;
@@ -1470,6 +1642,238 @@ export interface BezierPath {
   outTangents: Vec2[];
 }
 
+// --- Trim Paths ------------------------------------------------------------
+// One definition of "the stroke from start% to end% of a bezier path" for both
+// renderers. The editor's Pixi viewport and the native engine's tessellator each
+// flatten a path before stroking it; if each derived the trim window its own way
+// the two would disagree about where a cut lands on a curve, the same class of
+// divergence rule 18 exists to catch. So the trim operates on a flattened
+// polyline here, in f64, and each renderer tessellates the result.
+
+/** A flattened polyline: the points a path's stroke passes through, in order. */
+export type FlattenedPath = Vec2[];
+
+/**
+ * Flatten one bezier path to a polyline, adaptive on flatness.
+ *
+ * `tolerance` is the maximum allowed distance between the curve and its chord, in
+ * object-local pixels; 0.5px is below what either renderer can show at 100% zoom.
+ * A closed path's polyline does not repeat the first point — `closed` stays on the
+ * source path and the caller closes explicitly.
+ */
+export function flattenBezierPath(path: BezierPath, tolerance = 0.5): FlattenedPath {
+  const { vertices, inTangents, outTangents, closed } = path;
+  const count = vertices.length;
+  if (count === 0) return [];
+  const points: FlattenedPath = [{ x: vertices[0].x, y: vertices[0].y }];
+  const segments = closed ? count : count - 1;
+  for (let index = 0; index < segments; index += 1) {
+    const from = vertices[index];
+    const to = vertices[(index + 1) % count];
+    const out = outTangents[index] ?? { x: 0, y: 0 };
+    const inn = inTangents[(index + 1) % count] ?? { x: 0, y: 0 };
+    flattenCubicSegment(
+      from,
+      { x: from.x + out.x, y: from.y + out.y },
+      { x: to.x + inn.x, y: to.y + inn.y },
+      to,
+      tolerance,
+      points
+    );
+  }
+  return points;
+}
+
+function flattenCubicSegment(
+  p0: Vec2,
+  p1: Vec2,
+  p2: Vec2,
+  p3: Vec2,
+  tolerance: number,
+  out: FlattenedPath,
+  depth = 0
+): void {
+  // de Casteljau subdivision, bounded so a degenerate curve cannot recurse forever.
+  if (depth >= 16 || cubicIsFlat(p0, p1, p2, p3, tolerance)) {
+    out.push({ x: p3.x, y: p3.y });
+    return;
+  }
+  const mid = (a: Vec2, b: Vec2): Vec2 => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+  const p01 = mid(p0, p1);
+  const p12 = mid(p1, p2);
+  const p23 = mid(p2, p3);
+  const p012 = mid(p01, p12);
+  const p123 = mid(p12, p23);
+  const p0123 = mid(p012, p123);
+  flattenCubicSegment(p0, p01, p012, p0123, tolerance, out, depth + 1);
+  flattenCubicSegment(p0123, p123, p23, p3, tolerance, out, depth + 1);
+}
+
+function cubicIsFlat(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, tolerance: number): boolean {
+  // Both control points near the chord: the curve is within tolerance of its line.
+  const chordX = p3.x - p0.x;
+  const chordY = p3.y - p0.y;
+  const chordLength = Math.hypot(chordX, chordY);
+  if (chordLength === 0) {
+    return Math.hypot(p1.x - p0.x, p1.y - p0.y) <= tolerance
+      && Math.hypot(p2.x - p0.x, p2.y - p0.y) <= tolerance;
+  }
+  const distance = (p: Vec2) => Math.abs(chordX * (p0.y - p.y) - (p0.x - p.x) * chordY) / chordLength;
+  return distance(p1) <= tolerance && distance(p2) <= tolerance;
+}
+
+/** Total length of a flattened path, closing the loop when the source path is closed. */
+export function flattenedPathLength(points: FlattenedPath, closed: boolean): number {
+  let length = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    length += Math.hypot(points[index].x - points[index - 1].x, points[index].y - points[index - 1].y);
+  }
+  if (closed && points.length > 2) {
+    length += Math.hypot(points[0].x - points[points.length - 1].x, points[0].y - points[points.length - 1].y);
+  }
+  return length;
+}
+
+/** Whether an authored trim changes the stroke at all — 0→100 with no offset is the whole path. */
+export function trimPathsActive(start: number | undefined, end: number | undefined, offset: number | undefined): boolean {
+  const s = start ?? 0;
+  const e = end ?? 100;
+  const o = offset ?? 0;
+  return !(s === 0 && e === 100 && o % 100 === 0);
+}
+
+/**
+ * Cut the `start`–`end` window out of a flattened path, rotated by `offset`.
+ *
+ * AE semantics, one definition for both renderers:
+ * - `start`, `end`, `offset` are percentages of the path's total length.
+ * - The window is computed first, then rotated by `offset` (negative shifts backward).
+ * - On a closed path the window may wrap the seam; on an open path it is clamped.
+ * - `start > end` inverts: the result is the complement, as separate pieces.
+ * - Returns one polyline per piece — a wrapped window on a closed path is two.
+ *   An empty window returns no pieces; the caller draws no stroke, which is what
+ *   distinguishes a 0%-wide trim from a path that was never authored.
+ */
+export function trimFlattenedPath(
+  points: FlattenedPath,
+  closed: boolean,
+  start: number,
+  end: number,
+  offset: number
+): FlattenedPath[] {
+  if (points.length < 2) return [];
+  const total = flattenedPathLength(points, closed);
+  if (total <= 0) return [];
+
+  // Offset rotates the measuring origin before any cut is taken, so a wrapped window is an
+  // ordinary window on a rotated walk of the same loop. On an open path there is no loop to
+  // rotate around; the trim simply clamps at the ends, matching AE's open-path behaviour.
+  const rotation = ((offset % 100) + 100) % 100;
+  const base = closed && rotation !== 0 ? rotateClosedWalk(points, rotation / 100 * total) : points;
+  const sliceClosed = closed && rotation !== 0 ? false : closed;
+
+  const clamp = (percent: number) => Math.max(0, Math.min(100, percent)) / 100 * total;
+  const inverted = start > end;
+  const from = inverted ? clamp(end) : clamp(start);
+  const to = inverted ? clamp(start) : clamp(end);
+
+  const window_ = sliceFlattenedPath(base, sliceClosed, total, from, to);
+  if (!inverted) return window_.length >= 2 ? [window_] : [];
+
+  // Inverted: everything before `from` and everything after `to`, as two pieces.
+  const pieces: FlattenedPath[] = [];
+  const head = sliceFlattenedPath(base, sliceClosed, total, 0, from);
+  const tail = sliceFlattenedPath(base, sliceClosed, total, to, total);
+  if (head.length >= 2) pieces.push(head);
+  if (tail.length >= 2) pieces.push(tail);
+  return pieces;
+}
+
+/**
+ * Re-walk a closed path starting `distance` along it, returning one open polyline that
+ * covers the whole loop exactly once (the cut point appears at both ends). Slicing that
+ * polyline as open is then the wrapped-window case for free.
+ */
+function rotateClosedWalk(points: FlattenedPath, distance: number): FlattenedPath {
+  const total = flattenedPathLength(points, true);
+  const start = pointAtDistance(points, true, total, distance);
+  // Continue from the vertex after the cut point, around the loop and back to it. `remainder`
+  // is the vertices after the cut in path order; the ones before it follow the seam.
+  const startIndex = points.length - start.remainder.length;
+  const order = [...points.slice(startIndex), ...points.slice(0, startIndex)];
+  const walked: FlattenedPath = [start.point];
+  let covered = 0;
+  for (const vertex of order) {
+    if (covered >= total) break;
+    const last = walked[walked.length - 1];
+    const step = Math.hypot(vertex.x - last.x, vertex.y - last.y);
+    if (covered + step >= total) {
+      const t = step === 0 ? 0 : (total - covered) / step;
+      walked.push({ x: last.x + (vertex.x - last.x) * t, y: last.y + (vertex.y - last.y) * t });
+      break;
+    }
+    walked.push(vertex);
+    covered += step;
+  }
+  return walked;
+}
+
+/** Walk a flattened path and return the point at `distance`, plus the points still ahead. */
+function pointAtDistance(
+  points: FlattenedPath,
+  closed: boolean,
+  total: number,
+  distance: number
+): { point: Vec2; remainder: FlattenedPath } {
+  const d = closed ? ((distance % total) + total) % total : Math.max(0, Math.min(total, distance));
+  let walked = 0;
+  const count = points.length;
+  const segments = closed ? count : count - 1;
+  for (let index = 0; index < segments; index += 1) {
+    const from = points[index];
+    const to = points[(index + 1) % count];
+    const step = Math.hypot(to.x - from.x, to.y - from.y);
+    if (walked + step >= d) {
+      const t = step === 0 ? 0 : (d - walked) / step;
+      return {
+        point: { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t },
+        remainder: points.slice(index + 1)
+      };
+    }
+    walked += step;
+  }
+  return { point: points[closed ? 0 : points.length - 1], remainder: closed ? points.slice(1) : [] };
+}
+
+/** The polyline between two arc-length positions. Open paths clamp; closed paths wrap the seam. */
+function sliceFlattenedPath(
+  points: FlattenedPath,
+  closed: boolean,
+  total: number,
+  from: number,
+  to: number
+): FlattenedPath {
+  const start = pointAtDistance(points, closed, total, from);
+  const end = pointAtDistance(points, closed, total, to);
+  if (to <= from) return [];
+  const between: Vec2[] = [];
+  // Collect the vertices strictly inside the window. On a closed path with from > to the
+  // window wraps, which rotateFlattenedPath has already normalised away, so a straight
+  // distance comparison is correct here.
+  let walked = 0;
+  const count = points.length;
+  const segments = closed ? count : count - 1;
+  for (let index = 0; index < segments; index += 1) {
+    const a = points[index];
+    const b = points[(index + 1) % count];
+    const step = Math.hypot(b.x - a.x, b.y - a.y);
+    const next = walked + step;
+    if (next > from && next < to) between.push(b);
+    walked = next;
+  }
+  return [start.point, ...between, end.point];
+}
+
 /**
  * An After-Effects-style shape layer (S-1: a single bezier path with fill and
  * stroke; groups/operators/masks arrive in later slices). Reuses BaseSceneObject
@@ -1480,6 +1884,19 @@ export interface ShapeSceneObject extends BaseSceneObject {
   path: BezierPath;
   /** Additional subpaths for compound paths; path remains the primary compatibility path. */
   compoundPaths?: BezierPath[];
+  /** Per-frame path keyframe sequence (shape/path morphing). */
+  pathAnimation?: PathKeyframe[];
+  /**
+   * AE-style Trim Paths, as percentages of the total path length: the stroke draws from
+   * `trimStart` to `trimEnd`, rotated by `trimOffset`. Absent or 0/100/0 draws the whole
+   * stroke. The trimmed window is stroke-only — the fill always covers the full region,
+   * which is what AE does and what separates a wipe reveal from a scaling mask.
+   */
+  trimStart?: number;
+  trimEnd?: number;
+  trimOffset?: number;
+  /** Per-property stopwatches for the trim values, sampled per frame at evaluation. */
+  trimAnimation?: TrimPathsAnimation;
   fillEnabled: boolean;
   strokeEnabled: boolean;
   fillRule: "nonzero" | "evenodd";
@@ -1874,10 +2291,31 @@ export function validateSceneEffects(scene: SceneDocument): SceneEffectAudit {
   return { unrenderedByType, affectedObjectIds, warnings };
 }
 
+export type PathKeyframe = MaskPathKeyframe;
 export interface MaskPathKeyframe {
   id: string;
   frame: number;
   value: BezierPath;
+}
+
+/** One numeric trim channel keyframe (start / end / offset), AE-style. */
+export interface TrimNumberKeyframe {
+  id: string;
+  frame: number;
+  value: number;
+}
+
+/**
+ * After Effects–style Trim Paths channels for a shape's stroke.
+ *
+ * Each channel is an independent stopwatch; an absent channel is a static value. `start` and
+ * `end` are percentages of the path's total length and `offset` rotates the trimmed window
+ * around the path — all three evaluated by `evaluateSceneAtFrame` so Preview and Program agree.
+ */
+export interface TrimPathsAnimation {
+  start?: TrimNumberKeyframe[];
+  end?: TrimNumberKeyframe[];
+  offset?: TrimNumberKeyframe[];
 }
 
 export interface MaskNumberKeyframe {
@@ -2154,6 +2592,21 @@ interface SceneHierarchyInheritedState {
   visible: boolean;
   opacity: number;
   locked: boolean;
+  /**
+   * Masks a container imposes on everything inside it, with the transform that maps each mask's
+   * own coordinates into the scene.
+   *
+   * A container is never drawn — `renderableObjects` excludes it — so a mask authored on one used
+   * to have no effect whatsoever: a clipping composition clipped nothing. Carrying the mask down
+   * to the objects that *are* drawn is what makes a clip group a clip group.
+   */
+  masks: readonly InheritedSceneMask[];
+}
+
+interface InheritedSceneMask {
+  mask: ObjectMask;
+  /** Mask-local space to scene space, so it can be re-expressed in any descendant's space. */
+  toScene: SceneHierarchyAffine2d;
 }
 
 const IDENTITY_SCENE_HIERARCHY_STATE: SceneHierarchyInheritedState = {
@@ -2167,7 +2620,8 @@ const IDENTITY_SCENE_HIERARCHY_STATE: SceneHierarchyInheritedState = {
   scaleZ: 1,
   visible: true,
   opacity: 1,
-  locked: false
+  locked: false,
+  masks: []
 };
 
 export function isSceneHierarchyContainer(
@@ -2275,6 +2729,14 @@ export function resolveSceneObjectHierarchy(
     const effectiveOpacity = inherited.opacity * object.opacity;
     const effectiveLocked = inherited.locked || object.locked;
 
+    // Where this object's own local space sits in the scene. Needed twice: to re-express an
+    // inherited mask in this object's coordinates, and to hand descendants a mask that is still
+    // measured from the right origin.
+    const localToScene = multiplySceneHierarchyTransforms(
+      inherited.transform,
+      sceneHierarchyObjectTransform(object)
+    );
+
     let effective = {
       ...object,
       x: point.x,
@@ -2286,7 +2748,18 @@ export function resolveSceneObjectHierarchy(
       scaleZ: effectiveScaleZ,
       visible: effectiveVisible,
       opacity: effectiveOpacity,
-      locked: effectiveLocked
+      locked: effectiveLocked,
+      /*
+       * A container's masks reach the objects it contains.
+       *
+       * Both renderers draw leaves only, each in its own local space, so a mask path must be
+       * restated in that space: mask-local → scene → this object's local. The object's own masks
+       * stay last, because those are the ones an author edits directly.
+       */
+      masks: [
+        ...inheritedMasksFor(inherited.masks, localToScene),
+        ...(object.masks ?? [])
+      ]
     } as SceneObject;
 
     if (effective.type === "mesh") {
@@ -2310,10 +2783,7 @@ export function resolveSceneObjectHierarchy(
     }
 
     const nextState: SceneHierarchyInheritedState = {
-      transform: multiplySceneHierarchyTransforms(
-        inherited.transform,
-        sceneHierarchyObjectTransform(object)
-      ),
+      transform: localToScene,
       zDepth: inherited.zDepth + object.zDepth,
       rotationX: inherited.rotationX + (object.rotationX ?? 0),
       rotationY: inherited.rotationY + (object.rotationY ?? 0),
@@ -2323,7 +2793,12 @@ export function resolveSceneObjectHierarchy(
       scaleZ: effectiveScaleZ,
       visible: effectiveVisible,
       opacity: effectiveOpacity,
-      locked: effectiveLocked
+      locked: effectiveLocked,
+      // This container's own masks join the ones it inherited, measured from its local space.
+      masks: [
+        ...inherited.masks,
+        ...(object.masks ?? []).map((mask) => ({ mask, toScene: localToScene }))
+      ]
     };
 
     for (const childId of acceptedChildren.get(object.id) ?? []) {
@@ -2427,6 +2902,74 @@ function multiplySceneHierarchyTransforms(
   };
 }
 
+/**
+ * Restate inherited masks in one object's local space.
+ *
+ * `toScene` maps a mask's own coordinates into the scene; `localToScene` does the same for the
+ * object about to carry it. The mask therefore needs `inverse(localToScene) · toScene` applied to
+ * every point. A degenerate object transform — a zero scale — has no inverse, and the object is
+ * invisible anyway, so its inherited masks are dropped rather than producing infinities.
+ */
+function inheritedMasksFor(
+  masks: readonly InheritedSceneMask[],
+  localToScene: SceneHierarchyAffine2d
+): ObjectMask[] {
+  if (masks.length === 0) return [];
+  const sceneToLocal = invertSceneHierarchyTransform(localToScene);
+  if (!sceneToLocal) return [];
+
+  return masks.map(({ mask, toScene }) => {
+    const maskToLocal = multiplySceneHierarchyTransforms(sceneToLocal, toScene);
+    return {
+      ...mask,
+      // A fresh id per carrier: two objects must not share a mask id, or the Inspector would edit
+      // both at once, and an inherited mask is not the authored one — it is a projection of it.
+      id: `${mask.id}__inherited`,
+      path: transformMaskPath(mask.path, maskToLocal)
+    };
+  });
+}
+
+/**
+ * Move a mask path through an affine transform.
+ *
+ * Tangents are offsets from their vertex, so they take the linear part only — translating a tangent
+ * would drag every control point toward the origin and flatten the curve.
+ */
+function transformMaskPath(path: BezierPath, transform: SceneHierarchyAffine2d): BezierPath {
+  const linear = (point: Vec2): Vec2 => ({
+    x: transform.a * point.x + transform.c * point.y,
+    y: transform.b * point.x + transform.d * point.y
+  });
+  return {
+    ...path,
+    vertices: path.vertices.map((vertex) => applySceneHierarchyTransform(transform, vertex.x, vertex.y)),
+    inTangents: path.inTangents.map(linear),
+    outTangents: path.outTangents.map(linear)
+  };
+}
+
+/** The inverse of a 2D affine, or null when it has none. */
+function invertSceneHierarchyTransform(
+  transform: SceneHierarchyAffine2d
+): SceneHierarchyAffine2d | null {
+  const determinant = transform.a * transform.d - transform.b * transform.c;
+  if (!Number.isFinite(determinant) || Math.abs(determinant) < 1e-12) return null;
+
+  const a = transform.d / determinant;
+  const b = -transform.b / determinant;
+  const c = -transform.c / determinant;
+  const d = transform.a / determinant;
+  return {
+    a,
+    b,
+    c,
+    d,
+    tx: -(a * transform.tx + c * transform.ty),
+    ty: -(b * transform.tx + d * transform.ty)
+  };
+}
+
 function applySceneHierarchyTransform(
   transform: SceneHierarchyAffine2d,
   x: number,
@@ -2505,6 +3048,12 @@ export interface ScenePackageAssetEntry {
 }
 
 export interface ScenePackageManifest {
+  /**
+   * Always `"scene-package"`. A project manifest and a published scene package now share the
+   * `.gpxpkg` extension, so the file says which it is instead of a reader inferring it from the
+   * fields it can find. Optional only so packages built before the field existed still read.
+   */
+  kind?: "scene-package";
   packageVersion: 2;
   minimumRendererProtocolVersion: 2;
   sceneId: string;
@@ -2991,41 +3540,69 @@ export function validateMaterialAssetImportDescriptor(
   return errors;
 }
 
-export interface SceneHistorySnapshot {
+/**
+ * One step of scene history: the document **before** a change, and what that change was.
+ *
+ * The label describes the change the entry reverts, so `undoStack.at(-1)!.label` is exactly what
+ * "Undo" is about to do. Snapshots used to be bare documents, which meant every undo was anonymous
+ * — the label `beginHistory` collected was thrown away at commit — and nothing could tell an author
+ * what a keystroke was about to take back.
+ *
+ * `scope` is the module that made the change. It is attribution, **not** a separate stack: every
+ * panel edits one `SceneDocument`, so reverting one module's older entry while another module's
+ * newer entry stands would produce a document that never existed and silently discard the second
+ * module's work. One history, labelled by owner.
+ */
+export interface SceneHistoryEntry {
   scene: SceneDocument;
-  undoStack: SceneDocument[];
-  redoStack: SceneDocument[];
+  label?: string;
+  scope?: string;
 }
 
-export function appendSceneHistory(stack: SceneDocument[], scene: SceneDocument, limit = 100): SceneDocument[] {
-  return [...stack, scene].slice(-Math.max(1, limit));
+export interface SceneHistorySnapshot {
+  scene: SceneDocument;
+  undoStack: SceneHistoryEntry[];
+  redoStack: SceneHistoryEntry[];
+  /** The entry that was applied, so a caller can report what it just undid or redid. */
+  applied: SceneHistoryEntry;
+}
+
+export function appendSceneHistory(
+  stack: SceneHistoryEntry[],
+  entry: SceneHistoryEntry,
+  limit = 100
+): SceneHistoryEntry[] {
+  return [...stack, entry].slice(-Math.max(1, limit));
 }
 
 export function undoSceneHistory(
   scene: SceneDocument,
-  undoStack: SceneDocument[],
-  redoStack: SceneDocument[]
+  undoStack: SceneHistoryEntry[],
+  redoStack: SceneHistoryEntry[]
 ): SceneHistorySnapshot | null {
   const previous = undoStack.at(-1);
   if (!previous) return null;
   return {
-    scene: previous,
+    scene: previous.scene,
     undoStack: undoStack.slice(0, -1),
-    redoStack: appendSceneHistory(redoStack, scene)
+    // Redo re-applies the same change, so it carries the same description.
+    redoStack: appendSceneHistory(redoStack, { scene, label: previous.label, scope: previous.scope }),
+    applied: previous
   };
 }
 
 export function redoSceneHistory(
   scene: SceneDocument,
-  undoStack: SceneDocument[],
-  redoStack: SceneDocument[]
+  undoStack: SceneHistoryEntry[],
+  redoStack: SceneHistoryEntry[]
 ): SceneHistorySnapshot | null {
   const next = redoStack.at(-1);
   if (!next) return null;
   return {
-    scene: next,
-    undoStack: appendSceneHistory(undoStack, scene),
-    redoStack: redoStack.slice(0, -1)
+    scene: next.scene,
+    undoStack: appendSceneHistory(undoStack, { scene, label: next.label, scope: next.scope }),
+    redoStack: redoStack.slice(0, -1),
+    applied: next
   };
 }
 
@@ -3471,6 +4048,7 @@ export function buildScenePackageManifest(
   }
 
   return {
+    kind: "scene-package",
     packageVersion: 2,
     minimumRendererProtocolVersion: 2,
     sceneId: scene.id,
@@ -3768,6 +4346,20 @@ export function preflightScenePackage(scene: SceneDocument): ScenePackagePreflig
         objectId: object.id
       });
     }
+    // A channel authored before the animatability gate existed. It is inert in Preview and on air
+    // alike, so this is a warning: the scene renders the same either way, and blocking a package
+    // over keys that move nothing would stop a show for a cosmetic cleanup. Never stripped here —
+    // the author is told which object holds it and decides.
+    for (const property of ANIMATABLE_PROPERTIES) {
+      if (!object.animation?.[property]?.keys.length) continue;
+      if (isPropertyAnimatable(object.type, property)) continue;
+      issues.push({
+        severity: "warning",
+        code: "ANIMATION_CHANNEL_NOT_RENDERED",
+        message: `${object.name} animates ${property}, which is not rendered for a ${object.type} object: depth is paint order for 2D content and is resolved when the scene is prepared. The keys are kept and ignored.`,
+        objectId: object.id
+      });
+    }
     for (const [property, bindingPath] of Object.entries(object.bindings)) {
       if (!bindingPath?.trim()) {
         issues.push({
@@ -4013,4 +4605,253 @@ function cryptoRandomSegment(): string {
   }
 
   return Math.random().toString(16).slice(2, 10);
+}
+
+// ---------------------------------------------------------------------------
+// After Effects project import — the intermediate manifest
+//
+// One shape, three producers. The AE bridge (ExtendScript walking an open .aep),
+// the AEPX direct parser (XML, no After Effects), and the collected-footage
+// resolver all emit the same `AeManifest`, so the converter and the report read
+// one structure no matter where the project came from. A field is optional when
+// a producer can legitimately not know it — the AEPX parser reads no pixel data,
+// and the bridge reads no XML — so absence always means "not readable", never
+// "default".
+// ---------------------------------------------------------------------------
+
+/**
+ * How faithfully one imported item survives the move to GrapiX.
+ *
+ * Ordered from most to least editable. `baked` and below are not editable in
+ * GrapiX; the report groups on this so an author can see at a glance what they
+ * can still change and what arrived as a picture of itself.
+ */
+export type AECompatibility =
+  /** A native GrapiX object with full editability (a text layer, a solid). */
+  | "native-editable"
+  /** Mapped to a native object with an approximation the report names. */
+  | "translated"
+  /** An expression or animated property reduced to evaluated keyframes. */
+  | "sampled"
+  /** An effect or layer rendered to a fallback by After Effects. */
+  | "baked"
+  /** A third-party effect whose plugin is not installed. */
+  | "missing-plugin"
+  /** Footage or a font the project references but the collector could not find. */
+  | "missing-asset"
+  /** No GrapiX representation exists and none was approximated. */
+  | "unsupported";
+
+/** A layer, effect, or property and the state it imported with. */
+export interface AeCompatibilityEntry {
+  id: string;
+  name: string;
+  kind: "layer" | "effect" | "expression" | "mask" | "asset" | "font" | "property";
+  status: AECompatibility;
+  /** Why, when the status is not native-editable. */
+  reason?: string;
+}
+
+export interface AeMarker {
+  time: number;
+  comment?: string;
+  label?: number;
+}
+
+/** One keyframe on an animatable stream. Times are seconds within the layer. */
+export interface AeKeyframe {
+  time: number;
+  value: number | number[] | string | boolean;
+  /** `linear`, `bezier`, `hold` — AE_KEY_INTERP names. */
+  interpolation: "linear" | "bezier" | "hold";
+  inTangent?: { x: number; y: number };
+  outTangent?: { x: number; y: number };
+  /** Spatial tangents for position streams, in comp pixels. */
+  spatialIn?: number[];
+  spatialOut?: number[];
+  roving?: boolean;
+  label?: number;
+}
+
+/** One animatable property's keyframes, keyed by AE_LayerStream name. */
+export interface AePropertyStream {
+  /** AE stream name: anchorPoint, position, scale, rotation, opacity, rotateX, ... */
+  property: string;
+  keyframes: AeKeyframe[];
+  /** The original expression source, when the stream is expression-driven. */
+  expression?: string;
+  /** True when the expression was sampled into `keyframes` because it has no translation. */
+  expressionSampled?: boolean;
+}
+
+export interface AeMask {
+  name: string;
+  /** GrapiX mask mode, already resolved from PF_MaskMode. */
+  mode: "none" | "add" | "subtract" | "intersect" | "lighten" | "darken" | "difference";
+  inverted: boolean;
+  opacity: number;
+  feather: { x: number; y: number };
+  expansion: number;
+  /** Bezier path, object-local, same shape as GrapiX `BezierPath`. */
+  path: { closed: boolean; vertices: { x: number; y: number }[]; inTangents: { x: number; y: number }[]; outTangents: { x: number; y: number }[] };
+  pathKeyframes?: AeKeyframe[];
+}
+
+export interface AeEffect {
+  /** Display name, e.g. "Gaussian Blur". */
+  name: string;
+  /** Stable match name, e.g. "ADBE Gaussian Blur 2" — the plugin identifier. */
+  matchName: string;
+  enabled: boolean;
+  /** Parameters by display name; values may be animated (then they carry keyframes). */
+  parameters: Record<string, unknown>;
+  /** The compatibility the importer assigned. Unsupported/native-third-party -> baked. */
+  status: AECompatibility;
+}
+
+export interface AeTrackMatte {
+  /** alpha | notAlpha | luma | notLuma, resolved from AEGP_TrackMatte. */
+  type: "alpha" | "notAlpha" | "luma" | "notLuma";
+  /** The layer index (1-based, comp order) supplying the matte. */
+  sourceLayerIndex: number;
+}
+
+export interface AeLayer {
+  /** 1-based index in composition stacking order; layer 1 is topmost. */
+  index: number;
+  name: string;
+  /** GrapiX-facing type, resolved from AEGP_ObjectType plus the null/adjustment flags. */
+  type: "video" | "image" | "image-sequence" | "audio" | "text" | "shape" | "solid" | "null" | "adjustment" | "precomp" | "camera" | "light";
+  /** Project-item id of the footage/precomp this layer draws from, when it has one. */
+  sourceItemId?: string;
+  inPoint: number;
+  outPoint: number;
+  startTime: number;
+  stretch: number;
+  visible: boolean;
+  locked: boolean;
+  shy: boolean;
+  solo: boolean;
+  is3d: boolean;
+  guide: boolean;
+  collapseTransformations: boolean;
+  continuouslyRasterize: boolean;
+  motionBlur: boolean;
+  frameBlending: boolean;
+  blendingMode: string;
+  label?: number;
+  comment?: string;
+  parentIndex?: number;
+  trackMatte?: AeTrackMatte;
+  /** Transform + animatable streams. */
+  anchorPoint: number[];
+  position: number[];
+  scale: number[];
+  rotation: number[];
+  orientation?: number[];
+  opacity: number;
+  streams: AePropertyStream[];
+  masks: AeMask[];
+  effects: AeEffect[];
+  markers: AeMarker[];
+  text?: {
+    content: string;
+    fontFamily: string;
+    fontStyle?: string;
+    fontSize: number;
+    fillColor: string;
+    strokeColor?: string;
+    strokeWidth?: number;
+    align: "left" | "center" | "right" | "justify";
+    tracking?: number;
+    leading?: number;
+    baselineShift?: number;
+    boxSize?: { x: number; y: number };
+  };
+  /** Solid fill, when type is solid. */
+  solidColor?: string;
+  status: AECompatibility;
+}
+
+export interface AeComposition {
+  /** Project-item id; precomp layers reference this. */
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  duration: number;
+  frameRate: number;
+  displayStartTime: number;
+  workAreaStart: number;
+  workAreaDuration: number;
+  backgroundColor: string;
+  layers: AeLayer[];
+  markers: AeMarker[];
+}
+
+/** A footage or project item the collector must resolve and copy. */
+export interface AeAssetRef {
+  /** Project-item id. */
+  id: string;
+  name: string;
+  kind: "footage" | "composition" | "folder";
+  /** For footage: the source file path exactly as AE recorded it. */
+  sourcePath?: string;
+  /** True when the file was missing in AE. */
+  missing?: boolean;
+  /** Image sequence: the ordered frame file names, when it is one. */
+  sequenceFrames?: string[];
+  /** A still used as a proxy / alternate source. */
+  proxyPath?: string;
+  mediaType?: "video" | "audio" | "image" | "image-sequence" | "font" | "photoshop" | "illustrator" | "other";
+}
+
+/** The folder tree is preserved as nesting; compositions and footage carry the full path. */
+export interface AeManifest {
+  formatVersion: 1;
+  /**
+   * Which producer made this manifest.
+   *
+   * `aep-native` reads the binary `.aep` directly, without After Effects; `ae-bridge` runs the
+   * ExtendScript exporter inside an installed After Effects. They emit the same structure but
+   * not the same coverage, so the report names the producer — an author looking at a missing
+   * effect parameter needs to know which path the project took.
+   */
+  producer: "ae-bridge" | "aep-native" | "aepx-direct" | "collected";
+  projectName: string;
+  /** Absolute path of the source .aep/.aepx, never modified. */
+  sourceFile: string;
+  frameRate: number;
+  compositions: AeComposition[];
+  assets: AeAssetRef[];
+  /** Fonts the text layers reference, for missing-font detection. */
+  fonts: { family: string; style?: string; usedBy: string[] }[];
+  /** Warnings the producer already knows (parse degradation, sampled expressions). */
+  warnings: string[];
+}
+
+/** One composition that converted, mapped to the scene it became. */
+export interface AeImportedComposition {
+  id: string;
+  name: string;
+  sceneId: string;
+}
+
+/**
+ * The compatibility report an import ends with.
+ *
+ * This is the answer to "what can I still edit, and what arrived as a picture of itself?".
+ * `entries` is the per-item breakdown; the `missing*` lists feed the relink and font-replace
+ * windows; `counts` lets the report open with the one-line summary an author reads first.
+ */
+export interface AeImportReport {
+  projectName: string;
+  producer: AeManifest["producer"];
+  compositions: AeImportedComposition[];
+  entries: AeCompatibilityEntry[];
+  missingFootage: string[];
+  missingFonts: string[];
+  missingPlugins: string[];
+  warnings: string[];
+  counts: Record<AECompatibility, number>;
 }

@@ -142,7 +142,7 @@ function convertNode(
   const firstStroke = node.strokes.length > 0 ? normalizeColorValue(node.strokes[0], "transparent") : { type: "none" as const };
   const fill = firstFill.type === "solid" ? firstFill.color : firstFill.type === "none" ? "transparent" : firstFill.stops[0]?.color ?? "transparent";
   const stroke = firstStroke.type === "solid" ? firstStroke.color : firstStroke.type === "none" ? "transparent" : firstStroke.stops[0]?.color ?? "transparent";
-  const effects = convertNodeEffects(node.effects, node, report);
+  const effects = convertNodeEffects(node.effects, node, options, report);
   const blendingOptions = convertNodeBlendingOptions(node);
   const base = {
     id: `import-${safeId(node.id)}`,
@@ -195,13 +195,30 @@ function convertNode(
       sourceNodeId: node.sourceId ?? node.id,
       sourceNodeType: node.type,
       fillOpacity: node.fillOpacity,
-      clipping: Boolean(node.sourceData?.clipping),
+      clipping: node.clipsContent === true || Boolean(node.sourceData?.clipping),
+      /** True when the pixels came from the source tool's own renderer, not from a placed image. */
+      flattenedFromFigma: node.flattenedFromFigma === true,
+      genericContainer: node.genericContainer === true,
+      sourceType: node.sourceType,
+      isMask: node.isMask === true,
+      maskType: node.maskType,
       componentId: node.componentId,
       componentProperties: node.componentProperties,
       responsiveLayout: node.layout as unknown as Record<string, unknown>,
       effects: node.effects as unknown as Array<Record<string, unknown>>,
       additionalFills: node.fills.slice(1),
       additionalStrokes: node.strokes.slice(1),
+      /*
+       * How the image is painted, in the source tool's own terms: scale mode, crop matrix,
+       * rotation, opacity, blend mode, filters. `objectFit` below captures the part GrapiX renders
+       * today; the rest is here so a crop or an exposure adjustment can be honoured later without
+       * a re-import, and so an author can see what was in the file.
+       */
+      imagePaint: node.sourceData?.imagePaint,
+      /** Images used as a stroke. GrapiX strokes are paint, so these stay library assets. */
+      strokeImageAssetIds: node.strokeImageAssetIds,
+      /** Further image fills on the same layer; GrapiX draws one image per object. */
+      additionalImageAssetIds: node.additionalImageAssetIds,
       raw: node.sourceData
     }
   };
@@ -223,7 +240,53 @@ function convertNode(
     base.materialSlots = { main: materialId };
   }
 
-  if (isContainerType(node.type) || node.type === "adjustment" || node.type === "unsupported") {
+  /*
+   * A node the source tool rendered for us. It is drawn as that image — which is the whole point of
+   * rendering it — but only when it has no children of its own: a container's content is its
+   * children, and drawing both would paint the group twice.
+   */
+  const rendered = node.flattenedFromFigma && node.renderedAssetId
+    ? assets.find((item) => item.assetId === node.renderedAssetId)
+    : undefined;
+  if (rendered && node.children.length === 0) {
+    if (requestsRasterFallback(node)) {
+      addDesignImportIssue(report, {
+        kind: "rasterized",
+        severity: "info",
+        message: `${node.name} requested rasterize-layer for unsupported features and uses the source renderer fallback.`,
+        sourceNodeId: node.sourceId,
+        sourceNodeName: node.name,
+        fallback: "Source-rendered layer pixels"
+      });
+    }
+    // A Figma render is exactly the node's box, so stretching is identity here.
+    return { ...base, type: "image", src: rendered.source, objectFit: "stretch" };
+  }
+  if (requestsRasterFallback(node)) {
+    addDesignImportIssue(report, {
+      kind: "converted",
+      severity: "warning",
+      message: `${node.name} requested rasterize-layer for unsupported features, but this import has no source-rendered fallback for the layer.`,
+      sourceNodeId: node.sourceId,
+      sourceNodeName: node.name,
+      fallback: "Closest editable representation with retained source metadata"
+    });
+  }
+
+  /*
+   * A container: either a real one, or a node whose own appearance GrapiX cannot draw but which has
+   * children that can be. Both keep their children — the whole point of a generic container is that
+   * nothing under it is lost — and a rendered image is not used here, because it would paint the
+   * same artwork twice, once flat and once live.
+   */
+  if (
+    isContainerType(node.type)
+    || node.type === "adjustment"
+    || node.type === "unsupported"
+    || node.type === "annotation"
+    || node.type === "slice"
+    || (node.children.length > 0 && !node.path && node.type === "boolean-operation")
+  ) {
     return {
       ...base,
       type: "group",
@@ -233,6 +296,16 @@ function convertNode(
   const asset = assets.find((item) => item.assetId === node.assetId);
   if (node.type === "text" && node.text && options.keepTextEditable) {
     const family = options.missingFontPolicy === "replace" ? options.replacementFontFamily : node.text.fontFamily;
+    if (node.text.textCase === "small-caps") {
+      addDesignImportIssue(report, {
+        kind: "converted",
+        severity: "warning",
+        message: `${node.name} is set to small caps, which needs a font feature no browser text engine applies on its own. It draws as upper case.`,
+        sourceNodeId: node.sourceId ?? node.id,
+        sourceNodeName: node.name,
+        fallback: "Upper case"
+      });
+    }
     return {
       ...base,
       type: "text",
@@ -245,7 +318,13 @@ function convertNode(
       fontFamily: family,
       fontWeight: node.text.fontWeight,
       fontStyle: node.text.fontStyle ?? "normal",
-      textDecoration: {},
+      /*
+       * Case and decoration are how the source *draws* the text, not what it holds. A layer typed
+       * "mvp" with UPPER set reads MVP on air, so dropping either changes the graphic while the
+       * document still looks right in an inspector.
+       */
+      textCase: node.text.textCase ?? "original",
+      textDecoration: node.text.textDecoration ?? {},
       lineHeight: node.text.lineHeight,
       letterSpacing: node.text.letterSpacing,
       wordSpacing: 0,
@@ -267,13 +346,21 @@ function convertNode(
     return { ...base, type: "image", src: asset.source, objectFit: "stretch" };
   }
   if (node.type === "rectangle") {
+    /*
+     * A rectangle with an image fill is how Figma stores nearly every photo: there is no image
+     * *node*, there is a rectangle whose fill happens to be a bitmap. Importing it as a rect painted
+     * with the fill's average colour is why photos arrived as flat blocks.
+     */
+    if (asset) {
+      return { ...base, type: "image", src: asset.source, objectFit: imageObjectFit(node) };
+    }
     return { ...base, type: "rect", radius: node.cornerRadius ?? node.independentCorners?.[0] ?? 0 };
   }
   if (node.type === "ellipse") return { ...base, type: "ellipse" };
   if (node.type === "line") {
     return { ...base, type: "line", points: node.path?.vertices ?? [{ x: 0, y: 0 }, { x: node.width, y: node.height }] };
   }
-  if (node.type === "path" && node.path) {
+  if ((node.type === "path" || node.type === "boolean-operation") && node.path) {
     return {
       ...base,
       type: "shape",
@@ -285,12 +372,11 @@ function convertNode(
     };
   }
   if ((node.type === "image" || node.type === "video" || node.type === "smart-object") && asset) {
-    return {
-      ...base,
-      type: "image",
-      src: asset.source,
-      objectFit: "stretch"
-    };
+    return { ...base, type: "image", src: asset.source, objectFit: imageObjectFit(node) };
+  }
+  // An image fill on a shape whose geometry Figma did not give us: the pixels are the layer.
+  if (asset && !node.path) {
+    return { ...base, type: "image", src: asset.source, objectFit: imageObjectFit(node) };
   }
   addDesignImportIssue(report, {
     kind: "converted",
@@ -306,12 +392,13 @@ function convertNode(
 function convertNodeEffects(
   sourceEffects: NormalizedDesignEffect[],
   node: NormalizedDesignNode,
+  options: DesignImportOptions,
   report: DesignImportReport
 ): ObjectEffect[] {
   const candidates: Array<Record<string, unknown>> = [];
   sourceEffects.forEach((effect, index) => {
     if (effect.type === "layer-blur" || effect.type === "background-blur" || effect.type === "unknown") {
-      if (effect.enabled) {
+      if (effect.enabled && options.unsupportedFeaturePolicy === "closest-editable") {
         addDesignImportIssue(report, {
           kind: "unsupported-effect",
           severity: "warning",
@@ -359,6 +446,10 @@ function convertNodeBlendingOptions(node: NormalizedDesignNode): ObjectBlendingO
   return Object.values(options).some((value) => value !== undefined) ? options : undefined;
 }
 
+function requestsRasterFallback(node: NormalizedDesignNode): boolean {
+  return node.sourceData?.__unsupportedFeaturePolicy === "rasterize-layer";
+}
+
 /**
  * Scene asset library from the normalized document.
  *
@@ -391,10 +482,18 @@ function convertAssets(
       assetId: asset.id,
       name: asset.name,
       kind: mapAssetKind(asset.kind),
-      source: asset.sourceUrl ?? (inline ? `data:${asset.mimeType};base64,${asset.dataBase64}` : ""),
+      /*
+       * The project-relative path when the import stored one: `images/<scene>/<layer>.png`. That is
+       * what every consumer resolves — the editor preview, a saved and reopened scene, and Playout
+       * when it uploads bytes to the engine. A Figma URL expires in minutes and must never be what
+       * a scene remembers.
+       */
+      source: asset.projectPath
+        ?? asset.sourceUrl
+        ?? (inline ? `data:${asset.mimeType};base64,${asset.dataBase64}` : ""),
       mimeType: asset.mimeType,
       importedAt: timestamp,
-      sourcePath: asset.sourceUrl,
+      sourcePath: asset.projectPath ?? asset.sourceUrl,
       width: asset.width,
       height: asset.height,
       checksum: asset.checksum,
@@ -443,14 +542,48 @@ function isContainer(object: SceneObject): object is GroupSceneObject {
   return object.type === "group";
 }
 
+/**
+ * Figma's image `scaleMode` as a GrapiX object fit.
+ *
+ * `FILL` covers the box and crops the overflow; `FIT` shows the whole image inside it. `CROP` is a
+ * matrix Figma applies to the source rectangle — GrapiX has no crop transform on an image object
+ * yet, and `cover` is its closest honest neighbour, so the matrix travels in `importedDesign` for
+ * the renderer that will use it. `TILE` has no equivalent at all and is reported by the caller.
+ */
+function imageObjectFit(node: NormalizedDesignNode): "cover" | "contain" | "stretch" {
+  const paint = node.sourceData?.imagePaint;
+  const mode = paint && typeof paint === "object" && "scaleMode" in paint
+    ? String((paint as { scaleMode?: unknown }).scaleMode ?? "")
+    : "";
+
+  switch (mode.toUpperCase()) {
+    case "FIT":
+      return "contain";
+    case "FILL":
+    case "CROP":
+      return "cover";
+    default:
+      // No scale mode reported: the image is the layer's own box, which is what stretch means.
+      return "stretch";
+  }
+}
+
 function isContainerType(type: NormalizedDesignNode["type"]): boolean {
-  return ["group", "artboard", "frame", "component", "component-set", "instance"].includes(type);
+  return [
+    "group",
+    "artboard",
+    "frame",
+    "section",
+    "component",
+    "component-set",
+    "instance"
+  ].includes(type);
 }
 
 function sceneType(node: NormalizedDesignNode): SceneObject["type"] {
   if (node.type === "text") return "text";
   if (node.type === "ellipse") return "ellipse";
-  if (node.type === "path") return "shape";
+  if (node.type === "path" || node.type === "boolean-operation") return "shape";
   if (node.type === "image" || node.type === "video" || node.type === "smart-object") return "image";
   return "rect";
 }

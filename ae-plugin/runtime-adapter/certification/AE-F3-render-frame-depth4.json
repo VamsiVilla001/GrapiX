@@ -1,0 +1,54 @@
+{
+  "phase": "AE-F3",
+  "kind": "render-frame-throughput-probe",
+  "recordedAt": "2026-08-19T04:59:49.146Z",
+  "claim": "Measures 1920x1080 RENDER_FRAME throughput over the runtime protocol, pipelined, with the ring drained by ae-ring-drain. It is not the 30-minute soak and closes no gate.",
+  "adapter": {
+    "sha256": "b5e6c79ca729b91128e6c0171d3508e10df4ba38cde9414f23c9277cf5c90e99",
+    "aeVersion": "26.3",
+    "idleMaxOpsPerCallback": 8,
+    "idleBudgetMicros": 24000
+  },
+  "request": {
+    "composition": "LOWER_THIRD",
+    "compositionItemId": 1,
+    "geometry": "1920x1080",
+    "clock": {
+      "frameDuration": "800",
+      "timeScale": "23976"
+    },
+    "frames": 300,
+    "inFlight": 4,
+    "pinnedRate": "2997/100",
+    "targetFps": 29.97
+  },
+  "measured": {
+    "completed": 300,
+    "rendered": 300,
+    "refused": 0,
+    "elapsedSeconds": 4.713,
+    "framesPerSecond": 63.649,
+    "realTimeRatio": 2.124,
+    "latencyMs": {
+      "p50": 57.534,
+      "p95": 75.284,
+      "p99": 76.784,
+      "max": 99.435
+    }
+  },
+  "idleCadence": {
+    "callbacks": 102,
+    "meanPeriodMicros": 46866,
+    "framesPerCallback": 2.94
+  },
+  "ring": {
+    "published": 300
+  },
+  "renderEvents": {
+    "ready": 300,
+    "failed": 0,
+    "failureCodes": []
+  },
+  "refusalCodes": [],
+  "payloadWritten": false
+}

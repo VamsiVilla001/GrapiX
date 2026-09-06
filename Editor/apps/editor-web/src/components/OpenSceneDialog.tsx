@@ -37,11 +37,10 @@ export function OpenSceneDialog({ onClose }: { onClose: () => void }) {
       );
     } catch (cause) {
       setScenes([]);
-      setError(
-        cause instanceof Error
-          ? `${cause.message} — is the project service running on 127.0.0.1:4100?`
-          : "The scene list could not be read."
-      );
+      // No local hint: `request()` names an unreachable service and its address, and the
+      // service's own text explains every other refusal. Appending "is the service running?"
+      // to a 423 told the operator to check something that was working.
+      setError(cause instanceof Error ? cause.message : "The scene list could not be read.");
     }
   }, []);
 

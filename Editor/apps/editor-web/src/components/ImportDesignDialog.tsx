@@ -2,12 +2,24 @@ import {
   DEFAULT_DESIGN_IMPORT_OPTIONS,
   type DesignImportOptions,
   type DesignImportResult,
+  type FigmaMotionImportMode,
+  type FigmaMotionImportReport,
+  type FigmaMotionManifest,
   type NormalizedDesignNode,
   type SceneDocument
 } from "@grapix/shared-types";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { importDesignFileToApi, importFigmaDesignToApi } from "../lib/apiClient";
+import {
+  MOTION_COMPATIBILITY_LABELS,
+  canStartMotionImport,
+  missingNodeSummary,
+  motionManifestDeliverable,
+  motionReportGroups,
+  parseMotionManifest,
+  resolveMotionMode
+} from "./designImportMotion";
 import { useEditorStore } from "../store/editorStore";
 import { useTemplateStore } from "../store/templateStore";
 
@@ -32,7 +44,16 @@ export function ImportDesignDialog({ onClose }: { onClose: () => void }) {
   const [result, setResult] = useState<DesignImportResult | null>(null);
   const [selectedSceneIds, setSelectedSceneIds] = useState<string[]>([]);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
-  const [reportView, setReportView] = useState<"summary" | "issues">("summary");
+  const [reportView, setReportView] = useState<"summary" | "issues" | "motion">("summary");
+  const [motionMode, setMotionMode] = useState<FigmaMotionImportMode>("design-only");
+  /**
+   * The parsed `grapix-figma-motion.json`, held as the manifest rather than the File.
+   *
+   * Parsed at selection time so a malformed export is reported while the author is still looking
+   * at the field that caused it, instead of surfacing as a failed import a minute later.
+   */
+  const [motionManifest, setMotionManifest] = useState<{ manifest: FigmaMotionManifest; fileName: string } | null>(null);
+  const [motionError, setMotionError] = useState("");
 
   useEffect(() => {
     function closeFromKeyboard(event: KeyboardEvent) {
@@ -42,9 +63,27 @@ export function ImportDesignDialog({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener("keydown", closeFromKeyboard);
   }, [onClose, phase]);
 
-  const canAnalyze = sourceMode === "file"
+  const motionManifestAvailable = motionManifestDeliverable(sourceMode);
+  const effectiveMotionMode = resolveMotionMode(motionMode, sourceMode);
+
+  const canAnalyze = (sourceMode === "file"
     ? Boolean(file)
-    : Boolean(figmaSource.url.trim());
+    : Boolean(figmaSource.url.trim()))
+    && canStartMotionImport(effectiveMotionMode, Boolean(motionManifest));
+
+  async function selectMotionManifest(selected: File | null) {
+    setMotionError("");
+    if (!selected) {
+      setMotionManifest(null);
+      return;
+    }
+    try {
+      setMotionManifest({ manifest: parseMotionManifest(await selected.text()), fileName: selected.name });
+    } catch (nextError) {
+      setMotionManifest(null);
+      setMotionError(nextError instanceof Error ? nextError.message : "That file could not be read.");
+    }
+  }
   const selectedScenes = useMemo(
     () => result?.scenes
       .filter((scene) => selectedSceneIds.includes(scene.id))
@@ -61,12 +100,14 @@ export function ImportDesignDialog({ onClose }: { onClose: () => void }) {
       await new Promise((resolve) => window.setTimeout(resolve, 30));
       setPhase("parsing");
       const imported = sourceMode === "file"
-        ? await importDesignFileToApi(file!, options)
+        ? await importDesignFileToApi(file!, options, { motionMode: effectiveMotionMode })
         : await importFigmaDesignToApi({
             url: figmaSource.url,
             nodeIds: figmaSource.nodeIds.split(",").map((value) => value.trim()).filter(Boolean),
             transport: figmaSource.transport,
-            accessToken: figmaSource.accessToken.trim() || undefined
+            accessToken: figmaSource.accessToken.trim() || undefined,
+            motionMode: effectiveMotionMode,
+            motionManifest: effectiveMotionMode === "full-motion-manifest" ? motionManifest?.manifest : undefined
           }, options);
       setPhase("converting");
       await new Promise((resolve) => window.setTimeout(resolve, 30));
@@ -168,12 +209,25 @@ export function ImportDesignDialog({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
+        <MotionOptions
+          error={motionError}
+          manifest={motionManifest}
+          manifestAvailable={motionManifestAvailable}
+          mode={motionMode}
+          onSelectManifest={(selected) => void selectMotionManifest(selected)}
+          setMode={setMotionMode}
+        />
+
         <ImportOptions options={options} setOptions={setOptions} destination={destination} setDestination={setDestination} hasActiveScene={hasActiveScene} />
 
         {phase !== "idle" && phase !== "ready" && phase !== "error" ? (
           <div className="design-import-progress" role="status">
             <progress />
-            <span>{phase === "reading" ? "Reading source…" : phase === "parsing" ? "Parsing layers and assets…" : "Converting native GrapiX objects…"}</span>
+            <span>{phase === "reading"
+              ? "Reading source…"
+              : phase === "parsing"
+                ? effectiveMotionMode === "design-only" ? "Parsing layers and assets…" : "Parsing layers, assets and motion…"
+                : effectiveMotionMode === "design-only" ? "Converting native GrapiX objects…" : "Converting objects and writing keyframes…"}</span>
           </div>
         ) : null}
         {error ? <div className="design-import-error" role="alert">{error}</div> : null}
@@ -220,8 +274,15 @@ export function ImportDesignDialog({ onClose }: { onClose: () => void }) {
               <div className="design-import-report-tabs">
                 <button className={reportView === "summary" ? "active" : ""} onClick={() => setReportView("summary")} type="button">Report summary</button>
                 <button className={reportView === "issues" ? "active" : ""} onClick={() => setReportView("issues")} type="button">Issues ({result.report.issues.length})</button>
+                {result.motion ? (
+                  <button className={reportView === "motion" ? "active" : ""} onClick={() => setReportView("motion")} type="button">
+                    Motion ({result.motion.keyframesCreated})
+                  </button>
+                ) : null}
               </div>
-              {reportView === "summary" ? <ReportSummary result={result} /> : (
+              {reportView === "summary" ? <ReportSummary result={result} /> : reportView === "motion" && result.motion ? (
+                <MotionReport report={result.motion} />
+              ) : (
                 <div className="design-import-issues">
                   {result.report.issues.length ? result.report.issues.map((issue) => (
                     <article className={`severity-${issue.severity}`} key={issue.id}>
@@ -286,6 +347,119 @@ function ImportOptions(props: {
   );
 }
 
+/**
+ * How much motion to bring across.
+ *
+ * The three modes are not degrees of effort, they are three different sources, and the control
+ * says so: prototype transitions come from the REST document, per-property tracks come only from
+ * a file the export bridge writes. An author who picks the third mode without the file gets told
+ * here rather than getting a design-only import and a warning buried in the report.
+ */
+function MotionOptions(props: {
+  error: string;
+  manifest: { manifest: FigmaMotionManifest; fileName: string } | null;
+  manifestAvailable: boolean;
+  mode: FigmaMotionImportMode;
+  onSelectManifest: (file: File | null) => void;
+  setMode: (mode: FigmaMotionImportMode) => void;
+}) {
+  const wantsManifest = props.mode === "full-motion-manifest";
+  const timelines = props.manifest?.manifest.timelines.length ?? 0;
+
+  return (
+    <fieldset className="design-import-motion">
+      <legend>Motion</legend>
+      <label>Bring across
+        <select
+          aria-label="Motion import mode"
+          onChange={(event) => props.setMode(event.target.value as FigmaMotionImportMode)}
+          value={props.mode}
+        >
+          <option value="design-only">Design only · no motion</option>
+          <option value="design-and-prototype-motion">Design + prototype motion · transitions and Smart Animate</option>
+          <option value="full-motion-manifest">Full motion manifest · keyframed Motion timelines</option>
+        </select>
+      </label>
+
+      {wantsManifest && props.manifestAvailable ? (
+        <>
+          <label className="design-file-drop">
+            <span>{props.manifest ? `${props.manifest.fileName} · ${timelines} ${timelines === 1 ? "timeline" : "timelines"}` : "Choose grapix-figma-motion.json"}</span>
+            <input
+              accept=".json,application/json"
+              aria-label="GrapiX motion manifest"
+              onChange={(event) => props.onSelectManifest(event.target.files?.[0] ?? null)}
+              type="file"
+            />
+          </label>
+          <p className="design-import-token-hint" role="note">
+            Export this from the <strong>GrapiX Motion Bridge</strong> plugin in Figma
+            (<code>tools/figma-motion-bridge</code>). Figma&apos;s REST API cannot see a Motion timeline, so
+            keyframed motion can only reach GrapiX through that file. Import the same frames the export
+            covered — motion referring to a frame you did not import is named in the report rather than applied.
+          </p>
+        </>
+      ) : null}
+
+      {wantsManifest && !props.manifestAvailable ? (
+        <p className="design-import-token-hint" role="note">
+          A motion manifest needs the <strong>Figma link</strong> tab: this request sends the design file as raw
+          bytes, which leaves nowhere for a second file. Importing prototype motion instead — an exported Figma
+          document carries its own transitions, so that part still works here.
+        </p>
+      ) : null}
+
+      {props.mode === "design-and-prototype-motion" ? (
+        <p className="design-import-token-hint" role="note">
+          Prototype transitions state that two frames are related and how long the change takes. Smart Animate is
+          where per-property motion comes from on this route: the difference between the two frames is the
+          animation. Anything you keyframed on a Motion timeline needs the manifest.
+        </p>
+      ) : null}
+
+      {props.error ? <div className="design-import-error" role="alert">{props.error}</div> : null}
+    </fieldset>
+  );
+}
+
+/** What happened to the design's motion, grouped by outcome with the worst first. */
+function MotionReport({ report }: { report: FigmaMotionImportReport }) {
+  const groups = motionReportGroups(report);
+
+  return (
+    <div className="design-import-motion-report">
+      <dl>
+        <div><dt>Timelines converted</dt><dd>{report.timelinesConverted} / {report.timelines}</dd></div>
+        <div><dt>Matched layers</dt><dd>{report.matchedNodes}</dd></div>
+        <div><dt>Channels created</dt><dd>{report.channelsCreated}</dd></div>
+        <div><dt>Keyframes created</dt><dd>{report.keyframesCreated}</dd></div>
+      </dl>
+
+      {report.missingNodes.length ? (
+        <article className="severity-warning">
+          <strong>Motion for {report.missingNodes.length} {report.missingNodes.length === 1 ? "layer" : "layers"} had nowhere to go</strong>
+          {/* Named, not counted: the remedy is to import the frame holding them, and that needs identifying. */}
+          <span>No imported object carries {missingNodeSummary(report.missingNodes)}. The frame holding
+            them was probably not selected for import.</span>
+        </article>
+      ) : null}
+
+      {groups.length ? groups.map((group) => (
+        <section key={group.compatibility}>
+          <strong>{MOTION_COMPATIBILITY_LABELS[group.compatibility]} ({group.entries.length})</strong>
+          {group.entries.map((entry, index) => (
+            <article className={group.compatibility === "unsupported" ? "severity-warning" : "severity-info"} key={`${entry.nodeId}_${entry.property}_${index}`}>
+              <strong>{entry.nodeName ?? entry.nodeId} · {entry.property}</strong>
+              <span>{entry.detail}</span>
+              {entry.timelineName ? <small>{entry.timelineName}</small> : null}
+            </article>
+          ))}
+        </section>
+      )) : <span>The manifest carried no motion for the imported layers.</span>}
+    </div>
+  );
+}
+
 function ReportSummary({ result }: { result: DesignImportResult }) {
   const report = result.report;
   const rows = [
@@ -299,7 +473,27 @@ function ReportSummary({ result }: { result: DesignImportResult }) {
     ["Errors", report.errors.length],
     ["Warnings", report.warnings.length]
   ];
-  return <dl>{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>;
+  return (
+    <>
+      <dl>{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+      {report.counts ? (
+        <section className="design-import-counts">
+          <strong>Layer and asset accounting</strong>
+          <dl>
+            <div><dt>Native layers</dt><dd>{report.counts.native}</dd></div>
+            <div><dt>Generic containers</dt><dd>{report.counts.genericContainers}</dd></div>
+            <div><dt>Flattened layers</dt><dd>{report.counts.flattened}</dd></div>
+            <div><dt>Masks</dt><dd>{report.counts.masks}</dd></div>
+            <div><dt>Clip containers</dt><dd>{report.counts.clippedContainers}</dd></div>
+            <div><dt>Synthetic layers</dt><dd>{report.counts.syntheticLayers}</dd></div>
+            <div><dt>Downloaded assets</dt><dd>{report.counts.assetsDownloaded}</dd></div>
+            <div><dt>Failed assets</dt><dd>{report.counts.assetsFailed}</dd></div>
+            <div><dt>Missing nodes</dt><dd>{report.counts.missingNodes.length}</dd></div>
+          </dl>
+        </section>
+      ) : null}
+    </>
+  );
 }
 
 function DesignNodeTree(props: {

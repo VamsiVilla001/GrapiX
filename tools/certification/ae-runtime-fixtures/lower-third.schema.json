@@ -1,0 +1,206 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://grapix.local/schemas/ae-runtime-lower-third-v1.json",
+  "title": "GrapiX After Effects LOWER_THIRD fixture",
+  "type": "object",
+  "required": ["version", "id", "phase", "fixture", "render", "controls", "cueMap", "comparisons", "expectedDependencies", "externalGates"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": 1 },
+    "id": { "type": "string", "minLength": 1 },
+    "phase": { "const": "BO0a" },
+    "scope": { "type": "string" },
+    "fixture": {
+      "type": "object",
+      "required": ["file", "sha256", "authoringCommand", "aeBuild", "pluginSet"],
+      "properties": {
+        "file": { "type": "string", "pattern": "\\.aep$" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "authoringCommand": { "type": "string" },
+        "aeBuild": { "type": "string" },
+        "pluginSet": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "render": {
+      "type": "object",
+      "required": ["composition", "compositionItemId", "width", "height", "pixelAspect", "frameRate", "clock", "durationFrames", "sourceAlphaMode"],
+      "properties": {
+        "composition": { "const": "LOWER_THIRD" },
+        "compositionItemId": { "type": "integer", "minimum": 1 },
+        "width": { "const": 1920 },
+        "height": { "const": 1080 },
+        "pixelAspect": { "const": "1/1" },
+        "frameRate": { "type": "string", "pattern": "^[1-9][0-9]*/[1-9][0-9]*$", "const": "2997/100" },
+        "clock": { "$ref": "#/$defs/compositionClock" },
+        "durationFrames": { "type": "integer", "minimum": 1 },
+        "sourceAlphaMode": { "const": "premultiplied-black" }
+      },
+      "additionalProperties": false
+    },
+    "controls": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "updateClass", "target", "nativeBinding", "productionProbe", "acceptedValues"],
+        "properties": {
+          "id": { "enum": ["PLAYER_NAME", "SCORE", "PLAYER_IMAGE", "TEAM_COLOR"] },
+          "kind": { "enum": ["text", "integer-text", "image-source", "colour"] },
+          "updateClass": { "enum": ["fast", "preload-required"] },
+          "target": {
+            "type": "object",
+            "required": ["compositionItemId", "layerId", "sourceItemId"],
+            "properties": {
+              "compositionItemId": { "type": "integer", "minimum": 1 },
+              "layerId": { "type": "integer", "minimum": 1 },
+              "sourceItemId": { "type": ["integer", "null"], "minimum": 1 }
+            },
+            "additionalProperties": false
+          },
+          "nativeBinding": {
+            "type": "object",
+            "required": ["kind", "verification"],
+            "properties": {
+              "kind": { "enum": ["source-text", "solid-source", "fill-colour"] },
+              "effectMatchName": { "type": "string" },
+              "verification": { "const": "live-verified" }
+            },
+            "additionalProperties": false
+          },
+          "productionProbe": {
+            "type": "object",
+            "required": ["status", "path"],
+            "properties": {
+              "status": { "const": "not-advertised" },
+              "path": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["matchName", "ordinal"],
+                  "properties": {
+                    "matchName": { "type": "string" },
+                    "ordinal": { "type": "integer", "minimum": 0 }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "acceptedValues": {}
+        },
+        "additionalProperties": false
+      }
+    },
+    "cueMap": {
+      "type": "object",
+      "required": ["authoringStatus", "rate", "clock", "markers", "resolved", "digest"],
+      "properties": {
+        "authoringStatus": { "const": "declared-not-authored" },
+        "rate": {
+          "type": "object",
+          "required": ["numerator", "denominator"],
+          "properties": {
+            "numerator": { "const": 2997 },
+            "denominator": { "const": 100 }
+          },
+          "additionalProperties": false
+        },
+        "clock": { "$ref": "#/$defs/compositionClock" },
+        "markers": {
+          "type": "array",
+          "minItems": 6,
+          "items": {
+            "type": "object",
+            "required": ["text", "time"],
+            "properties": {
+              "text": { "type": "string", "pattern": "^GRAPIX:(CUE|IN|HOLD|CONTINUE:[A-Za-z0-9_-]{1,32}|UPDATE|OUT|END)$" },
+              "time": { "$ref": "#/$defs/exactTime" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "resolved": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["role", "id", "time", "compositionTime", "frame", "deadlineNanos"],
+            "properties": {
+              "role": { "enum": ["CUE", "IN", "HOLD", "CONTINUE", "UPDATE", "OUT", "END"] },
+              "id": { "type": ["string", "null"] },
+              "time": { "$ref": "#/$defs/exactTime" },
+              "compositionTime": { "$ref": "#/$defs/exactTime" },
+              "frame": { "type": "integer", "minimum": 0 },
+              "deadlineNanos": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "comparisons": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "frame", "reference", "matteMode", "channelOrder", "tolerance"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "frame": { "type": "integer", "minimum": 0 },
+          "reference": { "type": "string", "minLength": 1 },
+          "matteMode": { "const": "premul-black" },
+          "channelOrder": { "const": "argb" },
+          "tolerance": {
+            "type": "object",
+            "required": ["maxChannelDelta", "maxDifferingPixels"],
+            "properties": {
+              "maxChannelDelta": { "type": "integer", "minimum": 0 },
+              "maxDifferingPixels": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "expectedDependencies": {
+      "type": "object",
+      "required": ["fonts", "media", "effects", "missing", "liveReport"],
+      "properties": {
+        "fonts": { "type": "array", "items": { "type": "string" } },
+        "media": { "type": "array", "items": { "type": "string" } },
+        "effects": { "type": "array", "items": { "type": "string" } },
+        "missing": { "type": "array", "items": { "type": "string" } },
+        "liveReport": { "const": "live-asserted-via-LIST_EFFECTS" }
+      },
+      "additionalProperties": false
+    },
+    "externalGates": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "compositionClock": {
+      "type": "object",
+      "required": ["frameDuration", "timeScale"],
+      "properties": {
+        "frameDuration": { "type": "string", "pattern": "^[1-9][0-9]*$" },
+        "timeScale": { "type": "string", "pattern": "^[1-9][0-9]*$" }
+      },
+      "additionalProperties": false
+    },
+    "exactTime": {
+      "type": "object",
+      "required": ["value", "scale"],
+      "properties": {
+        "value": { "type": "string", "pattern": "^-?[0-9]+$" },
+        "scale": { "type": "string", "pattern": "^[1-9][0-9]*$" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

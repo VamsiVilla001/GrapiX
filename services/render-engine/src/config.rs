@@ -86,11 +86,17 @@ impl NetworkConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct AuthConfig {
-    /// Require a bearer token. Forced on for any non-loopback bind.
+    /// Require a valid access token on every connection, on every transport, including
+    /// loopback and the local pipe. Forced on for any non-loopback bind. This is the
+    /// production switch: with it set, the engine issues no authority to anyone who cannot
+    /// name themselves.
     pub required: bool,
-    /// Inline token. Prefer `token_file`; an inline secret ends up in git.
-    pub token: Option<String>,
-    pub token_file: Option<String>,
+    /// The HMAC key access tokens are signed with, shared with whichever service mints them.
+    ///
+    /// Inline for development only; prefer `signing_secret_file`, because an inline secret
+    /// ends up in git, and a signing key in git is every account in the facility.
+    pub signing_secret: Option<String>,
+    pub signing_secret_file: Option<String>,
     /// Projects this engine will serve. Empty means any.
     pub allowed_projects: Vec<String>,
 }
@@ -99,8 +105,8 @@ impl Default for AuthConfig {
     fn default() -> Self {
         Self {
             required: true,
-            token: None,
-            token_file: None,
+            signing_secret: None,
+            signing_secret_file: None,
             allowed_projects: Vec::new(),
         }
     }
@@ -388,12 +394,12 @@ impl EngineConfig {
         if let Some(value) = get("IPC") {
             self.network.ipc_endpoint = Some(value.clone());
         }
-        if let Some(value) = get("TOKEN") {
-            self.auth.token = Some(value.clone());
+        if let Some(value) = get("AUTH_SECRET") {
+            self.auth.signing_secret = Some(value.clone());
             self.auth.required = true;
         }
-        if let Some(value) = get("TOKEN_FILE") {
-            self.auth.token_file = Some(value.clone());
+        if let Some(value) = get("AUTH_SECRET_FILE") {
+            self.auth.signing_secret_file = Some(value.clone());
         }
         if let Some(value) = get("HEADLESS") {
             self.gpu.headless = parse_bool(value, "HEADLESS")?;
@@ -475,8 +481,8 @@ impl EngineConfig {
         if let Some(value) = &cli.preferred_backend {
             self.gpu.preferred_backend = Some(value.clone());
         }
-        if let Some(value) = &cli.token_file {
-            self.auth.token_file = Some(value.clone());
+        if let Some(value) = &cli.signing_secret_file {
+            self.auth.signing_secret_file = Some(value.clone());
         }
         if let Some(value) = &cli.ipc {
             self.network.ipc_endpoint = Some(value.clone());
@@ -546,9 +552,9 @@ impl EngineConfig {
 
         if self.network.is_remote_reachable() {
             self.auth.required = true;
-            if self.auth.token.is_none() && self.auth.token_file.is_none() {
+            if self.auth.signing_secret.is_none() && self.auth.signing_secret_file.is_none() {
                 return Err(ConfigError::Invalid(format!(
-                    "engine binds {} which is reachable from the network, but no auth token is configured. Set auth.token-file, or bind 127.0.0.1.",
+                    "engine binds {} which is reachable from the network, but no token signing secret is configured. Set auth.signing-secret-file, or bind 127.0.0.1.",
                     self.network.bind_address
                 )));
             }
@@ -608,17 +614,20 @@ impl EngineConfig {
         Ok(warnings)
     }
 
-    /// Resolve the auth token from `token` or `token_file`.
-    pub fn resolve_token(&self) -> Result<Option<String>, ConfigError> {
-        if let Some(token) = &self.auth.token {
-            return Ok(Some(validate_token(token)?));
+    /// Resolve the token signing key from `signing_secret` or `signing_secret_file`.
+    ///
+    /// Returns the raw key bytes. The engine only ever *verifies* with this - it has no code
+    /// path that mints a token, so a compromised engine cannot issue authority to itself.
+    pub fn resolve_signing_key(&self) -> Result<Option<Vec<u8>>, ConfigError> {
+        if let Some(secret) = &self.auth.signing_secret {
+            return Ok(Some(validate_signing_secret(secret)?.into_bytes()));
         }
-        if let Some(path) = &self.auth.token_file {
+        if let Some(path) = &self.auth.signing_secret_file {
             let text = fs::read_to_string(path).map_err(|source| ConfigError::Read {
                 path: PathBuf::from(path),
                 source,
             })?;
-            return Ok(Some(validate_token(text.trim())?));
+            return Ok(Some(validate_signing_secret(text.trim())?.into_bytes()));
         }
         Ok(None)
     }
@@ -636,16 +645,15 @@ impl EngineConfig {
     }
 }
 
-fn validate_token(token: &str) -> Result<String, ConfigError> {
-    let trimmed = token.trim();
-    if trimmed.len() < 16 {
+/// A signing key shorter than this is not worth the HMAC around it.
+///
+/// 32 characters matches the minimum the TypeScript issuer enforces, so a secret that works
+/// on one side cannot be silently rejected on the other.
+fn validate_signing_secret(secret: &str) -> Result<String, ConfigError> {
+    let trimmed = secret.trim();
+    if trimmed.len() < 32 {
         return Err(ConfigError::Invalid(
-            "auth token must be at least 16 characters".to_string(),
-        ));
-    }
-    if trimmed.chars().any(char::is_whitespace) {
-        return Err(ConfigError::Invalid(
-            "auth token must not contain whitespace".to_string(),
+            "the auth signing secret must be at least 32 characters".to_string(),
         ));
     }
     Ok(trimmed.to_string())
@@ -676,7 +684,7 @@ pub struct CliOptions {
     pub headless: Option<bool>,
     pub preferred_gpu: Option<String>,
     pub preferred_backend: Option<String>,
-    pub token_file: Option<String>,
+    pub signing_secret_file: Option<String>,
     pub ipc: Option<String>,
     pub log_level: Option<String>,
     pub tile_size: Option<u32>,
@@ -701,7 +709,7 @@ OPTIONS:
         --headless <BOOL>      Run without a window or surface (default true)
         --preferred-gpu <STR>  Adapter name substring to prefer
         --preferred-backend <B> vulkan | dx12 | metal | gl
-        --token-file <PATH>    File containing the bearer token
+        --signing-secret-file <PATH>  File containing the token signing secret
         --tile-size <PIXELS>   Default tile edge length
         --log-level <LEVEL>    error | warn | info | debug | trace
         --print-config         Print the effective configuration and exit
@@ -712,8 +720,8 @@ PRECEDENCE:
     CLI argument > environment variable > TOML file > built-in default
 
 ENVIRONMENT:
-    GRAPIX_ENGINE_BIND, GRAPIX_ENGINE_PORT, GRAPIX_ENGINE_TOKEN,
-    GRAPIX_ENGINE_TOKEN_FILE, GRAPIX_ENGINE_HEADLESS, GRAPIX_ENGINE_ID,
+    GRAPIX_ENGINE_BIND, GRAPIX_ENGINE_PORT, GRAPIX_ENGINE_AUTH_SECRET,
+    GRAPIX_ENGINE_AUTH_SECRET_FILE, GRAPIX_ENGINE_HEADLESS, GRAPIX_ENGINE_ID,
     GRAPIX_ENGINE_NAME, GRAPIX_ENGINE_IPC, GRAPIX_ENGINE_PREFERRED_GPU,
     GRAPIX_ENGINE_PREFERRED_BACKEND, GRAPIX_ENGINE_TILE_SIZE,
     GRAPIX_ENGINE_TILE_CACHE_BYTES, GRAPIX_ENGINE_GPU_BUDGET_BYTES,
@@ -763,7 +771,7 @@ pub fn parse_cli(args: &[String]) -> Result<CliOptions, ConfigError> {
             }
             "--preferred-gpu" => options.preferred_gpu = Some(take_value(argument)?),
             "--preferred-backend" => options.preferred_backend = Some(take_value(argument)?),
-            "--token-file" => options.token_file = Some(take_value(argument)?),
+            "--signing-secret-file" => options.signing_secret_file = Some(take_value(argument)?),
             "--log-level" => options.log_level = Some(take_value(argument)?),
             "--tile-size" => {
                 let value = take_value(argument)?;

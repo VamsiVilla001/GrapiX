@@ -42,6 +42,14 @@ import {
 
 const HOST = process.env.ENGINE_HOST ?? "127.0.0.1";
 const PORT = Number(process.env.ENGINE_PORT ?? 4400);
+// Two authorities, two connections, one engine - the same split the product runs.
+//
+// Authoring (stage.load, scene.load, scene.unload) is the Editor, which a local peer gets
+// without a credential. Every capture here goes through `preview.request`, an operator verb,
+// so the measurement leg must present the bearer. One connection cannot be both: authority is
+// fixed at the handshake by what it presented.
+const url = engineUrl(HOST, PORT, { secure: false });
+const TOKEN = process.env.GRAPIX_ENGINE_TOKEN;
 const OUTPUT_DIRECTORY = process.env.PARITY_OUTPUT ?? "artifacts/pixel-parity";
 /** Where a browser capture is looked for, if one has been produced. */
 const BROWSER_CAPTURES = process.env.PARITY_BROWSER_CAPTURES ?? "artifacts/pixel-parity/browser";
@@ -65,7 +73,6 @@ function skip(label, why) {
   console.log(`  SKIP  ${label} — ${why}`);
 }
 
-const url = engineUrl(HOST, PORT, { secure: false });
 console.log(`\nPixel parity against ${url}\n`);
 
 const client = new EngineConnection({
@@ -77,12 +84,48 @@ const client = new EngineConnection({
   autoReconnect: false
 });
 
+// The measurement leg. Every capture is an operator verb, so without a bearer there is
+// nothing this harness can measure - it says so and stops rather than reporting a pass it
+// never earned.
+if (!TOKEN) {
+  console.log("GRAPIX_ENGINE_TOKEN is not set, and every capture here is an operator verb.");
+  console.log("Start a token-secured engine and export the same token, then re-run.\n");
+  process.exit(1);
+}
+const operator = new EngineConnection({
+  clientId: "parity-operator",
+  clientName: "GrapiX parity operator",
+  clientRole: "playout",
+  clientVersion: "0.2.0",
+  transport: new WebSocketEngineTransport({ url, authToken: TOKEN }),
+  autoReconnect: false,
+  authToken: TOKEN
+});
+
 try {
   await client.connect();
+  await operator.connect();
 } catch (error) {
   console.log(`Could not connect: ${error.message}`);
   console.log("Start the engine first: npm run dev:engine\n");
   process.exit(1);
+}
+
+// A previous run that stopped early leaves its scenes resident, and the engine refuses a load
+// once it holds its maximum. Releasing this harness's own two first makes the run repeatable
+// without restarting the engine; an absent scene simply is not there to release.
+for (const sceneId of ["scene_near", "scene_far"]) {
+  // Both domains: an older build of this harness loaded these ids as `authoring`, and a copy
+  // left under the other domain still counts against the engine's active-scene ceiling.
+  for (const domain of ["published", "authoring"]) {
+    await operator
+      .request(
+        "scene.unload",
+        { sceneId, force: true },
+        { sceneRef: { projectId: "certification", domain, sceneId, revision: 1 } }
+      )
+      .catch(() => {});
+  }
 }
 client.markReady("nothing to reconcile");
 await mkdir(OUTPUT_DIRECTORY, { recursive: true });
@@ -215,7 +258,7 @@ function parityScene(sceneId, offsetX) {
  * larger than the texture limit instead.
  */
 async function capture(region, options = {}) {
-  const reply = await client.request("preview.request", {
+  const reply = await operator.request("preview.request", {
     channel: "preview",
     // Named explicitly rather than relying on the channel's selection. The engine used to fall
     // back to an arbitrary scene in HashMap order when nothing was cued and now refuses instead,
@@ -235,6 +278,13 @@ async function capture(region, options = {}) {
     // trying to measure, and it discards alpha entirely.
     encoding: "png",
     ...(options.forceTiled ? { forceTiled: true } : {})
+  }, {
+    sceneRef: {
+      projectId: "certification",
+      domain: "published",
+      sceneId: options.sceneId ?? "scene_near",
+      revision: 1
+    }
   });
 
   const payload = reply.payload;
@@ -250,10 +300,10 @@ async function capture(region, options = {}) {
 
 console.log("— native determinism —");
 
-await client.request(
+await operator.request(
   "scene.load",
   { scene: parityScene("scene_near", 0), stageId: stage.stageId, prepare: true },
-  { sceneId: "scene_near", sceneRevision: 1 }
+  { sceneRef: { projectId: "certification", domain: "published", sceneId: "scene_near", revision: 1 } }
 );
 
 const region = { x: 0, y: 0, width: 900, height: 600, renderScale: 1 };
@@ -323,7 +373,7 @@ const engineCacheDirectory = diagnostics.payload?.cacheDirectory ?? null;
 async function recordProgramFrame(sceneId, name) {
   if (!engineCacheDirectory) return null;
 
-  await client.request("output.configure", {
+  await operator.request("output.configure", {
     outputId: "out_parity",
     adapterId: "recording",
     format: {
@@ -335,17 +385,21 @@ async function recordProgramFrame(sceneId, name) {
     },
     options: { recordingName: name, maxFrames: 1 }
   });
-  await client.request("playout.takeOnline", { sceneId, overrideUnprepared: true }, { sceneId });
+  await operator.request(
+    "playout.takeOnline",
+    { sceneId, overrideUnprepared: true },
+    { sceneRef: { projectId: "certification", domain: "published", sceneId, revision: 1 } }
+  );
 
   for (let attempt = 0; attempt < 80; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 100));
-    const outputs = await client.request("output.list", {});
+    const outputs = await operator.request("output.list", {});
     const output = outputs.payload.outputs.find((entry) => entry.outputId === "out_parity");
     if ((output?.framesSent ?? 0) > 0) break;
   }
 
-  await client.request("playout.clear", { channel: "program" });
-  await client.request("output.remove", { outputId: "out_parity" });
+  await operator.request("playout.clear", { channel: "program" });
+  await operator.request("output.remove", { outputId: "out_parity" });
 
   const recordings = join(engineCacheDirectory, "recordings");
   const files = await readdir(recordings).catch(() => []);
@@ -398,16 +452,16 @@ if (!programFrame) {
 console.log("\n— far edge against near edge —");
 
 const FAR_OFFSET = 49000;
-await client.request(
+await operator.request(
   "scene.load",
   { scene: parityScene("scene_far", FAR_OFFSET), stageId: stage.stageId, prepare: true },
-  { sceneId: "scene_far", sceneRevision: 1 }
+  { sceneRef: { projectId: "certification", domain: "published", sceneId: "scene_far", revision: 1 } }
 );
 // Both scenes are loaded, so the preview channel has to be pointed at the far one.
-await client.request(
+await operator.request(
   "playout.cue",
   { sceneId: "scene_far", sceneRevision: 1, channel: "preview" },
-  { sceneId: "scene_far", sceneRevision: 1 }
+  { sceneRef: { projectId: "certification", domain: "published", sceneId: "scene_far", revision: 1 } }
 );
 
 const farCapture = await capture(
@@ -422,10 +476,10 @@ check(
 );
 
 // Back to the near scene for its capture, so the two differ only in placement.
-await client.request(
+await operator.request(
   "playout.cue",
   { sceneId: "scene_near", sceneRevision: 1, channel: "preview" },
-  { sceneId: "scene_near", sceneRevision: 1 }
+  { sceneRef: { projectId: "certification", domain: "published", sceneId: "scene_near", revision: 1 } }
 );
 const nearCapture = await capture({ x: 0, y: 0, width: 900, height: 600 });
 
@@ -506,9 +560,18 @@ if (browserPngs.length === 0) {
   }
 }
 
-await client.request("scene.unload", { sceneId: "scene_near", force: true }, { sceneId: "scene_near" });
-await client.request("scene.unload", { sceneId: "scene_far", force: true }, { sceneId: "scene_far" });
+await operator.request(
+  "scene.unload",
+  { sceneId: "scene_near", force: true },
+  { sceneRef: { projectId: "certification", domain: "published", sceneId: "scene_near", revision: 1 } }
+);
+await operator.request(
+  "scene.unload",
+  { sceneId: "scene_far", force: true },
+  { sceneRef: { projectId: "certification", domain: "published", sceneId: "scene_far", revision: 1 } }
+);
 client.disconnect("parity run finished");
+operator.disconnect("parity run finished");
 
 console.log(`\n${pass.length} passed, ${fail.length} failed, ${skipped.length} skipped\n`);
 if (fail.length > 0) {
@@ -516,7 +579,7 @@ if (fail.length > 0) {
   for (const label of fail) console.log(`  - ${label}`);
 }
 if (skipped.length > 0) {
-  console.log("Skipped — these are NOT passes:");
+  console.log("Skipped:");
   for (const label of skipped) console.log(`  - ${label}`);
 }
 process.exit(fail.length === 0 ? 0 : 1);

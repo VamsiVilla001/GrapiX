@@ -19,6 +19,7 @@ import {
   IMPLEMENTED_TEXTURE_FIT_MODES,
   IMPLEMENTED_MASK_MODES,
   type BezierPath,
+  type TextSceneObject,
   type ColorValue,
   type MaterialBlendMode,
   type MaterialTextureSlot,
@@ -31,6 +32,9 @@ import {
   normalizeColorValue
 } from "@grapix/shared-types";
 import type { PreviewRendererCapabilities } from "./ScenePreviewRenderer";
+import { isProjectServiceUrl, resolveProjectAssetObjectUrl, resolveProjectAssetUrl } from "../lib/projectAssets";
+import { compoundGraphicsPath, shapeTrimActive, shapeVertexCount, trimmedStrokePolylines } from "./shapeGeometry";
+import { applyTextCase, hasTextDecoration } from "./textPresentation";
 import { isVideoSource, type RenderableSceneObject } from "./sceneMaterial";
 import { ThreeSceneLayer } from "./ThreeSceneLayer";
 import { projectFontRegistry } from "../fonts/ProjectFontRegistry";
@@ -93,15 +97,15 @@ function uvTransformActive(uv: UvTransform): boolean {
  * the parser from the asset MIME. Without a MIME we fall back to the bare
  * string and let Pixi's extension heuristic try.
  */
-function loadDescriptorForSource(source: string, mimeHint?: string): string | { src: string; loadParser: string } {
+function loadDescriptorForSource(source: string, mimeHint?: string): string | { src: string; parser: string } {
   if (source.startsWith("data:")) {
     return source;
   }
   if (mimeHint?.startsWith("image/svg")) {
-    return { src: source, loadParser: "loadSVG" };
+    return { src: source, parser: "loadSVG" };
   }
   if (mimeHint?.startsWith("image/")) {
-    return { src: source, loadParser: "loadTextures" };
+    return { src: source, parser: "loadTextures" };
   }
   return source;
 }
@@ -147,6 +151,8 @@ export class GpuSceneRenderer {
   private readonly threeLayer = new ThreeSceneLayer();
   private readonly textureCache = new Map<string, Promise<Texture>>();
   private readonly videoElements = new Map<string, HTMLVideoElement>();
+  /** Blob URLs backing playing videos, released on destroy rather than after load. */
+  private readonly videoObjectUrls: string[] = [];
   private renderVersion = 0;
   private initialized = false;
 
@@ -320,6 +326,10 @@ export class GpuSceneRenderer {
       video.load();
     }
 
+    // Video blobs outlive the load on purpose — a playing element keeps reading from its source —
+    // so this is where they are released.
+    for (const objectUrl of this.videoObjectUrls) URL.revokeObjectURL(objectUrl);
+    this.videoObjectUrls.length = 0;
     this.videoElements.clear();
     this.textureCache.clear();
     this.threeLayer.destroy();
@@ -466,14 +476,21 @@ export class GpuSceneRenderer {
     return sprite;
   }
 
-  private async getTexture(source: string, mimeHint?: string): Promise<Texture> {
+  private async getTexture(rawSource: string, mimeHint?: string): Promise<Texture> {
+    /*
+     * An imported image is stored in the project as `images/<scene>/<layer>.png` and the scene keeps
+     * that path. A relative path would resolve against the page origin — the dev server, or
+     * `tauri.localhost` in the shell — so it is resolved to the project service here, once, for
+     * every texture the preview draws.
+     */
+    const source = resolveProjectAssetUrl(rawSource);
     if (this.textureCache.has(source)) {
       return this.textureCache.get(source)!;
     }
 
     const texturePromise = (
-      isVideoSource(source)
-        ? Promise.resolve(this.createVideoTexture(source))
+      isVideoSource(source, mimeHint)
+        ? this.loadVideoTexture(source)
         : this.loadImageTexture(source, mimeHint)
     ).then((texture) => {
       if (texture === Texture.EMPTY) {
@@ -495,8 +512,27 @@ export class GpuSceneRenderer {
       return Texture.EMPTY;
     }
 
+    /*
+     * The project service's content routes require the session bearer, and Pixi's loader
+     * cannot attach one — `Assets.load(url)` fetches with no init, so an `/api/assets/<id>/
+     * content` source answered 401 and resolved to an empty texture on every image the scene
+     * drew. `resolveProjectAssetObjectUrl` fetches with the token and hands Pixi a blob URL
+     * instead; the texture keeps the decoded bitmap, so the blob is released as soon as the
+     * load settles. Remote and data URLs need no fetch and pass through untouched.
+     */
+    let loadSource = source;
+    let objectUrl: string | undefined;
+    if (isProjectServiceUrl(source)) {
+      try {
+        objectUrl = await resolveProjectAssetObjectUrl(source);
+        loadSource = objectUrl;
+      } catch {
+        return Texture.EMPTY;
+      }
+    }
+
     try {
-      const texture = await Assets.load<Texture>(loadDescriptorForSource(source, mimeHint));
+      const texture = await Assets.load<Texture>(loadDescriptorForSource(loadSource, mimeHint));
       // PixiJS RESOLVES (not rejects) to null when no load parser matches the
       // URL — e.g. an extension-less API content URL like /api/assets/<id>/content
       // — so a plain `.catch` never fires and the null flows into the sampler
@@ -505,10 +541,41 @@ export class GpuSceneRenderer {
       return texture ?? Texture.EMPTY;
     } catch {
       return Texture.EMPTY;
+    } finally {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
     }
   }
 
-  private createVideoTexture(source: string): Texture {
+  /**
+   * Fetch a movie the way an image is fetched, then hand it to a video element.
+   *
+   * The content routes need the session bearer, and a `<video src>` cannot carry one — pointing it
+   * straight at `/api/assets/<id>/content` answers 401 and the layer stays blank. The bytes are
+   * fetched with the token and played from a blob instead. Unlike an image, the blob is *not*
+   * revoked once loading settles: a texture keeps its decoded bitmap, a video keeps reading from
+   * its source for as long as it plays, so the URL is released when the renderer is disposed.
+   */
+  private async loadVideoTexture(source: string): Promise<Texture> {
+    if (!source) return Texture.EMPTY;
+    if (this.videoElements.has(source)) {
+      return Texture.from(this.videoElements.get(source)! as TextureSourceLike);
+    }
+
+    let playbackSource = source;
+    if (isProjectServiceUrl(source)) {
+      try {
+        playbackSource = await resolveProjectAssetObjectUrl(source);
+        this.videoObjectUrls.push(playbackSource);
+      } catch {
+        return Texture.EMPTY;
+      }
+    }
+    return this.createVideoTexture(source, playbackSource);
+  }
+
+  private createVideoTexture(source: string, playbackSource = source): Texture {
     const existingVideo = this.videoElements.get(source);
 
     if (existingVideo) {
@@ -517,7 +584,7 @@ export class GpuSceneRenderer {
 
     const video = document.createElement("video");
 
-    video.src = source;
+    video.src = playbackSource;
     video.crossOrigin = "anonymous";
     video.muted = true;
     video.loop = true;
@@ -649,6 +716,16 @@ function buildMaskGraphics(masks: ObjectMask[], object: RenderableSceneObject): 
             width: mask.expansion * 2,
             join: "round"
           });
+        } else if (mask.expansion < 0) {
+          // Contract, which the mask contract has always allowed and this renderer used to drop:
+          // an operator could type a negative expansion, save it, and see nothing change.
+          //
+          // A stroke centred on the path covers |expansion| to each side of it. Cutting that band
+          // removes the inner half from the filled region and the outer half from empty space, so
+          // what remains is the region pulled in by exactly |expansion|.
+          traceBezierPath(graphics, mask.path);
+          graphics.stroke({ color: 0xffffff, width: -mask.expansion * 2, join: "round" });
+          graphics.cut();
         }
       }
     }
@@ -725,33 +802,46 @@ function applyObjectMasks(
 
 function drawShape(object: Extract<SceneObject, { type: "shape" }>): Graphics {
   const graphics = new Graphics();
-  const { vertices, inTangents, outTangents, closed } = object.path;
-  const count = vertices.length;
+  /*
+   * Every subpath, in one path object, so holes are holes.
+   *
+   * A compound path is one shape: the letter O is an outer ring and an inner one, and a 48-subpath
+   * logo is one drawing. Only `path` was drawn before, so every counter and every extra piece of a
+   * logo was silently missing from an imported vector — the single most visible way a vector "does
+   * not import exactly".
+   *
+   * `checkForHoles` is what makes Pixi treat a subpath contained by another as a hole rather than
+   * paint over it; it only applies to a path added whole, which is why this builds a `GraphicsPath`
+   * instead of drawing into the context directly.
+   */
+  const drawable = shapeVertexCount(object);
+  if (drawable === 0) return graphics;
 
-  if (count > 0) {
-    graphics.moveTo(vertices[0].x, vertices[0].y);
-    const segments = closed ? count : count - 1;
-    for (let index = 0; index < segments; index += 1) {
-      const from = vertices[index];
-      const to = vertices[(index + 1) % count];
-      const out = outTangents[index] ?? { x: 0, y: 0 };
-      const inn = inTangents[(index + 1) % count] ?? { x: 0, y: 0 };
-      // Cubic bezier from `from` to `to` with relative tangent handles.
-      graphics.bezierCurveTo(from.x + out.x, from.y + out.y, to.x + inn.x, to.y + inn.y, to.x, to.y);
-    }
-    if (closed) {
-      graphics.closePath();
-    }
-    // A fill always closes the region (After Effects behaviour), so it renders
-    // even for an open path; only the stroke respects open vs closed.
-    if (object.fillEnabled && count >= 2) {
-      graphics.fill(pixiColorValue(object.fillStyle, object.fill));
-    }
-    if (object.strokeEnabled && object.strokeWidth > 0 && object.stroke !== "transparent") {
-      graphics.stroke(pixiStroke(object.strokeStyle, object.stroke, object.strokeWidth, {
-        cap: "round",
-        join: "round"
-      }));
+  graphics.path(compoundGraphicsPath(object));
+
+  // A fill always closes the region (After Effects behaviour), so it renders
+  // even for an open path; only the stroke respects open vs closed.
+  if (object.fillEnabled && drawable >= 2) {
+    graphics.fill(pixiColorValue(object.fillStyle, object.fill));
+  }
+  if (object.strokeEnabled && object.strokeWidth > 0 && object.stroke !== "transparent") {
+    const strokeStyle = pixiStroke(object.strokeStyle, object.stroke, object.strokeWidth, {
+      cap: "round",
+      join: "round"
+    });
+    if (shapeTrimActive(object)) {
+      // Trim Paths: the stroke draws only the start–end window. The fill above already
+      // covered the full region, which is AE's rule — the trim reveals the outline, never
+      // the area. One open polyline per piece; a wrapped window on a closed path is two.
+      for (const piece of trimmedStrokePolylines(object)) {
+        graphics.moveTo(piece[0].x, piece[0].y);
+        for (const point of piece.slice(1)) {
+          graphics.lineTo(point.x, point.y);
+        }
+        graphics.stroke(strokeStyle);
+      }
+    } else {
+      graphics.stroke(strokeStyle);
     }
   }
 
@@ -885,6 +975,37 @@ function drawGroup(object: Extract<SceneObject, { type: "group" }>): Graphics {
   return graphics;
 }
 
+/**
+ * Underline and strikethrough, drawn as rules.
+ *
+ * Pixi's text style has no decoration of its own, so the alternative to drawing them is dropping
+ * them. Thickness and offset follow the font size, which is what keeps a 200px headline and a 16px
+ * caption looking like the same design.
+ */
+function drawTextDecoration(
+  text: Text,
+  object: Extract<SceneObject, { type: "text" }>
+): Container | Text {
+  const decoration = object.textDecoration;
+  if (!hasTextDecoration(decoration)) return text;
+
+  const container = new Container();
+  const rules = new Graphics();
+  const width = text.width;
+  const thickness = Math.max(1, object.fontSize * 0.06);
+  const colour = pixiColorValue(object.fillStyle, object.fill);
+
+  if (decoration.underline) {
+    rules.rect(0, text.height - thickness * 1.5, width, thickness).fill(colour);
+  }
+  if (decoration.strikethrough) {
+    rules.rect(0, text.height / 2 - thickness / 2, width, thickness).fill(colour);
+  }
+
+  container.addChild(text, rules);
+  return container;
+}
+
 async function drawText(
   object: Extract<SceneObject, { type: "text" }>,
   scene: SceneDocument
@@ -897,7 +1018,7 @@ async function drawText(
   const stroke = normalizeColorValue(object.strokeStyle, object.stroke);
   const hasStroke = object.strokeWidth > 0 && !isTransparentColor(stroke);
   const text = new Text({
-    text: bidiIsolate(object.text, object.direction),
+    text: bidiIsolate(applyTextCase(object.text, object.textCase), object.direction),
     style: {
       fill: pixiColorValue(object.fillStyle, object.fill),
       ...(hasStroke ? { stroke: pixiStroke(stroke, object.stroke, object.strokeWidth) } : {}),
@@ -944,7 +1065,8 @@ async function drawText(
     container.addChild(text, warning);
     return container;
   }
-  return text;
+  // Decoration last, so its rules are measured against the laid-out text.
+  return drawTextDecoration(text, object);
 }
 
 async function drawVerticalText(

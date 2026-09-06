@@ -7,10 +7,10 @@ import { useEditorStore } from "../store/editorStore";
 import { type TemplateViewMode, useTemplateStore } from "../store/templateStore";
 import { ConvertDimensionsDialog } from "./ConvertDimensionsDialog";
 import { shouldDeleteTemplateFromKeyboard } from "./templateDeleteShortcut";
+import { resolveProjectAssetUrl } from "../lib/projectAssets";
 
 const contextMenuItems = [
   "New",
-  "To Sequencer",
   "Edit Script Events...",
   "Edit Visual Logic...",
   "Duplicate",
@@ -167,7 +167,6 @@ export function TemplatesPanel() {
       case "Delete":
         deleteSceneTemplate(templateId);
         break;
-      case "To Sequencer":
       case "Edit Script Events...":
       case "Edit Visual Logic...":
       case "Detach from Parent":
@@ -257,7 +256,6 @@ export function TemplatesPanel() {
   return (
     <aside className="templates-panel flat-templates-panel" ref={panelRef}>
       <div className="panel-header-row templates-header-row">
-        <strong>TEMPLATES</strong>
         <div className="template-header-actions">
           <div className="template-view-wrapper">
             <button
@@ -513,7 +511,7 @@ function renderTemplateObject(object: SceneObject) {
     case "ellipse":
       return <ellipse key={object.id} {...commonProps} cx={object.width / 2} cy={object.height / 2} rx={object.width / 2} ry={object.height / 2} fill={object.fill} stroke={object.stroke} strokeWidth={object.strokeWidth} />;
     case "image":
-      return <image key={object.id} {...commonProps} href={object.src} width={object.width} height={object.height} preserveAspectRatio={object.objectFit === "stretch" ? "none" : "xMidYMid slice"} />;
+      return <image key={object.id} {...commonProps} href={resolveProjectAssetUrl(object.src)} width={object.width} height={object.height} preserveAspectRatio={object.objectFit === "stretch" ? "none" : "xMidYMid slice"} />;
     case "line":
       return (
         <polyline

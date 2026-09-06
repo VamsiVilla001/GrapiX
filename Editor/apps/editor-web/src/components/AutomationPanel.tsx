@@ -7,17 +7,14 @@ import type {
 } from "@grapix/shared-types";
 import { Braces, Play, Plus, Trash2, Upload } from "lucide-react";
 import { useRef, useState } from "react";
-import {
-  fireSceneEvent,
-  importSceneScriptToApi,
-  saveSceneToApi
-} from "../lib/apiClient";
+import { fireSceneEvent, importSceneScriptToApi } from "../lib/apiClient";
 import { useEditorStore } from "../store/editorStore";
 
 const defaultPermissions: SceneScriptPermission[] = ["read-data", "patch-data", "emit-event"];
 
 export function AutomationPanel() {
   const scene = useEditorStore((state) => state.scene);
+  const saveScene = useEditorStore((state) => state.saveScene);
   const updateAutomation = useEditorStore((state) => state.updateAutomation);
   const attachSceneScript = useEditorStore((state) => state.attachSceneScript);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -57,7 +54,12 @@ export function AutomationPanel() {
 
   async function testEvent(execute: boolean) {
     try {
-      await saveSceneToApi(scene);
+      // Same guarded write as Save, so a trigger test cannot leave the status indicator
+      // claiming the scene is unsaved after it has just been persisted.
+      if (!(await saveScene())) {
+        setResult("The scene could not be saved, so the trigger was not fired.");
+        return;
+      }
       const response = await fireSceneEvent(scene.id, {
         type: eventType,
         name: eventName,

@@ -1,0 +1,13 @@
+{
+  "name": "GrapiX Motion Bridge",
+  "id": "grapix-motion-bridge",
+  "api": "1.0.0",
+  "main": "dist/code.js",
+  "ui": "dist/ui.html",
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["none"],
+    "reasoning": "The bridge only reads the open document and writes a file the author downloads. It never contacts a server, so a GrapiX motion export cannot leak a design."
+  }
+}

@@ -5,6 +5,7 @@ import {
   fontDefinitionForText,
   getBindableFaces,
   isMaterialCompatibleWithFace,
+  localBounds,
   type BezierPath,
   type BrushPoint,
   type CanvasGuide,
@@ -15,13 +16,15 @@ import {
   type Vec2
 } from "@grapix/shared-types";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent } from "react";
+import { Magnet } from "lucide-react";
 import { DesignToolToolbar, ToolOptionsBar } from "./DesignToolToolbar";
 import { GpuSceneStage } from "./GpuSceneStage";
 import type { PreviewRendererCapabilities } from "../rendering/ScenePreviewRenderer";
 import { resolveRenderableObjects } from "../rendering/sceneMaterial";
 import { projectMeshBounds } from "../rendering/ThreeSceneLayer";
 import { useEditorStore } from "../store/editorStore";
-import { useUiStore, type EditorTool } from "../store/uiStore";
+import { clampZoom, useUiStore, type EditorTool } from "../store/uiStore";
+import { anchorAt, nearestPointOnPath } from "../tools/bezierEditing";
 import {
   marqueeFromDrag,
   marqueePath,
@@ -32,6 +35,16 @@ import {
 import { sampleRenderedSceneColor } from "../rendering/thumbnailCapture";
 
 type TransformAxis = "free" | "x" | "y" | "z" | "uniform";
+
+/**
+ * How close a pen click must be to count as landing on an anchor or on the path, in screen
+ * pixels. Converted to scene units at use, so the target stays the same size on screen at any
+ * zoom — a tolerance in scene units would be unclickable when zoomed out and grab the wrong
+ * anchor when zoomed in. The anchor target is the larger of the two so that clicking near an
+ * anchor removes it rather than adding a second anchor on top of it.
+ */
+const ANCHOR_HIT_PX = 9;
+const SEGMENT_HIT_PX = 6;
 
 interface TransformDragState {
   kind: "move" | "rotate" | "scale" | "pivot";
@@ -56,6 +69,23 @@ interface PointDragState {
   kind: "vertex" | "in-tangent" | "out-tangent";
 }
 
+/**
+ * A Feather-tool drag.
+ *
+ * The values at the start of the drag are captured so every frame computes an absolute result
+ * from the total pointer movement. Accumulating per-frame deltas instead makes the final value
+ * depend on how many pointer events the machine happened to deliver.
+ */
+interface FeatherDragState {
+  objectId: string;
+  maskId: string;
+  startPointer: Vec2;
+  startFeather: Vec2;
+  startExpansion: number;
+  /** Shift was held on press: the drag moves the mask edge rather than softening it. */
+  expanding: boolean;
+}
+
 interface BrushDragState {
   objectId: string;
   strokeId: string;
@@ -78,6 +108,9 @@ export function CanvasStage() {
   const assignAssetToFaces = useEditorStore((state) => state.assignAssetToFaces);
   const createPenShape = useEditorStore((state) => state.createPenShape);
   const appendShapeVertex = useEditorStore((state) => state.appendShapeVertex);
+  const insertShapePointOnSegment = useEditorStore((state) => state.insertShapePointOnSegment);
+  const toggleShapeAnchorKind = useEditorStore((state) => state.toggleShapeAnchorKind);
+  const removeShapePoints = useEditorStore((state) => state.removeShapePoints);
   const updateShapeVertex = useEditorStore((state) => state.updateShapeVertex);
   const closeShapePath = useEditorStore((state) => state.closeShapePath);
   const addMask = useEditorStore((state) => state.addMask);
@@ -101,8 +134,8 @@ export function CanvasStage() {
   const activeTool = useUiStore((state) => state.activeTool);
   const penTarget = useUiStore((state) => state.penTarget);
   const penOptions = useUiStore((state) => state.penOptions);
-  const selectedPathObjectIds = useUiStore((state) => state.selectedPathObjectIds);
-  const setSelectedPaths = useUiStore((state) => state.setSelectedPaths);
+  const selectedObjectIds = useEditorStore((state) => state.selectedObjectIds);
+  const selectObjects = useEditorStore((state) => state.selectObjects);
   const selectedAnchorIndices = useUiStore((state) => state.selectedAnchorIndices);
   const setSelectedAnchors = useUiStore((state) => state.setSelectedAnchors);
   const selectedMaskId = useUiStore((state) => state.selectedMaskId);
@@ -122,6 +155,7 @@ export function CanvasStage() {
   const [penObjectId, setPenObjectId] = useState<string | null>(null);
   const [penDrag, setPenDrag] = useState<{ index: number; kind: "create-tangent" | "vertex" } | null>(null);
   const [penCursor, setPenCursor] = useState<Vec2 | null>(null);
+  const [featherDrag, setFeatherDrag] = useState<FeatherDragState | null>(null);
   // The mask currently being drawn (pen target = mask), on the selected object.
   const [penMaskId, setPenMaskId] = useState<string | null>(null);
   const [guideDrag, setGuideDrag] = useState<GuideDragState | null>(null);
@@ -134,6 +168,7 @@ export function CanvasStage() {
   const [gradientDrag, setGradientDrag] = useState<GradientDragState | null>(null);
   const [eyedropperPreview, setEyedropperPreview] = useState<{ point: Vec2; color: string } | null>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const stageFrameRef = useRef<HTMLDivElement>(null);
   const viewportSettings = scene.canvas.editorViewport ?? {
     showRulers: true,
     margins: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -158,7 +193,7 @@ export function CanvasStage() {
 
   // Finish the in-progress path on Escape, tool change, or pen-target change.
   useEffect(() => {
-    if (drag || penDrag || brushDrag || pointDrag || gradientDrag || typeDrag || marqueeStart) commitHistory();
+    if (drag || penDrag || brushDrag || featherDrag || pointDrag || gradientDrag || typeDrag || marqueeStart) commitHistory();
     setPenObjectId(null);
     setPenDrag(null);
     setPenMaskId(null);
@@ -218,6 +253,42 @@ export function CanvasStage() {
       ? { object, value }
       : null;
   }, [scene.objects, selectedObjectId]);
+
+  /**
+   * Ctrl + scroll zooms the viewport, the way every design tool does it.
+   *
+   * A native listener rather than React's `onWheel`, because React attaches wheel at the root
+   * as a *passive* listener and a passive handler may not `preventDefault` — without which the
+   * browser's own page zoom fires and the whole application scales instead of the canvas.
+   *
+   * The step is multiplicative, so one notch feels the same at 20% as it does at 400%: a fixed
+   * ±10 would crawl when zoomed out and jump when zoomed in. `deltaMode` is honoured because a
+   * mouse reports pixels while some trackpads and Firefox report lines or pages, and treating a
+   * line-delta of 3 as 3 pixels makes the wheel almost inert.
+   */
+  useEffect(() => {
+    // Depends on `hasActiveScene` because the empty state renders a different `.stage-frame`:
+    // mounting with no scene left the ref null, and a `[]` dependency meant the listener was
+    // never attached once a scene arrived.
+    const frame = stageFrameRef.current;
+    if (!frame) return undefined;
+
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      const linesToPixels = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 100 : 1;
+      const delta = event.deltaY * linesToPixels;
+      if (delta === 0) return;
+      // Scroll up (negative delta) zooms in. The exponent maps a 100px notch to ~1.35×.
+      const factor = Math.exp(-delta * 0.003);
+      const current = useUiStore.getState().zoom;
+      const next = clampZoom(current * factor);
+      if (next !== current) useUiStore.getState().setZoom(next);
+    };
+
+    frame.addEventListener("wheel", onWheel, { passive: false });
+    return () => frame.removeEventListener("wheel", onWheel);
+  }, [hasActiveScene]);
 
   useEffect(() => {
     if (!guideDrag) return undefined;
@@ -311,23 +382,32 @@ export function CanvasStage() {
     if (isCanvasCreationTool(activeTool)) return;
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
-    selectObject(object.id);
 
     if (activeTool === "path-selection" || activeTool === "direct-selection") {
-      const alreadySelected = selectedPathObjectIds.includes(object.id);
-      const nextPaths = event.shiftKey
-        ? alreadySelected
-          ? selectedPathObjectIds.filter((id) => id !== object.id)
-          : [...selectedPathObjectIds, object.id]
-        : alreadySelected
-          ? selectedPathObjectIds
-          : [object.id];
-      setSelectedPaths(nextPaths);
+      // Shift extends, a plain click on a member keeps the set so a drag moves all of it, and a
+      // plain click elsewhere replaces. One selection now, so this is the same set the Object
+      // Manager shows and the alignment tools act on.
+      const alreadySelected = selectedObjectIds.includes(object.id);
+      if (event.shiftKey) {
+        selectObjects(
+          alreadySelected
+            ? selectedObjectIds.filter((id) => id !== object.id)
+            : [...selectedObjectIds, object.id],
+          { active: object.id }
+        );
+      } else if (alreadySelected) {
+        // Keep the set so the drag below moves all of it; only the active member changes.
+        selectObjects(selectedObjectIds, { active: object.id });
+      } else {
+        selectObject(object.id);
+      }
       if (activeTool === "path-selection" && !object.locked) {
         beginTransformDrag(event, object, "move", "free");
       }
       return;
     }
+
+    selectObject(object.id);
 
     if (object.locked) {
       setDrag(null);
@@ -362,8 +442,8 @@ export function CanvasStage() {
     const startObjects = kind === "move"
       && axis === "free"
       && activeTool === "path-selection"
-      && selectedPathObjectIds.includes(source.id)
-      ? scene.objects.filter((object) => selectedPathObjectIds.includes(object.id) && !object.locked)
+      && selectedObjectIds.includes(source.id)
+      ? scene.objects.filter((object) => selectedObjectIds.includes(object.id) && !object.locked)
       : [source];
     setDrag({
       kind,
@@ -524,7 +604,7 @@ export function CanvasStage() {
     };
   }
 
-  function penDown(clientX: number, clientY: number) {
+  function penDown(clientX: number, clientY: number, convertModifier = false) {
     const point = clientToScene(clientX, clientY);
     if (!point) return;
     const closeThreshold = 10 * (overlayScale()?.scenePerPx ?? 1);
@@ -574,10 +654,106 @@ export function CanvasStage() {
       setPenDrag({ index, kind: "create-tangent" });
       return;
     }
+
+    // Not mid-draw: the pen edits the selected path before it starts a new one.
+    //
+    // This is the Illustrator/AE rule — over an existing path the pen is an add/remove/convert
+    // tool, and only a click in empty space begins a new shape. Without it the pen could only
+    // ever append to a path it had drawn itself in the same gesture: once a path was finished
+    // there was no way back into it, and "add a point" lived on a different tool entirely.
+    const edit = penEditTarget(point);
+    if (edit) {
+      if (edit.anchorIndex !== null) {
+        // Alt converts, a plain click removes — matching the +/- and convert cursors the pen
+        // shows in every design tool. A two-point path is left alone because removing an anchor
+        // would leave a path that cannot be drawn.
+        if (convertModifier) {
+          beginHistory("convert anchor");
+          toggleShapeAnchorKind(edit.object.id, edit.anchorIndex);
+          commitHistory();
+        } else if (edit.object.path.vertices.length > 2) {
+          beginHistory("pen remove point");
+          removeShapePoints(edit.object.id, [edit.anchorIndex]);
+          commitHistory();
+          setSelectedAnchors([]);
+        }
+        return;
+      }
+
+      beginHistory("pen add point");
+      const index = insertShapePointOnSegment(edit.object.id, edit.segmentIndex, edit.t);
+      commitHistory();
+      if (index >= 0) setSelectedAnchors([index]);
+      return;
+    }
+
     beginHistory("pen start");
     const id = createPenShape(point, penOptions);
     setPenObjectId(id);
     setPenDrag({ index: 0, kind: "create-tangent" });
+  }
+
+  /**
+   * What the pen would edit at this scene point, or null to start a new shape.
+   *
+   * Only the selected shape is considered. Hit-testing every path in the scene would make a click
+   * near an unrelated graphic silently edit it, and the selection is how the operator says which
+   * path they are working on.
+   */
+  function penEditTarget(point: Vec2): {
+    object: Extract<SceneObject, { type: "shape" }>;
+    anchorIndex: number | null;
+    segmentIndex: number;
+    t: number;
+  } | null {
+    const object = scene.objects.find((item) => item.id === selectedObjectId);
+    if (!object || object.type !== "shape" || object.locked) return null;
+
+    const scenePerPx = overlayScale()?.scenePerPx ?? 1;
+    const local = worldToLocal(object, point);
+
+    const anchorIndex = anchorAt(object.path, local, ANCHOR_HIT_PX * scenePerPx);
+    if (anchorIndex !== null) return { object, anchorIndex, segmentIndex: -1, t: 0 };
+
+    const hit = nearestPointOnPath(object.path, local);
+    if (!hit || hit.distance > SEGMENT_HIT_PX * scenePerPx) return null;
+    return { object, anchorIndex: null, segmentIndex: hit.segmentIndex, t: hit.t };
+  }
+
+  /** The mask the Feather tool acts on: the one selected in the Inspector, else the first. */
+  function featherTarget() {
+    const object = scene.objects.find((item) => item.id === selectedObjectId);
+    const masks = object?.masks ?? [];
+    if (!object || masks.length === 0) return null;
+    const mask = masks.find((item) => item.id === selectedMaskId) ?? masks[0];
+    return { object, mask };
+  }
+
+  /**
+   * Feather or expand from the total pointer movement.
+   *
+   * Rightward and downward both increase, which reads the same way as every other drag-to-grow
+   * control. Feather is clamped at zero because a negative blur has no meaning; expansion is not,
+   * because a negative expansion contracts the mask and is a value operators want.
+   */
+  function moveFeather(point: Vec2) {
+    if (!featherDrag) return;
+    const { linked, sensitivity } = useUiStore.getState().featherOptions;
+    const deltaX = (point.x - featherDrag.startPointer.x) * sensitivity;
+    const deltaY = (point.y - featherDrag.startPointer.y) * sensitivity;
+
+    if (featherDrag.expanding) {
+      updateMask(featherDrag.objectId, featherDrag.maskId, {
+        expansion: Math.round(featherDrag.startExpansion + deltaX)
+      });
+      return;
+    }
+
+    const x = Math.max(0, featherDrag.startFeather.x + deltaX);
+    const y = Math.max(0, featherDrag.startFeather.y + (linked ? deltaX : deltaY));
+    updateMask(featherDrag.objectId, featherDrag.maskId, {
+      feather: { x: Math.round(x), y: Math.round(y) }
+    });
   }
 
   function penMove(clientX: number, clientY: number) {
@@ -628,6 +804,21 @@ export function CanvasStage() {
       return true;
     }
 
+    if (activeTool === "feather") {
+      const target = featherTarget();
+      if (!target) return true;
+      beginHistory("feather mask");
+      setFeatherDrag({
+        objectId: target.object.id,
+        maskId: target.mask.id,
+        startPointer: point,
+        startFeather: { ...target.mask.feather },
+        startExpansion: target.mask.expansion,
+        expanding: event.shiftKey
+      });
+      return true;
+    }
+
     if (activeTool === "brush") {
       beginBrush(point, event.pressure || 1);
       return true;
@@ -657,6 +848,10 @@ export function CanvasStage() {
         marqueeOptions,
         { square: event.shiftKey, fromCenter: event.altKey }
       ));
+      return true;
+    }
+    if (featherDrag) {
+      moveFeather(point);
       return true;
     }
     if (brushDrag) {
@@ -731,6 +926,12 @@ export function CanvasStage() {
         setMarqueeSelection(null);
       }
       setMarqueeStart(null);
+      return true;
+    }
+    if (featherDrag) {
+      if (cancelled) cancelHistory();
+      else commitHistory();
+      setFeatherDrag(null);
       return true;
     }
     if (brushDrag) {
@@ -860,15 +1061,19 @@ export function CanvasStage() {
     }
     if (marqueeOptions.mode === "region") return;
 
+    // `displayObjects` is in render order, so `matches` is too.
     const matches = displayObjects
       .filter((object) => objectIntersectsMarquee(object, selection, marqueeOptions.objectContainment))
       .map((object) => object.id);
     let next = matches;
-    if (selection.operation === "add") next = [...new Set([...selectedPathObjectIds, ...matches])];
-    if (selection.operation === "subtract") next = selectedPathObjectIds.filter((id) => !matches.includes(id));
-    if (selection.operation === "intersect") next = selectedPathObjectIds.filter((id) => matches.includes(id));
-    setSelectedPaths(next);
-    selectObject(next.at(-1) ?? null);
+    if (selection.operation === "add") next = [...new Set([...selectedObjectIds, ...matches])];
+    if (selection.operation === "subtract") next = selectedObjectIds.filter((id) => !matches.includes(id));
+    if (selection.operation === "intersect") next = selectedObjectIds.filter((id) => matches.includes(id));
+    // The active member is the **topmost** match, not `next.at(-1)`. That was whichever object
+    // happened to sort last, so the key object the alignment tools align *to* was arbitrary — and
+    // the Object Manager now draws it, which makes an arbitrary choice visible.
+    const topmost = matches.filter((id) => next.includes(id)).at(-1) ?? next.at(0) ?? null;
+    selectObjects(next, { active: topmost, anchor: topmost });
   }
 
   async function sampleEyedropper(point: Vec2, clientX: number, clientY: number, apply: boolean) {
@@ -974,7 +1179,11 @@ export function CanvasStage() {
   }
 
   return (
-    <main className="stage-shell">
+    <main
+      className="stage-shell"
+      // Credit the canvas with what is authored on it, the same way the dock credits each panel.
+      onPointerDownCapture={() => useEditorStore.getState().setHistoryScope("canvas")}
+    >
       <div className="stage-toolbar">
         <span>{scene.canvas.width} x {scene.canvas.height}</span>
         <span className="renderer-status" title={capabilities?.rendererName ?? "Renderer initializing"}>
@@ -982,13 +1191,18 @@ export function CanvasStage() {
           {capabilities?.maxTextureSize ? ` / ${capabilities.maxTextureSize}px tex` : ""}
         </span>
         <DesignToolToolbar />
-        <ToolOptionsBar />
-        <button className={`snapping-toggle ${snapping ? "active" : ""}`} onClick={toggleSnapping}>
-          Snapping
+        <button
+          aria-pressed={snapping}
+          className={`snapping-toggle ${snapping ? "active" : ""}`}
+          onClick={toggleSnapping}
+          title="Toggle snapping"
+        >
+          <Magnet size={13} /><span>Snapping</span>
         </button>
+        <ToolOptionsBar />
         <span>{scene.objects.length} objects</span>
       </div>
-      <div className="stage-frame">
+      <div className="stage-frame" ref={stageFrameRef}>
         <div
           className={`viewport-chrome ${viewportSettings.showRulers ? "with-rulers" : "without-rulers"}`}
           style={{
@@ -1116,7 +1330,7 @@ export function CanvasStage() {
                 } catch {
                   // No active pointer to capture (e.g. programmatic events) — ignore.
                 }
-                penDown(event.clientX, event.clientY);
+                penDown(event.clientX, event.clientY, event.altKey);
                 return;
               }
               if (startToolPointer(event)) {
@@ -1128,8 +1342,10 @@ export function CanvasStage() {
                 return;
               }
               finishTransform();
+              // One selection, so clearing it is one call. `selectObject(null)` was previously
+              // paired with a `setSelectedPaths([])` that was easy to forget — and forgetting it
+              // is what left a marquee live in the alignment toolbar with nothing highlighted.
               selectObject(null);
-              setSelectedPaths([]);
               setSelectedAnchors([]);
             }}
             onPointerMove={(event) => {
@@ -1597,10 +1813,16 @@ function TransformGizmo({
   ) => void;
 }) {
   const meshBounds = object.type === "mesh" ? projectMeshBounds(scene, object) : null;
-  const boundsX = meshBounds?.x ?? 0;
-  const boundsY = meshBounds?.y ?? 0;
-  const boundsWidth = meshBounds?.width ?? object.width;
-  const boundsHeight = meshBounds?.height ?? object.height;
+  // The gizmo is drawn inside the object's own transform, so it wants the *local* box — and it
+  // wants the one geometry actually occupies. `width`/`height` is only the layout box: a pen
+  // shape, a line and a paint layer all draw somewhere else entirely, which is why the box used
+  // to float off the graphic it belonged to. `localBounds` is the same definition alignment and
+  // marquee already measure with, so the two cannot disagree.
+  const localBox = meshBounds ?? localBounds(object);
+  const boundsX = localBox.x;
+  const boundsY = localBox.y;
+  const boundsWidth = localBox.width;
+  const boundsHeight = localBox.height;
   const pivot = meshBounds?.center ?? { x: object.x, y: object.y };
   const axisLength = 82;
   const displayRotation = object.type === "mesh" ? object.rotationZ ?? object.rotation : object.rotation;
@@ -1610,8 +1832,15 @@ function TransformGizmo({
   const yEnd = { x: pivot.x + yAxis.x, y: pivot.y + yAxis.y };
   const zEnd = { x: pivot.x - axisLength * 0.7, y: pivot.y + axisLength * 0.7 };
   const anchor = object.anchor ?? { x: 0, y: 0 };
-  const farX = Math.abs(object.width - anchor.x) >= Math.abs(anchor.x) ? object.width : 0;
-  const farY = Math.abs(object.height - anchor.y) >= Math.abs(anchor.y) ? object.height : 0;
+  // The axis handles reach to the far edge of the *drawn* box, for the same reason the box
+  // itself does: on a path whose geometry sits away from the origin, `width`/`height` put the
+  // scale handle in empty space.
+  const nearX = boundsX;
+  const farEdgeX = boundsX + boundsWidth;
+  const nearY = boundsY;
+  const farEdgeY = boundsY + boundsHeight;
+  const farX = Math.abs(farEdgeX - anchor.x) >= Math.abs(nearX - anchor.x) ? farEdgeX : nearX;
+  const farY = Math.abs(farEdgeY - anchor.y) >= Math.abs(nearY - anchor.y) ? farEdgeY : nearY;
   const scaleXEnd = meshBounds
     ? { x: meshBounds.x + meshBounds.width, y: pivot.y }
     : localToWorld(object, { x: farX, y: anchor.y });
@@ -1623,7 +1852,7 @@ function TransformGizmo({
     : localToWorld(object, { x: farX, y: farY });
   const rotationRadius = Math.max(
     58,
-    Math.min(190, Math.hypot(object.width * (object.scaleX ?? 1), object.height * (object.scaleY ?? 1)) * 0.32)
+    Math.min(190, Math.hypot(boundsWidth * (object.scaleX ?? 1), boundsHeight * (object.scaleY ?? 1)) * 0.32)
   );
   const rotationKnobOffset = rotateVector({ x: 0, y: -rotationRadius }, displayRotation);
   const rotationKnob = { x: pivot.x + rotationKnobOffset.x, y: pivot.y + rotationKnobOffset.y };

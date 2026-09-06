@@ -1,0 +1,127 @@
+{
+  "phase": "AE-A3",
+  "recordedAt": "2026-08-18T12:55:19.992Z",
+  "host": {
+    "afterEffectsVersion": "26.3",
+    "os": "win32 x64",
+    "executablePath": "C:/Program Files/Adobe/Adobe After Effects 2026/Support Files/afterfx.exe"
+  },
+  "adapter": {
+    "file": "C:/Program Files/Adobe/Adobe After Effects 2026/Support Files/Plug-ins/GrapiX/GrapiXRuntimeAdapter.aex",
+    "sha256": "7155d7ef1f5be5cb902241a3629777e27372c5ab09d70c17b8d6160f3f3929bb",
+    "reportedAdapterSha256": "7155d7ef1f5be5cb902241a3629777e27372c5ab09d70c17b8d6160f3f3929bb",
+    "protocolMajor": 2,
+    "faultInjection": null
+  },
+  "projects": {
+    "initial": {
+      "path": "D:/Project KK/Personal projects/GrapiX/tools/certification/ae-runtime-fixtures/v1/fixtures/lower-third.aep",
+      "sha256": "5415da25002194a28aece42f5be2bf391e86cd28980ee19035d599bdef009469"
+    },
+    "replacement": {
+      "path": "D:/Project KK/Personal projects/GrapiX/tools/certification/ae-runtime-fixtures/v1/fixtures/bo0a-alpha-edges.aep",
+      "sha256": "1cdfb5f808c0104bcd22fadc6c28639d868782d3405a5bd60ce870c882739a06"
+    }
+  },
+  "initialLaunch": {
+    "pid": 45752,
+    "state": "ready",
+    "ownership": "owned",
+    "reportedProjectPath": "D:\\Project KK\\Personal projects\\GrapiX\\tools\\certification\\ae-runtime-fixtures\\v1\\fixtures\\lower-third.aep",
+    "lastSuccessfulCommand": "HEALTH"
+  },
+  "removedLifecycleSurface": {
+    "refusals": {
+      "OPEN_PROJECT": {
+        "ok": false,
+        "code": "OPERATION_UNSUPPORTED",
+        "message": "operation is outside the closed runtime protocol"
+      },
+      "CLOSE_PROJECT": {
+        "ok": false,
+        "code": "OPERATION_UNSUPPORTED",
+        "message": "operation is outside the closed runtime protocol"
+      }
+    },
+    "hostStillCommandable": {
+      "reportedProjectPath": "D:\\Project KK\\Personal projects\\GrapiX\\tools\\certification\\ae-runtime-fixtures\\v1\\fixtures\\lower-third.aep"
+    }
+  },
+  "projectReplacement": {
+    "pid": 49392,
+    "previousPid": 45752,
+    "state": "ready",
+    "ownership": "owned",
+    "reportedProjectPath": "D:\\Project KK\\Personal projects\\GrapiX\\tools\\certification\\ae-runtime-fixtures\\v1\\fixtures\\bo0a-alpha-edges.aep",
+    "projectDigest": "1cdfb5f808c0104bcd22fadc6c28639d868782d3405a5bd60ce870c882739a06",
+    "compositions": [
+      {
+        "itemId": 42,
+        "displayName": "BO0a-AntialiasedEdge",
+        "clock": {
+          "frameDuration": "1024",
+          "timeScale": "25600"
+        }
+      },
+      {
+        "itemId": 70,
+        "displayName": "BO0a-ColouredTranslucentShadow",
+        "clock": {
+          "frameDuration": "1024",
+          "timeScale": "25600"
+        }
+      },
+      {
+        "itemId": 56,
+        "displayName": "BO0a-Gradient50",
+        "clock": {
+          "frameDuration": "1024",
+          "timeScale": "25600"
+        }
+      },
+      {
+        "itemId": 28,
+        "displayName": "BO0a-HardEdge",
+        "clock": {
+          "frameDuration": "1024",
+          "timeScale": "25600"
+        }
+      },
+      {
+        "itemId": 1,
+        "displayName": "BO0a-Opaque",
+        "clock": {
+          "frameDuration": "1024",
+          "timeScale": "25600"
+        }
+      },
+      {
+        "itemId": 86,
+        "displayName": "BO0a-PremultipliedBlackEdge",
+        "clock": {
+          "frameDuration": "1024",
+          "timeScale": "25600"
+        }
+      },
+      {
+        "itemId": 16,
+        "displayName": "BO0a-ZeroAlpha",
+        "clock": {
+          "frameDuration": "1024",
+          "timeScale": "25600"
+        }
+      }
+    ]
+  },
+  "shutdown": {
+    "state": "stopped",
+    "pid": null,
+    "crashCount": 0,
+    "lastError": null
+  },
+  "verdict": {
+    "outcome": "pass",
+    "claim": "On licensed After Effects 26.3, project changes are supervisor-owned process replacements: each launch proves its project from AEGP_GetProjectPath, the removed in-process lifecycle operations refuse OPERATION_UNSUPPORTED without wedging the host, the replacement process answers discovery, and shutdown reaches stopped with no lifecycle timeout.",
+    "doesNotClaim": "AEGP_OpenProjectFromPath became safe, After Effects startup modals are cleared by the supervisor itself, a fingerprint-keyed capability matrix exists (AE-A4), or that any frame was rendered."
+  }
+}

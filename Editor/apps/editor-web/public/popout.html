@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GrapiX Editor</title>
+    <!--
+      The host page for a popped-out dock group.
+
+      dockview opens this document in a new OS window and then moves the group's live DOM into it,
+      so the page deliberately loads no application code: the panel is the one already running in
+      the main window, not a second copy of the Editor. Booting `main.tsx` here would mount a second
+      React tree, a second set of stores and a second autosave loop against the same scene.
+
+      It loads no stylesheet either — dockview copies every stylesheet from the opening document into
+      this one when it moves the group across, so a build-hashed bundle arrives without this file
+      having to name it. Only the window's own background is set here, so the frame does not flash
+      white before the panel lands.
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #0f141b;
+      }
+    </style>
+  </head>
+  <body></body>
+</html>

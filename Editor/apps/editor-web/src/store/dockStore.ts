@@ -1,6 +1,22 @@
+/**
+ * The Editor's dock: which panels exist, and where the workspace layout is kept.
+ *
+ * ## Why this is thin
+ *
+ * The layout itself lives in dockview, which owns the grid, the floating groups and the popout
+ * windows. Mirroring that tree into Zustand would create two truths about where a panel is, and the
+ * one the user sees would be dockview's. So this store holds the *api handle* and the panel
+ * catalogue, and every layout question is asked of dockview directly.
+ *
+ * What replaced what: the previous store modelled the workspace as three fixed areas
+ * (`"left" | "right" | "bottom"`) each holding stacks. That was the rigidity — a panel could only
+ * ever be in one of three places, and the viewport could not participate at all. There is no area
+ * concept here on purpose: a panel goes wherever the user drops it, including beside the viewport,
+ * floating over it, or in its own OS window.
+ */
 import { create } from "zustand";
+import type { DockviewApi } from "dockview-react";
 
-export type DockAreaId = "left" | "right" | "bottom";
 export type DockPanelId =
   | "templates"
   | "object-library"
@@ -8,30 +24,20 @@ export type DockPanelId =
   | "object-inspector"
   | "material-manager"
   | "font-manager"
+  | "ae-controls"
   | "automation"
   | "render-engine"
-  | "timeline"
-  | "sequencer";
+  | "timeline";
 
-export interface DockStack {
-  id: string;
-  panels: DockPanelId[];
-  activePanelId: DockPanelId;
-}
+/**
+ * The viewport is a dock panel like any other, so it can be split against, floated over, or moved.
+ * It is kept out of `DockPanelId` because it is not one of the author's tool panels: it cannot be
+ * closed, and `renderDockPanel` does not produce it.
+ */
+export const VIEWPORT_PANEL_ID = "viewport";
 
-export type DockLayout = Record<DockAreaId, DockStack[]>;
-
-interface DockState {
-  areas: DockLayout;
-  movePanelToArea: (panelId: DockPanelId, areaId: DockAreaId, stackIndex?: number) => void;
-  movePanelToStack: (panelId: DockPanelId, areaId: DockAreaId, stackId: string, insertIndex?: number) => void;
-  setActivePanel: (areaId: DockAreaId, stackId: string, panelId: DockPanelId) => void;
-  /** Bring a panel to the front of whichever stack contains it. */
-  activatePanel: (panelId: DockPanelId) => void;
-  resetDockLayout: () => void;
-}
-
-const allDockPanels: DockPanelId[] = [
+/** Every tool panel the Editor has, in the order the View menu lists them. */
+export const allDockPanels: DockPanelId[] = [
   "templates",
   "object-library",
   "scene-manager",
@@ -39,295 +45,161 @@ const allDockPanels: DockPanelId[] = [
   "material-manager",
   "font-manager",
   "automation",
+  "ae-controls",
   "render-engine",
-  "timeline",
-  "sequencer"
+  "timeline"
 ];
-const dockLayoutStorageKey = "grapix-dock-layout-v3";
-const legacyDockLayoutStorageKey = "grapix-dock-layout-v1";
 
-export const useDockStore = create<DockState>((set) => ({
-  areas: readDockLayout(),
-  movePanelToArea: (panelId, areaId, stackIndex) =>
-    set((state) => {
-      const layoutWithoutPanel = removePanelFromLayout(state.areas, panelId);
-      const nextAreas = cloneLayout(layoutWithoutPanel);
-      const targetStacks = [...nextAreas[areaId]];
-      const targetIndex = Math.max(0, Math.min(stackIndex ?? targetStacks.length, targetStacks.length));
+/**
+ * Bumped because the shape changed completely: a v4 value is three areas of stacks, which cannot be
+ * read as a dockview grid. An old key is ignored rather than migrated — there is no honest mapping
+ * from "left area, second stack" onto a free-form grid, and guessing one would put panels somewhere
+ * the user never chose. They get the default layout once, then their own arrangement persists.
+ */
+const dockLayoutStorageKey = "grapix-dock-layout-v5";
 
-      targetStacks.splice(targetIndex, 0, {
-        id: createStackId(areaId, panelId, targetStacks),
-        panels: [panelId],
-        activePanelId: panelId
-      });
+interface DockState {
+  /** Set once dockview is ready; null before the workspace has mounted. */
+  api: DockviewApi | null;
+  setApi: (api: DockviewApi | null) => void;
+  /** Bring a panel to the front of whichever group holds it, adding it back if it was closed. */
+  activatePanel: (panelId: DockPanelId) => void;
+  /** Float a panel free of the grid, over the workspace. */
+  floatPanel: (panelId: DockPanelId) => void;
+  /** Move a panel into its own OS window. */
+  popOutPanel: (panelId: DockPanelId) => void;
+  /** Discard the saved arrangement and rebuild the default one. */
+  resetDockLayout: () => void;
+}
 
-      nextAreas[areaId] = targetStacks;
-
-      saveDockLayout(nextAreas);
-
-      return {
-        areas: nextAreas
-      };
-    }),
-  movePanelToStack: (panelId, areaId, stackId, insertIndex) =>
-    set((state) => {
-      const layoutWithoutPanel = removePanelFromLayout(state.areas, panelId);
-      const nextAreas = cloneLayout(layoutWithoutPanel);
-      const targetStack = nextAreas[areaId].find((stack) => stack.id === stackId);
-
-      if (!targetStack) {
-        return { areas: state.areas };
-      }
-
-      const targetIndex = Math.max(0, Math.min(insertIndex ?? targetStack.panels.length, targetStack.panels.length));
-      targetStack.panels.splice(targetIndex, 0, panelId);
-      targetStack.activePanelId = panelId;
-
-      saveDockLayout(nextAreas);
-
-      return { areas: nextAreas };
-    }),
-  setActivePanel: (areaId, stackId, panelId) =>
-    set((state) => {
-      const nextAreas = cloneLayout(state.areas);
-      const targetStack = nextAreas[areaId].find((stack) => stack.id === stackId);
-
-      if (!targetStack || !targetStack.panels.includes(panelId)) {
-        return { areas: state.areas };
-      }
-
-      targetStack.activePanelId = panelId;
-      saveDockLayout(nextAreas);
-
-      return { areas: nextAreas };
-    }),
-  activatePanel: (panelId) =>
-    set((state) => {
-      for (const areaId of ["left", "right", "bottom"] as DockAreaId[]) {
-        const stackIndex = state.areas[areaId].findIndex((stack) => stack.panels.includes(panelId));
-        if (stackIndex >= 0) {
-          const nextAreas = cloneLayout(state.areas);
-          nextAreas[areaId][stackIndex].activePanelId = panelId;
-          saveDockLayout(nextAreas);
-          return { areas: nextAreas };
-        }
-      }
-      return { areas: state.areas };
-    }),
+export const useDockStore = create<DockState>((set, get) => ({
+  api: null,
+  setApi: (api) => set({ api }),
+  activatePanel: (panelId) => {
+    const api = get().api;
+    if (!api) return;
+    const panel = api.getPanel(panelId);
+    // A panel the user closed is gone from the layout, so "show it" has to add it back rather than
+    // fail silently — which is what a View-menu entry means.
+    if (panel) panel.api.setActive();
+    else addToolPanel(api, panelId);
+  },
+  floatPanel: (panelId) => {
+    const api = get().api;
+    const panel = api?.getPanel(panelId);
+    if (api && panel) api.addFloatingGroup(panel);
+  },
+  popOutPanel: (panelId) => {
+    const api = get().api;
+    const panel = api?.getPanel(panelId);
+    if (api && panel) void api.addPopoutGroup(panel);
+  },
   resetDockLayout: () => {
-    const defaultAreas = createDefaultDockLayout();
-    saveDockLayout(defaultAreas);
-    set({ areas: defaultAreas });
+    const api = get().api;
+    if (!api) return;
+    clearSavedDockLayout();
+    api.clear();
+    buildDefaultLayout(api);
   }
 }));
 
-function createDefaultDockLayout(): DockLayout {
-  return {
-    left: [
-      {
-        id: "left-browser-stack",
-        panels: ["templates", "object-library"],
-        activePanelId: "templates"
-      }
-    ],
-    right: [
-      {
-        id: "right-inspector-stack",
-        panels: [
-          "scene-manager",
-          "object-inspector",
-          "material-manager",
-          "font-manager",
-          "automation",
-          "render-engine"
-        ],
-        activePanelId: "scene-manager"
-      }
-    ],
-    bottom: [
-      {
-        id: "bottom-timeline-stack",
-        panels: ["timeline", "sequencer"],
-        activePanelId: "timeline"
-      }
-    ]
-  };
+/** Add one tool panel with no position, letting dockview place it in the active group. */
+export function addToolPanel(api: DockviewApi, panelId: DockPanelId): void {
+  api.addPanel({ id: panelId, component: panelId, title: titleForPanel(panelId) });
 }
 
-function readDockLayout(): DockLayout {
+export function readSavedDockLayout(): unknown | null {
   try {
-    const parsed = JSON.parse(localStorage.getItem(dockLayoutStorageKey) ?? "") as DockLayout;
-
-    if (hasDockAreas(parsed)) {
-      const mergedLayout = mergeMissingDockPanels(parsed);
-      saveDockLayout(mergedLayout);
-
-      return mergedLayout;
-    }
+    const raw = localStorage.getItem(dockLayoutStorageKey);
+    return raw ? JSON.parse(raw) : null;
   } catch {
-    const migratedLayout = readLegacyDockLayout();
-
-    if (migratedLayout) {
-      return migratedLayout;
-    }
-
-    return createDefaultDockLayout();
-  }
-
-  return createDefaultDockLayout();
-}
-
-function saveDockLayout(layout: DockLayout): void {
-  localStorage.setItem(dockLayoutStorageKey, JSON.stringify(layout));
-}
-
-function readLegacyDockLayout(): DockLayout | null {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(legacyDockLayoutStorageKey) ?? "") as Record<DockAreaId, DockPanelId[]>;
-
-    if (!parsed.left || !parsed.right || !parsed.bottom) {
-      return null;
-    }
-
-    const migratedLayout: DockLayout = {
-      left: panelsToStacks("left", parsed.left),
-      right: panelsToStacks("right", parsed.right),
-      bottom: panelsToStacks("bottom", parsed.bottom)
-    };
-    const mergedLayout = mergeMissingDockPanels(migratedLayout);
-
-    saveDockLayout(mergedLayout);
-
-    return mergedLayout;
-  } catch {
+    // A corrupt value is not worth failing the whole workspace over; the default layout is a
+    // perfectly good answer to "we could not read your arrangement".
     return null;
   }
 }
 
-function panelsToStacks(areaId: DockAreaId, panels: DockPanelId[]): DockStack[] {
-  return panels.filter(isDockPanelId).map((panelId) => ({
-    id: `${areaId}-${panelId}-stack`,
-    panels: [panelId],
-    activePanelId: panelId
-  }));
+export function saveDockLayout(layout: unknown): void {
+  try {
+    localStorage.setItem(dockLayoutStorageKey, JSON.stringify(layout));
+  } catch {
+    // Storage can be full or blocked; losing the arrangement is not worth an error to the author.
+  }
 }
 
-function mergeMissingDockPanels(layout: DockLayout): DockLayout {
-  const knownPanels = new Set(allDockPanels);
-  const visiblePanels = new Set<DockPanelId>();
-  const nextLayout: DockLayout = {
-    left: sanitizeStacks("left", layout.left, knownPanels, visiblePanels),
-    right: sanitizeStacks("right", layout.right, knownPanels, visiblePanels),
-    bottom: sanitizeStacks("bottom", layout.bottom, knownPanels, visiblePanels)
-  };
+export function clearSavedDockLayout(): void {
+  localStorage.removeItem(dockLayoutStorageKey);
+}
 
-  for (const panelId of allDockPanels) {
-    if (!visiblePanels.has(panelId)) {
-      const targetArea: DockAreaId = [
-        "material-manager",
-        "font-manager",
-        "automation",
-        "render-engine"
-      ].includes(panelId)
-        ? "right"
-        : ["timeline", "sequencer"].includes(panelId)
-          ? "bottom"
-          : "left";
-      nextLayout[targetArea].push({
-        id: createStackId(targetArea, panelId, nextLayout[targetArea]),
-        panels: [panelId],
-        activePanelId: panelId
-      });
-    }
+/**
+ * The layout a first run gets: the shape the Editor had before, expressed as a grid.
+ *
+ * The viewport is added first so every other panel is positioned relative to it — that is what makes
+ * this a viewport-centred workspace rather than three boxes around a hole. Everything after is a
+ * direction from something already placed, so the result is readable as a sentence: library left of
+ * the viewport, inspector right of it, timeline below it.
+ */
+export function buildDefaultLayout(api: DockviewApi): void {
+  api.addPanel({ id: VIEWPORT_PANEL_ID, component: VIEWPORT_PANEL_ID, title: "Viewport" });
+
+  const panel = (id: DockPanelId, referencePanel: string, direction: "left" | "right" | "below" | "above") =>
+    api.addPanel({
+      id,
+      component: id,
+      title: titleForPanel(id),
+      position: { referencePanel, direction }
+    });
+
+  panel("object-library", VIEWPORT_PANEL_ID, "left");
+  panel("templates", "object-library", "below");
+  panel("object-inspector", VIEWPORT_PANEL_ID, "right");
+  panel("scene-manager", "object-inspector", "above");
+  panel("timeline", VIEWPORT_PANEL_ID, "below");
+
+  // Stacked as tabs onto panels already placed: these share space with a sibling rather than
+  // claiming their own region, which is how the old layout read too.
+  for (const [id, host] of [
+    ["material-manager", "object-inspector"],
+    ["font-manager", "object-inspector"],
+    ["ae-controls", "scene-manager"],
+    ["automation", "timeline"],
+    ["render-engine", "timeline"]
+  ] as [DockPanelId, string][]) {
+    api.addPanel({
+      id,
+      component: id,
+      title: titleForPanel(id),
+      position: { referencePanel: host, direction: "within" },
+      // Added without stealing focus, so the default workspace opens on the panels above rather
+      // than on whichever of these was added last.
+      inactive: true
+    });
   }
 
-  return nextLayout;
+  api.getPanel(VIEWPORT_PANEL_ID)?.api.setActive();
 }
 
-function sanitizeStacks(
-  areaId: DockAreaId,
-  stacks: DockStack[],
-  knownPanels: Set<DockPanelId>,
-  visiblePanels: Set<DockPanelId>
-): DockStack[] {
-  if (!Array.isArray(stacks)) {
-    return [];
+export function titleForPanel(panelId: DockPanelId): string {
+  switch (panelId) {
+    case "templates":
+      return "Templates";
+    case "object-library":
+      return "Object Library";
+    case "scene-manager":
+      return "Object Manager";
+    case "object-inspector":
+      return "Object Inspector";
+    case "material-manager":
+      return "Material Manager";
+    case "font-manager":
+      return "Font Manager";
+    case "ae-controls":
+      return "After Effects";
+    case "automation":
+      return "Automation";
+    case "render-engine":
+      return "Render Engine";
+    case "timeline":
+      return "Timeline";
   }
-
-  return stacks
-    .map((stack, stackIndex) => {
-      const panels = Array.isArray(stack.panels)
-        ? stack.panels.filter((panelId) => knownPanels.has(panelId) && !visiblePanels.has(panelId))
-        : [];
-
-      for (const panelId of panels) {
-        visiblePanels.add(panelId);
-      }
-
-      return {
-        id: typeof stack.id === "string" && stack.id.length > 0 ? stack.id : `${areaId}-stack-${stackIndex + 1}`,
-        panels,
-        activePanelId: panels.includes(stack.activePanelId) ? stack.activePanelId : panels[0]
-      };
-    })
-    .filter((stack): stack is DockStack => Boolean(stack.activePanelId) && stack.panels.length > 0);
-}
-
-function removePanelFromLayout(layout: DockLayout, panelId: DockPanelId): DockLayout {
-  return {
-    left: removePanelFromStacks(layout.left, panelId),
-    right: removePanelFromStacks(layout.right, panelId),
-    bottom: removePanelFromStacks(layout.bottom, panelId)
-  };
-}
-
-function removePanelFromStacks(stacks: DockStack[], panelId: DockPanelId): DockStack[] {
-  return stacks
-    .map((stack) => {
-      const panels = stack.panels.filter((item) => item !== panelId);
-
-      return {
-        ...stack,
-        panels,
-        activePanelId: panels.includes(stack.activePanelId) ? stack.activePanelId : panels[0]
-      };
-    })
-    .filter((stack): stack is DockStack => Boolean(stack.activePanelId) && stack.panels.length > 0);
-}
-
-function cloneLayout(layout: DockLayout): DockLayout {
-  return {
-    left: layout.left.map(cloneStack),
-    right: layout.right.map(cloneStack),
-    bottom: layout.bottom.map(cloneStack)
-  };
-}
-
-function cloneStack(stack: DockStack): DockStack {
-  return {
-    id: stack.id,
-    panels: [...stack.panels],
-    activePanelId: stack.activePanelId
-  };
-}
-
-function createStackId(areaId: DockAreaId, panelId: DockPanelId, stacks: DockStack[]): string {
-  const baseId = `${areaId}-${panelId}-stack`;
-  let candidateId = baseId;
-  let suffix = 2;
-
-  while (stacks.some((stack) => stack.id === candidateId)) {
-    candidateId = `${baseId}-${suffix}`;
-    suffix += 1;
-  }
-
-  return candidateId;
-}
-
-function hasDockAreas(layout: DockLayout): boolean {
-  return Boolean(layout?.left && layout?.right && layout?.bottom);
-}
-
-function isDockPanelId(panelId: string): panelId is DockPanelId {
-  return allDockPanels.includes(panelId as DockPanelId);
 }

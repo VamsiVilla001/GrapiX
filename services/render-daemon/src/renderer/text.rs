@@ -214,13 +214,14 @@ mod tests {
 
     #[test]
     fn alpha_composites_bgra_in_place() {
+        let pool = crate::output::VideoFramePool::new(1, 4).unwrap();
         let mut frame = VideoFrame {
             width: 1,
             height: 1,
-            data: vec![0, 0, 0, 0],
+            data: pool.try_acquire().unwrap(),
             frame_index: 0,
         };
         blend_bgra_pixel(&mut frame, 0, 0, Color::rgba(255, 0, 0, 128), 1.0);
-        assert_eq!(frame.data, [0, 0, 128, 128]);
+        assert_eq!(frame.data.as_slice(), [0, 0, 128, 128]);
     }
 }

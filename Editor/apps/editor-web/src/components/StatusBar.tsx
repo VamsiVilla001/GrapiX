@@ -7,6 +7,8 @@ import {
 } from "../hooks/useSupervisorStatus";
 import { useApiHealth } from "../hooks/useApiHealth";
 import { AssistantChip } from "./AssistantChip";
+import { useEffect, useState } from "react";
+import { onUiDiagnostic, uiDiagnostics } from "../lib/diagnostics";
 
 export function StatusBar() {
   const scene = useEditorStore((state) => state.scene);
@@ -44,6 +46,7 @@ export function StatusBar() {
         </span>
       ) : null}
       <AssistantChip />
+      <ConsoleChip />
       <span className={`save-status ${saveStatus}`}>{saveStatusLabel(saveStatus, saveError)}</span>
     </footer>
   );
@@ -88,4 +91,46 @@ function serviceTone(state: ProcessState): "healthy" | "degraded" | "fallback" {
   if (state === "online" || state === "adopted") return "healthy";
   if (state === "lost" || state === "failed") return "fallback";
   return "degraded";
+}
+
+/**
+ * The console's door in the status bar. Quiet when nothing has failed; a red or amber count
+ * when it has. Clicking toggles the drawer — the store lives outside React, so the chip
+ * subscribes rather than polling.
+ */
+function ConsoleChip() {
+  const [counts, setCounts] = useState(() => countLevels(uiDiagnostics()));
+
+  useEffect(
+    () => onUiDiagnostic(() => setCounts(countLevels(uiDiagnostics()))),
+    []
+  );
+
+  const tone = counts.errors > 0 ? "has-errors" : counts.warnings > 0 ? "has-warnings" : "";
+  const label =
+    counts.errors > 0
+      ? `Console: ${counts.errors} error${counts.errors === 1 ? "" : "s"}`
+      : counts.warnings > 0
+        ? `Console: ${counts.warnings} warning${counts.warnings === 1 ? "" : "s"}`
+        : "Console";
+
+  return (
+    <button
+      className={`console-chip-button ${tone}`}
+      title="Open the diagnostics console (Ctrl+Alt+C)"
+      onClick={() => window.dispatchEvent(new CustomEvent("grapix:toggle-console"))}
+    >
+      {label}
+    </button>
+  );
+}
+
+function countLevels(records: readonly { level: string }[]): { errors: number; warnings: number } {
+  let errors = 0;
+  let warnings = 0;
+  for (const record of records) {
+    if (record.level === "error") errors += 1;
+    else if (record.level === "warning") warnings += 1;
+  }
+  return { errors, warnings };
 }

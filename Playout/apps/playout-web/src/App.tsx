@@ -1,3 +1,5 @@
+import { LoginScreen } from "./LoginScreen";
+import { currentUser, onAuthChange, type SignedInUser } from "./auth";
 import type {
   PlayoutRuntimeStatus,
   PlayoutTakeEntry,
@@ -28,6 +30,7 @@ import {
   Settings2,
   SkipForward,
   Square,
+  Terminal,
   Trash2,
   Wifi,
   WifiOff
@@ -44,9 +47,13 @@ import {
   isProgramExplicitlyCleared,
   monitorStreamUrl,
   playoutApi,
+  PlayoutRequestError,
   subscribeToPlayoutEvents,
+  type AePackageView,
   type EngineHealthView
 } from "./api";
+import { DiagnosticsConsole } from "./DiagnosticsConsole";
+import { installUiDiagnosticCapture, recordUiDiagnostic, type ConsoleRecord } from "./diagnostics";
 import { OutputsPanel } from "./OutputsPanel";
 
 const emptyRuntime: PlayoutRuntimeStatus = {
@@ -68,17 +75,42 @@ function sceneRef(takeId: number): string {
   return `scene:take-${takeId}`;
 }
 
-type OperatorAction = "cue" | "take" | "take-out" | "continue";
+type OperatorAction = "cue" | "take" | "take-out" | "continue" | "load-ae";
 
 export function App() {
+  // Sign-in gates the operator surface. Nothing behind this gate is usable without an
+  // identity - the engine refuses every operator verb from an unidentified session - so the
+  // window shows the login instead of a transport an operator cannot drive.
+  const [user, setUser] = useState<SignedInUser | null>(() => currentUser());
+  useEffect(() => onAuthChange(setUser), []);
+  if (!user) return <LoginScreen />;
+  return <PlayoutWorkspace />;
+}
+
+function PlayoutWorkspace() {
   const [library, setLibrary] = useState<PublishedSceneMetadata[]>([]);
+  const [aePackages, setAePackages] = useState<AePackageView[]>([]);
   /** True while the control service's event stream is attached. */
   const [liveLink, setLiveLink] = useState(false);
   const [takeList, setTakeList] = useState<PlayoutTakeList | null>(null);
   const [runtime, setRuntime] = useState<PlayoutRuntimeStatus>(emptyRuntime);
   const [engine, setEngine] = useState<EngineHealthView | null>(null);
   const [clock, setClock] = useState(new Date());
-  const [error, setError] = useState<string | null>(null);
+
+  /**
+   * The banner. Carries the remedy and a pointer into the console, so a failure is one click
+   * from everything known about it rather than one line that the next action replaces.
+   */
+  const [failure, setFailure] = useState<{
+    message: string;
+    remedy?: string;
+    record: { origin: ConsoleRecord["origin"]; sequence: number };
+  } | null>(null);
+  const [consoleOpen, setConsoleOpen] = useState(false);
+  /** Bumped on every `diagnostics.logged`, so an open console fetches the tail at once. */
+  const [serviceRevision, setServiceRevision] = useState(0);
+  /** Errors recorded since the console was last opened, for the toolbar badge. */
+  const [unseenErrors, setUnseenErrors] = useState(0);
   const [search, setSearch] = useState("");
   const [busyAction, setBusyAction] = useState<OperatorAction | null>(null);
   const [syncingEditor, setSyncingEditor] = useState(false);
@@ -90,31 +122,78 @@ export function App() {
   /** The recall field an operator types a Take ID into. */
   const [recall, setRecall] = useState("");
 
+  /**
+   * Report a failure once, in one place.
+   *
+   * A refusal the control service answered is already in its log, and it travels back with
+   * the sequence of that record — so the banner points at it instead of the UI keeping a
+   * second copy under a different origin. Anything else (a request that never left this
+   * window, a bad recall, a parse failure) is recorded here, because nothing else saw it.
+   */
+  const report = useCallback(
+    (source: string, error: unknown, context?: Record<string, unknown>) => {
+      if (error instanceof PlayoutRequestError && error.diagnosticSequence !== undefined) {
+        setFailure({
+          message: error.message,
+          ...(error.detail?.remedy ? { remedy: error.detail.remedy } : {}),
+          record: { origin: "service", sequence: error.diagnosticSequence }
+        });
+      } else {
+        const record = recordUiDiagnostic({
+          level: "error",
+          source,
+          error,
+          ...(context ? { context } : {})
+        });
+        setFailure({
+          message: record.message,
+          ...(record.detail?.remedy ? { remedy: record.detail.remedy } : {}),
+          record: { origin: "ui", sequence: record.sequence }
+        });
+      }
+      setUnseenErrors((count) => count + 1);
+    },
+    []
+  );
+
+  const openConsole = useCallback(() => {
+    setConsoleOpen(true);
+    setUnseenErrors(0);
+  }, []);
+
+  // Nothing else in an operator window would ever see an uncaught error: there is no devtools
+  // console on a station, and none at all in the packaged desktop build.
+  useEffect(installUiDiagnosticCapture, []);
+
   const refreshLibrary = useCallback(async () => {
     setLibrary(await playoutApi.listScenes());
   }, []);
 
+  const refreshAePackages = useCallback(async () => {
+    setAePackages(await playoutApi.listAePackages());
+  }, []);
+
   const fetchFromEditor = useCallback(async () => {
     setSyncingEditor(true);
-    setError(null);
+    setFailure(null);
     try {
       await playoutApi.syncFromEditor();
-      await refreshLibrary();
+      await Promise.all([refreshLibrary(), refreshAePackages()]);
     } catch (fetchError) {
-      setError(errorMessage(fetchError));
+      report("ui/fetch-from-editor", fetchError);
     } finally {
       setSyncingEditor(false);
     }
-  }, [refreshLibrary]);
+  }, [refreshAePackages, refreshLibrary, report]);
 
   const handleRefresh = useCallback(async () => {
     try {
       await playoutApi.syncFromEditor();
-      await refreshLibrary();
+      await Promise.all([refreshLibrary(), refreshAePackages()]);
     } catch (error) {
-      setError(errorMessage(error));
+      report("ui/refresh-library", error);
     }
-  }, [refreshLibrary]);
+  }, [refreshAePackages, refreshLibrary, report]);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -123,7 +202,7 @@ export function App() {
       setRuntime((current) => ({
         ...current,
         rendererConnection: "disconnected",
-        lastError: errorMessage(statusError)
+        lastError: statusError instanceof Error ? statusError.message : String(statusError)
       }));
     }
   }, []);
@@ -154,12 +233,17 @@ export function App() {
     let cancelled = false;
     void (async () => {
       try {
-        const [scenes, active] = await Promise.all([playoutApi.listScenes(), refreshTakeList()]);
+        const [scenes, packages, active] = await Promise.all([
+          playoutApi.listScenes(),
+          playoutApi.listAePackages(),
+          refreshTakeList()
+        ]);
         if (cancelled) return;
         setLibrary(scenes);
+        setAePackages(packages);
         setSelectedEntryId(active.cursorEntryId ?? active.entries[0]?.entryId ?? null);
       } catch (loadError) {
-        if (!cancelled) setError(errorMessage(loadError));
+        if (!cancelled) report("ui/startup-load", loadError);
       }
     })();
 
@@ -172,12 +256,16 @@ export function App() {
     const detachEvents = subscribeToPlayoutEvents(
       (kind) => {
         if (kind === "library.changed") {
-          void refreshLibrary().catch((error: unknown) => setError(errorMessage(error)));
+          void Promise.all([refreshLibrary(), refreshAePackages()]).catch((error: unknown) =>
+            report("ui/refresh-library", error)
+          );
         }
         if (kind === "sequence.changed") {
-          void refreshTakeList().catch((error: unknown) => setError(errorMessage(error)));
+          void refreshTakeList().catch((error: unknown) => report("ui/refresh-take-list", error));
         }
         if (kind === "runtime.changed") void refreshStatus();
+        // The console fetches its own tail; this only tells it there is one.
+        if (kind === "diagnostics.logged") setServiceRevision((revision) => revision + 1);
       },
       setLiveLink
     );
@@ -190,6 +278,7 @@ export function App() {
         try {
           await playoutApi.syncFromEditor();
           await refreshLibrary();
+          await refreshAePackages();
         } catch {
           // Background sync failure is silent
         }
@@ -203,7 +292,7 @@ export function App() {
       window.clearInterval(clockTimer);
       window.clearInterval(editorSyncTimer);
     };
-  }, [refreshEngine, refreshLibrary, refreshStatus, refreshTakeList]);
+  }, [refreshAePackages, refreshEngine, refreshLibrary, refreshStatus, refreshTakeList, report]);
 
   /**
    * The Scene Manager list: one row per scene at its newest version.
@@ -289,18 +378,18 @@ export function App() {
   const run = useCallback(
     async (action: OperatorAction, body: () => Promise<PlayoutRuntimeStatus | void>) => {
       setBusyAction(action);
-      setError(null);
+      setFailure(null);
       try {
         const status = await body();
         if (status) setRuntime(status);
       } catch (actionError) {
-        setError(errorMessage(actionError));
+        report(`ui/${action}`, actionError);
         await refreshStatus();
       } finally {
         setBusyAction(null);
       }
     },
-    [refreshStatus]
+    [refreshStatus, report]
   );
 
   /** Recall a Take ID straight to air — the Scene Manager's whole point. */
@@ -315,11 +404,20 @@ export function App() {
     [run]
   );
 
+  const loadAePackage = useCallback(
+    async (graphicId: string) => {
+      await run("load-ae", async () => {
+        await playoutApi.loadAePackage(graphicId);
+      });
+    },
+    [run]
+  );
+
   async function saveList(next: PlayoutTakeList) {
     try {
       setTakeList(await playoutApi.saveTakeList(next));
     } catch (saveError) {
-      setError(errorMessage(saveError));
+      report("ui/save-take-list", saveError, { takeListId: next.takeListId, entries: next.entries.length });
     }
   }
 
@@ -387,7 +485,11 @@ export function App() {
       setSelectedTakeId(null);
       await refreshLibrary();
     } catch (removeError) {
-      setError(errorMessage(removeError));
+      report("ui/remove-scene", removeError, {
+        sceneId: selectedScene.sceneId,
+        sceneName: selectedScene.name,
+        takeId: selectedScene.takeId
+      });
     }
   }
 
@@ -400,7 +502,9 @@ export function App() {
       await playoutApi.publishScene(scene);
       await refreshLibrary();
     } catch (importError) {
-      setError(errorMessage(importError));
+      // A hand-edited scene file that will not parse lands here, and the parser's own
+      // position is the only thing that identifies where.
+      report("ui/import-scene", importError, { file: file.name, sizeBytes: file.size });
     }
   }
 
@@ -408,11 +512,17 @@ export function App() {
     event.preventDefault();
     const takeId = Number(recall.trim());
     if (!Number.isSafeInteger(takeId)) {
-      setError(`"${recall}" is not a take ID`);
+      report("ui/recall", new Error(`"${recall}" is not a take ID`), {
+        typed: recall,
+        expected: "a whole number, as shown on each Scene Manager card"
+      });
       return;
     }
     if (!library.some((scene) => scene.takeId === takeId)) {
-      setError(`No published scene has take ID ${takeId}`);
+      report("ui/recall", new Error(`No published scene has take ID ${takeId}`), {
+        typed: recall,
+        availableTakeIds: library.map((scene) => scene.takeId).sort((left, right) => left - right)
+      });
       return;
     }
     setSelectedTakeId(takeId);
@@ -450,17 +560,40 @@ export function App() {
             <Clock3 size={14} />
             {formatClock(clock)}
           </div>
+          {/*
+            The console. On an operator station there is no devtools window and no terminal,
+            so this is the only place a failure can be read in full — and the badge is how an
+            operator learns there is something to read.
+          */}
+          <button
+            className={`icon-button console-toggle ${consoleOpen ? "active" : ""}`}
+            onClick={() => (consoleOpen ? setConsoleOpen(false) : openConsole())}
+            title="Console — every failure, with its cause and what to do about it"
+          >
+            <Terminal size={16} />
+            {unseenErrors > 0 && <span className="console-badge">{unseenErrors > 9 ? "9+" : unseenErrors}</span>}
+          </button>
           <button className="icon-button" title="Playout settings">
             <Settings2 size={16} />
           </button>
         </div>
       </header>
 
-      {error && (
+      {failure && (
         <div className="error-banner">
           <CircleAlert size={15} />
-          <span>{error}</span>
-          <button onClick={() => setError(null)}>Dismiss</button>
+          <span>
+            {failure.message}
+            {failure.remedy && <em className="banner-remedy">{failure.remedy}</em>}
+          </span>
+          <button
+            onClick={() => {
+              openConsole();
+            }}
+          >
+            Details
+          </button>
+          <button onClick={() => setFailure(null)}>Dismiss</button>
         </div>
       )}
 
@@ -567,7 +700,38 @@ export function App() {
                 detail="Publish from the Editor, or import a GrapiX SceneDocument JSON."
               />
             )}
+            <div className="revision-label">After Effects</div>
+            {aePackages.map((aePackage) => (
+              <div className="scene-card" key={aePackage.graphicId}>
+                <span className="take-id">AE</span>
+                <div className="scene-thumbnail checkerboard">
+                  <Clapperboard size={25} />
+                </div>
+                <span className="scene-copy">
+                  <strong>{aePackage.name}</strong>
+                  <small>
+                    v{aePackage.latestVersion} · {aePackage.mainComposition.name} ·{" "}
+                    {aePackage.mainComposition.width} × {aePackage.mainComposition.height}
+                  </small>
+                </span>
+                <button
+                  className="small-button"
+                  disabled={busyAction !== null}
+                  onClick={() => void loadAePackage(aePackage.graphicId)}
+                >
+                  Load on Air
+                </button>
+              </div>
+            ))}
+            {aePackages.length === 0 && (
+              <EmptyState
+                icon={<Clapperboard size={28} />}
+                title="No published After Effects packages"
+                detail="Ingest a published After Effects package to load it on air."
+              />
+            )}
           </div>
+
 
           <div className="library-actions">
             <button
@@ -708,6 +872,13 @@ export function App() {
           />
         </section>
       </section>
+
+      <DiagnosticsConsole
+        open={consoleOpen}
+        onClose={() => setConsoleOpen(false)}
+        serviceRevision={serviceRevision}
+        focusRecord={failure?.record ?? null}
+      />
 
       <footer className="transport">
         <div className="selected-summary">
@@ -1013,8 +1184,4 @@ function formatClock(date: Date): string {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(
     date.getSeconds()
   )}:${pad(Math.floor(date.getMilliseconds() / 40))}`;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

@@ -14,6 +14,10 @@
 //! window close, and including an engine it started itself. An Editor window is not allowed
 //! to take a show off air by being shut.
 //!
+//! It also provisions the token signing secret on first run (`signing_secret_file`). The
+//! project service refuses to start without one and nothing else ever wrote it, so a clean
+//! install could not sign in until this existed.
+//!
 //! What it deliberately does **not** do, and used to:
 //!
 //! - supervise the protocol v2 render daemon on 4200 (retired: `architecture.md`, repository
@@ -24,6 +28,7 @@
 //!   the failure mode the journal-and-verify recovery model exists to prevent.
 
 use std::env;
+use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
@@ -31,6 +36,15 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+/// Windows process-creation flag that starts a console subsystem process without a console
+/// window. The value is stable (`CREATE_NO_WINDOW` in the Win32 API), and the `cfg` keeps it
+/// out of every other target's way.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
@@ -162,6 +176,9 @@ pub struct RuntimeLayout {
     /// the per-user AppData directory rather than Program Files, so a packaged installer
     /// running under a standard Windows account does not try to write to a read-only tree.
     pub data_root: PathBuf,
+    /// Product-wide identity store and signing key. Editor and Playout have different
+    /// AppData roots, so accounts cannot live under `data_root` without splitting identity.
+    pub auth_root: PathBuf,
 }
 
 impl RuntimeLayout {
@@ -250,10 +267,14 @@ impl DesktopSupervisor {
         };
 
         thread::spawn(move || {
+            // Before anything starts, because two of them need the same value and one of
+            // them cannot boot without it.
+            let secret = signing_secret_file(&layout);
+
             // The engine first: the editor's engine client connects on start-up, and the
             // other order means it spends its first seconds retrying.
-            ensure_engine(&layout, &inner);
-            start_api(&layout, &inner);
+            ensure_engine(&layout, &inner, &secret);
+            start_api(&layout, &inner, &secret);
             start_assistant(&layout, &inner);
             start_adobe(&layout, &inner);
             watch(&inner, &app);
@@ -319,7 +340,11 @@ fn stop_owned(slot: &mut ProcessSlot) {
 // Starting
 // ---------------------------------------------------------------------------
 
-fn ensure_engine(layout: &RuntimeLayout, inner: &Arc<Mutex<Inner>>) {
+fn ensure_engine(
+    layout: &RuntimeLayout,
+    inner: &Arc<Mutex<Inner>>,
+    secret: &Result<Option<PathBuf>, String>,
+) {
     if port_open(ENGINE_ADDRESS) {
         adopt(inner, |inner| &mut inner.engine, "already running on :4400");
         return;
@@ -349,10 +374,11 @@ fn ensure_engine(layout: &RuntimeLayout, inner: &Arc<Mutex<Inner>>) {
         return;
     };
 
-    let config = layout
-        .workspace_root
-        .as_ref()
-        .map(|root| root.join("services").join("render-engine").join("engine.toml"));
+    let config = layout.workspace_root.as_ref().map(|root| {
+        root.join("services")
+            .join("render-engine")
+            .join("engine.toml")
+    });
     let mut command = Command::new(executable);
     if let Some(root) = &layout.workspace_root {
         command.current_dir(root);
@@ -363,21 +389,68 @@ fn ensure_engine(layout: &RuntimeLayout, inner: &Arc<Mutex<Inner>>) {
         command.arg("--config").arg(config);
     }
     apply_shared_env(&mut command, layout);
-    spawn(inner, |inner| &mut inner.engine, command);
+
+    // The same key the project service mints tokens with, so the two agree by construction
+    // when `auth.required` is turned on. Deliberately the `_FILE` form: `GRAPIX_ENGINE_AUTH_SECRET`
+    // also flips `auth.required = true` (`config.rs`), and an authoring shell may not decide
+    // that a renderer starts demanding credentials. A failure to provision is not propagated
+    // here — the engine's own default is `required = false`, and refusing to start a renderer
+    // over a key it does not currently need would be the more expensive mistake.
+    //
+    // An *adopted* engine never sees this, because there is no environment left to set. That
+    // is the same boundary as everywhere else in this file: an engine this shell did not
+    // start is an engine this shell does not configure.
+    if let Ok(Some(path)) = secret {
+        command.env("GRAPIX_ENGINE_AUTH_SECRET_FILE", path);
+    }
+
+    // The render engine keeps its console — the one window the author asked to stay — so it
+    // spawns with inherited output and no log redirect.
+    spawn(inner, |inner| &mut inner.engine, command, None);
 }
 
-fn start_api(layout: &RuntimeLayout, inner: &Arc<Mutex<Inner>>) {
+fn start_api(
+    layout: &RuntimeLayout,
+    inner: &Arc<Mutex<Inner>>,
+    secret: &Result<Option<PathBuf>, String>,
+) {
     if api_health() {
-        adopt(inner, |inner| &mut inner.api, "already running and healthy on :4100");
+        adopt(
+            inner,
+            |inner| &mut inner.api,
+            "already running and healthy on :4100",
+        );
         return;
     }
+
+    let mut extra: Vec<(&str, PathBuf)> = Vec::new();
+    match secret {
+        Ok(Some(path)) => extra.push(("GRAPIX_AUTH_SECRET_FILE", path.clone())),
+        // The environment already carries one; the child inherits it.
+        Ok(None) => {}
+        // Reported here rather than left to the service. Unprovisioned, it exits during
+        // start-up with the reason on stdout only, which is the silent failure this whole
+        // path exists to remove — the status strip says why instead.
+        Err(reason) => {
+            fail(
+                inner,
+                |inner| &mut inner.api,
+                &format!(
+                    "could not provision the token signing secret ({reason}); \
+                     set GRAPIX_AUTH_SECRET_FILE to a readable file of at least 32 characters"
+                ),
+            );
+            return;
+        }
+    }
+
     launch_node_service(
         layout,
         inner,
         |inner| &mut inner.api,
         "grapix-api-server.mjs",
         "@grapix/api-server",
-        &[],
+        &extra,
     );
 }
 
@@ -470,7 +543,13 @@ fn launch_node_service(
     for (key, value) in extra_env {
         command.env(key, value);
     }
-    spawn(inner, select, command);
+    // A Node service is a console-subsystem process; spawned with inherited stdio it allocates
+    // a console window, which is the black terminal the author sees pop up. Route its output to
+    // a per-service log and start it with no window instead, so the service runs silently and
+    // its words are still on disk when a start-up needs debugging. The render engine is the one
+    // exception and keeps its console.
+    hide_console(&mut command);
+    spawn(inner, select, command, service_log(layout, bundle_name));
 }
 
 /// Environment every launched process shares.
@@ -481,6 +560,118 @@ fn launch_node_service(
 /// variable, so one write here keeps disk I/O off `Program Files` everywhere.
 fn apply_shared_env(command: &mut Command, layout: &RuntimeLayout) {
     command.env("GRAPIX_DATA_ROOT", &layout.data_root);
+    command.env("GRAPIX_ACCOUNT_DATA_ROOT", &layout.auth_root);
+
+    // An After Effects container may only reference a project under an allowlisted root: the project
+    // service refuses an absolute path, a `..` segment and anything outside the list, which is what stops
+    // a client naming `C:\Windows\...` as a "project". The list has no default, so a packaged Editor left
+    // it empty and the AE Controls panel could not even *list* containers — it answered
+    // `AE_PROJECT_ROOT_NOT_CONFIGURED` and showed the operator an environment variable name.
+    //
+    // So one root is provisioned here, owned by this installation and inside the per-user data root that
+    // is already writable. Deliberately not the whole user profile or a drive: widening an allowlist to
+    // make a panel populate would trade the control away for a cosmetic fix. An operator who sets the
+    // variable themselves keeps their own list untouched.
+    if env::var_os("GRAPIX_AE_PROJECT_ROOTS").is_none() {
+        let projects = layout.data_root.join("ae-projects");
+        if let Err(error) = fs::create_dir_all(&projects) {
+            eprintln!(
+                "[grapix] could not create the default After Effects project root {}: {error}",
+                projects.display()
+            );
+        }
+        command.env("GRAPIX_AE_PROJECT_ROOTS", &projects);
+    }
+}
+
+/// Provision the token signing secret, once per installation.
+///
+/// `createAuthContext` in the project service throws when no secret is configured, so before
+/// this existed a clean install could not sign in at all: the service exited during start-up,
+/// nothing listened on 4100, and the window reported the resulting `fetch` rejection as
+/// `Failed to fetch` — which reads as a network fault rather than as a service that never
+/// started. Nothing else in the shell, the installer or a checkout ever wrote the value the
+/// service requires of itself.
+///
+/// The secret persists. Regenerating it per launch would invalidate every refresh token and
+/// every session minted against the previous key, signing out anyone whose window outlived a
+/// restart of the shell.
+///
+/// Returns `Ok(None)` when the environment already carries a secret. An operator who manages
+/// their own key material is precisely the case this must not override, and a child inherits
+/// this process's environment anyway, so the correct action there is to add nothing.
+fn signing_secret_file(layout: &RuntimeLayout) -> Result<Option<PathBuf>, String> {
+    if env::var_os("GRAPIX_AUTH_SECRET").is_some()
+        || env::var_os("GRAPIX_AUTH_SECRET_FILE").is_some()
+    {
+        return Ok(None);
+    }
+
+    let path = layout.auth_root.join("signing-secret");
+    if secret_is_usable(&path) {
+        return Ok(Some(path));
+    }
+    match write_new_secret(&path) {
+        Ok(()) => {
+            println!(
+                "[grapix] provisioned a token signing secret at {}",
+                path.display()
+            );
+            Ok(Some(path))
+        }
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+/// Whether a secret already on disk can be handed on as-is.
+///
+/// Both sides enforce a 32-character floor — `validate_signing_secret` in the engine and the
+/// TypeScript issuer it is written to match — so a truncated file is replaced rather than
+/// passed on. An interrupted first run is the way one is produced, and the failure it causes
+/// surfaces later as a rejected sign-in rather than here as a bad file.
+fn secret_is_usable(path: &Path) -> bool {
+    fs::read_to_string(path)
+        .map(|text| text.trim().len() >= 32)
+        .unwrap_or(false)
+}
+
+/// Write a fresh secret, atomically.
+///
+/// 32 bytes of OS entropy as 64 hex characters: past the 32-character floor with room, and
+/// hex so the value survives a shell, a `.env` and a TOML file without quoting rules changing
+/// it. The write lands on a per-process temporary file and is renamed into place, so a crash
+/// mid-write cannot leave a short secret behind for the next run to accept.
+fn write_new_secret(path: &Path) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let mut bytes = [0_u8; 32];
+    getrandom::fill(&mut bytes)
+        .map_err(|error| std::io::Error::other(format!("no OS entropy available: {error}")))?;
+    let secret: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+
+    let temporary = path.with_extension(format!("{}.tmp", std::process::id()));
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    // The file holds a key. Unix can say so; Windows cannot, from `std` alone — there the
+    // protection that actually applies is the per-user AppData root the file sits in.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+
+    let mut file = options.open(&temporary)?;
+    let written = file
+        .write_all(secret.as_bytes())
+        .and_then(|()| file.sync_all());
+    drop(file);
+    if let Err(error) = written {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+    fs::rename(&temporary, path)
 }
 
 fn engine_binary(root: &Path, profile: &str) -> PathBuf {
@@ -511,13 +702,26 @@ fn spawn(
     inner: &Arc<Mutex<Inner>>,
     select: impl Fn(&mut Inner) -> &mut ProcessSlot,
     mut command: Command,
+    log: Option<ServiceLog>,
 ) {
-    // Inherited output on purpose: whoever is debugging a start-up failure needs the
-    // process's own words, not a supervisor's summary of them.
     command.stdin(Stdio::null());
 
+    // When the process has a log, capture its pipes so no console is allocated and the words
+    // land on disk; otherwise inherit, which is what gives the render engine its console.
+    if log.is_some() {
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    }
+
     match command.spawn() {
-        Ok(child) => {
+        Ok(mut child) => {
+            if let Some(log) = log {
+                if let Some(stdout) = child.stdout.take() {
+                    pump_to_log(stdout, log.clone());
+                }
+                if let Some(stderr) = child.stderr.take() {
+                    pump_to_log(stderr, log);
+                }
+            }
             let Ok(mut guard) = inner.lock() else { return };
             let slot = select(&mut guard);
             println!("[grapix] started {}", slot.label);
@@ -535,11 +739,57 @@ fn spawn(
     }
 }
 
-fn adopt(
-    inner: &Arc<Mutex<Inner>>,
-    select: impl Fn(&mut Inner) -> &mut ProcessSlot,
-    detail: &str,
-) {
+/// A service's log file: `data_root/logs/<process>.log`, opened for append.
+///
+/// `data_root` is the per-user AppData directory the whole product already writes to (see
+/// `apply_shared_env`), so the log never touches `Program Files`. One file per service,
+/// newest at the end; the supervisor truncates nothing, so a crash's last lines survive the
+/// restart that follows.
+#[derive(Clone)]
+struct ServiceLog {
+    path: PathBuf,
+}
+
+fn service_log(layout: &RuntimeLayout, bundle_name: &str) -> Option<ServiceLog> {
+    let process = bundle_name.strip_suffix(".mjs").unwrap_or(bundle_name);
+    let dir = layout.data_root.join("logs");
+    if fs::create_dir_all(&dir).is_err() {
+        return None;
+    }
+    Some(ServiceLog {
+        path: dir.join(format!("{process}.log")),
+    })
+}
+
+/// Copy one captured stream into the log, a line at a time, until the process closes it.
+fn pump_to_log(mut stream: impl Read + Send + 'static, log: ServiceLog) {
+    thread::spawn(move || {
+        let mut buffer = [0_u8; 4096];
+        loop {
+            match stream.read(&mut buffer) {
+                Ok(0) | Err(_) => break,
+                Ok(read) => {
+                    if let Ok(mut file) =
+                        OpenOptions::new().create(true).append(true).open(&log.path)
+                    {
+                        let _ = file.write_all(&buffer[..read]);
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// Start a console-subsystem process without a console window. A no-op off Windows, where
+/// the question does not arise.
+fn hide_console(command: &mut Command) {
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+    #[cfg(not(windows))]
+    let _ = command;
+}
+
+fn adopt(inner: &Arc<Mutex<Inner>>, select: impl Fn(&mut Inner) -> &mut ProcessSlot, detail: &str) {
     let Ok(mut guard) = inner.lock() else { return };
     let slot = select(&mut guard);
     println!("[grapix] adopting {}: {detail}", slot.label);
@@ -593,7 +843,11 @@ fn watch(inner: &Arc<Mutex<Inner>>, app: &AppHandle) {
         // UI polls the command for its initial state anyway.
         let fingerprint = format!(
             "{:?}/{:?}/{:?}/{:?}/{}",
-            snapshot.api.state, snapshot.assistant.state, snapshot.adobe.state, snapshot.engine.state, snapshot.ready
+            snapshot.api.state,
+            snapshot.assistant.state,
+            snapshot.adobe.state,
+            snapshot.engine.state,
+            snapshot.ready
         );
         if previous.as_deref() != Some(fingerprint.as_str()) {
             let _ = app.emit("grapix-supervisor-status", &snapshot);
@@ -657,10 +911,11 @@ fn http_get(address: &str, path: &str) -> Option<u16> {
     let target: SocketAddr = address.parse().ok()?;
     let mut stream = TcpStream::connect_timeout(&target, Duration::from_millis(750)).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
-    stream.set_write_timeout(Some(Duration::from_secs(2))).ok()?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(2)))
+        .ok()?;
 
-    let request =
-        format!("GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n");
+    let request = format!("GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n");
     stream.write_all(request.as_bytes()).ok()?;
 
     let mut response = String::new();
@@ -687,7 +942,10 @@ mod tests {
             parse_status("HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\n{\"ok\":true}"),
             Some(200)
         );
-        assert_eq!(parse_status("HTTP/1.1 503 Service Unavailable\r\n\r\n"), Some(503));
+        assert_eq!(
+            parse_status("HTTP/1.1 503 Service Unavailable\r\n\r\n"),
+            Some(503)
+        );
         assert_eq!(parse_status("not http"), None);
     }
 

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { BrushBlendMode, ColorValue, Vec2 } from "@grapix/shared-types";
+import type { TimelineRowFilter } from "../components/timelineModel";
 
-type PropertiesTab = "Properties" | "Transform" | "Materials" | "Text" | "Data Binding";
 export type EditorTool =
   | "select"
   | "move"
@@ -9,6 +9,7 @@ export type EditorTool =
   | "scale"
   | "pivot"
   | "pen"
+  | "feather"
   | "path-selection"
   | "direct-selection"
   | "horizontal-type"
@@ -18,6 +19,7 @@ export type EditorTool =
   | "rectangular-marquee"
   | "elliptical-marquee";
 export type PenTarget = "shape" | "mask";
+export type AlignReferenceSetting = "selection" | "canvas" | "key-object" | "parent";
 export type ToolGroup = "selection" | "type" | "marquee";
 export type MarqueeOperation = "new" | "add" | "subtract" | "intersect";
 export type MarqueeMode = "objects" | "region" | "mask";
@@ -64,6 +66,22 @@ export interface PenOptions {
   strokeEnabled: boolean;
 }
 
+/**
+ * The Feather tool's settings.
+ *
+ * Feather softens a mask's edge and expansion moves it. They belong together because they are the
+ * two ways to adjust where a mask *ends*, and an operator matching a graphic to a background
+ * reaches for both in the same breath.
+ *
+ * `linked` drives both axes from one drag, which is what is wanted almost always; unlinking is
+ * for the deliberately directional blur.
+ */
+export interface FeatherOptions {
+  linked: boolean;
+  /** Scene pixels moved per pixel of drag, so a slow drag can still land on an exact value. */
+  sensitivity: number;
+}
+
 export interface MarqueeOptions {
   mode: MarqueeMode;
   operation: MarqueeOperation;
@@ -83,50 +101,75 @@ export interface EyedropperOptions {
   applyToSelection: boolean;
 }
 
+/**
+ * Viewport zoom limits, in percent.
+ *
+ * Clamped in the store rather than at each caller so the preset dropdown, Ctrl+scroll and
+ * anything added later cannot disagree about how far the viewport may go. The floor keeps a
+ * 4K canvas visible; the ceiling is where a single scene pixel fills a screen pixel eight
+ * times over, which is past any useful nudge.
+ */
+export const MIN_ZOOM = 10;
+export const MAX_ZOOM = 800;
+
+export function clampZoom(zoom: number): number {
+  if (!Number.isFinite(zoom)) return 100;
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(zoom)));
+}
+
 interface UiState {
   zoom: number;
   snapping: boolean;
-  propertiesTab: PropertiesTab;
   activeTool: EditorTool;
   penTarget: PenTarget;
   lastGroupTool: Record<ToolGroup, EditorTool>;
-  selectedPathObjectIds: string[];
   selectedAnchorIndices: number[];
   selectedMaskId: string | null;
   marqueeSelection: MarqueeSelection | null;
   foregroundColor: ColorValue;
   typeOptions: TypeOptions;
   penOptions: PenOptions;
+  featherOptions: FeatherOptions;
+  /** What the alignment toolbar measures against. Remembered across selections. */
+  alignReference: AlignReferenceSetting;
   brushOptions: BrushOptions;
   marqueeOptions: MarqueeOptions;
   eyedropperOptions: EyedropperOptions;
   timelinePlaying: boolean;
   currentFrame: number;
+  /**
+   * Which objects the timeline lists.
+   *
+   * Lives here rather than in the panel so it survives the panel being re-mounted by a dock
+   * move — an author who filtered to the two objects they are animating should not get the
+   * whole scene back for re-docking the tab.
+   */
+  timelineRowFilter: TimelineRowFilter;
   setZoom: (zoom: number) => void;
   toggleSnapping: () => void;
   setActiveTool: (tool: EditorTool) => void;
-  setSelectedPaths: (objectIds: string[]) => void;
   setSelectedAnchors: (indices: number[]) => void;
   setSelectedMaskId: (maskId: string | null) => void;
   setMarqueeSelection: (selection: MarqueeSelection | null) => void;
   setForegroundColor: (color: ColorValue) => void;
   updateTypeOptions: (patch: Partial<TypeOptions>) => void;
   updatePenOptions: (patch: Partial<PenOptions>) => void;
+  updateFeatherOptions: (patch: Partial<FeatherOptions>) => void;
+  setAlignReference: (reference: AlignReferenceSetting) => void;
   updateBrushOptions: (patch: Partial<BrushOptions>) => void;
   updateMarqueeOptions: (patch: Partial<MarqueeOptions>) => void;
   updateEyedropperOptions: (patch: Partial<EyedropperOptions>) => void;
   setPenTarget: (target: PenTarget) => void;
-  setPropertiesTab: (tab: PropertiesTab) => void;
   setCurrentFrame: (frame: number, durationFrames?: number) => void;
   toggleTimelinePlayback: () => void;
   goToStart: () => void;
   stepTimeline: (durationFrames: number) => void;
+  setTimelineRowFilter: (filter: TimelineRowFilter) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
   zoom: 100,
   snapping: true,
-  propertiesTab: "Properties",
   activeTool: "select",
   penTarget: "shape",
   lastGroupTool: {
@@ -134,7 +177,6 @@ export const useUiStore = create<UiState>((set) => ({
     type: "horizontal-type",
     marquee: "rectangular-marquee"
   },
-  selectedPathObjectIds: [],
   selectedAnchorIndices: [],
   selectedMaskId: null,
   marqueeSelection: null,
@@ -151,6 +193,11 @@ export const useUiStore = create<UiState>((set) => ({
     fillEnabled: true,
     strokeEnabled: true
   },
+  featherOptions: {
+    linked: true,
+    sensitivity: 0.5
+  },
+  alignReference: "selection",
   brushOptions: {
     mode: "paint",
     size: 36,
@@ -182,7 +229,8 @@ export const useUiStore = create<UiState>((set) => ({
   },
   timelinePlaying: false,
   currentFrame: 0,
-  setZoom: (zoom) => set({ zoom }),
+  timelineRowFilter: "all",
+  setZoom: (zoom) => set({ zoom: clampZoom(zoom) }),
   toggleSnapping: () => set((state) => ({ snapping: !state.snapping })),
   setActiveTool: (activeTool) => set((state) => ({
     activeTool,
@@ -199,18 +247,18 @@ export const useUiStore = create<UiState>((set) => ({
         : {})
     }
   })),
-  setSelectedPaths: (selectedPathObjectIds) => set({ selectedPathObjectIds }),
   setSelectedAnchors: (selectedAnchorIndices) => set({ selectedAnchorIndices }),
   setSelectedMaskId: (selectedMaskId) => set({ selectedMaskId }),
   setMarqueeSelection: (marqueeSelection) => set({ marqueeSelection }),
   setForegroundColor: (foregroundColor) => set({ foregroundColor }),
   updateTypeOptions: (patch) => set((state) => ({ typeOptions: { ...state.typeOptions, ...patch } })),
   updatePenOptions: (patch) => set((state) => ({ penOptions: { ...state.penOptions, ...patch } })),
+  updateFeatherOptions: (patch) => set((state) => ({ featherOptions: { ...state.featherOptions, ...patch } })),
+  setAlignReference: (alignReference) => set({ alignReference }),
   updateBrushOptions: (patch) => set((state) => ({ brushOptions: { ...state.brushOptions, ...patch } })),
   updateMarqueeOptions: (patch) => set((state) => ({ marqueeOptions: { ...state.marqueeOptions, ...patch } })),
   updateEyedropperOptions: (patch) => set((state) => ({ eyedropperOptions: { ...state.eyedropperOptions, ...patch } })),
   setPenTarget: (penTarget) => set({ penTarget }),
-  setPropertiesTab: (propertiesTab) => set({ propertiesTab }),
   setCurrentFrame: (currentFrame, durationFrames) =>
     set({
       currentFrame: clampCurrentFrame(currentFrame, durationFrames)
@@ -225,7 +273,8 @@ export const useUiStore = create<UiState>((set) => ({
         currentFrame: nextFrame,
         timelinePlaying: nextFrame < durationFrames
       };
-    })
+    }),
+  setTimelineRowFilter: (timelineRowFilter) => set({ timelineRowFilter })
 }));
 
 function clampCurrentFrame(frame: number, durationFrames?: number): number {

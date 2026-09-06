@@ -1,0 +1,4 @@
+# Large, reproducible Render Queue frames. Per-frame pixel digests live in the tracked manifests.
+v1/references/*/frames/
+
+# Runtime checkout payloads are written under the adapter state directory, never here.

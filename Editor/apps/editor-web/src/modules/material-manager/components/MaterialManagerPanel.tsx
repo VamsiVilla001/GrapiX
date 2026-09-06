@@ -8,7 +8,8 @@ import {
   Search,
   Video
 } from "lucide-react";
-import { useRef, type DragEvent } from "react";
+// React 19 removed the global `JSX` namespace; it is now exported from React itself.
+import { useRef, type DragEvent, type JSX } from "react";
 import { useEditorStore } from "../../../store/editorStore";
 import { MaterialLibrary } from "./MaterialLibrary";
 import { MaterialPreview } from "./MaterialPreview";

@@ -87,7 +87,7 @@ Returns:
 Examples:
   - "Which blend modes actually render?" -> query="blend mode implemented"
   - "Can the Editor take a scene to air?" -> query="Program authority Editor invariant"
-  - "What is in a .gfxpkg?" -> query="scene package manifest checksums"
+  - "What is in a .gpxpkg?" -> query="scene package manifest checksums"
 
 Error handling: returns "No sections matched" with suggested broader terms when the query finds nothing.`,
     inputSchema: z

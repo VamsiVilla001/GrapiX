@@ -158,11 +158,29 @@ const scene = {
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z"
 };
+// A tiled stage, so the diagnostic table below is genuinely large. On the implicit 1920x1080
+// stage the whole scene is one tile and the reply fits in a single read - which would let a
+// broken length prefix pass the reassembly check.
+const ipcStage = {
+  stageId: "stage_ipc_e2e",
+  name: "IPC arena",
+  version: 1,
+  canvas: { logicalWidth: 20000, logicalHeight: 4000 },
+  regions: [],
+  surfaces: [],
+  viewports: [
+    { viewportId: "vp_all", name: "All", source: { type: "full-stage" }, renderScale: 0.05, enabled: true }
+  ],
+  outputs: [],
+  outputMappings: [],
+  tiling: { enabled: true, tileWidth: 2048, tileHeight: 2048, overscan: 32, maxResidentTiles: 256, cacheBudgetBytes: 536870912 }
+};
+await client.request("stage.load", { stage: ipcStage });
 
 const loaded = await client.request(
   "scene.load",
-  { scene, prepare: true },
-  { sceneId: scene.id, sceneRevision: 1 }
+  { scene, stageId: ipcStage.stageId, prepare: true },
+  { sceneRef: { projectId: "certification", domain: "authoring", sceneId: scene.id, revision: 1 } }
 );
 check(
   "a scene loads and prepares over IPC",
@@ -170,48 +188,42 @@ check(
   `state=${loaded.payload?.state} tiles=${loaded.payload?.preparedTileCount}`
 );
 
-// A large message over a stream socket is the case framing exists for: the reply carries
-// a base64 JPEG, which will not fit in one read.
+// A large message over a stream socket is the case framing exists for: a reply far bigger than
+// one read has to be reassembled from the length prefix, not from luck.
 //
-// `sceneId` is explicit. This used to rely on the engine picking a scene when none was cued,
-// which it did from HashMap order — so the harness passed while an operator could get a
-// preview of a scene they never selected. The engine now refuses; callers name what they mean.
-const preview = await client.request("preview.request", {
-  channel: "preview",
-  sceneId: scene.id,
-  source: { type: "scaled-stage", maxWidth: 960, maxHeight: 540 },
-  encoding: "jpeg",
-  quality: 80
-});
+// The payload is the per-tile diagnostic table rather than a preview image. Preview is an
+// operator verb, and IPC is the Editor's transport - the engine grants an IPC session Editor
+// authority and nothing more, so asking for a preview here would prove only that the engine
+// refuses it. The tile table is Editor-visible, and large for the same reason.
+const bulky = await client.request("engine.getDiagnostics", { includeTiles: true });
+const bulkyBytes = JSON.stringify(bulky.payload ?? {}).length;
 check(
-  "a multi-kilobyte preview reply is reassembled correctly",
-  preview.type === "reply.preview" && (preview.payload?.data?.length ?? 0) > 4096,
-  `${preview.payload?.width}x${preview.payload?.height}, ${Math.round((preview.payload?.data?.length ?? 0) / 1024)}KB base64`
+  "a multi-kilobyte reply is reassembled correctly",
+  bulky.type === "reply.diagnostics" && bulkyBytes > 4096,
+  `${bulky.payload?.tileDetail?.length ?? 0} tile rows, ${Math.round(bulkyBytes / 1024)}KB of JSON`
 );
 
-// Streamed frames arrive as addressed events, which proves event delivery works on this
-// transport too, not just request/reply.
-const frames = [];
+// Events arrive unbidden, which proves delivery works on this transport too, not just
+// request/reply. Scene lifecycle is the Editor-authority event: preparing a scene emits it,
+// and it reaches the pipe without anyone having asked for a reply.
+const lifecycle = [];
 client.on((event) => {
-  if (event.type === "engine-event" && event.eventType === "event.previewFrame") {
-    frames.push(event.message.payload);
+  if (event.type === "engine-event" && event.eventType === "event.sceneLifecycle") {
+    lifecycle.push(event.message.payload);
   }
 });
 
-await client.request("preview.streamStart", {
-  streamId: "ipc_stream",
-  channel: "preview",
-  source: { type: "scaled-stage", maxWidth: 320, maxHeight: 180 },
-  encoding: "jpeg",
-  targetFps: 8
-});
-await new Promise((resolve) => setTimeout(resolve, 1200));
-check(
-  "streamed frames arrive over IPC",
-  frames.length >= 2,
-  `${frames.length} frames in 1.2s at a target of 8 fps`
+await client.request(
+  "scene.prepare",
+  { sceneId: scene.id },
+  { sceneRef: { projectId: "certification", domain: "authoring", sceneId: scene.id, revision: 1 } }
 );
-await client.request("preview.streamStop", { streamId: "ipc_stream" });
+await new Promise((resolve) => setTimeout(resolve, 300));
+check(
+  "unrequested events arrive over IPC",
+  lifecycle.length >= 1,
+  `${lifecycle.length} scene-lifecycle events`
+);
 
 const patched = await client.request(
   "scene.applyPatch",
@@ -226,7 +238,7 @@ const patched = await client.request(
       ]
     }
   },
-  { sceneId: scene.id, sceneRevision: 1 }
+  { sceneRef: { projectId: "certification", domain: "authoring", sceneId: scene.id, revision: 1 } }
 );
 check(
   "a patch applies over IPC exactly as over WebSocket",
@@ -235,10 +247,14 @@ check(
 );
 
 const status = await client.request("engine.getStatus", {});
+// The engine reports a scene under its runtime SceneRef key, whose segments are
+// `length:value` - a plain-id comparison is never true and would assert nothing.
+const holdsScene = (payload) =>
+  (payload?.scenes ?? []).some((entry) => entry.sceneId?.includes(`:${scene.id}|`));
 check(
   "status is readable over IPC",
-  status.payload?.scenes?.[0]?.sceneId === scene.id,
-  `clients=${status.payload?.network?.connectedClients}`
+  holdsScene(status.payload),
+  `clients=${status.payload?.network?.connectedClients}, scenes=${status.payload?.scenes?.length ?? 0}`
 );
 
 // The engine keeps serving after a client leaves: Program state lives in the engine.
@@ -268,7 +284,7 @@ if (secondConnected) {
   const retained = await second.request("engine.getStatus", {});
   check(
     "the scene the first client loaded is still there",
-    retained.payload?.scenes?.[0]?.sceneId === scene.id,
+    holdsScene(retained.payload),
     `revision=${retained.payload?.scenes?.[0]?.revision}`
   );
   second.disconnect("e2e finished");

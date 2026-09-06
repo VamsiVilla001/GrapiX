@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+// React 19 removed the global `JSX` namespace; it is now exported from React itself.
+import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
 
 import type { EngineCapabilities } from "@grapix/render-protocol";
 
@@ -9,6 +10,7 @@ import {
   selectEditorBackend
 } from "../rendering/rendererPreference";
 import { useEditorStore } from "../store/editorStore";
+import { currentAccessToken } from "../lib/auth";
 
 /**
  * Render Engine panel.
@@ -99,7 +101,12 @@ export function RenderEnginePanel(): JSX.Element {
 
   const handleConnect = (profileId: string) =>
     run("connect", async () => {
-      const negotiated = await client.connect(profileId, token.trim() || undefined);
+      // The signed-in user's access token, unless the operator pasted a different one. This
+      // is what makes the engine's audit rows name a person: the same credential that opened
+      // the API opens the socket, so a scene load and the take that follows it are attributed
+      // to the same account rather than to "the Editor".
+      const credential = token.trim() || currentAccessToken() || undefined;
+      const negotiated = await client.connect(profileId, credential);
       setSelectedId(profileId);
       return (
         `connected to ${negotiated.engineName} — ${negotiated.gpu.adapter} ` +

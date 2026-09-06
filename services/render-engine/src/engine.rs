@@ -19,6 +19,7 @@ use std::time::Instant;
 use serde_json::{json, Value};
 use tokio::sync::broadcast;
 
+use grapix_render_core::output::{VideoFrame, VideoFramePool};
 use grapix_render_core::renderer::gpu::GpuContext;
 
 use crate::capabilities::{
@@ -157,6 +158,17 @@ pub struct EngineEvent {
     /// frame, never as JSON/base64; IPC intentionally does not expose this view.
     pub binary: Option<Vec<u8>>,
 }
+/// One bounded Program staging slab for an accepted AE ring frame.
+///
+/// `VideoFramePool` owns the allocation at source installation time. The Program tick merely leases
+/// that slab, copies into it, and returns it after every synchronous sink handoff.
+struct AeProgramStaging {
+    pool: VideoFramePool,
+    width: u32,
+    height: u32,
+    byte_length: usize,
+}
+
 
 pub struct Engine {
     pub config: EngineConfig,
@@ -173,6 +185,20 @@ pub struct Engine {
     stages: HashMap<String, StageDocument>,
     scenes: HashMap<String, LoadedScene>,
     program_scene_id: Option<String>,
+    /// Program's After Effects source, when Program is fed by the adapter ring rather than a scene.
+    /// `None` on every non-AE path, which is what keeps the scene renderer untouched by `AE-F2a`.
+    ae_program: Option<crate::ae_ingress::AeProgramSource>,
+    /// Adapter-owned source of leased AE frames. It is deliberately separate from ingress validation:
+    /// this boundary knows a ring lease, while `ae_program` knows only descriptor facts.
+    ae_program_frame_source: Option<Box<dyn crate::ae_ingress::AeProgramFrameSource>>,
+    /// The request half of the AE frame path: it carries the schedule's ledger to the adapter as
+    /// `RENDER_FRAME`. Absent means the schedule is computed and nothing is asked for, which is what
+    /// every phase before this one did.
+    ae_render_requester: Option<crate::ae_runtime_client::AeRenderRequester>,
+    /// Fixed Program handoff slab, allocated from the negotiated AE geometry rather than per frame.
+    ae_program_staging: Option<AeProgramStaging>,
+    /// Number of fixed staging allocations, including the initial negotiated geometry.
+    ae_program_staging_allocations: u64,
     preview_scene_id: Option<String>,
     /// Preview owns a playhead independent from Program. Sharing `LoadedScene::frame`
     /// made Cue either freeze Preview or rewind a scene that was already on air.
@@ -293,6 +319,11 @@ impl Engine {
             stages: HashMap::new(),
             scenes: HashMap::new(),
             program_scene_id: None,
+            ae_program: None,
+            ae_program_frame_source: None,
+            ae_render_requester: None,
+            ae_program_staging: None,
+            ae_program_staging_allocations: 0,
             preview_scene_id: None,
             preview_start_frame: 0,
             preview_started_at: None,
@@ -495,6 +526,56 @@ impl Engine {
             return Err(error);
         }
 
+        // Role says what a *connection* is; a permission says what a *request* needs. Checking
+        // only the former means every request type added later silently inherits whatever its
+        // role already had, and a narrowed token would be honoured at connect and ignored
+        // thereafter. So the token is consulted on every command, not once.
+        match crate::auth::permission_for_request(&envelope.message_type) {
+            crate::auth::RequiredPermission::None => {}
+            crate::auth::RequiredPermission::Needs(permission) => {
+                if !principal.allows_permission(permission) {
+                    let error = ProtocolError::new(
+                        ErrorCode::UnauthorizedRole,
+                        format!(
+                            "{} requires the {} permission, which this session does not carry",
+                            envelope.message_type,
+                            permission.as_str()
+                        ),
+                    );
+                    self.record_audit(
+                        principal,
+                        request,
+                        &envelope.message_type,
+                        envelope.scene_ref.clone(),
+                        &format!("refused: missing {}", permission.as_str()),
+                        None,
+                    );
+                    return Err(error);
+                }
+            }
+            crate::auth::RequiredPermission::Unknown => {
+                // A verb this build cannot classify is refused, never waved through. Treating
+                // an unrecognised message as unprivileged is how a protocol addition becomes
+                // an authority hole.
+                let error = ProtocolError::new(
+                    ErrorCode::UnauthorizedRole,
+                    format!(
+                        "{} is not a classified request type on this engine",
+                        envelope.message_type
+                    ),
+                );
+                self.record_audit(
+                    principal,
+                    request,
+                    &envelope.message_type,
+                    envelope.scene_ref.clone(),
+                    "refused: unclassified request",
+                    None,
+                );
+                return Err(error);
+            }
+        }
+
         let scene_ref = if request.requires_scene_ref() {
             let scene_ref = envelope.scene_ref.clone().ok_or_else(|| {
                 ProtocolError::new(
@@ -520,10 +601,24 @@ impl Engine {
             let runtime_key = scene_ref.cache_key();
             object.insert("sceneId".to_string(), Value::String(runtime_key.clone()));
             object.insert("sceneRevision".to_string(), Value::from(scene_ref.revision));
+            // Replace names its scene differently from every other verb, and the runtime key
+            // has to land on the same field the handler reads or the scene resolves to a bare
+            // id that was never loaded.
+            if request == RequestType::Replace {
+                object.insert("incomingSceneId".to_string(), Value::String(runtime_key.clone()));
+            }
             if matches!(request, RequestType::SceneLoad | RequestType::SceneFullSync) {
                 if let Some(scene) = object.get_mut("scene").and_then(Value::as_object_mut) {
                     scene.insert("id".to_string(), Value::String(runtime_key));
-                    scene.insert("revision".to_string(), Value::from(scene_ref.revision));
+                    // A plain load is keyed by the revision it arrives at, so the address and
+                    // the document revision are the same. A full sync addresses the scene being
+                    // replaced - the load revision - while the document it carries names the
+                    // *new* revision, and clobbering that with the address would make every
+                    // sync look like it changed nothing. The load keeps the address; the sync
+                    // keeps the document's own revision.
+                    if request == RequestType::SceneLoad {
+                        scene.insert("revision".to_string(), Value::from(scene_ref.revision));
+                    }
                 }
             }
             if request == RequestType::SceneApplyPatch {
@@ -603,6 +698,14 @@ impl Engine {
 
             RequestType::OutputList => Ok(("reply.outputs".to_string(), self.outputs_payload())),
             RequestType::OutputConfigure => self.handle_output_configure(payload),
+            #[cfg(windows)]
+            RequestType::AeContainerLoad => self.handle_ae_container_load(payload),
+            #[cfg(not(windows))]
+            RequestType::AeContainerLoad => Err(ProtocolError::new(
+                ErrorCode::InternalError,
+                "an After Effects container needs the Windows shared-memory ring and named pipe",
+            )),
+            RequestType::AeContainerUnload => self.handle_ae_container_unload(payload),
             RequestType::OutputStart => {
                 self.recovery_gate.permit_output().map_err(|error| {
                     ProtocolError::new(ErrorCode::OutputError, error.to_string())
@@ -875,14 +978,25 @@ impl Engine {
             .ok_or_else(|| ProtocolError::new(ErrorCode::InvalidPayload, "scene needs an id"))?
             .to_string();
 
+        // The ceiling guards memory the operator actually sees: each *published* scene on
+        // the engine is a render target. An Editor's authoring copy of the same scene is a
+        // working document, not a separate show - counting it would halve the operator's
+        // capacity for no protective purpose and, once a scene is normally delivered as both
+        // an authoring and a published copy, fail the eighth load with a message that blames
+        // a limit rather than the double-count.
+        let published_scenes = self
+            .scenes
+            .keys()
+            .filter(|key| key.contains("|9:published|"))
+            .count();
         if !full_sync
-            && self.scenes.len() >= self.config.stage.max_active_scenes as usize
+            && published_scenes >= self.config.stage.max_active_scenes as usize
             && !self.scenes.contains_key(&scene_id)
         {
             return Err(ProtocolError::new(
                 ErrorCode::EngineBusy,
                 format!(
-                    "engine holds its maximum of {} active scenes; unload one first",
+                    "engine holds its maximum of {} published scenes; unload one first",
                     self.config.stage.max_active_scenes
                 ),
             ));
@@ -1120,6 +1234,16 @@ impl Engine {
             }
         }
 
+        // Easings this build does not implement are a scene fault a client must see: the
+        // sampler holds the previous value, so the graphic renders and simply stops moving.
+        // Merged into the same warning list a prepared scene already reports, which is how it
+        // reaches the Editor's and Playout's consoles without a new protocol message.
+        for warning in crate::animation::collect_unknown_easings(scene.source_document()) {
+            if !warnings.contains(&warning) {
+                warnings.push(warning);
+            }
+        }
+
         scene.prepared_tile_count = prepared;
         scene.warnings = warnings.clone();
         scene.take_blockers = failures.clone();
@@ -1265,10 +1389,21 @@ impl Engine {
 
         let scene_id = patch.scene_id.clone();
         if !self.scenes.contains_key(&scene_id) {
-            return Err(ProtocolError::new(
-                ErrorCode::SceneNotFound,
-                format!("no scene {scene_id}"),
-            ));
+            // A patch whose address keys a scene the engine does not hold at that revision is
+            // the same disagreement `apply_patch` would report had the address resolved - and
+            // the caller recovers the same way, by resending the scene. `require_scene` names
+            // the revision the engine actually holds rather than a bare "not found", which is
+            // the difference between "you asked for the wrong version" and "it was never
+            // delivered" to whoever is reading the console.
+            let error = self
+                .require_scene(&scene_id)
+                .err()
+                .unwrap_or_else(|| ProtocolError::new(ErrorCode::SceneNotFound, format!("no scene {scene_id}")));
+            // A revision disagreement counts as a resync, matching the in-gate behaviour.
+            if error.code == ErrorCode::RevisionMismatch {
+                self.resync_count += 1;
+            }
+            return Err(error);
         }
 
         // Bounds before the patch, so a moved object can dirty the tiles it left as
@@ -3276,6 +3411,486 @@ impl Engine {
         self.program_scene_id.is_some()
     }
 
+    /// True when Program's frames come from After Effects rather than the scene renderer.
+    ///
+    /// Read in the clock's existing status lock so the non-AE path pays nothing for this phase: without
+    /// an AE source the clock keeps exactly its previous single-sleep shape.
+    pub fn has_ae_program_source(&self) -> bool {
+        self.ae_program.is_some()
+    }
+
+    /// Install the AE Program source, or refuse the topology or clock structurally.
+    pub fn set_ae_program_source(
+        &mut self,
+        session: crate::ae_ingress::AeIngressSession,
+        clock: crate::stage::AeCompositionClock,
+        data_revision: u64,
+    ) -> Result<(), crate::ae_ingress::AeIngressRefusal> {
+        let format = session.format.clone();
+        let rate = self.program_frame_rate();
+        let source = crate::ae_ingress::AeProgramSource::new(session, clock, rate, data_revision)?;
+        self.configure_ae_program_staging(&format)?;
+        self.ae_program_frame_source = None;
+        self.ae_program = Some(source);
+        Ok(())
+    }
+
+    pub fn clear_ae_program_source(&mut self) {
+        self.ae_program = None;
+        self.ae_program_frame_source = None;
+        self.ae_program_staging = None;
+    }
+
+
+    /// Attach the adapter-owned ring consumer after a local AE Program source has negotiated its
+    /// format. The source can expose only a lease and raw bytes; it has no Program or GPU authority.
+    pub fn set_ae_program_frame_source(
+        &mut self,
+        source: Box<dyn crate::ae_ingress::AeProgramFrameSource>,
+    ) -> Result<(), String> {
+        if self.ae_program.is_none() || self.ae_program_staging.is_none() {
+            return Err("AE Program ingress must be installed before its frame source".to_string());
+        }
+        // The ring is the physical bound on frames in flight, and only the source knows it. One slot
+        // is reserved for the publish the adapter is performing, so capacity is the count minus one.
+        if let (Some(slots), Some(program)) = (source.ring_slot_count(), self.ae_program.as_mut()) {
+            program.set_ring_capacity(slots.saturating_sub(1) as usize);
+        }
+        self.ae_program_frame_source = Some(source);
+        Ok(())
+    }
+
+    /// Fixed staging allocations made for the currently installed AE source lineage.
+    pub fn ae_program_staging_allocations(&self) -> u64 {
+        self.ae_program_staging_allocations
+    }
+    pub fn ae_program_counters(&self) -> Option<crate::ae_ingress::AeIngressCounters> {
+        self.ae_program.as_ref().map(|source| source.counters())
+    }
+
+    /// Ask After Effects for `frame`, at most once, ahead of its presentation deadline.
+    ///
+    /// Returns the request that was issued, or `None` when one is already outstanding, the frame is not
+    /// on a composition boundary, or there is no AE source. The clock calls this from its request stage;
+    /// it deliberately does **not** wait for the frame.
+    pub fn request_ae_program_frame(
+        &mut self,
+        frame: u64,
+        deadline_nanos: u64,
+    ) -> Option<crate::ae_ingress::AeFrameRequest> {
+        let issued = self.ae_program.as_mut()?.issue(frame, deadline_nanos);
+        if let Some(request) = issued.as_ref() {
+            self.send_ae_program_requests(std::slice::from_ref(request));
+        }
+        issued
+    }
+
+    /// Ask After Effects for every frame `AE-F2b`'s lead window needs, at most once each.
+    ///
+    /// The clock calls this at its request point and hands over only "the next frame" and "how long
+    /// this run has been going": the window, each frame's absolute deadline and the ring's capacity
+    /// are the source's own arithmetic, so the loop stays a scheduler and not a policy.
+    pub fn request_ae_program_frames(
+        &mut self,
+        next: u64,
+        elapsed_nanos: u64,
+    ) -> Vec<crate::ae_ingress::AeFrameRequest> {
+        let issued = self
+            .ae_program
+            .as_mut()
+            .map(|source| source.issue_window(next, elapsed_nanos))
+            .unwrap_or_default();
+        self.send_ae_program_requests(&issued);
+        issued
+    }
+
+    /// Post the ledger to After Effects.
+    ///
+    /// This is the only place a scheduled frame becomes a `RENDER_FRAME` on the wire, and it is here
+    /// rather than in the clock so that *every* producer of "ask AE for this frame" is wired: the lead
+    /// window, a single frame, and the re-requests a data revision invalidates. Submission never
+    /// blocks - a frame request that waits for After Effects has already missed the deadline it was
+    /// scheduled against.
+    fn send_ae_program_requests(&self, requests: &[crate::ae_ingress::AeFrameRequest]) {
+        let Some(requester) = self.ae_render_requester.as_ref() else {
+            return;
+        };
+        for request in requests {
+            requester.submit(request.clone());
+        }
+    }
+
+    /// Install the requester that carries scheduled frames to After Effects.
+    ///
+    /// Refused unless AE ingress is installed: a requester without a frame source would ask for pixels
+    /// nothing is waiting to receive, and the ring would back-pressure after four frames.
+    pub fn set_ae_render_requester(
+        &mut self,
+        requester: crate::ae_runtime_client::AeRenderRequester,
+    ) -> Result<(), String> {
+        if self.ae_program.is_none() {
+            return Err("AE Program ingress must be installed before its frame requester".to_string());
+        }
+        self.ae_render_requester = Some(requester);
+        Ok(())
+    }
+
+    /// Whether scheduled frames currently reach After Effects.
+    pub fn has_ae_render_requester(&self) -> bool {
+        self.ae_render_requester.is_some()
+    }
+
+    /// Counters for the status block: submitted, written, accepted, refused, ready, failed, dropped.
+    pub fn ae_render_requester_status(
+        &self,
+    ) -> Option<crate::ae_runtime_client::AeRenderRequesterStatus> {
+        self.ae_render_requester.as_ref().map(|requester| requester.status())
+    }
+
+    /// Drain what the pipe learned, applying `AE-F2b`'s back-pressure policy to the lead depth.
+    ///
+    /// The requester thread deliberately holds no engine lock, so this is where its findings land - on a
+    /// tick the clock already holds the lock for.
+    pub fn apply_ae_render_feedback(&mut self) -> Vec<crate::ae_runtime_client::AeRenderFeedback> {
+        let Some(requester) = self.ae_render_requester.as_ref() else {
+            return Vec::new();
+        };
+        let drained = requester.drain_feedback();
+        for event in &drained {
+            if matches!(
+                event,
+                crate::ae_runtime_client::AeRenderFeedback::RingBackpressure { .. }
+            ) {
+                self.note_ae_program_backpressure();
+            }
+        }
+        drained
+    }
+
+    /// Advance the AE data revision, returning the in-flight frames that must be asked for again.
+    pub fn set_ae_program_data_revision(
+        &mut self,
+        revision: u64,
+    ) -> Vec<crate::ae_ingress::AeFrameRequest> {
+        let reissued = self
+            .ae_program
+            .as_mut()
+            .map(|source| source.set_data_revision(revision))
+            .unwrap_or_default();
+        self.send_ae_program_requests(&reissued);
+        reissued
+    }
+    /// `PL3` · attach a live After Effects container to this running engine.
+    ///
+    /// This is the verb that makes the frame path reachable outside a test. It performs, in order, the
+    /// only sequence the adapter permits:
+    ///
+    /// 1. install ingress with the negotiated geometry and the composition's own clock;
+    /// 2. connect the requester, so scheduled frames have somewhere to go;
+    /// 3. ask for one warm-up frame — because the adapter creates its ring mapping **lazily, on the
+    ///    first publish**, so there is nothing to open until a frame has been requested;
+    /// 4. open that mapping as the frame source, bounded by a deadline.
+    ///
+    /// Success therefore means "attached and proven", not "configured". A failure at any step leaves
+    /// nothing half-installed: the container is detached again before the refusal is returned, because a
+    /// Program that believes it has an AE source and silently never asks for a frame is the exact fault
+    /// this whole track exists to remove.
+    ///
+    /// The session token arrives in the payload because Playout launched the host and owns it. It is
+    /// never echoed into the ack, the audit record or a log line.
+    #[cfg(windows)]
+    fn handle_ae_container_load(
+        &mut self,
+        payload: &Value,
+    ) -> Result<(String, Value), ProtocolError> {
+        let session_id = require_str(payload, "sessionId")?.to_string();
+        let token = require_str(payload, "token")?.to_string();
+        let composition_item_id = payload
+            .get("compositionItemId")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| {
+                ProtocolError::new(
+                    ErrorCode::InvalidPayload,
+                    "compositionItemId is required: a composition is addressed by stable item id",
+                )
+            })?;
+        let clock_value = payload.get("clock").ok_or_else(|| {
+            ProtocolError::new(
+                ErrorCode::InvalidPayload,
+                "clock is required: {frameDuration, timeScale} as the composition states them",
+            )
+        })?;
+        let frame_duration = require_str(clock_value, "frameDuration")?;
+        let time_scale = require_str(clock_value, "timeScale")?;
+        let clock = crate::stage::AeCompositionClock::from_decimal_strings(
+            frame_duration,
+            time_scale,
+        )
+        .ok_or_else(|| {
+            ProtocolError::new(
+                ErrorCode::InvalidPayload,
+                format!(
+                    "clock {frame_duration}/{time_scale} is not a usable composition frame duration"
+                ),
+            )
+        })?;
+        let format_value = payload.get("format").ok_or_else(|| {
+            ProtocolError::new(
+                ErrorCode::InvalidPayload,
+                "format is required: the negotiated geometry a descriptor must match exactly",
+            )
+        })?;
+        let width = require_dimension(format_value, "width")?;
+        let height = require_dimension(format_value, "height")?;
+        let ring_generation = payload
+            .get("ringGeneration")
+            .and_then(Value::as_u64)
+            .unwrap_or(1);
+        let data_revision = payload
+            .get("dataRevision")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let warm_up_frame = payload.get("warmUpFrame").and_then(Value::as_u64).unwrap_or(1);
+
+        let mut session = crate::ae_ingress::AeIngressSession {
+            origin: crate::ae_ingress::AeSessionOrigin::LocalSharedMemory,
+            ring_generation,
+            composition_item_id,
+            format: crate::ae_ingress::AeNegotiatedFormat {
+                width,
+                height,
+                // Four bytes per pixel, packed: the adapter's own rows are unpadded and any other
+                // stride is a descriptor mismatch rather than a conversion.
+                stride: width.saturating_mul(4),
+                color_format: crate::protocol::AeFrameColorFormat::Bgra8,
+                alpha_mode: "premultiplied".to_string(),
+                color_space: "sRGB".to_string(),
+            },
+        };
+        if let Some(color_space) = format_value.get("colorSpace").and_then(Value::as_str) {
+            session.format.color_space = color_space.to_string();
+        }
+        if let Some(alpha_mode) = format_value.get("alphaMode").and_then(Value::as_str) {
+            session.format.alpha_mode = alpha_mode.to_string();
+        }
+
+        self.set_ae_program_source(session, clock, data_revision)
+            .map_err(|refusal| {
+                ProtocolError::new(ErrorCode::InvalidPayload, format!("{refusal:?}"))
+            })?;
+
+        let requester = crate::ae_runtime_client::connect(
+            crate::ae_runtime_client::AeRuntimeClientConfig::new(session_id.clone(), token),
+        )
+        .map_err(|detail| {
+            self.detach_ae_container();
+            ProtocolError::new(
+                ErrorCode::InternalError,
+                format!("the adapter's request pipe is not available: {detail}"),
+            )
+        })?;
+        self.set_ae_render_requester(requester)
+            .map_err(|detail| ProtocolError::new(ErrorCode::InternalError, detail))?;
+
+        // The warm-up request is what brings the mapping into existence.
+        let deadline_nanos = self.program_frame_rate().deadline_nanos(warm_up_frame);
+        let requested = self.request_ae_program_frame(warm_up_frame, deadline_nanos).is_some();
+
+        let mapping =
+            crate::ae_ring_source::MappedAeProgramFrameSource::mapping_name_for_session(&session_id);
+        let wait_until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let source = loop {
+            match crate::ae_ring_source::MappedAeProgramFrameSource::open(
+                mapping.clone(),
+                std::process::id() as u64,
+                data_revision,
+                Some(ring_generation),
+            ) {
+                Ok(source) => break source,
+                Err(error) => {
+                    if std::time::Instant::now() >= wait_until {
+                        let status = self.ae_render_requester_status();
+                        self.detach_ae_container();
+                        return Err(ProtocolError::new(
+                            ErrorCode::InternalError,
+                            format!(
+                                "no frame was published for the warm-up request, so the container is \
+                                 not attached: {} (requester {status:?})",
+                                error.detail
+                            ),
+                        ));
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+            }
+        };
+        let slots = crate::ae_ingress::AeProgramFrameSource::ring_slot_count(&source);
+        self.set_ae_program_frame_source(Box::new(source))
+            .map_err(|detail| {
+                ProtocolError::new(ErrorCode::InternalError, detail)
+            })?;
+
+        Ok((
+            "ae.container.loaded".to_string(),
+            serde_json::json!({
+                "sessionId": session_id,
+                "compositionItemId": composition_item_id,
+                "ringGeneration": ring_generation,
+                "ringSlots": slots,
+                "dataRevision": data_revision,
+                "warmUpFrame": warm_up_frame,
+                "warmUpRequested": requested,
+                "geometry": { "width": width, "height": height, "stride": width.saturating_mul(4) },
+                "clock": { "frameDuration": frame_duration, "timeScale": time_scale },
+                "programFrameRate": {
+                    "numerator": self.program_frame_rate().numerator,
+                    "denominator": self.program_frame_rate().denominator
+                }
+            }),
+        ))
+    }
+
+    /// Detach the container: the requester's thread ends and the ring consumer releases its claim.
+    fn detach_ae_container(&mut self) {
+        self.ae_render_requester = None;
+        self.ae_program_frame_source = None;
+    }
+
+    /// `PL3` · detach a container, so the adapter's single consumer slot is released.
+    fn handle_ae_container_unload(
+        &mut self,
+        _payload: &Value,
+    ) -> Result<(String, Value), ProtocolError> {
+        let was_attached = self.ae_render_requester.is_some();
+        self.detach_ae_container();
+        Ok((
+            "ae.container.unloaded".to_string(),
+            serde_json::json!({ "wasAttached": was_attached }),
+        ))
+    }
+
+    /// Report that the ring refused a publish. Back-pressure shrinks the lead depth by one step.
+    pub fn note_ae_program_backpressure(&mut self) {
+        if let Some(source) = self.ae_program.as_mut() {
+            source.note_backpressure();
+        }
+    }
+
+    /// The lead depth in force, the depth the rate asks for, and the ring capacity bounding both.
+    pub fn ae_program_pipeline(&self) -> Option<crate::ae_schedule::AeFramePipeline> {
+        self.ae_program.as_ref().map(|source| source.pipeline())
+    }
+
+    /// Abandon outstanding requests the clock has skipped past. Each counts as missed, never queued.
+    pub fn abandon_ae_program_requests_before(&mut self, due: u64) -> Vec<u64> {
+        self.ae_program
+            .as_mut()
+            .map(|source| source.abandon_before(due))
+            .unwrap_or_default()
+    }
+
+    /// Validate a published descriptor against the request that asked for it.
+    pub fn accept_ae_program_frame(
+        &mut self,
+        descriptor: &crate::protocol::AeFrameDescriptor,
+        due: u64,
+        now_nanos: u64,
+    ) -> Option<Result<crate::ae_ingress::AeAcceptedFrame, crate::ae_ingress::AeIngressRefusal>> {
+        Some(self.ae_program.as_mut()?.accept(descriptor, due, now_nanos))
+    }
+
+    fn configure_ae_program_staging(
+        &mut self,
+        format: &crate::ae_ingress::AeNegotiatedFormat,
+    ) -> Result<(), crate::ae_ingress::AeIngressRefusal> {
+        let byte_length = format
+            .stride
+            .checked_mul(format.height)
+            .filter(|length| *length > 0)
+            .and_then(|length| usize::try_from(length).ok())
+            .ok_or_else(|| crate::ae_ingress::AeIngressRefusal::ImpossibleGeometry {
+                detail: "negotiated stride times height is not a positive host size".to_string(),
+            })?;
+
+        if self.ae_program_staging.as_ref().is_some_and(|staging| {
+            staging.width == format.width
+                && staging.height == format.height
+                && staging.byte_length == byte_length
+        }) {
+            return Ok(());
+        }
+
+        let pool = VideoFramePool::new(1, byte_length).map_err(|error| {
+            crate::ae_ingress::AeIngressRefusal::ImpossibleGeometry {
+                detail: format!("could not allocate AE Program staging slab: {error}"),
+            }
+        })?;
+        self.ae_program_staging = Some(AeProgramStaging {
+            pool,
+            width: format.width,
+            height: format.height,
+            byte_length,
+        });
+        self.ae_program_staging_allocations += 1;
+        Ok(())
+    }
+
+    /// All running outputs must accept the exact bytes AE published. There is deliberately no swizzle,
+    /// alpha conversion, colour transform, or stride repack on this seam.
+    fn ae_egress_format_error(&self, descriptor: &crate::protocol::AeFrameDescriptor) -> Option<String> {
+        if descriptor.color_format != crate::protocol::AeFrameColorFormat::Bgra8
+            || descriptor.alpha_mode != "premultiplied"
+            || !descriptor.color_space.eq_ignore_ascii_case("srgb")
+        {
+            return Some(format!(
+                "daemon requires premultiplied bgra8 srgb; descriptor is {:?}, {}, {}",
+                descriptor.color_format, descriptor.alpha_mode, descriptor.color_space
+            ));
+        }
+        let Some(tight_stride) = descriptor.width.checked_mul(4) else {
+            return Some("descriptor width overflows tight bgra8 stride".to_string());
+        };
+        if descriptor.stride != tight_stride {
+            return Some(format!(
+                "output frame has no stride field; descriptor stride {} is not tight bgra8 {}",
+                descriptor.stride, tight_stride
+            ));
+        }
+        for output in self.outputs.iter().filter(|output| output.is_running()) {
+            if let Err(error) = outputs::validate_ndi_format(&output.format) {
+                return Some(format!("output {} rejects its format: {error}", output.output_id));
+            }
+            if output.format.width != descriptor.width
+                || output.format.height != descriptor.height
+                || output.format.color_space != "srgb"
+            {
+                return Some(format!(
+                    "output {} format {}x{} {} does not match descriptor {}x{} srgb",
+                    output.output_id,
+                    output.format.width,
+                    output.format.height,
+                    output.format.color_space,
+                    descriptor.width,
+                    descriptor.height
+                ));
+            }
+        }
+        None
+    }
+
+    fn refuse_ae_program_frame(
+        &mut self,
+        descriptor: &crate::protocol::AeFrameDescriptor,
+        due: u64,
+        now_nanos: u64,
+        refusal: crate::ae_ingress::AeIngressRefusal,
+    ) -> crate::ae_ingress::AeIngressRefusal {
+        self.ae_program
+            .as_mut()
+            .expect("AE Program branch has an ingress source")
+            .refuse(descriptor, due, now_nanos, refusal)
+    }
+
     /// Advance the Program playhead by the frames that have actually elapsed.
     ///
     /// Program output and its monitor sample `LoadedScene::frame`; the dedicated Preview
@@ -3303,6 +3918,12 @@ impl Engine {
     pub fn render_program_frame(&mut self, frame: u64) -> Result<usize, String> {
         if !self.has_running_outputs() {
             return Ok(0);
+        }
+
+        // AE owns evaluation but not Program: once installed, its leased ring frame is the Program
+        // source. Keeping this branch before every scene/GPU operation leaves the non-AE path intact.
+        if self.ae_program.is_some() {
+            return self.render_ae_program_frame(frame);
         }
 
         let Some(scene_id) = self.program_scene_id.as_deref() else {
@@ -3394,6 +4015,125 @@ impl Engine {
 
         // Status construction clones adapter strings, so it is deliberately
         // exceptional work rather than an allocation made by every frame.
+        if output_error {
+            for index in 0..self.outputs.len() {
+                if self.outputs[index].is_error() {
+                    let status = self.outputs[index].status();
+                    self.emit(
+                        "event.outputHealth",
+                        serde_json::to_value(&status).unwrap_or(Value::Null),
+                    );
+                }
+            }
+        }
+        Ok(delivered)
+    }
+
+    fn render_ae_program_frame(&mut self, frame: u64) -> Result<usize, String> {
+        let now_nanos = self.started_at.elapsed().as_nanos() as u64;
+        let mut source = self
+            .ae_program_frame_source
+            .take()
+            .ok_or_else(|| "AE Program source has no attached frame consumer".to_string())?;
+
+        let (slot_index, result) = match source.take_ready_frame(frame) {
+            Err(error) => {
+                if let Some(slot_index) = error.slot_index {
+                    source.release_frame(slot_index);
+                }
+                (None, Err(format!("AE frame source error: {}", error.detail)))
+            }
+            Ok(None) => (None, Ok(0)),
+            Ok(Some(leased)) => {
+                let slot_index = leased.descriptor.slot_index;
+                let result =
+                    self.render_ae_leased_program_frame(leased.descriptor, leased.bytes, frame, now_nanos);
+                (Some(slot_index), result)
+            }
+        };
+
+        // The ring is bounded. Returning the lease is unconditional, including every ingress refusal,
+        // staging failure, and source error that named an acquired slot.
+        if let Some(slot_index) = slot_index {
+            source.release_frame(slot_index);
+        }
+        self.ae_program_frame_source = Some(source);
+        result
+    }
+
+    fn render_ae_leased_program_frame(
+        &mut self,
+        descriptor: &crate::protocol::AeFrameDescriptor,
+        bytes: &[u8],
+        due: u64,
+        now_nanos: u64,
+    ) -> Result<usize, String> {
+        if let Some(detail) = self.ae_egress_format_error(descriptor) {
+            let refusal = self.refuse_ae_program_frame(
+                descriptor,
+                due,
+                now_nanos,
+                crate::ae_ingress::AeIngressRefusal::FormatMismatch { detail: detail.clone() },
+            );
+            return Err(format!("{}: egress format disagreement: {detail}", refusal.code()));
+        }
+
+        let expected_bytes = self
+            .ae_program_staging
+            .as_ref()
+            .ok_or_else(|| "AE Program source has no negotiated staging slab".to_string())?
+            .byte_length;
+        if bytes.len() != expected_bytes {
+            let refusal = self.refuse_ae_program_frame(
+                descriptor,
+                due,
+                now_nanos,
+                crate::ae_ingress::AeIngressRefusal::ImpossibleGeometry {
+                    detail: format!(
+                        "leased byte length {} does not equal negotiated {}",
+                        bytes.len(),
+                        expected_bytes
+                    ),
+                },
+            );
+            return Err(format!("{}: leased bytes do not match geometry", refusal.code()));
+        }
+
+        let mut staging = self
+            .ae_program_staging
+            .as_ref()
+            .expect("checked above")
+            .pool
+            .try_acquire()
+            .ok_or_else(|| "AE Program staging slab is unexpectedly leased".to_string())?;
+        self.accept_ae_program_frame(descriptor, due, now_nanos)
+            .ok_or_else(|| "AE Program ingress disappeared during frame delivery".to_string())?
+            .map_err(|refusal| format!("{}: descriptor refused", refusal.code()))?;
+
+        let started = Instant::now();
+        staging.as_mut_slice().copy_from_slice(bytes);
+        let video = VideoFrame {
+            width: descriptor.width,
+            height: descriptor.height,
+            data: staging,
+            frame_index: descriptor.frame_id,
+        };
+
+        self.frames_rendered += 1;
+        self.last_render_micros = started.elapsed().as_micros() as u64;
+        self.clear_program_error();
+
+        let mut delivered = 0usize;
+        let mut output_error = false;
+        for output in self.outputs.iter_mut() {
+            if !output.is_running() {
+                continue;
+            }
+            if output.send(&video) {
+                delivered += 1;
+            }
+            output_error |= output.is_error();
+        }
         if output_error {
             for index in 0..self.outputs.len() {
                 if self.outputs[index].is_error() {
@@ -3549,14 +4289,29 @@ impl Engine {
 
     /// Full status, and diagnostics when `include_tiles` is set.
     pub fn status_payload(&self, include_tiles: bool) -> Value {
-        let program_stage = self
+        // Program first, then preview: what is on air describes the engine best.
+        //
+        // With neither - an Editor authoring session, which is a whole product's normal state -
+        // the engine used to describe itself with an implicit 1920x1080 stage it was not using.
+        // An operator reading "1920x1080" off an engine holding a 50,000-wide stage is being
+        // told something false. So when exactly one scene is loaded, that scene's stage is the
+        // answer; it is unambiguous, and it is the stage the engine really holds. Two or more
+        // uncued scenes stay implicit rather than picking one arbitrarily.
+        let sole_loaded_stage = || {
+            if self.scenes.len() != 1 {
+                return None;
+            }
+            let scene_id = self.scenes.keys().next()?;
+            self.stage_for_scene(scene_id).ok()
+        };
+
+        let stage = self
             .program_scene_id
             .as_ref()
             .or(self.preview_scene_id.as_ref())
-            .and_then(|scene_id| self.stage_for_scene(scene_id).ok());
-
-        let stage =
-            program_stage.unwrap_or_else(|| StageDocument::implicit("stage_none", 1920.0, 1080.0));
+            .and_then(|scene_id| self.stage_for_scene(scene_id).ok())
+            .or_else(sole_loaded_stage)
+            .unwrap_or_else(|| StageDocument::implicit("stage_none", 1920.0, 1080.0));
 
         let (
             mut tracked,
@@ -3772,6 +4527,42 @@ impl Engine {
                 .unwrap_or_else(|_| self.config.assets.cache_directory.clone()),
         });
 
+        // AE Program facts, and only when After Effects is the source: a non-AE engine's status keeps
+        // exactly the shape it had, so nothing downstream has to learn a block that is always absent.
+        //
+        // These are facts, not policy. `PL4` decides what an operator sees; `CB4` classifies runs.
+        // Both need the pipeline's depth alongside the counters, because a pipeline that has settled a
+        // step shallow after back-pressure presents differently from one at its configured depth, and
+        // the counters alone cannot say which is in force *now*.
+        if let (Some(counters), Some(pipeline)) =
+            (self.ae_program_counters(), self.ae_program_pipeline())
+        {
+            if let Some(object) = status.as_object_mut() {
+                object.insert(
+                    "aeProgram".to_string(),
+                    json!({
+                        "leadDepth": pipeline.effective_depth(),
+                        "configuredLeadDepth": pipeline.configured_depth(),
+                        "ringCapacity": pipeline.capacity(),
+                        "inFlight": self.ae_program.as_ref().map(|source| source.in_flight_len()),
+                        "stagingAllocations": self.ae_program_staging_allocations,
+                        "requested": counters.requested,
+                        "readyBeforeDeadline": counters.ready_before_deadline,
+                        "late": counters.late,
+                        "missed": counters.missed,
+                        "ringBackpressured": counters.ring_backpressured,
+                        "staleRevision": counters.stale_revision,
+                        "rejectedFormat": counters.rejected_format,
+                        "refusedOther": counters.refused_other,
+                        "inFlightSaturated": counters.in_flight_saturated,
+                        "revisionSuperseded": counters.revision_superseded,
+                        "leadDepthReduced": counters.lead_depth_reduced,
+                        "leadDepthRestored": counters.lead_depth_restored,
+                    }),
+                );
+            }
+        }
+
         if include_tiles {
             if let Some(object) = status.as_object_mut() {
                 object.insert(
@@ -3829,9 +4620,39 @@ impl Engine {
     }
 
     fn require_scene(&self, scene_id: &str) -> Result<&LoadedScene, ProtocolError> {
-        self.scenes.get(scene_id).ok_or_else(|| {
-            ProtocolError::new(ErrorCode::SceneNotFound, format!("no scene {scene_id}"))
-        })
+        if let Some(scene) = self.scenes.get(scene_id) {
+            return Ok(scene);
+        }
+
+        // A runtime key ends in `|<revision>`, so the same scene at another revision shares
+        // everything before it. Telling an operator "no scene ...|99" when the engine holds
+        // revision 2 of that very scene names neither the cause nor the fix - and on air the
+        // difference between "this scene was never delivered" and "you asked for the wrong
+        // version" is the difference between a rebuild and a re-cue.
+        if let Some((address, _)) = scene_id.rsplit_once('|') {
+            let mut held: Vec<&str> = self
+                .scenes
+                .keys()
+                .filter_map(|key| key.rsplit_once('|'))
+                .filter(|(candidate, _)| *candidate == address)
+                .map(|(_, revision)| revision)
+                .collect();
+            if !held.is_empty() {
+                held.sort_unstable();
+                return Err(ProtocolError::new(
+                    ErrorCode::RevisionMismatch,
+                    format!(
+                        "no scene {scene_id}; this engine holds revision {} of it - cue that revision, or resend the scene with scene.fullSync",
+                        held.join(", ")
+                    ),
+                ));
+            }
+        }
+
+        Err(ProtocolError::new(
+            ErrorCode::SceneNotFound,
+            format!("no scene {scene_id}"),
+        ))
     }
 
     /// Reject a command that names a revision the engine does not hold.
@@ -3995,6 +4816,22 @@ fn require_str<'a>(payload: &'a Value, key: &str) -> Result<&'a str, ProtocolErr
         .get(key)
         .and_then(Value::as_str)
         .ok_or_else(|| ProtocolError::new(ErrorCode::InvalidPayload, format!("missing {key}")))
+}
+
+/// A pixel dimension that must be positive and representable, because a negotiated geometry of zero or
+/// of 2^32 is not a geometry a descriptor could ever match.
+fn require_dimension(payload: &Value, key: &str) -> Result<u32, ProtocolError> {
+    payload
+        .get(key)
+        .and_then(Value::as_u64)
+        .filter(|value| *value > 0)
+        .and_then(|value| u32::try_from(value).ok())
+        .ok_or_else(|| {
+            ProtocolError::new(
+                ErrorCode::InvalidPayload,
+                format!("{key} must be a positive 32-bit pixel count"),
+            )
+        })
 }
 
 fn require_channel(payload: &Value) -> Result<Channel, ProtocolError> {

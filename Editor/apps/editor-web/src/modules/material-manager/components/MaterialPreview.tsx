@@ -4,6 +4,7 @@ import { GpuSceneStage } from "../../../components/GpuSceneStage";
 import { resolveRenderableObjects } from "../../../rendering/sceneMaterial";
 import { useEditorStore } from "../../../store/editorStore";
 import { useMaterialManagerStore } from "../stores/materialManagerStore";
+import { resolveProjectAssetUrl } from "../../../lib/projectAssets";
 
 export function MaterialPreview() {
   const scene = useEditorStore((state) => state.scene);
@@ -25,7 +26,7 @@ export function MaterialPreview() {
       </header>
       <div className={`material-preview material-preview-${background}`}>
         {preview ? <GpuSceneStage scene={preview} objects={resolveRenderableObjects(preview)} /> : null}
-        {!preview && asset && ["image", "svg"].includes(asset.kind) && asset.status !== "MISSING" ? <img src={asset.source} alt={asset.name} /> : null}
+        {!preview && asset && ["image", "svg"].includes(asset.kind) && asset.status !== "MISSING" ? <img src={resolveProjectAssetUrl(asset.source)} alt={asset.name} /> : null}
         {!preview && !asset ? <span>Select a material to render its live preview.</span> : null}
         {asset?.status === "MISSING" ? <span className="preview-warning">Source is missing. Relink the asset to restore the preview.</span> : null}
       </div>

@@ -15,29 +15,43 @@ import { fileURLToPath } from "node:url";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const fixturesDir = path.join(packageRoot, "fixtures");
-const outputPath = path.join(fixturesDir, "scene-document.v1.json");
 const checkMode = process.argv.includes("--check");
 
-const { sceneDocumentContractFixtureV1 } = await import(
+const { animatablePropertiesContractFixture, sceneDocumentContractFixtureV1 } = await import(
   new URL("../dist/fixtures.js", import.meta.url).href
 );
 
-const json = `${JSON.stringify(sceneDocumentContractFixtureV1, null, 2)}\n`;
+const outputs = [
+  ["scene-document.v1.json", sceneDocumentContractFixtureV1],
+  // The animatability table `services/render-engine/src/animation.rs` asserts against.
+  ["animatable-properties.json", animatablePropertiesContractFixture]
+];
 
-if (checkMode) {
-  const committed = await readFile(outputPath, "utf8").catch(() => null);
+let stale = false;
 
-  if (committed !== json) {
-    console.error(
-      `fixtures out of date: ${path.relative(packageRoot, outputPath)} does not match src/fixtures.ts.\n` +
-        "Run: npm run fixtures:emit -w @grapix/shared-types"
-    );
-    process.exit(1);
+for (const [fileName, fixture] of outputs) {
+  const outputPath = path.join(fixturesDir, fileName);
+  const json = `${JSON.stringify(fixture, null, 2)}\n`;
+
+  if (checkMode) {
+    const committed = await readFile(outputPath, "utf8").catch(() => null);
+
+    if (committed !== json) {
+      console.error(
+        `fixtures out of date: ${path.relative(packageRoot, outputPath)} does not match src/fixtures.ts.\n` +
+          "Run: npm run fixtures:emit -w @grapix/shared-types"
+      );
+      stale = true;
+    }
+    continue;
   }
 
-  console.log("fixtures up to date");
-} else {
   await mkdir(fixturesDir, { recursive: true });
   await writeFile(outputPath, json);
   console.log(`wrote ${path.relative(packageRoot, outputPath)}`);
+}
+
+if (checkMode) {
+  if (stale) process.exit(1);
+  console.log("fixtures up to date");
 }

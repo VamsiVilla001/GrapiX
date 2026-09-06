@@ -24,10 +24,18 @@ export interface GatewayConfig {
 /** The scopes the Photoshop API SDK's own samples request. */
 const DEFAULT_PS_API_SCOPES = ["openid", "AdobeID", "read_organizations"];
 
+/** A short shared secret is readily guessable by another local process. */
+const MIN_GATEWAY_TOKEN_LENGTH = 16;
+
 export function loadGatewayConfig(override?: Partial<GatewayConfig>): GatewayConfig {
   const port = override?.port ?? parseInt(process.env.GRAPIX_ADOBE_GATEWAY_PORT || "4784", 10);
   const host = override?.host ?? (process.env.GRAPIX_ADOBE_GATEWAY_HOST || "127.0.0.1");
-  const token = override?.token ?? (process.env.GRAPIX_ADOBE_GATEWAY_TOKEN || "grapix-adobe-token-secret");
+  const token = override?.token ?? process.env.GRAPIX_ADOBE_GATEWAY_TOKEN;
+  if (!token || token.length < MIN_GATEWAY_TOKEN_LENGTH) {
+    throw new Error(
+      `GRAPIX_ADOBE_GATEWAY_TOKEN must be set to at least ${MIN_GATEWAY_TOKEN_LENGTH} characters before starting the Adobe MCP gateway.`
+    );
+  }
   const allowPublic = override?.allowPublic ?? process.env.GRAPIX_ADOBE_ALLOW_PUBLIC === "true";
 
   return {

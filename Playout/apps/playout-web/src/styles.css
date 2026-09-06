@@ -180,6 +180,16 @@ button {
   flex: 1;
 }
 
+/* The remedy sits under the summary: what to do is more useful than what happened. */
+.banner-remedy {
+  display: block;
+  margin-top: 2px;
+  color: #f0d6d8;
+  font-size: 10px;
+  font-style: normal;
+  opacity: 0.85;
+}
+
 .error-banner button {
   border: 0;
   background: transparent;
@@ -1485,4 +1495,387 @@ button {
 
 .spin {
   animation: spin 1s linear infinite;
+}
+
+
+/* ---------------------------------------------------------------------------
+   Operator console
+
+   Opened when something is wrong, and closed the rest of the time — a station's
+   screen space belongs to Scene Manager, the Take List and the monitors. Levels
+   are colour-coded on the left edge because an operator scans this list while a
+   show is running, and the failure is nearly always the newest red row.
+   --------------------------------------------------------------------------- */
+
+.console-toggle {
+  position: relative;
+}
+
+.console-toggle.active {
+  border-color: var(--blue-dark);
+  background: #1c2f42;
+}
+
+.console-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--red);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+}
+
+.diagnostics-console {
+  display: flex;
+  flex-direction: column;
+  max-height: 42vh;
+  min-height: 160px;
+  margin: 0 5px 5px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+  box-shadow: 0 -2px 10px #0008;
+}
+
+.diagnostics-console > header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  height: 31px;
+  padding: 0 7px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(#1b2834, #15202a);
+  font-size: 11px;
+}
+
+.console-count {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.console-filters {
+  display: flex;
+  gap: 3px;
+  margin-left: auto;
+}
+
+.console-chip {
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #0f1922;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.console-chip.active {
+  border-color: var(--blue-dark);
+  color: #cfe3f5;
+  background: #1b2d3e;
+}
+
+.console-search {
+  width: 240px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: #0d151c;
+  color: #d6e2ec;
+  font-size: 10px;
+}
+
+.console-note {
+  margin: 0;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--amber);
+  font-size: 10px;
+}
+
+.console-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-color: #3a4a58 #101820;
+  scrollbar-width: thin;
+}
+
+.console-record {
+  border-bottom: 1px solid var(--line-soft);
+  border-left: 3px solid #3a4a58;
+}
+
+.console-record.error {
+  border-left-color: var(--red);
+}
+
+.console-record.warning {
+  border-left-color: var(--amber);
+}
+
+.console-record.info {
+  border-left-color: var(--blue-dark);
+}
+
+.console-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  background: transparent;
+  color: #d6e2ec;
+  font: inherit;
+  font-size: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.console-row:hover {
+  background: #16222d;
+}
+
+.console-record.error .console-level-icon {
+  color: var(--red);
+}
+
+.console-record.warning .console-level-icon {
+  color: var(--amber);
+}
+
+.console-record.info .console-level-icon {
+  color: var(--blue);
+}
+
+.console-row time {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.console-source {
+  flex: 0 0 auto;
+  max-width: 190px;
+  overflow: hidden;
+  color: #8fb4d6;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.console-message {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.console-code {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: #0e161d;
+  color: #7d8ea0;
+  font-size: 9px;
+}
+
+.console-detail {
+  padding: 2px 8px 9px 27px;
+  background: #0d151c;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.console-detail p {
+  display: flex;
+  gap: 8px;
+  margin: 4px 0;
+}
+
+.console-label {
+  flex: 0 0 62px;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.console-value {
+  flex: 1 1 auto;
+  color: #d6e2ec;
+  overflow-wrap: anywhere;
+}
+
+/* The remedy is the reason this panel exists, so it does not look like another field. */
+.console-remedy .console-value {
+  padding: 5px 7px;
+  border-left: 2px solid var(--green);
+  border-radius: 2px;
+  background: #12241c;
+  color: #cfeeda;
+  font-style: normal;
+}
+
+.console-context {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  margin: 6px 0 0;
+  gap: 2px 10px;
+}
+
+.console-context div {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.console-context dt {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.console-context dd {
+  flex: 1 1 auto;
+  margin: 0;
+  color: #c4d4e2;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 9px;
+  overflow-wrap: anywhere;
+}
+
+.console-stack {
+  max-height: 150px;
+  margin: 7px 0 0;
+  padding: 6px 7px;
+  overflow: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 2px;
+  background: #0a1015;
+  color: #9fb1c1;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.console-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.console-origin {
+  flex: 1 1 auto;
+  color: #63747f;
+  font-size: 9px;
+}
+
+.console-empty {
+  margin: 0;
+  padding: 16px 12px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+  text-align: center;
+}
+/* ---------------------------------------------------------------------------
+   Sign-in gate
+
+   Full-viewport and not dismissable: an operator without an identity has no authority to
+   cue or take, and the engine refuses those verbs from an unidentified session. Showing the
+   transport behind a modal would promise control that does not exist.
+   --------------------------------------------------------------------------- */
+
+.login-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  background: radial-gradient(120% 120% at 50% 0%, #16222f 0%, #080d12 100%);
+}
+
+.login-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  width: min(380px, calc(100vw - 40px));
+  padding: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.7);
+  color: #dce6ef;
+  background: #111a23;
+}
+
+.login-dialog > header {
+  display: flex;
+  justify-content: center;
+  font-size: 17px;
+}
+
+.login-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.login-field > span {
+  font-size: 12px;
+  color: #9fb3cc;
+}
+
+.login-field > input {
+  padding: 9px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 5px;
+  color: #dce6ef;
+  background: #0b1218;
+  font-size: 14px;
+}
+
+.login-field > input:focus {
+  outline: none;
+  border-color: #2f7fe0;
+  box-shadow: 0 0 0 2px rgba(47, 127, 224, 0.25);
+}
+
+.login-dialog > footer .primary {
+  width: 100%;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 5px;
+  color: #05202f;
+  background: #4db6e5;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.login-dialog > footer .primary:disabled { opacity: 0.6; cursor: default; }
+
+.login-error {
+  margin: 0;
+  color: #ff9c9c;
+  font-size: 12px;
+}
+
+.login-note {
+  margin: 0;
+  color: #6f8496;
+  font-size: 11px;
+  text-align: center;
 }
