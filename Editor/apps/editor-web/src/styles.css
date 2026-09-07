@@ -9633,3 +9633,38 @@ h3 {
   color: #d6e6f5;
   background: rgba(255, 255, 255, 0.06);
 }
+
+/* ── Timeline canvas layers ──────────────────────────────────────────────────
+ *
+ * Three stacked canvases replace one DOM node per keyframe, per track line and
+ * per ruler tick. They are absolutely positioned in one stacking context so a
+ * repaint of any of them cannot reflow the others or the row gutter beside them.
+ *
+ * `contain: strict` on the stack tells the browser that nothing inside affects
+ * layout, paint or size outside it: a canvas repaint is then confined to this
+ * box rather than inviting a layout pass over the panel. `strict` implies size
+ * containment, so the stack needs its own extent — it takes it from the grid
+ * cell, which is why the height is 100% rather than auto.
+ */
+.timeline-canvas-stack {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  contain: strict;
+}
+
+.timeline-canvas-stack .timeline-layer {
+  position: absolute;
+  inset: 0;
+  display: block;
+  /* Pointer handling lives on the container: the layers are painted output, and
+     a pointer target that moves with the drawing would need hit regions the
+     frame-space hit test already replaces. */
+  pointer-events: none;
+}
+
+/* Stacking order matches the repaint model: static below, interaction on top. */
+.timeline-canvas-stack .timeline-layer-static { z-index: 0; }
+.timeline-canvas-stack .timeline-layer-content { z-index: 1; }
+.timeline-canvas-stack .timeline-layer-interaction { z-index: 2; }
