@@ -475,12 +475,6 @@ function renderTemplateObject(object: SceneObject) {
           strokeWidth={object.strokeWidth}
         />
       );
-    case "mesh":
-      return <rect {...commonProps} width={object.width} height={object.height} rx={12} fill={object.fill} stroke={object.stroke} strokeWidth={object.strokeWidth} />;
-    case "light":
-      return <circle {...commonProps} cx={object.width / 2} cy={object.height / 2} r={Math.min(object.width, object.height) / 2} fill={object.color} />;
-    case "camera":
-      return <rect {...commonProps} width={object.width} height={object.height} rx={10} fill={object.fill} stroke={object.stroke} strokeWidth={object.strokeWidth} />;
     case "layer":
     case "group":
       return <rect {...commonProps} width={object.width} height={object.height} rx={10} fill="none" stroke={object.stroke} strokeWidth={object.strokeWidth} strokeDasharray="18 12" />;

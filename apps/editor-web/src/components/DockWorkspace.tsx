@@ -104,8 +104,8 @@ function titleForPanel(panelId: DockPanelId): string {
   switch (panelId) {
     case "templates":
       return "Templates";
-    case "object-library":
-      return "Object Library";
+    case "design-import":
+      return "Design Import";
     case "scene-manager":
       return "Scene Manager";
     case "properties":

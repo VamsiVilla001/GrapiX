@@ -194,12 +194,6 @@ function labelForType(object: SceneObject): string {
       return "img";
     case "line":
       return "line";
-    case "mesh":
-      return object.meshKind;
-    case "light":
-      return object.lightKind;
-    case "camera":
-      return object.cameraKind === "perspective" ? "persp" : "ortho";
     case "layer":
       return object.layerKind;
     case "marker":

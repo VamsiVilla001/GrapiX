@@ -1,0 +1,223 @@
+<!--
+  GrapiX Figma plugin — UI half.
+
+  Only the iframe can reach the network, so the sandbox hands the serialised payload here
+  and this page posts it to the local GrapiX API.
+-->
+<style>
+  :root {
+    color-scheme: light;
+    font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 12px;
+  }
+
+  body {
+    margin: 0;
+    padding: 16px;
+    color: #1a1a1a;
+    background: #fff;
+  }
+
+  h1 {
+    margin: 0 0 4px;
+    font-size: 14px;
+  }
+
+  p.hint {
+    margin: 0 0 16px;
+    color: #6b6b6b;
+    line-height: 1.45;
+  }
+
+  label {
+    display: block;
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
+
+  input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px;
+    margin-bottom: 12px;
+    border: 1px solid #d8d8d8;
+    border-radius: 4px;
+    font: inherit;
+  }
+
+  button {
+    width: 100%;
+    padding: 10px;
+    border: 0;
+    border-radius: 4px;
+    background: #18a0fb;
+    color: #fff;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  button:disabled {
+    background: #b9b9b9;
+    cursor: default;
+  }
+
+  .selection {
+    padding: 10px;
+    margin-bottom: 12px;
+    border-radius: 4px;
+    background: #f5f5f5;
+    line-height: 1.5;
+  }
+
+  .status {
+    margin-top: 12px;
+    padding: 10px;
+    border-radius: 4px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    display: none;
+  }
+
+  .status.ok {
+    display: block;
+    background: #e7f7ed;
+    color: #14663a;
+  }
+
+  .status.err {
+    display: block;
+    background: #fdeaea;
+    color: #8a1c1c;
+  }
+
+  .status.busy {
+    display: block;
+    background: #eef4fd;
+    color: #1c4b8a;
+  }
+</style>
+
+<h1>Send to GrapiX</h1>
+<p class="hint">
+  Exports the selected frames as a design import. Runs against the GrapiX desktop app on this
+  machine, so leave the app running.
+</p>
+
+<div class="selection" id="selection">Reading selection…</div>
+
+<label for="api">GrapiX API</label>
+<input id="api" type="text" value="http://127.0.0.1:4100" spellcheck="false" />
+
+<button id="send" type="button">Export selection</button>
+
+<div class="status" id="status"></div>
+
+<script>
+  const selectionEl = document.getElementById("selection");
+  const statusEl = document.getElementById("status");
+  const sendButton = document.getElementById("send");
+  const apiInput = document.getElementById("api");
+
+  const API_STORAGE_KEY = "grapix-api-base-url";
+
+  try {
+    const saved = localStorage.getItem(API_STORAGE_KEY);
+
+    if (saved) {
+      apiInput.value = saved;
+    }
+  } catch {
+    // Storage can be unavailable in the plugin iframe; the default value still works.
+  }
+
+  function setStatus(kind, message) {
+    statusEl.className = "status " + kind;
+    statusEl.textContent = message;
+  }
+
+  parent.postMessage({ pluginMessage: { type: "request-selection-info" } }, "*");
+
+  sendButton.addEventListener("click", () => {
+    sendButton.disabled = true;
+    setStatus("busy", "Reading the selection from Figma…");
+    parent.postMessage({ pluginMessage: { type: "export" } }, "*");
+  });
+
+  window.addEventListener("message", async (event) => {
+    const message = event.data && event.data.pluginMessage;
+
+    if (!message) {
+      return;
+    }
+
+    if (message.type === "selection-info") {
+      selectionEl.textContent = message.count
+        ? message.count + " selected: " + message.names.slice(0, 4).join(", ") + (message.count > 4 ? "…" : "")
+        : "Nothing selected — the whole page will be exported.";
+
+      return;
+    }
+
+    if (message.type === "error") {
+      sendButton.disabled = false;
+      setStatus("err", message.message);
+
+      return;
+    }
+
+    if (message.type !== "payload") {
+      return;
+    }
+
+    const baseUrl = apiInput.value.trim().replace(/\/$/, "");
+
+    try {
+      localStorage.setItem(API_STORAGE_KEY, baseUrl);
+    } catch {
+      // Non-fatal.
+    }
+
+    setStatus("busy", "Sending to GrapiX…");
+
+    try {
+      const response = await fetch(baseUrl + "/api/imports/figma/plugin", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(message.payload)
+      });
+      const body = await response.json();
+
+      if (!response.ok || !body.ok) {
+        setStatus("err", body.error || "GrapiX rejected the import (" + response.status + ").");
+        sendButton.disabled = false;
+
+        return;
+      }
+
+      const design = body.design;
+      const warnings = (body.warnings || []).filter((warning) => warning.severity !== "info");
+      const lines = [
+        "Imported " + design.nodeCount + " nodes into GrapiX.",
+        design.tokenCount + " binding token(s), " + design.textNodeCount + " text node(s)."
+      ];
+
+      if (warnings.length) {
+        lines.push("");
+        lines.push(warnings.length + " warning(s) to review in the Design Import panel.");
+      }
+
+      setStatus("ok", lines.join("\n"));
+    } catch (error) {
+      setStatus(
+        "err",
+        "Could not reach GrapiX at " +
+          baseUrl +
+          ".\nIs the desktop app running?\n\n" +
+          (error && error.message ? error.message : error)
+      );
+    }
+
+    sendButton.disabled = false;
+  });
+</script>

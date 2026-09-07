@@ -1,5 +1,12 @@
 # GrapiX Rendering Engine
 
+> **Status:** partially superseded by [middle-layer-arch.md](middle-layer-arch.md) section 8.
+> The swappable-renderer boundary argued for below is retained and remains correct. The
+> PixiJS feature roadmap is not: `GpuSceneRenderer` is now explicitly temporary scaffolding
+> for layout, hit-testing and selection only, and gets no new features. Pixel rendering
+> moves to the native renderer (Rive's GPU vector core) so that editor preview and air
+> output are the same code.
+
 ## Current Direction
 
 GrapiX uses a web-based desktop architecture:
@@ -31,7 +38,8 @@ The editor viewport now separates rendering from editing:
 - Rectangles and ellipses render as GPU graphics.
 - Text renders through the GPU renderer.
 - Image objects render from images, SVG data URLs, and video sources.
-- Object Library primitives render immediately: quads, spheres, lines, cube/cylinder/torus/slab/model placeholders, light symbols, camera symbols, layer frames, event markers, and groups.
+- Lines, layer frames, event markers and groups render as editor symbols. The mesh, light
+  and camera placeholder families were removed: no ingest source produces them.
 - Render order is explicit: objects sort by layer, z-depth, and z-index rather than accidental array order.
 - Image fit modes support stretch, contain, and cover-style sizing.
 - Video assets can be imported and converted into video materials.

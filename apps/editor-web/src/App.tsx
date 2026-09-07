@@ -1,7 +1,9 @@
+import { useEffect } from "react";
 import { Group, Panel, Separator, type Layout } from "react-resizable-panels";
 import { CanvasStage } from "./components/CanvasStage";
+import { DesignImportPanel } from "./components/DesignImportPanel";
 import { DockArea } from "./components/DockWorkspace";
-import { ObjectLibrary } from "./components/ObjectLibrary";
+import { ProfileLauncher } from "./components/ProfileLauncher";
 import { PropertiesSidebar } from "./components/PropertiesSidebar";
 import { ReferenceTopBar } from "./components/ReferenceTopBar";
 import { SceneManager } from "./components/SceneManager";
@@ -9,10 +11,56 @@ import { StatusBar } from "./components/StatusBar";
 import { TemplatesPanel } from "./components/TemplatesPanel";
 import { TimelinePanel } from "./components/TimelinePanel";
 import { useSceneAutosave } from "./hooks/useSceneAutosave";
-import type { DockPanelId } from "./store/dockStore";
+import { useDockStore, type DockPanelId } from "./store/dockStore";
+import { useProfileStore } from "./store/profileStore";
 
+/**
+ * GrapiX launches into the profile picker. The workspace only mounts once a profile is
+ * active, because the profile carries the layout and the importer credentials.
+ */
 export function App() {
+  const activeProfile = useProfileStore((state) => state.activeProfile);
+
+  if (!activeProfile) {
+    return <ProfileLauncher />;
+  }
+
+  return <Workspace />;
+}
+
+function Workspace() {
+  const activeProfile = useProfileStore((state) => state.activeProfile);
+  const saveWorkspaceLayout = useProfileStore((state) => state.saveWorkspaceLayout);
+  const applyProfileLayout = useDockStore((state) => state.applyProfileLayout);
+
   useSceneAutosave();
+
+  const profileId = activeProfile?.profileId;
+
+  useEffect(() => {
+    // Seed the dock from the launched profile once, then let dockStore own it.
+    applyProfileLayout(activeProfile?.workspaceLayout?.dock);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileId, applyProfileLayout]);
+
+  const panelSizes = activeProfile?.workspaceLayout?.panelSizes ?? {};
+
+  const readLayout = (key: string, fallback: Layout): Layout =>
+    (panelSizes[key] as Layout | undefined) ?? fallback;
+
+  const saveLayout = (key: string, layout: Layout): void => {
+    if (!activeProfile) {
+      return;
+    }
+
+    saveWorkspaceLayout({
+      dock: activeProfile.workspaceLayout?.dock ?? {},
+      panelSizes: {
+        ...panelSizes,
+        [key]: layout as Record<string, number>
+      }
+    });
+  };
 
   return (
     <div className="app-shell reference-editor-shell">
@@ -63,8 +111,8 @@ function renderDockPanel(panelId: DockPanelId) {
   switch (panelId) {
     case "templates":
       return <TemplatesPanel />;
-    case "object-library":
-      return <ObjectLibrary />;
+    case "design-import":
+      return <DesignImportPanel />;
     case "scene-manager":
       return <SceneManager />;
     case "properties":
@@ -72,16 +120,4 @@ function renderDockPanel(panelId: DockPanelId) {
     case "timeline":
       return <TimelinePanel />;
   }
-}
-
-function readLayout(key: string, fallback: Layout): Layout {
-  try {
-    return JSON.parse(localStorage.getItem(key) ?? "") as Layout;
-  } catch {
-    return fallback;
-  }
-}
-
-function saveLayout(key: string, layout: Layout): void {
-  localStorage.setItem(key, JSON.stringify(layout));
 }

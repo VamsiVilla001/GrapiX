@@ -9,7 +9,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "electron .",
     "dev": "npm run build:workspace && electron .",
-    "build:workspace": "npm run build -w @grapix/shared-types && npm run build -w @grapix/api-server && npm run build -w @grapix/editor-web && npm run build -w @grapix/desktop-electron"
+    "build:workspace": "npm run build -w @grapix/shared-types && npm run build -w @grapix/design-ir && npm run build -w @grapix/importers && npm run build -w @grapix/api-server && npm run build -w @grapix/editor-web && npm run build -w @grapix/desktop-electron"
   },
   "dependencies": {
     "electron": "^31.7.7"

@@ -1,19 +1,21 @@
+/**
+ * Object families the scene model carries.
+ *
+ * Mesh, light and camera were removed with the middle-layer pivot: no ingest source
+ * produces them, so they were placeholder geometry with no path to air. Re-add them when
+ * an importer or a broadcast object actually needs them —
+ * see docs/middle-layer-arch.md section 4.3.
+ */
 export type SceneObjectType =
   | "text"
   | "rect"
   | "ellipse"
   | "image"
   | "line"
-  | "mesh"
-  | "light"
-  | "camera"
   | "layer"
   | "marker"
   | "group";
 
-export type MeshPrimitiveKind = "model" | "cube" | "cylinder" | "torus" | "slab";
-export type LightKind = "directional" | "point" | "spot";
-export type CameraKind = "perspective" | "orthographic";
 export type LayerKind = "object" | "camera";
 export type MarkerKind = "event";
 
@@ -200,27 +202,6 @@ export interface LineSceneObject extends BaseSceneObject {
   points: Array<{ x: number; y: number }>;
 }
 
-export interface MeshSceneObject extends BaseSceneObject {
-  type: "mesh";
-  meshKind: MeshPrimitiveKind;
-  depth: number;
-  src?: string;
-}
-
-export interface LightSceneObject extends BaseSceneObject {
-  type: "light";
-  lightKind: LightKind;
-  intensity: number;
-  color: string;
-}
-
-export interface CameraSceneObject extends BaseSceneObject {
-  type: "camera";
-  cameraKind: CameraKind;
-  fov: number;
-  zoom: number;
-}
-
 export interface LayerSceneObject extends BaseSceneObject {
   type: "layer";
   layerKind: LayerKind;
@@ -244,9 +225,6 @@ export type SceneObject =
   | EllipseSceneObject
   | ImageSceneObject
   | LineSceneObject
-  | MeshSceneObject
-  | LightSceneObject
-  | CameraSceneObject
   | LayerSceneObject
   | MarkerSceneObject
   | GroupSceneObject;
@@ -627,4 +605,75 @@ function cryptoRandomSegment(): string {
   }
 
   return Math.random().toString(16).slice(2, 10);
+}
+
+// ---------------------------------------------------------------------------
+// Application profiles
+//
+// A profile is chosen at launch and then opens the workspace. It owns the workspace
+// layout and the credentials the importers need. `settings` is the extension point:
+// video format, project root and output config land there when those phases arrive.
+// See docs/middle-layer-arch.md.
+// ---------------------------------------------------------------------------
+
+/** Secrets. Held by the API service only and never serialised towards the editor. */
+export interface ProfileCredentials {
+  figmaToken?: string;
+}
+
+export interface ProfileWorkspaceLayout {
+  /** Dock area id -> ordered panel ids. */
+  dock: Record<string, string[]>;
+  /** Resizable-panel group id -> that group's persisted layout. */
+  panelSizes: Record<string, Record<string, number>>;
+}
+
+export interface Profile {
+  profileId: string;
+  name: string;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+  lastOpenedAt?: string;
+  workspaceLayout: ProfileWorkspaceLayout | null;
+  settings: Record<string, unknown>;
+  credentials: ProfileCredentials;
+}
+
+/** What the editor is allowed to see: everything except the secret values. */
+export interface CredentialHint {
+  present: boolean;
+  /** Last four characters, so an operator can tell two tokens apart. */
+  last4?: string;
+}
+
+export type ProfilePublic = Omit<Profile, "credentials"> & {
+  credentialHints: Record<keyof ProfileCredentials, CredentialHint>;
+};
+
+export function toProfilePublic(profile: Profile): ProfilePublic {
+  const { credentials, ...rest } = profile;
+
+  return {
+    ...rest,
+    credentialHints: {
+      figmaToken: describeCredential(credentials.figmaToken)
+    }
+  };
+}
+
+function describeCredential(value: string | undefined): CredentialHint {
+  if (!value) {
+    return { present: false };
+  }
+
+  return { present: true, last4: value.slice(-4) };
+}
+
+export function createProfileId(): string {
+  return `profile_${cryptoRandomSegment()}`;
+}
+
+export function createDefaultWorkspaceLayout(): ProfileWorkspaceLayout {
+  return { dock: {}, panelSizes: {} };
 }

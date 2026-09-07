@@ -1,0 +1,50 @@
+%PDF-1.5
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [6 0 R 7 0 R] /D << /ON [6 0 R 7 0 R] >> >> >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 200] /Resources << /Font << /F1 5 0 R >> /Properties << /OC1 6 0 R /OC2 7 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 167 >>
+stream
+/OC /OC1 BDC
+0.13 0.78 0.85 rg
+40 40 320 90 re f
+1 0.8 0.26 RG
+4 w
+40 150 m 360 150 l S
+EMC
+/OC /OC2 BDC
+0 0 0 rg
+BT /F1 28 Tf 48 170 Td (GrapiX Lower Third) Tj ET
+EMC
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+6 0 obj
+<< /Type /OCG /Name (Background) >>
+endobj
+7 0 obj
+<< /Type /OCG /Name (Headline {{scorer.name}} @fit) >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000009 00000 n 
+0000000125 00000 n 
+0000000182 00000 n 
+0000000348 00000 n 
+0000000566 00000 n 
+0000000636 00000 n 
+0000000687 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R >>
+startxref
+757
+%%EOF

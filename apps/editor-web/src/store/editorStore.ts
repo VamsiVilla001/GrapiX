@@ -5,16 +5,10 @@ import {
   createObjectId,
   createSceneId,
   type BindingMap,
-  type CameraSceneObject,
   type EllipseSceneObject,
-  type GroupSceneObject,
   type ImageSceneObject,
-  type LayerSceneObject,
-  type LightSceneObject,
   type LineSceneObject,
   type Material,
-  type MarkerSceneObject,
-  type MeshSceneObject,
   type RectSceneObject,
   type SceneDocument,
   type SceneKeyframe,
@@ -22,27 +16,6 @@ import {
   type SceneObject,
   type TextSceneObject
 } from "@grapix/shared-types";
-
-export type LibraryObjectKind =
-  | "text"
-  | "background"
-  | "model"
-  | "quad"
-  | "sphere"
-  | "cube"
-  | "cylinder"
-  | "torus"
-  | "slab"
-  | "line"
-  | "directional-light"
-  | "point-light"
-  | "spot-light"
-  | "perspective-camera"
-  | "orthographic-camera"
-  | "layer-object"
-  | "camera-layer"
-  | "event-marker"
-  | "group";
 
 interface EditorState {
   scene: SceneDocument;
@@ -59,7 +32,6 @@ interface EditorState {
   addRectObject: () => void;
   addEllipseObject: () => void;
   addImageObject: () => void;
-  addLibraryObject: (kind: LibraryObjectKind) => void;
   duplicateSelectedObject: () => void;
   deleteSelectedObject: () => void;
   duplicateObject: (objectId: string) => void;
@@ -146,7 +118,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
     addRectObject: () => addObject(createRectObject()),
     addEllipseObject: () => addObject(createEllipseObject()),
     addImageObject: () => addObject(createImageObject()),
-    addLibraryObject: (kind) => addObject(createLibraryObject(kind, get().scene)),
     duplicateSelectedObject: () => {
       const { selectedObjectId } = get();
 
@@ -595,57 +566,6 @@ function createImageObject(patch: Partial<ImageSceneObject> = {}): ImageSceneObj
   };
 }
 
-function createLibraryObject(kind: LibraryObjectKind, scene: SceneDocument): SceneObject {
-  switch (kind) {
-    case "text":
-      return createTextObject({ name: "Text", x: 240, y: 220 });
-    case "background":
-      return createRectObject({
-        name: "Background",
-        x: 0,
-        y: 0,
-        width: scene.canvas.width,
-        height: scene.canvas.height,
-        fill: "#101722",
-        stroke: "transparent",
-        radius: 0
-      });
-    case "quad":
-      return createRectObject({ name: "Quad", width: 360, height: 210, fill: "#263348", radius: 0 });
-    case "sphere":
-      return createEllipseObject({ name: "Sphere", width: 220, height: 220, fill: "#9fc7ff" });
-    case "line":
-      return createLineObject();
-    case "model":
-      return createMeshObject("model", { name: "3D Model", fill: "#6be7ff" });
-    case "cube":
-      return createMeshObject("cube", { name: "Cube", fill: "#84a7ff" });
-    case "cylinder":
-      return createMeshObject("cylinder", { name: "Cylinder", fill: "#66d9a8" });
-    case "torus":
-      return createMeshObject("torus", { name: "Torus", fill: "#b889ff" });
-    case "slab":
-      return createMeshObject("slab", { name: "Slab", fill: "#8bd1c7", width: 360, height: 92, depth: 42 });
-    case "directional-light":
-      return createLightObject("directional", { name: "Directional Light" });
-    case "point-light":
-      return createLightObject("point", { name: "Point Light" });
-    case "spot-light":
-      return createLightObject("spot", { name: "Spot Light" });
-    case "perspective-camera":
-      return createCameraObject("perspective", { name: "Persp. Camera" });
-    case "orthographic-camera":
-      return createCameraObject("orthographic", { name: "Ortho. Camera" });
-    case "layer-object":
-      return createLayerObject("object", { name: "Layer Object" });
-    case "camera-layer":
-      return createLayerObject("camera", { name: "Camera Layer" });
-    case "event-marker":
-      return createMarkerObject();
-    case "group":
-      return createGroupObject();
-  }
-}
 
 function createLineObject(patch: Partial<LineSceneObject> = {}): LineSceneObject {
   return {
@@ -663,103 +583,6 @@ function createLineObject(patch: Partial<LineSceneObject> = {}): LineSceneObject
       { x: 210, y: 72 },
       { x: 320, y: 18 }
     ],
-    ...patch
-  };
-}
-
-function createMeshObject(meshKind: MeshSceneObject["meshKind"], patch: Partial<MeshSceneObject> = {}): MeshSceneObject {
-  return {
-    ...createBaseObject("mesh"),
-    type: "mesh",
-    name: "Mesh",
-    width: 240,
-    height: 180,
-    depth: 120,
-    fill: "#6be7ff",
-    stroke: "#ffffff",
-    strokeWidth: 2,
-    meshKind,
-    ...patch
-  };
-}
-
-function createLightObject(lightKind: LightSceneObject["lightKind"], patch: Partial<LightSceneObject> = {}): LightSceneObject {
-  return {
-    ...createBaseObject("light"),
-    type: "light",
-    name: "Light",
-    width: 120,
-    height: 120,
-    fill: "#fff56b",
-    stroke: "#ffffff",
-    strokeWidth: 2,
-    lightKind,
-    intensity: 1,
-    color: "#fff56b",
-    ...patch
-  };
-}
-
-function createCameraObject(cameraKind: CameraSceneObject["cameraKind"], patch: Partial<CameraSceneObject> = {}): CameraSceneObject {
-  return {
-    ...createBaseObject("camera"),
-    type: "camera",
-    name: "Camera",
-    width: 180,
-    height: 120,
-    fill: "#d95f5f",
-    stroke: "#ffffff",
-    strokeWidth: 2,
-    cameraKind,
-    fov: cameraKind === "perspective" ? 45 : 0,
-    zoom: 1,
-    ...patch
-  };
-}
-
-function createLayerObject(layerKind: LayerSceneObject["layerKind"], patch: Partial<LayerSceneObject> = {}): LayerSceneObject {
-  return {
-    ...createBaseObject("layer"),
-    type: "layer",
-    name: "Layer",
-    width: 260,
-    height: 160,
-    fill: "#253647",
-    stroke: "#23c7d9",
-    strokeWidth: 3,
-    layerKind,
-    childIds: [],
-    ...patch
-  };
-}
-
-function createMarkerObject(patch: Partial<MarkerSceneObject> = {}): MarkerSceneObject {
-  return {
-    ...createBaseObject("marker"),
-    type: "marker",
-    name: "Event Marker",
-    width: 96,
-    height: 96,
-    fill: "#ff4f5f",
-    stroke: "#fff27a",
-    strokeWidth: 4,
-    markerKind: "event",
-    eventName: "Event Marker",
-    ...patch
-  };
-}
-
-function createGroupObject(patch: Partial<GroupSceneObject> = {}): GroupSceneObject {
-  return {
-    ...createBaseObject("group"),
-    type: "group",
-    name: "Group",
-    width: 260,
-    height: 170,
-    fill: "rgba(35, 199, 217, 0.12)",
-    stroke: "#23c7d9",
-    strokeWidth: 3,
-    childIds: [],
     ...patch
   };
 }

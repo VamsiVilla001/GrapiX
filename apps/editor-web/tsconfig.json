@@ -3,8 +3,16 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@grapix/shared-types": ["../../packages/shared-types/src"]
+      "@grapix/shared-types": [
+        "../../packages/shared-types/src"
+      ],
+      "@grapix/design-ir": [
+        "../../packages/design-ir/src"
+      ]
     }
   },
-  "include": ["src", "vite.config.ts"]
+  "include": [
+    "src",
+    "vite.config.ts"
+  ]
 }

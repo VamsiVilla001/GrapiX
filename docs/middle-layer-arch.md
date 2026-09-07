@@ -215,10 +215,15 @@ These are the reason GrapiX exists. None of them can come out of Figma.
 
 ### 5.1 Sources and priority
 
-1. **Figma - via plugin, not the REST API.** The plugin gets vector networks, real text metrics,
-   `exportAsync`, and - critically - a place for designers to author binding tokens in context. The
-   REST API loses geometry fidelity and text layout and fights fills, masks, effects and font
-   fallback. REST arrives later as the headless/automation path, sharing the same DesignIR target.
+1. **Figma - plugin first, REST as the fallback.** Both are built. The plugin gets source vector
+   paths and real per-run text styling, and is where designers author binding tokens in context.
+   The REST path needs a personal access token on the profile and gives outlined geometry plus
+   text runs reconstructed from character overrides; it is also the headless/automation path.
+
+   Both front-ends emit the same `FigmaImportPayload` and share one mapper
+   (`packages/importers/src/figma-mapper.ts`), so the two paths cannot drift. The mapper prefers
+   the plugin's higher-fidelity fields when present and records a `FIGMA_REST_FALLBACK` notice
+   otherwise.
 2. **PSD.** Layered parse (`ag-psd` class of library). Expect pain in the text engine data and layer
    effects; expect raster, not vector.
 3. **Illustrator.** PDF-backed; normalise via its vector content, not via a flat SVG export.
@@ -441,6 +446,20 @@ and it constrains the IR, so it cannot be sequenced late.
 
 Rationale for the ordering: if the Phase 1 spike fails, we have changed strategy for the price of a
 spike. If we build the IR and the editor first and *then* discover it, we rewrite everything.
+
+### Landed so far
+
+- `packages/design-ir`: DesignIR types, the design-token grammar, identity helpers.
+- `packages/importers`: Figma mapper (plugin + REST), PSD, Illustrator. Tested against committed
+  fixtures, including a re-import identity-stability test.
+- `apps/figma-plugin`: the high-fidelity Figma front-end.
+- Profiles: launch screen, workspace layout ownership, server-held credentials.
+- Cleanup: mesh/light/camera families, the Object Library palette and the primitive toolbars
+  are gone.
+
+Still outstanding from Phase 2: the reconcile diff and the manual re-link UI. Identity is in
+place and stable across re-imports, but nothing yet *carries a rig forward* across one, because
+the rig layer (Phase 3) does not exist yet.
 
 ---
 

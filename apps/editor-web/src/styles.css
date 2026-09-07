@@ -2844,3 +2844,419 @@ h3 {
     border-top: 1px solid rgba(255, 255, 255, 0.08);
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Profile launcher — the screen GrapiX opens on.
+   --------------------------------------------------------------------------- */
+
+.launcher-shell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 32px;
+  background: radial-gradient(circle at 20% 0%, #16222f 0%, #0b1017 60%);
+}
+
+.launcher-card {
+  width: 100%;
+  max-width: 520px;
+  padding: 28px;
+  border: 1px solid #1e2a38;
+  border-radius: 12px;
+  background: #111a24;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+.launcher-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.launcher-header h1 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: 0.04em;
+  color: #e8f1f8;
+}
+
+.launcher-header p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #7d90a3;
+}
+
+.launcher-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.launcher-item {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.launcher-item-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid #1e2a38;
+  border-radius: 8px;
+  background: #16212d;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.launcher-item-main:hover:not(:disabled) {
+  border-color: #23c7d9;
+  background: #192836;
+}
+
+.launcher-item-main:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.launcher-item-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e8f1f8;
+}
+
+.launcher-item-meta {
+  font-size: 11px;
+  color: #7d90a3;
+}
+
+.launcher-form {
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  border: 1px solid #1e2a38;
+  border-radius: 8px;
+  background: #0e161f;
+}
+
+.launcher-form label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #7d90a3;
+}
+
+.launcher-form input {
+  padding: 9px 10px;
+  margin-bottom: 14px;
+  border: 1px solid #22303f;
+  border-radius: 6px;
+  background: #0a1218;
+  color: #e8f1f8;
+  font: inherit;
+  font-size: 13px;
+}
+
+.launcher-form input:focus {
+  border-color: #23c7d9;
+  outline: none;
+}
+
+.launcher-hint {
+  margin: -8px 0 14px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #6b7d8f;
+}
+
+.launcher-form-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.launcher-primary-button,
+.launcher-secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.launcher-primary-button {
+  width: 100%;
+  background: #23c7d9;
+  color: #06222a;
+}
+
+.launcher-form-actions .launcher-primary-button {
+  width: auto;
+}
+
+.launcher-primary-button:disabled {
+  background: #2b3a48;
+  color: #6b7d8f;
+  cursor: default;
+}
+
+.launcher-secondary-button {
+  border-color: #22303f;
+  background: transparent;
+  color: #9db0c2;
+}
+
+.launcher-ghost-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border: 1px solid #1e2a38;
+  border-radius: 6px;
+  background: transparent;
+  color: #7d90a3;
+  cursor: pointer;
+}
+
+.launcher-ghost-button:hover {
+  border-color: #d95f5f;
+  color: #d95f5f;
+}
+
+.launcher-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 18px;
+  margin-bottom: 16px;
+  border: 1px dashed #22303f;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #7d90a3;
+}
+
+.launcher-error {
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  border: 1px solid #4a2226;
+  border-radius: 6px;
+  background: #241417;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #f0a1a1;
+}
+
+.launcher-spin,
+.import-spin {
+  animation: grapix-spin 1s linear infinite;
+}
+
+@keyframes grapix-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Design Import panel
+   --------------------------------------------------------------------------- */
+
+.import-hint {
+  margin: 0 0 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #6b7d8f;
+}
+
+.import-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 8px;
+  margin-bottom: 8px;
+  border: 1px solid #22303f;
+  border-radius: 5px;
+  background: #0a1218;
+  color: #e8f1f8;
+  font: inherit;
+  font-size: 12px;
+}
+
+.import-input:focus {
+  border-color: #23c7d9;
+  outline: none;
+}
+
+.import-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border: 1px solid #22303f;
+  border-radius: 5px;
+  background: #16212d;
+  color: #cfe0ee;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.import-button:hover:not(:disabled) {
+  border-color: #23c7d9;
+  color: #e8f1f8;
+}
+
+.import-button:disabled {
+  color: #56687a;
+  cursor: default;
+}
+
+.import-token-form {
+  padding: 10px;
+  margin-top: 8px;
+  border: 1px dashed #22303f;
+  border-radius: 6px;
+}
+
+.import-error,
+.import-notice {
+  padding: 8px 10px;
+  margin: 8px 0;
+  border-radius: 5px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.import-error {
+  border: 1px solid #4a2226;
+  background: #241417;
+  color: #f0a1a1;
+}
+
+.import-notice {
+  border: 1px solid #1d4335;
+  background: #10231c;
+  color: #8ee0b6;
+}
+
+.import-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.import-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 7px 8px;
+  border-radius: 5px;
+  font-size: 11px;
+  line-height: 1.45;
+  background: #16212d;
+}
+
+.import-warning strong {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 10px;
+  color: #9db0c2;
+}
+
+.import-warning em {
+  color: #6b7d8f;
+  font-style: normal;
+}
+
+.import-warning-info {
+  color: #9db0c2;
+}
+
+.import-warning-warning {
+  color: #e3c07b;
+}
+
+.import-warning-error {
+  color: #f0a1a1;
+}
+
+.import-design-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.import-design {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #1e2a38;
+  border-radius: 5px;
+  background: #16212d;
+}
+
+.import-design-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.import-design-name {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  color: #e8f1f8;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-design-meta {
+  font-size: 10px;
+  color: #6b7d8f;
+}
+
+.import-icon-button {
+  display: inline-flex;
+  padding: 5px;
+  border: 1px solid #1e2a38;
+  border-radius: 4px;
+  background: transparent;
+  color: #7d90a3;
+  cursor: pointer;
+}
+
+.import-icon-button:hover {
+  border-color: #d95f5f;
+  color: #d95f5f;
+}

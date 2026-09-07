@@ -1,8 +1,36 @@
 import cors from "@fastify/cors";
-import { preflightScenePackage, type SceneDocument } from "@grapix/shared-types";
+import {
+  fetchFigmaPayload,
+  FigmaRestError,
+  importDesignFile,
+  mapFigmaPayloadToDesignIR,
+  type FigmaImportPayload
+} from "@grapix/importers";
+import {
+  preflightScenePackage,
+  type ProfileWorkspaceLayout,
+  type SceneDocument
+} from "@grapix/shared-types";
 import Fastify, { type FastifyInstance } from "fastify";
 import { pathToFileURL } from "node:url";
+import {
+  deleteDesign,
+  ensureDesignStorage,
+  listDesigns,
+  readDesign,
+  saveDesign
+} from "./designStore.js";
 import { buildScenePackage } from "./packageBuilder.js";
+import {
+  createProfile,
+  deleteProfile,
+  ensureProfileStorage,
+  launchProfile,
+  listProfiles,
+  ProfileError,
+  readProfileCredential,
+  updateProfile
+} from "./profileStore.js";
 import { ensureStorage, listScenes, readScene, savePackage, saveScene, updateScene } from "./storage.js";
 
 export interface ApiServerOptions {
@@ -14,7 +42,7 @@ export interface ApiServerOptions {
 export async function createApiServer(options: Pick<ApiServerOptions, "logger"> = {}): Promise<FastifyInstance> {
   const app = Fastify({
     logger: options.logger ?? true,
-    bodyLimit: 50 * 1024 * 1024
+    bodyLimit: 200 * 1024 * 1024
   });
 
   await app.register(cors, {
@@ -184,9 +212,200 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
     };
   });
 
+  // -------------------------------------------------------------------------
+  // Profiles. The editor never receives a credential value, only a hint, so every
+  // response here goes through toProfilePublic inside the store.
+  // -------------------------------------------------------------------------
+
+  app.get("/api/profiles", async () => ({
+    ok: true,
+    profiles: await listProfiles()
+  }));
+
+  app.post<{ Body: { name?: string; description?: string; figmaToken?: string } }>(
+    "/api/profiles",
+    async (request, reply) =>
+      withProfileErrors(reply, async () => ({
+        ok: true,
+        profile: await createProfile({
+          name: request.body?.name ?? "",
+          description: request.body?.description,
+          figmaToken: request.body?.figmaToken
+        })
+      }))
+  );
+
+  app.patch<{
+    Params: { profileId: string };
+    Body: {
+      name?: string;
+      description?: string;
+      workspaceLayout?: ProfileWorkspaceLayout | null;
+      settings?: Record<string, unknown>;
+      figmaToken?: string;
+    };
+  }>("/api/profiles/:profileId", async (request, reply) =>
+    withProfileErrors(reply, async () => ({
+      ok: true,
+      profile: await updateProfile(request.params.profileId, request.body ?? {})
+    }))
+  );
+
+  app.post<{ Params: { profileId: string } }>("/api/profiles/:profileId/launch", async (request, reply) =>
+    withProfileErrors(reply, async () => ({
+      ok: true,
+      profile: await launchProfile(request.params.profileId)
+    }))
+  );
+
+  app.delete<{ Params: { profileId: string } }>("/api/profiles/:profileId", async (request, reply) =>
+    withProfileErrors(reply, async () => {
+      await deleteProfile(request.params.profileId);
+
+      return { ok: true };
+    })
+  );
+
+  // -------------------------------------------------------------------------
+  // Designs (DesignIR). Immutable once stored.
+  // -------------------------------------------------------------------------
+
+  app.get("/api/designs", async () => ({
+    ok: true,
+    designs: await listDesigns()
+  }));
+
+  app.get<{ Params: { designId: string } }>("/api/designs/:designId", async (request, reply) => {
+    const design = await readDesign(request.params.designId);
+
+    if (!design) {
+      return reply.code(404).send({ ok: false, error: "Design not found" });
+    }
+
+    return { ok: true, design };
+  });
+
+  app.delete<{ Params: { designId: string } }>("/api/designs/:designId", async (request, reply) => {
+    const removed = await deleteDesign(request.params.designId);
+
+    if (!removed) {
+      return reply.code(404).send({ ok: false, error: "Design not found" });
+    }
+
+    return { ok: true };
+  });
+
+  // -------------------------------------------------------------------------
+  // Import: Figma via REST fallback. The token stays in this process.
+  // -------------------------------------------------------------------------
+
+  app.post<{ Body: { profileId?: string; target?: string; nodeIds?: string[] } }>(
+    "/api/imports/figma",
+    async (request, reply) => {
+      const { profileId, target, nodeIds } = request.body ?? {};
+
+      if (!profileId || !target) {
+        return reply.code(400).send({ ok: false, error: "profileId and target are required." });
+      }
+
+      try {
+        const token = await readProfileCredential(profileId, "figmaToken");
+
+        if (!token) {
+          return reply.code(400).send({
+            ok: false,
+            error: "This profile has no Figma personal access token. Add one in the profile, or import with the plugin."
+          });
+        }
+
+        const payload = await fetchFigmaPayload({ token, target, nodeIds });
+        const design = mapFigmaPayloadToDesignIR(payload);
+        const summary = await saveDesign(design);
+
+        return { ok: true, design: summary, warnings: design.warnings };
+      } catch (error) {
+        if (error instanceof FigmaRestError) {
+          return reply.code(error.status).send({ ok: false, error: error.message });
+        }
+
+        if (error instanceof ProfileError) {
+          return reply.code(error.status).send({ ok: false, error: error.message });
+        }
+
+        throw error;
+      }
+    }
+  );
+
+  // -------------------------------------------------------------------------
+  // Import: Figma via the plugin. Same mapper, higher-fidelity payload.
+  // -------------------------------------------------------------------------
+
+  app.post<{ Body: FigmaImportPayload }>("/api/imports/figma/plugin", async (request, reply) => {
+    const payload = request.body;
+
+    if (!payload?.nodes?.length) {
+      return reply
+        .code(400)
+        .send({ ok: false, error: "The plugin sent no nodes. Select at least one frame in Figma." });
+    }
+
+    const design = mapFigmaPayloadToDesignIR({ ...payload, origin: "plugin" });
+    const summary = await saveDesign(design);
+
+    return { ok: true, design: summary, warnings: design.warnings };
+  });
+
+  // -------------------------------------------------------------------------
+  // Import: PSD and Illustrator file upload, base64 in the body.
+  // -------------------------------------------------------------------------
+
+  app.post<{ Body: { fileName?: string; dataBase64?: string } }>(
+    "/api/imports/file",
+    async (request, reply) => {
+      const { fileName, dataBase64 } = request.body ?? {};
+
+      if (!fileName || !dataBase64) {
+        return reply.code(400).send({ ok: false, error: "fileName and dataBase64 are required." });
+      }
+
+      try {
+        const design = await importDesignFile({
+          fileName,
+          data: new Uint8Array(Buffer.from(dataBase64, "base64"))
+        });
+        const summary = await saveDesign(design);
+
+        return { ok: true, design: summary, warnings: design.warnings };
+      } catch (error) {
+        return reply.code(422).send({
+          ok: false,
+          error: error instanceof Error ? error.message : "Import failed."
+        });
+      }
+    }
+  );
+
   await ensureStorage();
+  await ensureProfileStorage();
+  await ensureDesignStorage();
 
   return app;
+}
+
+async function withProfileErrors<T>(
+  reply: { code: (status: number) => { send: (body: unknown) => unknown } },
+  run: () => Promise<T>
+): Promise<T | unknown> {
+  try {
+    return await run();
+  } catch (error) {
+    if (error instanceof ProfileError) {
+      return reply.code(error.status).send({ ok: false, error: error.message });
+    }
+
+    throw error;
+  }
 }
 
 export async function startApiServer(options: ApiServerOptions = {}): Promise<FastifyInstance> {
