@@ -15,6 +15,9 @@ import {
   getBindableFaces,
   getMaterialReadiness,
   IMPLEMENTED_BLEND_MODES,
+  UNIMPLEMENTED_BLEND_MODES,
+  MATERIAL_BLEND_MODES,
+  isImplementedBlendMode,
   IMPLEMENTED_TEXTURE_FIT_MODES,
   resolveTextureFit,
   textureWrapForFit,
@@ -1035,4 +1038,61 @@ test("tile falls back to the identity when an extent is unusable", () => {
   ]) {
     assert.deepEqual(resolveTextureFit("tile", surface), { repeat: [1, 1], offset: [0, 0] });
   }
+});
+
+/* ── Blend-mode refusal ───────────────────────────────────────────────────────────────────── */
+
+/**
+ * The validator's half of the no-silent-fallback rule, mirroring the fit-mode test above.
+ *
+ * The renderer refuses an unsupported mode by throwing; this is what an *author* sees instead — a
+ * named warning on the resolved material. Both halves must name the mode, or "my overlay looks
+ * wrong" has no answer anywhere in the product.
+ */
+test("the scene validator reports every blend mode it cannot honour", () => {
+  const build = (mode) => {
+    const material = createMaterialDefinition("Blend warning");
+    material.blendMode = mode;
+    const object = rect("blend_rect", material.materialId);
+    return resolvePrimitiveMaterial(scene([material], [object]), object);
+  };
+
+  assert.ok(UNIMPLEMENTED_BLEND_MODES.length > 0, "there are unsupported modes to report");
+
+  for (const mode of UNIMPLEMENTED_BLEND_MODES) {
+    const resolved = build(mode);
+    assert.ok(
+      resolved.warnings.some((warning) => warning.includes(`Blend mode ${mode}`)),
+      `expected ${mode} to be reported by name: ${resolved.warnings}`
+    );
+  }
+
+  for (const mode of IMPLEMENTED_BLEND_MODES) {
+    const resolved = build(mode);
+    assert.equal(
+      resolved.warnings.some((warning) => /Blend mode/i.test(warning)),
+      false,
+      `${mode} must not be reported as unimplemented: ${resolved.warnings}`
+    );
+  }
+});
+
+/** The two sets are derived from one vocabulary, so they cannot drift apart or overlap. */
+test("implemented and unimplemented blend modes partition the vocabulary", () => {
+  assert.deepEqual(
+    [...IMPLEMENTED_BLEND_MODES, ...UNIMPLEMENTED_BLEND_MODES].sort(),
+    [...MATERIAL_BLEND_MODES].sort()
+  );
+  for (const mode of UNIMPLEMENTED_BLEND_MODES) {
+    assert.equal(isImplementedBlendMode(mode), false, `${mode} must not be both`);
+  }
+  for (const mode of IMPLEMENTED_BLEND_MODES) {
+    assert.equal(isImplementedBlendMode(mode), true);
+  }
+});
+
+/** `overlay` specifically: excluded because PixiJS core aliases it to screen. */
+test("overlay is in the vocabulary and not implemented", () => {
+  assert.ok(MATERIAL_BLEND_MODES.includes("overlay"));
+  assert.equal(isImplementedBlendMode("overlay"), false);
 });

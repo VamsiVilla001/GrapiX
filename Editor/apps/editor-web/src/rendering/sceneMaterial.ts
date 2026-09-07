@@ -3,7 +3,7 @@ import {
   findAsset,
   findMaterial,
   getBindableFaces,
-  IMPLEMENTED_BLEND_MODES,
+  isImplementedBlendMode,
   IMPLEMENTED_TEXTURE_FIT_MODES,
   resolveMaterialAsset,
   resolveMaterialColor,
@@ -169,7 +169,7 @@ export function isResolvedMaterialPreviewSupported(
   return Boolean(
     resolved
     && resolved.material.enabled !== false
-    && IMPLEMENTED_BLEND_MODES.includes(resolved.blendMode)
+    && isImplementedBlendMode(resolved.blendMode)
     && ["opaque", "straight", "premultiplied"].includes(resolved.alphaMode)
     && resolved.textureSlots.every((slot) => IMPLEMENTED_TEXTURE_FIT_MODES.includes(slot.fit))
   );

@@ -223,7 +223,28 @@ export type MaterialType =
   | "basic-lit"
   | "pbr";
 
-export type MaterialBlendMode = "normal" | "add" | "multiply" | "screen" | "overlay" | "darken" | "lighten" | "subtract" | "alpha-mask" | "inverse-alpha-mask";
+/**
+ * Every blend mode the authoring vocabulary contains, implemented or not.
+ *
+ * A runtime list with the type derived from it, rather than a bare union, so the *unsupported* set
+ * can be computed as this minus `IMPLEMENTED_BLEND_MODES` rather than written out a second time
+ * somewhere that can fall behind. Adding a mode here and nowhere else makes it unsupported by
+ * construction, which is the safe default.
+ */
+export const MATERIAL_BLEND_MODES = [
+  "normal",
+  "add",
+  "multiply",
+  "screen",
+  "overlay",
+  "darken",
+  "lighten",
+  "subtract",
+  "alpha-mask",
+  "inverse-alpha-mask"
+] as const;
+
+export type MaterialBlendMode = (typeof MATERIAL_BLEND_MODES)[number];
 
 /**
  * Blend modes implemented identically in BOTH renderers (PixiJS preview and
@@ -238,14 +259,51 @@ export type MaterialBlendMode = "normal" | "add" | "multiply" | "screen" | "over
  * violate the no-silent-fallback rule), "subtract", "alpha-mask",
  * "inverse-alpha-mask".
  */
-export const IMPLEMENTED_BLEND_MODES: readonly MaterialBlendMode[] = [
+export const IMPLEMENTED_BLEND_MODES = [
   "normal",
   "add",
   "multiply",
   "screen",
   "darken",
   "lighten"
-];
+] as const satisfies readonly MaterialBlendMode[];
+
+/**
+ * The supported modes as a union, derived from the list rather than restated.
+ *
+ * This is what lets a renderer's mapping table be keyed on exactly the supported set: adding a mode
+ * here without giving it a mapping is a compile error in every renderer that maps them, and
+ * removing one leaves an excess key that also fails. `satisfies` above keeps the list checked
+ * against `MaterialBlendMode` while preserving the literal types this needs.
+ */
+export type ImplementedBlendMode = (typeof IMPLEMENTED_BLEND_MODES)[number];
+
+/**
+ * Whether a blend mode is one both renderers implement, narrowing the type when it is.
+ *
+ * A predicate rather than a bare `.includes` so callers get the narrowing: a renderer that has
+ * checked this can then index a mapping table without a cast, and one that has not cannot index it
+ * at all. That is the whole mechanism preventing an unsupported mode from being quietly drawn as
+ * something else.
+ */
+export function isImplementedBlendMode(
+  mode: MaterialBlendMode | undefined
+): mode is ImplementedBlendMode {
+  return mode !== undefined && (IMPLEMENTED_BLEND_MODES as readonly MaterialBlendMode[]).includes(mode);
+}
+
+/**
+ * The modes the renderers do not implement, derived rather than restated.
+ *
+ * Declared *after* `IMPLEMENTED_BLEND_MODES` deliberately. It is computed at module evaluation, so
+ * placing it beside `MATERIAL_BLEND_MODES` — where it reads more naturally — put it in the temporal
+ * dead zone of the const it filters against, and every import of this package threw
+ * "Cannot access 'IMPLEMENTED_BLEND_MODES' before initialization". TypeScript does not catch that.
+ */
+export const UNIMPLEMENTED_BLEND_MODES: readonly Exclude<MaterialBlendMode, ImplementedBlendMode>[] =
+  MATERIAL_BLEND_MODES.filter(
+    (mode): mode is Exclude<MaterialBlendMode, ImplementedBlendMode> => !isImplementedBlendMode(mode)
+  );
 export type MaterialAlphaMode = "opaque" | "straight" | "premultiplied" | "alpha-test" | "alpha-mask";
 export type MaterialCullMode = "none" | "front" | "back";
 export type MaterialDepthMode = "disabled" | "read" | "read-write";
@@ -3325,7 +3383,7 @@ export function resolvePrimitiveMaterial(
 
   const blendMode = material.blendMode ?? "normal";
   const alphaMode = material.alphaMode ?? "premultiplied";
-  if (!IMPLEMENTED_BLEND_MODES.includes(blendMode)) {
+  if (!isImplementedBlendMode(blendMode)) {
     warnings.push(`Blend mode ${blendMode} is not implemented by both GrapiX renderers.`);
   }
   if (!["opaque", "straight", "premultiplied"].includes(alphaMode)) {

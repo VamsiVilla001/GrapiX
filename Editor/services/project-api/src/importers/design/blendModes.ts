@@ -1,4 +1,4 @@
-import { IMPLEMENTED_BLEND_MODES, type MaterialBlendMode } from "@grapix/shared-types";
+import { isImplementedBlendMode, type MaterialBlendMode } from "@grapix/shared-types";
 
 export interface ResolvedSourceBlendMode {
   /** A mode both GrapiX renderers implement. Never a declared-but-unrendered value. */
@@ -72,5 +72,5 @@ export function resolveSourceBlendMode(value: unknown): ResolvedSourceBlendMode 
   }
   // A table entry that names a mode the renderers dropped would reintroduce exactly
   // the class of bug this module exists to prevent.
-  return IMPLEMENTED_BLEND_MODES.includes(resolved.mode) ? resolved : { mode: "normal", exact: false };
+  return isImplementedBlendMode(resolved.mode) ? resolved : { mode: "normal", exact: false };
 }

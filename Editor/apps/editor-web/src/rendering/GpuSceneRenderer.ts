@@ -15,7 +15,8 @@ import {
   type WRAP_MODE
 } from "pixi.js";
 import {
-  IMPLEMENTED_BLEND_MODES,
+  isImplementedBlendMode,
+  type ImplementedBlendMode,
   IMPLEMENTED_TEXTURE_FIT_MODES,
   IMPLEMENTED_MASK_MODES,
   type BezierPath,
@@ -122,29 +123,58 @@ function applyTextureSampler(texture: Texture, slot: MaterialTextureSlot | undef
   texture.source.addressMode = pixiWrapMode(textureWrapForFit(slot.fit, slot.wrap));
 }
 
+/** The Pixi blend modes this renderer uses. */
+type PixiBlendMode = "normal" | "add" | "multiply" | "screen" | "min" | "max";
+
 /**
- * Material blend mode -> PixiJS blend mode. Adobe's darken/lighten are
- * per-channel min/max, which Pixi exposes as the fixed-function "min"/"max"
- * modes. The engine mirrors Pixi's exact blend equations per
- * Shared/render-shaders/layouts.json, so this mapping is the preview half
- * of that contract. Unimplemented modes never reach this function — the
- * render guard skips those objects with a warning.
+ * Material blend mode -> PixiJS blend mode.
+ *
+ * Adobe's darken/lighten are per-channel min/max, which Pixi exposes as the fixed-function
+ * "min"/"max" modes. The engine mirrors Pixi's exact blend equations per
+ * `Shared/render-shaders/layouts.json`, so this table is the preview half of that contract.
+ *
+ * Keyed on `ImplementedBlendMode`, which is derived from `IMPLEMENTED_BLEND_MODES` rather than
+ * restated here. That is what makes the shared list the single source of truth: adding a mode to it
+ * without giving it a Pixi equivalent fails to compile with a missing key, and mapping a mode that
+ * is not in it fails with an excess one. Neither can be resolved by guessing a substitute.
  */
-function pixiBlendMode(blendMode: MaterialBlendMode | undefined): "normal" | "add" | "multiply" | "screen" | "min" | "max" {
-  switch (blendMode) {
-    case "add":
-      return "add";
-    case "multiply":
-      return "multiply";
-    case "screen":
-      return "screen";
-    case "darken":
-      return "min";
-    case "lighten":
-      return "max";
-    default:
-      return "normal";
+const PIXI_BLEND_MODES: Readonly<Record<ImplementedBlendMode, PixiBlendMode>> = {
+  normal: "normal",
+  add: "add",
+  multiply: "multiply",
+  screen: "screen",
+  darken: "min",
+  lighten: "max"
+};
+
+/**
+ * The Pixi blend mode for a resolved material's blend mode.
+ *
+ * `undefined` means the object carries no resolved material — either nothing is bound, or the
+ * render guard rejected what was bound — and draws with normal blending. That is an absence, not a
+ * substitution.
+ *
+ * An unsupported mode **throws**. There is deliberately no fallback branch: the previous `default`
+ * returned `"normal"`, so an author who selected `overlay` saw ordinary blending, the scene
+ * validator's warning was the only trace, and the native renderer did something different again.
+ * A mode that reaches here unsupported means a caller skipped `isImplementedBlendMode`, which is a
+ * defect in that caller — the throw makes it a loud one instead of a wrong picture.
+ *
+ * The refusal an author is meant to see is the scene validator's:
+ * `resolvePrimitiveMaterial` pushes "Blend mode <mode> is not implemented by both GrapiX
+ * renderers." (`Shared/shared-types/src/index.ts`), and `isResolvedMaterialPreviewSupported`
+ * (`./sceneMaterial.ts`) keeps the object out of this path entirely.
+ */
+export function pixiBlendMode(blendMode: MaterialBlendMode | undefined): PixiBlendMode {
+  if (blendMode === undefined) return "normal";
+  if (!isImplementedBlendMode(blendMode)) {
+    throw new Error(
+      `Blend mode ${blendMode} is not implemented by both GrapiX renderers and must not be drawn `
+      + "as a substitute. Objects using it are excluded by isResolvedMaterialPreviewSupported and "
+      + "reported by the scene validator."
+    );
   }
+  return PIXI_BLEND_MODES[blendMode];
 }
 
 export class GpuSceneRenderer {
@@ -223,7 +253,9 @@ export class GpuSceneRenderer {
       }
       if (object.resolvedMaterial && (
         object.resolvedMaterial.material.enabled === false
-        || !IMPLEMENTED_BLEND_MODES.includes(object.resolvedMaterial.blendMode)
+        // This guard is what keeps an unsupported blend mode away from `pixiBlendMode`, which
+        // throws rather than substituting one. The author sees the scene validator's warning.
+        || !isImplementedBlendMode(object.resolvedMaterial.blendMode)
         || !["opaque", "straight", "premultiplied"].includes(object.resolvedMaterial.alphaMode)
         // Fit modes outside IMPLEMENTED_TEXTURE_FIT_MODES need a transparent border or extra
         // geometry, which this path cannot express, so they are skipped rather than stretched.
