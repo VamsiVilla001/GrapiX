@@ -10,7 +10,7 @@
  * platform honours it.
  */
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { hashPassword, needsRehash, verifyPassword } from "./password.js";
@@ -66,6 +66,13 @@ export type LoginOutcome =
 export class UserStore {
   private users: StoredUser[] = [];
   private loaded = false;
+  /**
+   * Tail of the save queue, so writes land in the order they were requested.
+   *
+   * Tracks completion rather than success — see `save()`. Never rejects, so nothing needs to
+   * attach a handler to it.
+   */
+  private saveChain: Promise<void> = Promise.resolve();
 
   constructor(private readonly path: string) {}
 
@@ -217,15 +224,47 @@ export class UserStore {
     return { user, password };
   }
 
+  /**
+   * Persist the accounts, atomically, and one at a time.
+   *
+   * Write-then-rename, because a crash mid-write must not leave a truncated account file — that
+   * locks every operator out of the system at the worst possible moment.
+   *
+   * Two things make it actually atomic, and the previous version had neither:
+   *
+   * 1. **A temporary name unique to this write.** It used to be a fixed `<path>.tmp`, so two
+   *    concurrent saves wrote the same file: the first rename moved it away and the second failed
+   *    with `ENOENT`. Worse than the error, the two bodies could interleave, leaving the *older*
+   *    content in place while both callers believed they had saved.
+   * 2. **Serialisation per store.** Unique names stop them clobbering one file, but not from
+   *    finishing out of order — an earlier save landing after a later one still loses the newer
+   *    accounts. Each save waits for the one before it, so the last caller wins.
+   *
+   * The chain deliberately swallows the previous save's rejection (`catch(() => {})`) purely for
+   * *ordering*: a failed write must not prevent the next from being attempted. Its own error is
+   * still thrown to its own caller.
+   */
   private async save(): Promise<void> {
+    const run = this.saveChain.then(() => this.writeAtomically(), () => this.writeAtomically());
+    // The chain tracks completion, not success; the caller below still sees a real rejection.
+    this.saveChain = run.catch(() => {});
+    return run;
+  }
+
+  private async writeAtomically(): Promise<void> {
     const file: UserFile = { version: 1, users: this.users };
     const body = `${JSON.stringify(file, null, 2)}\n`;
     await mkdir(dirname(this.path), { recursive: true });
-    // Write-then-rename: a crash mid-write must not leave a truncated account file, which
-    // would lock every operator out of the system at the worst possible moment.
-    const temporary = `${this.path}.tmp`;
+
+    const temporary = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
     await writeFile(temporary, body, { encoding: "utf8", mode: 0o600 });
-    await rename(temporary, this.path);
+    try {
+      await rename(temporary, this.path);
+    } catch (error) {
+      // Leave no orphan beside the account file if the promotion failed.
+      await rm(temporary, { force: true }).catch(() => {});
+      throw error;
+    }
   }
 }
 
