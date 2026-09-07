@@ -449,17 +449,32 @@ spike. If we build the IR and the editor first and *then* discover it, we rewrit
 
 ### Landed so far
 
-- `packages/design-ir`: DesignIR types, the design-token grammar, identity helpers.
+- `packages/design-ir`: DesignIR types, the design-token grammar, identity helpers, layout
+  intent (auto-layout, constraints, component refs), and the reconciliation engine.
 - `packages/importers`: Figma mapper (plugin + REST), PSD, Illustrator. Tested against committed
   fixtures, including a re-import identity-stability test.
 - `apps/figma-plugin`: the high-fidelity Figma front-end.
 - Profiles: launch screen, workspace layout ownership, server-held credentials.
+- Asset persistence: every import materialises its assets to files before the design is
+  stored. Required, not cosmetic — Figma REST returns signed URLs that expire within hours,
+  so storing them would have rotted every design.
+- Reconciliation: a re-import is diffed against the previous import of the same file, and the
+  diff is surfaced for review in the Design Import panel. Matching runs strongest-strategy
+  first (native node id, then GrapiX id, then layer path, then name, then content
+  fingerprint), records which strategy found each match, and **refuses to match ambiguous
+  names** — two layers called "Row" stay unmatched rather than being paired arbitrarily,
+  because a wrong match silently moves someone's rig onto the wrong element.
 - Cleanup: mesh/light/camera families, the Object Library palette and the primitive toolbars
   are gone.
 
-Still outstanding from Phase 2: the reconcile diff and the manual re-link UI. Identity is in
-place and stable across re-imports, but nothing yet *carries a rig forward* across one, because
-the rig layer (Phase 3) does not exist yet.
+Still outstanding from Phase 2: the **manual re-link UI**. The diff names orphaned nodes, but
+there is no screen yet to re-point a rig entry at a different node — and nothing yet *carries
+a rig forward* across a re-import, because the rig layer (Phase 3) does not exist. The
+reconciliation engine is what Phase 3 will consume.
+
+Also unverified: neither Figma front-end has run against a real Figma file. The plugin has
+never executed inside Figma, and the REST path has never been called with a live token. Both
+are covered by fixture tests against realistic payloads, which is not the same thing.
 
 ---
 

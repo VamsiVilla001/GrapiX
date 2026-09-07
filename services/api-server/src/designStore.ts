@@ -48,6 +48,30 @@ export async function listDesigns(): Promise<DesignIRSummary[]> {
   return summaries.sort((a, b) => b.importedAt.localeCompare(a.importedAt));
 }
 
+/**
+ * The most recent earlier import of the same source file, which is what a re-import gets
+ * diffed against. designId folds in the revision, so each re-import is a new immutable
+ * document and the previous one is found by sourceRef.
+ */
+export async function findPreviousDesign(
+  sourceRef: string,
+  excludeDesignId: string
+): Promise<DesignIR | null> {
+  const candidates = (await listDesigns())
+    .filter((summary) => summary.sourceRef === sourceRef && summary.designId !== excludeDesignId)
+    .sort((a, b) => b.importedAt.localeCompare(a.importedAt));
+
+  for (const candidate of candidates) {
+    const design = await readDesign(candidate.designId);
+
+    if (design) {
+      return design;
+    }
+  }
+
+  return null;
+}
+
 export async function readDesign(designId: string): Promise<DesignIR | null> {
   try {
     return JSON.parse(await readFile(designPath(designId), "utf8")) as DesignIR;

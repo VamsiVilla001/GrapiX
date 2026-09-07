@@ -14,8 +14,18 @@ import {
 import Fastify, { type FastifyInstance } from "fastify";
 import { pathToFileURL } from "node:url";
 import {
+  diffNeedsReview,
+  reconcileDesigns,
+  type DesignDiff,
+  type DesignIR,
+  type DesignIRSummary,
+  type ImportWarning
+} from "@grapix/design-ir";
+import { deleteDesignAssets, persistDesignAssets, readDesignAsset } from "./assetStore.js";
+import {
   deleteDesign,
   ensureDesignStorage,
+  findPreviousDesign,
   listDesigns,
   readDesign,
   saveDesign
@@ -292,8 +302,58 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
       return reply.code(404).send({ ok: false, error: "Design not found" });
     }
 
+    await deleteDesignAssets(request.params.designId);
+
     return { ok: true };
   });
+
+  /** Serves a stored asset. Sources inside a DesignIR point here. */
+  app.get<{ Params: { designId: string; fileName: string } }>(
+    "/api/designs/:designId/assets/:fileName",
+    async (request, reply) => {
+      const asset = await readDesignAsset(request.params.designId, request.params.fileName);
+
+      if (!asset) {
+        return reply.code(404).send({ ok: false, error: "Asset not found" });
+      }
+
+      // Asset file names are content-addressed by assetId, so they are safe to cache hard.
+      return reply
+        .header("content-type", asset.mimeType)
+        .header("cache-control", "public, max-age=31536000, immutable")
+        .send(asset.bytes);
+    }
+  );
+
+  /**
+   * Reconciles two imports of the same source file. Without `against`, diffs the design
+   * against the most recent earlier import of the same file.
+   */
+  app.get<{ Params: { designId: string }; Querystring: { against?: string } }>(
+    "/api/designs/:designId/diff",
+    async (request, reply) => {
+      const design = await readDesign(request.params.designId);
+
+      if (!design) {
+        return reply.code(404).send({ ok: false, error: "Design not found" });
+      }
+
+      const previous = request.query.against
+        ? await readDesign(request.query.against)
+        : await findPreviousDesign(design.sourceRef, design.designId);
+
+      if (!previous) {
+        return reply.code(404).send({
+          ok: false,
+          error: "No earlier import of this source file to compare against."
+        });
+      }
+
+      const diff = reconcileDesigns(previous, design);
+
+      return { ok: true, diff, needsReview: diffNeedsReview(diff) };
+    }
+  );
 
   // -------------------------------------------------------------------------
   // Import: Figma via REST fallback. The token stays in this process.
@@ -319,10 +379,8 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
         }
 
         const payload = await fetchFigmaPayload({ token, target, nodeIds });
-        const design = mapFigmaPayloadToDesignIR(payload);
-        const summary = await saveDesign(design);
 
-        return { ok: true, design: summary, warnings: design.warnings };
+        return { ok: true, ...(await ingestDesign(mapFigmaPayloadToDesignIR(payload))) };
       } catch (error) {
         if (error instanceof FigmaRestError) {
           return reply.code(error.status).send({ ok: false, error: error.message });
@@ -351,9 +409,8 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
     }
 
     const design = mapFigmaPayloadToDesignIR({ ...payload, origin: "plugin" });
-    const summary = await saveDesign(design);
 
-    return { ok: true, design: summary, warnings: design.warnings };
+    return { ok: true, ...(await ingestDesign(design)) };
   });
 
   // -------------------------------------------------------------------------
@@ -374,9 +431,8 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
           fileName,
           data: new Uint8Array(Buffer.from(dataBase64, "base64"))
         });
-        const summary = await saveDesign(design);
 
-        return { ok: true, design: summary, warnings: design.warnings };
+        return { ok: true, ...(await ingestDesign(design)) };
       } catch (error) {
         return reply.code(422).send({
           ok: false,
@@ -391,6 +447,43 @@ export async function createApiServer(options: Pick<ApiServerOptions, "logger"> 
   await ensureDesignStorage();
 
   return app;
+}
+
+export interface IngestResult {
+  design: DesignIRSummary;
+  warnings: ImportWarning[];
+  /** Present when this source file has been imported before. */
+  diff: DesignDiff | null;
+  /** True when a rig should not be carried across this diff unreviewed. */
+  needsReview: boolean;
+  assetsStored: number;
+}
+
+/**
+ * The one path every importer's output takes.
+ *
+ * Assets are materialised before the design is stored, because both Figma front-ends hand
+ * back sources that cannot be persisted: REST gives signed URLs that expire, and the
+ * plugin gives data URIs that would bloat the JSON. Then, if this file has been imported
+ * before, the new tree is reconciled against the previous one so the change is reviewable
+ * rather than silent.
+ */
+async function ingestDesign(design: DesignIR): Promise<IngestResult> {
+  const persisted = await persistDesignAssets(design);
+  const previous = await findPreviousDesign(
+    persisted.design.sourceRef,
+    persisted.design.designId
+  );
+  const diff = previous ? reconcileDesigns(previous, persisted.design) : null;
+  const summary = await saveDesign(persisted.design);
+
+  return {
+    design: summary,
+    warnings: persisted.design.warnings,
+    diff,
+    needsReview: diff ? diffNeedsReview(diff) : false,
+    assetsStored: persisted.stored
+  };
 }
 
 async function withProfileErrors<T>(

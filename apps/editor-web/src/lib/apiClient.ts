@@ -1,4 +1,4 @@
-import type { DesignIR, DesignIRSummary, ImportWarning } from "@grapix/design-ir";
+import type { DesignDiff, DesignIR, DesignIRSummary, ImportWarning } from "@grapix/design-ir";
 import type {
   ProfilePublic,
   ProfileWorkspaceLayout,
@@ -273,6 +273,22 @@ export async function deleteProfileOnApi(profileId: string): Promise<void> {
 export interface ApiImportResult {
   design: DesignIRSummary;
   warnings: ImportWarning[];
+  /** Present when this source file has been imported before. */
+  diff: DesignDiff | null;
+  /** True when something the rig may point at was removed, or a match was only a guess. */
+  needsReview: boolean;
+  assetsStored: number;
+}
+
+export async function getDesignDiffFromApi(
+  designId: string,
+  against?: string
+): Promise<{ diff: DesignDiff; needsReview: boolean }> {
+  const query = against ? `?against=${encodeURIComponent(against)}` : "";
+
+  return request<{ ok: boolean; diff: DesignDiff; needsReview: boolean }>(
+    `/api/designs/${designId}/diff${query}`
+  );
 }
 
 export async function listDesignsFromApi(): Promise<DesignIRSummary[]> {

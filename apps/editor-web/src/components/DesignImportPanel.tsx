@@ -1,7 +1,8 @@
-import type { DesignIRSummary, ImportWarning } from "@grapix/design-ir";
-import { AlertTriangle, FileUp, Info, Loader2, RefreshCw, Trash2, Type } from "lucide-react";
+import type { DesignDiff, DesignIRSummary, ImportWarning } from "@grapix/design-ir";
+import { AlertTriangle, FileUp, Info, Loader2, MinusCircle, RefreshCw, Trash2, Type } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  type ApiImportResult,
   deleteDesignOnApi,
   importDesignFileOnApi,
   importFigmaOnApi,
@@ -23,6 +24,8 @@ export function DesignImportPanel() {
 
   const [designs, setDesigns] = useState<DesignIRSummary[]>([]);
   const [warnings, setWarnings] = useState<ImportWarning[]>([]);
+  const [diff, setDiff] = useState<DesignDiff | null>(null);
+  const [needsReview, setNeedsReview] = useState(false);
   const [figmaTarget, setFigmaTarget] = useState("");
   const [tokenDraft, setTokenDraft] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -44,20 +47,23 @@ export function DesignImportPanel() {
     void refresh();
   }, [refresh]);
 
-  const runImport = async (
-    label: string,
-    action: () => Promise<{ design: DesignIRSummary; warnings: ImportWarning[] }>
-  ): Promise<void> => {
+  const runImport = async (label: string, action: () => Promise<ApiImportResult>): Promise<void> => {
     setBusy(label);
     setError(null);
     setNotice(null);
     setWarnings([]);
+    setDiff(null);
+    setNeedsReview(false);
 
     try {
       const result = await action();
       setWarnings(result.warnings);
+      setDiff(result.diff);
+      setNeedsReview(result.needsReview);
       setNotice(
-        `Imported ${result.design.nodeCount} nodes from ${result.design.sourceFileName} — ${result.design.tokenCount} binding token(s).`
+        `Imported ${result.design.nodeCount} nodes from ${result.design.sourceFileName} — ${result.design.tokenCount} binding token(s)${
+          result.assetsStored ? `, ${result.assetsStored} asset(s) stored` : ""
+        }.`
       );
       await refresh();
     } catch (importError) {
@@ -167,6 +173,90 @@ export function DesignImportPanel() {
 
       {error ? <div className="import-error">{error}</div> : null}
       {notice ? <div className="import-notice">{notice}</div> : null}
+
+      {diff ? (
+        <CollapsibleSection title="Re-import changes">
+          <div className={needsReview ? "import-review-banner" : "import-notice"}>
+            {needsReview
+              ? "Review needed before a rig is carried across this import."
+              : "Every previous layer was matched; safe to carry a rig across."}
+          </div>
+
+          <ul className="import-diff-stats">
+            <li>
+              <strong>{diff.summary.matched}</strong> matched
+            </li>
+            <li>
+              <strong>{diff.summary.changed}</strong> changed
+            </li>
+            <li>
+              <strong>{diff.summary.added}</strong> added
+            </li>
+            <li className={diff.summary.removed ? "import-diff-bad" : undefined}>
+              <strong>{diff.summary.removed}</strong> removed
+            </li>
+            <li className={diff.summary.lowConfidence ? "import-diff-warn" : undefined}>
+              <strong>{diff.summary.lowConfidence}</strong> guessed
+            </li>
+          </ul>
+
+          {diff.removed.length ? (
+            <>
+              <p className="import-hint">
+                Gone from the design. Anything rigged against these will orphan and needs
+                re-linking:
+              </p>
+              <ul className="import-diff-list">
+                {diff.removed.slice(0, 12).map((node) => (
+                  <li className="import-diff-removed" key={node.nodeId}>
+                    <MinusCircle size={12} /> {node.sourcePath || node.name}{" "}
+                    <em>({node.kind})</em>
+                  </li>
+                ))}
+              </ul>
+              {diff.removed.length > 12 ? (
+                <p className="import-hint">…and {diff.removed.length - 12} more.</p>
+              ) : null}
+            </>
+          ) : null}
+
+          {diff.matched.filter((entry) => entry.confidence < 0.8).length ? (
+            <>
+              <p className="import-hint">
+                Matched by name or content rather than a stable id — confirm these are the
+                same element:
+              </p>
+              <ul className="import-diff-list">
+                {diff.matched
+                  .filter((entry) => entry.confidence < 0.8)
+                  .slice(0, 8)
+                  .map((entry) => (
+                    <li className="import-diff-guessed" key={entry.nodeId}>
+                      <AlertTriangle size={12} /> {entry.sourcePath}{" "}
+                      <em>({entry.strategy})</em>
+                    </li>
+                  ))}
+              </ul>
+            </>
+          ) : null}
+
+          {diff.matched.filter((entry) => !entry.changes.includes("unchanged")).length ? (
+            <>
+              <p className="import-hint">Changed:</p>
+              <ul className="import-diff-list">
+                {diff.matched
+                  .filter((entry) => !entry.changes.includes("unchanged"))
+                  .slice(0, 12)
+                  .map((entry) => (
+                    <li className="import-diff-changed" key={entry.nodeId}>
+                      {entry.sourcePath} <em>({entry.changes.join(", ")})</em>
+                    </li>
+                  ))}
+              </ul>
+            </>
+          ) : null}
+        </CollapsibleSection>
+      ) : null}
 
       {warnings.length ? (
         <CollapsibleSection title={`Import notes (${warnings.length})`}>

@@ -119,6 +119,26 @@ export interface FigmaNodePayload {
   rectangleCornerRadii?: [number, number, number, number];
   cornerSmoothing?: number;
 
+  /** Auto-layout. Same field names in both the REST response and the plugin API. */
+  layoutMode?: string;
+  primaryAxisAlignItems?: string;
+  counterAxisAlignItems?: string;
+  primaryAxisSizingMode?: string;
+  counterAxisSizingMode?: string;
+  itemSpacing?: number;
+  paddingTop?: number;
+  paddingRight?: number;
+  paddingBottom?: number;
+  paddingLeft?: number;
+  layoutAlign?: string;
+  layoutGrow?: number;
+
+  constraints?: { horizontal?: string; vertical?: string };
+
+  /** Component identity. REST exposes componentId; the plugin resolves the main component. */
+  componentId?: string;
+  pluginComponentName?: string;
+
   /** REST: outlined geometry. Present only when queried with geometry=paths. */
   fillGeometry?: FigmaVectorPath[];
   strokeGeometry?: FigmaVectorPath[];

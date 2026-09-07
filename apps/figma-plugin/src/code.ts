@@ -47,6 +47,19 @@ interface SerializedNode {
   cornerRadius?: number;
   rectangleCornerRadii?: [number, number, number, number];
   cornerSmoothing?: number;
+  layoutMode?: string;
+  primaryAxisAlignItems?: string;
+  counterAxisAlignItems?: string;
+  primaryAxisSizingMode?: string;
+  counterAxisSizingMode?: string;
+  itemSpacing?: number;
+  paddingTop?: number;
+  paddingRight?: number;
+  paddingBottom?: number;
+  paddingLeft?: number;
+  constraints?: { horizontal?: string; vertical?: string };
+  componentId?: string;
+  pluginComponentName?: string;
   characters?: string;
   style?: Record<string, unknown>;
   pluginVectorPaths?: Array<{ data: string; windingRule?: string }>;
@@ -197,6 +210,8 @@ async function serializeNode(node: SceneNode | PageNode): Promise<SerializedNode
   }
 
   serializeCorners(node, serialized);
+  serializeLayout(node, serialized);
+  await serializeComponent(node, serialized);
 
   // Source vector paths, which the REST API never returns.
   if ("vectorPaths" in node && node.vectorPaths) {
@@ -243,6 +258,61 @@ function serializeCorners(node: SceneNode | PageNode, serialized: SerializedNode
 
   if ("cornerSmoothing" in node && typeof node.cornerSmoothing === "number") {
     serialized.cornerSmoothing = node.cornerSmoothing;
+  }
+}
+
+/** Auto-layout and pinning intent — the reason imported artwork can still reflow. */
+function serializeLayout(node: SceneNode | PageNode, serialized: SerializedNode): void {
+  if ("layoutMode" in node && node.layoutMode !== "NONE") {
+    serialized.layoutMode = node.layoutMode;
+    serialized.primaryAxisAlignItems = node.primaryAxisAlignItems;
+    serialized.counterAxisAlignItems = node.counterAxisAlignItems;
+    serialized.primaryAxisSizingMode = node.primaryAxisSizingMode;
+    serialized.counterAxisSizingMode = node.counterAxisSizingMode;
+    serialized.itemSpacing = typeof node.itemSpacing === "number" ? node.itemSpacing : 0;
+    serialized.paddingTop = node.paddingTop;
+    serialized.paddingRight = node.paddingRight;
+    serialized.paddingBottom = node.paddingBottom;
+    serialized.paddingLeft = node.paddingLeft;
+  }
+
+  if ("constraints" in node && node.constraints) {
+    serialized.constraints = {
+      horizontal: node.constraints.horizontal,
+      vertical: node.constraints.vertical
+    };
+  }
+}
+
+/**
+ * Component identity, so two instances of one component rig once.
+ * `getMainComponentAsync` is the dynamic-page-safe accessor; the sync `mainComponent`
+ * getter throws under the `dynamic-page` documentAccess this plugin declares.
+ */
+async function serializeComponent(
+  node: SceneNode | PageNode,
+  serialized: SerializedNode
+): Promise<void> {
+  if (node.type === "COMPONENT" || node.type === "COMPONENT_SET") {
+    serialized.componentId = node.id;
+    serialized.pluginComponentName = node.name;
+
+    return;
+  }
+
+  if (node.type !== "INSTANCE") {
+    return;
+  }
+
+  try {
+    const main = await node.getMainComponentAsync();
+
+    if (main) {
+      serialized.componentId = main.id;
+      serialized.pluginComponentName = main.name;
+    }
+  } catch {
+    // A detached or unreachable main component is not worth failing the export for.
   }
 }
 

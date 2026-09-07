@@ -15,7 +15,13 @@ import {
   defaultTextLayout,
   IDENTITY_MATRIX,
   hashString,
+  type AutoLayout,
   type BlendMode,
+  type ComponentRef,
+  type ConstraintKind,
+  type LayoutAlign,
+  type LayoutSizing,
+  type NodeConstraints,
   type DesignAsset,
   type DesignIR,
   type DesignNode,
@@ -259,11 +265,119 @@ function mapNode(node: FigmaNodePayload, parentPath: string, context: MapperCont
       geometry: resolveGeometry(node, kind, context, sourcePath, resolvedNodeId),
       text: kind === "text" ? resolveText(node, context, sourcePath, resolvedNodeId) : undefined,
       imageAssetId: resolveImageAssetId(node, context),
+      autoLayout: resolveAutoLayout(node),
+      constraints: resolveConstraints(node),
+      componentRef: resolveComponentRef(node),
       children: (node.children ?? []).map((child) => mapNode(child, sourcePath, context))
     }
   );
 
   return mapped;
+}
+
+/**
+ * Auto-layout carries the designer's reflow intent, which broadcast needs: a bound name
+ * longer than the placeholder has to push the rest of the lower third along.
+ */
+function resolveAutoLayout(node: FigmaNodePayload): AutoLayout | undefined {
+  const axis = node.layoutMode === "HORIZONTAL" ? "horizontal" : node.layoutMode === "VERTICAL" ? "vertical" : "none";
+
+  if (axis === "none") {
+    return undefined;
+  }
+
+  return {
+    axis,
+    primaryAlign: mapLayoutAlign(node.primaryAxisAlignItems),
+    counterAlign: mapLayoutAlign(node.counterAxisAlignItems),
+    itemSpacing: node.itemSpacing ?? 0,
+    padding: {
+      top: node.paddingTop ?? 0,
+      right: node.paddingRight ?? 0,
+      bottom: node.paddingBottom ?? 0,
+      left: node.paddingLeft ?? 0
+    },
+    primarySizing: mapLayoutSizing(node.primaryAxisSizingMode),
+    counterSizing: mapLayoutSizing(node.counterAxisSizingMode),
+    clipsContent: node.clipsContent ?? false
+  };
+}
+
+function mapLayoutAlign(align: string | undefined): LayoutAlign {
+  switch (align) {
+    case "CENTER":
+      return "center";
+    case "MAX":
+      return "end";
+    case "SPACE_BETWEEN":
+      return "space-between";
+    case "BASELINE":
+      return "baseline";
+    default:
+      return "start";
+  }
+}
+
+function mapLayoutSizing(mode: string | undefined): LayoutSizing {
+  switch (mode) {
+    case "AUTO":
+      return "hug";
+    case "FIXED":
+      return "fixed";
+    default:
+      return "fixed";
+  }
+}
+
+/** Pinning intent, so a badge stays on the right edge when the raster changes. */
+function resolveConstraints(node: FigmaNodePayload): NodeConstraints | undefined {
+  if (!node.constraints) {
+    return undefined;
+  }
+
+  return {
+    horizontal: mapConstraint(node.constraints.horizontal),
+    vertical: mapConstraint(node.constraints.vertical)
+  };
+}
+
+function mapConstraint(constraint: string | undefined): ConstraintKind {
+  switch (constraint) {
+    case "MAX":
+    case "RIGHT":
+    case "BOTTOM":
+      return "max";
+    case "CENTER":
+      return "center";
+    case "STRETCH":
+    case "TOP_BOTTOM":
+    case "LEFT_RIGHT":
+      return "stretch";
+    case "SCALE":
+      return "scale";
+    default:
+      return "min";
+  }
+}
+
+function resolveComponentRef(node: FigmaNodePayload): ComponentRef | undefined {
+  if (node.type === "COMPONENT" || node.type === "COMPONENT_SET") {
+    return {
+      componentId: node.id,
+      componentName: node.name,
+      isInstance: false
+    };
+  }
+
+  if (node.type === "INSTANCE" && node.componentId) {
+    return {
+      componentId: node.componentId,
+      componentName: node.pluginComponentName,
+      isInstance: true
+    };
+  }
+
+  return undefined;
 }
 
 function resolveSize(node: FigmaNodePayload): Size {

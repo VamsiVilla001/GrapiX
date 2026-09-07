@@ -60,6 +60,25 @@ Both Figma front-ends emit the same payload and share one mapper, so they cannot
 Every importer records what it had to approximate as a reviewable warning — fidelity loss
 is never silent.
 
+Assets are materialised to files on import and served from `/api/designs/:id/assets/:file`.
+This is required rather than tidy: Figma's REST API returns signed URLs that expire within
+hours, so a design that stored them would stop rendering.
+
+### Re-import
+
+Importing the same source file again does not replace the previous import. Each import is an
+immutable revision, and the new tree is reconciled against the last one to produce a
+reviewable diff — matched, changed, added and, critically, **removed** nodes, since anything
+rigged against a removed node orphans.
+
+Matching runs strongest-strategy first (native node id → GrapiX id → layer path → name →
+content fingerprint) and records which strategy found each match, so the UI can separate what
+it knew from what it guessed. Ambiguous names are deliberately left unmatched.
+
+```bash
+curl http://127.0.0.1:4100/api/designs/<designId>/diff
+```
+
 ### Installing the Figma plugin
 
 ```bash

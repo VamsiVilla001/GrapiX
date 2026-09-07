@@ -271,6 +271,9 @@ export interface DesignNode {
   geometry?: VectorGeometry;
   text?: TextContent;
   imageAssetId?: string;
+  autoLayout?: AutoLayout;
+  constraints?: NodeConstraints;
+  componentRef?: ComponentRef;
   tokens: DesignToken[];
   children: DesignNode[];
 }
@@ -585,4 +588,58 @@ export function createFontCollector(): FontCollector {
         sampleText: [...face.chars].sort().join("")
       }))
   };
+}
+
+export {
+  diffNeedsReview,
+  reconcileDesigns,
+  STRATEGY_CONFIDENCE,
+  type ChangeKind,
+  type DesignDiff,
+  type MatchedNode,
+  type MatchStrategy,
+  type UnmatchedNode
+} from "./reconcile.js";
+
+// ---------------------------------------------------------------------------
+// Layout intent
+//
+// Design tools express *why* a box is where it is, not just where it ended up.
+// Broadcast needs that intent: a lower third built with auto-layout has to reflow when a
+// bound name is longer than the designer's placeholder, and a badge pinned to the right
+// edge has to stay pinned when the raster changes. Dropping this on import is what makes
+// imported artwork feel dead.
+// ---------------------------------------------------------------------------
+
+export type LayoutAxis = "none" | "horizontal" | "vertical";
+export type LayoutAlign = "start" | "center" | "end" | "space-between" | "baseline";
+export type LayoutSizing = "fixed" | "hug" | "fill";
+
+export interface AutoLayout {
+  axis: LayoutAxis;
+  primaryAlign: LayoutAlign;
+  counterAlign: LayoutAlign;
+  itemSpacing: number;
+  padding: { top: number; right: number; bottom: number; left: number };
+  primarySizing: LayoutSizing;
+  counterSizing: LayoutSizing;
+  /** Children ignoring the layout, positioned absolutely inside it. */
+  clipsContent: boolean;
+}
+
+export type ConstraintKind = "min" | "max" | "center" | "stretch" | "scale";
+
+export interface NodeConstraints {
+  horizontal: ConstraintKind;
+  vertical: ConstraintKind;
+}
+
+/**
+ * Component identity. Two instances of one component should rig once, so the compiler and
+ * the re-link UI both need to know which nodes share a definition.
+ */
+export interface ComponentRef {
+  componentId: string;
+  componentName?: string;
+  isInstance: boolean;
 }

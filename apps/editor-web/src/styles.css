@@ -3260,3 +3260,82 @@ h3 {
   border-color: #d95f5f;
   color: #d95f5f;
 }
+
+/* Re-import diff review */
+
+.import-review-banner {
+  padding: 8px 10px;
+  margin: 8px 0;
+  border: 1px solid #5a3d1a;
+  border-radius: 5px;
+  background: #2a1e0f;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #e3c07b;
+}
+
+.import-diff-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.import-diff-stats li {
+  padding: 4px 7px;
+  border: 1px solid #1e2a38;
+  border-radius: 4px;
+  background: #16212d;
+  font-size: 10px;
+  color: #9db0c2;
+}
+
+.import-diff-stats strong {
+  color: #e8f1f8;
+}
+
+.import-diff-stats .import-diff-bad {
+  border-color: #4a2226;
+  color: #f0a1a1;
+}
+
+.import-diff-stats .import-diff-warn {
+  border-color: #5a3d1a;
+  color: #e3c07b;
+}
+
+.import-diff-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.import-diff-list li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 7px;
+  border-radius: 4px;
+  background: #16212d;
+  font-size: 10px;
+  line-height: 1.4;
+  color: #cfe0ee;
+}
+
+.import-diff-list em {
+  color: #6b7d8f;
+  font-style: normal;
+}
+
+.import-diff-removed {
+  color: #f0a1a1;
+}
+
+.import-diff-guessed {
+  color: #e3c07b;
+}
