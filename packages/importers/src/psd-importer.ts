@@ -133,6 +133,8 @@ export function importPsd(options: PsdImportOptions): DesignIR {
     root,
     assets: [],
     fonts: context.fonts.list(),
+    // PSD has per-layer styles but no shared style library.
+    sharedStyles: {},
     warnings: context.warnings
   };
 }

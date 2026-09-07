@@ -26,11 +26,20 @@ export interface FigmaRestOptions {
   fetchImpl?: typeof fetch;
 }
 
+/** Shared style definitions, as returned alongside the nodes. */
+type FigmaStyleTable = Record<
+  string,
+  { name?: string; styleType?: string; key?: string; description?: string }
+>;
+
 interface FigmaNodesResponse {
   name?: string;
   version?: string;
   lastModified?: string;
-  nodes?: Record<string, { document?: FigmaNodePayload } | undefined>;
+  nodes?: Record<
+    string,
+    { document?: FigmaNodePayload; styles?: FigmaStyleTable } | undefined
+  >;
 }
 
 interface FigmaFileResponse {
@@ -38,6 +47,7 @@ interface FigmaFileResponse {
   version?: string;
   lastModified?: string;
   document?: FigmaNodePayload;
+  styles?: FigmaStyleTable;
 }
 
 interface FigmaImageFillsResponse {
@@ -67,7 +77,7 @@ export async function fetchFigmaPayload(options: FigmaRestOptions): Promise<Figm
   const doFetch = options.fetchImpl ?? fetch;
   const nodeIds = options.nodeIds?.length ? options.nodeIds : parsed.nodeIds;
 
-  const { nodes, fileName, version } = nodeIds.length
+  const { nodes, fileName, version, styles } = nodeIds.length
     ? await fetchSelectedNodes(doFetch, options.token, parsed.fileKey, nodeIds)
     : await fetchWholeFile(doFetch, options.token, parsed.fileKey);
 
@@ -80,7 +90,8 @@ export async function fetchFigmaPayload(options: FigmaRestOptions): Promise<Figm
     fileName,
     version,
     nodes,
-    images
+    images,
+    styles
   };
 }
 
@@ -89,7 +100,12 @@ async function fetchSelectedNodes(
   token: string,
   fileKey: string,
   nodeIds: string[]
-): Promise<{ nodes: FigmaNodePayload[]; fileName: string; version: string }> {
+): Promise<{
+  nodes: FigmaNodePayload[];
+  fileName: string;
+  version: string;
+  styles: FigmaStyleTable;
+}> {
   const query = new URLSearchParams({
     ids: nodeIds.join(","),
     geometry: "paths"
@@ -100,9 +116,12 @@ async function fetchSelectedNodes(
     `/files/${fileKey}/nodes?${query.toString()}`
   );
 
-  const nodes = Object.values(response.nodes ?? {})
+  const entries = Object.values(response.nodes ?? {});
+  const nodes = entries
     .map((entry) => entry?.document)
     .filter((document): document is FigmaNodePayload => Boolean(document));
+  // Each requested node carries its own styles table; merge them into one.
+  const styles: FigmaStyleTable = Object.assign({}, ...entries.map((entry) => entry?.styles ?? {}));
 
   if (!nodes.length) {
     throw new FigmaRestError(
@@ -113,6 +132,7 @@ async function fetchSelectedNodes(
 
   return {
     nodes,
+    styles,
     fileName: response.name ?? fileKey,
     version: response.version ?? response.lastModified ?? "unknown"
   };
@@ -122,7 +142,12 @@ async function fetchWholeFile(
   doFetch: typeof fetch,
   token: string,
   fileKey: string
-): Promise<{ nodes: FigmaNodePayload[]; fileName: string; version: string }> {
+): Promise<{
+  nodes: FigmaNodePayload[];
+  fileName: string;
+  version: string;
+  styles: FigmaStyleTable;
+}> {
   const response = await figmaRequest<FigmaFileResponse>(
     doFetch,
     token,
@@ -136,6 +161,7 @@ async function fetchWholeFile(
 
   return {
     nodes,
+    styles: response.styles ?? {},
     fileName: response.name ?? fileKey,
     version: response.version ?? response.lastModified ?? "unknown"
   };

@@ -280,6 +280,23 @@ export interface ApiImportResult {
   assetsStored: number;
 }
 
+/**
+ * Resolves a DesignIR asset source into a URL this window can actually load.
+ *
+ * Stored sources are API-relative (`/api/designs/...`) on purpose: that survives the API
+ * moving port, which an absolute URL baked into a stored design would not. But a relative
+ * path resolves against the *editor* origin — Vite in the browser, or `file://` under
+ * Electron — not the API, so it must be prefixed before use. Anything already absolute
+ * (a data URI, or an external URL an importer could not store) is passed straight through.
+ */
+export function resolveAssetUrl(source: string): string {
+  if (source.startsWith("/api/")) {
+    return `${apiBaseUrl}${source}`;
+  }
+
+  return source;
+}
+
 export async function getDesignDiffFromApi(
   designId: string,
   against?: string

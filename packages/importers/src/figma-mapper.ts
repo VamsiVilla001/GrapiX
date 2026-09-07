@@ -16,6 +16,10 @@ import {
   IDENTITY_MATRIX,
   hashString,
   type AutoLayout,
+  type ImageFilters,
+  type MaskType,
+  type SharedStyle,
+  type StyleRefs,
   type BlendMode,
   type ComponentRef,
   type ConstraintKind,
@@ -106,6 +110,7 @@ interface MapperContext {
   images: Map<string, DesignAsset>;
   origin: FigmaImportPayload["origin"];
   seenNodeIds: Set<string>;
+  referencedStyleIds: Set<string>;
 }
 
 export function mapFigmaPayloadToDesignIR(payload: FigmaImportPayload): DesignIR {
@@ -120,7 +125,8 @@ export function mapFigmaPayloadToDesignIR(payload: FigmaImportPayload): DesignIR
     fonts: createFontCollector(),
     images: new Map(),
     origin: payload.origin,
-    seenNodeIds: new Set()
+    seenNodeIds: new Set(),
+    referencedStyleIds: new Set()
   };
 
   for (const image of payload.images ?? []) {
@@ -183,6 +189,7 @@ export function mapFigmaPayloadToDesignIR(payload: FigmaImportPayload): DesignIR
     root,
     assets: [...context.images.values()],
     fonts: context.fonts.list(),
+    sharedStyles: resolveSharedStyles(payload, context),
     warnings: context.warnings
   };
 }
@@ -265,6 +272,17 @@ function mapNode(node: FigmaNodePayload, parentPath: string, context: MapperCont
       geometry: resolveGeometry(node, kind, context, sourcePath, resolvedNodeId),
       text: kind === "text" ? resolveText(node, context, sourcePath, resolvedNodeId) : undefined,
       imageAssetId: resolveImageAssetId(node, context),
+      maskType: node.isMask ? mapMaskType(node.maskType, context, sourcePath, resolvedNodeId) : undefined,
+      renderBounds: node.absoluteRenderBounds
+        ? {
+            x: node.absoluteRenderBounds.x,
+            y: node.absoluteRenderBounds.y,
+            width: node.absoluteRenderBounds.width,
+            height: node.absoluteRenderBounds.height
+          }
+        : undefined,
+      styleRefs: resolveStyleRefs(node, context),
+      variableRefs: resolveVariableRefs(node),
       autoLayout: resolveAutoLayout(node),
       constraints: resolveConstraints(node),
       componentRef: resolveComponentRef(node),
@@ -440,6 +458,10 @@ function mapPaint(
       position: stop.position,
       color: mapColor(stop.color)
     })),
+    imageTransform: paint.imageTransform ? rowsToMatrix(paint.imageTransform) : undefined,
+    tileScale: paint.scalingFactor,
+    rotation: paint.rotation,
+    filters: mapImageFilters(paint.filters),
     gradientTransform: paint.pluginGradientTransform
       ? ([
           paint.pluginGradientTransform[0][0],
@@ -470,6 +492,158 @@ function mapPaint(
   }
 
   return mapped;
+}
+
+/**
+ * Mask compositing mode. Luminance masks are how broadcast art usually builds a gradient
+ * fade, so silently treating one as an alpha mask changes the look.
+ */
+function mapMaskType(
+  maskType: string | undefined,
+  context: MapperContext,
+  sourcePath: string,
+  nodeId: string
+): MaskType {
+  switch (maskType) {
+    case "VECTOR":
+      return "vector";
+    case "LUMINANCE":
+      context.warnings.push({
+        severity: "info",
+        code: "FIGMA_LUMINANCE_MASK",
+        message:
+          "This layer is a luminance mask. It is recorded, but the renderer must composite it by luminance rather than alpha or the fade will look wrong.",
+        nodeId,
+        sourcePath
+      });
+
+      return "luminance";
+    default:
+      // Figma defaults to ALPHA when the field is absent.
+      return "alpha";
+  }
+}
+
+/**
+ * Shared style references — Figma's "layer styles". Recording the id (rather than only the
+ * resolved values) is what lets two nodes on one style change together later.
+ */
+function resolveStyleRefs(
+  node: FigmaNodePayload,
+  context: MapperContext
+): StyleRefs | undefined {
+  if (!node.styles || !Object.keys(node.styles).length) {
+    return undefined;
+  }
+
+  const refs: StyleRefs = {};
+
+  for (const [slot, styleId] of Object.entries(node.styles)) {
+    if (typeof styleId !== "string") {
+      continue;
+    }
+
+    switch (slot) {
+      case "fill":
+      case "fills":
+        refs.fill = styleId;
+        break;
+      case "stroke":
+      case "strokes":
+        refs.stroke = styleId;
+        break;
+      case "text":
+        refs.text = styleId;
+        break;
+      case "effect":
+      case "effects":
+        refs.effect = styleId;
+        break;
+      case "grid":
+      case "grids":
+        refs.grid = styleId;
+        break;
+      default:
+        break;
+    }
+
+    context.referencedStyleIds.add(styleId);
+  }
+
+  return Object.keys(refs).length ? refs : undefined;
+}
+
+/**
+ * Figma variable bindings, flattened to property -> variable id. The variable's value is
+ * not available from the file endpoint, so only the reference is kept.
+ */
+function resolveVariableRefs(node: FigmaNodePayload): Record<string, string> | undefined {
+  if (!node.boundVariables) {
+    return undefined;
+  }
+
+  const refs: Record<string, string> = {};
+
+  for (const [property, binding] of Object.entries(node.boundVariables)) {
+    const id = extractVariableId(binding);
+
+    if (id) {
+      refs[property] = id;
+    }
+  }
+
+  return Object.keys(refs).length ? refs : undefined;
+}
+
+/** A binding is either {id} or an array of them, depending on the property. */
+function extractVariableId(binding: unknown): string | null {
+  if (!binding || typeof binding !== "object") {
+    return null;
+  }
+
+  const direct = (binding as { id?: unknown }).id;
+
+  if (typeof direct === "string") {
+    return direct;
+  }
+
+  if (Array.isArray(binding)) {
+    for (const entry of binding) {
+      const id = extractVariableId(entry);
+
+      if (id) {
+        return id;
+      }
+    }
+  }
+
+  return null;
+}
+
+/** Figma's row-pair transform ([[a, c, e], [b, d, f]]) into DesignIR's flat matrix. */
+function rowsToMatrix(rows: [[number, number, number], [number, number, number]]): Matrix2D {
+  return [rows[0][0], rows[1][0], rows[0][1], rows[1][1], rows[0][2], rows[1][2]];
+}
+
+/** All-zero filters mean "untouched", so they are dropped rather than stored. */
+function mapImageFilters(
+  filters: FigmaPaint["filters"]
+): ImageFilters | undefined {
+  if (!filters) {
+    return undefined;
+  }
+
+  const mapped: ImageFilters = {
+    exposure: filters.exposure ?? 0,
+    contrast: filters.contrast ?? 0,
+    saturation: filters.saturation ?? 0,
+    temperature: filters.temperature ?? 0,
+    tint: filters.tint ?? 0,
+    highlights: filters.highlights ?? 0,
+    shadows: filters.shadows ?? 0
+  };
+
+  return Object.values(mapped).some((value) => value !== 0) ? mapped : undefined;
 }
 
 function mapScaleMode(scaleMode: string | undefined): Paint["scaleMode"] {
@@ -513,13 +687,28 @@ function mapStrokes(
   sourcePath: string,
   nodeId: string
 ): Stroke[] {
+  const sides = node.individualStrokeWeights;
+  // Only record per-side weights when they actually differ; otherwise `weight` says it all.
+  const individualWeights =
+    sides &&
+    new Set([sides.top ?? 0, sides.right ?? 0, sides.bottom ?? 0, sides.left ?? 0]).size > 1
+      ? {
+          top: sides.top ?? 0,
+          right: sides.right ?? 0,
+          bottom: sides.bottom ?? 0,
+          left: sides.left ?? 0
+        }
+      : undefined;
+
   return (node.strokes ?? []).map((paint) => ({
     paint: mapPaint(paint, context, sourcePath, nodeId),
     weight: node.strokeWeight ?? 1,
     align: mapStrokeAlign(node.strokeAlign),
     cap: mapStrokeCap(node.strokeCap),
     join: mapStrokeJoin(node.strokeJoin),
-    dashPattern: node.strokeDashes ?? []
+    dashPattern: node.strokeDashes ?? [],
+    individualWeights,
+    miterAngle: node.strokeMiterAngle
   }));
 }
 
@@ -576,7 +765,8 @@ function mapEffect(effect: FigmaEffect): Effect | null {
     spread: effect.spread,
     offset: effect.offset,
     color: effect.color ? mapColor(effect.color) : undefined,
-    blendMode: BLEND_MODE_BY_FIGMA[effect.blendMode ?? "NORMAL"] ?? "normal"
+    blendMode: BLEND_MODE_BY_FIGMA[effect.blendMode ?? "NORMAL"] ?? "normal",
+    showBehindNode: effect.showShadowBehindNode
   };
 }
 
@@ -767,6 +957,7 @@ function buildRun(
     textCase: mapTextCase(style.textCase),
     textDecoration: mapTextDecoration(style.textDecoration),
     baselineShift: 0,
+    fontPostScriptName: style.fontPostScriptName ?? undefined,
     fills: (style.fills ?? []).map((paint) => mapPaint(paint, context, sourcePath, nodeId))
   };
 }
@@ -782,7 +973,9 @@ function resolveTextLayout(style: FigmaTypeStyle | undefined): TextContent["layo
     horizontalAlign: mapHorizontalAlign(style.textAlignHorizontal),
     verticalAlign: mapVerticalAlign(style.textAlignVertical),
     autoResize: mapAutoResize(style.textAutoResize),
-    paragraphSpacing: style.paragraphSpacing ?? 0
+    paragraphSpacing: style.paragraphSpacing ?? 0,
+    maxLines: style.maxLines,
+    truncation: style.textTruncation === "ENDING" ? "ending" : "none"
   };
 }
 
@@ -844,5 +1037,59 @@ function mapTextDecoration(decoration: string | undefined): TextRun["textDecorat
       return "strikethrough";
     default:
       return "none";
+  }
+}
+
+/**
+ * Builds the shared-style table, keeping only styles a node actually references.
+ *
+ * A style the importer cannot resolve is reported: the node keeps its resolved values, so
+ * it still renders, but it is no longer linked to the style and will not follow a later
+ * change to it.
+ */
+function resolveSharedStyles(
+  payload: FigmaImportPayload,
+  context: MapperContext
+): Record<string, SharedStyle> {
+  const table: Record<string, SharedStyle> = {};
+  const supplied = payload.styles ?? {};
+
+  for (const styleId of context.referencedStyleIds) {
+    const definition = supplied[styleId];
+
+    if (!definition) {
+      context.warnings.push({
+        severity: "warning",
+        code: "FIGMA_STYLE_NOT_RESOLVED",
+        message: `Shared style ${styleId} was referenced but not included in the import, so those layers are no longer linked to it.`
+      });
+
+      continue;
+    }
+
+    table[styleId] = {
+      styleId,
+      name: definition.name ?? styleId,
+      styleType: mapStyleType(definition.styleType),
+      key: definition.key,
+      description: definition.description
+    };
+  }
+
+  return table;
+}
+
+function mapStyleType(styleType: string | undefined): SharedStyle["styleType"] {
+  switch (styleType) {
+    case "TEXT":
+      return "TEXT";
+    case "EFFECT":
+      return "EFFECT";
+    case "GRID":
+      return "GRID";
+    case "STROKE":
+      return "STROKE";
+    default:
+      return "FILL";
   }
 }

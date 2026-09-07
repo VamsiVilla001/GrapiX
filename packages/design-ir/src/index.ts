@@ -84,6 +84,12 @@ export interface Paint {
   gradientTransform?: Matrix2D;
   assetId?: string;
   scaleMode?: "fill" | "fit" | "stretch" | "tile";
+  /** Crop/placement transform for an image paint. Without it, cropped images render wrong. */
+  imageTransform?: Matrix2D;
+  /** Tile scale, only meaningful when scaleMode is "tile". */
+  tileScale?: number;
+  rotation?: number;
+  filters?: ImageFilters;
 }
 
 export type StrokeAlign = "inside" | "outside" | "center";
@@ -95,6 +101,9 @@ export interface Stroke {
   cap: "none" | "round" | "square";
   join: "miter" | "bevel" | "round";
   dashPattern: number[];
+  /** Set when the sides differ; the uniform `weight` above stays as the fallback. */
+  individualWeights?: StrokeWeights;
+  miterAngle?: number;
 }
 
 export type EffectKind = "drop-shadow" | "inner-shadow" | "layer-blur" | "background-blur";
@@ -107,6 +116,8 @@ export interface Effect {
   offset?: { x: number; y: number };
   color?: RGBA;
   blendMode?: BlendMode;
+  /** Drop shadows only: whether the shadow shows through a translucent node. */
+  showBehindNode?: boolean;
 }
 
 export interface VectorGeometry {
@@ -128,6 +139,8 @@ export interface TextRun {
   textCase: "original" | "upper" | "lower" | "title";
   textDecoration: "none" | "underline" | "strikethrough";
   baselineShift: number;
+  /** The exact face, which family+weight alone cannot always resolve. */
+  fontPostScriptName?: string;
   fills: Paint[];
 }
 
@@ -137,6 +150,7 @@ export interface TextLayout {
   autoResize: "none" | "width" | "height" | "width-and-height";
   paragraphSpacing: number;
   maxLines?: number;
+  truncation?: TextTruncation;
 }
 
 export interface TextContent {
@@ -271,6 +285,14 @@ export interface DesignNode {
   geometry?: VectorGeometry;
   text?: TextContent;
   imageAssetId?: string;
+  /** Only meaningful when isMask is true. */
+  maskType?: MaskType;
+  /** Bounds including effect and stroke bleed, which absoluteBoundingBox excludes. */
+  renderBounds?: Rect;
+  /** Shared styles this node points at. Resolve against DesignIR.sharedStyles. */
+  styleRefs?: StyleRefs;
+  /** Figma variable bindings, as property name -> variable id. */
+  variableRefs?: Record<string, string>;
   autoLayout?: AutoLayout;
   constraints?: NodeConstraints;
   componentRef?: ComponentRef;
@@ -293,6 +315,8 @@ export interface DesignIR {
   root: DesignNode;
   assets: DesignAsset[];
   fonts: FontRequirement[];
+  /** Shared style definitions referenced by node styleRefs. */
+  sharedStyles: Record<string, SharedStyle>;
   warnings: ImportWarning[];
 }
 
@@ -642,4 +666,63 @@ export interface ComponentRef {
   componentId: string;
   componentName?: string;
   isInstance: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Style detail
+//
+// The fields below are the difference between "the shape is roughly right" and "it
+// matches the design". They were all being dropped on import; see the audit in
+// docs/figma-coverage.md.
+// ---------------------------------------------------------------------------
+
+/**
+ * Figma image adjustments. Each runs -1..+1 with 0 meaning untouched, so an all-zero
+ * filter set is equivalent to absent.
+ */
+export interface ImageFilters {
+  exposure: number;
+  contrast: number;
+  saturation: number;
+  temperature: number;
+  tint: number;
+  highlights: number;
+  shadows: number;
+}
+
+/** Per-side stroke weights. Common in scorebugs, where only one edge carries a rule. */
+export interface StrokeWeights {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+/**
+ * How a mask composites. Luminance masks are the standard way broadcast art builds a
+ * gradient fade, so treating every mask as alpha silently changes the look.
+ */
+export type MaskType = "alpha" | "vector" | "luminance";
+
+export type TextTruncation = "none" | "ending";
+
+/**
+ * A shared style definition — Figma's own "layer styles". Two nodes referencing the same
+ * style id are meant to change together, which a per-node copy of the values cannot express.
+ */
+export interface SharedStyle {
+  styleId: string;
+  name: string;
+  styleType: "FILL" | "TEXT" | "EFFECT" | "GRID" | "STROKE";
+  key?: string;
+  description?: string;
+}
+
+/** Which shared style each styleable slot on a node points at. */
+export interface StyleRefs {
+  fill?: string;
+  stroke?: string;
+  text?: string;
+  effect?: string;
+  grid?: string;
 }

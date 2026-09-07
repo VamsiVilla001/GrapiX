@@ -140,6 +140,8 @@ export async function importIllustrator(options: IllustratorImportOptions): Prom
     root,
     assets: [],
     fonts: context.fonts.list(),
+    // PDF carries no shared style library.
+    sharedStyles: {},
     warnings: context.warnings
   };
 }

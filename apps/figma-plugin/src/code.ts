@@ -21,6 +21,10 @@ interface SerializedPaint {
   gradientHandlePositions?: Array<{ x: number; y: number }>;
   imageRef?: string;
   scaleMode?: string;
+  imageTransform?: [[number, number, number], [number, number, number]];
+  scalingFactor?: number;
+  rotation?: number;
+  filters?: Record<string, number>;
   pluginGradientTransform?: [[number, number, number], [number, number, number]];
 }
 
@@ -58,6 +62,11 @@ interface SerializedNode {
   paddingBottom?: number;
   paddingLeft?: number;
   constraints?: { horizontal?: string; vertical?: string };
+  individualStrokeWeights?: { top?: number; right?: number; bottom?: number; left?: number };
+  maskType?: string;
+  absoluteRenderBounds?: { x: number; y: number; width: number; height: number } | null;
+  styles?: Record<string, string>;
+  boundVariables?: Record<string, unknown>;
   componentId?: string;
   pluginComponentName?: string;
   characters?: string;
@@ -69,6 +78,9 @@ interface SerializedNode {
 
 /** Image hashes discovered while walking, resolved to data URIs before sending. */
 const imageHashes = new Set<string>();
+
+/** Shared style ids discovered while walking, resolved to definitions before sending. */
+const styleIds = new Set<string>();
 
 figma.showUI(__html__, { width: 380, height: 460 });
 
@@ -90,6 +102,7 @@ figma.ui.onmessage = async (message: { type?: string; apiBaseUrl?: string }) => 
 
   try {
     imageHashes.clear();
+    styleIds.clear();
 
     const roots = figma.currentPage.selection.length
       ? [...figma.currentPage.selection]
@@ -111,6 +124,7 @@ figma.ui.onmessage = async (message: { type?: string; apiBaseUrl?: string }) => 
     }
 
     const images = await resolveImages();
+    const styles = await resolveStyles();
 
     figma.ui.postMessage({
       type: "payload",
@@ -123,7 +137,8 @@ figma.ui.onmessage = async (message: { type?: string; apiBaseUrl?: string }) => 
         version: `plugin-${Date.now()}`,
         clientVersion: PLUGIN_VERSION,
         nodes,
-        images
+        images,
+        styles
       }
     });
   } catch (error) {
@@ -282,6 +297,99 @@ function serializeLayout(node: SceneNode | PageNode, serialized: SerializedNode)
       vertical: node.constraints.vertical
     };
   }
+
+  // Per-side stroke weights, common where only one edge carries a rule.
+  if (
+    "strokeTopWeight" in node &&
+    typeof node.strokeTopWeight === "number" &&
+    typeof node.strokeRightWeight === "number" &&
+    typeof node.strokeBottomWeight === "number" &&
+    typeof node.strokeLeftWeight === "number"
+  ) {
+    serialized.individualStrokeWeights = {
+      top: node.strokeTopWeight,
+      right: node.strokeRightWeight,
+      bottom: node.strokeBottomWeight,
+      left: node.strokeLeftWeight
+    };
+  }
+
+  // Only meaningful when the node is a mask, but cheap to always record.
+  if ("maskType" in node && typeof node.maskType === "string") {
+    serialized.maskType = node.maskType;
+  }
+
+  if ("absoluteRenderBounds" in node && node.absoluteRenderBounds) {
+    serialized.absoluteRenderBounds = {
+      x: node.absoluteRenderBounds.x,
+      y: node.absoluteRenderBounds.y,
+      width: node.absoluteRenderBounds.width,
+      height: node.absoluteRenderBounds.height
+    };
+  }
+
+  if ("boundVariables" in node && node.boundVariables) {
+    serialized.boundVariables = node.boundVariables as unknown as Record<string, unknown>;
+  }
+
+  serializeStyleRefs(node, serialized);
+}
+
+/**
+ * Shared style references. The plugin exposes one style id per styleable slot; the ids are
+ * collected here and resolved to names and types once, before the payload is sent.
+ */
+function serializeStyleRefs(node: SceneNode | PageNode, serialized: SerializedNode): void {
+  const slots: Array<[string, string]> = [
+    ["fill", "fillStyleId"],
+    ["stroke", "strokeStyleId"],
+    ["effect", "effectStyleId"],
+    ["grid", "gridStyleId"],
+    ["text", "textStyleId"]
+  ];
+  const refs: Record<string, string> = {};
+
+  for (const [slot, property] of slots) {
+    const value = (node as unknown as Record<string, unknown>)[property];
+
+    // A mixed style id means the node has more than one; there is no single ref to record.
+    if (typeof value === "string" && value) {
+      refs[slot] = value;
+      styleIds.add(value);
+    }
+  }
+
+  if (Object.keys(refs).length) {
+    serialized.styles = refs;
+  }
+}
+
+async function resolveStyles(): Promise<
+  Record<string, { name?: string; styleType?: string; key?: string; description?: string }>
+> {
+  const resolved: Record<
+    string,
+    { name?: string; styleType?: string; key?: string; description?: string }
+  > = {};
+
+  for (const styleId of styleIds) {
+    try {
+      const style = await figma.getStyleByIdAsync(styleId);
+
+      if (style) {
+        resolved[styleId] = {
+          name: style.name,
+          styleType: style.type,
+          key: style.key,
+          description: style.description
+        };
+      }
+    } catch {
+      // The mapper warns per unresolved style; one bad id must not fail the export.
+    }
+  }
+
+  return resolved;
 }
 
 /**
@@ -323,7 +431,9 @@ async function serializeText(node: TextNode, serialized: SerializedNode): Promis
     textAlignHorizontal: node.textAlignHorizontal,
     textAlignVertical: node.textAlignVertical,
     textAutoResize: node.textAutoResize,
-    paragraphSpacing: node.paragraphSpacing
+    paragraphSpacing: node.paragraphSpacing,
+    textTruncation: node.textTruncation,
+    maxLines: node.maxLines ?? undefined
   };
 
   const segments = node.getStyledTextSegments([
@@ -395,6 +505,26 @@ function serializePaints(paints: readonly Paint[] | typeof figma.mixed): Seriali
       serialized.imageRef = paint.imageHash;
       serialized.scaleMode = paint.scaleMode;
       imageHashes.add(paint.imageHash);
+
+      // Crop/placement and adjustments. Without imageTransform a cropped image is wrong.
+      if (paint.imageTransform) {
+        serialized.imageTransform = [
+          [paint.imageTransform[0][0], paint.imageTransform[0][1], paint.imageTransform[0][2]],
+          [paint.imageTransform[1][0], paint.imageTransform[1][1], paint.imageTransform[1][2]]
+        ];
+      }
+
+      if (typeof paint.scalingFactor === "number") {
+        serialized.scalingFactor = paint.scalingFactor;
+      }
+
+      if (typeof paint.rotation === "number") {
+        serialized.rotation = paint.rotation;
+      }
+
+      if (paint.filters) {
+        serialized.filters = { ...paint.filters } as unknown as Record<string, number>;
+      }
     }
 
     return serialized;

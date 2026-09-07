@@ -33,6 +33,20 @@ export interface FigmaPaint {
   gradientHandlePositions?: Array<{ x: number; y: number }>;
   imageRef?: string;
   scaleMode?: string;
+  /** Crop/placement transform for an image paint, as [[a, c, e], [b, d, f]]. */
+  imageTransform?: [[number, number, number], [number, number, number]];
+  /** Tile scale; present only when scaleMode is TILE. */
+  scalingFactor?: number;
+  rotation?: number;
+  filters?: {
+    exposure?: number;
+    contrast?: number;
+    saturation?: number;
+    temperature?: number;
+    tint?: number;
+    highlights?: number;
+    shadows?: number;
+  };
   /**
    * Plugin-only: the gradient's affine transform, as [[a, c, e], [b, d, f]].
    * The plugin API exposes this directly, where REST only gives handle positions.
@@ -48,6 +62,7 @@ export interface FigmaEffect {
   offset?: { x: number; y: number };
   color?: FigmaColor;
   blendMode?: string;
+  showShadowBehindNode?: boolean;
 }
 
 export interface FigmaTypeStyle {
@@ -65,6 +80,9 @@ export interface FigmaTypeStyle {
   textDecoration?: string;
   paragraphSpacing?: number;
   italic?: boolean;
+  textTruncation?: string;
+  maxLines?: number;
+  lineHeightUnit?: string;
   fills?: FigmaPaint[];
 }
 
@@ -113,7 +131,16 @@ export interface FigmaNodePayload {
   strokeCap?: string;
   strokeJoin?: string;
   strokeDashes?: number[];
+  individualStrokeWeights?: { top?: number; right?: number; bottom?: number; left?: number };
+  strokeMiterAngle?: number;
   effects?: FigmaEffect[];
+  maskType?: string;
+  /** Bounds including effect and stroke bleed; absoluteBoundingBox excludes both. */
+  absoluteRenderBounds?: { x: number; y: number; width: number; height: number } | null;
+  /** Shared style ids per styleable slot, resolved against the response's styles table. */
+  styles?: Record<string, string>;
+  /** Figma variable bindings. Shape varies, so only ids are read out. */
+  boundVariables?: Record<string, unknown>;
 
   cornerRadius?: number;
   rectangleCornerRadii?: [number, number, number, number];
@@ -174,6 +201,14 @@ export interface FigmaImportPayload {
   /** The selected roots. One import can bring in several artboards. */
   nodes: FigmaNodePayload[];
   images?: FigmaImagePayload[];
+  /**
+   * Shared style definitions, keyed by style id — Figma's own "layer styles". Both
+   * front-ends supply this; node.styles points into it.
+   */
+  styles?: Record<
+    string,
+    { name?: string; styleType?: string; key?: string; description?: string }
+  >;
   /** Plugin build id, so a DesignIR records which front-end produced it. */
   clientVersion?: string;
 }

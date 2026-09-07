@@ -40,6 +40,7 @@ function designWithAsset(source: string, designId = "design_test_assets"): Desig
       }
     ],
     fonts: [],
+    sharedStyles: {},
     warnings: []
   };
 }
