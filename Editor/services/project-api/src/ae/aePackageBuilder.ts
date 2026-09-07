@@ -318,6 +318,59 @@ export async function validateAePublish(request: AePublishRequest): Promise<AePu
   return buildAePublishValidation(refusals, warnings);
 }
 
+/**
+ * Errors that mean "try again in a moment", not "this will never work".
+ *
+ * On Windows a directory rename fails while any process holds a handle inside it, and antivirus
+ * and the search indexer both open freshly written files to scan them. That is a transient the
+ * caller cannot prevent and should not surface: the package is complete, the promotion simply has
+ * to wait for a scanner to let go.
+ *
+ * Everything else — a cross-device move, a name that already exists, a permission problem that is
+ * really a permission problem — fails immediately, because retrying it only delays the same error.
+ */
+const RETRYABLE_PROMOTION_CODES = new Set(["EPERM", "EBUSY", "EACCES", "ENOTEMPTY"]);
+
+/** Backoffs between promotion attempts, in milliseconds. Five tries across ~1.1s. */
+const PROMOTION_BACKOFF_MS = [25, 50, 100, 200, 400];
+
+function isRetryablePromotionError(error: unknown): boolean {
+  const code = (error as { code?: unknown })?.code;
+  return typeof code === "string" && RETRYABLE_PROMOTION_CODES.has(code);
+}
+
+/**
+ * Move the staged package into place, retrying the transient Windows failures.
+ *
+ * Injectable timer and rename so the retry policy can be tested against injected faults rather
+ * than by racing a real antivirus scanner — the fault it exists for appears about one run in three
+ * and never on demand.
+ */
+export async function promoteDirectory(
+  from: string,
+  to: string,
+  options: {
+    rename?: (from: string, to: string) => Promise<void>;
+    sleep?: (ms: number) => Promise<void>;
+    backoffMs?: readonly number[];
+  } = {}
+): Promise<void> {
+  const move = options.rename ?? rename;
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const backoff = options.backoffMs ?? PROMOTION_BACKOFF_MS;
+
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await move(from, to);
+      return;
+    } catch (error) {
+      // Out of attempts, or an error retrying cannot help: the caller cleans up and reports.
+      if (attempt >= backoff.length || !isRetryablePromotionError(error)) throw error;
+      await sleep(backoff[attempt]);
+    }
+  }
+}
+
 /** `30000/1001` or `50` → a positive rational; anything else → null. */
 function parseRationalFrameRate(value: string): { numerator: number; denominator: number } | null {
   const match = /^(\d+)(?:\/(\d+))?$/.exec(value.trim());
@@ -378,7 +431,7 @@ export async function buildAePackage(request: AePublishRequest): Promise<BuiltAe
 
   try {
     const built = await writePackageContents(request, stagingDirectory, version, validation);
-    await rename(stagingDirectory, finalDirectory);
+    await promoteDirectory(stagingDirectory, finalDirectory);
     return { ...built, directory: finalDirectory };
   } catch (error) {
     // A failed publish leaves nothing behind: the staging directory is the only thing written, and
