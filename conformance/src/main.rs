@@ -48,7 +48,11 @@ fn main() {
     // miniature: if the checks that pass in-process also pass across a
     // transport, the contracts really are transport-independent. When QUIC
     // arrives at L1, this block gains a peer and nothing else changes.
-    run_over_transport(&mut report);
+    run_over_transport(&mut report, None);
+    // Again, protected. Every check must behave identically once the
+    // credential is accepted: authentication gates the connection, it does not
+    // change the protocol.
+    run_over_transport(&mut report, Some(CONFORMANCE_TOKEN));
 
     report.set_peer("plane contract, no peer");
     control_plane_delivery_suite(&mut report);
@@ -103,9 +107,12 @@ fn print_report(report: &Report) {
     );
 }
 
+/// A token used only by this runner.
+const CONFORMANCE_TOKEN: &str = "conformance-token-0123456789abcd";
+
 /// Start a loopback server carrying a mock, then run the control-plane suite
 /// through a real client against it.
-fn run_over_transport(report: &mut Report) {
+fn run_over_transport(report: &mut Report, token: Option<&str>) {
     let mut engine = MockEngine::new().genlocked(RationalRate::P29_97);
     engine.publish(
         gx_contracts::TakeId("conformance/published".into()),
@@ -115,7 +122,7 @@ fn run_over_transport(report: &mut Report) {
     // Port 0: the OS picks a free port, so this never collides with a real
     // engine or a second run.
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
-    let server = match Server::bind(addr, None, engine) {
+    let server = match Server::bind(addr, token, engine) {
         Ok(server) => server,
         Err(e) => {
             eprintln!("transport pass skipped: cannot bind: {e}");
@@ -131,7 +138,20 @@ fn run_over_transport(report: &mut Report) {
     };
     server.serve_in_background();
 
-    let mut client = match Client::connect(bound) {
+    let connected = match token {
+        Some(token) => {
+            let token = match gx_control_plane::auth::Token::new(token) {
+                Ok(token) => token,
+                Err(e) => {
+                    eprintln!("transport pass skipped: {e}");
+                    return;
+                }
+            };
+            Client::connect_with_token(bound, token)
+        }
+        None => Client::connect(bound),
+    };
+    let mut client = match connected {
         Ok(client) => client,
         Err(e) => {
             eprintln!("transport pass skipped: cannot connect: {e}");
@@ -140,7 +160,12 @@ fn run_over_transport(report: &mut Report) {
     };
 
     report.set_peer(format!(
-        "control-transport client to {bound} (L0, loopback TCP)"
+        "control-transport client to {bound} (L0, loopback TCP{})",
+        if token.is_some() {
+            ", token required"
+        } else {
+            ""
+        }
     ));
     control_plane_suite(&mut client, report);
     // No fault suite here: a client cannot reach through the wire to drop a

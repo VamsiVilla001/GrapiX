@@ -18,12 +18,14 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use gx_contracts::Refusal;
+use gx_contracts::{Epoch, Refusal};
+use gx_control_plane::auth::Token;
 use gx_control_plane::capability::EngineCapability;
 use gx_control_plane::framing::{decode_body, decode_length, encode, LENGTH_PREFIX};
 use gx_control_plane::message::{ClientRequest, EngineEvent, EngineReply, Envelope};
 use gx_control_plane::peer::EnginePeer;
 use gx_control_plane::sequence::{MessageId, Sequence};
+use gx_control_plane::status::ProgramState;
 
 /// How long a request waits for its reply before giving up.
 ///
@@ -32,8 +34,34 @@ use gx_control_plane::sequence::{MessageId, Sequence};
 /// far better than silence.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// What a client learns when it reconnects (ADR B.4).
+///
+/// Reconciliation is by revision *and* epoch. A matching revision from a new
+/// epoch means the engine restarted and rebuilt state that happens to carry
+/// the same number, so a client that compared only revisions would carry on
+/// with assumptions that no longer hold.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reconciliation {
+    pub previous_epoch: Epoch,
+    pub current_epoch: Epoch,
+    /// What is on Program now, which may be nothing.
+    pub program: Option<ProgramState>,
+}
+
+impl Reconciliation {
+    /// Whether the engine is a different incarnation than before.
+    ///
+    /// When true, every cached assumption the client held is void: not stale,
+    /// void. There is no partial recovery from a restarted engine.
+    pub fn engine_restarted(&self) -> bool {
+        self.previous_epoch != self.current_epoch
+    }
+}
+
 /// A connected control-plane client.
 pub struct Client {
+    addr: SocketAddr,
+    token: Option<Token>,
     stream: TcpStream,
     capability: EngineCapability,
     replies: Receiver<EngineReply>,
@@ -50,6 +78,19 @@ impl Client {
     /// capability can change without a reconnect — and if the engine restarts,
     /// the epoch changes and the connection is gone anyway.
     pub fn connect(addr: SocketAddr) -> io::Result<Self> {
+        Self::connect_with(addr, None)
+    }
+
+    /// Connect and authenticate before anything else.
+    ///
+    /// A protected engine refuses every request, capability included, until
+    /// the credential is accepted — so this is not an optional extra step, it
+    /// is the first one.
+    pub fn connect_with_token(addr: SocketAddr, token: Token) -> io::Result<Self> {
+        Self::connect_with(addr, Some(token))
+    }
+
+    fn connect_with(addr: SocketAddr, token: Option<Token>) -> io::Result<Self> {
         let stream = TcpStream::connect(addr)?;
         stream.set_nodelay(true)?;
 
@@ -63,6 +104,8 @@ impl Client {
         }
 
         let mut client = Self {
+            addr,
+            token: token.clone(),
             stream,
             // Replaced immediately by the exchange below. Never observed.
             capability: placeholder_capability(),
@@ -72,23 +115,86 @@ impl Client {
             request_count: 0,
         };
 
+        if let Some(token) = token {
+            match client.request(ClientRequest::Authenticate { token }) {
+                Ok(EngineReply::Authenticated) => {}
+                Ok(EngineReply::Refused(refusal)) => {
+                    return Err(io::Error::new(kind_for(&refusal), refusal.to_string()))
+                }
+                Ok(other) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("expected an authentication reply, got {other:?}"),
+                    ))
+                }
+                Err(refusal) => {
+                    return Err(io::Error::new(kind_for(&refusal), refusal.to_string()))
+                }
+            }
+        }
+
         match client.request(ClientRequest::Capability) {
             Ok(EngineReply::Capability(cap)) => client.capability = cap,
+            // A refusal here is a real answer and must keep its meaning. An
+            // engine that wants a credential and one that is broken are
+            // different problems, and a caller can only act differently on
+            // them if the error kind says which it was.
+            Ok(EngineReply::Refused(refusal)) => {
+                return Err(io::Error::new(kind_for(&refusal), refusal.to_string()))
+            }
             Ok(other) => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("expected a capability reply on connect, got {other:?}"),
                 ))
             }
-            Err(refusal) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::ConnectionRefused,
-                    refusal.to_string(),
-                ))
-            }
+            Err(refusal) => return Err(io::Error::new(kind_for(&refusal), refusal.to_string())),
         }
 
         Ok(client)
+    }
+
+    /// Redial, re-authenticate, and report what changed (ADR B.4).
+    ///
+    /// The engine outlives its clients, so a disconnect is not a loss of
+    /// Program — it is a loss of knowledge about Program. This asks for that
+    /// knowledge back and names the one case where none of it can be trusted:
+    /// a new epoch.
+    pub fn reconnect(&mut self) -> Result<Reconciliation, Refusal> {
+        let previous_epoch = self.capability.epoch;
+
+        let fresh = Self::connect_with(self.addr, self.token.clone()).map_err(|e| {
+            Refusal::TransportFailed {
+                detail: e.to_string(),
+            }
+        })?;
+        *self = fresh;
+
+        let program = match self.request(ClientRequest::Status)? {
+            EngineReply::Status(status) => status.program,
+            EngineReply::Refused(refusal) => return Err(refusal),
+            other => {
+                return Err(Refusal::TransportFailed {
+                    detail: format!("expected status after reconnect, got {other:?}"),
+                })
+            }
+        };
+
+        Ok(Reconciliation {
+            previous_epoch,
+            current_epoch: self.capability.epoch,
+            program,
+        })
+    }
+
+    /// Swap the stored credential without reconnecting.
+    ///
+    /// Exists so a test can prove a reconnect re-authenticates rather than
+    /// inheriting the trust of the connection it replaces. Production code
+    /// rotates a token by building a new client.
+    #[doc(hidden)]
+    pub fn replace_token_for_test(&mut self, token: Token) {
+        self.token = Some(token);
     }
 
     /// Send a request and wait for its reply.
@@ -188,6 +294,20 @@ fn read_loop(
         } else if let Ok(event) = serde_json::from_value::<EngineEvent>(envelope.payload) {
             events.lock().expect("event mutex poisoned").push(event);
         }
+    }
+}
+
+/// Map a refusal onto the `io::ErrorKind` a caller can branch on.
+///
+/// Kept as one function so the authentication step and the capability
+/// exchange cannot classify the same refusal differently — which they did
+/// until a test caught it.
+fn kind_for(refusal: &Refusal) -> io::ErrorKind {
+    match refusal {
+        Refusal::Unauthenticated => io::ErrorKind::PermissionDenied,
+        Refusal::TransportFailed { .. } => io::ErrorKind::ConnectionAborted,
+        Refusal::ProtocolMismatch { .. } => io::ErrorKind::InvalidData,
+        _ => io::ErrorKind::ConnectionRefused,
     }
 }
 

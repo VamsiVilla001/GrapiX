@@ -31,10 +31,92 @@ not a euphemism for nearly done.
    Do not describe those two as transported.
 10. The L0 transport is loopback TCP, not the named pipe ADR-001 specifies.
    Say so when describing L0 security posture.
-11. The next implementation step is one of: a token check on the transport,
-   reconnect and reconcile by revision and epoch, or the pixel gate.
+11. Authentication lives in the transport. Do not add a credential check to
+   the engine or to a request handler.
+12. The credential is a shared bearer token over an unencrypted socket. Never
+   describe it as mTLS, and never describe L1 as ready.
+13. The next implementation step is one of: automatic reconnect with backoff,
+   an asset-plane transport, or the pixel gate.
 
 ---
+
+## 2026-09-10 — credential enforcement and reconnect reconciliation
+
+Closed a hole the previous entry opened, then implemented ADR B.4's first row.
+
+**The hole.** `check_bind` said a token makes a non-loopback address
+acceptable, and nothing verified a token on a connection. That is worse than
+not having the policy: it reads as a security control while being none. A
+network-bound engine would have accepted anybody.
+
+**`Shared/control-plane/src/auth.rs`.** `Token` compares in constant time over
+its full length — `==` returns at the first differing byte, which leaks the
+matching prefix length to anyone who can time it — and redacts itself in
+`Debug`, because every message type derives `Debug` and connection errors are
+printed. A token that prints itself reaches a log on the first bad connection.
+`Token::new` refuses anything under 32 bytes, which is the case an unset
+environment variable produces.
+
+**Enforcement is in the transport, not the engine.** Authentication is a
+property of the connection; an engine that re-checked on every request would
+eventually miss one. The engine refuses `Authenticate` outright if it ever
+sees one, and the compiler's exhaustiveness check is what forced that decision
+to be explicit rather than defaulted. A protected connection is refused every
+request until authenticated — capability included, since capability carries
+device tier, clock source and reference state, none of which is public. A wrong
+token gets a named refusal and the connection stays open: a mistyped
+credential deserves a retry, and an attacker gains nothing from an open socket
+that redialling would not also give.
+
+**Reconnect and reconcile (ADR B.4).** `Client::reconnect` redials,
+re-authenticates and returns a `Reconciliation` carrying the previous and
+current epoch plus what is now on Program. `engine_restarted()` is the
+question that matters. The trap it guards: a restarted engine can republish at
+the *same revision*, so a client comparing revisions alone would see no change
+and carry on with state that no longer exists. A fresh connection starts
+unauthenticated, so a reconnect re-authenticates — which is what makes a
+rotated token actually stop working, and there is a test that proves it.
+
+`MockEngine::restart()` models a new incarnation that lost its state, so the
+epoch path is reachable in a test rather than argued about.
+
+### One defect the tests found
+
+A `Refused(Unauthenticated)` arriving during the capability exchange came back
+to the caller as `InvalidData` with the text "expected a capability reply",
+because the client treated every non-capability reply as malformed. "Needs a
+credential" and "this peer is broken" are different problems and a caller can
+only act differently on them if the error kind says which. There is now one
+`kind_for` mapping used by both the authentication step and the capability
+exchange, so they cannot classify the same refusal differently — which they
+did until the test caught it.
+
+### Verified by execution
+
+| What | Result |
+|---|---|
+| `cargo test --workspace` | **125 passed, 0 failed** |
+| — of which auth/reconnect integration | 10 passed, over real sockets |
+| `cargo clippy --workspace --all-targets` | Clean, 0 warnings |
+| `cargo run -p gx-conformance` | **88 passed, 0 failed, 8 skipped**, exit 0 |
+| — peers exercised | 6, including two over a socket, one requiring a token |
+| `node --test` | 7 passed |
+| codegen | 37 types; `Token`, `Authenticate`, `Unauthenticated` reached TypeScript |
+| `gx-mock-engine --token short` | Refused before binding, exit 1 |
+| `gx-mock-engine --token <32 bytes>` | Bound, protected, listening |
+| `npm run check` | **exit 0** |
+
+### Still not done, and not claimed
+
+- **A shared token is not mTLS.** ADR-001 specifies mTLS for L1 and this is a
+  bearer secret on an unencrypted loopback socket. It is the enforcement half
+  of the bind policy, not the L1 credential.
+- Nothing is encrypted. At L0 that is defensible; at L1 it would not be.
+- No token rotation, no expiry, no per-client identity. One secret, shared.
+- Reconnect is client-initiated and manual: nothing reconnects automatically,
+  and there is no backoff.
+- The asset and media planes still have no transport.
+- No renderer, no shell. Nothing has rendered a frame.
 
 ## 2026-09-10 — the L0 control transport
 

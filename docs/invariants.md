@@ -155,3 +155,27 @@ execution evidence.
     address never briefly holds a listener. `0.0.0.0` and `::` are not
     loopback — treating an unspecified address as local is what turns
     invariant 41 into decoration.
+
+## Established by credential enforcement and reconnect
+
+53. **A token verifies in constant time over its full length.** `==` returns at
+    the first differing byte, which leaks the length of the matching prefix to
+    anyone who can time it.
+54. **`Token` redacts itself in `Debug`.** Message types derive `Debug`,
+    refusals are formatted into logs, and connection errors are printed. A
+    token that prints itself reaches a log file on the first bad connection.
+55. **A protected connection is refused every request until authenticated,
+    capability included.** Capability carries device tier, clock source and
+    reference state; none of it is public.
+56. **Authentication is a property of the connection, not of a request.** The
+    transport answers it; the engine refuses it if it ever sees one, because an
+    engine that re-checked on every request would eventually miss one.
+57. **A fresh connection is unauthenticated, so a reconnect re-authenticates.**
+    Inheriting trust across a redial is what would keep a rotated token
+    working.
+58. **Reconciliation compares epoch and revision, never revision alone.** A
+    restarted engine can rebuild state carrying the number it had before, and
+    a revision-only comparison would see no change.
+59. **A refusal keeps its meaning when it becomes an error.** "Needs a
+    credential" and "this peer is broken" are different problems, and a caller
+    can only act differently on them if the classification says which.

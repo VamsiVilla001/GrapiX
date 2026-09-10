@@ -37,4 +37,5 @@ export * from "./TakeAt";
 export * from "./TakeCommitted";
 export * from "./TakeId";
 export * from "./TakeRequest";
+export * from "./Token";
 export * from "./TransferState";

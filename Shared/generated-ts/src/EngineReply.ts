@@ -8,4 +8,4 @@ import type { TakeCommitted } from "./TakeCommitted";
  * Everything the engine may answer. A refusal is a reply, not an exception:
  * it travels the same path and is as much a defined outcome as success.
  */
-export type EngineReply = { "reply": "capability" } & EngineCapability | { "reply": "status" } & EngineStatus | { "reply": "cued" } & TakeCommitted | { "reply": "taken" } & TakeCommitted | { "reply": "cleared" } & TakeCommitted | { "reply": "outputConfigured", adapter: string, live: boolean, } | { "reply": "refused" } & Refusal;
+export type EngineReply = { "reply": "authenticated" } | { "reply": "capability" } & EngineCapability | { "reply": "status" } & EngineStatus | { "reply": "cued" } & TakeCommitted | { "reply": "taken" } & TakeCommitted | { "reply": "cleared" } & TakeCommitted | { "reply": "outputConfigured", adapter: string, live: boolean, } | { "reply": "refused" } & Refusal;

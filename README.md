@@ -92,8 +92,10 @@ Playout developer works against a peer that refuses where the real engine will
 cargo run -p gx-mock-engine -- --genlocked --publish lower-third:4
 ```
 
-It listens on `127.0.0.1:4400`. It is a mock: no GPU, no renderer, no outputs.
-A take moves a state field and nothing reaches a screen.
+It listens on `127.0.0.1:4400`. Add `--token <secret>` to require a credential
+on every connection, `--tier T2` to exercise the live-output refusal, or
+`--help` for the rest. It is a mock: no GPU, no renderer, no outputs. A take
+moves a state field and nothing reaches a screen.
 
 ## Before you change anything
 

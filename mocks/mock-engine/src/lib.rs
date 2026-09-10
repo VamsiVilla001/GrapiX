@@ -95,6 +95,20 @@ impl MockEngine {
         self.published.insert(take_id, revision);
     }
 
+    /// Model an engine restart: a new incarnation that lost its state.
+    ///
+    /// The epoch advances, Program and any cue are gone, and the frame counter
+    /// starts again. This is what a client reconnect has to detect (ADR B.4),
+    /// and the reason reconciliation compares epoch and not only revision: a
+    /// rebuilt state can carry the same revision number it had before.
+    pub fn restart(&mut self) {
+        self.epoch = Epoch(self.epoch.0 + 1);
+        self.frame = 0;
+        self.program = None;
+        self.cued = None;
+        self.events.clear();
+    }
+
     fn degradations(&self) -> Vec<Degradation> {
         let mut out = Vec::new();
         if let Some(d) = self.reference.degradation() {
@@ -199,6 +213,14 @@ impl EnginePeer for MockEngine {
 
     fn handle(&mut self, request: ClientRequest) -> EngineReply {
         match request {
+            // Authentication belongs to the connection, and the transport
+            // answers it before an engine ever sees it. Reaching here means
+            // the transport failed to intercept, so this refuses rather than
+            // approving something it has no basis to approve.
+            ClientRequest::Authenticate { .. } => EngineReply::Refused(Refusal::NotImplemented {
+                what: "authentication is a transport concern, not an engine one".to_string(),
+            }),
+
             ClientRequest::Capability => {
                 // A real engine checks the client's protocol on connect; the
                 // mock checks its own constant so the refusal path is reachable

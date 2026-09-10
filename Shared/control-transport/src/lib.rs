@@ -23,7 +23,7 @@
 pub mod client;
 pub mod server;
 
-pub use client::{Client, REQUEST_TIMEOUT};
+pub use client::{Client, Reconciliation, REQUEST_TIMEOUT};
 pub use server::{ServeError, Server};
 
 #[cfg(test)]

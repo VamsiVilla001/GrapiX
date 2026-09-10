@@ -10,6 +10,7 @@ use gx_contracts::{DeviceTier, Refusal};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::auth::Token;
 use crate::capability::EngineCapability;
 use crate::intent::{ClearRequest, CueRequest, TakeCommitted, TakeRequest};
 use crate::sequence::{MessageId, Sequence};
@@ -36,6 +37,11 @@ pub struct OutputConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "request", rename_all = "camelCase")]
 pub enum ClientRequest {
+    /// Present a credential. Required before anything else on a connection
+    /// the engine has been configured to protect; harmless on one it has not.
+    Authenticate {
+        token: Token,
+    },
     /// Capability exchange, including locality tier (ADR-001 action 2).
     Capability,
     Status,
@@ -50,6 +56,9 @@ pub enum ClientRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "reply", rename_all = "camelCase")]
 pub enum EngineReply {
+    /// The credential was accepted. Carries nothing: there is no session to
+    /// hand back, because the connection *is* the session.
+    Authenticated,
     Capability(EngineCapability),
     Status(EngineStatus),
     /// The frame the engine committed the cue to.
@@ -116,6 +125,9 @@ mod tests {
 
     fn every_request() -> Vec<ClientRequest> {
         vec![
+            ClientRequest::Authenticate {
+                token: Token("0123456789abcdef0123456789abcdef".into()),
+            },
             ClientRequest::Capability,
             ClientRequest::Status,
             ClientRequest::Cue(CueRequest {

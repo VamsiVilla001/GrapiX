@@ -670,6 +670,9 @@ pub fn timing_plane_suite(report: &mut Report) {
     ];
 
     let requests = vec![
+        ClientRequest::Authenticate {
+            token: gx_control_plane::auth::Token("0123456789abcdef0123456789abcdef".into()),
+        },
         ClientRequest::Capability,
         ClientRequest::Status,
         ClientRequest::Cue(CueRequest {

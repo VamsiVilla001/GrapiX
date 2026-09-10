@@ -20,6 +20,7 @@ fn main() {
     let mut port = ENGINE_CONTROL_PORT;
     let mut engine = MockEngine::new();
     let mut described = Vec::new();
+    let mut token: Option<String> = None;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -54,6 +55,10 @@ fn main() {
                 },
                 None => return usage("--publish needs id:revision"),
             },
+            "--token" => match args.next() {
+                Some(t) => token = Some(t),
+                None => return usage("--token needs a value"),
+            },
             "--help" | "-h" => return usage(""),
             other => return usage(&format!("unknown argument {other}")),
         }
@@ -66,9 +71,13 @@ fn main() {
         println!("  {note}");
     }
 
-    // Loopback only, and no token: the bind policy permits exactly this and
-    // would refuse anything wider (invariant 41).
-    let server = match Server::bind(addr, None, engine) {
+    if token.is_some() {
+        println!("  requiring a token on every connection");
+    }
+
+    // Loopback, optionally protected. The bind policy permits loopback without
+    // a token and refuses anything wider without one (invariant 41).
+    let server = match Server::bind(addr, token.as_deref(), engine) {
         Ok(server) => server,
         Err(e) => {
             eprintln!("cannot serve: {e}");
@@ -106,10 +115,12 @@ usage: gx-mock-engine [options]
   --lan               declare LAN locality, which lengthens the commit lead
   --tier <T0..T3>     report this device tier; below T0 refuses live output
   --publish <id:rev>  publish a scene so a take of it can succeed
+  --token <secret>    require this token on every connection (min 32 bytes)
   --help
 
-Listens on loopback only. The bind policy refuses anything wider without a
-token, and this binary never offers one."
+Listens on loopback only. Loopback needs no token, but one given with --token
+is enforced on every connection - which is what makes the setting meaningful
+rather than decorative."
     );
     if !problem.is_empty() {
         std::process::exit(2);

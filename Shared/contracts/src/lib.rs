@@ -199,6 +199,12 @@ pub enum Refusal {
         existing: ClockSource,
         requested: ClockSource,
     },
+    /// The connection has not presented a valid credential.
+    ///
+    /// One variant rather than separate "no token" and "wrong token" cases:
+    /// the distinction tells a caller nothing it can act on, and a server that
+    /// answers them differently is answering questions it was not asked.
+    Unauthenticated,
     /// The peer could not be reached, or answered nothing in time.
     ///
     /// Emitted by a *client*, never by an engine: it describes the transport
@@ -245,6 +251,7 @@ impl std::fmt::Display for Refusal {
                 f,
                 "clock domain already {existing:?}, refused {requested:?}"
             ),
+            Refusal::Unauthenticated => f.write_str("unauthenticated"),
             Refusal::TransportFailed { detail } => write!(f, "transport failed: {detail}"),
             Refusal::NotImplemented { what } => write!(f, "not implemented: {what}"),
         }
