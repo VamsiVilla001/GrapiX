@@ -5,6 +5,14 @@ version.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[lib]
+name = "gx_mock_engine"
+path = "src/lib.rs"
+
+[[bin]]
+name = "gx-mock-engine"
+path = "src/main.rs"
+
 [dependencies]
 gx-contracts = { workspace = true }
 gx-control-plane = { workspace = true }

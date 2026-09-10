@@ -11,10 +11,17 @@ use std::path::PathBuf;
 
 use gx_asset_plane::{AssetRef, PreflightRequest, PreflightResponse, TransferState};
 use gx_contracts::{
-    ClockSource, ContentHash, DeviceTier, Locality, MediaCodec, RationalRate, ReferenceState,
-    Refusal, Revision, TakeId,
+    ClockSource, ContentHash, DeviceTier, Epoch, Locality, MediaCodec, RationalRate,
+    ReferenceState, Refusal, Revision, TakeId,
 };
-use gx_control_plane::{EngineCapability, TakeAt, TakeCommitted, TakeRequest};
+use gx_control_plane::message::{ClientRequest, EngineEvent, EngineReply, OutputConfig};
+use gx_control_plane::sequence::{MessageId, MessageKind, Sequence};
+use gx_control_plane::status::{
+    ClockSummary, Degradation, EngineStatus, ProgramState, ReferenceTransition, Severity,
+};
+use gx_control_plane::{
+    ClearRequest, CueRequest, EngineCapability, TakeAt, TakeCommitted, TakeRequest,
+};
 use gx_media_plane::{ConsumerRole, DropCounters, MediaProfile};
 use ts_rs::TS;
 
@@ -48,12 +55,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ClockSource,
         ReferenceState,
         Refusal,
-        // gx-control-plane
+        Epoch,
+        // gx-control-plane: intent
         TakeAt,
         TakeRequest,
+        CueRequest,
+        ClearRequest,
         TakeCommitted,
         EngineCapability,
         MediaCodec,
+        // gx-control-plane: messages and delivery
+        ClientRequest,
+        EngineReply,
+        EngineEvent,
+        OutputConfig,
+        MessageId,
+        MessageKind,
+        Sequence,
+        // gx-control-plane: status
+        EngineStatus,
+        ProgramState,
+        Degradation,
+        Severity,
+        ClockSummary,
+        ReferenceTransition,
         // gx-asset-plane
         AssetRef,
         PreflightRequest,

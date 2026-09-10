@@ -11,10 +11,15 @@
 //! (invariant 35), and a large stage is never one GPU texture: only tiles
 //! become render targets (invariant 37).
 
-/// Placeholder so the crate has a compiled surface and the workspace builds.
-/// Replaced by the real device/tier negotiation in M2.
-pub fn planned() -> gx_contracts::Refusal {
+pub mod clock;
+
+pub use clock::ProgramClock;
+
+/// Device and tier negotiation, scene evaluation and frame production are
+/// still **Planned**. `clock` is the first real part of this crate: ADR-002
+/// puts clock authority here, and the clock is testable without a GPU.
+pub fn rasterizer_status() -> gx_contracts::Refusal {
     gx_contracts::Refusal::NotImplemented {
-        what: "render worker".to_string(),
+        what: "render worker rasterizer".to_string(),
     }
 }

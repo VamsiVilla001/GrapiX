@@ -9,3 +9,6 @@ rust-version.workspace = true
 gx-contracts = { workspace = true }
 serde = { workspace = true }
 ts-rs = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

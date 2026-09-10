@@ -5,6 +5,9 @@
 
 #![forbid(unsafe_code)]
 
+pub mod slot;
+pub use slot::{DropCause, LatestFrameSlot};
+
 use gx_contracts::{Locality, MediaCodec};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;

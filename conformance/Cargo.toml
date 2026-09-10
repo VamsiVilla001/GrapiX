@@ -5,8 +5,18 @@ version.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[lib]
+name = "gx_conformance"
+path = "src/lib.rs"
+
+[[bin]]
+name = "gx-conformance"
+path = "src/main.rs"
+
 [dependencies]
 gx-contracts = { workspace = true }
 gx-control-plane = { workspace = true }
 gx-asset-plane = { workspace = true }
 gx-media-plane = { workspace = true }
+gx-mock-engine = { path = "../mocks/mock-engine" }
+serde_json = { workspace = true }

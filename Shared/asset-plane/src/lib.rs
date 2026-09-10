@@ -5,6 +5,9 @@
 
 #![forbid(unsafe_code)]
 
+pub mod transfer;
+pub use transfer::Transfer;
+
 use gx_contracts::ContentHash;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;

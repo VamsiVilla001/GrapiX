@@ -1,7 +1,8 @@
 # Invariants
 
 Binding rules. Rationale lives in `adr/0001-distributed-architecture.md`; this
-file states what may not be done. Each rule is here because breaking it was
+file states what may not be done. **Numbers are permanent** - code and commit
+messages cite them, so new rules are appended and never renumbered. Each rule is here because breaking it was
 either paid for once already or is structurally unrecoverable.
 
 ## Product boundary
@@ -119,3 +120,20 @@ execution evidence.
     configured root, re-checked after canonicalisation. A syntax check alone
     cannot see a symlink.
 43. The parity harness reports SKIP, not PASS, when there is no capture.
+
+## Established by the ADR-001 / ADR-002 implementation
+
+44. **`Lead` is the only place transport distance may influence timing.** It
+    changes how early a client must ask, never what the engine does with the
+    request. Anything else that varies behaviour by locality has moved timing
+    into the transport, which is what ADR-002 exists to prevent.
+45. **A mock peer must refuse exactly where the real engine refuses.** A
+    permissive mock is worse than none: it teaches callers a contract that does
+    not exist, and the lesson is only unlearned during integration.
+46. **Intent resolution has one implementation.** `resolve_intent` is called by
+    the engine clock and by every mock. Two copies would drift, and the drift
+    would be a mock that disagrees with the engine about what
+    `NextOpportunity` means.
+47. **A conformance check that always skips is not a check.** If every
+    available peer skips it, add a peer that exercises it. The suite is graded
+    on what it ran, not on what it declared.

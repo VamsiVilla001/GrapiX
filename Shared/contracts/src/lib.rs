@@ -36,6 +36,14 @@ impl std::fmt::Display for ContentHash {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
 pub struct Revision(pub u64);
 
+/// Engine incarnation counter. Bumped on every engine start.
+///
+/// Reconnect reconciles by revision *and* epoch (ADR B.4): a matching revision
+/// from a previous epoch means the engine restarted, and a client that ignores
+/// the epoch would assume state it no longer has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+pub struct Epoch(pub u64);
+
 /// A frame rate as an exact rational. Never a float (invariant 12).
 ///
 /// 29.97 is 30000/1001 and cannot be represented in binary floating point.
@@ -173,6 +181,24 @@ pub enum Refusal {
     InvalidRate { num: u32, den: u32 },
     /// Requested on a platform that is not a certification target.
     PlatformNotCertified { platform: String },
+    /// No published scene with this id. Distinct from a revision mismatch:
+    /// one means "not that version", this means "not at all", and an operator
+    /// needs to know which.
+    UnknownTake { take_id: TakeId },
+    /// A requested frame the engine cannot still honour: it has passed, or it
+    /// falls inside the lead the engine needs to commit.
+    ///
+    /// An automation system asking for a frame that is already gone must be
+    /// told so. Firing it late instead is the silent failure this refusal
+    /// exists to prevent.
+    FrameNotReachable { requested: u64, earliest: u64 },
+    /// Two outputs on different references means two engine instances, not one
+    /// (invariant 10). Configuring a second clock domain in one engine is
+    /// refused rather than resolved by picking a winner.
+    MultipleClockDomains {
+        existing: ClockSource,
+        requested: ClockSource,
+    },
     /// Named, so the gap register stays honest instead of stubbing a feature.
     NotImplemented { what: String },
 }
@@ -199,6 +225,20 @@ impl std::fmt::Display for Refusal {
             Refusal::PlatformNotCertified { platform } => {
                 write!(f, "platform not a certification target: {platform}")
             }
+            Refusal::UnknownTake { take_id } => write!(f, "unknown take: {take_id}"),
+            Refusal::FrameNotReachable {
+                requested,
+                earliest,
+            } => {
+                write!(f, "frame {requested} not reachable: earliest is {earliest}")
+            }
+            Refusal::MultipleClockDomains {
+                existing,
+                requested,
+            } => write!(
+                f,
+                "clock domain already {existing:?}, refused {requested:?}"
+            ),
             Refusal::NotImplemented { what } => write!(f, "not implemented: {what}"),
         }
     }
