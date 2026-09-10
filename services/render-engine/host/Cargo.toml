@@ -8,3 +8,14 @@ rust-version.workspace = true
 [dependencies]
 gx-contracts = { workspace = true }
 gx-control-plane = { workspace = true }
+gx-control-transport = { workspace = true }
+
+[dev-dependencies]
+parking_lot = "0.12"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "gx-engine-host"
+path = "src/main.rs"

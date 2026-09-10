@@ -5,6 +5,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod design_system;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 

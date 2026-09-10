@@ -102,6 +102,14 @@ impl Report {
     pub fn is_conformant(&self) -> bool {
         self.failed() == 0
     }
+
+    /// Record that a peer's checks could not run at all, with the reason.
+    ///
+    /// A skip, never a pass: a conformance run on a machine without the engine
+    /// must say so, not claim the engine conformed (invariant 43).
+    pub fn skip_unavailable(&mut self, reason: impl Into<String>) {
+        self.record("availability", "peer is available", Outcome::Skip(reason.into()));
+    }
 }
 
 /// Turn a boolean expectation into an outcome, with the failure text supplied

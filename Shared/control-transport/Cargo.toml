@@ -13,3 +13,4 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 gx-mock-engine = { path = "../../mocks/mock-engine" }
+socket2 = "0.6"

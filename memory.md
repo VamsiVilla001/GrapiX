@@ -45,6 +45,106 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-09-10 — render engine, host supervisor, and the design-system schema
+
+The first running product code on the branch: a real render worker, its host
+supervisor, and the Part G token/motion schema in contracts. Verified end to
+end against the full gate.
+
+**Render worker (`services/render-engine/worker`).** Was a stub returning
+`NotImplemented`; now it is a live `EnginePeer` over the control transport.
+- `gpu.rs` negotiates the device with wgpu 26 and maps it to a contract
+  `DeviceTier` (DiscreteGpu/IntegratedGpu→T0, Cpu→T2, else T3) — the single
+  place a tier is decided (invariant 20). On this machine it reports T0.
+- `engine.rs` implements `EnginePeer`: capability, status, cue, take, clear,
+  output config, sharing `resolve_intent` with the mock (invariant 27). The
+  clock is a `ProgramClock` driven by an external frame pump over an
+  `Arc<AtomicU64>` — time passes whether or not a request arrives, and no
+  client message can set it (ADR-002). It does not implement `FaultInjection`,
+  which is why the fault suite skips against it.
+- `rasterizer.rs` produces a real Program frame on the software path (T2):
+  black with no take, a deterministic take key on a take, back to black on a
+  clear. The base frame is built once per take, not per frame (invariant 35).
+  There is still no scene-content renderer — the control plane has no scene
+  contract — so Program is a take key, not drawn scene content. That is stated
+  in the crate doc, not hidden.
+- `main.rs` is the binary: `--port/--lan/--rate/--publish/--token`. Found and
+  fixed a real bug here: `main` parsed `--port` but the host spawned it without
+  one, so the child bound the default 4400 while the host waited on the
+  requested port. `ensure` now injects `--port` itself.
+
+**Host (`services/render-engine/host`).** Was a stub exiting 78. Now
+`ensure()` adopts a live engine or spawns one, never stops one — no `Drop`
+kills the child, and the never-stop property is proven by provenance in the
+integration test (a re-ensure after the supervisor drops must find Adopted,
+not Spawned). `RestartPolicy` is bounded backoff with a hard attempt cap. The
+WAL journal and output-inhibited restore named in the crate README are still
+Planned and say so.
+
+**One platform bug fixed in the shared bind.** On Windows, std's
+`TcpListener::bind` does not set SO_REUSEADDR, so a port lingering in
+TIME_WAIT after `free_port()`/a probe failed the engine's bind with
+WSAEADDRINUSE even when free. `bind_listener` in `gx_control_plane::bind` is
+now the single place a control-plane socket opens (shared by mock and engine),
+with a short retry across the TIME_WAIT window; a genuinely occupied port
+still fails by name.
+
+**Design-system schema (`Shared/contracts/design_system.rs`).** The Part G
+"one thing to build first": `MotionTokens`, `MotionPreset`, `MotionPhases`,
+`Stagger`, `TokenRef`, and `ms_to_frames` — the single ms→whole-frames
+conversion against a rational rate (G.6.2). `MotionPreset::validate` refuses a
+missing `out` phase by name (G.6.6). Time is normalised, frames resolved at
+instantiation, never stored. 8 tests.
+
+**codegen + schema-mcp.** The 11 design-system types are in the codegen export
+list; `Shared/generated-ts` regenerated (51 files, gate green).
+`services/schema-mcp` is no longer a stub: `getCapabilitySurface()` returns the
+supported enums and refusal codes as data (Part D principle 2, capability
+discovery), with compile-time assertions that the hand-maintained lists match
+the generated unions, so drift fails typecheck. 5 tests.
+
+### Verified by execution
+
+| What | Result |
+|---|---|
+| `cargo test --workspace` | **140 passed, 0 failed** (incl. 24 worker, 11 contracts) |
+| host integration tests (`tests/ensure.rs`) | **3 passed** — adopt, spawn, reserved-port; spawn test takes ~25s and uses a real worker process |
+| `cargo run -p gx-conformance` | **99 passed, 0 failed, 9 skipped**, exit 0 — now includes the **real render engine** as a peer (CoLocated, T0, FreeRun) over a socket |
+| `node --test` (Playout + schema-mcp) | **12 passed, 0 failed** (`test:ts` glob widened to reach `services/*/tests`) |
+| `npm run check` | **exit 0** — boundaries, codegen-staleness (51 files), typecheck, TS tests, rust tests, conformance |
+
+The nine skips, each named: sub-T0 live refusal on T0 peers (mock ×2, transport
+×2, real engine ×1), LAN encode-adapt on a co-located peer, reference-loss on
+peers that cannot be driven into it (mock ×2), asset-over-wire (no endpoint),
+and hardware reference lock (external gate).
+
+### Status after this entry
+
+| Unit | Status |
+|---|---|
+| `services/render-engine/worker` | **Partial** — live `EnginePeer`, software rasteriser, engine-owned clock; no GPU scene renderer, no tiling, no scene contract |
+| `services/render-engine/host` | **Partial** — ensure/adopt/never-stop + bounded restart, tested; no WAL journal, no output-inhibited restore |
+| `Shared/contracts/design_system` | **Implemented** — token + motion-preset schema, tested, TS generated |
+| `services/schema-mcp` | **Partial** — capability discovery read surface, tested; no JSON-RPC transport, no mutating D.2 groups |
+| `conformance` | **Implemented** — 99 checks, real engine now a peer |
+
+### Not done, and not claimed
+
+- No scene-content renderer. Program is a deterministic take key, not drawn
+  scene content; the control plane has no scene contract. M2/M3 work.
+- No GPU-accelerated rasterisation or tiling. The wgpu device is negotiated
+  for tier only; frames come from the software path.
+- No WAL/journal/restore in the host.
+- schema-mcp is read-only capability discovery, not the full D.2 tool surface
+  (no scenes/objects/materials writes, no `render.preview`, no scope-gated
+  author/operator/admin tokens).
+- The design-system schema has no consumers yet: no Editor panel, no
+  preflight enforcement (three severities), no version stamp on packages, no
+  `designsystem.*`/`motion.*` MCP tools. Those are M2/M3-sequenced.
+- The genlock/PTP clock slave is modelled, not hardware-backed (external gate).
+
+---
+
 ## 2026-09-10 — ADR-0002 accepted as the final drafted handoff
 
 `docs/adr/0002-platform-and-mcp-schema.md` is now the authoritative handoff:

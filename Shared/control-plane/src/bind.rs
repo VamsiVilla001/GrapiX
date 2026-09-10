@@ -14,10 +14,54 @@
 //! binding anything, and so the engine, the tests and any future L1 listener
 //! cannot disagree about the rule.
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, SocketAddr, TcpListener};
+
+/// Bind a control-plane listener, after checking the address against the
+/// policy.
+///
+/// This is the single place a control-plane socket is opened, shared by the
+/// mock and the real engine, so the policy check and the socket behaviour cannot
+/// drift between them (invariant 27). The policy check runs *before* any socket
+/// exists, so a refused address never briefly holds one.
+pub fn bind_listener(addr: SocketAddr, token: Option<&str>) -> Result<TcpListener, BindRefusal> {
+    check_bind(addr, token)?;
+    platform_bind(addr)
+}
+
+#[cfg(windows)]
+fn platform_bind(addr: SocketAddr) -> Result<TcpListener, BindRefusal> {
+    // A just-released or just-probed port lingers in TIME_WAIT for a few
+    // seconds on Windows, and std's `TcpListener::bind` does not set
+    // SO_REUSEADDR there, so the bind fails with WSAEADDRINUSE even though the
+    // address is about to be free. Retry briefly across that window rather
+    // than reporting a transient state as a refusal. A genuinely occupied port
+    // still fails, after the window, with the OS error.
+    const ATTEMPTS: u32 = 50;
+    const INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+    let mut last = None;
+    for _ in 0..ATTEMPTS {
+        match TcpListener::bind(addr) {
+            Ok(listener) => return Ok(listener),
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+                last = Some(e);
+                std::thread::sleep(INTERVAL);
+            }
+            Err(e) => return Err(BindRefusal::Io(e)),
+        }
+    }
+    Err(BindRefusal::Io(last.expect("at least one attempt ran")))
+}
+
+#[cfg(not(windows))]
+fn platform_bind(addr: SocketAddr) -> Result<TcpListener, BindRefusal> {
+    TcpListener::bind(addr).map_err(BindRefusal::Io)
+}
 
 /// Why a bind was refused.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Not `PartialEq`: the `Io` variant carries an OS error, which has no
+/// meaningful equality. Tests match on the policy variants instead.
+#[derive(Debug)]
 pub enum BindRefusal {
     /// A network-reachable address with no token configured.
     NonLoopbackWithoutToken { addr: SocketAddr },
@@ -25,6 +69,8 @@ pub enum BindRefusal {
     TokenTooWeak { length: usize, minimum: usize },
     /// The port belongs to something else (invariant 32).
     PortReserved { port: u16, reason: &'static str },
+    /// The OS refused the bind itself (port in use, permission).
+    Io(std::io::Error),
 }
 
 impl std::fmt::Display for BindRefusal {
@@ -40,11 +86,19 @@ impl std::fmt::Display for BindRefusal {
             BindRefusal::PortReserved { port, reason } => {
                 write!(f, "port {port} is reserved: {reason}")
             }
+            BindRefusal::Io(e) => write!(f, "could not bind: {e}"),
         }
     }
 }
 
-impl std::error::Error for BindRefusal {}
+impl std::error::Error for BindRefusal {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            BindRefusal::Io(e) => Some(e),
+            _ => None,
+        }
+    }
+}
 
 /// Shortest token accepted. Not a security analysis — a floor, so that an
 /// empty string or a placeholder cannot satisfy the check.
@@ -123,9 +177,12 @@ mod tests {
     #[test]
     fn a_network_address_without_a_token_is_refused() {
         let a = addr("192.168.1.50", ENGINE_CONTROL_PORT);
-        assert_eq!(
-            check_bind(a, None),
-            Err(BindRefusal::NonLoopbackWithoutToken { addr: a })
+        assert!(
+            matches!(
+                check_bind(a, None),
+                Err(BindRefusal::NonLoopbackWithoutToken { addr }) if addr == a
+            ),
+            "a network address without a token must refuse by name"
         );
     }
 
@@ -153,12 +210,15 @@ mod tests {
     #[test]
     fn a_short_token_is_refused_rather_than_padded() {
         let err = check_bind(addr("10.0.0.4", ENGINE_CONTROL_PORT), Some("secret")).unwrap_err();
-        assert_eq!(
-            err,
-            BindRefusal::TokenTooWeak {
-                length: 6,
-                minimum: MINIMUM_TOKEN_BYTES
-            }
+        assert!(
+            matches!(
+                err,
+                BindRefusal::TokenTooWeak {
+                    length: 6,
+                    minimum: MINIMUM_TOKEN_BYTES
+                }
+            ),
+            "a short token must name its length and the floor, got {err:?}"
         );
         // An empty token is not "no token": passing Some("") is a
         // misconfiguration and must not silently fall through to the loopback

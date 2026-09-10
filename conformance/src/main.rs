@@ -54,6 +54,13 @@ fn main() {
     // change the protocol.
     run_over_transport(&mut report, Some(CONFORMANCE_TOKEN));
 
+    // The real engine, as a peer. The same control-plane suite that runs
+    // against the mock runs against the actual render worker, which is the
+    // point of writing the suite against `EnginePeer` (ADR-003). If the worker
+    // binary is not built or no GPU is present, this records a skip rather
+    // than a pass (invariant 43).
+    run_against_real_engine(&mut report);
+
     report.set_peer("plane contract, no peer");
     control_plane_delivery_suite(&mut report);
     asset_plane_suite(&mut report);
@@ -171,4 +178,104 @@ fn run_over_transport(report: &mut Report, token: Option<&str>) {
     // No fault suite here: a client cannot reach through the wire to drop a
     // reference, which is exactly the FaultInjection distinction. It skips by
     // being absent rather than by pretending.
+}
+
+/// Run the control-plane suite against the real render worker.
+///
+/// The worker binary lives next to the conformance executable in
+/// `target/debug`. If it is not built, or it cannot start (no GPU and no
+/// software fallback available), every check records a skip rather than a
+/// pass, so a conformance run on a machine without the engine is honest about
+/// what it did not exercise (invariant 43).
+fn run_against_real_engine(report: &mut Report) {
+    let Some(worker) = worker_binary() else {
+        report.set_peer("real render engine");
+        report.skip_unavailable("gx-render-worker binary not built");
+        return;
+    };
+
+    // A fresh loopback port, so this never collides with a live engine.
+    let port = free_port();
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+    let child = std::process::Command::new(&worker)
+        .args(["--port", &port.to_string(), "--publish", "conformance/published:1"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    let mut child = match child {
+        Ok(child) => child,
+        Err(e) => {
+            report.set_peer("real render engine");
+            report.skip_unavailable(format!("could not spawn worker: {e}"));
+            return;
+        }
+    };
+    // Whatever happens below, the engine the suite started is stopped when the
+    // guard drops. This is the conformance harness ending its own fixture, not
+    // a product stopping an engine.
+    let _guard = KillOnDrop(&mut child);
+
+    // Wait for the engine to answer the capability exchange.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    let client = loop {
+        match Client::connect(addr) {
+            Ok(client) => break Some(client),
+            Err(_) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(_) => break None,
+        }
+    };
+    let mut client = match client {
+        Some(client) => client,
+        None => {
+            report.set_peer("real render engine");
+            report.skip_unavailable("worker did not answer on its control port");
+            return;
+        }
+    };
+
+    let cap = client.capability();
+    report.set_peer(format!(
+        "real render engine, {:?}, {:?}, {:?}",
+        cap.locality, cap.device_tier, cap.clock
+    ));
+    control_plane_suite(&mut client, report);
+    // No fault suite: a real engine cannot be driven into a reference loss on
+    // request, which is the entire reason `FaultInjection` is a separate trait.
+}
+
+/// The worker binary. Cargo places a binary run via `cargo run` directly in
+/// `target/debug`, and a test/example executable in `target/debug/deps`, so
+/// look in the executable's own directory and its parent.
+fn worker_binary() -> Option<std::path::PathBuf> {
+    let current = std::env::current_exe().ok()?;
+    let name = if cfg!(windows) {
+        "gx-render-worker.exe"
+    } else {
+        "gx-render-worker"
+    };
+    let dir = current.parent()?;
+    for candidate in [dir.join(name), dir.parent()?.join(name)] {
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn free_port() -> u16 {
+    let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    listener.local_addr().unwrap().port()
+}
+
+/// Stops a fixture engine on drop. Used only by the conformance harness for
+/// the engine it started itself.
+struct KillOnDrop<'a>(&'a mut std::process::Child);
+impl Drop for KillOnDrop<'_> {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
 }

@@ -8,3 +8,13 @@ rust-version.workspace = true
 [dependencies]
 gx-contracts = { workspace = true }
 gx-control-plane = { workspace = true }
+gx-control-transport = { workspace = true }
+wgpu = "26"
+pollster = "0.4"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "gx-render-worker"
+path = "src/main.rs"

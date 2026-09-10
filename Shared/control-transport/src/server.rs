@@ -22,7 +22,7 @@ use std::thread::{self, JoinHandle};
 
 use gx_contracts::Refusal;
 use gx_control_plane::auth::Token;
-use gx_control_plane::bind::{check_bind, BindRefusal};
+use gx_control_plane::bind::{bind_listener, BindRefusal};
 use gx_control_plane::framing::{decode_body, decode_length, encode, LENGTH_PREFIX};
 use gx_control_plane::message::{ClientRequest, EngineEvent, EngineReply, Envelope};
 use gx_control_plane::peer::EnginePeer;
@@ -65,11 +65,11 @@ pub struct Server<P: EnginePeer> {
 impl<P: EnginePeer + Send + 'static> Server<P> {
     /// Bind, after checking the address against the bind policy.
     ///
-    /// The policy check happens *before* the bind, so a refused address never
-    /// briefly holds a socket.
+    /// The bind goes through `gx_control_plane::bind::bind_listener`, the one
+    /// place a control-plane socket is opened, so the policy check and the
+    /// socket options are shared with every engine rather than re-decided here.
     pub fn bind(addr: SocketAddr, token: Option<&str>, peer: P) -> Result<Self, ServeError> {
-        check_bind(addr, token).map_err(ServeError::Refused)?;
-        let listener = TcpListener::bind(addr).map_err(ServeError::Io)?;
+        let listener = bind_listener(addr, token).map_err(ServeError::Refused)?;
         Ok(Self {
             listener,
             peer: Arc::new(Mutex::new(peer)),

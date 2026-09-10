@@ -10,6 +10,10 @@
 use std::path::PathBuf;
 
 use gx_asset_plane::{AssetRef, PreflightRequest, PreflightResponse, TransferState};
+use gx_contracts::design_system::{
+    DurationSpec, MotionChannel, MotionKey, MotionPhase, MotionPhases, MotionPreset, MotionTokens,
+    NamedEasing, PresetParam, Stagger, TokenRef,
+};
 use gx_contracts::{
     ClockSource, ContentHash, DeviceTier, Epoch, Locality, MediaCodec, RationalRate,
     ReferenceState, Refusal, Revision, TakeId,
@@ -88,6 +92,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ConsumerRole,
         MediaProfile,
         DropCounters,
+        // gx-contracts: design system and motion (Part G)
+        TokenRef,
+        MotionTokens,
+        NamedEasing,
+        MotionPhases,
+        MotionPhase,
+        DurationSpec,
+        MotionChannel,
+        MotionKey,
+        Stagger,
+        MotionPreset,
+        PresetParam,
     );
 
     write_barrel(&out)?;
