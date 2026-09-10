@@ -34,6 +34,10 @@ pub enum Outcome {
 /// One named check and what happened.
 #[derive(Debug, Clone)]
 pub struct Result_ {
+    /// Which peer produced this. With several peers in one run, a result that
+    /// cannot be attributed to one of them is not actionable: the same check
+    /// legitimately passes against one peer and skips against another.
+    pub peer: String,
     pub plane: &'static str,
     pub name: &'static str,
     pub outcome: Outcome,
@@ -43,15 +47,31 @@ pub struct Result_ {
 #[derive(Debug, Clone, Default)]
 pub struct Report {
     pub results: Vec<Result_>,
+    peer: String,
 }
 
 impl Report {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            results: Vec::new(),
+            peer: "unattributed".to_string(),
+        }
+    }
+
+    /// Label the peer that subsequent records belong to. Called before each
+    /// suite; forgetting it leaves results marked "unattributed" rather than
+    /// silently crediting them to the previous peer.
+    pub fn set_peer(&mut self, peer: impl Into<String>) {
+        self.peer = peer.into();
+    }
+
+    pub fn peer(&self) -> &str {
+        &self.peer
     }
 
     fn record(&mut self, plane: &'static str, name: &'static str, outcome: Outcome) {
         self.results.push(Result_ {
+            peer: self.peer.clone(),
             plane,
             name,
             outcome,

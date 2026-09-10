@@ -7,6 +7,7 @@ Playout — the dependency arrow points only inward.
 |---|---|
 | `contracts` | Core types every plane shares: ids, revisions, rational rates, device tier, clock source, reference state, refusals |
 | `control-plane` | protocol v3: capability, prepare, cue, take, clear, patches, output config. Ordered, acknowledged, zero loss |
+| `control-transport` | protocol v3 over a stream: framing, listener and client. L0 is loopback TCP; L1 is QUIC, later |
 | `asset-plane` | `.gpxpkg` packages, content addressing, chunked resumable transfer, preflight |
 | `media-plane` | Preview and Program confidence frames. Drops, never queues |
 | `generated-ts` | **Generated. Never edited by hand** (invariant 23) |

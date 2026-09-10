@@ -199,6 +199,12 @@ pub enum Refusal {
         existing: ClockSource,
         requested: ClockSource,
     },
+    /// The peer could not be reached, or answered nothing in time.
+    ///
+    /// Emitted by a *client*, never by an engine: it describes the transport
+    /// rather than a decision. It is a refusal so that a caller handling
+    /// refusals cannot accidentally not handle this.
+    TransportFailed { detail: String },
     /// Named, so the gap register stays honest instead of stubbing a feature.
     NotImplemented { what: String },
 }
@@ -239,6 +245,7 @@ impl std::fmt::Display for Refusal {
                 f,
                 "clock domain already {existing:?}, refused {requested:?}"
             ),
+            Refusal::TransportFailed { detail } => write!(f, "transport failed: {detail}"),
             Refusal::NotImplemented { what } => write!(f, "not implemented: {what}"),
         }
     }

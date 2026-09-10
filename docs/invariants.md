@@ -137,3 +137,21 @@ execution evidence.
 47. **A conformance check that always skips is not a check.** If every
     available peer skips it, add a peer that exercises it. The suite is graded
     on what it ran, not on what it declared.
+
+## Established by the L0 control transport
+
+48. **A sequence gap closes the connection.** The control plane tolerates no
+    loss, so there is no correct way to carry on past a missing message.
+    Closing forces the reconnect-and-reconcile that ADR B.4 specifies.
+49. **A duplicate request is acknowledged, never re-executed.** Re-applying a
+    take because its request arrived twice would put a scene to air twice.
+50. **A listener retries a transient accept error and stops on a persistent
+    one.** Looping on an unrecoverable error burns a core and floods the log
+    with one line, which is how a small fault becomes the visible outage.
+51. **A frame's declared length is validated before any of its body is
+    allocated.** A peer must not be able to make this side reserve memory by
+    lying about a length.
+52. **The bind policy is checked before the socket is created**, so a refused
+    address never briefly holds a listener. `0.0.0.0` and `::` are not
+    loopback — treating an unspecified address as local is what turns
+    invariant 41 into decoration.

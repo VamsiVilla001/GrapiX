@@ -18,6 +18,7 @@ dependencies = [
  "gx-asset-plane",
  "gx-contracts",
  "gx-control-plane",
+ "gx-control-transport",
  "gx-media-plane",
  "gx-mock-engine",
  "serde_json",
@@ -53,6 +54,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "gx-control-transport"
+version = "0.1.0"
+dependencies = [
+ "gx-contracts",
+ "gx-control-plane",
+ "gx-mock-engine",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "gx-engine-host"
 version = "0.1.0"
 dependencies = [
@@ -83,6 +95,7 @@ version = "0.1.0"
 dependencies = [
  "gx-contracts",
  "gx-control-plane",
+ "gx-control-transport",
 ]
 
 [[package]]

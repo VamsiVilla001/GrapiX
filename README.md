@@ -3,10 +3,11 @@
 Broadcast graphics: authoring, playout and rendering. Three applications, one
 set of contracts.
 
-> **Status: skeleton.** Everything here is **Planned** in the sense defined by
-> [`docs/README.md`](docs/README.md). The contracts compile and are tested, the
-> guards run, and no application is implemented. Nothing in this repository has
-> produced a frame.
+> **Status: foundations.** The four planes' contracts and semantics are
+> implemented and tested, and the control plane runs over a real L0 transport.
+> There is no renderer, no application shell and no output. **Nothing in this
+> repository has produced a frame.** Status words are used exactly as
+> [`docs/README.md`](docs/README.md) defines them.
 
 ## The three applications
 
@@ -35,11 +36,12 @@ Full reasoning in
 
 ```
 Shared/          contracts — Rust is the source of truth, TypeScript generated
-  contracts/       core types: ids, rational rates, tier, clock, refusals
-  control-plane/   protocol v3: intent, never time
-  asset-plane/     packages, content addressing, resumable transfer
-  media-plane/     preview and confidence frames; drops, never queues
-  generated-ts/    GENERATED — never edited by hand
+  contracts/         core types: ids, rational rates, tier, clock, refusals
+  control-plane/     protocol v3: intent, never time
+  control-transport/ protocol v3 over a stream (L0: loopback TCP)
+  asset-plane/       packages, content addressing, resumable transfer
+  media-plane/       preview and confidence frames; drops, never queues
+  generated-ts/      GENERATED — never edited by hand
 services/
   render-engine/   host (supervisor) + worker (Rust/wgpu)
   schema-mcp/      standalone read-only MCP server over the contracts
@@ -68,7 +70,30 @@ output staleness check, the TypeScript project build, and the Rust test suite.
 | `npm run check:boundaries` | Fail on a cross-domain dependency |
 | `npm run typecheck` | Build every TypeScript project |
 | `npm run test:rust` | `cargo test --workspace` |
-| `npm run conformance` | Run the conformance suite (not yet implemented) |
+| `npm run conformance` | Run the conformance suite against every available peer |
+
+## Running something
+
+There is no application yet — no window, no viewport, nothing rendered. What
+runs today is the control plane.
+
+The conformance suite is the most informative thing to run. It exercises four
+peers, including one over a real socket, and reports per peer:
+
+```bash
+cargo run -p gx-conformance
+```
+
+A mock engine can also be run as a real server, which is how an Editor or
+Playout developer works against a peer that refuses where the real engine will
+(ADR-003):
+
+```bash
+cargo run -p gx-mock-engine -- --genlocked --publish lower-third:4
+```
+
+It listens on `127.0.0.1:4400`. It is a mock: no GPU, no renderer, no outputs.
+A take moves a state field and nothing reaches a screen.
 
 ## Before you change anything
 

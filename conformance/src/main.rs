@@ -14,7 +14,9 @@ use gx_conformance::{
 };
 use gx_contracts::{DeviceTier, Locality, RationalRate};
 use gx_control_plane::peer::EnginePeer;
+use gx_control_transport::{Client, Server};
 use gx_mock_engine::MockEngine;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 fn main() {
     let mut report = Report::new();
@@ -24,12 +26,12 @@ fn main() {
     let mut local = MockEngine::new();
     let mut lan = MockEngine::new().over_lan().genlocked(RationalRate::P29_97);
 
-    println!("peer: {}", gx_mock_engine::describe(&local));
+    report.set_peer("mock, co-located, T0, free-run");
     control_plane_suite(&mut local, &mut report);
     control_plane_fault_suite(&mut local, &mut report);
     media_plane_suite(local.capability().locality, &mut report);
 
-    println!("peer: {}", gx_mock_engine::describe(&lan));
+    report.set_peer("mock, LAN, T0, genlocked 29.97");
     control_plane_suite(&mut lan, &mut report);
     control_plane_fault_suite(&mut lan, &mut report);
     media_plane_suite(Locality::Lan, &mut report);
@@ -39,9 +41,16 @@ fn main() {
     let mut degraded = MockEngine::new()
         .genlocked(RationalRate::P50)
         .with_device_tier(DeviceTier::T2);
-    println!("peer: {}", gx_mock_engine::describe(&degraded));
+    report.set_peer("mock, co-located, T2, genlocked");
     control_plane_suite(&mut degraded, &mut report);
 
+    // The same suite, over a real socket. This is ADR-001's exit criterion in
+    // miniature: if the checks that pass in-process also pass across a
+    // transport, the contracts really are transport-independent. When QUIC
+    // arrives at L1, this block gains a peer and nothing else changes.
+    run_over_transport(&mut report);
+
+    report.set_peer("plane contract, no peer");
     control_plane_delivery_suite(&mut report);
     asset_plane_suite(&mut report);
     timing_plane_suite(&mut report);
@@ -54,16 +63,24 @@ fn main() {
 }
 
 fn print_report(report: &Report) {
+    let mut peer = "";
     let mut plane = "";
     for result in &report.results {
+        if result.peer != peer {
+            peer = &result.peer;
+            // Reset, so each peer's section carries its own plane headers
+            // rather than inheriting the previous peer's last one.
+            plane = "";
+            println!("\n=== {peer} ===");
+        }
         if result.plane != plane {
             plane = result.plane;
-            println!("\n{} plane", plane.to_uppercase());
+            println!("  {} plane", plane.to_uppercase());
         }
         match &result.outcome {
-            Outcome::Pass => println!("  PASS  {}", result.name),
-            Outcome::Skip(why) => println!("  SKIP  {} - {why}", result.name),
-            Outcome::Fail(why) => println!("  FAIL  {} - {why}", result.name),
+            Outcome::Pass => println!("    PASS  {}", result.name),
+            Outcome::Skip(why) => println!("    SKIP  {} - {why}", result.name),
+            Outcome::Fail(why) => println!("    FAIL  {} - {why}", result.name),
         }
     }
 
@@ -84,4 +101,49 @@ fn print_report(report: &Report) {
             "NOT CONFORMANT"
         }
     );
+}
+
+/// Start a loopback server carrying a mock, then run the control-plane suite
+/// through a real client against it.
+fn run_over_transport(report: &mut Report) {
+    let mut engine = MockEngine::new().genlocked(RationalRate::P29_97);
+    engine.publish(
+        gx_contracts::TakeId("conformance/published".into()),
+        gx_contracts::Revision(1),
+    );
+
+    // Port 0: the OS picks a free port, so this never collides with a real
+    // engine or a second run.
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+    let server = match Server::bind(addr, None, engine) {
+        Ok(server) => server,
+        Err(e) => {
+            eprintln!("transport pass skipped: cannot bind: {e}");
+            return;
+        }
+    };
+    let bound = match server.local_addr() {
+        Ok(bound) => bound,
+        Err(e) => {
+            eprintln!("transport pass skipped: no local address: {e}");
+            return;
+        }
+    };
+    server.serve_in_background();
+
+    let mut client = match Client::connect(bound) {
+        Ok(client) => client,
+        Err(e) => {
+            eprintln!("transport pass skipped: cannot connect: {e}");
+            return;
+        }
+    };
+
+    report.set_peer(format!(
+        "control-transport client to {bound} (L0, loopback TCP)"
+    ));
+    control_plane_suite(&mut client, report);
+    // No fault suite here: a client cannot reach through the wire to drop a
+    // reference, which is exactly the FaultInjection distinction. It skips by
+    // being absent rather than by pretending.
 }

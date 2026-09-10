@@ -27,11 +27,95 @@ not a euphemism for nearly done.
    whole architecture.
 8. `resolve_intent` has exactly one implementation. A mock, a test double or a
    second engine must call it, never reimplement it (invariant 46).
-9. The next implementation step is a **transport** for the control plane, or
-   the pixel gate. Both are M1 remainders. The planes' semantics are done and
-   tested in-process; none of them crosses a wire.
+9. The control plane has an L0 transport; the asset and media planes do not.
+   Do not describe those two as transported.
+10. The L0 transport is loopback TCP, not the named pipe ADR-001 specifies.
+   Say so when describing L0 security posture.
+11. The next implementation step is one of: a token check on the transport,
+   reconnect and reconcile by revision and epoch, or the pixel gate.
 
 ---
+
+## 2026-09-10 — the L0 control transport
+
+The planes had semantics but no transport: everything ran in-process, so
+"transport-independent contracts" was an assertion. It is now a thing that runs.
+
+**`Shared/control-plane` gained two pure modules.** `framing`: a four-byte
+big-endian length then that many bytes of JSON, with the length validated
+against a 1 MiB cap *before* any body is allocated — a peer cannot make the
+reader reserve memory by lying (invariant 51). `bind`: the policy deciding
+where the engine may listen. `0.0.0.0` and `::` are explicitly not loopback,
+which is the case that would otherwise turn invariant 41 into decoration.
+
+**`Shared/control-transport` is new** — both halves of the wire in one crate.
+ADR-001 places protocol clients in `Shared`, and the server is the same format
+read the other way; two copies of framing and dispatch would be the parallel
+implementation invariant 27 forbids. The server is generic over `EnginePeer`
+and has never heard of a scene. Three behaviours come straight from the plane's
+guarantees: a sequence gap closes the connection (there is no correct way to
+continue past a lost message), a duplicate is acknowledged but not re-executed
+(a repeated take would reach air twice), and replies carry a `reply.` id while
+events do not — which is how the client separates them off one stream, making
+invariant 34 load-bearing rather than decorative.
+
+**The conformance suite now runs over a socket.** Because the suite is written
+against `EnginePeer` and `Client` implements it, pointing it at a live server
+took no change to any check. Twelve control-plane checks now pass across a real
+transport. That is ADR-001's L0/L1 exit criterion in miniature.
+
+**The mock engine is runnable.** `cargo run -p gx-mock-engine -- --genlocked
+--publish lower-third:4` serves on `127.0.0.1:4400`, with flags for locality,
+tier and reference so a client developer can reach every refusal path. Verified
+listening, and verified refusing port 4200 with the burned-port reason.
+
+### One real defect, found by its symptom
+
+The first `serve()` printed and continued on *every* accept error. On Windows,
+Winsock deinitialises when `main` returns, so the detached listener thread hit
+a permanent error and spun, flooding stderr with the same line. The bug is not
+Windows-specific: any persistent accept failure would burn a core forever. Now
+transient errors (interrupted, aborted, reset, timed out) are retried and
+anything else stops the listener (invariant 50).
+
+### One defect in the report itself
+
+With four peers in one run, results were printed with no attribution, so
+"SKIP live output refuses below T0" could not be traced to the peer that
+skipped it — and I misread the output myself before noticing. `Result_` now
+carries the peer, and the report groups by peer then plane.
+
+The codegen guard also did its job unprompted: adding `Refusal::TransportFailed`
+made `Refusal.ts` stale and `npm run check` refused to pass until it was
+regenerated.
+
+### Verified by execution
+
+| What | Result |
+|---|---|
+| `cargo test --workspace` | **108 passed, 0 failed** |
+| `cargo clippy --workspace --all-targets` | Clean |
+| `cargo run -p gx-conformance` | **77 passed, 0 failed, 7 skipped**, exit 0 |
+| — of which over a real socket | 11 passed, 1 skipped |
+| `node --test` | 7 passed |
+| `npx tsc --build` | Clean, 4 projects |
+| `gx-mock-engine` serving | Bound and listening on 127.0.0.1:4400 |
+| `gx-mock-engine --port 4200` | Refused, exit 1, burned-port reason |
+| `npm run check` | **exit 0** |
+
+### Still not done, and not claimed
+
+- **This is loopback TCP, not a named pipe.** ADR-001 specifies a pipe or Unix
+  socket at L0. A pipe can carry an OS-level peer identity; loopback TCP
+  cannot. Recorded as a gap, not dressed up. What TCP buys is one code path on
+  Windows and Unix.
+- No reconnect, no reconciliation by revision and epoch. A gap closes the
+  connection and nothing dials back.
+- **No asset or media transport.** Those planes are still in-process only.
+- No token authentication implemented: the bind policy *requires* a token off
+  loopback, and nothing yet verifies one on a connection.
+- No engine host supervision, no WAL, no renderer, no shell.
+- Nothing has rendered a frame.
 
 ## 2026-09-10 — ADR-001 and ADR-002 implemented
 
