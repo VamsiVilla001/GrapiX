@@ -35,10 +35,86 @@ not a euphemism for nearly done.
    the engine or to a request handler.
 12. The credential is a shared bearer token over an unencrypted socket. Never
    describe it as mTLS, and never describe L1 as ready.
-13. The next implementation step is one of: automatic reconnect with backoff,
-   an asset-plane transport, or the pixel gate.
+13. `docs/adr/0002-platform-and-mcp-schema.md` is the accepted handoff and its
+   **Part E is the definition of done**. Verify against it; do not claim an
+   item without execution evidence.
+14. The next implementation step is the **token schema, including motion tokens
+   and the preset format, in shared contracts** (Part E item 18, Part G.10).
+   Everything else in Part G consumes it. Settle `supported` vs `allowed`, the
+   `Out` verb, and the `Token`/`Severity` name collisions first.
 
 ---
+
+## 2026-09-10 — ADR-0002 accepted as the final drafted handoff
+
+`docs/adr/0002-platform-and-mcp-schema.md` is now the authoritative handoff:
+platform matrix, colour management, DPI, filename handling, resolution and rate
+policy, the MCP tool surface and scopes, the UI research plan (Part F), and the
+design-system and motion-library handoff (Part G, which absorbs and supersedes
+the standalone 9 September copy). Second in the authority order, after 0001.
+
+**Part E is the definition of done for the platform layer.** Verified against
+the branch at `becb09d`, item by item. It is the checklist any claim of
+completeness is measured against, so it is recorded here in full.
+
+| # | Item | Status |
+|---|---|---|
+| 1 | Editor builds, signs, notarises on both; CI installers | **Not present** — no Tauri shell, no CI |
+| 2 | WebGPU capability probe on both, recorded | **Not present** |
+| 3 | Colour-managed pipeline, colour ramp in reference set | **Not present** |
+| 4 | Pixel gate identical on both platforms | **Not present** |
+| 5 | DPI correct at 100/125/150/200, survives monitor move | **Not present** |
+| 6 | Filename sanitiser with hostile corpus | **Partial, and narrower than it looks** — `is_syntactically_safe` rejects traversal, absolute and drive-letter paths. Zero handling of reserved names (CON/AUX/NUL/LPT), trailing dots, Unicode NFC, or >260-char paths |
+| 7 | One atomic-write helper, both races closed | **Not present** — the rule is written in `transfer.rs` docs; no implementation |
+| 8 | Service data root uses OS conventions | **Not present** — no `directories` crate, no data root at all |
+| 9 | 1080p/720p at all eight rates; interlaced refused by name | **Partial** — six of eight rates exist as constants; **24/1 and 24000/1001 are missing**. No resolution type, no interlaced refusal |
+| 10 | Virtual, recording, null adapters on both | **Not present** — `OutputConfig.adapter` is a bare `String` |
+| 11 | DeckLink and NDI behind feature flags | **Not present** |
+| 12 | MCP: capability, structured refusals, `if_revision`, batch-as-one-undo, `render.preview` | **Partial** — capability discovery is implemented and conformance-checked; refusals are structured but carry no `supported`/`allowed`; **no `if_revision`, no batches, no idempotency keys, no `render.preview`** |
+| 13 | Scopes enforced: `author` refused on `playout.take` | **Not present** — one shared bearer token, no scopes. This is the gap in the credential work of the previous entry |
+| 14 | Font Manager ported unchanged | **Not present** — 2.0 is an orphan; nothing was ported |
+| 15 | Missing font refused at preflight | **Not present** — no preflight |
+| 16 | UI built against Part F constraints | **Not present** — Part F research not run |
+| 17 | Design reviewed against the anti-pattern list | Not applicable yet |
+| 18 | Token schema in contracts before any consumer | **Not present.** The document names this as the one thing to build first |
+| 19 | Design-system violations refused with `allowed` values | **Not present** |
+| 20 | Every package stamped with design-system version | **Not present** — no package or publish concept |
+| 21 | Presets resolve identically at 25/50/59.94/23.976 | **Not present** — and 23.976 is not even a declared rate |
+| 22 | A preset with no `out` phase is refused | **Not present** |
+
+Nothing in Part E is complete. Items 12 and 6 are the only ones with anything
+behind them, and both are narrower than the item requires.
+
+### Three inconsistencies inside the document, to settle before building
+
+1. **`supported` vs `allowed`.** D.1's refusal shape uses `supported`; G.4's
+   and E.19's use `allowed`. Same concept, two names. Pick one before the
+   refusal shape is widened, because every consumer parses it.
+2. **Is `Out` a verb?** G.6.3 names five operator verbs — Cue, Take, Continue,
+   Out, Clear — and gives `out` a required preset phase. D.2's `playout` row
+   lists four: cue, take, continue, clear. Either `Out` is a distinct verb or
+   it is Clear with a transition, and the preset schema depends on which.
+3. **Refusal code casing.** D.1 shows `UNSUPPORTED_BLEND_MODE`; the
+   implemented surface is camelCase (`unsupportedBlendMode`). Cosmetic, but it
+   is a wire format and worth settling once.
+
+### Two collisions the token schema will hit
+
+`Token` is taken (the auth credential, `export type Token = string`) and
+`Severity` is taken (clock health: `Nominal | Warning | Critical`, against the
+document's `error | warning | info`). Both need renaming or namespacing before
+Part G's schema lands.
+
+### Also noted
+
+`Refusal.unknownTake.take_id` is the one snake_case field on an otherwise
+camelCase contract surface: `#[serde(rename_all = "camelCase")]` on an enum
+renames variants, not variant fields. Needs `rename_all_fields`. Only visible
+on `take_id` because every other variant field is a single word.
+
+**Environment change:** the `figma-import-motion-config-f13e17` worktree is no
+longer registered, and `GrapiX-2.0` is now checked out in the main repository
+at `D:\Project KK\Personal projects\GrapiX`. Work there.
 
 ## 2026-09-10 — credential enforcement and reconnect reconciliation
 
