@@ -99,6 +99,16 @@ moves a state field and nothing reaches a screen.
 
 ## Before you change anything
 
+**If you are an AI assistant (Codex, Claude, Kimi, or any other), first read
+[`LLM-GOVERNANCE.md`](LLM-GOVERNANCE.md). It is binding.** It mandates the
+verify-then-record loop: no task is marked done without execution evidence
+against the build plan, and `progress.html` / `progress.json` are the only
+place completion is recorded.
+
+The single build plan is [`GrapiX-Build-Plan.md`](GrapiX-Build-Plan.md);
+progress against it is tracked in [`progress.html`](progress.html). Work only
+against that plan.
+
 Read [`docs/invariants.md`](docs/invariants.md). It is short, and every rule in
 it is there because breaking it cost something real — a 482 ms-per-frame
 regression, a 15-second hang on every call, a truncated file cached under a

@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GrapiX build progress</title>
+<style>
+  :root{
+    --base:#131A20; --panel:#1A232B; --panel2:#161E25; --rule:#26323C;
+    --text:#D6DFE6; --dim:#78899A; --faint:#4E5E6B;
+    --done:#35A47C; --active:#D89A34; --blocked:#C25A4E;
+    --font: ui-sans-serif, system-ui, "Segoe UI", -apple-system, Roboto, Arial, sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--base);color:var(--text);font-family:var(--font);
+       font-size:14px;line-height:1.5;font-variant-numeric:tabular-nums;
+       padding:0 0 80px}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 20px}
+
+  header{border-bottom:1px solid var(--rule);padding:34px 0 0;margin-bottom:22px}
+  .htop{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap}
+  h1{font-size:23px;font-weight:600;letter-spacing:-.01em}
+  .sub{color:var(--dim);font-size:13px;margin-top:5px;max-width:62ch}
+  .tally{text-align:right;white-space:nowrap}
+  .tally b{font-size:44px;font-weight:600;letter-spacing:-.03em;line-height:1;display:block}
+  .tally span{color:var(--dim);font-size:12px}
+
+  /* the meter: one cell per phase, fill = completion */
+  .meter{display:flex;gap:3px;margin:24px 0 0;height:38px;align-items:flex-end}
+  .cell{flex:1;position:relative;background:var(--panel2);border:1px solid var(--rule);
+        height:100%;overflow:hidden;cursor:pointer}
+  .cell .fill{position:absolute;left:0;right:0;bottom:0;background:var(--done);opacity:.85}
+  .cell .act{position:absolute;left:0;right:0;background:var(--active);opacity:.75}
+  .cell .blk{position:absolute;left:0;right:0;top:0;background:var(--blocked);opacity:.8}
+  .cell b{position:absolute;left:0;right:0;bottom:3px;text-align:center;font-size:10px;
+          font-weight:600;color:var(--text);mix-blend-mode:normal}
+  .cell:focus-visible{outline:2px solid var(--active);outline-offset:2px}
+  .meterkey{display:flex;justify-content:space-between;color:var(--faint);font-size:11px;
+            padding:7px 0 26px}
+
+  .bar{display:flex;gap:16px;align-items:center;flex-wrap:wrap;padding:0 0 18px}
+  .filters{display:flex;gap:6px;flex-wrap:wrap}
+  button{font:inherit;color:var(--text);background:var(--panel);border:1px solid var(--rule);
+         padding:5px 11px;cursor:pointer}
+  button:hover{border-color:var(--faint)}
+  button:focus-visible{outline:2px solid var(--active);outline-offset:2px}
+  button[aria-pressed="true"]{background:#22303A;border-color:var(--dim)}
+  .spacer{flex:1}
+  .io button{color:var(--dim)}
+
+  section{margin-bottom:26px;border:1px solid var(--rule);background:var(--panel2)}
+  .ph{display:flex;align-items:baseline;gap:12px;padding:13px 16px;background:var(--panel);
+      border-bottom:1px solid var(--rule);cursor:pointer;flex-wrap:wrap}
+  .ph h2{font-size:14.5px;font-weight:600}
+  .ph .num{color:var(--dim);font-size:12px;min-width:26px}
+  .ph .cnt{color:var(--dim);font-size:12px;margin-left:auto;white-space:nowrap}
+  .ph .mini{width:110px;height:5px;background:#0F161B;border:1px solid var(--rule);position:relative}
+  .ph .mini i{position:absolute;left:0;top:0;bottom:0;background:var(--done);display:block}
+  .note{color:var(--dim);font-size:12.5px;padding:11px 16px;border-bottom:1px solid var(--rule);
+        max-width:82ch}
+
+  table{width:100%;border-collapse:collapse}
+  tr{border-bottom:1px solid #1E2830}
+  tr:last-child{border-bottom:none}
+  td{padding:8px 10px;vertical-align:top;font-size:13px}
+  td.id{width:56px;color:var(--faint);padding-left:16px}
+  tr.ready td.id{color:var(--active)}
+  tr.ready{box-shadow:inset 2px 0 0 var(--active)}
+  td.nm{color:var(--text)}
+  td.nm .dn{display:block;color:var(--faint);font-size:11.5px;margin-top:2px}
+  td.tr{width:78px;color:var(--dim);font-size:11.5px}
+  td.dep{width:70px;color:var(--faint);font-size:11.5px}
+  td.st{width:112px;padding-right:16px;text-align:right}
+  .chip{display:inline-block;min-width:88px;text-align:center;padding:3px 9px;font-size:11px;
+        border:1px solid var(--rule);background:transparent;color:var(--dim);cursor:pointer}
+  .chip.done{color:var(--done);border-color:#1E5344;background:#12281F}
+  .chip.active{color:var(--active);border-color:#5A4520;background:#2A2113}
+  .chip.blocked{color:var(--blocked);border-color:#5A2E28;background:#2A1715}
+
+  .ms{padding:11px 16px;border-top:1px solid var(--rule);background:#141C22;
+      color:var(--done);font-size:12.5px}
+  tr.hid,section.hid{display:none}
+  footer{color:var(--faint);font-size:11.5px;padding-top:10px;border-top:1px solid var(--rule)}
+  @media (prefers-reduced-motion: no-preference){.cell .fill,.ph .mini i{transition:height .18s,width .18s}}
+  @media (max-width:720px){td.dep,td.tr{display:none} .tally b{font-size:34px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="htop">
+    <div>
+      <h1>GrapiX build progress</h1>
+      <p class="sub">Sequenced from scratch in dependency order. A phase does not start until the steps it needs are done.</p>
+    </div>
+    <div class="tally"><b id="pct">0%</b><span id="counts">0 of 0 steps</span></div>
+  </div>
+  <div class="meter" id="meter"></div>
+  <div class="meterkey"><span>Phase P</span><span>Phase 17</span></div>
+</header>
+
+<div class="bar">
+  <div class="filters" id="filters"></div>
+  <span class="spacer"></span>
+  <div class="io">
+    <button id="exp">Save progress file</button>
+    <button id="imp">Load progress file</button>
+    <input type="file" id="file" accept="application/json" hidden>
+  </div>
+</div>
+
+<div id="phases"></div>
+
+<footer id="foot"></footer>
+</div>
+
+<script>
+const PLAN = [{"id":"P","title":"Parallel tracks \u2014 start on day one","note":"Long lead times. Nothing here is code, and all of it blocks something later.","milestone":null,"steps":[{"id":"P.1","name":"Procure GPU, DeckLink/AJA hardware, NDI SDK access, lab time","track":"EXT","dep":"\u2014","done":"Purchase orders raised and dates confirmed"},{"id":"P.2","name":"Licensing decisions: Adobe/AE, FFmpeg LGPL vs GPL, H.264/HEVC/ProRes, font embedding","track":"EXT","dep":"\u2014","done":"Written position per item, owner named"},{"id":"P.3","name":"UI research programme (Phase 9) kicked off","track":"RES","dep":"\u2014","done":"Participants recruited, first sessions booked"}]},{"id":"0","title":"Repository foundations","note":"Blocks literally everything. Nothing else starts until this is green.","milestone":null,"steps":[{"id":"0.1","name":"Clean branch; one Cargo workspace, one lockfile","track":"CON","dep":"\u2014","done":"cargo build at root builds all crates"},{"id":"0.2","name":"Pin toolchains: Rust, Node, wgpu 26 across every crate","track":"CON","dep":"0.1","done":"Versions pinned in-tree, CI enforces"},{"id":"0.3","name":"CI matrix on Windows and macOS from the first commit","track":"PLAT","dep":"0.1","done":"Both platforms green on an empty tree"},{"id":"0.4","name":"Dependency and licence policy; SBOM generated in CI","track":"PLAT","dep":"0.3","done":"SBOM artifact on every build"},{"id":"0.5","name":"tracing + OpenTelemetry skeleton","track":"BE","dep":"0.1","done":"A span reaches a collector"},{"id":"0.6","name":"Structured refusal type \u2014 code, field, given, allowed, severity","track":"CON","dep":"0.1","done":"Serialises identically in Rust and TS"},{"id":"0.7","name":"RationalRate type (num/den). No float rates anywhere","track":"CON","dep":"0.1","done":"Lint or test forbids float rates"},{"id":"0.8","name":"Stable ID and Revision types; if_revision semantics","track":"CON","dep":"0.1","done":"Conflict returns current revision"},{"id":"0.9","name":"Contracts package; Rust is source of truth, TS generated","track":"CON","dep":"0.6","done":"No hand-written TS type duplicates a Rust one"},{"id":"0.10","name":"Conformance harness scaffold and mock-peer pattern","track":"CON","dep":"0.9","done":"An empty conformance suite runs in CI"}]},{"id":"1","title":"Domain contracts","note":"Defined before any implementation reads them. This is what makes three products buildable in parallel.","milestone":"Three products can be built in parallel from here.","steps":[{"id":"1.1","name":"Scene document schema","track":"CON","dep":"0.9","done":"Round-trips through both languages"},{"id":"1.2","name":"Object type catalogue and full property surface","track":"CON","dep":"1.1","done":"Every authorable object is representable"},{"id":"1.3","name":"Material model; fit and blend enums as the single source of truth","track":"CON","dep":"1.1","done":"One enum, consumed by validator, engine and UI"},{"id":"1.4","name":"Colour types: linear working space, tagged sources, output transforms","track":"CON","dep":"1.1","done":"sRGB and Rec.709 transforms named and testable"},{"id":"1.5","name":"Design system token schema","track":"CON","dep":"1.1","done":"W3C Design Tokens JSON maps in cleanly"},{"id":"1.6","name":"Motion token and preset schema: phases, 0\u20131 time, stagger modes","track":"CON","dep":"1.5","done":"A preset resolves to frames at any rate"},{"id":"1.7","name":"Asset addressing: content hash plus project-relative path","track":"CON","dep":"1.1","done":"Replacing a file in place keeps bindings"},{"id":"1.8","name":".gpxpkg format and manifest","track":"CON","dep":"1.7","done":"Per-file SHA-256, verified after write"},{"id":"1.9","name":"Protocol v3 message set \u2014 intent-based take, committed frame returned","track":"CON","dep":"0.7","done":"No message carries wall-clock time"},{"id":"1.10","name":"Capability: locality, device tier, clock source, reference state","track":"CON","dep":"1.9","done":"Mismatch has a dedicated error code"},{"id":"1.11","name":"Mock engine, mock playout, mock editor","track":"CON","dep":"1.10","done":"Each product can run with zero real peers"},{"id":"1.12","name":"Conformance suite green against all three mocks","track":"CON","dep":"1.11","done":"CI gate on every PR"}]},{"id":"2","title":"Platform primitives","note":"No UI. These are the things every later layer depends on and that fail quietly if rushed.","milestone":null,"steps":[{"id":"2.1","name":"Atomic write helper: unique temp, fsync, retry on contention, directory fsync","track":"PLAT","dep":"0.1","done":"Both known rename races closed; one implementation only"},{"id":"2.2","name":"Filename sanitiser: reserved names, illegal characters, length, NFC","track":"PLAT","dep":"0.1","done":"Passes a hostile-name corpus on both platforms"},{"id":"2.3","name":"Case canonicalisation policy: compare insensitively, preserve for display","track":"PLAT","dep":"2.2","done":"A case-sensitive volume behaves identically"},{"id":"2.4","name":"OS directory conventions; the in-repo default removed","track":"PLAT","dep":"0.1","done":"AppData and Application Support used correctly"},{"id":"2.5","name":"File watching with debounce, both platforms","track":"PLAT","dep":"2.4","done":"Equivalent event streams from FSEvents and Win32"},{"id":"2.6","name":"Project store: JSON, backups, autosave ring","track":"BE","dep":"2.1","done":"Kill -9 mid-write leaves a valid project"},{"id":"2.7","name":"Asset store: SHA-256 dedupe, two-address, geometry read from headers","track":"BE","dep":"1.7","done":"Same asset imported twice stores once"},{"id":"2.8","name":"Font subsystem ported across unchanged","track":"BE","dep":"2.7","done":"All sources resolve on both platforms"},{"id":"2.9","name":"gx1 HMAC tokens; roles and scopes","track":"BE","dep":"0.1","done":"Algorithm fixed by prefix at parse time"},{"id":"2.10","name":"Audit and operations logging, sanitised","track":"BE","dep":"0.5","done":"No credentials in any log line"}]},{"id":"3","title":"Render engine core","note":"Headless. The engine must be complete and testable before anything draws a pixel of UI.","milestone":null,"steps":[{"id":"3.1","name":"wgpu init; backend selection D3D12 / Metal / Vulkan","track":"BE","dep":"0.2","done":"Runs headless on both platforms"},{"id":"3.2","name":"Device tier negotiation T0\u2013T3","track":"BE","dep":"3.1","done":"Tier reported in capability"},{"id":"3.3","name":"Colour pipeline: linear internal, tagged textures, sRGB and Rec.709 output","track":"BE","dep":"1.4","done":"Colour ramp renders identically on both platforms"},{"id":"3.4","name":"Scene parse to prepared scene","track":"BE","dep":"1.1","done":"Unknown fields refuse, never ignore"},{"id":"3.5","name":"PathRasteriser trait; lyon implementation behind it","track":"BE","dep":"3.1","done":"Swappable without touching scene logic"},{"id":"3.6","name":"Text via cosmic-text: shaping, fallback, bidi, OpenType","track":"BE","dep":"2.8","done":"Missing font refuses, never substitutes"},{"id":"3.7","name":"Meshes, glTF, materials, lights, cameras","track":"BE","dep":"3.4","done":"Per-object, per-face and per-element assignment"},{"id":"3.8","name":"ProgramClock: rational rate, absolute deadlines, ClockSource abstraction","track":"BE","dep":"0.7","done":"Late frames dropped, never queued"},{"id":"3.9","name":"Tiling with overscan above the GPU texture limit","track":"BE","dep":"3.1","done":"Seam-free composite proven byte-identical"},{"id":"3.10","name":"OutputAdapter trait; null, virtual, recording","track":"BE","dep":"3.8","done":"Unknown adapter id refused with the offered list"},{"id":"3.11","name":"Preview and Program frame emission; bounded queue, counted drops","track":"BE","dep":"3.10","done":"Stall drops frames, never blocks the clock"},{"id":"3.12","name":"WAL recovery journal; restore starts output-inhibited","track":"BE","dep":"2.1","done":"Forced kill restores without an unrecovered output"},{"id":"3.13","name":"Refusal coverage audit \u2014 every unsupported case refuses by name","track":"BE","dep":"0.6","done":"No silent fallback anywhere; blend and fit modes included"}]},{"id":"4","title":"Pixel gate","note":"The instrument. Built before anything that could change pixels, so there is a baseline to compare against.","milestone":"There is now an instrument. Nothing after this changes pixels unmeasured.","steps":[{"id":"4.1","name":"Reference scene set: colour ramp, safe areas, text, vector, 3D, every rate family","track":"BE","dep":"3.13","done":"Covers each supported fit and blend mode"},{"id":"4.2","name":"Headless render harness on both platforms","track":"PLAT","dep":"4.1","done":"Runs in CI without a display"},{"id":"4.3","name":"Baseline capture, committed to the repo","track":"BE","dep":"4.2","done":"Reference images versioned"},{"id":"4.4","name":"CI gate with a diff threshold that fails the build","track":"PLAT","dep":"4.3","done":"A deliberate one-pixel change is caught"},{"id":"4.5","name":"Cross-platform pixel equality: Windows versus macOS","track":"PLAT","dep":"4.4","done":"Any difference is explained or fixed, not accepted"}]},{"id":"5","title":"Transport \u2014 local","note":"Location-transparent from the first line. Local is an optimisation, not a different code path.","milestone":null,"steps":[{"id":"5.1","name":"Control plane over named pipe and unix socket","track":"BE","dep":"1.9","done":"Ordered, acknowledged, sequenced"},{"id":"5.2","name":"Session, auth, epoch, reconnect and reconciliation","track":"BE","dep":"2.9","done":"Program survives a control disconnect"},{"id":"5.3","name":"Asset plane local: hash preflight, transfer only the difference","track":"BE","dep":"2.7","done":"Re-publish moves no unchanged bytes"},{"id":"5.4","name":"Media plane local: shared memory or handle passing","track":"BE","dep":"3.11","done":"Frames reach a consumer with no copy"},{"id":"5.5","name":"Locality declared in the capability exchange","track":"BE","dep":"1.10","done":"Consumers adapt without code change"},{"id":"5.6","name":"Conformance suite passes over the real transport, not just mocks","track":"BE","dep":"1.12","done":"Same suite, both paths"}]},{"id":"6","title":"Playout service","note":"Headless and fully testable before its UI exists.","milestone":null,"steps":[{"id":"6.1","name":"Published library store; stable Take IDs","track":"BE","dep":"1.8","done":"IDs stable across republish"},{"id":"6.2","name":"Cue, take, continue, out, clear as intent; committed frame returned","track":"BE","dep":"5.1","done":"No caller can specify wall-clock time"},{"id":"6.3","name":"Revision pinning; refusal on mismatch","track":"BE","dep":"0.8","done":"Stale revision cannot go to air"},{"id":"6.4","name":"Rundown persistence and sequence engine","track":"BE","dep":"6.1","done":"Cursor survives restart"},{"id":"6.5","name":"Output configuration; is_live gated on tier, platform and reference","track":"BE","dep":"3.2","done":"Live refused below T0, naming the failing condition"},{"id":"6.6","name":"Automation trigger evaluation; execution explicitly deferred","track":"BE","dep":"6.4","done":"Deferral is a named refusal, not silence"}]},{"id":"7","title":"Editor service","note":"Also headless. Import, validation and publish must work before a designer sees a window.","milestone":null,"steps":[{"id":"7.1","name":"Project and scene CRUD","track":"BE","dep":"2.6","done":"Refuses writes until a project folder exists"},{"id":"7.2","name":"Import pipeline: four tiers, compatibility report, source retained","track":"BE","dep":"1.1","done":"Every substitution named in the report"},{"id":"7.3","name":"Import fidelity gate: source reference render versus imported render","track":"BE","dep":"4.3","done":"Diff stored with the template"},{"id":"7.4","name":"Scene validator: every unsupported case refused by name","track":"BE","dep":"3.13","done":"Shares one enum with the engine"},{"id":"7.5","name":"Design system enforcement: three severities plus override log","track":"BE","dep":"1.5","done":"Overrides recorded with a reason"},{"id":"7.6","name":"Package build, verify, publish; design-system version stamped","track":"BE","dep":"1.8","done":"Publishing is all-or-nothing"},{"id":"7.7","name":"Preflight","track":"BE","dep":"7.4","done":"Returns structured refusals with allowed values"}]},{"id":"8","title":"MCP automation surface","note":"Deliberately before the UI. The application becomes fully operable and automatable while still headless.","milestone":"The application is fully operable and automatable with no interface at all.","steps":[{"id":"8.1","name":"Tool schema generated from contracts; versioned alongside protocol v3","track":"BE","dep":"0.9","done":"No hand-written schema"},{"id":"8.2","name":"system.capability \u2014 supported enums, tier, versions, build hash","track":"BE","dep":"1.10","done":"An agent never has to guess"},{"id":"8.3","name":"project, scenes, objects","track":"BE","dep":"7.1","done":"Full property surface reachable"},{"id":"8.4","name":"materials, assets, fonts","track":"BE","dep":"7.1","done":"Including relink and usage lookup"},{"id":"8.5","name":"animation, including apply_preset","track":"BE","dep":"1.6","done":"Presets parameterised, never authored by the caller"},{"id":"8.6","name":"bindings","track":"BE","dep":"1.1","done":"Data schema discoverable"},{"id":"8.7","name":"designsystem.* and motion.*","track":"BE","dep":"1.6","done":"Import and commit are admin-scoped"},{"id":"8.8","name":"validate.*","track":"BE","dep":"7.7","done":"Refusals machine-parseable"},{"id":"8.9","name":"render.preview returning a real frame","track":"BE","dep":"3.11","done":"An agent can see its own output"},{"id":"8.10","name":"packages.*","track":"BE","dep":"7.6","done":"Publish returns Take ID and revision"},{"id":"8.11","name":"playout.* and outputs.*, scope-gated","track":"BE","dep":"6.5","done":"author token refused on take and configure"},{"id":"8.12","name":"if_revision, idempotency keys, batch-as-one-undo","track":"BE","dep":"0.8","done":"Retry after timeout does not duplicate"},{"id":"8.13","name":"Scope enforcement tests","track":"BE","dep":"8.11","done":"Every scope violation covered"}]},{"id":"9","title":"UI research","note":"Started on day one in parallel. Must land before Phase 11 begins \u2014 it produces the constraints Phase 11 builds against.","milestone":null,"steps":[{"id":"9.1","name":"Artifact teardown of comparable professional tools","track":"RES","dep":"P.3","done":"Vocabulary of density, chrome and controls"},{"id":"9.2","name":"Recruit designers, operators, producers","track":"RES","dep":"P.3","done":"Segments filled, including macOS-primary designers"},{"id":"9.3","name":"Contextual interviews in the suite and the control room","track":"RES","dep":"9.2","done":"Not remote. Lighting and viewing distance observed"},{"id":"9.4","name":"Card sort for panel and function grouping","track":"RES","dep":"9.3","done":"Information architecture proposal"},{"id":"9.5","name":"Usability baseline against the previous build","track":"RES","dep":"9.2","done":"Timed tasks including the disconnected-engine task"},{"id":"9.6","name":"Concept reaction across three divergent directions","track":"RES","dep":"9.1","done":"Tested on calibrated and uncalibrated displays"},{"id":"9.7","name":"Synthesis: design constraints document and anti-pattern list","track":"RES","dep":"9.6","done":"Density scale, chrome range, type at viewing distance"}]},{"id":"10","title":"Design system implementation","note":"Backend first \u2014 ingest and enforcement land before the panels that surface them.","milestone":null,"steps":[{"id":"10.1","name":"Token ingest from W3C Design Tokens JSON","track":"BE","dep":"1.5","done":"Round-trips without loss"},{"id":"10.2","name":"Token ingest from Figma and Claude Design","track":"BE","dep":"10.1","done":"Variables and published styles mapped"},{"id":"10.3","name":"Unexpressible report at ingest","track":"BE","dep":"10.1","done":"Names what the source held and tokens cannot"},{"id":"10.4","name":"Versioned, immutable store with provenance","track":"BE","dep":"10.1","done":"Human confirmation before v1"},{"id":"10.5","name":"Drift report across published templates","track":"BE","dep":"7.6","done":"Lists every template behind the current version"}]},{"id":"11","title":"Editor UI","note":"Deferred to here on purpose. Everything above is usable without it, and this is built against research output, not guesswork.","milestone":null,"steps":[{"id":"11.1","name":"Tauri 2 shell on both platforms; signed and notarised","track":"UI","dep":"0.3","done":"Installers produced by CI"},{"id":"11.2","name":"WebGPU capability probe on both target OS versions","track":"PLAT","dep":"11.1","done":"Result recorded; decides the WASM fallback"},{"id":"11.3","name":"DPI: fractional scaling, scale change, monitor move","track":"UI","dep":"11.1","done":"Correct at 100, 125, 150 and 200 per cent"},{"id":"11.4","name":"Colour management in the browser layer, matching the engine","track":"UI","dep":"3.3","done":"Colour ramp matches the engine render"},{"id":"11.5","name":"Dockable workspace","track":"UI","dep":"9.7","done":"Layout follows the card sort"},{"id":"11.6","name":"Three.js viewport: 2D on an orthographic camera plus 3D","track":"UI","dep":"11.4","done":"A 2D object renders between two 3D objects"},{"id":"11.7","name":"Overlay layer: handles, guides, selection, marquee","track":"UI","dep":"11.6","done":"Structured so the engine can take over the raster"},{"id":"11.8","name":"Object manager treegrid","track":"UI","dep":"11.5","done":"Hierarchy, visibility, lock, alpha, transforms"},{"id":"11.9","name":"Type-aware inspector","track":"UI","dep":"11.8","done":"Multi-select Mixed state, one undo transaction"},{"id":"11.10","name":"Timeline: virtualised rows, canvas layers, dirty-rect repaint","track":"UI","dep":"11.5","done":"Node count flat from 100 to 100,000 keys"},{"id":"11.11","name":"Speed graph and curve editing","track":"UI","dep":"11.10","done":"Scrub causes no static-layer repaint"},{"id":"11.12","name":"Material manager","track":"UI","dep":"11.9","done":"Shared instances, relink, usage lookup"},{"id":"11.13","name":"Font manager panel","track":"UI","dep":"2.8","done":"Ported, not redesigned"},{"id":"11.14","name":"Design system panel; tokens as editor defaults","track":"UI","dep":"10.4","done":"Palette and type scale are the path of least resistance"},{"id":"11.15","name":"Motion preset browser; save selection as preset","track":"UI","dep":"1.6","done":"Library grows from real designer work"},{"id":"11.16","name":"Live conformance indicator","track":"UI","dep":"7.5","done":"Drift visible as it happens, not at publish"},{"id":"11.17","name":"Import UI with tier and substitution report","track":"UI","dep":"7.2","done":"Nothing substituted without being named"}]},{"id":"12","title":"Playout UI","note":"Second because the control surface is smaller and the service beneath it is already proven.","milestone":null,"steps":[{"id":"12.1","name":"Tauri 2 shell","track":"UI","dep":"0.3","done":"Signed on both platforms"},{"id":"12.2","name":"Scene manager with Take IDs","track":"UI","dep":"6.1","done":"Search, import, fetch, direct recall"},{"id":"12.3","name":"Take list and rundown","track":"UI","dep":"6.4","done":"Persisted cursor, continue behaviour"},{"id":"12.4","name":"Transport controls: cue, take, continue, out, clear","track":"UI","dep":"6.2","done":"Committed frame number shown"},{"id":"12.5","name":"Confidence monitors, fill and key","track":"UI","dep":"5.4","done":"Native-resolution tier available"},{"id":"12.6","name":"Status surface: tier, reference lock, free-run, clock source","track":"UI","dep":"6.5","done":"Free-run is unmissable"},{"id":"12.7","name":"Output configuration with refusal reasons shown","track":"UI","dep":"6.5","done":"A refused live adapter names the failing condition"}]},{"id":"13","title":"Parity \u2014 the engine renders the viewport","note":"The gap-register item. Only possible once both the engine and the overlay architecture exist.","milestone":"What a designer approves is what goes to air.","steps":[{"id":"13.1","name":"Measure viewport interaction latency on the existing stream","track":"BE","dep":"5.4","done":"Handle-drag round trip recorded on target hardware"},{"id":"13.2","name":"Binary alpha frames","track":"BE","dep":"13.1","done":"Alpha correct at the viewport edge"},{"id":"13.3","name":"Picking and bounds metadata from the engine","track":"BE","dep":"13.2","done":"Hit-testing without a browser renderer"},{"id":"13.4","name":"Adaptive resolution","track":"BE","dep":"13.2","done":"Degrades resolution before latency"},{"id":"13.5","name":"Browser reduced to overlays only","track":"UI","dep":"11.7","done":"Three.js draws no scene content"},{"id":"13.6","name":"Pixel gate: viewport equals Program","track":"BE","dep":"4.4","done":"Byte-identical across the reference set"}]},{"id":"14","title":"Remote engine","note":"Deployment change, not an architecture change \u2014 if the earlier phases held the line.","milestone":null,"steps":[{"id":"14.1","name":"QUIC with rustls; mTLS","track":"BE","dep":"5.1","done":"Certificates and rotation documented"},{"id":"14.2","name":"Control plane over the remote transport","track":"BE","dep":"14.1","done":"Same messages, same semantics"},{"id":"14.3","name":"Resumable asset transfer","track":"BE","dep":"5.3","done":"Survives a disconnect mid-package"},{"id":"14.4","name":"Media codec negotiation by locality and consumer role","track":"BE","dep":"5.5","done":"Interactive and observational streams differ"},{"id":"14.5","name":"NVENC encode; VideoToolbox decode on macOS clients","track":"BE","dep":"14.4","done":"Bandwidth within a LAN budget"},{"id":"14.6","name":"Two engine instances by role: design and program","track":"BE","dep":"3.2","done":"Design engine structurally cannot go live"},{"id":"14.7","name":"Build hash pinned at publish; skew warning in Playout","track":"BE","dep":"7.6","done":"Version skew is visible, not silent"},{"id":"14.8","name":"Conformance suite passes at L1 exactly as at L0","track":"BE","dep":"5.6","done":"Same suite, remote transport"}]},{"id":"15","title":"Output server and genlock","note":"External gate. Cannot be closed by engineering. Started at day one via P.1.","milestone":"The only phase engineering cannot finish alone.","steps":[{"id":"15.1","name":"Hardware, SDKs and lab access in hand","track":"EXT","dep":"P.1","done":"Devices on a bench, SDKs licensed"},{"id":"15.2","name":"DeckLink integration via thin FFI","track":"EXT","dep":"15.1","done":"C++ confined to the boundary"},{"id":"15.3","name":"AJA integration","track":"EXT","dep":"15.1","done":"Same wrapper shape"},{"id":"15.4","name":"Reference input and lock detection","track":"EXT","dep":"15.2","done":"Lock state in capability and status"},{"id":"15.5","name":"ProgramClock slaved to the card timebase; free-run reported","track":"BE","dep":"15.4","done":"Cadence never a function of transport"},{"id":"15.6","name":"Scheduled playback in the card timebase","track":"EXT","dep":"15.5","done":"Frames presented on the reference cadence"},{"id":"15.7","name":"NDI adapter certification against real receivers","track":"EXT","dep":"15.1","done":"Documented certification record"},{"id":"15.8","name":"SRT and OMT adapters","track":"BE","dep":"3.10","done":"IP output not tied to one vendor"},{"id":"15.9","name":"8-hour nightly protocol soak","track":"EXT","dep":"15.6","done":"Runs clean for a sustained period"},{"id":"15.10","name":"24-hour hardware release gate","track":"EXT","dep":"15.9","done":"Passes on release-candidate hardware"},{"id":"15.11","name":"Device-loss and driver-reset recovery tests","track":"EXT","dep":"3.12","done":"Restores without an unrecovered output interruption"}]},{"id":"16","title":"Content depth","note":"Feature work that is not release-blocking. Sequenced after parity and reliability.","milestone":null,"steps":[{"id":"16.1","name":"Video decoder tier: FFmpeg with NVDEC","track":"BE","dep":"P.2","done":"Licence position settled first"},{"id":"16.2","name":"VideoToolbox decode on macOS","track":"BE","dep":"16.1","done":"One trait, two backends"},{"id":"16.3","name":"Transitions beyond cut, dual-target","track":"BE","dep":"3.8","done":"Dropped-frame behaviour certified"},{"id":"16.4","name":"Script sandbox on rquickjs","track":"BE","dep":"2.9","done":"CPU and memory bounded, disposable"},{"id":"16.5","name":"Lottie import path","track":"BE","dep":"7.2","done":"Reduces the Adobe dependency"},{"id":"16.6","name":"3D: shadows","track":"BE","dep":"3.7","done":"Separate branch, own pixel gate"},{"id":"16.7","name":"3D: transparent depth ordering","track":"BE","dep":"3.7","done":"Separate branch, own pixel gate"},{"id":"16.8","name":"3D: camera parity in Program","track":"BE","dep":"13.6","done":"Perspective and orthographic match"},{"id":"16.9","name":"Rasteriser benchmark; Vello evaluated against the gate","track":"BE","dep":"4.4","done":"Measured on broadcast content, not demos"}]},{"id":"17","title":"Gen-AI template factory","note":"Depends only on Phases 1\u20138 plus the design system. Independent of the certification gates, so it moves at its own pace.","milestone":null,"steps":[{"id":"17.1","name":"Reproduction test on an already-shipped esports pack","track":"AI","dep":"8.13","done":"Blind comparison; designer states faster or slower"},{"id":"17.2","name":"Design system as constraints inside the loop","track":"AI","dep":"10.4","done":"Agent works in the brand-and-renderer overlap"},{"id":"17.3","name":"Motion preset library authored by a designer","track":"AI","dep":"11.15","done":"10\u201315 presets covering the common builds"},{"id":"17.4","name":"Scene assembly agent over MCP","track":"AI","dep":"8.9","done":"Batch edits arrive as one undo entry"},{"id":"17.5","name":"Correction capture from the very first draft","track":"AI","dep":"7.6","done":"Every generated-versus-shipped diff stored"},{"id":"17.6","name":"Visual critique loop","track":"AI","dep":"8.9","done":"With-loop beats without-loop in blind ranking"},{"id":"17.7","name":"Batch generation from a template list","track":"AI","dep":"17.4","done":"A full tournament pack generated as drafts"},{"id":"17.8","name":"Zero-edit publish rate reported per class","track":"AI","dep":"17.7","done":"Reportable metric, per tournament"},{"id":"17.9","name":"Per-class graduation with a named sign-off owner","track":"AI","dep":"17.8","done":"One class auto-publishing, with an owner"}]}];
+const ORDER = ["pending","active","done","blocked"];
+const LABEL = {pending:"Not started", active:"In progress", done:"Done", blocked:"Blocked"};
+const TRACKS = {CON:"Contracts",PLAT:"Platform",BE:"Backend",UI:"Interface",RES:"Research",EXT:"External",AI:"Gen-AI"};
+const KEY = "grapix-build-progress-v1";
+
+// INITIAL_STATE is the committed snapshot of verified completions, mirrored
+// from progress.json. It is the source of truth on first load; a saved
+// localStorage value or an imported progress.json overrides it. Every entry
+// here was marked done only after the work was verified by execution against
+// the build plan's "Done when" criterion — see the governance rule in
+// AGENTS.md and LLM-GOVERNANCE.md.
+const INITIAL_STATE = {
+  // Phase 0 — repository foundations (verified: cargo build, cargo test,
+  // codegen-staleness gate, conformance harness, all in `npm run check`).
+  "0.1": "done",   // one Cargo workspace, one lockfile — cargo build builds all crates
+  "0.2": "done",   // toolchains pinned: rust-toolchain.toml, engines.node, wgpu 26
+  "0.7": "done",   // RationalRate num/den, no f64 constructor; test forbids float rates
+  "0.9": "done",   // contracts package; Rust source of truth, TS generated, drift gate
+  "0.10": "done",  // conformance harness + mock-peer pattern, runs in gate
+  // Phase 1 — domain contracts (verified by conformance + unit tests).
+  "1.5": "done",   // design system token schema (MotionTokens et al.)
+  "1.6": "done",   // motion token + preset schema; ms_to_frames resolves at any rate
+  "1.9": "done",   // protocol v3 intent-based take, committed frame; conformance asserts no wall-clock
+  "1.10": "done",  // capability: locality, device tier, clock source, reference state
+  // Phase 3 — render engine core (partial: the parts that are verified).
+  "3.1": "done",   // wgpu init, device negotiation, runs headless (Windows, T0)
+  "3.2": "done",   // device tier negotiation T0–T3, reported in capability
+  "3.8": "done",   // ProgramClock: rational rate, engine-owned, no client-set time
+  // Phase 5 — transport, local.
+  "5.1": "done",   // control plane over a local transport (loopback TCP, not yet named pipe)
+  "5.2": "done",   // session/auth/epoch; Program survives a control disconnect
+  "5.5": "done",   // locality declared in the capability exchange
+  "5.6": "done"    // conformance suite passes over the real transport AND the real engine
+};
+
+let state = Object.assign({}, INITIAL_STATE);
+let filter = null;
+let collapsed = {};
+
+function load(){
+  try { const r = localStorage.getItem(KEY); if(r) state = JSON.parse(r); }
+  catch(e){ /* file:// or private mode - stay in memory */ }
+}
+function save(){
+  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch(e){}
+}
+function st(id){ return state[id] || "pending"; }
+
+function depDone(dep){
+  if(!dep || dep === "\u2014") return true;
+  return st(dep) === "done";
+}
+
+function render(){
+  const phasesEl = document.getElementById("phases");
+  phasesEl.innerHTML = "";
+  let total = 0, done = 0;
+
+  PLAN.forEach(ph => {
+    const sec = document.createElement("section");
+    const visible = ph.steps.filter(s => !filter || s.track === filter);
+    if(visible.length === 0) sec.classList.add("hid");
+
+    const d = ph.steps.filter(s => st(s.id) === "done").length;
+    const a = ph.steps.filter(s => st(s.id) === "active").length;
+    const b = ph.steps.filter(s => st(s.id) === "blocked").length;
+    total += ph.steps.length; done += d;
+    const pctP = Math.round(d / ph.steps.length * 100);
+
+    const head = document.createElement("div");
+    head.className = "ph"; head.tabIndex = 0; head.setAttribute("role","button");
+    head.setAttribute("aria-expanded", String(!collapsed[ph.id]));
+    head.innerHTML = `<span class="num">${ph.id}</span><h2>${ph.title}</h2>
+      <span class="cnt">${d}/${ph.steps.length}${a?" · "+a+" active":""}${b?" · "+b+" blocked":""}</span>
+      <span class="mini"><i style="width:${pctP}%"></i></span>`;
+    head.onclick = () => { collapsed[ph.id] = !collapsed[ph.id]; render(); };
+    head.onkeydown = e => { if(e.key==="Enter"||e.key===" "){ e.preventDefault(); head.click(); } };
+    sec.appendChild(head);
+
+    if(!collapsed[ph.id]){
+      const note = document.createElement("p");
+      note.className = "note"; note.textContent = ph.note;
+      sec.appendChild(note);
+
+      const tbl = document.createElement("table");
+      visible.forEach(s => {
+        const cur = st(s.id);
+        const ready = cur === "pending" && depDone(s.dep);
+        const tr = document.createElement("tr");
+        if(ready) tr.className = "ready";
+        tr.innerHTML = `<td class="id">${s.id}</td>
+          <td class="nm">${s.name}<span class="dn">${s.done}</span></td>
+          <td class="tr">${TRACKS[s.track]||s.track}</td>
+          <td class="dep">${s.dep}</td>
+          <td class="st"><button class="chip ${cur==="pending"?"":cur}" data-id="${s.id}">${LABEL[cur]}</button></td>`;
+        tbl.appendChild(tr);
+      });
+      sec.appendChild(tbl);
+
+      if(ph.milestone){
+        const m = document.createElement("div");
+        m.className = "ms"; m.textContent = "Milestone. " + ph.milestone;
+        sec.appendChild(m);
+      }
+    }
+    phasesEl.appendChild(sec);
+  });
+
+  phasesEl.querySelectorAll(".chip").forEach(btn => {
+    btn.onclick = e => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      state[id] = ORDER[(ORDER.indexOf(st(id)) + 1) % ORDER.length];
+      save(); render();
+    };
+  });
+
+  document.getElementById("pct").textContent = Math.round(done/total*100) + "%";
+  document.getElementById("counts").textContent = `${done} of ${total} steps complete`;
+
+  const meter = document.getElementById("meter");
+  meter.innerHTML = "";
+  PLAN.forEach(ph => {
+    const n = ph.steps.length;
+    const d = ph.steps.filter(s => st(s.id)==="done").length / n * 100;
+    const a = ph.steps.filter(s => st(s.id)==="active").length / n * 100;
+    const b = ph.steps.filter(s => st(s.id)==="blocked").length / n * 100;
+    const c = document.createElement("button");
+    c.className = "cell"; c.title = `Phase ${ph.id} — ${ph.title}`;
+    c.innerHTML = `<span class="fill" style="height:${d}%"></span>
+                   <span class="act" style="bottom:${d}%;height:${a}%"></span>
+                   <span class="blk" style="height:${b}%"></span><b>${ph.id}</b>`;
+    c.onclick = () => {
+      collapsed[ph.id] = false; render();
+      document.querySelectorAll("section")[PLAN.indexOf(ph)].scrollIntoView({behavior:"smooth",block:"start"});
+    };
+    meter.appendChild(c);
+  });
+
+  const readyCount = PLAN.flatMap(p=>p.steps).filter(s => st(s.id)==="pending" && depDone(s.dep)).length;
+  document.getElementById("foot").textContent =
+    `${readyCount} steps are ready to start now — their dependencies are met. Progress is stored in this browser; use Save progress file to commit it alongside the repo.`;
+}
+
+const filtersEl = document.getElementById("filters");
+[["All",null]].concat(Object.entries(TRACKS).map(([k,v]) => [v,k])).forEach(([label,key]) => {
+  const b = document.createElement("button");
+  b.textContent = label;
+  b.setAttribute("aria-pressed", String(filter === key));
+  b.onclick = () => { filter = key; document.querySelectorAll("#filters button")
+    .forEach(x => x.setAttribute("aria-pressed", String(x === b))); render(); };
+  filtersEl.appendChild(b);
+});
+
+document.getElementById("exp").onclick = () => {
+  const blob = new Blob([JSON.stringify(state,null,2)], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = "progress.json"; a.click();
+  URL.revokeObjectURL(a.href);
+};
+document.getElementById("imp").onclick = () => document.getElementById("file").click();
+document.getElementById("file").onchange = e => {
+  const f = e.target.files[0]; if(!f) return;
+  const r = new FileReader();
+  r.onload = () => { try { state = JSON.parse(r.result); save(); render(); }
+                     catch(err){ alert("That file is not valid progress JSON."); } };
+  r.readAsText(f);
+};
+
+load(); render();
+</script>
+</body>
+</html>

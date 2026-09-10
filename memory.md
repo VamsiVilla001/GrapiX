@@ -13,32 +13,38 @@ not a euphemism for nearly done.
 
 1. Read this file and `docs/invariants.md` before editing. The invariants are
    binding; this file is context.
-2. Inspect `git status` before editing. Preserve uncommitted work.
-3. Log every change here: what, why, and what was actually run to verify it.
+2. **Read `LLM-GOVERNANCE.md` before any task. It is binding on every LLM and
+   platform.** The verify-then-record loop is mandatory: no task is marked
+   done without execution evidence against the step's "Done when" criterion in
+   `GrapiX-Build-Plan.md`, and only then is it recorded in `progress.html` /
+   `progress.json` (kept in sync, committed with the work). `GrapiX-Build-Plan.md`
+   is the only build plan; `progress.html` is the only tracker.
+3. Inspect `git status` before editing. Preserve uncommitted work.
+4. Log every change here: what, why, and what was actually run to verify it.
    An entry with no execution evidence must say so.
-4. Never describe anything as working without having run it. "Compiles" is not
+5. Never describe anything as working without having run it. "Compiles" is not
    "works", and `cargo check` is not a test.
-5. Run `npm run check` before committing. It is cheap and it is the whole gate
+6. Run `npm run check` before committing. It is cheap and it is the whole gate
    at this stage.
-6. Rust is the source of truth for contracts. Never hand-edit
+7. Rust is the source of truth for contracts. Never hand-edit
    `Shared/generated-ts` — regenerate and commit the result.
-7. Do not add a `Now` variant to `TakeAt`, or any other way for a client to
+8. Do not add a `Now` variant to `TakeAt`, or any other way for a client to
    send a time. That is invariant 8 and it is the load-bearing decision of the
    whole architecture.
-8. `resolve_intent` has exactly one implementation. A mock, a test double or a
+9. `resolve_intent` has exactly one implementation. A mock, a test double or a
    second engine must call it, never reimplement it (invariant 46).
-9. The control plane has an L0 transport; the asset and media planes do not.
+10. The control plane has an L0 transport; the asset and media planes do not.
    Do not describe those two as transported.
-10. The L0 transport is loopback TCP, not the named pipe ADR-001 specifies.
+11. The L0 transport is loopback TCP, not the named pipe ADR-001 specifies.
    Say so when describing L0 security posture.
-11. Authentication lives in the transport. Do not add a credential check to
+12. Authentication lives in the transport. Do not add a credential check to
    the engine or to a request handler.
-12. The credential is a shared bearer token over an unencrypted socket. Never
+13. The credential is a shared bearer token over an unencrypted socket. Never
    describe it as mTLS, and never describe L1 as ready.
-13. `docs/adr/0002-platform-and-mcp-schema.md` is the accepted handoff and its
+14. `docs/adr/0002-platform-and-mcp-schema.md` is the accepted handoff and its
    **Part E is the definition of done**. Verify against it; do not claim an
    item without execution evidence.
-14. The next implementation step is the **token schema, including motion tokens
+15. The next implementation step is the **token schema, including motion tokens
    and the preset format, in shared contracts** (Part E item 18, Part G.10).
    Everything else in Part G consumes it. Settle `supported` vs `allowed`, the
    `Out` verb, and the `Token`/`Severity` name collisions first.
