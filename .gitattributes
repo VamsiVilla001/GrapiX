@@ -1,0 +1,18 @@
+# Normalise to LF in the repository. ADR Part B.1 puts designers on macOS and
+# the output server on Windows, so this is settled once here rather than in
+# every cross-platform diff.
+* text=auto eol=lf
+
+# Binary
+*.png binary
+*.jpg binary
+*.ttf binary
+*.otf binary
+*.gltf binary
+*.glb binary
+*.gpxpkg binary
+
+# Generated. Collapsed in diffs and review, but still versioned.
+Shared/generated-ts/src/** linguist-generated=true
+Cargo.lock -diff
+package-lock.json -diff

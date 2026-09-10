@@ -1,0 +1,27 @@
+{
+  "name": "grapix",
+  "version": "0.1.0",
+  "private": true,
+  "license": "LicenseRef-Proprietary",
+  "workspaces": [
+    "Shared/generated-ts",
+    "services/schema-mcp",
+    "Editor",
+    "Playout"
+  ],
+  "scripts": {
+    "codegen": "cargo run -p gx-contract-codegen",
+    "codegen:check": "node tools/codegen-check.mjs",
+    "check:boundaries": "node tools/check-boundaries.mjs",
+    "typecheck": "tsc --build --verbose",
+    "test:rust": "cargo test --workspace",
+    "conformance": "cargo run -p gx-conformance",
+    "check": "npm run check:boundaries && npm run codegen:check && npm run typecheck && npm run test:rust"
+  },
+  "devDependencies": {
+    "typescript": "~5.6.3"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

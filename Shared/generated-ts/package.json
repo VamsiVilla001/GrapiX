@@ -1,0 +1,11 @@
+{
+  "name": "@grapix/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Generated contract types. Do not edit.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --build"
+  }
+}

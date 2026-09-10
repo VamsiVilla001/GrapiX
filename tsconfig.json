@@ -1,0 +1,9 @@
+{
+  "files": [],
+  "references": [
+    { "path": "Shared/generated-ts" },
+    { "path": "services/schema-mcp" },
+    { "path": "Editor" },
+    { "path": "Playout" }
+  ]
+}

@@ -1,0 +1,24 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+
+# Tauri
+**/src-tauri/target/
+
+# Local
+.env
+.env.local
+.DS_Store
+*.log
+
+# Agent worktrees
+.claude/worktrees/
+
+# ts-rs per-crate export dirs; the codegen binary is the only generator
+bindings/

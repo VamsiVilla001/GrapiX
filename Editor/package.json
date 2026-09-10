@@ -1,0 +1,14 @@
+{
+  "name": "@grapix/editor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Authoring application. Tauri 2 shell.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --build"
+  },
+  "dependencies": {
+    "@grapix/contracts": "*"
+  }
+}

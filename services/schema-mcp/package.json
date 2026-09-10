@@ -1,0 +1,14 @@
+{
+  "name": "@grapix/schema-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone read-only MCP server exposing the GrapiX contracts.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --build"
+  },
+  "dependencies": {
+    "@grapix/contracts": "*"
+  }
+}
