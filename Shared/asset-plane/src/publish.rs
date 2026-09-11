@@ -239,7 +239,8 @@ mod tests {
         assert!(matches!(
             reply,
             PublishReply::Refused(PublishRefusal::SceneRefused {
-                refusal: gx_contracts::Refusal::SceneUnknownField { path }
+                cause: gx_contracts::Refusal::SceneUnknownField { path },
+                ..
             }) if path == "objects[0].unknownProperty"
         ));
         assert!(peer.lock().expect("peer lock").published.is_empty());
@@ -263,7 +264,8 @@ mod tests {
         assert!(matches!(
             reply,
             PublishReply::Refused(PublishRefusal::SceneRefused {
-                refusal: gx_contracts::Refusal::SceneUnknownField { path }
+                cause: gx_contracts::Refusal::SceneUnknownField { path },
+                ..
             }) if path == "objectList"
         ));
         assert!(peer.lock().expect("peer lock").published.is_empty());
@@ -282,7 +284,8 @@ mod tests {
         assert!(matches!(
             reply,
             PublishReply::Refused(PublishRefusal::SceneRefused {
-                refusal: gx_contracts::Refusal::SceneParseFailed { detail }
+                cause: gx_contracts::Refusal::SceneParseFailed { detail },
+                ..
             }) if detail.contains("notADrawnThing")
         ));
         assert!(peer.lock().expect("peer lock").published.is_empty());
