@@ -8,7 +8,7 @@
 // the time someone debugs it.
 
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,10 +19,18 @@ const GENERATED = join(ROOT, "Shared", "generated-ts", "src");
 const backup = mkdtempSync(join(tmpdir(), "gx-codegen-"));
 let restored = false;
 
-function snapshot(dir) {
+function snapshot(dir, prefix = "") {
   const out = new Map();
   for (const name of readdirSync(dir).sort()) {
-    if (name.endsWith(".ts")) out.set(name, readFileSync(join(dir, name), "utf8"));
+    const full = join(dir, name);
+    const rel = prefix ? `${prefix}/${name}` : name;
+    if (statSync(full).isDirectory()) {
+      // Nested output (e.g. ts-rs's serde_json/JsonValue.ts) is generated
+      // too, and drifts the same way a flat file does.
+      for (const [k, v] of snapshot(full, rel)) out.set(k, v);
+    } else if (name.endsWith(".ts")) {
+      out.set(rel, readFileSync(full, "utf8"));
+    }
   }
   return out;
 }

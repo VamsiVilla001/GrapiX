@@ -48,6 +48,81 @@ not a euphemism for nearly done.
    and the preset format, in shared contracts** (Part E item 18, Part G.10).
    Everything else in Part G consumes it. Settle `supported` vs `allowed`, the
    `Out` verb, and the `Token`/`Severity` name collisions first.
+16. The structured refusal envelope is `StructuredRefusal` in `gx-contracts`
+   (0.6). It uses `allowed`, never `supported` — that inconsistency is
+   settled. The severity type is `RefusalSeverity`; `Severity` stays with
+   clock health. Optional fields are `Option<T>` with `skip_serializing_if`
+   **and** `#[ts(optional)]` — ts-rs cannot see serde's skip attribute, and
+   one without the other makes the TS shape lie about the wire.
+
+---
+
+## 2026-09-11 — structured refusal envelope reaches TypeScript (0.5, 0.6)
+
+Two phase-0 foundations that were left uncommitted and unlogged at the end of
+the previous session, finished and verified.
+
+**Structured refusal (0.6).** `StructuredRefusal` and `RefusalSeverity` in
+`Shared/contracts/src/lib.rs`: `code` (the `Refusal`), `field`, `given`,
+`allowed`, `severity` — the exact shape ADR-0002 G.4/E.19 requires, which
+settles `supported` vs `allowed` in favour of `allowed` and the `Severity`
+name collision in favour of `RefusalSeverity`. This session's work was the
+TypeScript half of the done-when: the types were missing from the codegen
+export list, so "serialises identically in Rust and TS" had no TS side. Both
+are now exported; `Shared/generated-ts` regenerated (54 files).
+
+**The wire-shape trap, fixed properly.** ts-rs ignores serde's
+`skip_serializing_if` (warns and carries on), so the first export produced
+`field: string | null` — a required key — while serde omits the key. The Rust
+field was `String`/sentinel-empty, so the two sides disagreed about the wire.
+The fields are now honest `Option<String>` / `Option<Vec<Value>>` with both
+`skip_serializing_if = "Option::is_none"` and `#[ts(optional)]`, giving
+`field?: string` / `allowed?: Array<JsonValue>`: absent is absent on both
+sides. Recorded as rule 16, because the next `skip_serializing_if` on an
+exported type will hit the same trap.
+
+**One guard widened, found by adding a type.** Exporting pulled ts-rs's
+`serde_json::Value` shadow into a new `serde_json/` subdirectory — which the
+staleness gate never read: its snapshot was flat-only, so a drifted
+`JsonValue.ts` would have passed. `tools/codegen-check.mjs` now recurses; the
+count went 51 → 54 files. The boundary guard already recursed and requires
+the generated header, which `JsonValue.ts` carries, so no change needed there.
+
+**Telemetry (0.5).** `Shared/telemetry` (`gx-telemetry`): one `init`
+installing a tracing subscriber (idempotent, `RUST_LOG`-honouring), typed
+`frame_span(frame, committed)` and `take_span(take_id)` constructors so the
+span vocabulary is defined once and a rename breaks loudly, and the
+done-when test proving a span reaches a collector — in-process, via a
+captured-writer subscriber. OTLP export is deliberately absent and the crate
+doc says so: wiring an exporter with nothing to observe yet would be
+scaffolding dressed as a feature; it lands with the observability series
+before the first soak run.
+
+### Verified by execution
+
+| What | Result |
+|---|---|
+| `cargo test -p gx-contracts -p gx-telemetry` | **18 passed, 0 failed** (17 contracts incl. the pinned refusal JSON round-trip; 1 span-reaches-collector) |
+| `cargo run -p gx-contract-codegen` | 50 root types, 54 files incl. `serde_json/JsonValue.ts` |
+| `npm run check` | **exit 0** — boundaries, codegen-staleness (54 files), typecheck, TS tests (12), Rust tests (workspace incl. 24 worker), conformance **99 passed, 0 failed, 9 skipped** (same nine named skips as the previous entry) |
+
+### Status after this entry
+
+| Unit | Status |
+|---|---|
+| `Shared/contracts` `StructuredRefusal` | **Implemented** — envelope + severity, tested, TS generated, in codegen list |
+| `Shared/telemetry` | **Partial** — skeleton: init, typed spans, collector test; no OTLP exporter |
+| `tools/codegen-check` | **Implemented** — now covers nested generated output |
+
+### Not done, and not claimed
+
+- The refusal envelope has **no consumers yet**: engine and MCP refusals still
+  return the bare `Refusal`, not the envelope. Wiring it through the engine,
+  the validator and preflight is later-phase work (E.12/E.19 territory).
+- OTLP export, as above — the skeleton proves the pipeline, not a collector
+  over a network.
+- The `Out`-verb question from ADR-0002 is still open; the token schema work
+  (rule 15) is untouched by this entry.
 
 ---
 

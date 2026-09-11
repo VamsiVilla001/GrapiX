@@ -16,7 +16,7 @@ use gx_contracts::design_system::{
 };
 use gx_contracts::{
     ClockSource, ContentHash, DeviceTier, Epoch, Locality, MediaCodec, RationalRate,
-    ReferenceState, Refusal, Revision, TakeId,
+    ReferenceState, Refusal, RefusalSeverity, Revision, StructuredRefusal, TakeId,
 };
 use gx_control_plane::message::{ClientRequest, EngineEvent, EngineReply, OutputConfig};
 use gx_control_plane::sequence::{MessageId, MessageKind, Sequence};
@@ -59,6 +59,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ClockSource,
         ReferenceState,
         Refusal,
+        RefusalSeverity,
+        StructuredRefusal,
         Epoch,
         // gx-control-plane: intent
         TakeAt,

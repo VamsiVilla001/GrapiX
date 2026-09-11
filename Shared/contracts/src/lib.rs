@@ -38,6 +38,57 @@ impl std::fmt::Display for ContentHash {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
 pub struct Revision(pub u64);
 
+impl Revision {
+    /// The next revision after this one. Publishing is additive (invariant 30):
+    /// a write produces a new revision, never edits an old one.
+    pub fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
+
+    /// Optimistic-concurrency check (0.8): a write declares the revision it
+    /// read, and is applied only if that is still current.
+    ///
+    /// On a match the write proceeds and yields the *next* revision, which the
+    /// caller records as the new current. On a mismatch the conflict carries
+    /// the revision that is actually current, so the caller re-reads and
+    /// retries rather than overwriting someone else's work blind.
+    pub fn check_write(&self, if_revision: Revision) -> Result<Revision, RevisionConflict> {
+        if if_revision == *self {
+            Ok(self.next())
+        } else {
+            Err(RevisionConflict {
+                expected: if_revision,
+                current: *self,
+            })
+        }
+    }
+}
+
+/// A write attempted against a stale revision (0.8).
+///
+/// Carries the current revision, never just "conflict": the whole point of
+/// optimistic concurrency is that the loser learns the state it must re-read,
+/// so a retry can succeed instead of failing the same way again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RevisionConflict {
+    /// The revision the writer believed was current.
+    pub expected: Revision,
+    /// The revision that is actually current now.
+    pub current: Revision,
+}
+
+impl std::fmt::Display for RevisionConflict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "revision conflict: wrote against {}, current is {}",
+            self.expected.0, self.current.0
+        )
+    }
+}
+impl std::error::Error for RevisionConflict {}
+
 /// Engine incarnation counter. Bumped on every engine start.
 ///
 /// Reconnect reconciles by revision *and* epoch (ADR B.4): a matching revision
@@ -262,6 +313,97 @@ impl std::fmt::Display for Refusal {
 
 impl std::error::Error for Refusal {}
 
+/// How urgently a structured refusal must be acted on (0.6). Not everything is
+/// a hard rule, so the envelope carries severity alongside the code.
+///
+/// Lives in contracts rather than in the validator because the same triage
+/// applies to every refusal surface — engine, validator and design system —
+/// and three copies would drift (invariant 27).
+///
+/// Declared least-urgent first so the derived `Ord` reads as urgency:
+/// `Error > Warning > Info`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum RefusalSeverity {
+    /// Reported only. Informational, no action required.
+    Info,
+    /// Allowed, but recorded. Reviewed when the system versions.
+    Warning,
+    /// The operation is refused. Publish, take and configure all stop here.
+    Error,
+}
+
+/// The structured refusal envelope (0.6): the shape every refusal surface
+/// returns, so a caller — human or agent — can act on it without parsing prose.
+///
+/// `Refusal` names *what* was refused; this envelope adds *where*, *what was
+/// given*, *what is allowed* and *how urgent it is*. The `allowed` array is
+/// what turns a failure into a successful retry: a refusal that names the
+/// acceptable values is the difference between an agent that corrects itself
+/// and one that guesses again (Part D principle 3, Part G.4).
+///
+/// Serialises identically in Rust and TypeScript because it is generated from
+/// this one definition (invariant 22); the test below pins the exact JSON.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct StructuredRefusal {
+    /// The named refusal. The machine-parseable reason.
+    pub code: Refusal,
+    /// The JSON path to the offending value, e.g. `objects[2].text.size`.
+    /// Omitted on the wire when the refusal is not about one field.
+    ///
+    /// `#[ts(optional)]` keeps the generated TS in step with serde's
+    /// `skip_serializing_if`: the key is absent, not `null`, so the TS field
+    /// is `field?: string`, and the two attributes must change together.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub field: Option<String>,
+    /// The value that was given, as JSON, so the caller can show or log it
+    /// verbatim. `Null` when there is no single given value.
+    #[serde(default)]
+    pub given: serde_json::Value,
+    /// The values that would have been accepted. Omitted on the wire when
+    /// there is no enumerable set — the fix is described by the code, not a
+    /// list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub allowed: Option<Vec<serde_json::Value>>,
+    pub severity: RefusalSeverity,
+}
+
+impl StructuredRefusal {
+    /// An error-severity refusal with no field context: the common case for
+    /// engine refusals, which are about a request as a whole.
+    pub fn error(code: Refusal) -> Self {
+        Self {
+            code,
+            field: None,
+            given: serde_json::Value::Null,
+            allowed: None,
+            severity: RefusalSeverity::Error,
+        }
+    }
+
+    /// Attach the field path and the offending value.
+    pub fn at(mut self, field: impl Into<String>, given: serde_json::Value) -> Self {
+        self.field = Some(field.into());
+        self.given = given;
+        self
+    }
+
+    /// Attach the set of acceptable values.
+    pub fn allowing(mut self, allowed: Vec<serde_json::Value>) -> Self {
+        self.allowed = Some(allowed);
+        self
+    }
+
+    /// Downgrade or set the severity.
+    pub fn with_severity(mut self, severity: RefusalSeverity) -> Self {
+        self.severity = severity;
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,5 +435,85 @@ mod tests {
         for tier in [DeviceTier::T1, DeviceTier::T2, DeviceTier::T3] {
             assert!(!tier.live_capable(), "{tier:?} must never be live capable");
         }
+    }
+
+    #[test]
+    fn a_structured_refusal_serialises_to_the_handoff_shape() {
+        // 0.6: code, field, given, allowed, severity. The exact JSON is the
+        // contract an agent parses, so it is pinned here — a field renamed or
+        // dropped fails this test, and the generated TS is checked against it
+        // by the codegen-staleness gate.
+        let r = StructuredRefusal::error(Refusal::UnsupportedBlendMode {
+            mode: "overlay".into(),
+        })
+        .at("objects[3].material.blend", serde_json::json!("overlay"))
+        .allowing(vec![
+            serde_json::json!("normal"),
+            serde_json::json!("add"),
+            serde_json::json!("screen"),
+        ]);
+
+        let v = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["code"]["refusal"], "unsupportedBlendMode");
+        assert_eq!(v["code"]["mode"], "overlay");
+        assert_eq!(v["field"], "objects[3].material.blend");
+        assert_eq!(v["given"], "overlay");
+        assert_eq!(v["allowed"], serde_json::json!(["normal", "add", "screen"]));
+        assert_eq!(v["severity"], "error");
+
+        // Round-trips: the same bytes come back as the same value.
+        let back: StructuredRefusal = serde_json::from_value(v).unwrap();
+        assert_eq!(back, r);
+    }
+
+    #[test]
+    fn an_engine_refusal_defaults_to_error_with_no_field_noise() {
+        let r = StructuredRefusal::error(Refusal::TierTooLow {
+            actual: DeviceTier::T2,
+        });
+        let v = serde_json::to_value(&r).unwrap();
+        // Empty field and allowed are omitted, not serialised as noise.
+        assert!(v.get("field").is_none());
+        assert!(v.get("allowed").is_none());
+        assert_eq!(v["severity"], "error");
+    }
+
+    #[test]
+    fn severity_orders_so_error_is_the_most_urgent() {
+        assert!(RefusalSeverity::Error > RefusalSeverity::Warning);
+        assert!(RefusalSeverity::Warning > RefusalSeverity::Info);
+    }
+
+    #[test]
+    fn a_write_on_the_current_revision_advances_it() {
+        // 0.8: matching if_revision applies the write and yields the next
+        // revision, which becomes the new current.
+        let current = Revision(7);
+        let new = current.check_write(Revision(7)).unwrap();
+        assert_eq!(new, Revision(8));
+    }
+
+    #[test]
+    fn a_write_on_a_stale_revision_returns_the_current_one() {
+        // 0.8's done-when: a conflict returns the current revision, so the
+        // caller re-reads and retries rather than overwriting blind.
+        let current = Revision(7);
+        let conflict = current.check_write(Revision(3)).unwrap_err();
+        assert_eq!(conflict.expected, Revision(3));
+        assert_eq!(conflict.current, Revision(7));
+    }
+
+    #[test]
+    fn a_loser_can_recover_and_win_the_retry() {
+        // The reason the conflict carries current: the retry succeeds.
+        let mut current = Revision(1);
+        // Writer A and B both read revision 1. A wins.
+        current = current.check_write(Revision(1)).unwrap();
+        // B's write against the now-stale 1 conflicts, and B learns current=2.
+        let conflict = current.check_write(Revision(1)).unwrap_err();
+        let learned = conflict.current;
+        // B re-reads at 2 and retries: now it applies.
+        current = current.check_write(learned).unwrap();
+        assert_eq!(current, Revision(3));
     }
 }

@@ -128,10 +128,15 @@ const KEY = "grapix-build-progress-v1";
 // the build plan's "Done when" criterion — see the governance rule in
 // AGENTS.md and LLM-GOVERNANCE.md.
 const INITIAL_STATE = {
+  // Phase P — external tracks, owned by the user (procurement, licensing,
+  // research). Marked active: in flight externally, not executable by an LLM.
+  "P.1": "active", "P.2": "active", "P.3": "active",
   // Phase 0 — repository foundations (verified: cargo build, cargo test,
   // codegen-staleness gate, conformance harness, all in `npm run check`).
   "0.1": "done",   // one Cargo workspace, one lockfile — cargo build builds all crates
   "0.2": "done",   // toolchains pinned: rust-toolchain.toml, engines.node, wgpu 26
+  "0.5": "done",   // tracing skeleton: gx-telemetry init + typed spans; span reaches a collector (in-process; OTLP export deferred to the observability series)
+  "0.6": "done",   // StructuredRefusal: code, field, given, allowed, severity; serialises identically in Rust and generated TS
   "0.7": "done",   // RationalRate num/den, no f64 constructor; test forbids float rates
   "0.9": "done",   // contracts package; Rust source of truth, TS generated, drift gate
   "0.10": "done",  // conformance harness + mock-peer pattern, runs in gate
