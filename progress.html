@@ -151,6 +151,7 @@ const INITIAL_STATE = {
   "11.6": "active", // Three.js viewport foundation: colour policy (B.1), scene-coordinate ortho camera (B.2), one mesh per object; policy+camera tested headless (4 vitest), render loop needs the Tauri shell
   // Phase 1 — domain contracts (verified by conformance + unit tests).
   "1.1": "done",   // scene document schema (lean core: 5 object kinds); round-trips Rust↔TS, proven by a pinned-JSON Rust test + a generated-TS typecheck + a runtime round-trip
+  "1.2": "done",   // object catalogue: all 13 of 1.x's authorable kinds + the authored property surface + the ported hierarchy resolver; kind set held against 1.x's own contract file in Rust and in the generated TS (13 scene tests). Colour values are 1.4, fit/blend/cull enums 1.3, keyframe channels 1.6/11.10; 1.x masks and layer styles are outside the plan
   "1.5": "done",   // design system token schema (MotionTokens et al.)
   "1.6": "done",   // motion token + preset schema; ms_to_frames resolves at any rate
   "1.9": "done",   // protocol v3 intent-based take, committed frame; conformance asserts no wall-clock

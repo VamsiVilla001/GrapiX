@@ -44,10 +44,12 @@ not a euphemism for nearly done.
 14. `docs/adr/0002-platform-and-mcp-schema.md` is the accepted handoff and its
    **Part E is the definition of done**. Verify against it; do not claim an
    item without execution evidence.
-15. The next implementation step is the **token schema, including motion tokens
-   and the preset format, in shared contracts** (Part E item 18, Part G.10).
-   Everything else in Part G consumes it. Settle `supported` vs `allowed`, the
-   `Out` verb, and the `Token`/`Severity` name collisions first.
+15. The next implementation steps are **1.3 (material model; fit and blend
+   enums as the single source of truth)** and **1.4 (colour types)**. Both are
+   unblocked, both are named residuals of 1.2, and 1.4 also gates 3.3. The
+   catalogue already has the fields that consume them — an image's fit, a
+   slab's culling, `fill`/`stroke` as CSS strings, `material_slots` as an
+   opaque map — so those four are the seams to fill, not to redesign.
 16. The structured refusal envelope is `StructuredRefusal` in `gx-contracts`
    (0.6). It uses `allowed`, never `supported` — that inconsistency is
    settled. The severity type is `RefusalSeverity`; `Severity` stays with
@@ -68,6 +70,152 @@ not a euphemism for nearly done.
    spawned binary, not a contract break. Rebuild and re-run before treating
    a wire failure as a serialisation bug — the conformance engine is a real
    child process and cargo does not rebuild it between runs of the harness.
+20. **Hierarchy resolution walks from the roots, never down the array.** A
+   child may be declared before its parent; resolving in array order makes it
+   a root and silently drops the parent's transform. Duplicate ids keep the
+   *first* object, which is what 1.x did and what keeps resolution
+   deterministic while an invalid scene is being repaired.
+21. **A kind must never redeclare an `ObjectBase` field.** With
+   `#[serde(flatten)]` both are emitted, the reader keeps the last, and an
+   authored value is silently lost. `fill` was declared twice until 1.2. The
+   catalogue round-trip test uses a fully populated base so any recurrence
+   fails.
+22. **The generated TS maps `u64` to `bigint`; JSON gives `number`.** That
+   affects `Revision`, `Epoch`, `Sequence`, frame numbers, `durationFrames`
+   and `sizeBytes` — twelve types. The mapping is deliberate and consistent;
+   the conversion is owed by the TypeScript client codec, which does not exist
+   yet. Do not "fix" it with a cast in a test.
+23. **Never assign a wire literal with `as unknown as T` in a TypeScript
+   contract test.** A double cast type-checks anything; it hid two real drifts
+   until 1.2 replaced it with a direct assignment. Assign directly and let the
+   compiler do the work.
+24. 1.x's layer masks, Photoshop layer styles, blending options and
+   `importedDesign` provenance have **no owning step in the build plan**. They
+   are outside 2.0's planned scope, not a gap in the catalogue. Adding them is
+   a plan change and the user's call.
+
+---
+
+## 2026-09-11 — object catalogue, property surface and the hierarchy resolver (1.2)
+
+Resumed an interrupted session: `Shared/contracts/src/scene.rs` had 664
+uncommitted lines — the remaining eight object kinds and a first cut of the
+hierarchy resolver — with no tests, and the resolver half-finished. Continued
+it to 1.2's done-when rather than starting anything new.
+
+**The catalogue is measured, not asserted.** 1.2's done-when is "every
+authorable object is representable", so the kind set is held against 1.x's own
+machine-readable claim: `programObjectTypes` + `notRenderedByProgram` in
+`Shared/shared-types/contracts/program-object-types.json` on
+`Basic-v0.4-2026-09-06-project-container-material-library`. Thirteen kinds —
+text, rect, ellipse, image, line, shape, paint, mesh, light, camera, layer,
+marker, group. A Rust test compares the serialised tags to that list; a Node
+test extracts the tags from the *generated* `SceneObject.ts` and compares the
+same way, so a kind that reaches one language and not the other fails.
+
+**The property surface was ported from 1.x's interfaces, field by field**, not
+eyeballed: the base box (`width`/`height` — 1.x carries them on
+`BaseSceneObject`, and bindings target them, so they belong on the base and not
+on three kinds), text typography (layout, auto-fit, writing mode, vertical
+align, direction, case, decoration, overflow, align, line height, letter/word/
+paragraph spacing, indent — the surface 3.6's shaper consumes), rect corner
+radius, AE trim paths on shape, paint stroke dynamics, XPression slab controls
+with 1.x's defaults, light decay/cone/penumbra, camera `up`, glTF clip
+selection on mesh. What is *not* there is named with the step that owns it:
+colour values → 1.4, fit/blend/cull enums → 1.3, keyframe channels → 1.6 and
+11.10.
+
+**One scope finding for the user.** 1.x's layer masks, Photoshop layer styles,
+blending options and `importedDesign` provenance are not in the catalogue, and
+**no step in `GrapiX-Build-Plan.md` owns them** — there is no design-importer
+or mask-compositor step in the 164. They are recorded as outside 2.0's planned
+scope rather than deferred to an unnamed step. If they are wanted, the plan
+needs a step; they are not a contract gap to fill quietly.
+
+### Four faults the work surfaced, each fixed
+
+1. **Forward-declared children lost their parent.** The draft walked the
+   `objects` array from the top, so a child listed before its parent resolved
+   as a root and the parent's transform vanished — wrong placement, nothing
+   reported. The walk now starts from the roots (1.x's own order), with 1.x's
+   defensive second pass for malformed duplicate-id documents. A test resolves
+   the same two objects in both orders and compares.
+2. **Duplicate ids kept the last object; 1.x keeps the first**, deliberately,
+   so resolution stays deterministic while the editor repairs an invalid
+   scene. Now first-wins, compared by pointer identity as 1.x compares by
+   reference.
+3. **Mesh X/Y rotation was accumulated and then dropped.** `ResolvedObject`
+   had no `rotation_x`/`rotation_y`, so the one rule the mesh doc claims — 3D
+   rotation composes down the hierarchy on meshes and nowhere else — was
+   computed and discarded. Both are reported now, inherited on meshes and
+   authored on every other kind, which is 1.x's rule.
+4. **`fill` was declared on both `ObjectBase` and three kinds.** With
+   `#[serde(flatten)]` that emits a duplicate JSON key, the reader keeps the
+   last, and one of the two authored values is silently lost. The kinds no
+   longer redeclare base fields, and the catalogue round-trip runs against a
+   base with *every* field set away from its default, so any future shadowing
+   fails the test.
+
+**Two drifts the strengthened TypeScript proof caught.** 1.1's "compile-time
+half" was `wire as unknown as SceneDocument` — a double cast, which type-checks
+anything. It is now a direct assignment, and it immediately found (a)
+`AssetAvailability` serialising `"Ready"` on an otherwise camelCase surface —
+it was missing `rename_all`, now fixed and regenerated; (b) `Revision`,
+`durationFrames` and `sizeBytes` are `u64` → `bigint` in the generated TS,
+while `JSON.parse` yields `number`. The bigint mapping is consistent across
+twelve generated types (frames, epochs, sequences), so it stays; the test now
+states it honestly with `n` literals and records that the conversion belongs to
+the TS client codec. **No TypeScript client parses these yet — when one does,
+that gap is real work, not a typo.**
+
+**The resolution is a contract type.** `ResolvedObject`, `HierarchyEdge`,
+`HierarchyChildren` and `HierarchyResolution` serialise and generate to TS, so
+the Editor consumes the one Rust implementation of the composition rules
+instead of re-deriving inheritance in the browser. Containers are included in
+`effective` and flagged `is_container`, with `renderable()` and `containers()`
+as the two views 1.x returned separately.
+
+`Editor/src/viewport.ts` had to grow with the union: its switch now names all
+thirteen kinds, so a fourteenth stops the build rather than silently skipping
+the object, and each `return null` says which step draws that kind instead. A
+rect's authored corner radius is built as a shape rather than dropped —
+`rectGeometry` is pure, so it is tested headless.
+
+### Verified by execution
+
+| What | Result |
+|---|---|
+| `cargo test -p gx-contracts` | **39 passed, 0 failed** (13 scene tests) |
+| `cargo test --workspace` | **199 passed, 0 failed** |
+| `cargo clippy -p gx-contracts -p gx-contract-codegen --all-targets` | clean |
+| `npx tsc --build` | clean — the catalogue literal assigns to the generated types with no cast |
+| `node --test` (TS) | **15 passed** incl. the generated-union kind check |
+| `npx vitest run` (Editor) | **6 passed** incl. rect geometry with and without a radius |
+| `npm run check` | **exit 0** — codegen 111 files, conformance **99 passed, 0 failed, 9 skipped** |
+
+### Status after this entry
+
+| Unit | Status |
+|---|---|
+| `Shared/contracts/src/scene.rs` | **Implemented** for 1.1, 1.2 and 1.7 — 13 kinds, the authored property surface, the resolver, 13 tests |
+| `resolve_hierarchy` | **Implemented** — composition, order independence, four named diagnostics, serialisable result |
+| 1.2 | **done** |
+| `Editor/src/viewport.ts` | **Partial** — draws rect, ellipse and image placeholders; every other kind returns null by name |
+| 1.3, 1.4, 1.8, 1.11, 1.12 | **open** — materials and fit/blend enums, colour types, `.gpxpkg`, mocks' scene surface, conformance |
+
+### Not done, and not claimed
+
+- Nothing renders a catalogue object. The engine has no scene parse (3.4), no
+  rasteriser (3.5), no shaper (3.6) and no mesh path (3.7); the viewport draws
+  three of the thirteen kinds as flat quads.
+- No gradient, no fit mode, no blend mode, no cull mode — 1.3 and 1.4.
+- No keyframes. Every animated property in this catalogue carries its static
+  authored value only.
+- The resolver composes 2D affines. There is no 3D transform hierarchy: mesh
+  X/Y rotation is reported as a scalar sum, which is what 1.x did and is not
+  the same as composing a 3×3 rotation.
+- `.gpxpkg` (1.8) does not exist, the mocks do not serve scenes (1.11) and no
+  conformance check exercises a scene (1.12).
 
 ---
 

@@ -3,4 +3,4 @@
 /**
  * Whether an asset's bytes are available where they are needed.
  */
-export type AssetAvailability = "Ready" | "Missing" | "Importing" | "Unsupported" | "Error";
+export type AssetAvailability = "ready" | "missing" | "importing" | "unsupported" | "error";

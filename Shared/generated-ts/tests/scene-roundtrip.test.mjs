@@ -1,21 +1,50 @@
-// Round-trip proof for build plan 1.1: the scene document serialises
-// identically in Rust and TypeScript.
+// Runtime half of the scene proof: the document round-trip (1.1) and the
+// object catalogue's coverage (1.2).
 //
-// Two halves, because the done-when is "round-trips through both languages":
+// Three halves, because "round-trips through both languages" and "every
+// authorable object is representable" each have two sides:
 //
-// 1. **Compile time** — `scene-roundtrip.types.ts` imports the generated
-//    types and assigns the exact wire JSON. If the generated TS drifts from
-//    the Rust definition, `npm run typecheck` fails. That is the half that
-//    proves the two languages agree on the shape.
-// 2. **Run time** — this file asserts the JSON round-trips losslessly and
-//    the 1.7 replace-in-place semantics hold. Plain JS over the same wire
-//    object, so it runs under `node --test` with no build step.
+// 1. **Rust** — `Shared/contracts/src/scene.rs` pins the wire JSON, holds the
+//    kind list against 1.x's own contract file, and round-trips one object of
+//    every kind with a fully populated base.
+// 2. **Compile time** — `scene-roundtrip.types.ts` assigns one object of every
+//    kind, as wire JSON, directly to the generated `SceneDocument` and
+//    `HierarchyResolution` types. No cast, so a renamed field, a missing
+//    required one or a misspelled enum member fails `npm run typecheck`.
+// 3. **Run time** — this file. It reads the *generated* union to check the
+//    catalogue's kinds without restating them, and round-trips a scene.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+
+// 1.x's authorable object set, from `programObjectTypes` plus
+// `notRenderedByProgram` in
+// `Shared/shared-types/contracts/program-object-types.json` on branch
+// `Basic-v0.4-2026-09-06-project-container-material-library`. The Rust test
+// of the same name holds the catalogue against this list too; here it is
+// checked on the TypeScript side of the generator, so a kind that reaches
+// Rust but not TypeScript is caught.
+const ONE_X_AUTHORABLE_KINDS = [
+  "rect",
+  "ellipse",
+  "text",
+  "shape",
+  "mesh",
+  "light",
+  "image",
+  "line",
+  "paint",
+  "camera",
+  "layer",
+  "marker",
+  "group",
+];
 
 // The same scene the Rust round-trip test builds, as the JSON the wire
-// carries (camelCase, `type`-tagged objects, rational rate).
+// carries (camelCase, `type`-tagged objects, rational rate). The box is on
+// the base for every kind (1.2), which is why the rect carries no width of
+// its own.
 export const sceneJson = {
   id: "scene_1",
   name: "Lower Third",
@@ -38,17 +67,27 @@ export const sceneJson = {
   ],
   fonts: [],
   objects: [
-    { type: "rect", id: "bg", name: "bg", visible: true, opacity: 1, x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, width: 1920, height: 200, fill: "#102030" },
-    { type: "text", id: "title", name: "title", visible: true, opacity: 1, x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, text: "Hello", fontId: "font_inter", size: 72, color: "#ffffff" },
-    { type: "image", id: "logo", name: "logo", visible: true, opacity: 1, x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, assetId: "asset_logo", width: 120, height: 120 },
+    { type: "rect", id: "bg", name: "bg", visible: true, opacity: 1, x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, width: 1920, height: 200, fill: "#102030", radius: 0 },
+    { type: "text", id: "title", name: "title", visible: true, opacity: 1, x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, text: "Hello", fontId: "font_inter", size: 72, fill: "#ffffff", align: "left" },
+    { type: "image", id: "logo", name: "logo", visible: true, opacity: 1, x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, width: 120, height: 120, assetId: "asset_logo" },
   ],
 };
+
+test("the generated object union covers 1.x's authorable catalogue (1.2)", () => {
+  // Read the generated union rather than restating it: the tags come from
+  // Rust through the generator, so this fails if a kind is added on one side
+  // only.
+  const union = readFileSync(new URL("../src/SceneObject.ts", import.meta.url), "utf8");
+  const tags = [...union.matchAll(/"type":\s*"([a-z]+)"/g)].map((match) => match[1]);
+  assert.deepEqual([...tags].sort(), [...ONE_X_AUTHORABLE_KINDS].sort());
+});
 
 test("the scene JSON round-trips losslessly", () => {
   const back = JSON.parse(JSON.stringify(sceneJson));
   assert.deepEqual(back, sceneJson);
   // Spot-check the wire invariants the Rust test pins.
   assert.equal(back.canvas.frameRate.num, 50);
+  assert.equal(back.objects[0].width, 1920);
   assert.equal(back.objects[1].type, "text");
   assert.equal(back.objects[1].fontId, "font_inter");
   assert.equal(back.assets[0].assetId, "asset_logo");

@@ -68,9 +68,39 @@ export class SceneViewport {
   }
 }
 
-/// Build a mesh for one scene object, in scene coordinates. Returns null for
-/// a group — a container paints no pixels; the hierarchy resolver (1.2) is
-/// where children inherit its transform.
+/// The geometry of a rectangle with the base box and an authored corner
+/// radius. Pure geometry, so it is tested headless; the radius is clamped to
+/// half the shorter side, which is the largest radius the box can hold.
+///
+/// A rounded rect is built as a shape rather than a plane because dropping the
+/// radius would be a silent approximation of what the author asked for, and
+/// the engine's rasteriser (3.5) will honour it.
+export function rectGeometry(width: number, height: number, radius: number): THREE.BufferGeometry {
+  if (radius <= 0) {
+    return new THREE.PlaneGeometry(width, height);
+  }
+  const r = Math.min(radius, width / 2, height / 2);
+  const x = -width / 2;
+  const y = -height / 2;
+  const shape = new THREE.Shape();
+  shape.moveTo(x + r, y);
+  shape.lineTo(x + width - r, y);
+  shape.absarc(x + width - r, y + r, r, -Math.PI / 2, 0, false);
+  shape.lineTo(x + width, y + height - r);
+  shape.absarc(x + width - r, y + height - r, r, 0, Math.PI / 2, false);
+  shape.lineTo(x + r, y + height);
+  shape.absarc(x + r, y + height - r, r, Math.PI / 2, Math.PI, false);
+  shape.lineTo(x, y + r);
+  shape.absarc(x + r, y + r, r, Math.PI, (3 * Math.PI) / 2, false);
+  return new THREE.ShapeGeometry(shape, 8);
+}
+
+/// Build a mesh for one scene object, in scene coordinates.
+///
+/// Returns null for every kind this layer does not draw — and each case says
+/// why, because the switch is exhaustive over the object union: adding a
+/// fourteenth kind (1.2) stops this file compiling rather than silently
+/// skipping the object (invariant 18).
 function meshForObject(object: SceneObject, space: { width: number; height: number }): THREE.Mesh | null {
   const base = object;
   const pos = scenePosition(space, base.x, base.y, 0);
@@ -78,7 +108,7 @@ function meshForObject(object: SceneObject, space: { width: number; height: numb
   let mesh: THREE.Mesh;
   switch (object.type) {
     case "rect": {
-      const geometry = new THREE.PlaneGeometry(object.width, object.height);
+      const geometry = rectGeometry(object.width, object.height, object.radius);
       const material = new THREE.MeshBasicMaterial({
         color: new THREE.Color(object.fill ?? "#000000"),
         transparent: base.opacity < 1,
@@ -88,8 +118,9 @@ function meshForObject(object: SceneObject, space: { width: number; height: numb
       break;
     }
     case "ellipse": {
+      // Inscribed in the base box (1.2): the unit circle scaled to its radii.
       const geometry = new THREE.CircleGeometry(1, 64);
-      geometry.scale(object.radiusX, object.radiusY, 1);
+      geometry.scale(object.width / 2, object.height / 2, 1);
       const material = new THREE.MeshBasicMaterial({
         color: new THREE.Color(object.fill ?? "#000000"),
         transparent: base.opacity < 1,
@@ -102,16 +133,34 @@ function meshForObject(object: SceneObject, space: { width: number; height: numb
       // Texture resolution is the asset pipeline's concern; the viewport
       // shows a placeholder plane the size the author gave it until the
       // texture arrives.
-      const geometry = new THREE.PlaneGeometry(object.width ?? 1, object.height ?? 1);
+      const geometry = new THREE.PlaneGeometry(object.width, object.height);
       const material = new THREE.MeshBasicMaterial({ color: 0x808080 });
       mesh = new THREE.Mesh(geometry, material);
       break;
     }
     case "text":
+      // Shaped through cosmic-text on the engine (3.6), not drawn as a quad
+      // here — 11.6's 2D-beside-3D case covers it.
+      return null;
+    case "line":
+    case "shape":
+    case "paint":
+      // Vector geometry goes through the path rasteriser (3.5); this layer
+      // has no tessellator and will not fake one.
+      return null;
+    case "mesh":
+    case "light":
+    case "camera":
+      // 3D scene assembly, glTF loading and lighting are 3.7 and the shell's
+      // viewport proper; the foundation is 2D only.
+      return null;
+    case "layer":
     case "group":
-      // Text renders through the shaped-text path (cosmic-text on the engine;
-      // a canvas texture here), not a quad — 11.6's 2D-beside-3D case covers
-      // it. Groups paint nothing.
+      // Containers paint nothing. `resolveHierarchy` (1.2) is where their
+      // transform reaches the objects that do.
+      return null;
+    case "marker":
+      // A timeline marker emits an event; it has no appearance.
       return null;
   }
 
