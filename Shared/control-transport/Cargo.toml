@@ -8,8 +8,10 @@ rust-version.workspace = true
 [dependencies]
 gx-contracts = { workspace = true }
 gx-control-plane = { workspace = true }
+hmac = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 
 [dev-dependencies]
 gx-mock-engine = { path = "../../mocks/mock-engine" }

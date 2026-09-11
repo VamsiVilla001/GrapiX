@@ -8,14 +8,14 @@ use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
 use std::sync::{Arc, Mutex};
 
+use gx_contracts::auth::{Role, Scope};
 use gx_contracts::{RationalRate, Refusal, Revision, TakeId};
-use gx_control_plane::auth::Token;
 use gx_control_plane::framing::{decode_body, decode_length, encode, LENGTH_PREFIX};
 use gx_control_plane::intent::{TakeAt, TakeRequest};
 use gx_control_plane::message::{ClientRequest, EngineReply, Envelope};
 use gx_control_plane::peer::EnginePeer;
 use gx_control_plane::sequence::{MessageId, Sequence};
-use gx_control_transport::{Client, Server};
+use gx_control_transport::{Client, Server, Token};
 use gx_mock_engine::MockEngine;
 
 const TOKEN: &str = "0123456789abcdef0123456789abcdef";
@@ -42,6 +42,21 @@ fn protected() -> (SocketAddr, Arc<Mutex<MockEngine>>) {
     (addr, engine)
 }
 
+fn credential(secret: &str) -> Token {
+    Token::mint(
+        "playout-test",
+        Role::Playout,
+        vec![
+            Scope::Cue,
+            Scope::Take,
+            Scope::Clear,
+            Scope::ConfigureOutput,
+        ],
+        secret,
+    )
+    .expect("mint gx1 credential")
+}
+
 fn take() -> ClientRequest {
     ClientRequest::Take(TakeRequest {
         take_id: TakeId("t".into()),
@@ -53,15 +68,15 @@ fn take() -> ClientRequest {
 #[test]
 fn a_correct_token_connects() {
     let (addr, _engine) = protected();
-    let client = Client::connect_with_token(addr, Token::new(TOKEN).unwrap())
-        .expect("a correct token must connect");
+    let client =
+        Client::connect_with_token(addr, credential(TOKEN)).expect("a correct token must connect");
     assert_eq!(client.capability().protocol, gx_contracts::PROTOCOL_VERSION);
 }
 
 #[test]
 fn a_token_wrong_in_one_byte_is_refused() {
     let (addr, _engine) = protected();
-    let err = Client::connect_with_token(addr, Token::new(WRONG).unwrap())
+    let err = Client::connect_with_token(addr, credential(WRONG))
         .err()
         .expect("a wrong token must not connect");
     assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
@@ -107,7 +122,7 @@ fn authenticating_then_taking_works_on_the_same_connection() {
     let mut raw = RawPeer::connect(addr);
 
     let authed = raw.send(ClientRequest::Authenticate {
-        token: Token::new(TOKEN).unwrap(),
+        token: credential(TOKEN).as_str().to_owned(),
     });
     assert!(
         matches!(authed, EngineReply::Authenticated),
@@ -127,7 +142,7 @@ fn a_failed_authentication_does_not_close_the_connection() {
     let mut raw = RawPeer::connect(addr);
 
     let refused = raw.send(ClientRequest::Authenticate {
-        token: Token::new(WRONG).unwrap(),
+        token: credential(WRONG).as_str().to_owned(),
     });
     assert!(
         matches!(refused, EngineReply::Refused(Refusal::Unauthenticated)),
@@ -135,7 +150,7 @@ fn a_failed_authentication_does_not_close_the_connection() {
     );
 
     let accepted = raw.send(ClientRequest::Authenticate {
-        token: Token::new(TOKEN).unwrap(),
+        token: credential(TOKEN).as_str().to_owned(),
     });
     assert!(
         matches!(accepted, EngineReply::Authenticated),
@@ -156,7 +171,7 @@ fn program_survives_a_reconnect_and_the_epoch_matches() {
     // ADR B.4: the engine outlives its clients. A disconnect loses the
     // client's knowledge of Program, not Program itself.
     let (addr, _engine) = protected();
-    let mut client = Client::connect_with_token(addr, Token::new(TOKEN).unwrap()).expect("connect");
+    let mut client = Client::connect_with_token(addr, credential(TOKEN)).expect("connect");
 
     assert!(matches!(client.handle(take()), EngineReply::Taken(_)));
 
@@ -176,7 +191,7 @@ fn a_restarted_engine_is_detected_by_epoch_not_by_revision() {
     // same revision. A client comparing revisions alone would see no change
     // and carry on with state that no longer exists.
     let (addr, engine) = protected();
-    let mut client = Client::connect_with_token(addr, Token::new(TOKEN).unwrap()).expect("connect");
+    let mut client = Client::connect_with_token(addr, credential(TOKEN)).expect("connect");
     client.handle(take());
 
     {
@@ -200,10 +215,10 @@ fn a_restarted_engine_is_detected_by_epoch_not_by_revision() {
 #[test]
 fn reconnecting_re_authenticates_so_a_rotated_token_stops_working() {
     let (addr, _engine) = protected();
-    let mut client = Client::connect_with_token(addr, Token::new(TOKEN).unwrap()).expect("connect");
+    let mut client = Client::connect_with_token(addr, credential(TOKEN)).expect("connect");
     assert!(client.reconnect().is_ok(), "the same token still works");
 
-    client.replace_token_for_test(Token::new(WRONG).unwrap());
+    client.replace_token_for_test(credential(WRONG));
     let err = client
         .reconnect()
         .expect_err("a credential that no longer matches must fail on reconnect");

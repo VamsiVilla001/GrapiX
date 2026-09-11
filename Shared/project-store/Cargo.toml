@@ -1,5 +1,5 @@
 [package]
-name = "gx-mock-playout"
+name = "gx-project-store"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -7,5 +7,6 @@ rust-version.workspace = true
 
 [dependencies]
 gx-contracts = { workspace = true }
-gx-control-plane = { workspace = true }
-gx-control-transport = { workspace = true }
+gx-fs = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

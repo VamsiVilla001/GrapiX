@@ -9,7 +9,6 @@
 //!
 //! | Module | Concern |
 //! |---|---|
-//! | [`auth`] | Credentials, and why a token redacts itself |
 //! | [`bind`] | Where the engine may listen, and on what terms |
 //! | [`capability`] | Capability exchange, protocol and live gating, clock domain |
 //! | [`framing`] | The wire format: length-prefixed JSON |
@@ -21,7 +20,6 @@
 
 #![forbid(unsafe_code)]
 
-pub mod auth;
 pub mod bind;
 pub mod capability;
 pub mod framing;
@@ -31,7 +29,6 @@ pub mod peer;
 pub mod sequence;
 pub mod status;
 
-pub use auth::{Token, TokenTooShort};
 pub use bind::{check_bind, BindRefusal, ENGINE_CONTROL_PORT};
 pub use capability::{check_clock_domain, check_protocol, live_allowed, EngineCapability};
 pub use framing::{

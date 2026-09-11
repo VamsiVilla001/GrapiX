@@ -3,7 +3,6 @@ import type { ClearRequest } from "./ClearRequest";
 import type { CueRequest } from "./CueRequest";
 import type { OutputConfig } from "./OutputConfig";
 import type { TakeRequest } from "./TakeRequest";
-import type { Token } from "./Token";
 
 /**
  * Everything a client may ask for. Playout may send all of these; the Editor
@@ -11,4 +10,4 @@ import type { Token } from "./Token";
  * enforced by the command surfaces each product exposes rather than by a flag
  * on the message.
  */
-export type ClientRequest = { "request": "authenticate", token: Token, } | { "request": "capability" } | { "request": "status" } | { "request": "cue" } & CueRequest | { "request": "take" } & TakeRequest | { "request": "clear" } & ClearRequest | { "request": "configureOutput" } & OutputConfig;
+export type ClientRequest = { "request": "authenticate", token: string, } | { "request": "capability" } | { "request": "status" } | { "request": "cue" } & CueRequest | { "request": "take" } & TakeRequest | { "request": "clear" } & ClearRequest | { "request": "configureOutput" } & OutputConfig;

@@ -5,10 +5,12 @@
 
 #![forbid(unsafe_code)]
 
+pub mod auth;
 pub mod color;
 pub mod design_system;
 pub mod font;
 pub mod material;
+pub mod package;
 pub mod platform;
 pub mod scene;
 
@@ -293,6 +295,35 @@ pub enum Refusal {
     /// A `package`-policy font with no licence recorded. Unstated licence is
     /// treated as restricted (docs/p2-licensing-positions.md §5).
     FontEmbeddingRefused { font_id: String },
+    /// A font file source supplied an absolute or traversal-containing path.
+    /// This is the first gate of invariant 42; canonicalisation cannot repair
+    /// a path that should never have been accepted as relative input.
+    FontPathUnsafe { path: String },
+    /// A syntactically-safe font path escaped its configured root after
+    /// canonicalisation, usually through a symlink (invariant 42).
+    FontPathOutsideRoot { path: String },
+    /// A remote font request targeted a host outside the resolver's configured
+    /// allowlist. Every redirect hop is checked separately.
+    FontFetchHostNotTrusted { url: String },
+    /// A remote font host resolved to loopback, private, link-local, or cloud
+    /// metadata address space. The resolver never connects to it.
+    FontFetchAddressDenied { url: String },
+    /// A stylesheet import chain exceeded the resolver's bounded depth.
+    FontStylesheetImportDepthExceeded { url: String, max_depth: u8 },
+    /// A remote font response exceeded the resolver's byte ceiling.
+    FontFetchTooLarge { url: String, limit_bytes: usize },
+    /// A remote font request failed after its URL passed policy checks.
+    FontFetchFailed { url: String, detail: String },
+    /// A stylesheet imports itself through a finite path. It is refused rather
+    /// than silently treating the partial stylesheet as complete.
+    FontStylesheetImportCycle { url: String },
+    /// A required local or packaged font file could not be read.
+    FontFileReadFailed { path: String, detail: String },
+    /// Verified remote font bytes could not be durably recorded in the cache.
+    FontCacheWriteFailed { path: String, detail: String },
+    /// Adobe Fonts bytes may not be extracted under the binding font licensing
+    /// position; the source is refused rather than substituted.
+    AdobeFontLicenceRestricted { url: String },
     /// Font bytes failed inspection: unreadable tables, unsupported
     /// container, no family name.
     InvalidFontData { detail: String },
@@ -305,6 +336,52 @@ pub enum Refusal {
     /// reported as `InvalidFontData` until 1.4, which told the caller
     /// nothing true.
     PlatformDirectoryUnavailable { detail: String },
+    /// A package format version this reader does not implement. Packages are
+    /// immutable; guessing at a future format would invalidate verification.
+    UnknownPackageFormatVersion { received: u32 },
+    /// A manifest entry has an absolute, traversal, non-canonical or otherwise
+    /// unsafe package-relative path (invariant 42).
+    UnsafePackagePath { path: String },
+    /// Two manifest entries compare equal under the platform case policy.
+    DuplicatePackagePath { path: String },
+    /// A manifest checksum is not lowercase hexadecimal SHA-256.
+    InvalidPackageHash { path: String },
+    /// A required archive member is absent from the package.
+    PackageEntryMissing { path: String },
+    /// An archive member could not be decoded, including a corrupt archive
+    /// checksum. The package is never handed on as a revision.
+    PackageEntryUnreadable { path: String, detail: String },
+    /// The archive member's actual byte length differs from its manifest.
+    PackageFileLengthMismatch {
+        path: String,
+        expected: u64,
+        actual: u64,
+    },
+    /// The archive member's SHA-256 differs from its manifest.
+    PackageFileHashMismatch {
+        path: String,
+        expected: ContentHash,
+        actual: ContentHash,
+    },
+    /// The package's scene does not have the revision its manifest pins.
+    PackageScenePinMismatch { detail: String },
+    /// A scene-declared asset was omitted from the package closure.
+    PackageAssetNotPackaged { asset_id: String, path: String },
+    /// Project JSON could not be parsed. The store refuses it instead of
+    /// selecting a backup without the operator's explicit recovery choice.
+    ProjectJsonCorrupt { project: String, detail: String },
+    /// A project document declares a schema this store does not implement.
+    UnknownProjectSchema {
+        project: String,
+        actual: u32,
+        supported: u32,
+    },
+    /// A document's id does not compare equal to the case-canonical project
+    /// directory that contains it.
+    ProjectIdLocationMismatch {
+        project_id: String,
+        location: String,
+    },
 }
 
 impl std::fmt::Display for Refusal {
@@ -356,10 +433,98 @@ impl std::fmt::Display for Refusal {
                 write!(f, "font {font_id} may not be packaged: no licence recorded")
             }
             Refusal::InvalidFontData { detail } => write!(f, "invalid font data: {detail}"),
+            Refusal::FontPathUnsafe { path } => write!(f, "unsafe font path: {path}"),
+            Refusal::FontPathOutsideRoot { path } => {
+                write!(f, "font path escaped configured root: {path}")
+            }
+            Refusal::FontFetchHostNotTrusted { url } => {
+                write!(f, "font fetch host is not trusted: {url}")
+            }
+            Refusal::FontFetchAddressDenied { url } => {
+                write!(f, "font fetch address is denied: {url}")
+            }
+            Refusal::FontStylesheetImportDepthExceeded { url, max_depth } => {
+                write!(
+                    f,
+                    "font stylesheet import depth exceeded ({max_depth}): {url}"
+                )
+            }
+            Refusal::FontFetchTooLarge { url, limit_bytes } => {
+                write!(f, "font fetch exceeds {limit_bytes} bytes: {url}")
+            }
+            Refusal::FontFetchFailed { url, detail } => {
+                write!(f, "font fetch failed for {url}: {detail}")
+            }
+            Refusal::FontStylesheetImportCycle { url } => {
+                write!(f, "font stylesheet import cycle: {url}")
+            }
+            Refusal::FontFileReadFailed { path, detail } => {
+                write!(f, "font file read failed for {path}: {detail}")
+            }
+            Refusal::FontCacheWriteFailed { path, detail } => {
+                write!(f, "font cache write failed for {path}: {detail}")
+            }
+            Refusal::AdobeFontLicenceRestricted { url } => {
+                write!(f, "Adobe Fonts bytes may not be extracted: {url}")
+            }
             Refusal::InvalidColor { given } => write!(f, "not a colour: {given}"),
             Refusal::PlatformDirectoryUnavailable { detail } => {
                 write!(f, "platform directory unavailable: {detail}")
             }
+            Refusal::UnknownPackageFormatVersion { received } => {
+                write!(f, "unknown package format version: {received}")
+            }
+            Refusal::UnsafePackagePath { path } => write!(f, "unsafe package path: {path}"),
+            Refusal::DuplicatePackagePath { path } => {
+                write!(f, "duplicate package path under case policy: {path}")
+            }
+            Refusal::InvalidPackageHash { path } => {
+                write!(f, "invalid SHA-256 package hash: {path}")
+            }
+            Refusal::PackageEntryMissing { path } => write!(f, "package entry missing: {path}"),
+            Refusal::PackageEntryUnreadable { path, detail } => {
+                write!(f, "package entry unreadable ({path}): {detail}")
+            }
+            Refusal::PackageFileLengthMismatch {
+                path,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "package entry length mismatch ({path}): expected {expected}, got {actual}"
+            ),
+            Refusal::PackageFileHashMismatch {
+                path,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "package entry SHA-256 mismatch ({path}): expected {expected}, got {actual}"
+            ),
+            Refusal::PackageScenePinMismatch { detail } => {
+                write!(f, "package scene pin mismatch: {detail}")
+            }
+            Refusal::PackageAssetNotPackaged { asset_id, path } => {
+                write!(f, "scene asset {asset_id} is not packaged at {path}")
+            }
+            Refusal::ProjectJsonCorrupt { project, detail } => {
+                write!(f, "project JSON is corrupt ({project}): {detail}")
+            }
+            Refusal::UnknownProjectSchema {
+                project,
+                actual,
+                supported,
+            } => write!(
+                f,
+                "project {project} has unknown schema {actual}; supported schema is {supported}"
+            ),
+            Refusal::ProjectIdLocationMismatch {
+                project_id,
+                location,
+            } => write!(
+                f,
+                "project id {project_id} does not match its location {location}"
+            ),
         }
     }
 }

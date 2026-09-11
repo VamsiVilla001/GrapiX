@@ -14,6 +14,7 @@
 //!   tells them apart, and why they can never be confused for one another
 //!   (invariant 33).
 
+use crate::{Claims, Token};
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -21,7 +22,6 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 use gx_contracts::Refusal;
-use gx_control_plane::auth::Token;
 use gx_control_plane::bind::{bind_listener, BindRefusal};
 use gx_control_plane::framing::{decode_body, decode_length, encode, LENGTH_PREFIX};
 use gx_control_plane::message::{ClientRequest, EngineEvent, EngineReply, Envelope};
@@ -54,26 +54,34 @@ pub struct Server<P: EnginePeer> {
     /// point: requests are handled one at a time, in arrival order, which is
     /// what an ordered plane promises.
     peer: Arc<Mutex<P>>,
-    /// The credential a connection must present, if any.
+    /// The HMAC secret a connection must use, if any.
     ///
     /// `None` is only reachable on loopback: `check_bind` refuses a wider
-    /// address without a token, and this field is what makes that refusal mean
+    /// address without a secret, and this field is what makes that refusal mean
     /// something on an accepted connection.
-    token: Option<Token>,
+    secret: Option<String>,
 }
 
+/// Authentication retained for the lifetime of one connection.
+///
+/// Keeping verified claims here, rather than on `ClientRequest`, makes the
+/// transport the sole authorization boundary (invariants 55–57).
+enum ConnectionAuthorization {
+    Unprotected,
+    Authenticated(Claims),
+}
 impl<P: EnginePeer + Send + 'static> Server<P> {
     /// Bind, after checking the address against the bind policy.
     ///
     /// The bind goes through `gx_control_plane::bind::bind_listener`, the one
     /// place a control-plane socket is opened, so the policy check and the
     /// socket options are shared with every engine rather than re-decided here.
-    pub fn bind(addr: SocketAddr, token: Option<&str>, peer: P) -> Result<Self, ServeError> {
-        let listener = bind_listener(addr, token).map_err(ServeError::Refused)?;
+    pub fn bind(addr: SocketAddr, secret: Option<&str>, peer: P) -> Result<Self, ServeError> {
+        let listener = bind_listener(addr, secret).map_err(ServeError::Refused)?;
         Ok(Self {
             listener,
             peer: Arc::new(Mutex::new(peer)),
-            token: token.map(|t| Token(t.to_string())),
+            secret: secret.map(str::to_owned),
         })
     }
 
@@ -103,9 +111,9 @@ impl<P: EnginePeer + Send + 'static> Server<P> {
             match stream {
                 Ok(stream) => {
                     let peer = Arc::clone(&self.peer);
-                    let token = self.token.clone();
+                    let secret = self.secret.clone();
                     thread::spawn(move || {
-                        if let Err(e) = handle_connection(stream, peer, token) {
+                        if let Err(e) = handle_connection(stream, peer, secret) {
                             eprintln!("control connection closed: {e}");
                         }
                     });
@@ -172,14 +180,17 @@ fn write_frame<T: serde::Serialize>(stream: &mut TcpStream, message: &T) -> io::
 fn handle_connection<P: EnginePeer>(
     mut stream: TcpStream,
     peer: Arc<Mutex<P>>,
-    token: Option<Token>,
+    secret: Option<String>,
 ) -> io::Result<()> {
     let mut inbound = SequenceTracker::new();
     let outbound = AtomicU64::new(0);
     // A fresh connection is unauthenticated. Reconnecting therefore
     // re-authenticates, which is what makes a leaked-then-rotated token
-    // actually stop working.
-    let mut authenticated = token.is_none();
+    // actually stop working. Verified claims remain connection state: the
+    // engine never receives a credential or repeats this check per request.
+    let mut authentication = secret
+        .is_none()
+        .then_some(ConnectionAuthorization::Unprotected);
 
     loop {
         let body = match read_frame(&mut stream) {
@@ -212,22 +223,29 @@ fn handle_connection<P: EnginePeer>(
         // every request would eventually forget on one of them.
         let (reply, events) = match envelope.payload {
             ClientRequest::Authenticate { token: presented } => {
-                let ok = token
-                    .as_ref()
-                    .map(|expected| presented.verify(expected))
-                    .unwrap_or(true);
-                if ok {
-                    authenticated = true;
-                    (EngineReply::Authenticated, Vec::new())
-                } else {
-                    // Do not close: a client that mistyped a token should get
-                    // a named refusal, and an attacker gains nothing from the
-                    // connection staying open that it would not gain by
-                    // redialling.
-                    (EngineReply::Refused(Refusal::Unauthenticated), Vec::new())
+                let verified =
+                    secret
+                        .as_deref()
+                        .map_or(Ok(ConnectionAuthorization::Unprotected), |secret| {
+                            Token::parse(presented)
+                                .and_then(|token| token.verify(secret))
+                                .map(ConnectionAuthorization::Authenticated)
+                        });
+                match verified {
+                    Ok(authorization) => {
+                        authentication = Some(authorization);
+                        (EngineReply::Authenticated, Vec::new())
+                    }
+                    Err(_) => {
+                        // Do not close: a client that mistyped a token should get
+                        // a named refusal and a chance to retry. The token error
+                        // itself is not logged, because malformed credentials are
+                        // attacker-controlled input.
+                        (EngineReply::Refused(Refusal::Unauthenticated), Vec::new())
+                    }
                 }
             }
-            request if !authenticated => {
+            request if authentication.is_none() => {
                 // Every request, including capability, is refused until the
                 // connection is authenticated. Answering capability first
                 // would hand an unauthenticated caller the engine's tier,

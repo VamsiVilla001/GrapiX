@@ -347,7 +347,10 @@ mod tests {
 
         let result = write_atomic_with(&target, |file| {
             file.write_all(b"partial")?;
-            Err(io::Error::new(io::ErrorKind::Other, "serialisation failed"))
+            // A named error kind, not a free string: clippy's io_other_error is
+            // right that an Other-with-text hides the failure from a caller that
+            // matches on the kind.
+            Err(io::Error::from(io::ErrorKind::BrokenPipe))
         });
 
         assert!(matches!(result, Err(AtomicWriteError::Write { .. })));

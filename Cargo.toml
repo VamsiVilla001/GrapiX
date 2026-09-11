@@ -18,6 +18,7 @@ members = [
   "mocks/mock-editor",
   "conformance",
   "tools/contract-codegen",
+  "Shared/project-store",
 ]
 
 [workspace.package]
@@ -45,9 +46,11 @@ serde            = { version = "1", features = ["derive"] }
 # one over the original — which would make a `.gpxpkg` manifest (1.8) wrong.
 serde_json       = { version = "1", features = ["float_roundtrip"] }
 sha2             = "0.10"
+hmac             = "0.12"
 ttf-parser       = "0.25"
 ts-rs            = { version = "10", features = ["serde-json-impl"] }
 url              = "2"
+gx-project-store = { path = "Shared/project-store" }
 
 [profile.release]
 lto = "thin"

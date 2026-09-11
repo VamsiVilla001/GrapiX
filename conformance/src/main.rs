@@ -147,7 +147,7 @@ fn run_over_transport(report: &mut Report, token: Option<&str>) {
 
     let connected = match token {
         Some(token) => {
-            let token = match gx_control_plane::auth::Token::new(token) {
+            let token = match gx_control_transport::Token::parse(token) {
                 Ok(token) => token,
                 Err(e) => {
                     eprintln!("transport pass skipped: {e}");

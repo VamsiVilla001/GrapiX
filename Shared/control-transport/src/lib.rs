@@ -20,9 +20,11 @@
 
 #![forbid(unsafe_code)]
 
+pub mod auth;
 pub mod client;
 pub mod server;
 
+pub use auth::{Claims, ClaimsError, Token, TokenError};
 pub use client::{Client, Reconciliation, REQUEST_TIMEOUT};
 pub use server::{ServeError, Server};
 

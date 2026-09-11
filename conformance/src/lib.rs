@@ -683,7 +683,15 @@ pub fn timing_plane_suite(report: &mut Report) {
 
     let requests = vec![
         ClientRequest::Authenticate {
-            token: gx_control_plane::auth::Token("0123456789abcdef0123456789abcdef".into()),
+            token: gx_control_transport::Token::mint(
+                "conformance",
+                gx_contracts::auth::Role::Engine,
+                vec![gx_contracts::auth::Scope::Report],
+                b"conformance-secret",
+            )
+            .expect("the conformance credential mints")
+            .as_str()
+            .to_owned(),
         },
         ClientRequest::Capability,
         ClientRequest::Status,

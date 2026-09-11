@@ -11,6 +11,7 @@
 //! not a convention here — it is load-bearing, and this is the code that
 //! depends on it.
 
+use crate::Token;
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
@@ -19,7 +20,6 @@ use std::thread;
 use std::time::Duration;
 
 use gx_contracts::{Epoch, Refusal};
-use gx_control_plane::auth::Token;
 use gx_control_plane::capability::EngineCapability;
 use gx_control_plane::framing::{decode_body, decode_length, encode, LENGTH_PREFIX};
 use gx_control_plane::message::{ClientRequest, EngineEvent, EngineReply, Envelope};
@@ -116,7 +116,9 @@ impl Client {
         };
 
         if let Some(token) = token {
-            match client.request(ClientRequest::Authenticate { token }) {
+            match client.request(ClientRequest::Authenticate {
+                token: token.as_str().to_owned(),
+            }) {
                 Ok(EngineReply::Authenticated) => {}
                 Ok(EngineReply::Refused(refusal)) => {
                     return Err(io::Error::new(kind_for(&refusal), refusal.to_string()))

@@ -9,7 +9,16 @@ rust-version.workspace = true
 gx-contracts = { workspace = true }
 gx-fs = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 sha2 = { workspace = true }
 ttf-parser = { workspace = true }
 ts-rs = { workspace = true }
 url = { workspace = true }
+# MIT/Apache-2.0; decompresses WOFF transport wrappers into sfnt so the
+# established `ttf-parser` metadata inspection verifies every accepted format.
+allsorts = "0.17"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+# MIT; provides the established ZIP container with zstd member compression
+# required by the `.gpxpkg` archive format (ADR-0001 C.2).
+zip = { version = "2.4", default-features = false, features = ["zstd"] }

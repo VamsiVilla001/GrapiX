@@ -10,6 +10,7 @@
 use std::path::PathBuf;
 
 use gx_asset_plane::{AssetRef, PreflightRequest, PreflightResponse, TransferState};
+use gx_contracts::auth::{Role, Scope};
 use gx_contracts::color::{
     ColorValue, GradientCoordinateMode, GradientSpread, GradientStop, OutputTransform, Rgba,
     SourceColorSpace, WorkingColorSpace,
@@ -26,6 +27,7 @@ use gx_contracts::material::{
     AlphaMode, BlendMode, CullMode, DepthMode, FitMode, MaterialBinding, MaterialDefinition,
     MaterialKind, MaterialSupport, MaterialTextureSlot, TextureFiltering, TextureWrapMode,
 };
+use gx_contracts::package::{PackageFileEntry, PackageManifest};
 use gx_contracts::scene::{
     AssetAvailability, AssetKind, AssetLibraryItem, BezierPath, BrushBlendMode, BrushPoint,
     CameraKind, CameraObject, EllipseObject, FillRule, GroupObject, HierarchyChildren,
@@ -72,6 +74,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let count = export_all!(
         &out,
         // gx-contracts
+        // gx-contracts: authorization (2.9)
+        Role,
+        Scope,
         TakeId,
         ContentHash,
         Revision,
@@ -84,6 +89,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         RefusalSeverity,
         StructuredRefusal,
         Epoch,
+        // gx-contracts: package manifest (1.8)
+        PackageFileEntry,
+        PackageManifest,
         // gx-contracts: fonts (A.4 port)
         FontFormat,
         EmbeddingPolicy,

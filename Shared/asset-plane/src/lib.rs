@@ -5,8 +5,12 @@
 
 #![forbid(unsafe_code)]
 
-pub mod fonts;
+pub mod package;
+pub mod publish;
+pub mod store;
 pub mod transfer;
+pub use publish::{PublishRefusal, PublishReply, PublishRequest};
+pub use store::{content_hash, read_image_geometry, AssetStore, AssetStoreError, ImageGeometry};
 pub use transfer::Transfer;
 
 use gx_contracts::ContentHash;

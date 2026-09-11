@@ -10,11 +10,17 @@
 //! (invariant 27). What it does *not* share is the clock's driving: this one
 //! advances when a test says so, which is the whole point of a mock.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::io::{self, Read, Write};
+use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
 
+use gx_asset_plane::{PublishRefusal, PublishReply, PublishRequest};
+use gx_contracts::scene::SceneDocument;
 use gx_contracts::{
-    ClockSource, DeviceTier, Epoch, Locality, MediaCodec, RationalRate, ReferenceState, Refusal,
-    Revision, TakeId,
+    ClockSource, ContentHash, DeviceTier, Epoch, Locality, MediaCodec, RationalRate,
+    ReferenceState, Refusal, Revision, TakeId,
 };
 use gx_control_plane::capability::{check_protocol, live_allowed, EngineCapability};
 use gx_control_plane::intent::{resolve_intent, ClockState, Lead, TakeAt, TakeCommitted};
@@ -34,8 +40,12 @@ pub struct MockEngine {
     locality: Locality,
     platform_certified: bool,
     lead: Lead,
-    /// What has been published, and at which revision.
+    /// The latest published revision for each stable take id.
     published: HashMap<TakeId, Revision>,
+    /// Immutable documents keyed by their pinned publication identity.
+    documents: HashMap<(TakeId, Revision), SceneDocument>,
+    /// Content hashes the asset plane says this engine has verified.
+    assets: HashSet<ContentHash>,
     program: Option<ProgramState>,
     cued: Option<ProgramState>,
     events: Vec<EngineEvent>,
@@ -59,6 +69,8 @@ impl MockEngine {
             platform_certified: true,
             lead: Lead::CO_LOCATED,
             published: HashMap::new(),
+            documents: HashMap::new(),
+            assets: HashSet::new(),
             program: None,
             cued: None,
             events: Vec::new(),
@@ -90,9 +102,43 @@ impl MockEngine {
         self
     }
 
-    /// Publish a scene, so a take of it can succeed.
+    /// Publish a scene identifier, so a take of it can succeed.
+    ///
+    /// This compatibility helper models a preloaded scene without a document;
+    /// asset-plane publication below is what Editor uses.
     pub fn publish(&mut self, take_id: TakeId, revision: Revision) {
         self.published.insert(take_id, revision);
+    }
+
+    /// Mark bytes as verified and available to a subsequently taken scene.
+    ///
+    /// This is intentionally separate from publishing the document: a package
+    /// can be complete as authoring data while a declared asset transfer is
+    /// still outstanding, and invariant 29 makes that a take blocker.
+    pub fn hold_asset(&mut self, hash: ContentHash) {
+        self.assets.insert(hash);
+    }
+
+    /// Publish one complete document as a new immutable revision.
+    ///
+    /// The document is inserted only after all publication metadata is known,
+    /// so a refusal or interrupted request cannot expose a partial revision.
+    pub fn publish_scene(&mut self, scene: SceneDocument) -> PublishReply {
+        let take_id = TakeId(scene.id.clone());
+        let revision = self
+            .published
+            .get(&take_id)
+            .copied()
+            .unwrap_or(Revision(0))
+            .next();
+        self.documents.insert((take_id.clone(), revision), scene);
+        self.published.insert(take_id.clone(), revision);
+        PublishReply::Published { take_id, revision }
+    }
+
+    /// Return the immutable document a published revision pins, if present.
+    pub fn published_scene(&self, take_id: &TakeId, revision: Revision) -> Option<&SceneDocument> {
+        self.documents.get(&(take_id.clone(), revision))
     }
 
     /// Model an engine restart: a new incarnation that lost its state.
@@ -148,9 +194,6 @@ impl MockEngine {
     }
 
     /// Check a scene reference against what is published.
-    ///
-    /// Two distinct refusals, because an operator needs to tell "wrong
-    /// version" from "no such scene".
     fn check_published(&self, take_id: &TakeId, revision: Revision) -> Result<(), Refusal> {
         match self.published.get(take_id) {
             None => Err(Refusal::UnknownTake {
@@ -160,7 +203,14 @@ impl MockEngine {
                 expected: published,
                 actual: revision,
             }),
-            Some(_) => Ok(()),
+            Some(_) => self
+                .published_scene(take_id, revision)
+                .into_iter()
+                .flat_map(|scene| scene.assets.iter())
+                .filter_map(|asset| asset.checksum.as_ref())
+                .find(|hash| !self.assets.contains(*hash))
+                .cloned()
+                .map_or(Ok(()), |hash| Err(Refusal::AssetMissing { hash })),
         }
     }
 
@@ -326,6 +376,80 @@ pub fn describe(engine: &MockEngine) -> String {
         cap.reference,
         cap.live_allowed
     )
+}
+
+/// A loopback asset-plane endpoint for a mock Editor.
+///
+/// Control continues to carry only cue/take/clear intent. This listener
+/// accepts bounded JSON publish frames because scene content is restartable
+/// asset-plane work, and it updates the same engine instance the control
+/// listener serves.
+pub struct AssetPublishServer {
+    listener: TcpListener,
+    engine: Arc<Mutex<MockEngine>>,
+}
+
+impl AssetPublishServer {
+    pub fn bind(addr: SocketAddr, engine: Arc<Mutex<MockEngine>>) -> io::Result<Self> {
+        Ok(Self {
+            listener: TcpListener::bind(addr)?,
+            engine,
+        })
+    }
+
+    pub fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.listener.local_addr()
+    }
+
+    pub fn serve_in_background(self) -> JoinHandle<()> {
+        thread::spawn(move || {
+            for stream in self.listener.incoming() {
+                match stream {
+                    Ok(stream) => {
+                        let engine = Arc::clone(&self.engine);
+                        thread::spawn(move || {
+                            let _ = handle_publish(stream, engine);
+                        });
+                    }
+                    Err(error) => {
+                        eprintln!("mock asset listener stopping: {error}");
+                        return;
+                    }
+                }
+            }
+        })
+    }
+}
+
+const MAX_PUBLISH_FRAME_BYTES: usize = 64 * 1024 * 1024;
+
+fn handle_publish(mut stream: TcpStream, engine: Arc<Mutex<MockEngine>>) -> io::Result<()> {
+    let mut prefix = [0_u8; 4];
+    stream.read_exact(&mut prefix)?;
+    let length = u32::from_be_bytes(prefix) as usize;
+    let reply = if length > MAX_PUBLISH_FRAME_BYTES {
+        PublishReply::Refused(PublishRefusal::InvalidSceneDocument {
+            detail: format!(
+                "publish frame is {length} bytes; maximum is {MAX_PUBLISH_FRAME_BYTES}"
+            ),
+        })
+    } else {
+        let mut bytes = vec![0; length];
+        stream.read_exact(&mut bytes)?;
+        match serde_json::from_slice::<PublishRequest>(&bytes) {
+            Ok(request) => engine
+                .lock()
+                .expect("mock engine mutex poisoned")
+                .publish_scene(request.scene),
+            Err(error) => PublishReply::Refused(PublishRefusal::InvalidSceneDocument {
+                detail: error.to_string(),
+            }),
+        }
+    };
+    let bytes = serde_json::to_vec(&reply).map_err(io::Error::other)?;
+    stream.write_all(&(bytes.len() as u32).to_be_bytes())?;
+    stream.write_all(&bytes)?;
+    stream.flush()
 }
 
 #[cfg(test)]

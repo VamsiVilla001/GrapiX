@@ -13,11 +13,12 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use gx_contracts::{DeviceTier, RationalRate, Revision, TakeId};
 use gx_control_plane::bind::ENGINE_CONTROL_PORT;
 use gx_control_transport::Server;
-use gx_mock_engine::{describe, MockEngine};
+use gx_mock_engine::{describe, AssetPublishServer, MockEngine};
 
 fn main() {
     let mut args = std::env::args().skip(1);
     let mut port = ENGINE_CONTROL_PORT;
+    let mut asset_port = None;
     let mut engine = MockEngine::new();
     let mut described = Vec::new();
     let mut token: Option<String> = None;
@@ -27,6 +28,10 @@ fn main() {
             "--port" => match args.next().and_then(|p| p.parse::<u16>().ok()) {
                 Some(p) => port = p,
                 None => return usage("--port needs a number"),
+            },
+            "--asset-port" => match args.next().and_then(|p| p.parse::<u16>().ok()) {
+                Some(p) => asset_port = Some(p),
+                None => return usage("--asset-port needs a number"),
             },
             "--genlocked" => {
                 engine = engine.genlocked(RationalRate::P29_97);
@@ -65,6 +70,11 @@ fn main() {
     }
 
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+    let asset_port = match asset_port.or_else(|| port.checked_add(1)) {
+        Some(port) => port,
+        None => return usage("--port leaves no asset-plane port"),
+    };
+    let asset_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), asset_port);
     println!("MOCK ENGINE - not a renderer, nothing reaches an output");
     println!("{}", describe(&engine));
     for note in &described {
@@ -85,10 +95,23 @@ fn main() {
         }
     };
 
+    let asset_server = match AssetPublishServer::bind(asset_addr, server.engine()) {
+        Ok(server) => server,
+        Err(e) => {
+            eprintln!("cannot serve asset plane: {e}");
+            std::process::exit(1);
+        }
+    };
+
     match server.local_addr() {
-        Ok(bound) => println!("listening on {bound}"),
-        Err(e) => eprintln!("bound, but cannot report the address: {e}"),
+        Ok(bound) => println!("control listening on {bound}"),
+        Err(e) => eprintln!("bound, but cannot report the control address: {e}"),
     }
+    match asset_server.local_addr() {
+        Ok(bound) => println!("asset publish listening on {bound}"),
+        Err(e) => eprintln!("bound, but cannot report the asset address: {e}"),
+    }
+    let _asset_listener = asset_server.serve_in_background();
     println!("ctrl-c to stop");
     server.serve();
 }
@@ -110,17 +133,17 @@ fn usage(problem: &str) {
 
 usage: gx-mock-engine [options]
 
-  --port <n>          listen on this port (default {ENGINE_CONTROL_PORT})
+  --port <n>          control listener (default {ENGINE_CONTROL_PORT})
+  --asset-port <n>    scene publication listener (default control port + 1)
   --genlocked         report a locked reference at 29.97 instead of free-run
   --lan               declare LAN locality, which lengthens the commit lead
   --tier <T0..T3>     report this device tier; below T0 refuses live output
-  --publish <id:rev>  publish a scene so a take of it can succeed
-  --token <secret>    require this token on every connection (min 32 bytes)
+  --publish <id:rev>  preload a scene identifier so a take can succeed
+  --token <secret>    require this token on every control connection
   --help
 
-Listens on loopback only. Loopback needs no token, but one given with --token
-is enforced on every connection - which is what makes the setting meaningful
-rather than decorative."
+Both listeners bind loopback. Scene documents publish on the restartable asset
+plane; cue/take/clear stay on the intent-only control plane."
     );
     if !problem.is_empty() {
         std::process::exit(2);

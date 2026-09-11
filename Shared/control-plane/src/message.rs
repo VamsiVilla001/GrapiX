@@ -10,7 +10,6 @@ use gx_contracts::{DeviceTier, Refusal};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::auth::Token;
 use crate::capability::EngineCapability;
 use crate::intent::{ClearRequest, CueRequest, TakeCommitted, TakeRequest};
 use crate::sequence::{MessageId, Sequence};
@@ -37,10 +36,11 @@ pub struct OutputConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "request", rename_all = "camelCase")]
 pub enum ClientRequest {
-    /// Present a credential. Required before anything else on a connection
-    /// the engine has been configured to protect; harmless on one it has not.
+    /// Present an opaque gx1 credential. Its format and verification belong to
+    /// the transport, which authenticates the connection before forwarding
+    /// any request to the engine.
     Authenticate {
-        token: Token,
+        token: String,
     },
     /// Capability exchange, including locality tier (ADR-001 action 2).
     Capability,
@@ -126,7 +126,8 @@ mod tests {
     fn every_request() -> Vec<ClientRequest> {
         vec![
             ClientRequest::Authenticate {
-                token: Token("0123456789abcdef0123456789abcdef".into()),
+                token: "gx1.test.0000000000000000000000000000000000000000000000000000000000000000"
+                    .into(),
             },
             ClientRequest::Capability,
             ClientRequest::Status,

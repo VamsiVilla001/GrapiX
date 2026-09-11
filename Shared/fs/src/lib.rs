@@ -8,5 +8,7 @@
 #![forbid(unsafe_code)]
 
 pub mod atomic;
+pub mod watch;
 
 pub use atomic::{write_atomic, write_atomic_with, AtomicWriteError};
+pub use watch::{watch_directory, FileWatcher, WatchError, WatchEvent, WatchStream};
