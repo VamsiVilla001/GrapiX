@@ -24,8 +24,8 @@ use gx_contracts::package::{
     PACKAGE_FORMAT_VERSION, SCENE_PATH,
 };
 use gx_contracts::scene::SceneDocument;
-use gx_contracts::{ContentHash, Refusal, Revision};
-use gx_fs::{write_atomic, write_atomic_with, AtomicWriteError};
+use gx_contracts::{ContentHash, Refusal};
+use gx_fs::{write_atomic_with, AtomicWriteError};
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
@@ -388,6 +388,7 @@ mod tests {
         AssetAvailability, AssetKind, AssetLibraryItem, SceneCanvas, SceneTimeline,
     };
     use gx_contracts::{RationalRate, Revision};
+    use gx_fs::write_atomic;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static UNIQUE: AtomicU64 = AtomicU64::new(0);
@@ -426,6 +427,7 @@ mod tests {
                 status: Some(AssetAvailability::Ready),
             }],
             fonts: Vec::new(),
+            materials: Vec::new(),
             objects: Vec::new(),
         }
     }

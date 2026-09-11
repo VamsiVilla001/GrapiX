@@ -45,7 +45,7 @@ use ts_rs::TS;
 use crate::color::{ColorValue, Rgba};
 use crate::font::FontDefinition;
 use crate::material::{CullMode, FitMode, MaterialBinding};
-use crate::{ContentHash, RationalRate, Revision};
+use crate::{ContentHash, RationalRate, Refusal, Revision};
 
 // ---------------------------------------------------------------------------
 // Assets — the library side of the two-address model (1.7).
@@ -1346,6 +1346,12 @@ pub struct SceneDocument {
     /// Fonts available to this scene, resolved package-first.
     #[serde(default)]
     pub fonts: Vec<FontDefinition>,
+    /// The materials this scene's objects bind by id. A scene is
+    /// self-describing (1.1), so a material slot resolves inside the
+    /// document or not at all — a library held anywhere else would make a
+    /// published package depend on outside state.
+    #[serde(default)]
+    pub materials: Vec<crate::material::MaterialDefinition>,
     /// The scene graph, in draw order.
     #[serde(default)]
     pub objects: Vec<SceneObject>,
@@ -1381,6 +1387,248 @@ impl SceneDocument {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Strict parsing (build plan 3.4).
+// ---------------------------------------------------------------------------
+
+/// Parse a scene document, refusing any field this schema does not know.
+///
+/// 3.4's done-when is "unknown fields refuse, never ignore", and plain serde
+/// does the opposite: an unrecognised key is dropped in silence, so a scene
+/// authored against a newer schema *renders*, just without whatever the new
+/// key was for. A lower third that silently loses its drop shadow is worse
+/// than one that refuses to publish, because only the second one tells
+/// anybody.
+///
+/// `#[serde(deny_unknown_fields)]` cannot express this here: it is
+/// incompatible with `#[serde(flatten)]`, and every object kind flattens
+/// `ObjectBase`. So the check is done by difference — parse, re-serialise,
+/// and compare the input's keys against the ones the schema round-tripped.
+/// Anything the input carried and the schema did not is unknown, and its
+/// JSON path is named in the refusal.
+///
+/// This is the one implementation, called by the real engine and by every
+/// mock, because a mock that accepts what the engine refuses teaches a
+/// contract that does not exist (invariant 45).
+pub fn parse_scene_document(bytes: &[u8]) -> Result<SceneDocument, Refusal> {
+    let raw: serde_json::Value =
+        serde_json::from_slice(bytes).map_err(|error| Refusal::SceneParseFailed {
+            detail: error.to_string(),
+        })?;
+    let document: SceneDocument =
+        serde_json::from_value(raw.clone()).map_err(|error| Refusal::SceneParseFailed {
+            detail: error.to_string(),
+        })?;
+
+    // The schema's own view of the same document. An optional field the author
+    // omitted is absent from both; a default the author omitted appears only
+    // here, which is not an error.
+    let understood =
+        serde_json::to_value(&document).map_err(|error| Refusal::SceneParseFailed {
+            detail: error.to_string(),
+        })?;
+
+    let mut unknown = Vec::new();
+    collect_unknown_keys(&raw, &understood, String::new(), &mut unknown);
+    match unknown.first() {
+        // One path, not all of them: the author fixes the first and re-runs,
+        // and a list of forty paths from one mistyped nesting level is noise.
+        Some(path) => Err(Refusal::SceneUnknownField { path: path.clone() }),
+        None => Ok(document),
+    }
+}
+
+/// Walk the authored JSON beside the schema's own serialisation, collecting
+/// the paths the author supplied and the schema does not carry.
+///
+/// An explicit `null` on the author's side is treated as absence, because
+/// that is exactly what serde does with it for an `Option` field: refusing
+/// `"fill": null` while accepting a missing `fill` would be a distinction the
+/// reader cannot act on.
+fn collect_unknown_keys(
+    authored: &serde_json::Value,
+    understood: &serde_json::Value,
+    path: String,
+    unknown: &mut Vec<String>,
+) {
+    match (authored, understood) {
+        (serde_json::Value::Object(authored), serde_json::Value::Object(understood)) => {
+            for (key, value) in authored {
+                if value.is_null() {
+                    continue;
+                }
+                let child = if path.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{path}.{key}")
+                };
+                match understood.get(key) {
+                    Some(counterpart) => collect_unknown_keys(value, counterpart, child, unknown),
+                    None => unknown.push(child),
+                }
+            }
+        }
+        (serde_json::Value::Array(authored), serde_json::Value::Array(understood)) => {
+            for (index, value) in authored.iter().enumerate() {
+                if let Some(counterpart) = understood.get(index) {
+                    collect_unknown_keys(value, counterpart, format!("{path}[{index}]"), unknown);
+                }
+            }
+        }
+        // A leaf, or a shape mismatch serde has already accepted. Neither can
+        // hide an unknown *key*, which is all this walk is looking for.
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod parse_tests {
+    use super::*;
+
+    /// The smallest document this schema accepts, as authored JSON.
+    fn authored(objects: &str, extra_document_fields: &str) -> String {
+        format!(
+            r#"{{"id":"scene_1","name":"Lower Third","version":1{extra_document_fields},
+               "canvas":{{"width":1920,"height":1080,"frameRate":{{"num":50,"den":1}}}},
+               "objects":[{objects}]}}"#
+        )
+    }
+
+    #[test]
+    fn a_well_formed_scene_parses_with_its_defaults_filled_in() {
+        // The author omits everything optional; the schema supplies defaults,
+        // and that must not look like an unknown field in either direction.
+        let json = authored(r#"{"type":"rect","id":"bg","name":"bg"}"#, "");
+        let document = parse_scene_document(json.as_bytes()).expect("a minimal scene parses");
+        assert_eq!(document.objects.len(), 1);
+        let base = document.objects[0].base();
+        assert!(base.visible, "an omitted `visible` defaults to true");
+        assert_eq!(base.scale_x, 1.0);
+    }
+
+    #[test]
+    fn an_unknown_field_on_an_object_is_refused_and_named() {
+        // 3.4's done-when. Before this existed serde dropped the key and the
+        // scene rendered without whatever it was for.
+        let json = authored(
+            r#"{"type":"rect","id":"bg","name":"bg","hologramDensity":9}"#,
+            "",
+        );
+        match parse_scene_document(json.as_bytes()) {
+            Err(Refusal::SceneUnknownField { path }) => {
+                assert_eq!(path, "objects[0].hologramDensity")
+            }
+            other => panic!("an unknown field must refuse by name, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_unknown_field_on_the_document_is_refused_and_named() {
+        let json = authored(
+            r#"{"type":"rect","id":"bg","name":"bg"}"#,
+            r#","wormhole":true"#,
+        );
+        match parse_scene_document(json.as_bytes()) {
+            Err(Refusal::SceneUnknownField { path }) => assert_eq!(path, "wormhole"),
+            other => panic!("an unknown field must refuse by name, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_misspelled_field_is_refused_rather_than_silently_defaulted() {
+        // The dangerous case: `scaleX` mistyped is not a new feature, it is a
+        // scale the author set and the renderer never saw.
+        let json = authored(r#"{"type":"rect","id":"bg","name":"bg","scalex":2.0}"#, "");
+        assert!(matches!(
+            parse_scene_document(json.as_bytes()),
+            Err(Refusal::SceneUnknownField { .. })
+        ));
+    }
+
+    #[test]
+    fn an_unknown_field_nested_in_a_colour_or_a_path_is_still_found() {
+        let json = authored(
+            r#"{"type":"rect","id":"bg","name":"bg",
+                "fill":{"type":"solid","color":{"r":1,"g":0,"b":0,"a":1,"space":"srgb","gamma":2.2}}}"#,
+            "",
+        );
+        match parse_scene_document(json.as_bytes()) {
+            Err(Refusal::SceneUnknownField { path }) => {
+                assert_eq!(path, "objects[0].fill.color.gamma")
+            }
+            other => panic!("the walk must reach nested objects, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_explicit_null_means_absent_and_is_not_an_unknown_field() {
+        // serde reads `null` into `None` for an optional field, so refusing it
+        // would draw a distinction the reader cannot act on.
+        let json = authored(
+            r#"{"type":"rect","id":"bg","name":"bg","fill":null,"anchor":null}"#,
+            "",
+        );
+        let document = parse_scene_document(json.as_bytes()).expect("null is absence");
+        assert!(document.objects[0].base().fill.is_none());
+    }
+
+    #[test]
+    fn an_unknown_object_kind_is_a_parse_failure_not_an_unknown_field() {
+        // Invariant 18, and the two refusals are deliberately different: one
+        // says "this schema has no such object", the other "this object has no
+        // such property". An operator fixes them differently.
+        let json = authored(r#"{"type":"hologram","id":"h","name":"h"}"#, "");
+        assert!(matches!(
+            parse_scene_document(json.as_bytes()),
+            Err(Refusal::SceneParseFailed { .. })
+        ));
+    }
+
+    #[test]
+    fn malformed_json_and_a_wrong_type_both_refuse_by_name() {
+        assert!(matches!(
+            parse_scene_document(b"{not json"),
+            Err(Refusal::SceneParseFailed { .. })
+        ));
+        let wrong_type = authored(
+            r#"{"type":"rect","id":"bg","name":"bg","radius":"round"}"#,
+            "",
+        );
+        assert!(matches!(
+            parse_scene_document(wrong_type.as_bytes()),
+            Err(Refusal::SceneParseFailed { .. })
+        ));
+    }
+
+    #[test]
+    fn a_full_catalogue_scene_survives_the_strict_parse() {
+        // The audit must not reject the schema's own output: every kind, with
+        // every field populated, serialised and read back through the strict
+        // path. A false positive here would make publishing impossible.
+        let document = SceneDocument {
+            id: "scene_1".into(),
+            name: "Catalogue".into(),
+            version: 1,
+            revision: Some(Revision(2)),
+            canvas: SceneCanvas {
+                width: 1920,
+                height: 1080,
+                frame_rate: RationalRate::P50,
+            },
+            timeline: SceneTimeline {
+                duration_frames: 100,
+            },
+            data_context: serde_json::Map::new(),
+            assets: vec![],
+            fonts: vec![],
+            materials: vec![],
+            objects: super::tests::catalogue(),
+        };
+        let bytes = serde_json::to_vec(&document).unwrap();
+        let parsed = parse_scene_document(&bytes).expect("the schema's own output must parse");
+        assert_eq!(parsed, document);
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1443,7 +1691,7 @@ mod tests {
 
     /// One object of every kind in the catalogue, each with its own fields
     /// populated.
-    fn catalogue() -> Vec<SceneObject> {
+    pub(super) fn catalogue() -> Vec<SceneObject> {
         vec![
             SceneObject::Text(TextObject {
                 base: populated_base("text"),
@@ -1628,6 +1876,7 @@ mod tests {
                 status: Some(AssetAvailability::Ready),
             }],
             fonts: vec![],
+            materials: vec![],
             objects: vec![
                 SceneObject::Rect(RectObject {
                     base: bg,

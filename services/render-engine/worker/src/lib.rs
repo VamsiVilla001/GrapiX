@@ -21,8 +21,10 @@
 pub mod clock;
 pub mod engine;
 pub mod gpu;
+pub mod prepared;
 pub mod rasterizer;
 
 pub use clock::ProgramClock;
 pub use engine::Engine;
+pub use prepared::PreparedScene;
 pub use rasterizer::{Frame, SoftwareRasterizer};

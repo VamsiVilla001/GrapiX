@@ -113,6 +113,87 @@ not a euphemism for nearly done.
 
 ---
 
+
+## 2026-09-11 — Phase 3 begins: scene parse to prepared scene (3.4)
+
+Scoped by the user: "start phase 3". Eight slices were dispatched; the task
+runtime hit its usage limit again and every one died in four seconds, so this
+was done inline. 3.4 was chosen first because it is the spine: the engine had
+**no scene at all** — `Engine::publish` stored a `(TakeId, Revision)` and
+Program was a deterministic take key. Every other Phase 3 step renders what
+3.4 produces, so nothing else could start honestly.
+
+**The done-when was false before this.** "Unknown fields refuse, never
+ignore" — serde does the opposite by default, and a probe confirmed it: a
+document carrying `hologramDensity` on a rect, or `wormhole` at the top level,
+parsed cleanly and dropped the key. A scene authored against a newer schema
+*rendered*, just without whatever the new key was for.
+
+`#[serde(deny_unknown_fields)]` cannot fix it here: it is incompatible with
+`#[serde(flatten)]`, and every one of the thirteen object kinds flattens
+`ObjectBase`. So `parse_scene_document` checks by **difference** — parse,
+re-serialise, and walk the authored JSON beside the schema's own output,
+collecting any path the author supplied and the schema does not carry. An
+explicit `null` counts as absence, because that is what serde does with it for
+an `Option`; a default the author omitted appears only on the schema's side
+and is not an error. The refusal names one path, not forty, because the author
+fixes the first and re-runs. This works precisely because 1.4's
+`float_roundtrip` fix made the re-serialisation exact (memory rule 25).
+
+It is **one function**, called by the real engine and by the mock's publish
+listener, because a mock that accepts a field the engine refuses teaches a
+contract that does not exist (invariant 45).
+
+**`PreparedScene`** is the other half. Preparation happens once per publish
+(invariant 35 — 1.x rebuilt this per frame and paid 482 ms), and it is where
+every "this scene cannot be rendered" answer is produced: a declared asset the
+engine does not hold refuses as `AssetMissing` (invariant 29), a text object
+naming a font the document does not carry refuses by name rather than
+substituting a system face, an unresolvable asset id refuses, and a material
+this device cannot draw refuses through 1.3's validator with the allowed list
+attached. The placement is the point: a scene that refuses at publish refuses
+while an operator is still looking at an editor, not when somebody takes it to
+air. A take can then only fail for reasons about *timing*, which is the
+separation ADR-002 depends on.
+
+**A gap in 1.3 this surfaced.** `ObjectBase.material_slots` bound materials by
+id, but `SceneDocument` had no material library — the slots could never
+resolve. The document now carries `materials`, so a published package still
+depends on no outside state (1.1's self-describing rule).
+
+### Verified by execution
+
+| What | Result |
+|---|---|
+| `cargo test -p gx-contracts` | 69 passed — 9 of them the strict-parse suite |
+| `cargo test -p gx-render-worker` | 30 passed — 6 of them `PreparedScene` |
+| `cargo test --workspace` | **251 passed, 0 failed** |
+| `npm run check` | **exit 0** — codegen 135 files, conformance 88/0/8 |
+
+### Status after this entry
+
+| Step | Status |
+|---|---|
+| 3.1, 3.2, 3.4, 3.8 | **done** |
+| 3.3, 3.5, 3.6, 3.7, 3.9, 3.10, 3.11, 3.12, 3.13 | **open** — nine of the thirteen |
+
+### Not done, and not claimed
+
+- **Nothing renders scene content.** `PreparedScene` is consumed by nobody
+  yet: Program is still the software rasteriser's deterministic take key. The
+  vector rasteriser (3.5), the text shaper (3.6) and the mesh path (3.7) are
+  the steps that draw it, and none of them exists.
+- The engine declares `MaterialSupport::none()`, so *every* material refuses
+  today. That is true rather than convenient, and it becomes a measured set
+  when 3.5 and 3.7 land.
+- No colour pipeline in the engine (3.3), no tiling (3.9), no output adapters
+  (3.10), no frame emission through the media plane (3.11), no WAL (3.12), and
+  no refusal-coverage audit (3.13).
+- The asset-plane publish path exists on the mock engine; the real engine's
+  `publish_scene` takes bytes directly and is not yet wired to a listener.
+
+---
+
 ## 2026-09-11 — colour and material contracts (1.4, 1.3), atomic write and case policy (2.1, 2.3)
 
 Scoped by the user: "start the remaining Phase 1 & 2". The subagent runtime hit its usage limit twice, so these were done inline.

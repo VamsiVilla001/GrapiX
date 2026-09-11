@@ -18,12 +18,13 @@
 //! make real hardware lose genlock on request, which is exactly why that
 //! trait is separate and why the fault suite reports SKIP against this peer.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+use gx_contracts::material::MaterialSupport;
 use gx_contracts::{
-    DeviceTier, Epoch, Locality, MediaCodec, RationalRate, Refusal, Revision, TakeId,
+    ContentHash, DeviceTier, Epoch, Locality, MediaCodec, RationalRate, Refusal, Revision, TakeId,
 };
 use gx_control_plane::capability::{check_protocol, live_allowed, EngineCapability};
 use gx_control_plane::intent::{Lead, TakeAt, TakeCommitted};
@@ -33,6 +34,7 @@ use gx_control_plane::status::{Degradation, EngineStatus, ProgramState};
 
 use crate::clock::ProgramClock;
 use crate::gpu::{self, Gpu};
+use crate::prepared::PreparedScene;
 use crate::rasterizer::{key_for_take, Frame, SoftwareRasterizer};
 
 /// The render engine. Owns the GPU, the clock and Program.
@@ -51,6 +53,12 @@ pub struct Engine {
     platform_certified: bool,
     /// What has been published, and at which revision.
     published: HashMap<TakeId, Revision>,
+    /// The prepared scene each published revision pins (3.4). Keyed by the
+    /// pinned identity, so an earlier revision keeps exactly the scene it was
+    /// published with (invariant 30).
+    prepared: HashMap<(TakeId, Revision), PreparedScene>,
+    /// Content hashes the asset plane has verified into the store.
+    assets: HashSet<ContentHash>,
     program: Option<ProgramState>,
     cued: Option<ProgramState>,
     rasterizer: SoftwareRasterizer,
@@ -75,6 +83,8 @@ impl Engine {
             locality,
             platform_certified: true,
             published: HashMap::new(),
+            prepared: HashMap::new(),
+            assets: HashSet::new(),
             program: None,
             cued: None,
             rasterizer: SoftwareRasterizer::new(),
@@ -87,11 +97,69 @@ impl Engine {
         self.gpu.tier()
     }
 
-    /// Publish a scene so a take of it can succeed.
+    /// Publish a scene identifier so a take of it can succeed.
     ///
-    /// Publishing is how content reaches the engine; the take only names it.
+    /// This is the identifier-only path the control plane and the conformance
+    /// suite use: a take names a revision, and the engine answers whether it
+    /// has one. It carries no content, which is why [`Engine::publish_scene`]
+    /// exists beside it — a take against an id published this way commits,
+    /// and Program is the deterministic take key the software rasteriser
+    /// draws, not scene content.
     pub fn publish(&mut self, take_id: TakeId, revision: Revision) {
         self.published.insert(take_id, revision);
+    }
+
+    /// Publish an authored scene, parsed strictly and prepared once (3.4).
+    ///
+    /// The bytes go through `parse_scene_document`, so a field this schema
+    /// does not know refuses here rather than being dropped — and through the
+    /// *same* function every mock uses, because a mock that accepts what the
+    /// engine refuses teaches a contract that does not exist (invariant 45).
+    ///
+    /// Preparation happens now, not per frame (invariant 35), and every
+    /// reason a scene cannot be rendered is produced now: a missing asset, an
+    /// unresolvable font, a material this device cannot draw. A take can then
+    /// only fail for reasons about *timing*, which is the separation ADR-002
+    /// depends on.
+    ///
+    /// Publishing is additive and pins a revision (invariant 30): the same id
+    /// published twice is two revisions, and the earlier prepared scene stays
+    /// exactly as it was for anything already cued against it.
+    pub fn publish_scene(&mut self, bytes: &[u8]) -> Result<(TakeId, Revision), Refusal> {
+        let document = gx_contracts::scene::parse_scene_document(bytes)?;
+        let take_id = TakeId(document.id.clone());
+        let revision = Revision(
+            self.published
+                .get(&take_id)
+                .map(|current| current.0 + 1)
+                .unwrap_or(1),
+        );
+        let prepared = PreparedScene::prepare(document, &self.assets, &self.material_support())?;
+        self.prepared.insert((take_id.clone(), revision), prepared);
+        self.published.insert(take_id.clone(), revision);
+        Ok((take_id, revision))
+    }
+
+    /// The prepared scene a published revision pins, if this engine holds it.
+    pub fn prepared_scene(&self, take_id: &TakeId, revision: Revision) -> Option<&PreparedScene> {
+        self.prepared.get(&(take_id.clone(), revision))
+    }
+
+    /// Record that the asset plane has verified these bytes into the store.
+    ///
+    /// Verification is the asset plane's job (invariant 28); the engine only
+    /// learns the result, and a scene declaring bytes not recorded here
+    /// refuses to prepare (invariant 29).
+    pub fn record_verified_asset(&mut self, hash: ContentHash) {
+        self.assets.insert(hash);
+    }
+
+    /// What this engine can actually draw. `rasterizer_status()` is
+    /// `NotImplemented`, so it declares nothing and every material refuses by
+    /// name — the correct answer for a renderer that does not exist yet, and
+    /// never a set inferred from a build flag (invariant 21).
+    fn material_support(&self) -> MaterialSupport {
+        MaterialSupport::none()
     }
 
     /// Render the current Program frame.

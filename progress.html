@@ -172,6 +172,7 @@ const INITIAL_STATE = {
   // Phase 3 — render engine core (partial: the parts that are verified).
   "3.1": "done",   // wgpu init, device negotiation, runs headless (Windows, T0)
   "3.2": "done",   // device tier negotiation T0–T3, reported in capability
+  "3.4": "done",   // scene parse to prepared scene: parse_scene_document refuses any unknown field by JSON path (deny_unknown_fields is incompatible with flatten, so the check is by difference against the schema's own serialisation); PreparedScene resolves the hierarchy, binds assets and fonts and validates materials once per publish, so every reason a scene cannot render is produced at publish rather than at take. Same function in the real engine and every mock (invariant 45)
   "3.8": "done",   // ProgramClock: rational rate, engine-owned, no client-set time
   // Phase 5 — transport, local.
   "5.1": "done",   // control plane over a local transport (loopback TCP, not yet named pipe)

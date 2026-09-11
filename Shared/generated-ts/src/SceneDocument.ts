@@ -2,6 +2,7 @@
 import type { AssetLibraryItem } from "./AssetLibraryItem";
 import type { FontDefinition } from "./FontDefinition";
 import type { JsonValue } from "./serde_json/JsonValue";
+import type { MaterialDefinition } from "./MaterialDefinition";
 import type { Revision } from "./Revision";
 import type { SceneCanvas } from "./SceneCanvas";
 import type { SceneObject } from "./SceneObject";
@@ -33,6 +34,13 @@ assets: Array<AssetLibraryItem>,
  * Fonts available to this scene, resolved package-first.
  */
 fonts: Array<FontDefinition>, 
+/**
+ * The materials this scene's objects bind by id. A scene is
+ * self-describing (1.1), so a material slot resolves inside the
+ * document or not at all — a library held anywhere else would make a
+ * published package depend on outside state.
+ */
+materials: Array<MaterialDefinition>, 
 /**
  * The scene graph, in draw order.
  */

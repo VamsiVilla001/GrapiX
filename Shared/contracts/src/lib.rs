@@ -336,6 +336,19 @@ pub enum Refusal {
     /// reported as `InvalidFontData` until 1.4, which told the caller
     /// nothing true.
     PlatformDirectoryUnavailable { detail: String },
+    /// A scene document that is not readable as a scene at all: malformed
+    /// JSON, a wrong type, or an object kind this schema does not know.
+    SceneParseFailed { detail: String },
+    /// A scene carried a field this schema does not know, named by its JSON
+    /// path. Refused rather than dropped: a key that is silently ignored is a
+    /// feature the author believes they used (3.4).
+    SceneUnknownField { path: String },
+    /// A text object names a font id the scene's own font list does not
+    /// carry. The document is self-describing, so this can never resolve
+    /// later; substituting a system face is what 3.6 forbids.
+    SceneFontUnknown { font_id: String, object: String },
+    /// An object names an asset id the scene's own library does not carry.
+    SceneAssetUnknown { asset_id: String, object: String },
     /// A package format version this reader does not implement. Packages are
     /// immutable; guessing at a future format would invalidate verification.
     UnknownPackageFormatVersion { received: u32 },
@@ -471,6 +484,20 @@ impl std::fmt::Display for Refusal {
             Refusal::PlatformDirectoryUnavailable { detail } => {
                 write!(f, "platform directory unavailable: {detail}")
             }
+            Refusal::SceneParseFailed { detail } => {
+                write!(f, "scene document is not readable: {detail}")
+            }
+            Refusal::SceneUnknownField { path } => {
+                write!(f, "scene carries a field this schema does not know: {path}")
+            }
+            Refusal::SceneFontUnknown { font_id, object } => write!(
+                f,
+                "object {object} names font {font_id}, which the scene does not carry"
+            ),
+            Refusal::SceneAssetUnknown { asset_id, object } => write!(
+                f,
+                "object {object} names asset {asset_id}, which the scene does not carry"
+            ),
             Refusal::UnknownPackageFormatVersion { received } => {
                 write!(f, "unknown package format version: {received}")
             }

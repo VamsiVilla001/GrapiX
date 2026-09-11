@@ -128,6 +128,7 @@ fn new_scene(specification: &str) -> Result<SceneDocument, EditorError> {
         data_context: Default::default(),
         assets: Vec::new(),
         fonts: Vec::new(),
+        materials: Vec::new(),
         objects: Vec::new(),
     })
 }

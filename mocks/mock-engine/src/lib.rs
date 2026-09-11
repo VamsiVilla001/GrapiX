@@ -16,7 +16,7 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
-use gx_asset_plane::{PublishRefusal, PublishReply, PublishRequest};
+use gx_asset_plane::{PublishRefusal, PublishReply};
 use gx_contracts::scene::SceneDocument;
 use gx_contracts::{
     ClockSource, ContentHash, DeviceTier, Epoch, Locality, MediaCodec, RationalRate,
@@ -436,14 +436,25 @@ fn handle_publish(mut stream: TcpStream, engine: Arc<Mutex<MockEngine>>) -> io::
     } else {
         let mut bytes = vec![0; length];
         stream.read_exact(&mut bytes)?;
-        match serde_json::from_slice::<PublishRequest>(&bytes) {
-            Ok(request) => engine
+        // The same strict parse the real engine uses (3.4): a mock that
+        // accepted a field the engine refuses would teach a contract that
+        // does not exist, and the lesson would only be unlearned during
+        // integration (invariant 45).
+        match serde_json::from_slice::<serde_json::Value>(&bytes)
+            .map_err(|error| error.to_string())
+            .and_then(|envelope| {
+                let scene = envelope
+                    .get("scene")
+                    .ok_or_else(|| "publish request has no scene".to_string())?;
+                let scene = serde_json::to_vec(scene).map_err(|error| error.to_string())?;
+                gx_contracts::scene::parse_scene_document(&scene)
+                    .map_err(|refusal| refusal.to_string())
+            }) {
+            Ok(scene) => engine
                 .lock()
                 .expect("mock engine mutex poisoned")
-                .publish_scene(request.scene),
-            Err(error) => PublishReply::Refused(PublishRefusal::InvalidSceneDocument {
-                detail: error.to_string(),
-            }),
+                .publish_scene(scene),
+            Err(detail) => PublishReply::Refused(PublishRefusal::InvalidSceneDocument { detail }),
         }
     };
     let bytes = serde_json::to_vec(&reply).map_err(io::Error::other)?;

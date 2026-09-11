@@ -208,6 +208,7 @@ const scene: SceneDocument = {
     },
   ],
   fonts: [],
+  materials: [],
   objects: catalogue,
 };
 

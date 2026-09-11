@@ -790,6 +790,7 @@ dependencies = [
  "gx-control-plane",
  "gx-control-transport",
  "pollster",
+ "serde_json",
  "wgpu",
 ]
 
