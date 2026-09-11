@@ -344,6 +344,17 @@ impl EnginePeer for MockEngine {
             },
 
             ClientRequest::ConfigureOutput(config) => self.configure_output(&config),
+            ClientRequest::Performance => EngineReply::Performance(
+                gx_control_plane::status::PerformanceSummary {
+                    rate: self.reference.effective_timebase(),
+                    device_tier: self.device_tier,
+                    frames: Vec::new(),
+                    total_rendered: 0,
+                    total_late: 0,
+                    total_dropped: 0,
+                    mean_budget_ratio: None,
+                },
+            ),
         }
     }
 

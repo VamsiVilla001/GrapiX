@@ -13,7 +13,7 @@ use ts_rs::TS;
 use crate::capability::EngineCapability;
 use crate::intent::{ClearRequest, CueRequest, TakeCommitted, TakeRequest};
 use crate::sequence::{MessageId, Sequence};
-use crate::status::{EngineStatus, ReferenceTransition};
+use crate::status::{EngineStatus, PerformanceSummary, ReferenceTransition};
 
 /// Output configuration. Live output is gated by ADR-005, evaluated in
 /// `crate::capability::live_allowed`.
@@ -49,11 +49,13 @@ pub enum ClientRequest {
     Take(TakeRequest),
     Clear(ClearRequest),
     ConfigureOutput(OutputConfig),
+    /// Request a point-in-time performance snapshot for the graph page.
+    Performance,
 }
 
 /// Everything the engine may answer. A refusal is a reply, not an exception:
 /// it travels the same path and is as much a defined outcome as success.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "reply", rename_all = "camelCase")]
 pub enum EngineReply {
     /// The credential was accepted. Carries nothing: there is no session to
@@ -70,6 +72,8 @@ pub enum EngineReply {
         adapter: String,
         live: bool,
     },
+    /// Bounded performance snapshot: frame samples, totals, budget ratio.
+    Performance(PerformanceSummary),
     Refused(Refusal),
 }
 

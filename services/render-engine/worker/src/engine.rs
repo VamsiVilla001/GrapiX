@@ -414,6 +414,31 @@ impl Engine {
         }
     }
 
+    /// The performance snapshot in the control-plane's own type, so the
+    /// wire format does not depend on the worker crate.
+    fn performance_summary(&self) -> gx_control_plane::status::PerformanceSummary {
+        let perf = self.performance();
+        gx_control_plane::status::PerformanceSummary {
+            rate: perf.rate,
+            device_tier: perf.device_tier,
+            frames: perf
+                .frames
+                .iter()
+                .map(|f| gx_control_plane::status::FrameSampleSummary {
+                    frame: f.frame,
+                    render_nanos: f.render_nanos,
+                    interval_nanos: f.interval_nanos,
+                    late: f.late,
+                    drops_so_far: f.drops_so_far,
+                })
+                .collect(),
+            total_rendered: perf.total_rendered,
+            total_late: perf.total_late,
+            total_dropped: perf.total_dropped,
+            mean_budget_ratio: perf.mean_budget_ratio,
+        }
+    }
+
     /// Pull the clock forward to the frame the pump has reached.
     ///
     /// The pump owns the passage of time; the engine observes it. This keeps
@@ -421,8 +446,13 @@ impl Engine {
     /// writer is the pump, and it is not reachable from the control plane.
     fn sync_clock(&mut self) {
         let target = self.frame_source.load(Ordering::Relaxed);
-        while self.clock.frame() < target {
-            self.clock.tick();
+        let current = self.clock.frame();
+        if current < target {
+            // Advance in one step rather than per-frame ticking: the pump
+            // may have run far ahead while the engine was doing something
+            // else, and a per-tick loop would hold the engine lock for an
+            // unbounded time.
+            self.clock.advance_to(target);
         }
     }
 
@@ -616,6 +646,7 @@ impl EnginePeer for Engine {
             },
 
             ClientRequest::ConfigureOutput(config) => self.configure_output(&config),
+            ClientRequest::Performance => EngineReply::Performance(self.performance_summary()),
         };
         if persists && !matches!(reply, EngineReply::Refused(_)) {
             if let Err(error) = self.persist_recovery() {

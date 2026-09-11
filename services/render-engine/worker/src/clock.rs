@@ -129,6 +129,13 @@ impl ProgramClock {
         self.frame
     }
 
+    /// Advance directly to a frame number. Used when the engine has been
+    /// busy and the pump has run far ahead — per-tick catch-up would hold
+    /// the engine lock for an unbounded time.
+    pub fn advance_to(&mut self, frame: u64) {
+        self.frame = self.frame.max(frame);
+    }
+
     /// The offset of a frame from frame zero, in nanoseconds.
     ///
     /// A pure function of the frame number. `n * den / num` in 128-bit integer

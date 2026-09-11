@@ -21,7 +21,13 @@ version: number,
 /**
  * Monotonic authoring revision; the optimistic-concurrency token (0.8).
  */
-revision?: Revision, canvas: SceneCanvas, timeline: SceneTimeline, 
+revision?: Revision, 
+/**
+ * The camera Program renders through. Absent selects the documented
+ * synthetic 2D orthographic camera; a present id must resolve to a
+ * `CameraObject` in this scene.
+ */
+activeCameraId?: string, canvas: SceneCanvas, timeline: SceneTimeline, 
 /**
  * Live data the scene's bindings resolve against.
  */

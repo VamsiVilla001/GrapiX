@@ -88,6 +88,32 @@ impl EngineStatus {
     }
 }
 
+/// One frame's measured cost, for the performance graph page.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct FrameSampleSummary {
+    pub frame: u64,
+    pub render_nanos: u64,
+    pub interval_nanos: u64,
+    pub late: bool,
+    pub drops_so_far: u64,
+}
+
+/// A bounded performance snapshot, as the graph page consumes it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformanceSummary {
+    pub rate: RationalRate,
+    pub device_tier: DeviceTier,
+    pub frames: Vec<FrameSampleSummary>,
+    pub total_rendered: u64,
+    pub total_late: u64,
+    pub total_dropped: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub mean_budget_ratio: Option<f64>,
+}
+
 /// How urgently the operator must be told. Drives presentation, so that
 /// free-run cannot be rendered as quiet grey text (invariant 11).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
