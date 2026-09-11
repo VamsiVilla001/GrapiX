@@ -413,6 +413,7 @@ name = "gx-asset-plane"
 version = "0.1.0"
 dependencies = [
  "gx-contracts",
+ "gx-fs",
  "serde",
  "sha2",
  "ts-rs",
@@ -494,6 +495,10 @@ dependencies = [
  "gx-control-transport",
  "parking_lot",
 ]
+
+[[package]]
+name = "gx-fs"
+version = "0.1.0"
 
 [[package]]
 name = "gx-media-plane"

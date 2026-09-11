@@ -11,6 +11,7 @@
 
 import type {
   AssetLibraryItem,
+  ColorValue,
   HierarchyResolution,
   SceneDocument,
   SceneObject,
@@ -43,11 +44,18 @@ const base = (id: string) => ({
 
 // Every kind in the catalogue (1.2). A kind added in Rust and forgotten here
 // still compiles — the runtime half counts them against the expected set.
+// A solid sRGB paint. Colours are tagged as of 1.4: the space is part of the
+// value, so a bare CSS string no longer typechecks — which is the point.
+const solid = (r: number, g: number, b: number, a = 1): ColorValue => ({
+  type: "solid",
+  color: { r, g, b, a, space: "srgb" },
+});
+
 const catalogue: SceneObject[] = [
   {
     type: "text",
     ...base("title"),
-    fill: "#ffffff",
+    fill: solid(1, 1, 1),
     text: "Hello",
     fontId: "font_inter",
     size: 72,
@@ -66,9 +74,9 @@ const catalogue: SceneObject[] = [
     paragraphSpacing: 12,
     textIndent: 0,
   },
-  { type: "rect", ...base("bg"), fill: "#102030", radius: 8 },
-  { type: "ellipse", ...base("dot"), fill: "#ff0000" },
-  { type: "image", ...base("logo"), assetId: "asset_logo" },
+  { type: "rect", ...base("bg"), fill: solid(0.0627, 0.1255, 0.1882), radius: 8 },
+  { type: "ellipse", ...base("dot"), fill: solid(1, 0, 0) },
+  { type: "image", ...base("logo"), assetId: "asset_logo", fit: "cover" },
   {
     type: "line",
     ...base("underline"),
@@ -117,7 +125,7 @@ const catalogue: SceneObject[] = [
         smoothing: 0.3,
         roundness: 1,
         angle: 0,
-        color: "#ff0000",
+        color: solid(1, 0, 0),
         blendMode: "multiply",
       },
     ],
@@ -133,6 +141,7 @@ const catalogue: SceneObject[] = [
       cornerSegments: 6,
       skew: 0,
       skewTexture: false,
+      culling: "back",
       frontBevel: { enabled: true, size: 6, depth: 4 },
       backBevel: { enabled: false, size: 6, depth: 4 },
     },
@@ -149,7 +158,7 @@ const catalogue: SceneObject[] = [
     ...base("key"),
     lightKind: "spot",
     intensity: 2,
-    color: "#ffffff",
+    color: { r: 1, g: 1, b: 1, a: 1, space: "srgb" },
     range: 500,
     decay: 2,
     coneAngleDeg: 35,

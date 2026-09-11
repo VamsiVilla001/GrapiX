@@ -208,6 +208,11 @@ impl EnginePeer for MockEngine {
                 Locality::CoLocated => vec![MediaCodec::RawShared, MediaCodec::Jpeg],
                 Locality::Lan => vec![MediaCodec::H264, MediaCodec::Jpeg],
             },
+            // A mock refuses exactly where the real engine refuses
+            // (invariant 45). The real engine has no rasteriser yet, so it
+            // can reproduce no blend or fit mode at all, and declaring a set
+            // here would teach callers a contract that does not exist.
+            material: gx_contracts::material::MaterialSupport::none(),
         }
     }
 

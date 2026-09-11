@@ -87,7 +87,7 @@ pub fn is_canonical_filename(name: &str) -> bool {
 pub fn service_data_root() -> Result<PathBuf, Refusal> {
     directories::ProjectDirs::from("com", "GrapiX", "GrapiX")
         .map(|dirs| dirs.data_dir().to_path_buf())
-        .ok_or_else(|| Refusal::InvalidFontData {
+        .ok_or_else(|| Refusal::PlatformDirectoryUnavailable {
             detail: "the OS could not name a per-user data directory".into(),
         })
 }
@@ -96,7 +96,7 @@ pub fn service_data_root() -> Result<PathBuf, Refusal> {
 pub fn cache_root() -> Result<PathBuf, Refusal> {
     directories::ProjectDirs::from("com", "GrapiX", "GrapiX")
         .map(|dirs| dirs.cache_dir().to_path_buf())
-        .ok_or_else(|| Refusal::InvalidFontData {
+        .ok_or_else(|| Refusal::PlatformDirectoryUnavailable {
             detail: "the OS could not name a per-user cache directory".into(),
         })
 }
@@ -120,7 +120,7 @@ pub fn log_root() -> Result<PathBuf, Refusal> {
                 dirs.data_dir().join("logs")
             }
         })
-        .ok_or_else(|| Refusal::InvalidFontData {
+        .ok_or_else(|| Refusal::PlatformDirectoryUnavailable {
             detail: "the OS could not name a log directory".into(),
         })
 }
@@ -135,6 +135,109 @@ pub fn is_inside_root(path: &Path, root: &Path) -> bool {
         (Ok(p), Ok(r)) => p.starts_with(r),
         _ => false,
     }
+}
+
+// ---------------------------------------------------------------------------
+// Case canonicalisation (2.3).
+//
+// The fault: NTFS and the default APFS volume are case-insensitive, ext4 and
+// a case-sensitive APFS volume are not. A project where one layer references
+// `Logo.png` and another `logo.png` is one asset on the laptop it was
+// authored on and two on the build machine — or the reverse: an import that
+// silently overwrote a file on one volume creates a second file on the other,
+// and the scene now resolves to bytes nobody chose.
+//
+// The policy is therefore *ours*, not the filesystem's: names compare
+// case-insensitively everywhere, which is the stricter of the two behaviours,
+// and the author's own casing is preserved for display. Applying the strict
+// rule on every volume is what makes a case-sensitive volume behave
+// identically to an insensitive one — 2.3's done-when.
+// ---------------------------------------------------------------------------
+
+/// A file or directory name that compares by case-folded form and displays
+/// as the author typed it.
+///
+/// This is a type rather than a pair of helper functions because the rule is
+/// only unbreakable if the wrong comparison is unavailable: `PartialEq`,
+/// `Ord` and `Hash` all use the folded form, so a `HashMap<FileName, _>` or a
+/// `==` written without thinking still obeys the policy, while `Display` and
+/// [`FileName::display`] still show `Logo.png`.
+#[derive(Debug, Clone)]
+pub struct FileName {
+    display: String,
+    folded: String,
+}
+
+impl FileName {
+    /// Take a name as the author wrote it. The name is *not* sanitised here:
+    /// [`sanitize_filename`] is a separate decision made once at import, and
+    /// silently rewriting a name during a comparison would hide the very
+    /// collision this type exists to surface.
+    pub fn new(name: impl Into<String>) -> Self {
+        let display = name.into();
+        let folded = fold_case(&display);
+        Self { display, folded }
+    }
+
+    /// The name as the author wrote it.
+    pub fn display(&self) -> &str {
+        &self.display
+    }
+
+    /// The comparison form. Exposed for callers that must persist a key.
+    pub fn folded(&self) -> &str {
+        &self.folded
+    }
+
+    /// Whether these are the same name spelled differently — equal under the
+    /// policy, distinguishable on screen. An importer reports this rather
+    /// than picking a winner.
+    pub fn is_case_variant_of(&self, other: &Self) -> bool {
+        self.folded == other.folded && self.display != other.display
+    }
+}
+
+impl PartialEq for FileName {
+    fn eq(&self, other: &Self) -> bool {
+        self.folded == other.folded
+    }
+}
+
+impl Eq for FileName {}
+
+impl std::hash::Hash for FileName {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.folded.hash(state);
+    }
+}
+
+impl PartialOrd for FileName {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for FileName {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.folded.cmp(&other.folded)
+    }
+}
+
+impl std::fmt::Display for FileName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.display)
+    }
+}
+
+/// The comparison form of a name: NFC, then Unicode lowercase.
+///
+/// NFC first, because `é` composed and `é` decomposed are the same name to a
+/// user and to macOS, and lowercasing does not unify them. Rust's
+/// `to_lowercase` is locale-independent, which is deliberate: a Turkish
+/// locale mapping `I` to `ı` would make a project's names depend on the
+/// operator's regional settings.
+pub fn fold_case(name: &str) -> String {
+    name.nfc().collect::<String>().to_lowercase()
 }
 
 #[cfg(test)]
@@ -218,5 +321,79 @@ mod tests {
         let outside = root.join("..").canonicalize().unwrap();
         assert!(!is_inside_root(&outside, &root));
         assert!(is_inside_root(&root, &root));
+    }
+
+    #[test]
+    fn a_name_compares_folded_and_displays_as_authored() {
+        let authored = FileName::new("Logo.PNG");
+        let referenced = FileName::new("logo.png");
+        assert_eq!(authored, referenced, "case must not distinguish two names");
+        assert_eq!(authored.display(), "Logo.PNG", "display is verbatim");
+        assert!(authored.is_case_variant_of(&referenced));
+        assert!(!authored.is_case_variant_of(&FileName::new("Logo.PNG")));
+        // The wrong comparison must be unavailable, not merely discouraged:
+        // a map keyed by the type obeys the policy without the caller
+        // remembering to fold.
+        let mut library = std::collections::HashMap::new();
+        library.insert(FileName::new("Logo.PNG"), "first import");
+        assert_eq!(
+            library.insert(FileName::new("logo.png"), "second import"),
+            Some("first import"),
+            "a second spelling must collide, not create a second entry"
+        );
+        assert_eq!(library.len(), 1);
+    }
+
+    #[test]
+    fn folding_is_normalisation_aware_and_locale_independent() {
+        // Composed and decomposed forms are one name to a user and to macOS.
+        let composed = FileName::new("Café.png");
+        let decomposed = FileName::new("Cafe\u{0301}.png");
+        assert_eq!(composed, decomposed);
+        assert_ne!(
+            composed.display(),
+            decomposed.display(),
+            "the two spellings are still distinguishable on screen"
+        );
+        // A Turkish locale would fold `I` to `ı` and split these; Rust's
+        // mapping is locale-independent, so a project's names cannot depend
+        // on the operator's regional settings.
+        assert_eq!(FileName::new("FILE"), FileName::new("file"));
+        assert_eq!(fold_case("FILE"), "file");
+    }
+
+    #[test]
+    fn a_case_sensitive_volume_resolves_the_same_names_as_an_insensitive_one() {
+        // 2.3's done-when. The lookup a project store performs — match a
+        // referenced name against what the directory actually holds — is
+        // decided by this policy and not by the volume, so it gives the same
+        // answer on NTFS, on APFS and on ext4.
+        let scratch = std::env::temp_dir().join(format!(
+            "gx-case-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&scratch).unwrap();
+        std::fs::write(scratch.join("Logo.png"), b"bytes").unwrap();
+
+        let on_disk: Vec<FileName> = std::fs::read_dir(&scratch)
+            .unwrap()
+            .map(|entry| FileName::new(entry.unwrap().file_name().to_string_lossy().into_owned()))
+            .collect();
+        let referenced = FileName::new("logo.png");
+        let found = on_disk.iter().find(|name| **name == referenced);
+
+        assert!(
+            found.is_some(),
+            "the reference must resolve whatever the volume does"
+        );
+        assert_eq!(
+            found.unwrap().display(),
+            "Logo.png",
+            "and it resolves to the file as it is actually spelled on disk"
+        );
+        std::fs::remove_dir_all(&scratch).unwrap();
     }
 }

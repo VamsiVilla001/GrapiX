@@ -5,6 +5,7 @@
 //! reached it over a pipe or a socket; a client guessing would get it wrong
 //! exactly when it matters, which is during the L0 to L1 move.
 
+use gx_contracts::material::MaterialSupport;
 use gx_contracts::{ClockSource, DeviceTier, Epoch, Locality, MediaCodec, ReferenceState, Refusal};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -27,6 +28,15 @@ pub struct EngineCapability {
     pub live_allowed: bool,
     /// Offered, in preference order.
     pub media: Vec<MediaCodec>,
+    /// The blend and fit modes this engine can reproduce exactly (1.3).
+    ///
+    /// Declared, like locality and tier, and for the same reason: what a
+    /// device can actually draw is a measured property of that device, not
+    /// something a client may infer from a version or a build flag
+    /// (invariant 21). A validator refuses a material against *this* list,
+    /// so an engine that has no rasteriser yet declares none and every mode
+    /// refuses by name — which is the correct answer, not a degraded one.
+    pub material: MaterialSupport,
 }
 
 /// Reject a protocol mismatch by name rather than attempting to negotiate.

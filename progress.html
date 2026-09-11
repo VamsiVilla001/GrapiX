@@ -144,7 +144,9 @@ const INITIAL_STATE = {
   "0.9": "done",   // contracts package; Rust source of truth, TS generated, drift gate
   "0.10": "done",  // conformance harness + mock-peer pattern, runs in gate
   // Phase 2 — platform primitives.
+  "2.1": "done",   // atomic replacement (Shared/fs): unique temp + fsync + directory fsync + bounded retry on a Windows sharing violation; both rename races closed, one implementation, 7 tests
   "2.2": "done",   // filename sanitiser: hostile corpus (reserved names, illegal chars, NFC, length) passes; idempotent
+  "2.3": "done",   // case policy: FileName compares case-folded and displays as authored, so a case-sensitive volume resolves the same names as an insensitive one (proved against a real directory listing)
   "2.4": "done",   // OS data roots via directories crate; absolute, never in-repo (test proves on Windows; macOS leg is CI)
   "2.8": "active", // font subsystem ported: contracts + metadata + CSS parse + manager + cssgen + validate (28 tests); network resolver is Editor-service, shaping is 3.6
   // Phase 11 — Editor UI (the viewport foundation, ahead of the shell).
@@ -152,6 +154,8 @@ const INITIAL_STATE = {
   // Phase 1 — domain contracts (verified by conformance + unit tests).
   "1.1": "done",   // scene document schema (lean core: 5 object kinds); round-trips Rust↔TS, proven by a pinned-JSON Rust test + a generated-TS typecheck + a runtime round-trip
   "1.2": "done",   // object catalogue: all 13 of 1.x's authorable kinds + the authored property surface + the ported hierarchy resolver; kind set held against 1.x's own contract file in Rust and in the generated TS (13 scene tests). Colour values are 1.4, fit/blend/cull enums 1.3, keyframe channels 1.6/11.10; 1.x masks and layer styles are outside the plan
+  "1.3": "done",   // one BlendMode/FitMode/CullMode vocabulary; Refusal carries the enum, never a string; engine declares MaterialSupport (none today — no rasteriser), validator refuses against it with the allowed list, viewport maps the same enum. overlay is unspellable-as-supported
+  "1.4": "done",   // colour: linear working space, tagged sources, sRGB+Rec.709 transfer functions named and tested; hex parse refused by name never defaulted; flattened-float ULP drift found and closed with serde_json float_roundtrip
   "1.5": "done",   // design system token schema (MotionTokens et al.)
   "1.6": "done",   // motion token + preset schema; ms_to_frames resolves at any rate
   "1.9": "done",   // protocol v3 intent-based take, committed frame; conformance asserts no wall-clock

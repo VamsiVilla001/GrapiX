@@ -206,6 +206,12 @@ impl EnginePeer for Engine {
                 Locality::CoLocated => vec![MediaCodec::RawShared, MediaCodec::Jpeg],
                 Locality::Lan => vec![MediaCodec::H264, MediaCodec::Jpeg],
             },
+            // What this engine can actually draw. `rasterizer_status()`
+            // returns `NotImplemented`, so the honest declaration is that it
+            // reproduces no blend or fit mode: every material then refuses
+            // by name rather than being drawn approximately (invariants 18
+            // and 21). This becomes a measured set when 3.5 and 3.7 land.
+            material: gx_contracts::material::MaterialSupport::none(),
         }
     }
 

@@ -324,5 +324,6 @@ fn placeholder_capability() -> EngineCapability {
         reference: ReferenceState::NotPresent,
         live_allowed: false,
         media: Vec::new(),
+        material: gx_contracts::material::MaterialSupport::none(),
     }
 }

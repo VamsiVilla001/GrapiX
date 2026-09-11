@@ -67,9 +67,9 @@ export const sceneJson = {
   ],
   fonts: [],
   objects: [
-    { type: "rect", id: "bg", name: "bg", visible: true, opacity: 1, x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, width: 1920, height: 200, fill: "#102030", radius: 0 },
-    { type: "text", id: "title", name: "title", visible: true, opacity: 1, x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, text: "Hello", fontId: "font_inter", size: 72, fill: "#ffffff", align: "left" },
-    { type: "image", id: "logo", name: "logo", visible: true, opacity: 1, x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, width: 120, height: 120, assetId: "asset_logo" },
+    { type: "rect", id: "bg", name: "bg", visible: true, opacity: 1, x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, width: 1920, height: 200, fill: { type: "solid", color: { r: 0.0627, g: 0.1255, b: 0.1882, a: 1, space: "srgb" } }, radius: 0 },
+    { type: "text", id: "title", name: "title", visible: true, opacity: 1, x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, text: "Hello", fontId: "font_inter", size: 72, fill: { type: "solid", color: { r: 1, g: 1, b: 1, a: 1, space: "srgb" } }, align: "left" },
+    { type: "image", id: "logo", name: "logo", visible: true, opacity: 1, x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, width: 120, height: 120, assetId: "asset_logo", fit: "contain" },
   ],
 };
 

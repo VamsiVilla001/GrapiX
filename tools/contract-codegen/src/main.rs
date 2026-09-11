@@ -10,6 +10,10 @@
 use std::path::PathBuf;
 
 use gx_asset_plane::{AssetRef, PreflightRequest, PreflightResponse, TransferState};
+use gx_contracts::color::{
+    ColorValue, GradientCoordinateMode, GradientSpread, GradientStop, OutputTransform, Rgba,
+    SourceColorSpace, WorkingColorSpace,
+};
 use gx_contracts::design_system::{
     DurationSpec, MotionChannel, MotionKey, MotionPhase, MotionPhases, MotionPreset, MotionTokens,
     NamedEasing, PresetParam, Stagger, TokenRef,
@@ -17,6 +21,10 @@ use gx_contracts::design_system::{
 use gx_contracts::font::{
     EmbeddingPolicy, FontDefinition, FontFaceDefinition, FontFormat, FontLoadStatus, FontSource,
     FontStyle,
+};
+use gx_contracts::material::{
+    AlphaMode, BlendMode, CullMode, DepthMode, FitMode, MaterialBinding, MaterialDefinition,
+    MaterialKind, MaterialSupport, MaterialTextureSlot, TextureFiltering, TextureWrapMode,
 };
 use gx_contracts::scene::{
     AssetAvailability, AssetKind, AssetLibraryItem, BezierPath, BrushBlendMode, BrushPoint,
@@ -84,6 +92,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         FontStyle,
         FontFaceDefinition,
         FontDefinition,
+        // gx-contracts: colour (1.4)
+        WorkingColorSpace,
+        SourceColorSpace,
+        OutputTransform,
+        Rgba,
+        GradientStop,
+        GradientSpread,
+        GradientCoordinateMode,
+        ColorValue,
+        // gx-contracts: materials, fit and blend (1.3)
+        BlendMode,
+        FitMode,
+        CullMode,
+        AlphaMode,
+        DepthMode,
+        TextureWrapMode,
+        TextureFiltering,
+        MaterialKind,
+        MaterialTextureSlot,
+        MaterialDefinition,
+        MaterialBinding,
+        MaterialSupport,
         // gx-contracts: scene document (1.1), object catalogue (1.2) and
         // asset library (1.7)
         AssetKind,

@@ -93,10 +93,64 @@ not a euphemism for nearly done.
    `importedDesign` provenance have **no owning step in the build plan**. They
    are outside 2.0's planned scope, not a gap in the catalogue. Adding them is
    a plan change and the user's call.
+25. **`serde_json` needs `float_roundtrip` and it is not cosmetic.** Every
+   scene object flattens `ObjectBase`, and `#[serde(flatten)]` forces
+   deserialisation through `deserialize_any`, whose default float parser is
+   accurate to a ULP rather than exact. Without the feature a scene written
+   and read back is a different scene, and a content hash over the
+   re-serialised document differs from the original's — a `.gpxpkg` manifest
+   would be wrong about its own contents. `scene.rs` has the regression test.
+26. **A worker the test harness leaks holds `gx-render-worker.exe` open**, so
+   the next `cargo build` fails with "access is denied" and the *next* test
+   run gets a stale binary it then hangs against. `start_worker` in
+   `services/render-engine/host/tests/ensure.rs` owns the child from spawn,
+   not from successful connect; if you see the access error, kill the image
+   with `taskkill /F /IM gx-render-worker.exe` before rebuilding.
+27. **The capability exchange declares what a device measured, not what a
+   build enabled** (invariant 21). An engine with no rasteriser declares
+   `MaterialSupport::none()`, and a validator refusing every mode against
+   that list is the correct answer, not a degraded one.
 
 ---
 
-## 2026-09-11 — object catalogue, property surface and the hierarchy resolver (1.2)
+## 2026-09-11 — colour and material contracts (1.4, 1.3), atomic write and case policy (2.1, 2.3)
+
+Scoped by the user: "start the remaining Phase 1 & 2". The subagent runtime hit its usage limit twice, so these were done inline.
+
+**2.1 — `Shared/fs` (`gx-fs`), atomic replacement.** Unique temp file created with `create_new`, data `sync_all` before the rename, directory fsync after (Unix only — Windows cannot open a directory through `std::fs::File` without `unsafe` and this crate forbids it; NTFS journals the rename's metadata and the doc says so). A Windows sharing violation from an indexer or scanner is retried with bounded backoff; anything else reports on the first attempt, with the attempt count in the error. One implementation; `fs::write` is never the call for a file that matters. 7 tests, including eight writers racing on one path.
+
+**2.3 — case canonicalisation.** `FileName` in `gx-contracts::platform`: compares case-folded (NFC + locale-independent lowercase) and displays as authored, so the policy is in the type rather than at a call site — a `HashMap<FileName, _>` cannot be built wrong. Proved against a real directory listing, which is what "a case-sensitive volume behaves identically" has to mean.
+
+**1.4 — `gx-contracts::color`.** The working space has one variant, every colour is tagged, and the two output transforms are the piecewise curves from the standards, tested to 1e-9 and at the sRGB knee, with the two curves pinned as measurably different at mid grey. `Rgba::from_css_hex` refuses by name (`InvalidColor`), never defaults — a mistyped colour becoming an invisible graphic on air is the failure this prevents. `ColorValue` (`none | solid | linear-gradient | radial-gradient`) carries the gradient model from 1.x with every stop tagged. `Editor/src/color-policy.ts` now *imports* the generated types rather than hand-mirroring the unions, which is what invariant 22 always required.
+
+**1.3 — `gx-contracts::material`.** One `BlendMode` and one `FitMode`, merged from 1.x's two fit vocabularies (`fit`/`contain` and `fill`/`cover` were pairs; the old spellings are refused). The supported set is **data a peer declares** through its capability (`MaterialSupport`), never a constant and never a build flag — and the real engine, whose `rasterizer_status()` is `NotImplemented`, declares `none()`, so every material currently refuses by name, which is the honest answer. `Refusal::UnsupportedBlendMode` and `UnsupportedFitMode` carry the enum instead of a string, so an unsupported mode cannot be spelled freehand, and `validate_material` attaches the peer's allowed list so the caller corrects in one step. `overlay` has a test named after what it must never do.
+
+**Two faults the work surfaced.** (a) `serde_json` without `float_roundtrip` silently drifts flattened floats by a ULP — found by the scene round-trip failing on `48/255`, fixed at the workspace dependency with the reason in the manifest, regression-tested. (b) The host's integration test leaked a worker process on a failed startup; three leaks later, Windows refused to overwrite `gx-render-worker.exe` and the next test run hung against a stale binary for twenty minutes. The child is now owned from spawn, and memory rule 26 records the operator-facing recovery.
+
+### Verified by execution
+
+| What | Result |
+|---|---|
+| `cargo test --workspace` | **223 passed, 0 failed** |
+| `cargo test -p gx-contracts` | 56 passed — colour 7, material 5, scene 14 |
+| `npx vitest run` (Editor) | **9 passed** — paint resolution, geometry, camera, colour policy |
+| `node --test` (TS) | 15 passed |
+| `npm run check` | **exit 0** — codegen 131 files, conformance **99 passed, 0 failed, 9 skipped** |
+
+### Status after this entry
+
+| Unit | Status |
+|---|---|
+| 1.3, 1.4, 2.1, 2.3 | **done** |
+| `Shared/fs` | **Partial** — atomic write done; file watching (2.5) not started |
+| 1.8, 1.11, 1.12, 2.5, 2.6, 2.7, 2.9, 2.10 | **open** |
+| 2.8 | **active** — the remote-font resolver is still the open half |
+
+### Not done, and not claimed
+
+- The engine draws nothing. `MaterialSupport::none()` is a true statement about a renderer that does not exist yet; it becomes a measured set at 3.5/3.7.
+- The viewport converts solid sRGB and linear colours and reports everything else as unsupported rather than approximating — gradients, Display P3 and Rec.709 source colours are not drawn.
+- No `.gpxpkg`, no project store, no asset store, no watcher, no token/role/scope model, no audit log.
 
 Resumed an interrupted session: `Shared/contracts/src/scene.rs` had 664
 uncommitted lines — the remaining eight object kinds and a first cut of the

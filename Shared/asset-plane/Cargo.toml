@@ -7,6 +7,7 @@ rust-version.workspace = true
 
 [dependencies]
 gx-contracts = { workspace = true }
+gx-fs = { workspace = true }
 serde = { workspace = true }
 sha2 = { workspace = true }
 ttf-parser = { workspace = true }

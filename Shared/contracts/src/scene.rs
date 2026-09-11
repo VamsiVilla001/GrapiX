@@ -37,12 +37,14 @@
 //!   loss, because the TS is generated from these types (invariant 22) and
 //!   the round-trip test pins the exact JSON.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::color::{ColorValue, Rgba};
 use crate::font::FontDefinition;
+use crate::material::{CullMode, FitMode, MaterialBinding};
 use crate::{ContentHash, RationalRate, Revision};
 
 // ---------------------------------------------------------------------------
@@ -225,14 +227,14 @@ pub struct ObjectBase {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub anchor: Option<Vec2>,
-    /// Primary fill and stroke, as a CSS colour string. The rich colour model
-    /// (gradients, tagged source spaces) is 1.4's.
+    /// Primary fill and stroke. Tagged colour values as of 1.4 — a CSS
+    /// string carried no source space, and B.1 forbids inferring one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub fill: Option<String>,
+    pub fill: Option<ColorValue>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub stroke: Option<String>,
+    pub stroke: Option<ColorValue>,
     #[serde(default)]
     pub stroke_width: f64,
     /// Bound data paths (object property → data-context path). Opaque here;
@@ -240,11 +242,12 @@ pub struct ObjectBase {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub bindings: Option<serde_json::Map<String, serde_json::Value>>,
-    /// Material slot assignments (slot name → material id). Opaque until
-    /// 1.3's material model types the value.
+    /// Material slot assignments: slot name → the material bound to it
+    /// (1.3). A `BTreeMap` so the wire order is the slot order and two
+    /// equal scenes serialise to equal bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub material_slots: Option<serde_json::Map<String, serde_json::Value>>,
+    pub material_slots: Option<BTreeMap<String, MaterialBinding>>,
 }
 
 fn default_true() -> bool {
@@ -463,6 +466,10 @@ pub struct ImageObject {
     pub base: ObjectBase,
     /// References `AssetLibraryItem::asset_id` in the scene's `assets`.
     pub asset_id: String,
+    /// How the pixels are mapped into the base box (1.3's single fit
+    /// vocabulary).
+    #[serde(default)]
+    pub fit: FitMode,
 }
 
 /// A group: a hierarchy container that affects descendants but paints no
@@ -582,7 +589,7 @@ pub struct PaintStroke {
     pub smoothing: f64,
     pub roundness: f64,
     pub angle: f64,
-    pub color: String,
+    pub color: ColorValue,
     pub blend_mode: BrushBlendMode,
 }
 
@@ -634,6 +641,9 @@ pub struct SlabProperties {
     /// Whether texture coordinates follow the skewed outline.
     #[serde(default)]
     pub skew_texture: bool,
+    /// Object-level face culling, matching XPression's slab control (1.3).
+    #[serde(default)]
+    pub culling: CullMode,
     pub front_bevel: SlabBevel,
     pub back_bevel: SlabBevel,
 }
@@ -647,6 +657,7 @@ impl Default for SlabProperties {
             corner_segments: 6,
             skew: 0.0,
             skew_texture: false,
+            culling: CullMode::Back,
             front_bevel: SlabBevel {
                 enabled: true,
                 size: 6.0,
@@ -725,7 +736,8 @@ pub struct LightObject {
     pub base: ObjectBase,
     pub light_kind: LightKind,
     pub intensity: f64,
-    pub color: String,
+    /// The light's colour. A light emits one colour, never a gradient.
+    pub color: Rgba,
     /// Distance at which a point or spot light's intensity reaches zero.
     /// Absent means no cut-off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1413,8 +1425,8 @@ mod tests {
         base.scale_y = 2.5;
         base.scale_z = 3.5;
         base.anchor = Some(Vec2 { x: 4.0, y: 8.0 });
-        base.fill = Some("#102030".into());
-        base.stroke = Some("#405060".into());
+        base.fill = Some(ColorValue::hex("#102030").unwrap());
+        base.stroke = Some(ColorValue::hex("#405060").unwrap());
         base.stroke_width = 3.0;
         base.bindings = Some(
             serde_json::json!({ "text": "match.homeScore" })
@@ -1422,12 +1434,10 @@ mod tests {
                 .unwrap()
                 .clone(),
         );
-        base.material_slots = Some(
-            serde_json::json!({ "front": "material_gold" })
-                .as_object()
-                .unwrap()
-                .clone(),
-        );
+        base.material_slots = Some(BTreeMap::from([(
+            "front".to_string(),
+            MaterialBinding::new("material_gold"),
+        )]));
         base
     }
 
@@ -1468,6 +1478,7 @@ mod tests {
             SceneObject::Image(ImageObject {
                 base: populated_base("image"),
                 asset_id: "asset_logo".into(),
+                fit: FitMode::Cover,
             }),
             SceneObject::Line(LineObject {
                 base: populated_base("line"),
@@ -1507,7 +1518,7 @@ mod tests {
                     smoothing: 0.3,
                     roundness: 1.0,
                     angle: 0.0,
-                    color: "#ff0000".into(),
+                    color: ColorValue::hex("#ff0000").unwrap(),
                     blend_mode: BrushBlendMode::Multiply,
                 }],
                 paint_blend_mode: BrushBlendMode::Normal,
@@ -1534,7 +1545,7 @@ mod tests {
                 base: populated_base("light"),
                 light_kind: LightKind::Spot,
                 intensity: 2.0,
-                color: "#ffffff".into(),
+                color: Rgba::srgb(1.0, 1.0, 1.0, 1.0),
                 range: Some(500.0),
                 decay: Some(2.0),
                 cone_angle_deg: Some(35.0),
@@ -1585,9 +1596,9 @@ mod tests {
         let mut bg = base("bg");
         bg.width = 1920.0;
         bg.height = 200.0;
-        bg.fill = Some("#102030".into());
+        bg.fill = Some(ColorValue::hex("#102030").unwrap());
         let mut title = base("title");
-        title.fill = Some("#ffffff".into());
+        title.fill = Some(ColorValue::hex("#ffffff").unwrap());
         let mut logo = base("logo");
         logo.width = 120.0;
         logo.height = 120.0;
@@ -1645,6 +1656,7 @@ mod tests {
                 SceneObject::Image(ImageObject {
                     base: logo,
                     asset_id: "asset_logo".into(),
+                    fit: FitMode::Contain,
                 }),
             ],
         }
@@ -1700,7 +1712,10 @@ mod tests {
         assert_eq!(wire[0]["writingMode"], "vertical-rl");
         assert_eq!(wire[0]["textCase"], "small-caps");
         assert_eq!(wire[0]["lineHeight"], 1.2);
-        assert_eq!(wire[0]["materialSlots"]["front"], "material_gold");
+        assert_eq!(
+            wire[0]["materialSlots"]["front"]["materialId"],
+            "material_gold"
+        );
         assert_eq!(wire[7]["slab"]["cornerRadius"], 18.0);
         assert_eq!(wire[7]["frameOffset"], -3);
         assert_eq!(wire[8]["coneAngleDeg"], 35.0);
@@ -1719,6 +1734,37 @@ mod tests {
         for absent in ["anchor", "fill", "stroke", "bindings", "materialSlots"] {
             assert!(!map.contains_key(absent), "{absent} should be absent");
         }
+    }
+
+    #[test]
+    fn a_flattened_float_survives_the_wire_bit_for_bit() {
+        // Every kind flattens `ObjectBase`, and `#[serde(flatten)]` makes
+        // serde deserialise through `deserialize_any`, whose default float
+        // parser in serde_json is accurate to a ULP rather than exact. That
+        // is not a rounding curiosity: a scene read back would not equal the
+        // scene written, so a content hash over the re-serialised document
+        // would differ from the one over the original and a `.gpxpkg`
+        // manifest (1.8) would be wrong about its own contents. The
+        // `float_roundtrip` feature on serde_json is what makes this exact,
+        // and this test is what stops it being dropped as unused.
+        let component = 48.0 / 255.0;
+        let mut base = base("precision");
+        base.x = component;
+        base.fill = Some(ColorValue::Solid {
+            color: Rgba::srgb(component, component, component, 1.0),
+        });
+        let object = SceneObject::Rect(RectObject { base, radius: 0.0 });
+
+        let json = serde_json::to_string(&object).unwrap();
+        let back: SceneObject = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.base().x.to_bits(), component.to_bits(), "x drifted");
+        match back.base().fill.as_ref().expect("the fill") {
+            ColorValue::Solid { color } => {
+                assert_eq!(color.r.to_bits(), component.to_bits(), "red drifted")
+            }
+            other => panic!("expected a solid fill, got {other:?}"),
+        }
+        assert_eq!(back, object);
     }
 
     #[test]

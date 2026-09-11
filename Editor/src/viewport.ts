@@ -17,7 +17,7 @@
 
 import * as THREE from "three";
 
-import type { SceneDocument, SceneObject } from "@grapix/contracts";
+import type { ColorValue, SceneDocument, SceneObject } from "@grapix/contracts";
 import { PREVIEW_OUTPUT_COLOR_SPACE } from "./color-policy";
 import { makeOrthographicSceneCamera, scenePosition } from "./camera";
 
@@ -28,6 +28,10 @@ export class SceneViewport {
   readonly scene: THREE.Scene;
   readonly camera: THREE.OrthographicCamera;
   private readonly meshes: THREE.Mesh[] = [];
+  /// Objects this layer could not draw, and why — a gradient it has no
+  /// texture for, a colour space it cannot convert. Read by the shell so a
+  /// missing object is explained rather than merely absent.
+  readonly unsupported: string[] = [];
 
   constructor(canvas: HTMLCanvasElement, document: SceneDocument) {
     const space = { width: document.canvas.width, height: document.canvas.height };
@@ -43,7 +47,7 @@ export class SceneViewport {
     this.camera = makeOrthographicSceneCamera(space);
 
     for (const object of document.objects) {
-      const mesh = meshForObject(object, space);
+      const mesh = meshForObject(object, space, this.unsupported);
       if (mesh) {
         this.meshes.push(mesh);
         this.scene.add(mesh);
@@ -95,34 +99,95 @@ export function rectGeometry(width: number, height: number, radius: number): THR
   return new THREE.ShapeGeometry(shape, 8);
 }
 
+/// What the viewport could make of an authored paint.
+///
+/// A discriminated result rather than a `THREE.Color | null`, because the
+/// three answers are genuinely different: nothing was authored, the author
+/// turned the paint off, or this layer cannot reproduce what was authored.
+/// Collapsing the third into "draw black" is the silent substitution
+/// invariant 18 forbids, and collapsing it into "draw nothing" hides a
+/// defect the operator needs to see.
+export type PaintResolution =
+  | { kind: "color"; color: THREE.Color }
+  | { kind: "none" }
+  | { kind: "unsupported"; reason: string };
+
+/// Convert an authored paint (1.4) into something Three.js can draw.
+///
+/// The colour is handed to Three in the space it was tagged with and Three
+/// converts it, rather than this file re-deriving the sRGB curve — a second
+/// implementation of a transfer function is exactly the drift invariant 27
+/// exists to stop, and the authoritative one is in `gx-contracts::color`.
+export function resolvePaint(value: ColorValue | undefined): PaintResolution {
+  if (value === undefined) {
+    return { kind: "none" };
+  }
+  switch (value.type) {
+    case "none":
+      return { kind: "none" };
+    case "solid": {
+      const { r, g, b, space } = value.color;
+      switch (space) {
+        case "srgb":
+          return { kind: "color", color: new THREE.Color().setRGB(r, g, b, THREE.SRGBColorSpace) };
+        case "linear":
+          return {
+            kind: "color",
+            color: new THREE.Color().setRGB(r, g, b, THREE.LinearSRGBColorSpace),
+          };
+        case "display-p3":
+        case "rec709":
+          // Three's colour management has no transform for these, and
+          // drawing them as sRGB would be visibly wrong in the saturated
+          // colours a broadcast graphic is made of.
+          return { kind: "unsupported", reason: `colour space ${space} is not converted here` };
+      }
+      break;
+    }
+    case "linear-gradient":
+    case "radial-gradient":
+      // A gradient needs a texture or a shader; this layer has neither.
+      return { kind: "unsupported", reason: `${value.type} needs a texture the viewport cannot build` };
+  }
+  return { kind: "unsupported", reason: "unrecognised paint" };
+}
+
 /// Build a mesh for one scene object, in scene coordinates.
 ///
-/// Returns null for every kind this layer does not draw — and each case says
-/// why, because the switch is exhaustive over the object union: adding a
-/// fourteenth kind (1.2) stops this file compiling rather than silently
-/// skipping the object (invariant 18).
-function meshForObject(object: SceneObject, space: { width: number; height: number }): THREE.Mesh | null {
+/// Returns null for every kind this layer does not draw, and for an object
+/// whose paint it cannot reproduce — each case says why, because the switch
+/// is exhaustive over the object union: adding a fourteenth kind (1.2) stops
+/// this file compiling rather than silently skipping the object
+/// (invariant 18). `unsupported` collects the reasons so the shell can show
+/// them rather than leaving a hole in the picture unexplained.
+function meshForObject(
+  object: SceneObject,
+  space: { width: number; height: number },
+  unsupported: string[],
+): THREE.Mesh | null {
   const base = object;
   const pos = scenePosition(space, base.x, base.y, 0);
 
   let mesh: THREE.Mesh;
   switch (object.type) {
-    case "rect": {
-      const geometry = rectGeometry(object.width, object.height, object.radius);
-      const material = new THREE.MeshBasicMaterial({
-        color: new THREE.Color(object.fill ?? "#000000"),
-        transparent: base.opacity < 1,
-        opacity: base.opacity,
-      });
-      mesh = new THREE.Mesh(geometry, material);
-      break;
-    }
+    case "rect":
     case "ellipse": {
-      // Inscribed in the base box (1.2): the unit circle scaled to its radii.
-      const geometry = new THREE.CircleGeometry(1, 64);
-      geometry.scale(object.width / 2, object.height / 2, 1);
+      const paint = resolvePaint(object.fill);
+      if (paint.kind === "unsupported") {
+        unsupported.push(`${object.id}: ${paint.reason}`);
+        return null;
+      }
+      if (paint.kind === "none") {
+        return null;
+      }
+      const geometry =
+        object.type === "rect"
+          ? rectGeometry(object.width, object.height, object.radius)
+          : // An ellipse is inscribed in the base box (1.2): the unit circle
+            // scaled to its radii.
+            new THREE.CircleGeometry(1, 64).scale(object.width / 2, object.height / 2, 1);
       const material = new THREE.MeshBasicMaterial({
-        color: new THREE.Color(object.fill ?? "#000000"),
+        color: paint.color,
         transparent: base.opacity < 1,
         opacity: base.opacity,
       });

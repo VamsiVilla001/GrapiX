@@ -78,21 +78,30 @@ fn kill_worker_on(port: u16) {
 fn kill_worker_on(_port: u16) {}
 
 /// Start a worker on a port, waiting for it to answer.
+///
+/// The child is owned by `KillOnDrop` from the moment it exists, before the
+/// wait that can fail. Constructing the guard only on success leaks the
+/// process on every failed startup, and on Windows a leaked worker holds
+/// `gx-render-worker.exe` open so the next `cargo build` fails with "access
+/// is denied" — a stale binary that then fails the *next* run for a reason
+/// that looks nothing like the cause (memory rule 19).
 fn start_worker(binary: &PathBuf, port: u16) -> KillOnDrop {
-    let child = Command::new(binary)
-        .args(["--port", &port.to_string()])
-        // Detach stdio so the long-lived worker does not hold the test
-        // harness's output pipe open after the test process wants to exit.
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn worker");
+    let child = KillOnDrop(
+        Command::new(binary)
+            .args(["--port", &port.to_string()])
+            // Detach stdio so the long-lived worker does not hold the test
+            // harness's output pipe open after the test process wants to exit.
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn worker"),
+    );
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     while std::time::Instant::now() < deadline {
         if gx_control_transport::Client::connect(addr).is_ok() {
-            return KillOnDrop(child);
+            return child;
         }
         std::thread::sleep(Duration::from_millis(50));
     }

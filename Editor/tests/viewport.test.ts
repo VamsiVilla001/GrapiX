@@ -11,10 +11,12 @@
 //   construction is pure, so it runs here without a context.
 
 import { describe, expect, it } from "vitest";
+import * as THREE from "three";
 
+import type { ColorValue } from "@grapix/contracts";
 import { backingStoreSize, makeOrthographicSceneCamera, scenePosition } from "../src/camera";
 import { PREVIEW_OUTPUT_COLOR_SPACE } from "../src/color-policy";
-import { rectGeometry } from "../src/viewport";
+import { rectGeometry, resolvePaint } from "../src/viewport";
 
 const HD = { width: 1920, height: 1080 };
 
@@ -79,5 +81,50 @@ describe("rect geometry (1.2)", () => {
     // far more vertices than a plane's four.
     expect(geometry.attributes.position?.count ?? 0).toBeGreaterThan(4);
     geometry.dispose();
+  });
+});
+
+describe("authored paint (1.4)", () => {
+  const solid = (space: "srgb" | "linear" | "rec709"): ColorValue => ({
+    type: "solid",
+    color: { r: 0.5, g: 0.25, b: 0.125, a: 1, space },
+  });
+
+  it("converts a tagged colour through Three rather than re-deriving the curve", () => {
+    const fromSrgb = resolvePaint(solid("srgb"));
+    const fromLinear = resolvePaint(solid("linear"));
+    expect(fromSrgb.kind).toBe("color");
+    expect(fromLinear.kind).toBe("color");
+    if (fromSrgb.kind !== "color" || fromLinear.kind !== "color") return;
+    // The same numbers in two spaces are two different colours. If these
+    // ever agree, the tag is being ignored and B.1's "never infer" is gone.
+    expect(fromSrgb.color.r).not.toBeCloseTo(fromLinear.color.r, 4);
+    // Three holds colour linearly, so a linear-tagged value passes straight
+    // through and an sRGB one is decoded.
+    expect(fromLinear.color.r).toBeCloseTo(0.5, 6);
+    expect(fromSrgb.color.r).toBeCloseTo(new THREE.Color().setRGB(0.5, 0.25, 0.125, THREE.SRGBColorSpace).r, 12);
+  });
+
+  it("reports what it cannot reproduce instead of approximating it", () => {
+    // Invariant 18: drawing a gradient as its first stop, or Rec.709 as
+    // sRGB, is a silent visual substitution. Each must be named.
+    const gradient: ColorValue = {
+      type: "linear-gradient",
+      angle: 90,
+      startX: 0,
+      startY: 0,
+      endX: 1,
+      endY: 0,
+      stops: [{ position: 0, color: { r: 1, g: 0, b: 0, a: 1, space: "srgb" } }],
+      spread: "pad",
+      coordinateMode: "object",
+    };
+    expect(resolvePaint(gradient)).toMatchObject({ kind: "unsupported" });
+    expect(resolvePaint(solid("rec709"))).toMatchObject({ kind: "unsupported" });
+  });
+
+  it("distinguishes no paint authored from paint turned off", () => {
+    expect(resolvePaint(undefined).kind).toBe("none");
+    expect(resolvePaint({ type: "none" }).kind).toBe("none");
   });
 });

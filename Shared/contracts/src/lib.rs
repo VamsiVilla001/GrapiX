@@ -5,8 +5,10 @@
 
 #![forbid(unsafe_code)]
 
+pub mod color;
 pub mod design_system;
 pub mod font;
+pub mod material;
 pub mod platform;
 pub mod scene;
 
@@ -226,12 +228,14 @@ pub enum Refusal {
     TierTooLow { actual: DeviceTier },
     /// Reference is not locked and free-run was not explicitly accepted.
     ReferenceUnlocked { state: ReferenceState },
-    /// A blend mode the renderer cannot reproduce exactly. Notably `overlay`,
-    /// which aliased to `screen` in 1.x: a silent visual fallback, and an M1
-    /// fix.
-    UnsupportedBlendMode { mode: String },
+    /// A blend mode the renderer cannot reproduce exactly. Notably
+    /// `overlay`, which aliased to `screen` in 1.x: a silent visual
+    /// fallback, and an M1 fix. Carries the enum rather than a string, so a
+    /// mode that does not exist cannot be refused — or claimed — freehand
+    /// (1.3).
+    UnsupportedBlendMode { mode: material::BlendMode },
     /// A fit mode the renderer cannot reproduce exactly.
-    UnsupportedFitMode { mode: String },
+    UnsupportedFitMode { mode: material::FitMode },
     /// A declared asset's bytes have not arrived. A take blocker
     /// (invariant 29).
     AssetMissing { hash: ContentHash },
@@ -292,6 +296,15 @@ pub enum Refusal {
     /// Font bytes failed inspection: unreadable tables, unsupported
     /// container, no family name.
     InvalidFontData { detail: String },
+    /// A colour literal that is not a colour. Never defaulted to black: an
+    /// unreadable colour is an authoring error, and substituting one is how
+    /// a mistyped fill becomes an invisible graphic on air (1.4).
+    InvalidColor { given: String },
+    /// The OS could not name a per-user directory. Its own variant because a
+    /// refusal names its failing condition (invariant 17) — this was
+    /// reported as `InvalidFontData` until 1.4, which told the caller
+    /// nothing true.
+    PlatformDirectoryUnavailable { detail: String },
 }
 
 impl std::fmt::Display for Refusal {
@@ -306,8 +319,8 @@ impl std::fmt::Display for Refusal {
             }
             Refusal::TierTooLow { actual } => write!(f, "device tier too low: {actual:?}"),
             Refusal::ReferenceUnlocked { state } => write!(f, "reference not locked: {state:?}"),
-            Refusal::UnsupportedBlendMode { mode } => write!(f, "unsupported blend mode: {mode}"),
-            Refusal::UnsupportedFitMode { mode } => write!(f, "unsupported fit mode: {mode}"),
+            Refusal::UnsupportedBlendMode { mode } => write!(f, "unsupported blend mode: {mode:?}"),
+            Refusal::UnsupportedFitMode { mode } => write!(f, "unsupported fit mode: {mode:?}"),
             Refusal::AssetMissing { hash } => write!(f, "asset missing: {hash}"),
             Refusal::ProtocolMismatch { expected, actual } => {
                 write!(f, "protocol mismatch: expected {expected}, got {actual}")
@@ -343,6 +356,10 @@ impl std::fmt::Display for Refusal {
                 write!(f, "font {font_id} may not be packaged: no licence recorded")
             }
             Refusal::InvalidFontData { detail } => write!(f, "invalid font data: {detail}"),
+            Refusal::InvalidColor { given } => write!(f, "not a colour: {given}"),
+            Refusal::PlatformDirectoryUnavailable { detail } => {
+                write!(f, "platform directory unavailable: {detail}")
+            }
         }
     }
 }
@@ -480,7 +497,7 @@ mod tests {
         // dropped fails this test, and the generated TS is checked against it
         // by the codegen-staleness gate.
         let r = StructuredRefusal::error(Refusal::UnsupportedBlendMode {
-            mode: "overlay".into(),
+            mode: material::BlendMode::Overlay,
         })
         .at("objects[3].material.blend", serde_json::json!("overlay"))
         .allowing(vec![
