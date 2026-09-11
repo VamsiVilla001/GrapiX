@@ -71,6 +71,55 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-09-11 — the 1.x working tree removed from disk
+
+Requested by the user: remove the 1.x artefacts and files, leave the current
+2.0 work alone. No tracked file changed — the whole of 1.x survived on this
+branch only as untracked leftovers, because GrapiX-2.0 is an orphan branch and
+switching to it never cleaned the working directory.
+
+**What was verified before deleting.** Every 1.x source file on disk was
+hashed with `git hash-object` and matched against
+`Basic-v0.4-2026-09-06-project-container-material-library` (also on origin).
+All of it is committed there. The only 21 files that did not match are
+generated or binary: Tauri `gen/schemas`, the bundled sidecar `.exe`s, an
+esbuild bundle, and AE certification reference `.tif` frames. Nothing unique
+to the working tree was lost.
+
+**Removed.** The 1.x product trees (`Editor/apps`, `Editor/services`,
+`Playout/apps`, `Playout/services`, `ae-plugin`, `services/render-daemon`,
+`tools/certification`, `tools/figma-motion-bridge`, `tools/kindtest`); the
+seventeen 1.x `Shared/*` packages, which by then held nothing but stale
+compiled `dist/` — the sources were already gone; 1.x build output
+(`services/render-engine/target` at 25.8 GB, `services/render-daemon` at
+21.1 GB, the two Tauri targets at 13.5 GB); scratch and cache dirs
+(`.tmp-fixture-backup`, `.tmp-p4-data`, `.tmp-preflight`, `cache`, `tmp`,
+`output`, `artifacts`); the 1.x runtime data root `data/` (18 scenes, 256
+assets, 127 backups, `users.json`) and `Editor/data`, `Playout/data`; the
+Adobe AE SDK material (`SDK docs/`, `vendor/adobe`); and 37 empty 1.x package
+husks left inside `node_modules`, plus the `grapix-editor-mcp` bin shims.
+
+Deleting `data/` and the Adobe SDK was the user's explicit call, put to them
+first because neither exists in git and neither is recoverable.
+
+**Kept.** Everything tracked at HEAD, the 2.0 `target/` and `node_modules/`,
+and the 2.0 build output `Editor/dist`, `Playout/dist`,
+`Shared/generated-ts/dist`, `services/schema-mcp/dist` and the `.tsbuildinfo`
+files. 60.70 GB and 58,245 files freed; the repository is 71.83 GB → 11.13 GB.
+
+**Verified by execution.** `git status` is clean against HEAD `8a03d49` — no
+tracked file was deleted, and the only untracked path left is `.codex/`, which
+is agent config, not 1.x. `npm run check` passes end to end: boundaries,
+codegen check, typecheck, TS tests, `cargo test --workspace`, and conformance
+at 99 passed / 0 failed / 9 skipped.
+
+**A trap this surfaced.** The main checkout moved from `b5d7a3d` to `8a03d49`
+mid-task — another session committed 1.1/1.7 while this cleanup ran. The
+worktree this ran from is still at `b5d7a3d`. Re-read `git rev-parse HEAD` in
+the main checkout before trusting a file list taken from a worktree.
+
+---
+
 ## 2026-09-11 — fonts ported, platform primitives, DeckLink probe, P.2 positions
 
 Scoped by the user: DeckLink Duo 2 is installed; defer Adobe/AE; do FFmpeg,
@@ -209,6 +258,71 @@ silently ignored.
 - No `.gpxpkg` format or manifest (1.8).
 - The mocks do not yet serve scenes (1.11); conformance does not exercise a
   scene (1.12).
+
+---
+
+## 2026-09-11 — Three.js viewport foundation (11.6, ahead of the shell)
+
+The user directed Three.js for canvas, objects and rendering, per ADR-0002
+A.1 (Three.js 0.185, sole browser renderer, WebGL2) and ADR-0001's record
+("keep, sole browser renderer; PixiJS removed"). Phase 11's full viewport
+(11.6) needs the Tauri shell (11.1) and Phase 9 research, so this is the
+**foundation**, not the viewport: the policy and camera that the handoff
+makes load-bearing, plus the thin GL construction that needs a context.
+
+**Colour policy (`Editor/src/color-policy.ts`, B.1).** The constants the
+browser layer must honour, stated once: linear working space, exactly two
+output transforms (sRGB preview, Rec.709 broadcast), and no "unknown" source
+space — an untagged texture is a defect, per B.1's "never infer."
+
+**Camera (`Editor/src/camera.ts`, B.2, 11.6).** The scene document is in
+scene coordinates; DPI affects display only. `makeOrthographicSceneCamera`
+fits the frustum to the scene extent 1:1 (one scene unit = one canvas pixel
+at zoom 1); `backingStoreSize` scales the renderer's backing store with
+`devicePixelRatio` while the document never changes; `scenePosition` converts
+the top-left authoring origin to the camera's centred Y-up space — the single
+conversion between the two.
+
+**Viewport (`Editor/src/viewport.ts`).** The thin GL wiring: a WebGL2
+renderer with the sRGB preview transform applied, the ortho camera, one mesh
+per scene object in scene coordinates. Text renders through the shaped-text
+path (cosmic-text on the engine), not a quad, so it returns null here — the
+2D-beside-3D case (11.6's done-when) covers it. Groups paint nothing. This
+layer is a viewport convenience, not the production pixel path (invariant 2),
+and is structured so the engine can take over the raster (13.5).
+
+**Tested headless** — the policy and camera need no GL context, so vitest
+covers them (4 tests: preview is sRGB, frustum maps 1:1, backing store scales
+with DPI, scene-position conversion). The render loop needs a context and is
+typechecked, not run — no headless-GL claim is made. vitest is now wired into
+the gate's `test:ts`.
+
+three@0.185 pinned to match the handoff exactly.
+
+### Verified by execution
+
+| What | Result |
+|---|---|
+| `npx vitest run` (Editor) | **4 passed** — colour policy + camera mapping |
+| `npx tsc --build` | clean — viewport.ts typechecked against three@0.185 and the generated scene types |
+| `npm run check` | **exit 0** — codegen 74 files, 14 node tests + 4 vitest, conformance 99/0/9 |
+
+### Status after this entry
+
+| Unit | Status |
+|---|---|
+| `Editor/src/color-policy.ts`, `camera.ts` | **Implemented** — policy + camera, tested headless |
+| `Editor/src/viewport.ts` | **Partial** — GL construction typechecked; render loop needs a context, not run |
+| 11.6 | **active** — foundation only; the 2D-beside-3D done-when needs the shell |
+
+### Not done, and not claimed
+
+- No render loop run: no GL context exists outside the Tauri shell (11.1).
+- No hit-testing, overlays (11.7), or frame scheduling.
+- Text and image textures are placeholders; the shaped-text and asset-texture
+  paths are separate.
+- 2D-beside-3D (11.6's done-when) is not exercised — no 3D objects in the
+  lean union yet, and the engine raster path is 13.x.
 
 ---
 

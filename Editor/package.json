@@ -6,9 +6,15 @@
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
-    "typecheck": "tsc --build"
+    "typecheck": "tsc --build",
+    "test:unit": "vitest run"
   },
   "dependencies": {
-    "@grapix/contracts": "*"
+    "@grapix/contracts": "*",
+    "three": "0.185.0"
+  },
+  "devDependencies": {
+    "@types/three": "0.185.0",
+    "vitest": "^3"
   }
 }

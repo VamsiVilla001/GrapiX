@@ -147,6 +147,8 @@ const INITIAL_STATE = {
   "2.2": "done",   // filename sanitiser: hostile corpus (reserved names, illegal chars, NFC, length) passes; idempotent
   "2.4": "done",   // OS data roots via directories crate; absolute, never in-repo (test proves on Windows; macOS leg is CI)
   "2.8": "active", // font subsystem ported: contracts + metadata + CSS parse + manager + cssgen + validate (28 tests); network resolver is Editor-service, shaping is 3.6
+  // Phase 11 — Editor UI (the viewport foundation, ahead of the shell).
+  "11.6": "active", // Three.js viewport foundation: colour policy (B.1), scene-coordinate ortho camera (B.2), one mesh per object; policy+camera tested headless (4 vitest), render loop needs the Tauri shell
   // Phase 1 — domain contracts (verified by conformance + unit tests).
   "1.1": "done",   // scene document schema (lean core: 5 object kinds); round-trips Rust↔TS, proven by a pinned-JSON Rust test + a generated-TS typecheck + a runtime round-trip
   "1.5": "done",   // design system token schema (MotionTokens et al.)

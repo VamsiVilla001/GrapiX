@@ -5,6 +5,7 @@
     { "path": "Shared/generated-ts/tests" },
     { "path": "services/schema-mcp" },
     { "path": "Editor" },
+    { "path": "Editor/tests" },
     { "path": "Playout" }
   ]
 }
