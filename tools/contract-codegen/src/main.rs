@@ -18,6 +18,10 @@ use gx_contracts::font::{
     EmbeddingPolicy, FontDefinition, FontFaceDefinition, FontFormat, FontLoadStatus, FontSource,
     FontStyle,
 };
+use gx_contracts::scene::{
+    AssetAvailability, AssetKind, AssetLibraryItem, EllipseObject, GroupObject, ImageObject,
+    ObjectBase, RectObject, SceneCanvas, SceneDocument, SceneObject, SceneTimeline, TextObject,
+};
 use gx_contracts::{
     ClockSource, ContentHash, DeviceTier, Epoch, Locality, MediaCodec, RationalRate,
     ReferenceState, Refusal, RefusalSeverity, Revision, StructuredRefusal, TakeId,
@@ -74,6 +78,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         FontStyle,
         FontFaceDefinition,
         FontDefinition,
+        // gx-contracts: scene document (1.1) and asset library (1.7)
+        AssetKind,
+        AssetAvailability,
+        AssetLibraryItem,
+        SceneCanvas,
+        SceneTimeline,
+        ObjectBase,
+        TextObject,
+        RectObject,
+        EllipseObject,
+        ImageObject,
+        GroupObject,
+        SceneObject,
+        SceneDocument,
         // gx-control-plane: intent
         TakeAt,
         TakeRequest,

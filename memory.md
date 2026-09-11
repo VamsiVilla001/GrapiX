@@ -150,6 +150,68 @@ worker binary, not a contract break — rule 19 records the trap.
 
 ---
 
+## 2026-09-11 — scene document schema and asset addressing (1.1, 1.7)
+
+The Phase 1 bottleneck, scoped with the user to a **lean core** rather than
+the full 1.x union: the document shell is complete and the object union
+carries the five kinds the design system and lower-thirds use (text, rect,
+ellipse, image, group). Meshes, lights and cameras are deferred to 1.2's
+catalogue step — adding a kind is an additive change to a closed enum, so the
+core is not a straitjacket.
+
+**1.1 — `Shared/contracts/src/scene.rs`.** `SceneDocument` (id, name, version,
+revision, canvas, timeline, data context, assets, fonts, objects), the
+five-object `SceneObject` union (a closed tagged enum, so an unknown kind is
+a parse error, never a skipped object — invariant 18), and the supporting
+types. The done-when is proven three ways, because "round-trips through both
+languages" has two sides and a runtime:
+
+- a Rust test pins the exact wire JSON (camelCase, `type`-tagged);
+- a compile-time TS test (`scene-roundtrip.types.ts`, compiled by the gate's
+  typecheck) assigns that wire shape to the generated `SceneDocument` — a
+  renamed field or missed optional stops the build;
+- a runtime TS test (`scene-roundtrip.test.mjs`) round-trips the JSON
+  losslessly.
+
+The gate's `test:ts` glob did not reach `Shared/generated-ts/tests`, so the
+runtime test was passing silently un-run; the glob now covers it (14 TS
+tests, was 12).
+
+**1.7 — asset addressing.** `AssetKind`, `AssetAvailability` and
+`AssetLibraryItem` carry both addresses (content hash + project-relative
+path), and `SceneDocument::replace_asset_bytes` is the replace-in-place
+operation: it moves the hash, leaves the path and the asset id, and the image
+object binding the id resolves to the new bytes with no edit (invariant 31).
+Proven by a Rust test and its TS mirror; an unknown asset id is reported, not
+silently ignored.
+
+### Verified by execution
+
+| What | Result |
+|---|---|
+| `cargo test -p gx-contracts` (scene) | **3 passed** — round-trip, replace-in-place, unknown-kind refused |
+| `npx tsc --build` (with types test) | **clean** — the `@ts-expect-error` on an unknown kind holds, proving the union is closed |
+| `node --test` scene round-trip | **2 passed** |
+| `npm run check` | **exit 0** — codegen 74 files, 14 TS tests, conformance 99/0/9 |
+
+### Status after this entry
+
+| Unit | Status |
+|---|---|
+| `Shared/contracts/src/scene.rs` | **Implemented** — lean core, round-trips, 3 tests |
+| 1.1, 1.7 | **done** |
+| 1.2, 1.3, 1.4, 1.8, 1.11, 1.12 | **open** — object catalogue, materials, colour, .gpxpkg, mocks' scene surface, conformance |
+
+### Not done, and not claimed
+
+- The object union is five kinds. Meshes, lights, cameras, layers, line,
+  shape, paint and the hierarchy resolver are 1.2 and not present.
+- No `.gpxpkg` format or manifest (1.8).
+- The mocks do not yet serve scenes (1.11); conformance does not exercise a
+  scene (1.12).
+
+---
+
 ## 2026-09-11 — Phase 0 CI, licence policy, and the revision steps recorded
 
 Assessed every remaining Phase P and Phase 0 step. Phase P is external by

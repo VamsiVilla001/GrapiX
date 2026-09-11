@@ -8,6 +8,7 @@
 pub mod design_system;
 pub mod font;
 pub mod platform;
+pub mod scene;
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;

@@ -148,10 +148,12 @@ const INITIAL_STATE = {
   "2.4": "done",   // OS data roots via directories crate; absolute, never in-repo (test proves on Windows; macOS leg is CI)
   "2.8": "active", // font subsystem ported: contracts + metadata + CSS parse + manager + cssgen + validate (28 tests); network resolver is Editor-service, shaping is 3.6
   // Phase 1 — domain contracts (verified by conformance + unit tests).
+  "1.1": "done",   // scene document schema (lean core: 5 object kinds); round-trips Rust↔TS, proven by a pinned-JSON Rust test + a generated-TS typecheck + a runtime round-trip
   "1.5": "done",   // design system token schema (MotionTokens et al.)
   "1.6": "done",   // motion token + preset schema; ms_to_frames resolves at any rate
   "1.9": "done",   // protocol v3 intent-based take, committed frame; conformance asserts no wall-clock
   "1.10": "done",  // capability: locality, device tier, clock source, reference state
+  "1.7": "done",   // asset addressing: content hash + project-relative path; replace-in-place keeps bindings, proven in Rust and TS
   // Phase 3 — render engine core (partial: the parts that are verified).
   "3.1": "done",   // wgpu init, device negotiation, runs headless (Windows, T0)
   "3.2": "done",   // device tier negotiation T0–T3, reported in capability

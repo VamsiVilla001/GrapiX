@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "Shared/generated-ts" },
+    { "path": "Shared/generated-ts/tests" },
     { "path": "services/schema-mcp" },
     { "path": "Editor" },
     { "path": "Playout" }
