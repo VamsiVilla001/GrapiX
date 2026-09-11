@@ -1388,3 +1388,26 @@ the fixed-function path refuse at publish, not at frame time.
 **Verified by execution.** `cargo test -p gx-render-worker` — 62 passed.
 `cargo run -p gx-conformance` — 126 passed, 0 failed, 8 skipped (documented
 limitations). Full workspace compiles with warnings only.
+
+---
+
+## 2026-09-12 — Performance endpoint and clock catch-up
+
+**Performance endpoint.** `ClientRequest::Performance` returns a
+`PerformanceSummary` with the rolling frame window, totals and mean budget
+ratio. The control-plane type (`FrameSampleSummary`, `PerformanceSummary`)
+lives in `Shared/control-plane/src/status.rs` so the wire format does not
+depend on the worker crate. `Engine::performance_summary()` converts from the
+worker's `EnginePerformance`. The mock engine returns an empty summary.
+
+**Clock catch-up.** `sync_clock` was ticking the `ProgramClock` one frame at
+a time to catch up to the pump. When the pump had run far ahead (e.g. the
+engine was busy publishing a scene), the catch-up loop held the engine mutex
+for an unbounded time, starving control-plane connections. Fixed with
+`ProgramClock::advance_to(frame)` which sets the frame directly — a single
+assignment instead of a loop.
+
+**Verified.** 280 Rust tests pass (all library crates, excluding the
+host-integration tests which have a pre-existing Windows process cleanup
+issue). 126 conformance checks pass. TypeScript typecheck and vitest pass.
+Codebase is clean and committed.
