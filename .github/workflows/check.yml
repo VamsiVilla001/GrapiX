@@ -1,0 +1,78 @@
+# GrapiX CI — build plan 0.3 (matrix on Windows and macOS from the first
+# commit) and 0.4 (SBOM on every build).
+#
+# The gate is `npm run check`: boundaries, codegen-staleness, typecheck, TS
+# tests, Rust tests, and the conformance suite. A change is not mergeable
+# unless it is green on both platforms — cross-platform drift is caught here,
+# not by a client.
+
+name: check
+
+on:
+  push:
+    branches: [GrapiX-2.0, main]
+  pull_request:
+
+# Cancel a superseded run on the same ref rather than queueing behind it.
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: gate (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned toolchain, matching rust-toolchain.toml and package.json
+      # engines (0.2): Rust stable with rustfmt+clippy, Node >=22.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Cache the cargo registry and target dir per-OS so the matrix stays
+      # fast; a stale cache is keyed off Cargo.lock so a dependency change
+      # rebuilds rather than reusing mismatched artifacts.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Lint (fmt + clippy)
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Gate
+        run: npm run check
+
+      # 0.4: a Software Bill of Materials on every build, so the dependency
+      # and licence position is inspectable per artifact rather than asserted.
+      - name: Generate SBOM (Rust)
+        run: cargo install cargo-sbom --locked && cargo sbom > sbom-rust.json
+
+      - name: Generate SBOM (npm)
+        run: npx --yes @cyclonedx/cyclonedx-npm --output-file sbom-npm.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ matrix.os }}
+          path: |
+            sbom-rust.json
+            sbom-npm.json
+          retention-days: 30

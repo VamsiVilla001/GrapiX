@@ -134,10 +134,13 @@ const INITIAL_STATE = {
   // Phase 0 — repository foundations (verified: cargo build, cargo test,
   // codegen-staleness gate, conformance harness, all in `npm run check`).
   "0.1": "done",   // one Cargo workspace, one lockfile — cargo build builds all crates
-  "0.2": "done",   // toolchains pinned: rust-toolchain.toml, engines.node, wgpu 26
+  "0.2": "done",   // toolchains pinned: rust-toolchain.toml, engines.node, wgpu 26; CI builds with the same pins (0.3 workflow)
+  "0.3": "active", // CI matrix workflow committed, Windows leg green locally via npm run check; macOS leg never run — a pushed CI run is the remaining evidence
+  "0.4": "active", // licence policy written, SBOM steps in CI, both SBOMs generated locally (SPDX 156 pkgs, CycloneDX 5 components); SBOM-as-artifact on a real CI run still unobserved
   "0.5": "done",   // tracing skeleton: gx-telemetry init + typed spans; span reaches a collector (in-process; OTLP export deferred to the observability series)
   "0.6": "done",   // StructuredRefusal: code, field, given, allowed, severity; serialises identically in Rust and generated TS
   "0.7": "done",   // RationalRate num/den, no f64 constructor; test forbids float rates
+  "0.8": "done",   // Revision + if_revision: conflict returns the current revision; loser-recovery test passes
   "0.9": "done",   // contracts package; Rust source of truth, TS generated, drift gate
   "0.10": "done",  // conformance harness + mock-peer pattern, runs in gate
   // Phase 1 — domain contracts (verified by conformance + unit tests).

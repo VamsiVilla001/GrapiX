@@ -54,6 +54,62 @@ not a euphemism for nearly done.
    clock health. Optional fields are `Option<T>` with `skip_serializing_if`
    **and** `#[ts(optional)]` — ts-rs cannot see serde's skip attribute, and
    one without the other makes the TS shape lie about the wire.
+17. CI-only done-when criteria (0.3, 0.4) are not closable from a workstation.
+   Mark `active` with the workflow committed and every locally observable
+   half verified; `done` needs the CI run's green check plus the SBOM
+   artifact, which only exists after a push. Do not mark them `done` because
+   the YAML looks right.
+
+---
+
+## 2026-09-11 — Phase 0 CI, licence policy, and the revision steps recorded
+
+Assessed every remaining Phase P and Phase 0 step. Phase P is external by
+definition (procurement, licensing positions with named owners, participant
+recruitment) — nothing executable in-repo, and `active` stands. Phase 0 had
+three steps left, two of them partly built and uncommitted from a prior
+session.
+
+**0.3 — CI matrix (active).** `.github/workflows/check.yml` was sitting
+untracked. It is the right shape: Windows + macOS matrix, the pinned
+toolchain (rust-toolchain stable with rustfmt/clippy, Node 22 matching
+`engines`), lockfile-keyed cargo cache, fmt+clippy, then the whole gate.
+Committed. What cannot be done from here: the done-when is "both platforms
+green", and no CI run has ever executed — the workflow's first run happens
+on push. The Windows leg's equivalence is locally verified (`npm run check`
+exit 0 on Windows), the macOS leg is not observable from a Windows
+workstation. Recorded `active`, and rule 17 names this class of trap.
+
+**0.4 — dependency policy and SBOM (active).** `docs/dependency-policy.md`
+was also untracked: accepted licences (MIT/Apache-2.0/BSD/ISC/Zlib/Unicode),
+written-position-required for LGPL/GPL/patent codecs/font embedding
+(cross-referenced to P.2), prohibited classes, review cadence. The workflow
+generates both SBOMs and uploads them per-OS. Verified locally, since the
+tools exist here: `cargo sbom` produces SPDX 2.3 with 156 packages;
+`cyclonedx-npm` produces CycloneDX 1.6 with 5 components. Not `done`: the
+criterion is "SBOM artifact on every build", and "every build" means the CI
+artifact, which needs a CI run.
+
+**0.8 — revision semantics (done).** Was implemented two sessions ago
+(`Revision::check_write` returning `RevisionConflict { expected, current }`)
+but never recorded. Re-verified by execution rather than trusted: the three
+tests pass — stale write returns the current revision, matching write
+advances, and the loser recovers and wins the retry. That is exactly the
+done-when, so it is recorded `done` now.
+
+### Verified by execution
+
+| What | Result |
+|---|---|
+| `cargo sbom` | SPDX 2.3, **156 packages** |
+| `npx @cyclonedx/cyclonedx-npm` | CycloneDX 1.6, **5 components** |
+| `cargo test -p gx-contracts` (revision + recovery) | **3 passed, 0 failed** |
+| `npm run check` | **exit 0** after tracker edits — all six stages green |
+
+### Still open in Phase 0
+
+- **0.3, 0.4** — `active`, waiting on the first CI run (push the branch).
+- Phase P — all three tracks external; owners and dates are the user's.
 
 ---
 
