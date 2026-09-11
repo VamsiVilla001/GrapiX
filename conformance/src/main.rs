@@ -198,7 +198,12 @@ fn run_against_real_engine(report: &mut Report) {
     let port = free_port();
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
     let child = std::process::Command::new(&worker)
-        .args(["--port", &port.to_string(), "--publish", "conformance/published:1"])
+        .args([
+            "--port",
+            &port.to_string(),
+            "--publish",
+            "conformance/published:1",
+        ])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())

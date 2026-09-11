@@ -5,11 +5,11 @@
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
+use gx_contracts::{Revision, TakeId};
 use gx_control_plane::intent::{TakeAt, TakeRequest};
 use gx_control_plane::message::{ClientRequest, EngineReply};
 use gx_control_plane::peer::EnginePeer;
 use gx_control_transport::Client;
-use gx_contracts::{Revision, TakeId};
 
 fn main() {
     let port: u16 = std::env::args()

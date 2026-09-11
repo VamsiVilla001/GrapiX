@@ -65,7 +65,10 @@ pub fn validate_font_definition(
         }
         if !(1..=1000).contains(&face.weight) {
             return Err(Refusal::InvalidFontData {
-                detail: format!("face {} has weight {}, must be 1-1000", face.face_id, face.weight),
+                detail: format!(
+                    "face {} has weight {}, must be 1-1000",
+                    face.face_id, face.weight
+                ),
             });
         }
         match &face.source {

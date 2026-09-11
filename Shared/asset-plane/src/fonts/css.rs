@@ -93,9 +93,13 @@ fn find_font_face_bodies(css: &str) -> Vec<String> {
     let mut search_from = 0;
     while let Some(i) = lower[search_from..].find("@font-face") {
         let after = search_from + i + "@font-face".len();
-        let Some(open) = css[after..].find('{') else { break };
+        let Some(open) = css[after..].find('{') else {
+            break;
+        };
         let body_start = after + open + 1;
-        let Some(close) = css[body_start..].find('}') else { break };
+        let Some(close) = css[body_start..].find('}') else {
+            break;
+        };
         out.push(css[body_start..body_start + close].to_string());
         search_from = body_start + close + 1;
     }
@@ -116,8 +120,12 @@ fn parse_face(body: &str, base_url: &str) -> Option<ParsedFontFace> {
         family,
         weight: parse_weight(declarations.get("font-weight")),
         style: parse_style(declarations.get("font-style")),
-        stretch: declarations.get("font-stretch").map(|s| s.trim().to_string()),
-        unicode_range: declarations.get("unicode-range").map(|s| s.trim().to_string()),
+        stretch: declarations
+            .get("font-stretch")
+            .map(|s| s.trim().to_string()),
+        unicode_range: declarations
+            .get("unicode-range")
+            .map(|s| s.trim().to_string()),
         sources,
     })
 }
@@ -215,7 +223,8 @@ mod tests {
 
     #[test]
     fn google_stylesheet_parses_faces_and_sources() {
-        let parsed = parse_font_stylesheet(GOOGLE, "https://fonts.googleapis.com/css2?family=Inter");
+        let parsed =
+            parse_font_stylesheet(GOOGLE, "https://fonts.googleapis.com/css2?family=Inter");
         assert_eq!(parsed.faces.len(), 2);
         assert_eq!(parsed.faces[0].family, "Inter");
         assert_eq!(parsed.faces[0].weight, 400);
@@ -226,7 +235,10 @@ mod tests {
         assert_eq!(parsed.faces[1].weight, 700);
         assert_eq!(parsed.faces[1].style, FontStyle::Italic);
         // The comment's fake @font-face produced nothing.
-        assert!(!parsed.faces.iter().any(|f| f.sources.iter().any(|s| s.url.contains("evil"))));
+        assert!(!parsed
+            .faces
+            .iter()
+            .any(|f| f.sources.iter().any(|s| s.url.contains("evil"))));
     }
 
     #[test]

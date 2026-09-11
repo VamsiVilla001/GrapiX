@@ -110,8 +110,8 @@ fn the_host_adopts_an_engine_it_did_not_start() {
     // A "stranger's" engine, started outside the host entirely.
     let _foreign = start_worker(&binary, port);
 
-    let mut supervised = ensure(binary.to_str().unwrap(), port, &[])
-        .expect("ensure adopts the running engine");
+    let mut supervised =
+        ensure(binary.to_str().unwrap(), port, &[]).expect("ensure adopts the running engine");
 
     assert_eq!(
         supervised.provenance(),
@@ -119,7 +119,10 @@ fn the_host_adopts_an_engine_it_did_not_start() {
         "an engine already answering must be adopted, not replaced"
     );
     // And it is genuinely usable.
-    assert!(supervised.status().is_some(), "adopted engine answers status");
+    assert!(
+        supervised.status().is_some(),
+        "adopted engine answers status"
+    );
 }
 
 #[test]

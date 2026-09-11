@@ -67,7 +67,11 @@ pub enum FontLoadStatus {
 /// what hit the wire: `rename_all` alone would leave `asset_id` snake_case
 /// while every other contract is camelCase.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum FontSource {
     /// Packaged asset bytes, content-addressed.
     File {
@@ -179,11 +183,8 @@ fn default_enabled() -> bool {
 /// The hosts a stylesheet URL may point at (1.x allowlist, carried forward).
 /// Bunny Fonts is the GDPR-safe Google Fonts mirror; both serve OFL/Apache
 /// fonts. Adobe Fonts is `use.typekit.net`, the only host Adobe serves from.
-pub const TRUSTED_FONT_CSS_HOSTS: [&str; 3] = [
-    "use.typekit.net",
-    "fonts.googleapis.com",
-    "fonts.bunny.net",
-];
+pub const TRUSTED_FONT_CSS_HOSTS: [&str; 3] =
+    ["use.typekit.net", "fonts.googleapis.com", "fonts.bunny.net"];
 
 /// The single allowlist check (invariant 27). HTTPS, a trusted host, no
 /// credentials. Case-insensitive on the host, like DNS.
@@ -194,9 +195,11 @@ pub fn is_trusted_font_css_url(value: &str) -> bool {
     url.scheme() == "https"
         && url.username().is_empty()
         && url.password().is_none()
-        && url
-            .host_str()
-            .is_some_and(|h| TRUSTED_FONT_CSS_HOSTS.iter().any(|t| h.eq_ignore_ascii_case(t)))
+        && url.host_str().is_some_and(|h| {
+            TRUSTED_FONT_CSS_HOSTS
+                .iter()
+                .any(|t| h.eq_ignore_ascii_case(t))
+        })
 }
 
 /// The URL hygiene every non-file face must pass: HTTPS, no credentials,
@@ -209,15 +212,19 @@ pub fn check_font_face_url(source: &FontSource) -> Result<(), crate::Refusal> {
         FontSource::AdobeFonts { url, .. } => (url, true),
         FontSource::DirectUrl { url, .. } => (url, false),
     };
-    let parsed = url::Url::parse(url)
-        .map_err(|_| crate::Refusal::InvalidFontUrl { url: url.clone() })?;
+    let parsed =
+        url::Url::parse(url).map_err(|_| crate::Refusal::InvalidFontUrl { url: url.clone() })?;
     if parsed.scheme() != "https" {
         return Err(crate::Refusal::FontUrlNotHttps { url: url.clone() });
     }
     if !parsed.username().is_empty() || parsed.password().is_some() {
         return Err(crate::Refusal::FontUrlHasCredentials { url: url.clone() });
     }
-    if is_adobe && !parsed.host_str().is_some_and(|h| h.eq_ignore_ascii_case("use.typekit.net")) {
+    if is_adobe
+        && !parsed
+            .host_str()
+            .is_some_and(|h| h.eq_ignore_ascii_case("use.typekit.net"))
+    {
         return Err(crate::Refusal::InvalidFontUrl { url: url.clone() });
     }
     Ok(())
@@ -229,22 +236,32 @@ mod tests {
 
     #[test]
     fn trusted_hosts_are_exactly_the_1x_allowlist() {
-        assert!(is_trusted_font_css_url("https://use.typekit.net/abc123.css"));
+        assert!(is_trusted_font_css_url(
+            "https://use.typekit.net/abc123.css"
+        ));
         assert!(is_trusted_font_css_url(
             "https://fonts.googleapis.com/css2?family=Inter"
         ));
-        assert!(is_trusted_font_css_url("https://fonts.bunny.net/css?family=Inter"));
-        assert!(is_trusted_font_css_url("https://FONTS.GOOGLEAPIS.COM/css?family=Inter"));
+        assert!(is_trusted_font_css_url(
+            "https://fonts.bunny.net/css?family=Inter"
+        ));
+        assert!(is_trusted_font_css_url(
+            "https://FONTS.GOOGLEAPIS.COM/css?family=Inter"
+        ));
     }
 
     #[test]
     fn untrusted_sources_are_refused_by_name() {
         // HTTP, credentials, unknown hosts, garbage: all rejected.
-        assert!(!is_trusted_font_css_url("http://fonts.googleapis.com/css?family=Inter"));
+        assert!(!is_trusted_font_css_url(
+            "http://fonts.googleapis.com/css?family=Inter"
+        ));
         assert!(!is_trusted_font_css_url(
             "https://user:pw@fonts.googleapis.com/css?family=Inter"
         ));
-        assert!(!is_trusted_font_css_url("https://fonts.example.com/css?family=Inter"));
+        assert!(!is_trusted_font_css_url(
+            "https://fonts.example.com/css?family=Inter"
+        ));
         assert!(!is_trusted_font_css_url("not a url"));
     }
 

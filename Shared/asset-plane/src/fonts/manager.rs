@@ -100,7 +100,10 @@ pub struct LinkedFontRequest {
 #[derive(Debug, Clone)]
 pub enum LinkedSource {
     /// A CSS stylesheet on a trusted host.
-    CssUrl { url: String, integrity: Option<String> },
+    CssUrl {
+        url: String,
+        integrity: Option<String>,
+    },
     /// An Adobe Fonts project id (3–32 alphanumerics, as in 1.x).
     AdobeFonts { project_id: String },
 }
@@ -188,7 +191,11 @@ fn linked_source(source: &LinkedSource) -> Result<FontSource, Refusal> {
             }
             Ok(FontSource::CssUrl {
                 url,
-                integrity: integrity.as_deref().map(str::trim).map(str::to_string).filter(|s| !s.is_empty()),
+                integrity: integrity
+                    .as_deref()
+                    .map(str::trim)
+                    .map(str::to_string)
+                    .filter(|s| !s.is_empty()),
             })
         }
     }
@@ -223,7 +230,11 @@ fn normalize_fallbacks(values: &[String]) -> Vec<String> {
     let cleaned: Vec<String> = if values.is_empty() {
         vec!["Arial".into(), "sans-serif".into()]
     } else {
-        values.iter().map(|v| v.trim().to_string()).filter(|v| !v.is_empty()).collect()
+        values
+            .iter()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .collect()
     };
     let mut seen = std::collections::HashSet::new();
     cleaned

@@ -85,10 +85,7 @@ pub fn ensure(worker_program: &str, port: u16, spawn_args: &[String]) -> io::Res
     // for one port and spawn on another, and the supervise-then-adopt below
     // would then wait on a port nothing is listening to.
     let mut command = Command::new(worker_program);
-    command
-        .arg("--port")
-        .arg(port.to_string())
-        .args(spawn_args);
+    command.arg("--port").arg(port.to_string()).args(spawn_args);
     command
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())

@@ -80,8 +80,7 @@ mod windows {
     use std::path::PathBuf;
 
     /// The registry value the Desktop Video installer writes.
-    const DECKLINK_LOCATION: &str =
-        "SOFTWARE\\Blackmagic Design\\DeckLink";
+    const DECKLINK_LOCATION: &str = "SOFTWARE\\Blackmagic Design\\DeckLink";
 
     pub fn probe() -> DeckLinkRuntime {
         let Some(location) = install_location() else {
@@ -104,14 +103,21 @@ mod windows {
         // Read the registry without a crate dependency: `reg query` is the
         // OS's own tool, and this runs once at startup, not per frame.
         let output = std::process::Command::new("reg")
-            .args(["query", &format!("HKLM\\{DECKLINK_LOCATION}"), "/v", "Location"])
+            .args([
+                "query",
+                &format!("HKLM\\{DECKLINK_LOCATION}"),
+                "/v",
+                "Location",
+            ])
             .output()
             .ok()?;
         if !output.status.success() {
             return None;
         }
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let line = stdout.lines().find(|l| l.trim_start().starts_with("Location"))?;
+        let line = stdout
+            .lines()
+            .find(|l| l.trim_start().starts_with("Location"))?;
         let path = line.split("REG_SZ").nth(1)?.trim();
         (!path.is_empty()).then(|| PathBuf::from(path))
     }
@@ -154,7 +160,10 @@ mod tests {
         // Invariant 21: nothing may treat detection as live-readiness. This
         // test pins the API so `is_detected` can never silently grow into
         // `is_ready`.
-        assert!(DeckLinkRuntime::Detected { driver_version_known: true }.is_detected());
+        assert!(DeckLinkRuntime::Detected {
+            driver_version_known: true
+        }
+        .is_detected());
         assert!(!DeckLinkRuntime::DriverOnly.is_detected());
         assert!(!DeckLinkRuntime::NotPresent.is_detected());
     }

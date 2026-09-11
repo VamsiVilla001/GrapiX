@@ -235,6 +235,9 @@ mod tests {
         // Inter, then object fallback, then the font's own fallbacks; "ARIAL"
         // dedupes against nothing (lowercased key) and keeps its own casing,
         // as 1.x did — dedupe is case-insensitive, display case is preserved.
-        assert_eq!(stack, "\"Inter\", \"Helvetica Neue\", \"ARIAL\", sans-serif");
+        assert_eq!(
+            stack,
+            "\"Inter\", \"Helvetica Neue\", \"ARIAL\", sans-serif"
+        );
     }
 }

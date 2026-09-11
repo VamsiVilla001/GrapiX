@@ -63,7 +63,9 @@ fn main() {
 
 fn default_worker_path() -> String {
     let exe = std::env::current_exe().ok();
-    let debug = exe.as_ref().and_then(|e| e.parent().map(|p| p.to_path_buf()));
+    let debug = exe
+        .as_ref()
+        .and_then(|e| e.parent().map(|p| p.to_path_buf()));
     let name = if cfg!(windows) {
         "gx-render-worker.exe"
     } else {

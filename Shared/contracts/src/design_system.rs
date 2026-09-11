@@ -247,9 +247,9 @@ pub enum PresetError {
 impl std::fmt::Display for PresetError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PresetError::MissingOutPhase => {
-                f.write_str("a motion preset must have an out phase: a graphic that cannot leave is a defect")
-            }
+            PresetError::MissingOutPhase => f.write_str(
+                "a motion preset must have an out phase: a graphic that cannot leave is a defect",
+            ),
             PresetError::MalformedTokenRef(e) => write!(f, "{e}"),
         }
     }
@@ -267,7 +267,8 @@ impl MotionPreset {
         // G.6.6: missing out phase is an error. `in` and `out` are structurally
         // required by the type, so this is where a hand-built or deserialised
         // preset that bypassed construction is caught.
-        if self.phases.out.channels.is_empty() && self.phases.out.duration == DurationSpec::Ms(0.0) {
+        if self.phases.out.channels.is_empty() && self.phases.out.duration == DurationSpec::Ms(0.0)
+        {
             return Err(PresetError::MissingOutPhase);
         }
         Ok(())
@@ -300,7 +301,13 @@ mod tests {
 
     #[test]
     fn a_malformed_token_ref_is_refused() {
-        for bad in ["duration.base", "{duration}", "{duration.base.extra}", "{}", "{.}"] {
+        for bad in [
+            "duration.base",
+            "{duration}",
+            "{duration.base.extra}",
+            "{}",
+            "{.}",
+        ] {
             assert!(
                 TokenRef::parse(bad).is_err(),
                 "{bad:?} must not parse as a token reference"

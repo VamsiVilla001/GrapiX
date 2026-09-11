@@ -79,7 +79,10 @@ mod tests {
 
     impl io::Write for Capture {
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            self.0.lock().expect("capture poisoned").extend_from_slice(buf);
+            self.0
+                .lock()
+                .expect("capture poisoned")
+                .extend_from_slice(buf);
             Ok(buf.len())
         }
         fn flush(&mut self) -> io::Result<()> {

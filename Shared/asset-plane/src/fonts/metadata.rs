@@ -109,7 +109,10 @@ mod tests {
         assert_eq!(sniff_format(b"wOF2...."), Some(FontFormat::Woff2));
         assert_eq!(sniff_format(b"wOFF...."), Some(FontFormat::Woff));
         assert_eq!(sniff_format(b"OTTO...."), Some(FontFormat::Otf));
-        assert_eq!(sniff_format(&[0x00, 0x01, 0x00, 0x00, 0, 0, 0, 0]), Some(FontFormat::Ttf));
+        assert_eq!(
+            sniff_format(&[0x00, 0x01, 0x00, 0x00, 0, 0, 0, 0]),
+            Some(FontFormat::Ttf)
+        );
         assert_eq!(sniff_format(b"true...."), Some(FontFormat::Ttf));
         assert_eq!(sniff_format(b"random"), None);
         assert_eq!(sniff_format(&[0u8; 3]), None);

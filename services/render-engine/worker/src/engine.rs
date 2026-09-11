@@ -338,7 +338,10 @@ mod tests {
             EngineReply::Taken(c) => c,
             other => panic!("expected Taken, got {other:?}"),
         };
-        assert!(committed.frame >= 1, "next opportunity is at or past the lead");
+        assert!(
+            committed.frame >= 1,
+            "next opportunity is at or past the lead"
+        );
 
         let frame = e.render_program();
         assert!(!frame.is_black(), "a taken scene must reach Program");
@@ -372,7 +375,10 @@ mod tests {
             EngineReply::Status(s) => s,
             other => panic!("expected Status, got {other:?}"),
         };
-        assert_eq!(status.current_frame, 500, "the engine must observe the pump");
+        assert_eq!(
+            status.current_frame, 500,
+            "the engine must observe the pump"
+        );
 
         let reply = e.handle(ClientRequest::Take(TakeRequest {
             take_id,
@@ -394,6 +400,9 @@ mod tests {
             revision,
             at: TakeAt::NextOpportunity,
         }));
-        assert!(e.render_program().is_black(), "a cue prepares, it does not air");
+        assert!(
+            e.render_program().is_black(),
+            "a cue prepares, it does not air"
+        );
     }
 }

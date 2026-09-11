@@ -163,7 +163,10 @@ mod tests {
         let r = SoftwareRasterizer::new();
         let frame = r.render(0);
         assert!(frame.is_black());
-        assert_eq!(frame.pixels.len(), (FRAME_WIDTH * FRAME_HEIGHT * 4) as usize);
+        assert_eq!(
+            frame.pixels.len(),
+            (FRAME_WIDTH * FRAME_HEIGHT * 4) as usize
+        );
     }
 
     #[test]

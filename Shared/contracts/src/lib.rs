@@ -211,7 +211,11 @@ pub enum MediaCodec {
 /// what to fix; an agent that receives one learns the contract, which is the
 /// whole argument of the automation plan in ADR Part D, M7.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(tag = "refusal", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "refusal",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum Refusal {
     /// The take's revision does not match what is published.
     RevisionMismatch {

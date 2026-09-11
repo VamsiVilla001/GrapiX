@@ -108,7 +108,11 @@ impl Report {
     /// A skip, never a pass: a conformance run on a machine without the engine
     /// must say so, not claim the engine conformed (invariant 43).
     pub fn skip_unavailable(&mut self, reason: impl Into<String>) {
-        self.record("availability", "peer is available", Outcome::Skip(reason.into()));
+        self.record(
+            "availability",
+            "peer is available",
+            Outcome::Skip(reason.into()),
+        );
     }
 }
 
