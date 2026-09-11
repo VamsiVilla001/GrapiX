@@ -14,6 +14,10 @@ use gx_contracts::design_system::{
     DurationSpec, MotionChannel, MotionKey, MotionPhase, MotionPhases, MotionPreset, MotionTokens,
     NamedEasing, PresetParam, Stagger, TokenRef,
 };
+use gx_contracts::font::{
+    EmbeddingPolicy, FontDefinition, FontFaceDefinition, FontFormat, FontLoadStatus, FontSource,
+    FontStyle,
+};
 use gx_contracts::{
     ClockSource, ContentHash, DeviceTier, Epoch, Locality, MediaCodec, RationalRate,
     ReferenceState, Refusal, RefusalSeverity, Revision, StructuredRefusal, TakeId,
@@ -62,6 +66,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         RefusalSeverity,
         StructuredRefusal,
         Epoch,
+        // gx-contracts: fonts (A.4 port)
+        FontFormat,
+        EmbeddingPolicy,
+        FontLoadStatus,
+        FontSource,
+        FontStyle,
+        FontFaceDefinition,
+        FontDefinition,
         // gx-control-plane: intent
         TakeAt,
         TakeRequest,

@@ -1,5 +1,5 @@
 [package]
-name = "gx-contracts"
+name = "gx-decklink"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -7,8 +7,3 @@ rust-version.workspace = true
 
 [dependencies]
 serde = { workspace = true }
-serde_json = { workspace = true }
-ts-rs = { workspace = true }
-url = { workspace = true }
-directories = "6"
-unicode-normalization = "0.1"

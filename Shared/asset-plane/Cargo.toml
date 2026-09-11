@@ -8,4 +8,7 @@ rust-version.workspace = true
 [dependencies]
 gx-contracts = { workspace = true }
 serde = { workspace = true }
+sha2 = { workspace = true }
+ttf-parser = { workspace = true }
 ts-rs = { workspace = true }
+url = { workspace = true }

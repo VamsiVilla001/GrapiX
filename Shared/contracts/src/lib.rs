@@ -6,6 +6,8 @@
 #![forbid(unsafe_code)]
 
 pub mod design_system;
+pub mod font;
+pub mod platform;
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -208,7 +210,7 @@ pub enum MediaCodec {
 /// what to fix; an agent that receives one learns the contract, which is the
 /// whole argument of the automation plan in ADR Part D, M7.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(tag = "refusal", rename_all = "camelCase")]
+#[serde(tag = "refusal", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum Refusal {
     /// The take's revision does not match what is published.
     RevisionMismatch {
@@ -266,6 +268,25 @@ pub enum Refusal {
     TransportFailed { detail: String },
     /// Named, so the gap register stays honest instead of stubbing a feature.
     NotImplemented { what: String },
+    /// A scene references a font that has not resolved. A take blocker, like
+    /// a missing asset (invariant 29): both platforms will substitute a
+    /// system font if allowed to, which is precisely the silent visual
+    /// difference invariant 18 forbids (ADR-0002 A.4).
+    FontMissing { font_id: String },
+    /// A font source URL is not HTTPS. Credentials next door are a separate
+    /// offence so the caller learns which rule it broke.
+    FontUrlNotHttps { url: String },
+    /// A font source URL carries credentials.
+    FontUrlHasCredentials { url: String },
+    /// A font source URL is malformed, or an Adobe Fonts face points at a
+    /// host other than use.typekit.net.
+    InvalidFontUrl { url: String },
+    /// A `package`-policy font with no licence recorded. Unstated licence is
+    /// treated as restricted (docs/p2-licensing-positions.md §5).
+    FontEmbeddingRefused { font_id: String },
+    /// Font bytes failed inspection: unreadable tables, unsupported
+    /// container, no family name.
+    InvalidFontData { detail: String },
 }
 
 impl std::fmt::Display for Refusal {
@@ -307,6 +328,16 @@ impl std::fmt::Display for Refusal {
             Refusal::Unauthenticated => f.write_str("unauthenticated"),
             Refusal::TransportFailed { detail } => write!(f, "transport failed: {detail}"),
             Refusal::NotImplemented { what } => write!(f, "not implemented: {what}"),
+            Refusal::FontMissing { font_id } => write!(f, "font missing: {font_id}"),
+            Refusal::FontUrlNotHttps { url } => write!(f, "font URL is not HTTPS: {url}"),
+            Refusal::FontUrlHasCredentials { url } => {
+                write!(f, "font URL contains credentials: {url}")
+            }
+            Refusal::InvalidFontUrl { url } => write!(f, "invalid font URL: {url}"),
+            Refusal::FontEmbeddingRefused { font_id } => {
+                write!(f, "font {font_id} may not be packaged: no licence recorded")
+            }
+            Refusal::InvalidFontData { detail } => write!(f, "invalid font data: {detail}"),
         }
     }
 }

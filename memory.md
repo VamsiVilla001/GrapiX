@@ -59,6 +59,94 @@ not a euphemism for nearly done.
    half verified; `done` needs the CI run's green check plus the SBOM
    artifact, which only exists after a push. Do not mark them `done` because
    the YAML looks right.
+18. A detected output card is not a ready one. The DeckLink probe
+   (`Shared/decklink`) reports runtime presence; readiness is Phase 15 and
+   needs the vendor SDK, which is a separate Blackmagic download not yet in
+   the tree. Never set an output capability from a probe or a feature flag
+   (invariant 21).
+19. A failing-over-the-wire check that unit tests pass is usually a stale
+   spawned binary, not a contract break. Rebuild and re-run before treating
+   a wire failure as a serialisation bug — the conformance engine is a real
+   child process and cargo does not rebuild it between runs of the harness.
+
+---
+
+## 2026-09-11 — fonts ported, platform primitives, DeckLink probe, P.2 positions
+
+Scoped by the user: DeckLink Duo 2 is installed; defer Adobe/AE; do FFmpeg,
+video codecs and font embedding now; port the 1.x font manager; start Phase 2.
+
+**P.2 licensing positions** (`docs/p2-licensing-positions.md`). Written
+positions for the four codec items and the font-embedding gate, owned by the
+user: FFmpeg LGPL-only dynamically linked; H.264/HEVC via hardware/OS
+encoders, no x264/x265 shipped; ProRes decode-only until Apple licensing
+exists; fonts — `package`/`reference`/`restricted` embedding policy,
+Adobe Fonts never packaged, packaged fonts must carry a licence. P.2 stays
+`active`: the Adobe position is still open.
+
+**Font subsystem ported (2.8 → active).** The 1.x font manager, carried
+forward per ADR-0002 A.4 as *port, don't redesign*, rebuilt in Rust per
+invariant 22. Contracts (`Shared/contracts/src/font.rs`): `FontSource`,
+`FontDefinition`, `EmbeddingPolicy`, `FontLoadStatus`, the trusted-host
+allowlist and URL hygiene. Behaviour in `gx-asset-plane::fonts`: metadata
+inspection (ttf-parser replacing fontkit), inert CSS `@font-face`/`@import`
+parsing, the manager's content-derived identity (same bytes → same
+`font_id`), `buildFontCss` and the family stack, and validation — which now
+returns named `Refusal`s rather than 1.x's prose strings, and enforces the
+new licence rule: a `package` font with no licence is `FontEmbeddingRefused`.
+The network resolver is Editor-service work; shaping (cosmic-text) is 3.6.
+28 asset-plane tests pass.
+
+**Platform primitives.** `Shared/contracts/src/platform.rs`: `sanitize_filename`
+(2.2 — reserved names, illegal chars, trailing dots, NFC, 128-char bound,
+idempotent) against a hostile corpus drawn from ADR-0002 B.3's recorded
+failures; and `service_data_root`/`cache_root`/`log_root` via the
+`directories` crate (2.4) with a test proving the roots are absolute and
+never inside the repository — the 1.x in-repo default is gone.
+
+**DeckLink probe** (`Shared/decklink`). Runtime detection — registry +
+`DeckLinkAPI64.dll` on Windows, framework presence on macOS — behind a
+crate, reporting `Detected | DriverOnly | NotPresent` as data. Detection is
+explicitly not readiness (rule 18); the SDK itself is a separate download,
+not vendored. The Windows test asserts the probe finds the installed
+runtime — execution evidence for the Duo 2 row of P.1.
+
+**Two real bugs the work surfaced.** (1) `Refusal::UnknownTake.take_id` and
+the new `FontSource` variant fields were serialising snake_case on an
+otherwise-camelCase surface: `rename_all` renames variants, not their fields.
+Fixed with `rename_all_fields`, verified on the wire (`takeId`, `assetId`).
+(2) Three conformance failures against the real engine were a stale spawned
+worker binary, not a contract break — rule 19 records the trap.
+
+### Verified by execution
+
+| What | Result |
+|---|---|
+| `cargo test -p gx-asset-plane` | **28 passed, 0 failed** (16 font tests) |
+| `cargo test -p gx-contracts` | **26 passed, 0 failed** (font + platform + structured refusal) |
+| `cargo test -p gx-decklink` | **3 passed** incl. runtime-found on this machine |
+| DeckLink take over a socket | `{"refusal":"unknownTake","takeId":"nosuch"}` — correct camelCase wire shape |
+| `npm run check` | **exit 0** — codegen 61 files, conformance **99 passed, 0 failed, 9 skipped** |
+
+### Status after this entry
+
+| Unit | Status |
+|---|---|
+| `Shared/contracts/src/font.rs` | **Implemented** — types, allowlist, hygiene, tested, TS generated |
+| `gx-asset-plane::fonts` | **Partial** — validate/metadata/css/manager/cssgen tested; no network resolver |
+| `Shared/contracts/src/platform.rs` | **Implemented** on Windows — sanitiser + OS roots; macOS leg is CI |
+| `Shared/decklink` | **Partial** — runtime probe only; no SDK, no frames moved |
+| P.1 | **Active** — DeckLink runtime verified; AJA, NDI, lab outstanding |
+| P.2 | **Active** — codec/font positions written; Adobe open |
+
+### Not done, and not claimed
+
+- The remote-font *resolver* (HTTPS fetch, SSRF guard, depth-limited imports)
+  is not ported — it is Editor-service work, and nothing here downloads.
+- No cosmic-text shaping (3.6), no Font Manager UI, no `.gpxpkg` yet.
+- DeckLink moves no frames; readiness is Phase 15 and needs the SDK.
+- Phase 1's scene schema (1.1–1.4, 1.7, 1.8, 1.11, 1.12) is untouched — the
+  design comes next.
 
 ---
 

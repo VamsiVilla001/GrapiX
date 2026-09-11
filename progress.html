@@ -143,6 +143,10 @@ const INITIAL_STATE = {
   "0.8": "done",   // Revision + if_revision: conflict returns the current revision; loser-recovery test passes
   "0.9": "done",   // contracts package; Rust source of truth, TS generated, drift gate
   "0.10": "done",  // conformance harness + mock-peer pattern, runs in gate
+  // Phase 2 — platform primitives.
+  "2.2": "done",   // filename sanitiser: hostile corpus (reserved names, illegal chars, NFC, length) passes; idempotent
+  "2.4": "done",   // OS data roots via directories crate; absolute, never in-repo (test proves on Windows; macOS leg is CI)
+  "2.8": "active", // font subsystem ported: contracts + metadata + CSS parse + manager + cssgen + validate (28 tests); network resolver is Editor-service, shaping is 3.6
   // Phase 1 — domain contracts (verified by conformance + unit tests).
   "1.5": "done",   // design system token schema (MotionTokens et al.)
   "1.6": "done",   // motion token + preset schema; ms_to_frames resolves at any rate

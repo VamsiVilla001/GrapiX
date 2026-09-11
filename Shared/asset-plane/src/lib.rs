@@ -5,6 +5,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod fonts;
 pub mod transfer;
 pub use transfer::Transfer;
 
