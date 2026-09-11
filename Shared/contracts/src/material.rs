@@ -152,7 +152,7 @@ impl FitMode {
 }
 
 /// Which faces are drawn. Carried from 1.x `MaterialCullMode`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "kebab-case")]
 pub enum CullMode {
     None,
@@ -161,9 +161,13 @@ pub enum CullMode {
     Back,
 }
 
+impl CullMode {
+    pub const ALL: [CullMode; 3] = [CullMode::None, CullMode::Front, CullMode::Back];
+}
+
 /// How alpha is interpreted. Straight and premultiplied are different images,
 /// and guessing between them is a visible halo on every soft edge.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "kebab-case")]
 pub enum AlphaMode {
     Opaque,
@@ -173,13 +177,26 @@ pub enum AlphaMode {
     AlphaTest,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+impl AlphaMode {
+    pub const ALL: [AlphaMode; 4] = [
+        AlphaMode::Opaque,
+        AlphaMode::Straight,
+        AlphaMode::Premultiplied,
+        AlphaMode::AlphaTest,
+    ];
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "kebab-case")]
 pub enum DepthMode {
     Disabled,
     Read,
     #[default]
     ReadWrite,
+}
+
+impl DepthMode {
+    pub const ALL: [DepthMode; 3] = [DepthMode::Disabled, DepthMode::Read, DepthMode::ReadWrite];
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
@@ -306,7 +323,8 @@ impl MaterialBinding {
     }
 }
 
-/// The blend and fit modes a peer declares it can actually draw.
+/// The blend, fit, cull, alpha and depth modes a peer declares it can
+/// actually draw.
 ///
 /// Held as data and exchanged in the capability handshake, never derived from
 /// a feature flag (invariant 21): "this build has shader compositing compiled
@@ -316,6 +334,9 @@ impl MaterialBinding {
 pub struct MaterialSupport {
     pub blend_modes: Vec<BlendMode>,
     pub fit_modes: Vec<FitMode>,
+    pub cull_modes: Vec<CullMode>,
+    pub alpha_modes: Vec<AlphaMode>,
+    pub depth_modes: Vec<DepthMode>,
 }
 
 impl MaterialSupport {
@@ -331,6 +352,9 @@ impl MaterialSupport {
                 .into_iter()
                 .filter(|mode| mode.is_uv_transform())
                 .collect(),
+            cull_modes: CullMode::ALL.to_vec(),
+            alpha_modes: AlphaMode::ALL.to_vec(),
+            depth_modes: DepthMode::ALL.to_vec(),
         }
     }
 
@@ -341,6 +365,9 @@ impl MaterialSupport {
         Self {
             blend_modes: Vec::new(),
             fit_modes: Vec::new(),
+            cull_modes: Vec::new(),
+            alpha_modes: Vec::new(),
+            depth_modes: Vec::new(),
         }
     }
 }
@@ -365,6 +392,36 @@ pub fn validate_material(
             as_json(material.blend_mode),
         )
         .allowing(support.blend_modes.iter().copied().map(as_json).collect()));
+    }
+    if !support.cull_modes.contains(&material.cull_mode) {
+        return Err(StructuredRefusal::error(Refusal::UnsupportedCullMode {
+            mode: material.cull_mode,
+        })
+        .at(
+            format!("materials[{}].cullMode", material.material_id),
+            as_json(material.cull_mode),
+        )
+        .allowing(support.cull_modes.iter().copied().map(as_json).collect()));
+    }
+    if !support.alpha_modes.contains(&material.alpha_mode) {
+        return Err(StructuredRefusal::error(Refusal::UnsupportedAlphaMode {
+            mode: material.alpha_mode,
+        })
+        .at(
+            format!("materials[{}].alphaMode", material.material_id),
+            as_json(material.alpha_mode),
+        )
+        .allowing(support.alpha_modes.iter().copied().map(as_json).collect()));
+    }
+    if !support.depth_modes.contains(&material.depth_mode) {
+        return Err(StructuredRefusal::error(Refusal::UnsupportedDepthMode {
+            mode: material.depth_mode,
+        })
+        .at(
+            format!("materials[{}].depthMode", material.material_id),
+            as_json(material.depth_mode),
+        )
+        .allowing(support.depth_modes.iter().copied().map(as_json).collect()));
     }
     for texture in &material.textures {
         if !support.fit_modes.contains(&texture.fit) {

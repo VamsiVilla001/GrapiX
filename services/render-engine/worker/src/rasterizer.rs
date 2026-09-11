@@ -6,14 +6,12 @@
 //! software: the capability exchange reports the tier, so nobody confuses its
 //! output with a hardware frame.
 //!
-//! **What it is not.** There is no scene contract in the system yet — the
-//! control plane carries `take_id` and `revision`, not pixels to draw — so
-//! this does not and cannot rasterise scene content. What it renders is a
-//! deterministic Program frame: a take key derived from the take id and a
-//! frame counter, so a downstream pixel gate (M3) has a real, repeatable byte
-//! stream to compare across machines. A large stage is still never one
-//! texture (invariant 37): when a scene contract lands, this renders tiles,
-//! not the whole canvas.
+//! Scene content is prepared and rasterised once at publish time. This stage
+//! owns the current encoded base frame, applies the device-derived tile plan,
+//! and stamps only the frame counter while Program runs. Identifier-only test
+//! fixtures still use a deterministic colour key.
+
+use crate::tiling::{Stage, StageOrigin, TileError, TilePlan};
 
 /// Frame dimensions for the software path. 1080p is the supported ceiling
 /// (Part C), but a software frame at full raster is wasted work on a device
@@ -57,18 +55,55 @@ impl Frame {
 /// The key is derived once per take, not per frame (invariant 35: nothing
 /// that can be built once may be built per Program frame). Per frame it only
 /// stamps the frame counter.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SoftwareRasterizer {
     /// The committed Program take, as a colour key, or `None` for black.
     program_key: Option<[u8; 4]>,
     /// Pre-computed base row for the current key, so a frame render is a copy
     /// plus a counter stamp rather than a recompute.
     base: Vec<u8>,
+    width: u32,
+    height: u32,
+    /// The stage's current device-derived render-target plan.
+    tiles: TilePlan,
+}
+
+impl Default for SoftwareRasterizer {
+    fn default() -> Self {
+        // This software reference path owns no GPU texture. Its fixed frame
+        // extent is enough to render one CPU target; hardware callers must
+        // supply the negotiated device limit via `with_texture_limit`.
+        Self::with_texture_limit(FRAME_WIDTH.max(FRAME_HEIGHT))
+            .expect("the non-zero software reference frame always fits its own extent")
+    }
 }
 
 impl SoftwareRasterizer {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Construct the rasteriser with an actual device
+    /// `max_texture_dimension_2d`.
+    ///
+    /// The limit is not a preferred size: it is the hard maximum used to
+    /// derive each target core and its overscan. A device too small to hold a
+    /// filtered target refuses by name instead of silently using an unsafe
+    /// seam-prone fallback.
+    pub fn with_texture_limit(texture_limit: u32) -> Result<Self, TileError> {
+        let stage = Stage::new(FRAME_WIDTH, FRAME_HEIGHT, StageOrigin { x: 0.0, y: 0.0 })?;
+        Ok(Self {
+            program_key: None,
+            width: FRAME_WIDTH,
+            height: FRAME_HEIGHT,
+            base: Vec::new(),
+            tiles: TilePlan::new(stage, texture_limit)?,
+        })
+    }
+
+    /// The actual texture limit from which this rasteriser derived its tiles.
+    pub fn texture_limit(&self) -> u32 {
+        self.tiles.texture_limit()
     }
 
     /// Commit a take to Program: derive its key and pre-build the base frame.
@@ -79,6 +114,26 @@ impl SoftwareRasterizer {
     pub fn take(&mut self, take_key: [u8; 4]) {
         self.program_key = Some(take_key);
         self.rebuild_base();
+    }
+
+    /// Commit an already-prepared scene frame to Program.
+    ///
+    /// The caller supplies bytes built at publication; this method only swaps
+    /// the immutable base and derives the tile plan for its canvas.
+    pub fn take_prepared(&mut self, take_key: [u8; 4], frame: Frame) -> Result<(), TileError> {
+        assert_eq!(
+            frame.pixels.len(),
+            frame.width as usize * frame.height as usize * 4,
+            "a prepared frame must be tightly packed RGBA8",
+        );
+        let texture_limit = self.tiles.texture_limit();
+        let stage = Stage::new(frame.width, frame.height, StageOrigin { x: 0.0, y: 0.0 })?;
+        self.tiles = TilePlan::new(stage, texture_limit)?;
+        self.program_key = Some(take_key);
+        self.width = frame.width;
+        self.height = frame.height;
+        self.base = frame.pixels;
+        Ok(())
     }
 
     /// Clear Program to black.
@@ -94,7 +149,7 @@ impl SoftwareRasterizer {
 
     fn rebuild_base(&mut self) {
         let [r, g, b, a] = self.program_key.unwrap_or([0, 0, 0, 0]);
-        let px = (FRAME_WIDTH * FRAME_HEIGHT) as usize;
+        let px = (self.width * self.height) as usize;
         self.base = vec![0u8; px * 4];
         for chunk in self.base.chunks_exact_mut(4) {
             chunk[0] = r;
@@ -111,35 +166,37 @@ impl SoftwareRasterizer {
     /// is what lets a test confirm the clock is actually advancing the
     /// output.
     pub fn render(&self, frame: u64) -> Frame {
-        let px = (FRAME_WIDTH * FRAME_HEIGHT) as usize;
-        // A cleared rasteriser has no base; Program is a full black frame, not
-        // an empty buffer that misreports its own dimensions.
-        let mut pixels = if self.program_key.is_some() {
-            self.base.clone()
-        } else {
-            vec![0u8; px * 4]
-        };
+        let mut rendered = self
+            .tiles
+            .composite_filtered(|point| {
+                let x = point.x as u32;
+                let y = point.y as u32;
+                let offset = ((y as usize * self.width as usize) + x as usize) * 4;
+                if self.program_key.is_some() {
+                    [
+                        self.base[offset],
+                        self.base[offset + 1],
+                        self.base[offset + 2],
+                        self.base[offset + 3],
+                    ]
+                } else {
+                    [0, 0, 0, 0]
+                }
+            })
+            .expect("the validated fixed stage cannot overflow while rendering");
         if self.program_key.is_some() {
             // Frame counter, little-endian, into the first eight pixels' R
             // channel. Deterministic and visible to the checksum.
             let bytes = frame.to_le_bytes();
-            for (i, chunk) in pixels.chunks_exact_mut(4).take(8).enumerate() {
+            for (i, chunk) in rendered.pixels.chunks_exact_mut(4).take(8).enumerate() {
                 chunk[0] = chunk[0].wrapping_add(bytes[i]);
             }
         }
-        Frame {
-            width: FRAME_WIDTH,
-            height: FRAME_HEIGHT,
-            pixels,
-        }
+        rendered
     }
 }
 
-/// Derive a deterministic colour key for a take id.
-///
-/// This stands in for scene content until a scene contract exists: it makes
-/// Program a *function of the take*, which is the property the rest of the
-/// engine (and the M3 pixel gate) actually depends on.
+/// Derive a deterministic colour key for an identifier-only test fixture.
 pub fn key_for_take(take_id: &gx_contracts::TakeId) -> [u8; 4] {
     let mut hash: u32 = 0x811c_9dc5;
     for &byte in take_id.0.as_bytes() {
@@ -199,6 +256,18 @@ mod tests {
         assert_ne!(one, two);
     }
 
+    #[test]
+    fn a_forced_small_device_limit_tiles_program_without_changing_its_bytes() {
+        let key = key_for_take(&TakeId("take/101".into()));
+        let mut whole = SoftwareRasterizer::new();
+        let mut tiled = SoftwareRasterizer::with_texture_limit(11).unwrap();
+        whole.take(key);
+        tiled.take(key);
+
+        assert!(tiled.tiles.tiles().len() > 1);
+        assert_eq!(tiled.texture_limit(), 11);
+        assert_eq!(whole.render(100), tiled.render(100));
+    }
     #[test]
     fn the_base_frame_is_built_once_per_take_not_per_frame() {
         // Invariant 35: rebuilding the base per frame is the regression this

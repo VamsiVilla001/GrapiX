@@ -1,0 +1,3 @@
+[mcp_servers.grapix-editor]
+command = "node"
+args = ["Editor/services/editor-mcp/dist/index.js"]

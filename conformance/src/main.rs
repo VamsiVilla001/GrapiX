@@ -10,7 +10,8 @@
 
 use gx_conformance::{
     asset_plane_suite, control_plane_delivery_suite, control_plane_fault_suite,
-    control_plane_suite, media_plane_suite, timing_plane_suite, Outcome, Report,
+    control_plane_suite, media_plane_suite, refusal_audit_suite, timing_plane_suite, Outcome,
+    Report,
 };
 use gx_contracts::{DeviceTier, Locality, RationalRate};
 use gx_control_plane::peer::EnginePeer;
@@ -65,6 +66,7 @@ fn main() {
     control_plane_delivery_suite(&mut report);
     asset_plane_suite(&mut report);
     timing_plane_suite(&mut report);
+    refusal_audit_suite(&mut report);
 
     print_report(&report);
 
@@ -103,6 +105,15 @@ fn print_report(report: &Report) {
     );
     if report.skipped() > 0 {
         println!("skips are not passes: the checks above were not exercised");
+    }
+    if !report.refusal_limitations.is_empty() {
+        println!("\nREFUSAL AUDIT LIMITATIONS (not passes or skips)");
+        for limitation in &report.refusal_limitations {
+            println!(
+                "  {}: {} - {}",
+                limitation.peer, limitation.variant, limitation.reason
+            );
+        }
     }
     println!(
         "{}",

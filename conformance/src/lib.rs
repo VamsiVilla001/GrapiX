@@ -8,6 +8,10 @@
 //! reports SKIP and says why. Defaulting it to PASS would claim coverage of
 //! precisely the paths nobody ran.
 
+mod refusal_audit;
+
+pub use refusal_audit::refusal_audit_suite;
+
 use gx_asset_plane::{is_syntactically_safe, Transfer};
 use gx_contracts::{
     ClockSource, ContentHash, DeviceTier, Locality, MediaCodec, RationalRate, ReferenceState,
@@ -43,10 +47,23 @@ pub struct Result_ {
     pub outcome: Outcome,
 }
 
+/// A declared refusal outside the current peer surface, with the precise
+/// reason it cannot yet be driven through the conformance transport.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefusalLimitation {
+    pub peer: String,
+    pub variant: &'static str,
+    pub reason: &'static str,
+}
+
 /// Accumulated results across every suite.
 #[derive(Debug, Clone, Default)]
 pub struct Report {
     pub results: Vec<Result_>,
+    /// Named, non-passing limitations in the refusal audit. These must not be
+    /// represented as permanent skips: a check that always skips has not
+    /// tested anything (invariants 43 and 47).
+    pub refusal_limitations: Vec<RefusalLimitation>,
     peer: String,
 }
 
@@ -54,6 +71,7 @@ impl Report {
     pub fn new() -> Self {
         Self {
             results: Vec::new(),
+            refusal_limitations: Vec::new(),
             peer: "unattributed".to_string(),
         }
     }
@@ -69,12 +87,22 @@ impl Report {
         &self.peer
     }
 
-    fn record(&mut self, plane: &'static str, name: &'static str, outcome: Outcome) {
+    pub(crate) fn record(&mut self, plane: &'static str, name: &'static str, outcome: Outcome) {
         self.results.push(Result_ {
             peer: self.peer.clone(),
             plane,
             name,
             outcome,
+        });
+    }
+
+    /// State an intrinsic peer-surface limitation without treating it as a
+    /// successful check or inflating the SKIP count.
+    pub(crate) fn record_limitation(&mut self, variant: &'static str, reason: &'static str) {
+        self.refusal_limitations.push(RefusalLimitation {
+            peer: self.peer.clone(),
+            variant,
+            reason,
         });
     }
 
@@ -119,7 +147,7 @@ impl Report {
 /// Turn a boolean expectation into an outcome, with the failure text supplied
 /// by the caller so a failing report says what was wrong, not just that
 /// something was.
-fn expect(condition: bool, failure: impl Into<String>) -> Outcome {
+pub(crate) fn expect(condition: bool, failure: impl Into<String>) -> Outcome {
     if condition {
         Outcome::Pass
     } else {

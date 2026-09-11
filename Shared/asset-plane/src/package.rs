@@ -409,6 +409,7 @@ mod tests {
             name: "Package test".into(),
             version: 1,
             revision: Some(Revision(4)),
+            active_camera_id: None,
             canvas: SceneCanvas {
                 width: 1920,
                 height: 1080,

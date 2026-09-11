@@ -13,7 +13,9 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use gx_contracts::{DeviceTier, RationalRate, Revision, TakeId};
 use gx_control_plane::bind::ENGINE_CONTROL_PORT;
 use gx_control_transport::Server;
-use gx_mock_engine::{describe, AssetPublishServer, MockEngine};
+use gx_mock_engine::{describe, MockEngine};
+
+use gx_asset_plane::AssetPublishServer;
 
 fn main() {
     let mut args = std::env::args().skip(1);

@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! The render worker binary: the engine, on a socket, with a live clock.
 //!
 //! This is the real peer an Editor or Playout connects to on 4400. It is not
@@ -7,20 +9,25 @@
 //! contract exists (see `lib.rs`).
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use gx_asset_plane::AssetPublishServer;
 use gx_contracts::{Locality, RationalRate, Revision, TakeId};
 use gx_control_plane::bind::ENGINE_CONTROL_PORT;
 use gx_control_transport::Server;
+use gx_render_worker::recovery::RecoveryJournal;
 use gx_render_worker::Engine;
 
 fn main() {
     let mut args = std::env::args().skip(1);
     let mut port = ENGINE_CONTROL_PORT;
     let mut token: Option<String> = None;
+    let mut asset_port = None;
+    let mut recovery_path: Option<PathBuf> = None;
     let mut lan = false;
     let mut rate = RationalRate::P50;
     let mut publish_specs: Vec<(TakeId, Revision)> = Vec::new();
@@ -30,6 +37,14 @@ fn main() {
             "--port" => match args.next().and_then(|p| p.parse::<u16>().ok()) {
                 Some(p) => port = p,
                 None => return usage("--port needs a number"),
+            },
+            "--asset-port" => match args.next().and_then(|p| p.parse::<u16>().ok()) {
+                Some(p) => asset_port = Some(p),
+                None => return usage("--asset-port needs a number"),
+            },
+            "--recovery-journal" => match args.next() {
+                Some(path) => recovery_path = Some(PathBuf::from(path)),
+                None => return usage("--recovery-journal needs a path"),
             },
             "--lan" => lan = true,
             "--rate" => match args.next().as_deref().and_then(parse_rate) {
@@ -60,10 +75,25 @@ fn main() {
     let frame_source = Arc::new(AtomicU64::new(0));
     spawn_pump(Arc::clone(&frame_source), rate);
 
-    let mut engine = Engine::new(frame_source, locality);
+    let mut engine = Engine::new(Arc::clone(&frame_source), locality);
     let tier = engine.device_tier();
     for (id, revision) in publish_specs {
-        engine.publish(id, revision);
+        engine.publish_identifier(id, revision);
+    }
+    let recovery = match recovery_path {
+        Some(path) => RecoveryJournal::open_at(path),
+        None => RecoveryJournal::open(),
+    };
+    let recovery = match recovery {
+        Ok(recovery) => recovery,
+        Err(error) => {
+            eprintln!("cannot open recovery journal: {error}");
+            std::process::exit(1);
+        }
+    };
+    if let Err(error) = engine.attach_recovery_journal(recovery) {
+        eprintln!("cannot restore recovery journal: {error}");
+        std::process::exit(1);
     }
 
     println!("RENDER ENGINE - real device, engine-owned clock");
@@ -81,13 +111,21 @@ fn main() {
     }
 
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
-    let server = match Server::bind(addr, token.as_deref(), engine) {
-        Ok(server) => server,
-        Err(e) => {
-            eprintln!("cannot serve: {e}");
-            std::process::exit(1);
-        }
+    let asset_port = match asset_port.or_else(|| port.checked_add(1)) {
+        Some(asset_port) => asset_port,
+        None => return usage("--port leaves no asset-plane port"),
     };
+    let asset_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), asset_port);
+    let server = Server::bind(addr, token.as_deref(), engine).unwrap_or_else(|error| {
+        eprintln!("cannot serve control plane: {error}");
+        std::process::exit(1);
+    });
+    let shared_engine = server.engine();
+    let asset_server = AssetPublishServer::bind(asset_addr, Arc::clone(&shared_engine))
+        .unwrap_or_else(|error| {
+            eprintln!("cannot serve asset plane: {error}");
+            std::process::exit(1);
+        });
     match server.local_addr() {
         Ok(bound) => println!("  listening on {bound}"),
         Err(e) => {
@@ -95,6 +133,15 @@ fn main() {
             std::process::exit(1);
         }
     }
+    match asset_server.local_addr() {
+        Ok(bound) => println!("  asset publication on {bound}"),
+        Err(error) => {
+            eprintln!("cannot read asset-plane address: {error}");
+            std::process::exit(1);
+        }
+    }
+    spawn_render_loop(shared_engine, frame_source);
+    asset_server.serve_in_background();
     println!("ctrl-c to stop");
     server.serve();
 }
@@ -122,6 +169,35 @@ fn spawn_pump(frame_source: Arc<AtomicU64>, rate: RationalRate) {
     });
 }
 
+/// Emit each newly reached frame without making the control listener own
+/// cadence. The bounded media slots ensure a slow consumer cannot stall this
+/// loop; skipped observations simply advance to the freshest clock frame.
+fn spawn_render_loop(engine: Arc<Mutex<Engine>>, frame_source: Arc<AtomicU64>) {
+    thread::spawn(move || {
+        let mut emitted = u64::MAX;
+        loop {
+            let current = frame_source.load(Ordering::Relaxed);
+            if current == emitted {
+                thread::sleep(Duration::from_millis(1));
+                continue;
+            }
+            let Ok(mut engine) = engine.lock() else {
+                eprintln!("render loop stopping: engine lock poisoned");
+                return;
+            };
+            match engine.emit_frame() {
+                Ok(emission) => emitted = emission.sample.frame,
+                Err(error) => {
+                    eprintln!("output emission failed at frame {current}: {error}");
+                    emitted = current;
+                }
+            }
+            drop(engine);
+            thread::sleep(Duration::from_millis(1));
+        }
+    });
+}
+
 fn parse_rate(s: &str) -> Option<RationalRate> {
     Some(match s {
         "50" => RationalRate::P50,
@@ -144,7 +220,8 @@ fn usage(problem: &str) {
         eprintln!("error: {problem}");
     }
     eprintln!(
-        "gx-render-worker [--port N] [--lan] [--rate R] [--publish id:rev ...] [--token SECRET]"
+        "gx-render-worker [--port N] [--asset-port N] [--recovery-journal PATH] \
+         [--lan] [--rate R] [--publish id:rev ...] [--token SECRET]"
     );
     std::process::exit(if problem.is_empty() { 0 } else { 2 });
 }

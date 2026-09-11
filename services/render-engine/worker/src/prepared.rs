@@ -14,17 +14,23 @@
 //! refusal here is named (invariant 17), and nothing is approximated to keep
 //! a broken scene renderable (invariant 18).
 //!
-//! What this module deliberately does *not* do is draw. The vector rasteriser
-//! (3.5), the text shaper (3.6) and the mesh path (3.7) consume a
-//! `PreparedScene`; they are separate steps and are not implemented yet.
+//! Vector paths, text and mesh state are all built here exactly once. Program
+//! consumes the resulting immutable data; it never reparses authoring fields
+//! or resolves ids per frame.
 
 use std::collections::{HashMap, HashSet};
 
 use gx_contracts::material::{validate_material, MaterialSupport};
+use gx_contracts::color::OutputTransform;
 use gx_contracts::scene::{
     resolve_hierarchy, HierarchyDiagnostic, ResolvedObject, SceneDocument, SceneObject,
 };
 use gx_contracts::{ContentHash, Refusal};
+
+use crate::mesh::{prepare_meshes, AssetBytes, PreparedMeshes};
+use crate::rasterise::{LyonPathRasteriser, PathRasteriser, PreparedPaths, RasterSurface};
+use crate::rasterizer::Frame;
+use crate::text::{prepare_texts, PreparedTexts};
 
 /// A document resolved into what a renderer actually consumes.
 ///
@@ -44,6 +50,14 @@ pub struct PreparedScene {
     /// Object index, so a lookup during rendering is not a linear scan of the
     /// draw list for every reference.
     by_id: HashMap<String, usize>,
+    /// Tessellated vector draw commands, built once per publication.
+    paths: PreparedPaths,
+    /// The current static vector surface, composited in linear light.
+    vector_surface: RasterSurface,
+    /// Shaped glyph runs, restricted to fonts carried by the scene.
+    texts: PreparedTexts,
+    /// Prepared primitive/glTF geometry, materials, lights and camera.
+    meshes: PreparedMeshes,
 }
 
 impl PreparedScene {
@@ -56,8 +70,14 @@ impl PreparedScene {
     pub fn prepare(
         document: SceneDocument,
         available: &HashSet<ContentHash>,
+        asset_bytes: &AssetBytes,
         support: &MaterialSupport,
     ) -> Result<Self, Refusal> {
+        if document.canvas.width == 0 || document.canvas.height == 0 {
+            return Err(Refusal::SceneParseFailed {
+                detail: "scene canvas dimensions must be non-zero".into(),
+            });
+        }
         // Every asset the library declares must be present. Checked before
         // the objects, because "the logo has not arrived" is a more useful
         // answer than "object logo_1 cannot resolve its asset".
@@ -118,7 +138,62 @@ impl PreparedScene {
             validate_material(material, support).map_err(|refusal| refusal.code)?;
         }
 
+        // Text fills: the software rasteriser supports solid colours only.
+        // A gradient would need a fill rule we do not implement here, so it
+        // refuses at publish rather than approximating at frame time.
+        for object in &document.objects {
+            if let SceneObject::Text(text) = object {
+                if let Some(
+                    gx_contracts::color::ColorValue::LinearGradient { .. }
+                    | gx_contracts::color::ColorValue::RadialGradient { .. },
+                ) = &text.base.fill
+                {
+                    return Err(Refusal::UnsupportedPathGradient {
+                        object: text.base.id.clone(),
+                        paint: "text fill".into(),
+                    });
+                }
+            }
+        }
+
+        // PBR materials on meshes: a fixed-function software rasteriser
+        // cannot evaluate PBR lighting.  Refuse at publish time.
+        if !document.materials.is_empty() {
+            let pbr_materials: std::collections::HashSet<&str> = document
+                .materials
+                .iter()
+                .filter(|m| m.kind == gx_contracts::material::MaterialKind::Pbr)
+                .map(|m| m.material_id.as_str())
+                .collect();
+            if !pbr_materials.is_empty() {
+                for object in &document.objects {
+                    if let SceneObject::Mesh(mesh) = object {
+                        if let Some(slots) = &mesh.base.material_slots {
+                            for (slot_name, binding) in slots {
+                                if pbr_materials.contains(binding.material_id.as_str()) {
+                                    return Err(Refusal::NotImplemented {
+                                        what: format!(
+                                            "PBR material '{}' on mesh '{}' slot '{}' requires a GPU rasteriser",
+                                            binding.material_id, mesh.base.id, slot_name
+                                        ),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         let resolution = resolve_hierarchy(&document.objects);
+        let paths = PreparedPaths::prepare(&document, &resolution.effective)?;
+        let vector_surface = LyonPathRasteriser.rasterise(
+            &paths,
+            document.canvas.width,
+            document.canvas.height,
+        );
+        let texts = prepare_texts(&document, asset_bytes)?;
+        let meshes = prepare_meshes(&document, available, asset_bytes, support)?;
         let by_id = resolution
             .effective
             .iter()
@@ -131,6 +206,10 @@ impl PreparedScene {
             effective: resolution.effective,
             diagnostics: resolution.diagnostics,
             by_id,
+            paths,
+            vector_surface,
+            texts,
+            meshes,
         })
     }
 
@@ -160,6 +239,47 @@ impl PreparedScene {
     pub fn diagnostics(&self) -> &[HierarchyDiagnostic] {
         &self.diagnostics
     }
+
+    /// Tessellated vector content ready for any `PathRasteriser` backend.
+    pub fn paths(&self) -> &PreparedPaths {
+        &self.paths
+    }
+
+    /// Encode the prepared linear surface for one explicit output transform.
+    ///
+    /// Vector, text and mesh content are composited in scene draw order into
+    /// a single linear-light surface, then encoded once at the output boundary.
+    pub fn frame(&self, output: OutputTransform) -> Frame {
+        let mut surface = self.vector_surface.clone();
+        // Text and mesh rasterisation are overlays on the vector base. Every
+        // refusal they could produce was already validated at publish time;
+        // a refusal here is a bug, not a runtime condition.
+        crate::text::rasterise_texts(
+            &self.texts,
+            &self.document,
+            &self.effective,
+            &mut surface,
+        )
+        .expect("text rasterisation refusal survived publish-time validation");
+        crate::mesh::rasterise_meshes(
+            &self.meshes,
+            &self.document,
+            &self.effective,
+            &mut surface,
+        )
+        .expect("mesh rasterisation refusal survived publish-time validation");
+        surface.encode(output)
+    }
+
+    /// Glyph runs shaped from packaged fonts only.
+    pub fn texts(&self) -> &PreparedTexts {
+        &self.texts
+    }
+
+    /// Geometry, material assignments, lights and active camera.
+    pub fn meshes(&self) -> &PreparedMeshes {
+        &self.meshes
+    }
 }
 
 #[cfg(test)]
@@ -183,6 +303,7 @@ mod tests {
             name: "Lower Third".into(),
             version: 1,
             revision: Some(Revision(1)),
+            active_camera_id: None,
             canvas: SceneCanvas {
                 width: 1920,
                 height: 1080,
@@ -260,11 +381,7 @@ mod tests {
         parent.base.x = 100.0;
         let objects = vec![SceneObject::Group(parent), rect("r")];
 
-        let prepared = PreparedScene::prepare(
-            document(objects),
-            &HashSet::new(),
-            &MaterialSupport::fixed_function(),
-        )
+        let prepared = PreparedScene::prepare(document(objects), &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function())
         .expect("a scene with no assets prepares");
 
         assert_eq!(prepared.effective().len(), 2);
@@ -288,18 +405,14 @@ mod tests {
             assets: vec![logo_asset("deadbeef")],
             ..document(vec![rect("bg")])
         };
-        match PreparedScene::prepare(
-            scene.clone(),
-            &HashSet::new(),
-            &MaterialSupport::fixed_function(),
-        ) {
+        match PreparedScene::prepare(scene.clone(), &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function()) {
             Err(Refusal::AssetMissing { hash }) => assert_eq!(hash.0, "deadbeef"),
             other => panic!("a missing asset must refuse by name, got {other:?}"),
         }
 
         let available = HashSet::from([ContentHash("deadbeef".into())]);
         assert!(
-            PreparedScene::prepare(scene, &available, &MaterialSupport::fixed_function()).is_ok(),
+            PreparedScene::prepare(scene, &available, &AssetBytes::new(), &MaterialSupport::fixed_function()).is_ok(),
             "the same scene prepares once the bytes are held"
         );
     }
@@ -316,11 +429,7 @@ mod tests {
             size: 72.0,
             ..text_defaults()
         });
-        match PreparedScene::prepare(
-            document(vec![text]),
-            &HashSet::new(),
-            &MaterialSupport::fixed_function(),
-        ) {
+        match PreparedScene::prepare(document(vec![text]), &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function()) {
             Err(Refusal::SceneFontUnknown { font_id, object }) => {
                 assert_eq!(font_id, "font_absent");
                 assert_eq!(object, "title");
@@ -336,11 +445,7 @@ mod tests {
             asset_id: "asset_absent".into(),
             fit: Default::default(),
         });
-        match PreparedScene::prepare(
-            document(vec![image]),
-            &HashSet::new(),
-            &MaterialSupport::fixed_function(),
-        ) {
+        match PreparedScene::prepare(document(vec![image]), &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function()) {
             Err(Refusal::SceneAssetUnknown { asset_id, object }) => {
                 assert_eq!(asset_id, "asset_absent");
                 assert_eq!(object, "logo");
@@ -375,6 +480,7 @@ mod tests {
                 PreparedScene::prepare(
                     scene.clone(),
                     &HashSet::new(),
+                    &AssetBytes::new(),
                     &MaterialSupport::fixed_function()
                 ),
                 Err(Refusal::UnsupportedBlendMode {
@@ -387,9 +493,10 @@ mod tests {
             PreparedScene::prepare(
                 scene,
                 &HashSet::new(),
+                &AssetBytes::new(),
                 &MaterialSupport {
                     blend_modes: vec![BlendMode::Overlay],
-                    fit_modes: Vec::new(),
+                    ..MaterialSupport::fixed_function()
                 }
             )
             .is_ok(),
@@ -403,11 +510,7 @@ mod tests {
             base: ObjectBase::new("g", "g"),
             child_ids: vec!["ghost".into()],
         });
-        let prepared = PreparedScene::prepare(
-            document(vec![group, rect("r")]),
-            &HashSet::new(),
-            &MaterialSupport::fixed_function(),
-        )
+        let prepared = PreparedScene::prepare(document(vec![group, rect("r")]), &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function())
         .expect("a scene being repaired still prepares");
         assert_eq!(
             prepared.diagnostics().len(),

@@ -21,8 +21,12 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
+use gx_asset_plane::{AssetPublishPeer, PublishRefusal, PublishReply};
 use gx_contracts::material::MaterialSupport;
+use gx_contracts::scene::SceneDocument;
+use gx_contracts::color::OutputTransform;
 use gx_contracts::{
     ContentHash, DeviceTier, Epoch, Locality, MediaCodec, RationalRate, Refusal, Revision, TakeId,
 };
@@ -33,9 +37,16 @@ use gx_control_plane::peer::EnginePeer;
 use gx_control_plane::status::{Degradation, EngineStatus, ProgramState};
 
 use crate::clock::ProgramClock;
+use crate::emission::{FrameEmitter, ProgramEmission};
 use crate::gpu::{self, Gpu};
+use crate::mesh::AssetBytes;
+use crate::metrics::{EnginePerformance, FrameMetrics, FrameSample};
+use crate::output_adapter::{OutputAdapterError, OutputAdapterRegistry};
+use crate::recovery::{PreparedSceneRecord, RecoveryError, RecoveryJournal, RecoveryState};
 use crate::prepared::PreparedScene;
-use crate::rasterizer::{key_for_take, Frame, SoftwareRasterizer};
+use crate::rasterizer::{
+    key_for_take, Frame, SoftwareRasterizer, FRAME_HEIGHT, FRAME_WIDTH,
+};
 
 /// The render engine. Owns the GPU, the clock and Program.
 pub struct Engine {
@@ -59,9 +70,19 @@ pub struct Engine {
     prepared: HashMap<(TakeId, Revision), PreparedScene>,
     /// Content hashes the asset plane has verified into the store.
     assets: HashSet<ContentHash>,
+    /// Verified asset bytes bound by content hash. Mesh and font preparation
+    /// receive these only after the asset plane has completed verification.
+    asset_bytes: AssetBytes,
     program: Option<ProgramState>,
     cued: Option<ProgramState>,
     rasterizer: SoftwareRasterizer,
+    preview_rasterizer: SoftwareRasterizer,
+    emitter: FrameEmitter,
+    metrics: FrameMetrics,
+    outputs: OutputAdapterRegistry,
+    selected_output: String,
+    recovery: Option<RecoveryJournal>,
+    output_inhibited: bool,
     events: Vec<EngineEvent>,
 }
 
@@ -74,6 +95,13 @@ impl Engine {
     /// is free-running rather than implying accuracy it does not have.
     pub fn new(frame_source: Arc<AtomicU64>, locality: Locality) -> Self {
         let gpu = gpu::negotiate();
+        let texture_limit = gpu
+            .max_texture_dimension_2d()
+            .unwrap_or(FRAME_WIDTH.max(FRAME_HEIGHT));
+        let rasterizer = SoftwareRasterizer::with_texture_limit(texture_limit)
+            .expect("a negotiated device limit must yield a valid tile plan");
+        let preview_rasterizer = SoftwareRasterizer::with_texture_limit(texture_limit)
+            .expect("the Program and Preview tile plans share one valid limit");
         let rate = RationalRate::P50;
         let lead = Lead::for_locality(locality);
         Self {
@@ -85,9 +113,19 @@ impl Engine {
             published: HashMap::new(),
             prepared: HashMap::new(),
             assets: HashSet::new(),
+            asset_bytes: HashMap::new(),
             program: None,
             cued: None,
-            rasterizer: SoftwareRasterizer::new(),
+            rasterizer,
+            preview_rasterizer,
+            emitter: FrameEmitter::new(),
+            metrics: FrameMetrics::with_window(rate, 60),
+            outputs: OutputAdapterRegistry::standard(
+                std::env::temp_dir().join("grapix-render-output"),
+            ),
+            selected_output: "null".into(),
+            recovery: None,
+            output_inhibited: false,
             events: Vec::new(),
         }
     }
@@ -97,47 +135,175 @@ impl Engine {
         self.gpu.tier()
     }
 
-    /// Publish a scene identifier so a take of it can succeed.
+    /// Attach the host-owned journal and restore its last complete state.
     ///
-    /// This is the identifier-only path the control plane and the conformance
-    /// suite use: a take names a revision, and the engine answers whether it
-    /// has one. It carries no content, which is why [`Engine::publish_scene`]
-    /// exists beside it — a take against an id published this way commits,
-    /// and Program is the deterministic take key the software rasteriser
-    /// draws, not scene content.
-    pub fn publish(&mut self, take_id: TakeId, revision: Revision) {
+    /// A recovered Program is rebuilt but remains output-inhibited until a
+    /// fresh `ConfigureOutput` request explicitly re-arms a destination.
+    pub fn attach_recovery_journal(
+        &mut self,
+        journal: RecoveryJournal,
+    ) -> Result<(), RecoveryError> {
+        if let Some(state) = journal.load()? {
+            self.restore_state(state)?;
+            self.output_inhibited = true;
+            self.rasterizer.clear();
+            self.preview_rasterizer.clear();
+        }
+        self.recovery = Some(journal);
+        self.persist_recovery()
+    }
+
+    /// Whether a recovered engine is still prevented from emitting old state.
+    pub fn output_inhibited(&self) -> bool {
+        self.output_inhibited
+    }
+
+    /// A deterministic point-in-time recovery snapshot.
+    pub fn recovery_state(&self) -> RecoveryState {
+        let mut prepared_scenes: Vec<_> = self
+            .prepared
+            .iter()
+            .filter(|((take_id, revision), _)| self.published.get(take_id) == Some(revision))
+            .map(|((take_id, revision), prepared)| PreparedSceneRecord {
+                take_id: take_id.clone(),
+                revision: *revision,
+                document: prepared.document().clone(),
+            })
+            .collect();
+        prepared_scenes.sort_by(|left, right| {
+            (&left.take_id, left.revision).cmp(&(&right.take_id, right.revision))
+        });
+        RecoveryState {
+            schema_version: crate::recovery::RECOVERY_SCHEMA_VERSION,
+            epoch: self.clock.epoch(),
+            published: self
+                .published
+                .iter()
+                .map(|(take_id, revision)| (take_id.clone(), *revision))
+                .collect(),
+            prepared_scenes,
+            verified_assets: self.assets.iter().cloned().collect(),
+            cued: self.cued.clone(),
+            program: self.program.clone(),
+        }
+    }
+
+    fn persist_recovery(&self) -> Result<(), RecoveryError> {
+        match &self.recovery {
+            Some(journal) => journal.record(&self.recovery_state()),
+            None => Ok(()),
+        }
+    }
+
+    fn restore_state(&mut self, state: RecoveryState) -> Result<(), RecoveryError> {
+        state.validate()?;
+        let next_epoch = state.next_epoch()?;
+        let assets: HashSet<_> = state.verified_assets.iter().cloned().collect();
+        let mut prepared = HashMap::new();
+        let support = self.material_support();
+        for record in state.prepared_scenes {
+            let scene = PreparedScene::prepare(
+                record.document,
+                &assets,
+                &self.asset_bytes,
+                &support,
+            )
+            .map_err(|refusal| RecoveryError::InvalidState {
+                detail: format!(
+                    "prepared scene {}/{} cannot be rebuilt: {refusal}",
+                    record.take_id, record.revision.0
+                ),
+            })?;
+            prepared.insert((record.take_id, record.revision), scene);
+        }
+        self.clock = ProgramClock::free_running(
+            next_epoch,
+            self.clock.timebase(),
+            Lead::for_locality(self.locality),
+        );
+        self.published = state.published.into_iter().collect();
+        self.prepared = prepared;
+        self.assets = assets;
+        self.cued = state.cued;
+        self.program = state.program;
+        Ok(())
+    }
+    fn activate_program_base(&mut self) {
+        let Some(program) = self.program.clone() else {
+            self.rasterizer.clear();
+            self.preview_rasterizer.clear();
+            return;
+        };
+        let take_key = key_for_take(&program.take_id);
+        if let Some(prepared) = self
+            .prepared
+            .get(&(program.take_id.clone(), program.revision))
+        {
+            self.rasterizer
+                .take_prepared(take_key, prepared.frame(OutputTransform::Rec709))
+                .expect("a recovered non-zero canvas must yield a tile plan");
+            self.preview_rasterizer
+                .take_prepared(take_key, prepared.frame(OutputTransform::Srgb))
+                .expect("Preview shares Program's validated tile plan");
+        } else {
+            self.rasterizer.take(take_key);
+            self.preview_rasterizer.take(take_key);
+        }
+    }
+
+    /// Publish a scene identifier so a take of it can succeed, with no
+    /// content.
+    ///
+    /// The identifier-only path exists for the worker's own binary and the
+    /// conformance suite: a take names a revision and the engine answers
+    /// whether it has one, and Program is the software rasteriser's take key.
+    /// It is not the authoring path — a scene reaches the engine through
+    /// [`Engine::publish`], and an identifier published this way has no
+    /// `PreparedScene` behind it.
+    pub fn publish_identifier(&mut self, take_id: TakeId, revision: Revision) {
         self.published.insert(take_id, revision);
     }
 
-    /// Publish an authored scene, parsed strictly and prepared once (3.4).
+    /// Prepare and publish one complete authored scene as a new pinned revision.
     ///
-    /// The bytes go through `parse_scene_document`, so a field this schema
-    /// does not know refuses here rather than being dropped — and through the
-    /// *same* function every mock uses, because a mock that accepts what the
-    /// engine refuses teaches a contract that does not exist (invariant 45).
+    /// The asset-plane listener is solely responsible for accepting raw bytes
+    /// and strictly parsing the closed scene schema. This method deliberately
+    /// accepts the resulting `SceneDocument`, so there is no identifier-only
+    /// path that could put a take key on Program without scene content.
     ///
-    /// Preparation happens now, not per frame (invariant 35), and every
-    /// reason a scene cannot be rendered is produced now: a missing asset, an
-    /// unresolvable font, a material this device cannot draw. A take can then
-    /// only fail for reasons about *timing*, which is the separation ADR-002
-    /// depends on.
-    ///
-    /// Publishing is additive and pins a revision (invariant 30): the same id
-    /// published twice is two revisions, and the earlier prepared scene stays
-    /// exactly as it was for anything already cued against it.
-    pub fn publish_scene(&mut self, bytes: &[u8]) -> Result<(TakeId, Revision), Refusal> {
-        let document = gx_contracts::scene::parse_scene_document(bytes)?;
+    /// Preparation happens once here rather than during rendering (invariant
+    /// 35). Publication is additive: an earlier `(TakeId, Revision)` remains
+    /// immutable in `prepared` when the same take id is published again.
+    pub fn publish(&mut self, document: SceneDocument) -> PublishReply {
         let take_id = TakeId(document.id.clone());
-        let revision = Revision(
-            self.published
-                .get(&take_id)
-                .map(|current| current.0 + 1)
-                .unwrap_or(1),
-        );
-        let prepared = PreparedScene::prepare(document, &self.assets, &self.material_support())?;
+        let revision = self
+            .published
+            .get(&take_id)
+            .copied()
+            .map(Revision::next)
+            .unwrap_or(Revision(1));
+        let prepared = match PreparedScene::prepare(
+            document,
+            &self.assets,
+            &self.asset_bytes,
+            &self.material_support(),
+        ) {
+            Ok(prepared) => prepared,
+            Err(cause) => {
+                return PublishReply::Refused(PublishRefusal::PreparationRefused { cause });
+            }
+        };
         self.prepared.insert((take_id.clone(), revision), prepared);
         self.published.insert(take_id.clone(), revision);
-        Ok((take_id, revision))
+        if let Err(error) = self.persist_recovery() {
+            self.output_inhibited = true;
+            return PublishReply::Refused(PublishRefusal::PreparationRefused {
+                cause: Refusal::TransportFailed {
+                    detail: format!("recovery journal write failed: {error}"),
+                },
+            });
+        }
+        PublishReply::Published { take_id, revision }
     }
 
     /// The prepared scene a published revision pins, if this engine holds it.
@@ -154,22 +320,98 @@ impl Engine {
         self.assets.insert(hash);
     }
 
-    /// What this engine can actually draw. `rasterizer_status()` is
-    /// `NotImplemented`, so it declares nothing and every material refuses by
-    /// name — the correct answer for a renderer that does not exist yet, and
-    /// never a set inferred from a build flag (invariant 21).
-    fn material_support(&self) -> MaterialSupport {
-        MaterialSupport::none()
+    /// Record a verified asset and retain its immutable bytes for per-publish
+    /// font and mesh preparation. The asset plane verifies the content hash
+    /// before this receipt; the engine never reads a mutable source path.
+    pub fn record_verified_asset_bytes(&mut self, hash: ContentHash, bytes: Vec<u8>) {
+        self.assets.insert(hash.clone());
+        self.asset_bytes.insert(hash, bytes);
     }
 
-    /// Render the current Program frame.
+    /// What the current fixed-function path can reproduce exactly. The
+    /// capability and publish validator share this one declaration, so an
+    /// unsupported material is refused rather than approximated.
+    fn material_support(&self) -> MaterialSupport {
+        MaterialSupport::fixed_function()
+    }
+
+    /// Render and emit one Preview/Program pair at the engine's current frame.
     ///
-    /// The frame is a function of the committed take and the clock, produced
-    /// on demand rather than cached per frame (invariant 35 cuts the other
-    /// way here: the *base* is cached per take, the counter stamp is cheap).
-    pub fn render_program(&mut self) -> Frame {
+    /// Both bases were built at publish/take time. Per frame this measures the
+    /// raster copy, emits into bounded latest-frame slots, records the sample,
+    /// and delivers Program to the configured adapter without ever waiting for
+    /// a consumer.
+    pub fn emit_frame(&mut self) -> Result<ProgramEmission, OutputAdapterError> {
         self.sync_clock();
-        self.rasterizer.render(self.clock.frame())
+        let frame_number = self.clock.frame();
+        let started = Instant::now();
+        let program = Arc::new(self.rasterizer.render(frame_number));
+        let preview = Arc::new(self.preview_rasterizer.render(frame_number));
+        let render_nanos = started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
+        self.emitter
+            .emit(Arc::clone(&preview), Arc::clone(&program));
+        let interval_nanos = self
+            .clock
+            .offset_nanos(1)
+            .min(u128::from(u64::MAX)) as u64;
+        let sample = FrameSample {
+            frame: frame_number,
+            render_nanos,
+            interval_nanos,
+            late: render_nanos > interval_nanos,
+            drops_so_far: self.emitter.total_drops(),
+        };
+        self.metrics.record(sample);
+        if !self.output_inhibited {
+            self.outputs
+                .emit(&self.selected_output, frame_number, Arc::clone(&program))?;
+        }
+        Ok(ProgramEmission {
+            frame: program,
+            sample,
+        })
+    }
+
+    /// Render Program for synchronous callers and tests.
+    pub fn render_program(&mut self) -> Frame {
+        self.emit_frame()
+            .expect("the configured output adapter must accept Program")
+            .frame
+            .as_ref()
+            .clone()
+    }
+
+    /// The freshest sRGB Preview frame, if its consumer has not taken it.
+    pub fn take_preview(&mut self) -> Option<Arc<Frame>> {
+        self.emitter.take_preview()
+    }
+
+    /// The freshest Rec.709 Program frame, if its consumer has not taken it.
+    pub fn take_program(&mut self) -> Option<Arc<Frame>> {
+        self.emitter.take_program()
+    }
+
+    /// Cause-specific drops observed by the Preview consumer slot.
+    pub fn preview_drops(&self) -> gx_media_plane::DropCounters {
+        self.emitter.preview_drops()
+    }
+
+    /// Cause-specific drops observed by the Program consumer slot.
+    pub fn program_drops(&self) -> gx_media_plane::DropCounters {
+        self.emitter.program_drops()
+    }
+
+    /// Bounded, point-in-time performance data for the graph page.
+    pub fn performance(&self) -> EnginePerformance {
+        EnginePerformance {
+            rate: self.clock.timebase(),
+            device_tier: self.gpu.tier(),
+            frames: self.metrics.samples().to_vec(),
+            total_rendered: self.metrics.total_rendered(),
+            total_late: self.metrics.total_late(),
+            total_dropped: self.metrics.total_dropped(),
+            mean_budget_ratio: self.metrics.mean_budget_ratio(),
+        }
     }
 
     /// Pull the clock forward to the frame the pump has reached.
@@ -231,6 +473,9 @@ impl Engine {
     }
 
     fn configure_output(&mut self, config: &OutputConfig) -> EngineReply {
+        if let Err(refusal) = self.outputs.ensure_known(&config.adapter) {
+            return EngineReply::Refused(refusal);
+        }
         if config.live {
             if let Err(refusal) = live_allowed(
                 self.gpu.tier(),
@@ -253,6 +498,11 @@ impl Engine {
                 });
             }
         }
+        self.selected_output.clone_from(&config.adapter);
+        if self.output_inhibited {
+            self.activate_program_base();
+            self.output_inhibited = false;
+        }
         EngineReply::OutputConfigured {
             adapter: config.adapter.clone(),
             live: config.live,
@@ -260,8 +510,14 @@ impl Engine {
     }
 }
 
+impl AssetPublishPeer for Engine {
+    fn publish_scene(&mut self, scene: SceneDocument) -> PublishReply {
+        self.publish(scene)
+    }
+}
 impl EnginePeer for Engine {
     fn capability(&self) -> EngineCapability {
+
         EngineCapability {
             protocol: gx_contracts::PROTOCOL_VERSION,
             epoch: self.clock.epoch(),
@@ -269,22 +525,21 @@ impl EnginePeer for Engine {
             device_tier: self.gpu.tier(),
             clock: self.clock.source(),
             reference: self.clock.reference(),
-            live_allowed: self.live_is_allowed(false),
+            live_allowed: !self.output_inhibited && self.live_is_allowed(false),
             media: match self.locality {
                 Locality::CoLocated => vec![MediaCodec::RawShared, MediaCodec::Jpeg],
                 Locality::Lan => vec![MediaCodec::H264, MediaCodec::Jpeg],
             },
-            // What this engine can actually draw. `rasterizer_status()`
-            // returns `NotImplemented`, so the honest declaration is that it
-            // reproduces no blend or fit mode: every material then refuses
-            // by name rather than being drawn approximately (invariants 18
-            // and 21). This becomes a measured set when 3.5 and 3.7 land.
-            material: gx_contracts::material::MaterialSupport::none(),
+            material: self.material_support(),
         }
     }
 
     fn handle(&mut self, request: ClientRequest) -> EngineReply {
-        match request {
+        let persists = matches!(
+            &request,
+            ClientRequest::Cue(_) | ClientRequest::Take(_) | ClientRequest::Clear(_)
+        );
+        let reply = match request {
             // Authentication is a transport concern; reaching here means the
             // transport failed to intercept, so refuse rather than approve.
             ClientRequest::Authenticate { .. } => EngineReply::Refused(Refusal::NotImplemented {
@@ -305,7 +560,7 @@ impl EnginePeer for Engine {
                     clock: self.clock.source(),
                     reference: self.clock.reference(),
                     device_tier: self.gpu.tier(),
-                    live_allowed: self.live_is_allowed(false),
+                    live_allowed: !self.output_inhibited && self.live_is_allowed(false),
                     program: self.program.clone(),
                     degradations: self.degradations(),
                 })
@@ -340,7 +595,9 @@ impl EnginePeer for Engine {
                             committed_frame: committed.frame,
                         });
                         self.cued = None;
-                        self.rasterizer.take(key_for_take(&req.take_id));
+                        if !self.output_inhibited {
+                            self.activate_program_base();
+                        }
                         self.events.push(EngineEvent::Committed(committed));
                         EngineReply::Taken(committed)
                     }
@@ -352,13 +609,25 @@ impl EnginePeer for Engine {
                 Ok(committed) => {
                     self.program = None;
                     self.rasterizer.clear();
+                    self.preview_rasterizer.clear();
                     EngineReply::Cleared(committed)
                 }
                 Err(refusal) => EngineReply::Refused(refusal),
             },
 
             ClientRequest::ConfigureOutput(config) => self.configure_output(&config),
+        };
+        if persists && !matches!(reply, EngineReply::Refused(_)) {
+            if let Err(error) = self.persist_recovery() {
+                self.output_inhibited = true;
+                self.rasterizer.clear();
+                self.preview_rasterizer.clear();
+                return EngineReply::Refused(Refusal::TransportFailed {
+                    detail: format!("recovery journal write failed: {error}"),
+                });
+            }
         }
+        reply
     }
 
     fn drain_events(&mut self) -> Vec<EngineEvent> {
@@ -370,6 +639,9 @@ impl EnginePeer for Engine {
 mod tests {
     use super::*;
     use gx_control_plane::intent::{ClearRequest, CueRequest, TakeRequest};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use gx_control_plane::message::OutputConfig;
 
     fn engine() -> Engine {
         // A clock that does not advance on its own: the test drives the frame
@@ -379,8 +651,9 @@ mod tests {
 
     fn published(engine: &mut Engine) -> (TakeId, Revision) {
         let take_id = TakeId("take/101".into());
-        engine.publish(take_id.clone(), Revision(1));
-        (take_id, Revision(1))
+        let revision = Revision(1);
+        engine.publish_identifier(take_id.clone(), revision);
+        (take_id, revision)
     }
 
     #[test]
@@ -478,5 +751,96 @@ mod tests {
             e.render_program().is_black(),
             "a cue prepares, it does not air"
         );
+    }
+
+    #[test]
+    fn unknown_output_is_refused_with_the_sorted_offered_set() {
+        let mut e = engine();
+        let reply = e.handle(ClientRequest::ConfigureOutput(OutputConfig {
+            adapter: "decklink".into(),
+            live: false,
+            accept_free_run: false,
+        }));
+        assert!(matches!(
+            reply,
+            EngineReply::Refused(Refusal::UnknownOutputAdapter { requested, offered })
+                if requested == "decklink"
+                    && offered == ["null", "recording", "virtual"]
+        ));
+    }
+
+    #[test]
+    fn a_stalled_preview_consumer_never_blocks_program() {
+        let frames = Arc::new(AtomicU64::new(0));
+        let mut e = Engine::new(Arc::clone(&frames), Locality::CoLocated);
+        e.emit_frame().expect("first frame emits");
+        e.take_program().expect("Program consumer takes frame zero");
+
+        frames.store(1, Ordering::Relaxed);
+        let emission = e.emit_frame().expect("second frame emits");
+        assert_eq!(emission.sample.frame, 1);
+        assert_eq!(e.preview_drops().consumer_busy, 1);
+        assert_eq!(e.program_drops().consumer_busy, 0);
+        assert_eq!(e.take_program().expect("fresh Program remains available").checksum(), emission.frame.checksum());
+    }
+
+    #[test]
+    fn recovery_restores_program_at_a_new_epoch_but_requires_output_rearming() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "gx-engine-recovery-{}-{nonce}.json",
+            std::process::id()
+        ));
+        let take_id = TakeId("recovered/take".into());
+        {
+            let mut first = engine();
+            first.publish_identifier(take_id.clone(), Revision(1));
+            first
+                .attach_recovery_journal(
+                    RecoveryJournal::open_at(path.clone()).expect("journal opens"),
+                )
+                .expect("empty journal attaches");
+            assert!(matches!(
+                first.handle(ClientRequest::Take(TakeRequest {
+                    take_id: take_id.clone(),
+                    revision: Revision(1),
+                    at: TakeAt::NextOpportunity,
+                })),
+                EngineReply::Taken(_)
+            ));
+        }
+
+        let mut recovered = engine();
+        recovered
+            .attach_recovery_journal(
+                RecoveryJournal::open_at(path.clone()).expect("journal reopens"),
+            )
+            .expect("complete state restores");
+        assert!(recovered.output_inhibited());
+        assert_eq!(recovered.clock.epoch(), Epoch(2));
+        assert!(recovered.render_program().is_black());
+        assert!(matches!(
+            recovered.handle(ClientRequest::Status),
+            EngineReply::Status(EngineStatus {
+                program: Some(ProgramState { take_id: restored, .. }),
+                live_allowed: false,
+                ..
+            }) if restored == take_id
+        ));
+
+        assert!(matches!(
+            recovered.handle(ClientRequest::ConfigureOutput(OutputConfig {
+                adapter: "virtual".into(),
+                live: false,
+                accept_free_run: false,
+            })),
+            EngineReply::OutputConfigured { .. }
+        ));
+        assert!(!recovered.output_inhibited());
+        assert!(!recovered.render_program().is_black());
+        std::fs::remove_file(path).expect("remove recovery fixture");
     }
 }

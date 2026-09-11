@@ -7,11 +7,23 @@ rust-version.workspace = true
 
 [dependencies]
 gx-contracts = { workspace = true }
+gx-asset-plane = { workspace = true }
 gx-control-plane = { workspace = true }
 gx-control-transport = { workspace = true }
 serde_json = { workspace = true }
+serde = { workspace = true }
+ts-rs = { workspace = true }
+cosmic-text = "0.15"
+gx-media-plane = { workspace = true }
+gx-fs = { workspace = true }
 wgpu = "26"
 pollster = "0.4"
+# MIT. 3.5 uses lyon's maintained path tessellator behind `PathRasteriser`, so
+# scene logic remains independent of any tessellation backend.
+lyon = "1"
+# MIT. 3.7 parses glTF/GLB directly from verified content-addressed asset
+# bytes; the loader never receives an authoring path.
+gltf = "1"
 
 [lib]
 path = "src/lib.rs"

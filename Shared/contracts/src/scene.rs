@@ -1334,6 +1334,12 @@ pub struct SceneDocument {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub revision: Option<Revision>,
+    /// The camera Program renders through. Absent selects the documented
+    /// synthetic 2D orthographic camera; a present id must resolve to a
+    /// `CameraObject` in this scene.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub active_camera_id: Option<String>,
     pub canvas: SceneCanvas,
     #[serde(default)]
     pub timeline: SceneTimeline,
@@ -1610,6 +1616,7 @@ mod parse_tests {
             name: "Catalogue".into(),
             version: 1,
             revision: Some(Revision(2)),
+            active_camera_id: None,
             canvas: SceneCanvas {
                 width: 1920,
                 height: 1080,
@@ -1856,6 +1863,7 @@ mod tests {
             name: "Lower Third".into(),
             version: 1,
             revision: Some(Revision(3)),
+            active_camera_id: None,
             canvas: SceneCanvas {
                 width: 1920,
                 height: 1080,

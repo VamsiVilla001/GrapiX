@@ -238,6 +238,20 @@ pub enum Refusal {
     UnsupportedBlendMode { mode: material::BlendMode },
     /// A fit mode the renderer cannot reproduce exactly.
     UnsupportedFitMode { mode: material::FitMode },
+    /// A cull mode the renderer cannot reproduce exactly.
+    UnsupportedCullMode { mode: material::CullMode },
+    /// An alpha interpretation the renderer cannot reproduce exactly.
+    UnsupportedAlphaMode { mode: material::AlphaMode },
+    /// A depth mode the renderer cannot reproduce exactly.
+    UnsupportedDepthMode { mode: material::DepthMode },
+    /// A vector fill or stroke uses a gradient that the active path
+    /// rasteriser cannot carry exactly. It is refused at preparation rather
+    /// than reduced to a stop or flat colour (invariant 18).
+    UnsupportedPathGradient { object: String, paint: String },
+    /// A vector path could not be represented as triangles. The object and
+    /// tessellator diagnostic are retained so a malformed path never turns
+    /// into an absent or approximate graphic.
+    VectorTessellationFailed { object: String, detail: String },
     /// A declared asset's bytes have not arrived. A take blocker
     /// (invariant 29).
     AssetMissing { hash: ContentHash },
@@ -251,6 +265,13 @@ pub enum Refusal {
     /// one means "not that version", this means "not at all", and an operator
     /// needs to know which.
     UnknownTake { take_id: TakeId },
+    /// An output adapter identifier the engine does not offer. The offered
+    /// identifiers travel with the refusal so an operator can correct a
+    /// misspelling without a separate capability lookup.
+    UnknownOutputAdapter {
+        requested: String,
+        offered: Vec<String>,
+    },
     /// A requested frame the engine cannot still honour: it has passed, or it
     /// falls inside the lead the engine needs to commit.
     ///
@@ -349,6 +370,33 @@ pub enum Refusal {
     SceneFontUnknown { font_id: String, object: String },
     /// An object names an asset id the scene's own library does not carry.
     SceneAssetUnknown { asset_id: String, object: String },
+    /// A mesh material slot names no material in the scene's self-contained
+    /// material library.
+    SceneMaterialUnknown {
+        material_id: String,
+        object: String,
+        element: String,
+    },
+    /// A renderable mesh surface has no assignment. It is never drawn with an
+    /// implicit default material (invariant 18).
+    MeshMaterialUnassigned { object: String, element: String },
+    /// A model mesh points at an asset that is not a model.
+    MeshModelAssetWrongKind { asset_id: String, object: String },
+    /// Verified model bytes are not a readable glTF/GLB document.
+    MeshModelInvalid { hash: ContentHash, detail: String },
+    /// The model's imported material element names do not agree with the
+    /// authored mapping, so assigning by order would be ambiguous.
+    MeshMaterialElementsMismatch {
+        object: String,
+        declared: Vec<String>,
+        imported: Vec<String>,
+    },
+    /// A physically based mesh material has no scene light to respond to.
+    MeshMaterialRequiresLight { object: String, material_id: String },
+    /// A scene light has no physically based mesh material that can respond.
+    LightHasNoResponsiveMaterial { light_id: String },
+    /// The selected active camera does not name a camera object in this scene.
+    SceneActiveCameraUnknown { camera_id: String },
     /// A package format version this reader does not implement. Packages are
     /// immutable; guessing at a future format would invalidate verification.
     UnknownPackageFormatVersion { received: u32 },
@@ -411,6 +459,11 @@ impl std::fmt::Display for Refusal {
             Refusal::ReferenceUnlocked { state } => write!(f, "reference not locked: {state:?}"),
             Refusal::UnsupportedBlendMode { mode } => write!(f, "unsupported blend mode: {mode:?}"),
             Refusal::UnsupportedFitMode { mode } => write!(f, "unsupported fit mode: {mode:?}"),
+            Refusal::UnsupportedCullMode { mode } => write!(f, "unsupported cull mode: {mode:?}"),
+            Refusal::UnsupportedAlphaMode { mode } => {
+                write!(f, "unsupported alpha mode: {mode:?}")
+            }
+            Refusal::UnsupportedDepthMode { mode } => write!(f, "unsupported depth mode: {mode:?}"),
             Refusal::AssetMissing { hash } => write!(f, "asset missing: {hash}"),
             Refusal::ProtocolMismatch { expected, actual } => {
                 write!(f, "protocol mismatch: expected {expected}, got {actual}")
@@ -420,6 +473,11 @@ impl std::fmt::Display for Refusal {
                 write!(f, "platform not a certification target: {platform}")
             }
             Refusal::UnknownTake { take_id } => write!(f, "unknown take: {take_id}"),
+            Refusal::UnknownOutputAdapter { requested, offered } => write!(
+                f,
+                "unknown output adapter {requested}: offered {}",
+                offered.join(", ")
+            ),
             Refusal::FrameNotReachable {
                 requested,
                 earliest,
@@ -490,6 +548,13 @@ impl std::fmt::Display for Refusal {
             Refusal::SceneUnknownField { path } => {
                 write!(f, "scene carries a field this schema does not know: {path}")
             }
+            Refusal::UnsupportedPathGradient { object, paint } => write!(
+                f,
+                "object {object} carries a {paint} a path rasteriser cannot draw"
+            ),
+            Refusal::VectorTessellationFailed { object, detail } => {
+                write!(f, "object {object} could not be tessellated: {detail}")
+            }
             Refusal::SceneFontUnknown { font_id, object } => write!(
                 f,
                 "object {object} names font {font_id}, which the scene does not carry"
@@ -498,6 +563,50 @@ impl std::fmt::Display for Refusal {
                 f,
                 "object {object} names asset {asset_id}, which the scene does not carry"
             ),
+            Refusal::SceneMaterialUnknown {
+                material_id,
+                object,
+                element,
+            } => write!(
+                f,
+                "object {object} assigns unknown material {material_id} to {element}"
+            ),
+            Refusal::MeshMaterialUnassigned { object, element } => {
+                write!(
+                    f,
+                    "object {object} has no material assignment for {element}"
+                )
+            }
+            Refusal::MeshModelAssetWrongKind { asset_id, object } => {
+                write!(f, "mesh {object} names non-model asset {asset_id}")
+            }
+            Refusal::MeshModelInvalid { hash, detail } => {
+                write!(f, "model {hash} is not readable glTF: {detail}")
+            }
+            Refusal::MeshMaterialElementsMismatch {
+                object,
+                declared,
+                imported,
+            } => write!(
+                f,
+                "model mesh {object} declares elements {declared:?}, but imports {imported:?}"
+            ),
+            Refusal::MeshMaterialRequiresLight {
+                object,
+                material_id,
+            } => write!(
+                f,
+                "mesh {object} material {material_id} requires a scene light"
+            ),
+            Refusal::LightHasNoResponsiveMaterial { light_id } => {
+                write!(
+                    f,
+                    "light {light_id} has no physically based material to affect"
+                )
+            }
+            Refusal::SceneActiveCameraUnknown { camera_id } => {
+                write!(f, "active camera {camera_id} is not a scene camera")
+            }
             Refusal::UnknownPackageFormatVersion { received } => {
                 write!(f, "unknown package format version: {received}")
             }

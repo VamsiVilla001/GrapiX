@@ -119,6 +119,7 @@ fn new_scene(specification: &str) -> Result<SceneDocument, EditorError> {
         name: name.into(),
         version: 1,
         revision: None,
+        active_camera_id: None,
         canvas: SceneCanvas {
             width: 1920,
             height: 1080,
@@ -163,8 +164,12 @@ fn publish((engine, scene): (SocketAddr, SceneDocument)) -> Result<(), EditorErr
         PublishReply::Published { take_id, revision } => {
             println!("published {} revision {}", take_id.0, revision.0)
         }
-        PublishReply::Refused(PublishRefusal::InvalidSceneDocument { detail }) => {
+        PublishReply::Refused(PublishRefusal::InvalidPublishRequest { detail }) => {
             return Err(EditorError::PublishRefused(detail))
+        }
+        PublishReply::Refused(PublishRefusal::SceneRefused { cause })
+        | PublishReply::Refused(PublishRefusal::PreparationRefused { cause }) => {
+            return Err(EditorError::PublishRefused(cause.to_string()))
         }
     }
     Ok(())

@@ -23,10 +23,10 @@ pub struct Gpu {
 }
 
 struct GpuInner {
-    #[allow(dead_code)]
     device: wgpu::Device,
     #[allow(dead_code)]
     queue: wgpu::Queue,
+    max_texture_dimension_2d: u32,
 }
 
 /// Negotiate a device and the tier it supports.
@@ -74,8 +74,13 @@ pub fn negotiate() -> Gpu {
     }))
     .expect("a hardware adapter that negotiated must open a device");
 
+    let max_texture_dimension_2d = device.limits().max_texture_dimension_2d;
     Gpu {
-        inner: Some(GpuInner { device, queue }),
+        inner: Some(GpuInner {
+            device,
+            queue,
+            max_texture_dimension_2d,
+        }),
         tier,
     }
 }
@@ -102,6 +107,14 @@ impl Gpu {
     /// Whether a real GPU is present, as opposed to a software fallback.
     pub fn has_hardware(&self) -> bool {
         self.inner.is_some()
+    }
+
+    /// The maximum 2D texture dimension the negotiated device actually
+    /// granted. A software/non-hardware tier has no GPU texture limit and
+    /// returns `None`; it must not pretend that a guessed default is a device
+    /// capability.
+    pub fn max_texture_dimension_2d(&self) -> Option<u32> {
+        self.inner.as_ref().map(|gpu| gpu.max_texture_dimension_2d)
     }
 }
 

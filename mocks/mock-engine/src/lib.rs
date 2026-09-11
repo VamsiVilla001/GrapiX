@@ -10,13 +10,7 @@
 //! (invariant 27). What it does *not* share is the clock's driving: this one
 //! advances when a test says so, which is the whole point of a mock.
 
-use std::collections::{HashMap, HashSet};
-use std::io::{self, Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::sync::{Arc, Mutex};
-use std::thread::{self, JoinHandle};
-
-use gx_asset_plane::{PublishRefusal, PublishReply};
+use gx_asset_plane::{AssetPublishPeer, PublishReply};
 use gx_contracts::scene::SceneDocument;
 use gx_contracts::{
     ClockSource, ContentHash, DeviceTier, Epoch, Locality, MediaCodec, RationalRate,
@@ -27,6 +21,7 @@ use gx_control_plane::intent::{resolve_intent, ClockState, Lead, TakeAt, TakeCom
 use gx_control_plane::message::{ClientRequest, EngineEvent, EngineReply, OutputConfig};
 use gx_control_plane::peer::{EnginePeer, FaultInjection};
 use gx_control_plane::status::{Degradation, EngineStatus, ProgramState, ReferenceMonitor};
+use std::collections::{HashMap, HashSet};
 
 /// A mock engine. Deterministic, in-process, no GPU and no transport.
 #[derive(Debug, Clone)]
@@ -237,6 +232,12 @@ impl MockEngine {
     }
 }
 
+impl AssetPublishPeer for MockEngine {
+    fn publish_scene(&mut self, scene: SceneDocument) -> PublishReply {
+        MockEngine::publish_scene(self, scene)
+    }
+}
+
 impl Default for MockEngine {
     fn default() -> Self {
         Self::new()
@@ -376,91 +377,6 @@ pub fn describe(engine: &MockEngine) -> String {
         cap.reference,
         cap.live_allowed
     )
-}
-
-/// A loopback asset-plane endpoint for a mock Editor.
-///
-/// Control continues to carry only cue/take/clear intent. This listener
-/// accepts bounded JSON publish frames because scene content is restartable
-/// asset-plane work, and it updates the same engine instance the control
-/// listener serves.
-pub struct AssetPublishServer {
-    listener: TcpListener,
-    engine: Arc<Mutex<MockEngine>>,
-}
-
-impl AssetPublishServer {
-    pub fn bind(addr: SocketAddr, engine: Arc<Mutex<MockEngine>>) -> io::Result<Self> {
-        Ok(Self {
-            listener: TcpListener::bind(addr)?,
-            engine,
-        })
-    }
-
-    pub fn local_addr(&self) -> io::Result<SocketAddr> {
-        self.listener.local_addr()
-    }
-
-    pub fn serve_in_background(self) -> JoinHandle<()> {
-        thread::spawn(move || {
-            for stream in self.listener.incoming() {
-                match stream {
-                    Ok(stream) => {
-                        let engine = Arc::clone(&self.engine);
-                        thread::spawn(move || {
-                            let _ = handle_publish(stream, engine);
-                        });
-                    }
-                    Err(error) => {
-                        eprintln!("mock asset listener stopping: {error}");
-                        return;
-                    }
-                }
-            }
-        })
-    }
-}
-
-const MAX_PUBLISH_FRAME_BYTES: usize = 64 * 1024 * 1024;
-
-fn handle_publish(mut stream: TcpStream, engine: Arc<Mutex<MockEngine>>) -> io::Result<()> {
-    let mut prefix = [0_u8; 4];
-    stream.read_exact(&mut prefix)?;
-    let length = u32::from_be_bytes(prefix) as usize;
-    let reply = if length > MAX_PUBLISH_FRAME_BYTES {
-        PublishReply::Refused(PublishRefusal::InvalidSceneDocument {
-            detail: format!(
-                "publish frame is {length} bytes; maximum is {MAX_PUBLISH_FRAME_BYTES}"
-            ),
-        })
-    } else {
-        let mut bytes = vec![0; length];
-        stream.read_exact(&mut bytes)?;
-        // The same strict parse the real engine uses (3.4): a mock that
-        // accepted a field the engine refuses would teach a contract that
-        // does not exist, and the lesson would only be unlearned during
-        // integration (invariant 45).
-        match serde_json::from_slice::<serde_json::Value>(&bytes)
-            .map_err(|error| error.to_string())
-            .and_then(|envelope| {
-                let scene = envelope
-                    .get("scene")
-                    .ok_or_else(|| "publish request has no scene".to_string())?;
-                let scene = serde_json::to_vec(scene).map_err(|error| error.to_string())?;
-                gx_contracts::scene::parse_scene_document(&scene)
-                    .map_err(|refusal| refusal.to_string())
-            }) {
-            Ok(scene) => engine
-                .lock()
-                .expect("mock engine mutex poisoned")
-                .publish_scene(scene),
-            Err(detail) => PublishReply::Refused(PublishRefusal::InvalidSceneDocument { detail }),
-        }
-    };
-    let bytes = serde_json::to_vec(&reply).map_err(io::Error::other)?;
-    stream.write_all(&(bytes.len() as u32).to_be_bytes())?;
-    stream.write_all(&bytes)?;
-    stream.flush()
 }
 
 #[cfg(test)]

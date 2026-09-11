@@ -18,6 +18,13 @@ inspectable, and this document is the rule a reviewer applies to it.
    committed. Version pinning is enforced by the lockfiles, not by convention
    (ADR-003).
 
+## Approved render dependencies
+
+- **cosmic-text 0.15** (MIT): shapes the package-owned font bytes identically on
+  every render node, including OpenType layout and bidi processing. It is the
+  only text shaper in the Program path; its font database is populated only
+  from scene-packaged faces, never installed system fonts.
+
 ## Accepted licences
 
 Permissive, no copyleft on the distributed application:

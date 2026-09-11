@@ -9,7 +9,10 @@ pub mod package;
 pub mod publish;
 pub mod store;
 pub mod transfer;
-pub use publish::{PublishRefusal, PublishReply, PublishRequest};
+pub use publish::{
+    AssetPublishPeer, AssetPublishServer, PublishRefusal, PublishReply, PublishRequest,
+    MAX_PUBLISH_FRAME_BYTES,
+};
 pub use store::{content_hash, read_image_geometry, AssetStore, AssetStoreError, ImageGeometry};
 pub use transfer::Transfer;
 

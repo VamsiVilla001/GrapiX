@@ -1,0 +1,341 @@
+//! Prepared vector rasterisation (build-plan 3.5).
+//!
+//! This module exists so scene code depends on [`PathRasteriser`] rather than
+//! on a tessellation library. `lyon` 1.x (MIT) is deliberately confined to
+//! [`lyon`]: it tessellates paths once while a scene is prepared, preventing
+//! the per-frame geometry rebuild that invariant 35 forbids. A backend that
+//! cannot carry a gradient refuses it at preparation instead of selecting a
+//! stop or flattening it (invariant 18).
+
+mod lyon;
+
+use gx_contracts::color::{ColorValue, OutputTransform};
+use gx_contracts::scene::{ResolvedObject, SceneDocument};
+use gx_contracts::Refusal;
+
+use crate::colour_pipeline::LinearRgba;
+use crate::rasterizer::Frame;
+
+pub use lyon::LyonPathRasteriser;
+
+/// Cached triangle geometry for the vector content of one published scene.
+///
+/// Construction is intentionally separate from [`PathRasteriser::rasterise`]:
+/// it is called by `PreparedScene` exactly once during publication. The
+/// rasteriser receives only these resolved draw commands, never raw scene
+/// objects or JSON.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct PreparedPaths {
+    paths: Vec<PreparedPath>,
+}
+
+impl PreparedPaths {
+    /// Tessellate every vector object after hierarchy resolution.
+    ///
+    /// `effective` must be the resolution of `document` in source order. A
+    /// mismatch is an engine defect rather than an opportunity to associate an
+    /// object with a nearby transform, so it is refused by name.
+    pub fn prepare(
+        document: &SceneDocument,
+        effective: &[ResolvedObject],
+    ) -> Result<Self, Refusal> {
+        if document.objects.len() != effective.len() {
+            return Err(Refusal::VectorTessellationFailed {
+                object: "scene".into(),
+                detail: format!(
+                    "{} scene objects have {} resolved transforms",
+                    document.objects.len(),
+                    effective.len()
+                ),
+            });
+        }
+
+        let mut paths = Vec::new();
+        for (object, resolved) in document.objects.iter().zip(effective) {
+            if !resolved.visible || resolved.is_container {
+                continue;
+            }
+            lyon::prepare_object(object, resolved, &mut paths)?;
+        }
+        Ok(Self { paths })
+    }
+
+    /// The prepared, ordered vector draw commands.
+    pub fn paths(&self) -> &[PreparedPath] {
+        &self.paths
+    }
+}
+
+/// One filled or stroked, already-tessellated vector draw command.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreparedPath {
+    object_id: String,
+    paint: LinearRgba,
+    vertices: Vec<PathVertex>,
+    indices: Vec<u32>,
+    bounds: RasterBounds,
+}
+
+impl PreparedPath {
+    pub(crate) fn new(
+        object_id: String,
+        paint: LinearRgba,
+        vertices: Vec<PathVertex>,
+        indices: Vec<u32>,
+    ) -> Self {
+        let bounds = RasterBounds::from_vertices(&vertices);
+        Self {
+            object_id,
+            paint,
+            vertices,
+            indices,
+            bounds,
+        }
+    }
+
+    /// The owning scene object's stable id.
+    pub fn object_id(&self) -> &str {
+        &self.object_id
+    }
+
+    /// Premultiplied linear-sRGB paint, converted by the colour pipeline at
+    /// preparation. Tagged authored colour never reaches a raster backend.
+    pub fn paint(&self) -> LinearRgba {
+        self.paint
+    }
+
+    /// The cached vertices in scene coordinates.
+    pub fn vertices(&self) -> &[PathVertex] {
+        &self.vertices
+    }
+
+    /// Triangle indices into [`Self::vertices`].
+    pub fn indices(&self) -> &[u32] {
+        &self.indices
+    }
+
+    /// Smallest scene-space rectangle that contains this draw command.
+    pub fn bounds(&self) -> RasterBounds {
+        self.bounds
+    }
+}
+
+/// One tessellated vertex in scene coordinates.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PathVertex {
+    /// Horizontal scene coordinate.
+    pub x: f32,
+    /// Vertical scene coordinate.
+    pub y: f32,
+}
+
+/// An axis-aligned rectangle in scene coordinates.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RasterBounds {
+    /// Inclusive lower horizontal edge.
+    pub min_x: f32,
+    /// Inclusive lower vertical edge.
+    pub min_y: f32,
+    /// Exclusive upper horizontal edge.
+    pub max_x: f32,
+    /// Exclusive upper vertical edge.
+    pub max_y: f32,
+}
+
+impl RasterBounds {
+    fn from_vertices(vertices: &[PathVertex]) -> Self {
+        let mut bounds = Self {
+            min_x: f32::INFINITY,
+            min_y: f32::INFINITY,
+            max_x: f32::NEG_INFINITY,
+            max_y: f32::NEG_INFINITY,
+        };
+        for vertex in vertices {
+            bounds.min_x = bounds.min_x.min(vertex.x);
+            bounds.min_y = bounds.min_y.min(vertex.y);
+            bounds.max_x = bounds.max_x.max(vertex.x);
+            bounds.max_y = bounds.max_y.max(vertex.y);
+        }
+        bounds
+    }
+}
+
+/// A linear-premultiplied pixel surface produced by a [`PathRasteriser`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct RasterSurface {
+    width: u32,
+    height: u32,
+    pixels: Vec<LinearRgba>,
+}
+
+impl RasterSurface {
+    /// Create a transparent working-linear surface.
+    pub fn transparent(width: u32, height: u32) -> Self {
+        Self {
+            width,
+            height,
+            pixels: vec![LinearRgba::transparent(); (width as usize) * (height as usize)],
+        }
+    }
+
+    /// Width in scene pixels.
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    /// Height in scene pixels.
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    /// Pixels in row-major order, composited in linear light.
+    pub fn pixels(&self) -> &[LinearRgba] {
+        &self.pixels
+    }
+
+    /// Encode this working-linear surface once at an output boundary.
+    pub fn encode(&self, output: OutputTransform) -> Frame {
+        let mut pixels = Vec::with_capacity(self.pixels.len() * 4);
+        for pixel in &self.pixels {
+            pixels.extend_from_slice(&pixel.encode(output));
+        }
+        Frame {
+            width: self.width,
+            height: self.height,
+            pixels,
+        }
+    }
+
+    pub(crate) fn composite(&mut self, x: u32, y: u32, source: LinearRgba) {
+        let index = (y as usize) * (self.width as usize) + (x as usize);
+        self.pixels[index] = source.over(self.pixels[index]);
+    }
+}
+
+/// The scene-logic-facing vector backend contract.
+///
+/// Implementations receive the same prepared geometry and paint. They can be
+/// exchanged without reparsing a scene or changing its object dispatch; only
+/// the backend's coverage algorithm changes.
+pub trait PathRasteriser {
+    /// Render cached paths to a linear surface. Tessellation is deliberately
+    /// absent from this operation: it already happened in `PreparedPaths`.
+    fn rasterise(&self, paths: &PreparedPaths, width: u32, height: u32) -> RasterSurface;
+}
+
+pub(crate) fn solid_paint(
+    object: &str,
+    paint_name: &str,
+    color: Option<&ColorValue>,
+) -> Result<Option<LinearRgba>, Refusal> {
+    match color {
+        None | Some(ColorValue::None) => Ok(None),
+        Some(ColorValue::Solid { color }) => Ok(Some(LinearRgba::from_source(*color))),
+        Some(ColorValue::LinearGradient { .. } | ColorValue::RadialGradient { .. }) => {
+            Err(Refusal::UnsupportedPathGradient {
+                object: object.into(),
+                paint: paint_name.into(),
+            })
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gx_contracts::scene::SceneObject;
+    use gx_contracts::color::ColorValue;
+    use gx_contracts::scene::{ObjectBase, RectObject, SceneCanvas, SceneDocument};
+    use gx_contracts::RationalRate;
+
+    struct BoundingBoxRasteriser;
+
+    impl PathRasteriser for BoundingBoxRasteriser {
+        fn rasterise(&self, paths: &PreparedPaths, width: u32, height: u32) -> RasterSurface {
+            let mut surface = RasterSurface::transparent(width, height);
+            for path in paths.paths() {
+                let bounds = path.bounds();
+                let min_x = bounds.min_x.floor().max(0.0) as u32;
+                let min_y = bounds.min_y.floor().max(0.0) as u32;
+                let max_x = bounds.max_x.ceil().min(width as f32) as u32;
+                let max_y = bounds.max_y.ceil().min(height as f32) as u32;
+                for y in min_y..max_y {
+                    for x in min_x..max_x {
+                        surface.composite(x, y, path.paint());
+                    }
+                }
+            }
+            surface
+        }
+    }
+
+    fn document(objects: Vec<SceneObject>) -> SceneDocument {
+        SceneDocument {
+            id: "rasterise-test".into(),
+            name: "Rasterise test".into(),
+            version: 1,
+            revision: None,
+            active_camera_id: None,
+            canvas: SceneCanvas {
+                width: 12,
+                height: 10,
+                frame_rate: RationalRate::P50,
+            },
+            timeline: Default::default(),
+            data_context: Default::default(),
+            assets: Vec::new(),
+            fonts: Vec::new(),
+            materials: Vec::new(),
+            objects,
+        }
+    }
+
+    #[test]
+    fn two_rasterisers_render_the_same_prepared_rectangle_without_scene_logic_changes() {
+        let mut base = ObjectBase::new("lower-third", "Lower third");
+        base.x = 2.0;
+        base.y = 3.0;
+        base.width = 5.0;
+        base.height = 3.0;
+        base.fill = Some(ColorValue::hex("#2050a0").expect("valid colour"));
+        let document = document(vec![SceneObject::Rect(RectObject { base, radius: 0.0 })]);
+        let resolved = gx_contracts::scene::resolve_hierarchy(&document.objects);
+        let prepared = PreparedPaths::prepare(&document, &resolved.effective)
+            .expect("the rectangle prepares once");
+
+        let lyon = LyonPathRasteriser;
+        let bounding_boxes = BoundingBoxRasteriser;
+        assert_eq!(
+            lyon.rasterise(&prepared, 12, 10),
+            bounding_boxes.rasterise(&prepared, 12, 10),
+            "both implementations consume the same prepared scene through PathRasteriser"
+        );
+    }
+
+    #[test]
+    fn a_gradient_path_is_refused_instead_of_reduced_to_a_flat_colour() {
+        let mut base = ObjectBase::new("gradient", "Gradient");
+        base.width = 2.0;
+        base.height = 2.0;
+        base.fill = Some(ColorValue::LinearGradient {
+            angle: 0.0,
+            start_x: 0.0,
+            start_y: 0.0,
+            end_x: 2.0,
+            end_y: 0.0,
+            stops: vec![],
+            spread: Default::default(),
+            coordinate_mode: Default::default(),
+        });
+        let document = document(vec![SceneObject::Rect(RectObject { base, radius: 0.0 })]);
+        let resolved = gx_contracts::scene::resolve_hierarchy(&document.objects);
+
+        assert_eq!(
+            PreparedPaths::prepare(&document, &resolved.effective),
+            Err(Refusal::UnsupportedPathGradient {
+                object: "gradient".into(),
+                paint: "fill".into(),
+            })
+        );
+    }
+}

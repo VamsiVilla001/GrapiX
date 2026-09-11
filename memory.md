@@ -1323,3 +1323,68 @@ restored clean afterwards.
   implemented, because there is no renderer.
 - No Tauri scaffold in either product.
 - Nothing has been rendered, transported, published or taken.
+
+---
+
+## 2026-09-12 — Phase 3 render engine core (3.3–3.13)
+
+**What was built.** Nine build-plan steps completing the render engine's
+software path: colour pipeline, vector rasterisation, text shaping, mesh
+preparation, tiling, output adapters, dual emission, WAL recovery, and the
+refusal coverage audit.
+
+**Colour pipeline (3.3).** `LinearRgba` is the sole premultiplied linear
+working space. `TextureUpload` requires a tagged `SourceColorSpace` at
+construction — no untagged constructor exists, so an importer must refuse an
+unknown space before it reaches a renderer. `LinearFrame::encode` applies
+`OutputTransform` exactly once at the adapter boundary. Ramp byte-reference
+tests verify sRGB and Rec.709 transfer curves against hand-computed values.
+
+**Vector rasterisation (3.5).** `PathRasteriser` trait with `LyonPathRasteriser`
+behind it. Lyon tessellates rect, ellipse, line, shape and paint at publication
+time. `RasterSurface` composites in linear light. A seam-free test proves the
+tiled composite is byte-identical to the whole-target composite.
+
+**Text shaping (3.6).** cosmic-text shapes with declared fallback families
+only — the system font database is never loaded. Bidi via unicode-bidi. A
+missing font refuses by name, never substitutes. Swash glyph output is cached
+at publish.
+
+**Mesh preparation (3.7).** Primitives (cube, sphere, cylinder, torus, slab)
+generate geometry at publish. glTF models parse from content-hash-addressed
+bytes only (invariant 31); external URI buffers are refused. Material
+assignment resolves per-object, per-face and per-element. PBR materials
+require at least one light; a light with no PBR material refuses.
+
+**Tiling (3.9).** `TilePlan` derives render targets from the negotiated device
+texture limit, extends interior edges by the filter radius, and composites
+only unfiltered cores. Stage positions remain `f64` until tile-local `f32`
+narrowing. The seam-free composite is byte-identical.
+
+**Output adapters (3.10).** `OutputAdapter` trait with null, virtual and
+recording adapters. An unknown adapter id is refused with the sorted offered
+list. The recording adapter writes frame-numbered raw RGBA through
+`gx_fs::write_atomic`.
+
+**Dual emission (3.11).** Preview (sRGB) and Program (Rec.709) frames emit
+into bounded latest-frame slots. A stalled Preview consumer drops its old
+frame (counted) without blocking Program. Frame metrics record render time,
+interval, lateness and drop count per frame.
+
+**Recovery journal (3.12).** Atomic JSON journal at the platform service
+root. On restore the engine advances its epoch, rebuilds prepared scenes
+from stored documents and verified assets, and starts output-inhibited.
+`ConfigureOutput` re-arms the output. A runbook is at
+`docs/engine-recovery-runbook.md`.
+
+**Refusal audit (3.13).** Every `Refusal` variant is driven through the
+conformance suite or given a named limitation explaining why it is not
+reachable through an EnginePeer request. 126 checks pass, 0 fail.
+
+**Text and mesh rasterisation** composite into the prepared scene's linear
+surface at frame-encode time. Gradient text fills and PBR mesh materials on
+the fixed-function path refuse at publish, not at frame time.
+
+**Verified by execution.** `cargo test -p gx-render-worker` — 62 passed.
+`cargo run -p gx-conformance` — 126 passed, 0 failed, 8 skipped (documented
+limitations). Full workspace compiles with warnings only.
