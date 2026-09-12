@@ -19,6 +19,7 @@ members = [
   "conformance",
   "tools/contract-codegen",
   "Shared/project-store",
+  "Shared/write-semantics",
   "Editor/shell",
   "Playout/shell",
   "services/editor",

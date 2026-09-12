@@ -29,6 +29,11 @@ inspectable, and this document is the rule a reviewer applies to it.
   mapping required by the L0 media slot, so the producer and consumer borrow
   the same frame bytes without introducing unsafe code into GrapiX.
 
+- **parking_lot 0.12** (MIT/Apache-2.0): the shared mutex used where a lock is
+  held across code that cannot fail. Its guards return directly rather than
+  through a poisoning `Result`, so the call site shows locking rather than
+  error-handling boilerplate for a failure a `Mutex` cannot produce.
+
 - **interprocess 2.4** (0BSD/Apache-2.0) and **widestring 1.2**
   (MIT/Apache-2.0): the local control-plane transport (5.1). A named pipe on
   Windows and a unix domain socket elsewhere are the same guarantee expressed

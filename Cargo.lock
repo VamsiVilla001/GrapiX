@@ -1904,6 +1904,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "gx-write-semantics"
+version = "0.1.0"
+dependencies = [
+ "gx-contracts",
+ "parking_lot",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
