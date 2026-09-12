@@ -14,6 +14,9 @@
 
 import type { SceneDocument } from "@grapix/contracts";
 import { SceneViewport } from "../src/viewport";
+import { renderNode } from "../src/agent-surface";
+import { objectManagerPanel } from "../src/object-manager";
+import { inspectorPanel } from "../src/inspector";
 
 /** Tauri v2's global bridge. Typed narrowly: this layer uses exactly one
  *  function from it, and pretending to know more would be fiction. */
@@ -68,7 +71,8 @@ const ui = {
   saveScene: need<HTMLButtonElement>("save-scene"),
   canvas: need<HTMLCanvasElement>("viewport"),
   canvasSize: need<HTMLSpanElement>("canvas-size"),
-  objectList: need<HTMLUListElement>("object-list"),
+  objectManager: need<HTMLDivElement>("object-manager"),
+  inspector: need<HTMLDivElement>("inspector-mount"),
   objectEmpty: need<HTMLParagraphElement>("object-empty"),
   unsupportedPanel: need<HTMLElement>("unsupported-panel"),
   unsupportedList: need<HTMLUListElement>("unsupported-list"),
@@ -85,6 +89,12 @@ const ui = {
 let scene: SceneDocument | null = null;
 let viewport: SceneViewport | null = null;
 let scenePath: string | null = null;
+/** View state, deliberately not on the document: which rows the author has
+ *  selected and which containers they have shut. A collapsed group is not a
+ *  property of the scene, and saving it would make two authors' files differ
+ *  over something neither would call an edit. */
+let selection: string[] = [];
+let collapsed: string[] = [];
 
 // ---------------------------------------------------------------------------
 // Logging. Append-only, newest first, and it records refusals as refusals.
@@ -176,32 +186,28 @@ function showScene(next: SceneDocument, path: string | null): void {
   viewport = new SceneViewport(ui.canvas, next);
   viewport.render();
 
-  renderObjectList(next);
+  renderPanels(next);
   renderUnsupported(viewport.unsupported);
 }
 
-function renderObjectList(document_: SceneDocument): void {
-  ui.objectList.replaceChildren();
+/** Render the object manager and the inspector from their node trees.
+ *
+ *  Both panels are built as `UiNode` trees and rendered through the shared
+ *  `renderNode`, so the ARIA a screen reader announces is written from the
+ *  same description an agent reads via `agentView`. Building the DOM by hand
+ *  here would be a second description of the same panel, free to drift from
+ *  the one the tests hold (invariant 27). */
+function renderPanels(document_: SceneDocument): void {
   ui.objectEmpty.hidden = document_.objects.length > 0;
 
-  for (const object of document_.objects) {
-    const row = document.createElement("li");
+  const objects = objectManagerPanel(document_, {
+    selectedIds: selection,
+    collapsedIds: collapsed,
+  });
+  ui.objectManager.replaceChildren(renderNode(document, objects) as unknown as Node);
 
-    const kind = document.createElement("span");
-    kind.className = "object-kind";
-    kind.textContent = object.type;
-
-    const name = document.createElement("span");
-    name.className = "object-name";
-    name.textContent = object.name;
-
-    const id = document.createElement("span");
-    id.className = "object-id";
-    id.textContent = object.id;
-
-    row.append(kind, name, id);
-    ui.objectList.append(row);
-  }
+  const inspector = inspectorPanel(document_, selection);
+  ui.inspector.replaceChildren(renderNode(document, inspector) as unknown as Node);
 }
 
 /** Show what the preview could not draw.
