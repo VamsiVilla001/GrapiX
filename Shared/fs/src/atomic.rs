@@ -195,6 +195,117 @@ where
     sync_directory(parent)
 }
 
+/// What a verified atomic write can fail at.
+///
+/// Kept generic over the verifier's own error so a caller does not have to
+/// flatten its refusal into a string to use this: a package's verification
+/// failure is a `Refusal` naming the member that did not match, and losing
+/// that to a `String` would defeat invariant 17.
+#[derive(Debug)]
+pub enum VerifiedWriteError<E> {
+    /// The write itself failed. The destination is untouched.
+    Write(AtomicWriteError),
+    /// The bytes were written but did not satisfy the verifier. The
+    /// destination is untouched and the candidate has been removed.
+    Rejected(E),
+}
+
+impl<E: std::fmt::Display> std::fmt::Display for VerifiedWriteError<E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Write(source) => write!(f, "{source}"),
+            Self::Rejected(source) => {
+                write!(f, "written bytes failed verification, destination unchanged: {source}")
+            }
+        }
+    }
+}
+
+impl<E: std::error::Error + 'static> std::error::Error for VerifiedWriteError<E> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Write(source) => Some(source),
+            Self::Rejected(source) => Some(source),
+        }
+    }
+}
+
+/// Write, verify the written bytes, and only then replace the destination.
+///
+/// The ordering is the whole point, and it is the difference between
+/// "atomic" and "all-or-nothing". [`write_atomic_with`] guarantees the
+/// destination is never half-written — but a caller that renames first and
+/// checks afterwards has already destroyed the previous contents by the time
+/// it discovers the new ones are bad, and its only remaining move is to
+/// delete the destination entirely. A build that fails verification then
+/// takes the last good artefact with it.
+///
+/// So `verify` runs against the *candidate*, at its temporary path, while the
+/// destination still holds whatever it held before. A rejection removes the
+/// candidate and leaves the destination byte-identical.
+pub fn write_atomic_verified<F, V, E>(
+    path: &Path,
+    fill: F,
+    verify: V,
+) -> Result<(), VerifiedWriteError<E>>
+where
+    F: FnOnce(&mut File) -> io::Result<()>,
+    V: FnOnce(&Path) -> Result<(), E>,
+{
+    let parent = match path.parent() {
+        Some(parent) if parent.as_os_str().is_empty() => Path::new("."),
+        Some(parent) => parent,
+        None => {
+            return Err(VerifiedWriteError::Write(
+                AtomicWriteError::NoParentDirectory(path.to_path_buf()),
+            ))
+        }
+    };
+
+    let temporary = temporary_path(parent, path);
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .map_err(|source| {
+            VerifiedWriteError::Write(AtomicWriteError::CreateTemporary {
+                path: temporary.clone(),
+                source,
+            })
+        })?;
+
+    let written = fill(&mut file)
+        .map_err(|source| AtomicWriteError::Write {
+            path: temporary.clone(),
+            source,
+        })
+        .and_then(|()| {
+            file.sync_all().map_err(|source| AtomicWriteError::Sync {
+                path: temporary.clone(),
+                source,
+            })
+        });
+    // Close before verifying as well as before renaming: a verifier opens the
+    // candidate by path, and Windows will not let it while this handle lives.
+    drop(file);
+
+    if let Err(error) = written {
+        let _ = fs::remove_file(&temporary);
+        return Err(VerifiedWriteError::Write(error));
+    }
+
+    if let Err(rejection) = verify(&temporary) {
+        let _ = fs::remove_file(&temporary);
+        return Err(VerifiedWriteError::Rejected(rejection));
+    }
+
+    if let Err(error) = rename_retrying(&temporary, path, |from, to| fs::rename(from, to)) {
+        let _ = fs::remove_file(&temporary);
+        return Err(VerifiedWriteError::Write(error));
+    }
+    sync_directory(parent).map_err(VerifiedWriteError::Write)
+}
+
 /// A temporary name no other writer can be using: unique by process, by
 /// thread (the counter is process-global) and by time. `create_new` turns any
 /// remaining collision into an error rather than a silent overwrite.
@@ -318,6 +429,76 @@ mod tests {
             names.sort();
             names
         }
+    }
+
+    #[derive(Debug)]
+    struct Rejected(&'static str);
+    impl std::fmt::Display for Rejected {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(self.0)
+        }
+    }
+    impl std::error::Error for Rejected {}
+
+    #[test]
+    fn a_rejected_candidate_leaves_the_previous_contents_byte_identical() {
+        // The failure this exists to prevent: a build that verifies *after*
+        // renaming has already replaced the last good artefact, and deleting
+        // the bad one then leaves nothing at all.
+        let scratch = Scratch::new("verified-reject");
+        let path = scratch.file("package.bin");
+        write_atomic(&path, b"the previous good package").unwrap();
+
+        let outcome: Result<(), VerifiedWriteError<Rejected>> =
+            write_atomic_verified(&path, |file| file.write_all(b"a corrupt build"), |_| {
+                Err(Rejected("digest mismatch"))
+            });
+
+        assert!(matches!(outcome, Err(VerifiedWriteError::Rejected(_))));
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            b"the previous good package",
+            "a rejected candidate must not disturb the destination"
+        );
+        assert_eq!(
+            scratch.entries(),
+            vec!["package.bin".to_string()],
+            "the rejected candidate must not be left behind either"
+        );
+    }
+
+    #[test]
+    fn a_verified_candidate_replaces_the_destination() {
+        let scratch = Scratch::new("verified-accept");
+        let path = scratch.file("package.bin");
+        write_atomic(&path, b"old").unwrap();
+
+        let outcome: Result<(), VerifiedWriteError<Rejected>> =
+            write_atomic_verified(&path, |file| file.write_all(b"new"), |candidate| {
+                // The verifier sees the candidate's real bytes, at a path it
+                // can open, while the destination still holds the old ones.
+                assert_eq!(fs::read(candidate).unwrap(), b"new");
+                Ok(())
+            });
+
+        assert!(outcome.is_ok());
+        assert_eq!(fs::read(&path).unwrap(), b"new");
+        assert_eq!(scratch.entries(), vec!["package.bin".to_string()]);
+    }
+
+    #[test]
+    fn a_rejected_first_write_creates_nothing() {
+        let scratch = Scratch::new("verified-first");
+        let path = scratch.file("package.bin");
+
+        let outcome: Result<(), VerifiedWriteError<Rejected>> =
+            write_atomic_verified(&path, |file| file.write_all(b"bad"), |_| {
+                Err(Rejected("digest mismatch"))
+            });
+
+        assert!(matches!(outcome, Err(VerifiedWriteError::Rejected(_))));
+        assert!(!path.exists(), "a failed first build leaves no artefact");
+        assert!(scratch.entries().is_empty());
     }
 
     impl Drop for Scratch {

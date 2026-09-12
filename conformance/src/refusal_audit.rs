@@ -283,6 +283,7 @@ fn drive_contract_refusals(report: &mut Report) {
         scene_id: "audit".into(),
         scene_revision: Revision(1),
         files: Vec::<PackageFileEntry>::new(),
+        design_system_version: None,
     };
     report.record(
         PLANE,

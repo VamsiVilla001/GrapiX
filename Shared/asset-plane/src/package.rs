@@ -104,26 +104,37 @@ impl From<Refusal> for PackageError {
     }
 }
 
-/// Create an immutable package, then prove its on-disk bytes against its own
-/// manifest before returning. All scene assets must be represented by a source
-/// at the path the scene library declares.
+/// Create an immutable package, proving its bytes against its own manifest
+/// before it replaces anything. All scene assets must be represented by a
+/// source at the path the scene library declares.
+///
+/// `design_system_version` stamps the system the scene was authored against,
+/// so brand-pack drift is listable later (Part G, 7.6). `None` records that
+/// the package predates stamping rather than asserting it conforms to
+/// nothing.
 pub fn write_package(
     output: &Path,
     scene: &SceneDocument,
     sources: &[PackageSource],
+    design_system_version: Option<u32>,
 ) -> Result<PackageManifest, PackageError> {
-    write_package_with_after_write(output, scene, sources, |_| Ok(()))
+    write_package_inner(output, scene, sources, design_system_version, |_| {})
 }
 
-fn write_package_with_after_write<F>(
+/// The writer, with a seam for corrupting the candidate before verification.
+///
+/// Exists so a test can prove the destination survives a build that fails its
+/// own verification — the one path that cannot be reached by supplying bad
+/// inputs, because bad inputs are rejected before any bytes are written. The
+/// seam is private and the public [`write_package`] passes a no-op, so no
+/// production caller can corrupt a package on purpose.
+fn write_package_inner(
     output: &Path,
     scene: &SceneDocument,
     sources: &[PackageSource],
-    after_write: F,
-) -> Result<PackageManifest, PackageError>
-where
-    F: FnOnce(&Path) -> Result<(), PackageError>,
-{
+    design_system_version: Option<u32>,
+    tamper_with_candidate: impl FnOnce(&Path),
+) -> Result<PackageManifest, PackageError> {
     let revision = scene
         .revision
         .ok_or_else(|| Refusal::PackageScenePinMismatch {
@@ -135,44 +146,58 @@ where
             detail: error.to_string(),
         })?;
 
+    // Build, verify, *then* replace. Verifying after the rename would mean a
+    // failed build had already destroyed the last good package, leaving
+    // deletion as the only cleanup — which is the opposite of all-or-nothing
+    // (7.6's done-when). `write_atomic_verified` runs the check against the
+    // candidate while the destination still holds its previous contents.
     let mut written_manifest = None;
-    write_atomic_with(output, |file| {
-        let mut archive = ZipWriter::new(file);
-        let mut entries = Vec::with_capacity(sources.len() + 1);
-        entries.push(write_bytes(&mut archive, SCENE_PATH, &scene_bytes)?);
-        for source in sources {
-            let source_file = File::open(&source.source)?;
-            entries.push(write_reader(&mut archive, &source.path, source_file)?);
-        }
-        let manifest = PackageManifest {
-            format_version: PACKAGE_FORMAT_VERSION,
-            scene_id: scene.id.clone(),
-            scene_revision: revision,
-            files: entries,
-        };
-        let manifest_bytes = serde_json::to_vec(&manifest).map_err(io::Error::other)?;
-        archive
-            .start_file(MANIFEST_PATH, file_options())
-            .map_err(io::Error::other)?;
-        archive.write_all(&manifest_bytes)?;
-        archive.finish().map_err(io::Error::other)?;
-        written_manifest = Some(manifest);
-        Ok(())
-    })
-    .map_err(PackageError::Atomic)?;
+    let mut verified_manifest = None;
+    gx_fs::write_atomic_verified(
+        output,
+        |file| {
+            let mut archive = ZipWriter::new(file);
+            let mut entries = Vec::with_capacity(sources.len() + 1);
+            entries.push(write_bytes(&mut archive, SCENE_PATH, &scene_bytes)?);
+            for source in sources {
+                let source_file = File::open(&source.source)?;
+                entries.push(write_reader(&mut archive, &source.path, source_file)?);
+            }
+            let manifest = PackageManifest {
+                format_version: PACKAGE_FORMAT_VERSION,
+                scene_id: scene.id.clone(),
+                scene_revision: revision,
+                files: entries,
+                design_system_version,
+            };
+            let manifest_bytes = serde_json::to_vec(&manifest).map_err(io::Error::other)?;
+            archive
+                .start_file(MANIFEST_PATH, file_options())
+                .map_err(io::Error::other)?;
+            archive.write_all(&manifest_bytes)?;
+            archive.finish().map_err(io::Error::other)?;
+            written_manifest = Some(manifest);
+            Ok(())
+        },
+        |candidate| {
+            tamper_with_candidate(candidate);
+            // The candidate is read back from its own bytes, so what is
+            // verified is what will be published, not what was intended.
+            read_package(candidate).map(|verified| {
+                verified_manifest = Some(verified.manifest);
+            })
+        },
+    )
+    .map_err(|error| match error {
+        gx_fs::VerifiedWriteError::Write(source) => PackageError::Atomic(source),
+        gx_fs::VerifiedWriteError::Rejected(source) => source,
+    })?;
 
-    after_write(output)?;
-    let verified = read_package(output);
-    match verified {
-        Ok(verified) => Ok(verified.manifest),
-        Err(error) => {
-            fs::remove_file(output).map_err(|source| PackageError::Cleanup {
-                path: output.to_path_buf(),
-                source,
-            })?;
-            Err(error)
-        }
-    }
+    verified_manifest
+        .or(written_manifest)
+        .ok_or_else(|| PackageError::ManifestSerialization {
+            detail: "the package was written but produced no manifest".to_string(),
+        })
 }
 
 /// Read a package only after validating its manifest, archive inventory,
@@ -444,6 +469,7 @@ mod tests {
                 path: "assets/logo.bin".into(),
                 source,
             }],
+            Some(3),
         )
         .unwrap();
         (output, manifest)
@@ -534,29 +560,106 @@ mod tests {
         ));
         fs::remove_dir_all(root).unwrap();
     }
-
     #[test]
-    fn writer_removes_a_package_changed_before_post_write_verification() {
+    fn a_failed_build_leaves_the_previous_package_byte_identical() {
+        // 7.6's done-when: publishing is all-or-nothing. The failure this
+        // guards is a re-package that fails verification and takes the last
+        // good artefact with it — which is what verifying after the rename
+        // does, because by then there is nothing left to keep.
         let root = temporary_directory();
         let source = root.join("logo.bin");
         write_atomic(&source, b"logo").unwrap();
         let output = root.join("scene.gpxpkg");
-        let test_scene = scene();
-        let source_spec = PackageSource {
+        let spec = || PackageSource {
             path: "assets/logo.bin".into(),
-            source,
+            source: source.clone(),
         };
-        let changed =
-            write_package_with_after_write(&output, &test_scene, &[source_spec], |path| {
-                let verified = read_package(path).unwrap();
-                rewrite_archive(path, &verified.manifest, b"l0go");
-                Ok(())
-            });
+
+        write_package(&output, &scene(), &[spec()], Some(3)).expect("the first build succeeds");
+        let good = fs::read(&output).expect("a good package exists");
+
+        let failed = write_package_inner(&output, &scene(), &[spec()], Some(4), |candidate| {
+            let verified = read_package(candidate).unwrap();
+            rewrite_archive(candidate, &verified.manifest, b"l0go");
+        });
+
         assert!(matches!(
-            changed,
-            Err(PackageError::Refused(Refusal::PackageFileHashMismatch { path, .. })) if path == "assets/logo.bin"
+            failed,
+            Err(PackageError::Refused(Refusal::PackageFileHashMismatch { path, .. }))
+                if path == "assets/logo.bin"
         ));
-        assert!(!output.exists());
+        assert_eq!(
+            fs::read(&output).expect("the previous package must still be there"),
+            good,
+            "a rejected build must leave the destination byte-identical"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_failed_first_build_leaves_no_package_at_all() {
+        let root = temporary_directory();
+        let source = root.join("logo.bin");
+        write_atomic(&source, b"logo").unwrap();
+        let output = root.join("scene.gpxpkg");
+
+        let failed = write_package_inner(
+            &output,
+            &scene(),
+            &[PackageSource {
+                path: "assets/logo.bin".into(),
+                source,
+            }],
+            None,
+            |candidate| {
+                let verified = read_package(candidate).unwrap();
+                rewrite_archive(candidate, &verified.manifest, b"l0go");
+            },
+        );
+
+        assert!(failed.is_err());
+        assert!(
+            !output.exists(),
+            "a build that never verified must not leave a half-good artefact"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn the_design_system_stamp_survives_a_round_trip_and_is_covered_by_verification() {
+        // The stamp exists so brand-pack drift is listable (Part G). A stamp
+        // outside the manifest's own integrity could be edited afterwards,
+        // which would make it a decoration rather than a record.
+        let root = temporary_directory();
+        let (output, manifest) = write_test_package(&root);
+        assert_eq!(manifest.design_system_version, Some(3));
+
+        let read_back = read_package(&output).expect("the package verifies");
+        assert_eq!(read_back.manifest.design_system_version, Some(3));
+
+        // An unstamped package is a different statement from one stamped
+        // zero, and must round-trip as absent rather than as a default.
+        let source = root.join("other.bin");
+        write_atomic(&source, b"logo").unwrap();
+        let unstamped_path = root.join("unstamped.gpxpkg");
+        let unstamped = write_package(
+            &unstamped_path,
+            &scene(),
+            &[PackageSource {
+                path: "assets/logo.bin".into(),
+                source,
+            }],
+            None,
+        )
+        .expect("an unstamped package is legal");
+        assert_eq!(unstamped.design_system_version, None);
+        assert_eq!(
+            read_package(&unstamped_path)
+                .unwrap()
+                .manifest
+                .design_system_version,
+            None
+        );
         fs::remove_dir_all(root).unwrap();
     }
 }
