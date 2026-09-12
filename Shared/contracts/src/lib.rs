@@ -12,6 +12,7 @@ pub mod enforce;
 pub mod font;
 pub mod import;
 pub mod material;
+pub mod mcp;
 pub mod package;
 pub mod platform;
 pub mod scene;
@@ -765,6 +766,220 @@ impl Refusal {
     ///
     /// The match is exhaustive, so a new variant cannot be added without
     /// naming it here, and every consumer inherits that guarantee.
+
+    /// One instance of every variant.
+    ///
+    /// Enumeration a derive cannot provide: the variants carry data, so there
+    /// is no way to list them without constructing them. This lived in the
+    /// conformance suite, where it was invisible to every other consumer that
+    /// needed the same list — the MCP capability surface among them.
+    ///
+    /// The values are placeholders. What matters is that every variant appears
+    /// exactly once, which the conformance audit asserts by pairing this
+    /// against the exhaustive `code_name` match: a variant missing here has no
+    /// driver and no limitation, and fails that check.
+    pub fn all_variants() -> Vec<Self> {
+    vec![
+            Self::RevisionMismatch {
+                expected: Revision(1),
+                actual: Revision(0),
+            },
+            Self::TierTooLow {
+                actual: DeviceTier::T3,
+            },
+            Self::ReferenceUnlocked {
+                state: ReferenceState::Unlocked,
+            },
+            Self::UnsupportedBlendMode {
+                mode: material::BlendMode::Overlay,
+            },
+            Self::UnsupportedFitMode {
+                mode: material::FitMode::NineSlice,
+            },
+            Self::AssetMissing {
+                hash: ContentHash("audit".into()),
+            },
+            Self::ProtocolMismatch {
+                expected: 1,
+                actual: 0,
+            },
+            Self::InvalidRate { num: 0, den: 1 },
+            Self::PlatformNotCertified {
+                platform: "audit".into(),
+            },
+            Self::UnknownTake {
+                take_id: TakeId("audit".into()),
+            },
+            Self::FrameNotReachable {
+                requested: 0,
+                earliest: 1,
+            },
+            Self::MultipleClockDomains {
+                existing: ClockSource::Genlocked,
+                requested: ClockSource::Ptp,
+            },
+            Self::Unauthenticated,
+            Self::TransportFailed {
+                detail: "audit".into(),
+            },
+            Self::NotImplemented {
+                what: "audit".into(),
+            },
+            Self::FontMissing {
+                font_id: "audit".into(),
+            },
+            Self::FontUrlNotHttps {
+                url: "audit".into(),
+            },
+            Self::FontUrlHasCredentials {
+                url: "audit".into(),
+            },
+            Self::InvalidFontUrl {
+                url: "audit".into(),
+            },
+            Self::ProjectNotFound {
+                project: "audit".into(),
+            },
+            Self::FontEmbeddingRefused {
+                font_id: "audit".into(),
+            },
+            Self::FontPathUnsafe {
+                path: "audit".into(),
+            },
+            Self::FontPathOutsideRoot {
+                path: "audit".into(),
+            },
+            Self::FontFetchHostNotTrusted {
+                url: "audit".into(),
+            },
+            Self::FontFetchAddressDenied {
+                url: "audit".into(),
+            },
+            Self::FontStylesheetImportDepthExceeded {
+                url: "audit".into(),
+                max_depth: 1,
+            },
+            Self::FontFetchTooLarge {
+                url: "audit".into(),
+                limit_bytes: 1,
+            },
+            Self::FontFetchFailed {
+                url: "audit".into(),
+                detail: "audit".into(),
+            },
+            Self::FontStylesheetImportCycle {
+                url: "audit".into(),
+            },
+            Self::FontFileReadFailed {
+                path: "audit".into(),
+                detail: "audit".into(),
+            },
+            Self::FontCacheWriteFailed {
+                path: "audit".into(),
+                detail: "audit".into(),
+            },
+            Self::AdobeFontLicenceRestricted {
+                url: "audit".into(),
+            },
+            Self::InvalidFontData {
+                detail: "audit".into(),
+            },
+            Self::InvalidColor {
+                given: "audit".into(),
+            },
+            Self::PlatformDirectoryUnavailable {
+                detail: "audit".into(),
+            },
+            Self::SceneParseFailed {
+                detail: "audit".into(),
+            },
+            Self::SceneUnknownField {
+                path: "audit".into(),
+            },
+            Self::SceneFontUnknown {
+                font_id: "audit".into(),
+                object: "audit".into(),
+            },
+            Self::SceneAssetUnknown {
+                asset_id: "audit".into(),
+                object: "audit".into(),
+            },
+            Self::UnknownPackageFormatVersion { received: 0 },
+            Self::UnsafePackagePath {
+                path: "audit".into(),
+            },
+            Self::DuplicatePackagePath {
+                path: "audit".into(),
+            },
+            Self::InvalidPackageHash {
+                path: "audit".into(),
+            },
+            Self::PackageEntryMissing {
+                path: "audit".into(),
+            },
+            Self::PackageEntryUnreadable {
+                path: "audit".into(),
+                detail: "audit".into(),
+            },
+            Self::PackageFileLengthMismatch {
+                path: "audit".into(),
+                expected: 1,
+                actual: 0,
+            },
+            Self::PackageFileHashMismatch {
+                path: "audit".into(),
+                expected: ContentHash("expected".into()),
+                actual: ContentHash("actual".into()),
+            },
+            Self::PackageScenePinMismatch {
+                detail: "audit".into(),
+            },
+            Self::PackageAssetNotPackaged {
+                asset_id: "audit".into(),
+                path: "audit".into(),
+            },
+            Self::ProjectJsonCorrupt {
+                project: "audit".into(),
+                detail: "audit".into(),
+            },
+            Self::UnknownProjectSchema {
+                project: "audit".into(),
+                actual: 0,
+                supported: 1,
+            },
+            Self::ProjectIdLocationMismatch {
+                project_id: "audit".into(),
+                location: "audit".into(),
+            },
+            Self::AssetChunkOutOfOrder {
+                hash: ContentHash("audit".into()),
+                expected: 1,
+                received: 3,
+            },
+            Self::AssetTransferAlreadyComplete {
+                hash: ContentHash("audit".into()),
+            },
+            Self::EmptyAssetTransfer {
+                hash: ContentHash("audit".into()),
+            },
+            Self::AssetHashMismatch {
+                expected: ContentHash("expected".into()),
+                actual: ContentHash("actual".into()),
+            },
+            Self::MediaTransportUnavailable {
+                detail: "audit".into(),
+            },
+            Self::RundownCursorOutOfRange { cursor: 9, len: 2 },
+            Self::RundownEntryUnknown {
+                entry_id: "audit".into(),
+            },
+            Self::AutomationExecutionDeferred {
+                trigger: "audit".into(),
+                matched: "audit".into(),
+            },
+        ]
+    }
+
     pub const fn code_name(&self) -> &'static str {
         match self {
             Self::RevisionMismatch { .. } => "revisionMismatch",

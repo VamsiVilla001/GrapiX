@@ -15,7 +15,9 @@
 //! root (invariant 42).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{self, File};
+use std::fs::File;
+#[cfg(test)]
+use std::fs;
 use std::io::{self, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
@@ -25,7 +27,9 @@ use gx_contracts::package::{
 };
 use gx_contracts::scene::SceneDocument;
 use gx_contracts::{ContentHash, Refusal};
-use gx_fs::{write_atomic_with, AtomicWriteError};
+use gx_fs::AtomicWriteError;
+#[cfg(test)]
+use gx_fs::write_atomic_with;
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};

@@ -1699,3 +1699,93 @@ excused. Pixel gate still passes clean. `codegen:check` (137 files current),
   The seam is documented in the module rather than hidden.
 - The `gx-engine-host` integration tests remain excluded from the workspace
   run, a pre-existing Windows process-cleanup issue unrelated to this work.
+
+---
+
+## 2026-09-12 — Phase 8 foundation: the MCP surface, generated
+
+Requested: start phase 8. Three of thirteen steps are done — 8.1, 8.2 and
+8.13 — and they are the three the other ten rest on. The tool *bodies* are
+not built and are not claimed.
+
+### 8.1 turned out to be a cleanup, not a feature
+
+"Tool schema generated from contracts; no hand-written schema." The schema was
+already generated; the **values** were not. `schema-mcp` carried five
+hand-maintained runtime lists — device tiers, localities, clock sources,
+reference states, media codecs — plus the refusal codes and the motion
+vocabularies, each guarded by a compile-time assertion against the generated
+union.
+
+Those guards were correct and were the right answer to the wrong question. A
+TypeScript union carries no runtime list, so the values had to come from
+somewhere; the fix was to make the generator emit them, not to check a copy by
+hand. `npm run codegen` now writes `capability-surface.ts` from the same Rust
+that defines the enums, and every hand list and every assertion is gone.
+
+**It found a real bug on the way out.** The hand-written list advertised the
+stagger mode `cap-total`. `Stagger` is an internally-tagged enum with
+`rename_all = "camelCase"`, so the wire tag is `capTotal`. An agent that
+trusted capability discovery would have emitted a value the contract refuses —
+precisely the failure 8.1 exists to prevent, and invisible for as long as the
+list was written by hand. The compile-time guard could not catch it because it
+checked the *type*, and the type is a union of strings that the list satisfied.
+There is now a test pinning the surface to the wire tag.
+
+### Three refusal tables became one
+
+Before touching the MCP surface, `Refusal` had three separate exhaustive
+registers outside the crate that owns it: telemetry's audit names,
+conformance's variant names, and schema-mcp's list. Each was individually
+correct and collectively a drift risk.
+
+`Refusal::code_name` is now the single exhaustive match, and
+`Refusal::all_variants` the single enumeration. Telemetry delegates;
+conformance derives its PascalCase audit name from the wire code. Net −31
+lines and one source of truth, with 135 conformance checks passing unchanged
+either side of the merge — which is the evidence the three agreed before they
+were collapsed.
+
+### 8.13 is exhaustive because the requirement is data
+
+Each tool declares its required scope on its descriptor rather than checking
+inside a handler, so "every scope violation covered" is a loop over the
+registry crossed with every scope, not a list of cases someone remembered. A
+tool cannot be added without a scope decision because there is nowhere to put
+it without stating one.
+
+ADR-0002 D.3's rule is a test: *a design-scope token must never reach
+`playout.take` or `outputs.configure`*. So is the product boundary — an Editor
+role reaches authoring and nothing that touches Program (invariant 4), a
+Playout role the reverse (invariant 5).
+
+### One packaging change worth noting
+
+`@grapix/contracts` pointed `main` at `src/index.ts`. That worked while
+schema-mcp imported only *types*, which TypeScript erases. The capability
+surface is a runtime value, so the compiled output gained a real import of a
+`.ts` file that Node cannot load. `main` now points at `dist`, and the
+generated barrel emits `.js` specifiers — which TypeScript resolves back to
+the source and Node's ESM loader requires.
+
+### Verified by execution
+
+368 Rust tests pass. Conformance 135 passed, 0 failed, 8 skipped. TypeScript
+18 passed, 0 failed — up from 11, because the capability tests now exercise
+discovery rather than asserting that two hand-written lists agree.
+`codegen:check` (143 files current), `check:boundaries`, `typecheck` and the
+pixel gate all clean.
+
+### Not done, and not claimed
+
+**Ten of the thirteen steps are untouched.** The tool descriptors for
+project, scenes, objects, materials, assets, fonts, animation, bindings,
+designsystem, validate, render, packages, playout and outputs are *declared*,
+with their scopes and their contract types — an agent can discover the whole
+surface. But 8.3 through 8.12 are the tool **bodies** plus the JSON-RPC
+transport, and none of that is built. `schema-mcp` remains **Partial** and
+says so in its own header.
+
+Specifically absent: the JSON-RPC transport, every mutating handler,
+`render.preview` returning a real frame (8.9), and `if_revision` /
+idempotency-key / batch-as-one-undo (8.12).
