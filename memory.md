@@ -2050,3 +2050,47 @@ with both panels mounted; the earlier clipped-layout capture is gone.
 Phase 11 module agents died on the same usage limit within four seconds. The
 Phase 11 modules were written inline. Worth knowing before planning around
 subagents in this environment.
+
+---
+
+## 2026-09-12 — Browser colour reaches paint; 2D renders between 3D (11.6)
+
+**11.4 reached the viewport.** Rec.709 solid fills now decode through the
+TypeScript transfer curve already pinned against Rust's reference values, then
+enter Three's linear working space. Display P3 remains explicitly unsupported:
+it shares sRGB's curve but not its primaries, and decoding without the 3.3
+gamut matrix would silently substitute linear sRGB pixels (invariant 18).
+
+The colour-reference generator is now part of the normal
+`gx-contract-codegen` binary. The one-shot `gen-colour` binary used to produce
+the table was left behind with an absolute workstation path; its second binary
+target made `cargo run -p gx-contract-codegen` ambiguous and broke
+`npm run codegen:check`. Normal codegen now regenerates
+`Editor/src/transfer-reference.ts`, and the one-shot target is gone.
+
+**11.6's exact done-when was rendered, not inferred.** The Editor viewport now
+builds box, ellipsoid, cylinder and torus geometry beside planar scene objects
+in one Three.js scene. `zDepth` is geometry; `zIndex` is only
+`Object3D.renderOrder`, so an arbitrarily large 2D ordering hint cannot move a
+plane through a 3D surface. The orthographic camera fits near/far planes around
+the authored depth extent, including scaled and rotated mesh bounds. Unsupported
+slab/model geometry is named rather than replaced with a plausible box.
+
+A real Windows Tauri WebView2 session loaded the three-object JSON through
+`cmd_load_scene`, so the smoke used the same closed scene reader as the engine.
+The rendered frame showed a cyan 2D plane over a red back cube and a green
+front sphere over the plane. The captured frame contained 51,275 red,
+9,096 cyan and 19,509 green classified pixels; overlap samples were red
+`(189,50,52)`, cyan `(50,178,228)` and green `(52,210,77)`.
+
+### Verified by execution
+
+| What | Result |
+|---|---|
+| Windows Tauri/WebView2 `cmd_load_scene` + canvas capture | Three objects loaded; 2D plane visibly between two 3D meshes |
+| `npm --prefix Editor run test:unit` | **151 passed, 0 failed** |
+| `npm run check` | **exit 0** — boundaries, codegen staleness, typecheck, TypeScript, Rust and conformance all passed |
+| `cargo run -p gx-conformance` (inside the gate) | **135 passed, 0 failed, 8 skipped** |
+
+The concurrently added build-plan steps 11.18–11.24 and their tracker entries
+were preserved. They remain Planned and dependency-gated.

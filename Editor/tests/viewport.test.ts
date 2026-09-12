@@ -48,12 +48,9 @@ describe("the scene-coordinate camera (ADR-0002 B.2, 11.6)", () => {
   });
 
   it("scene position converts the top-left authoring origin to centred Y-up", () => {
-    // Top-left corner of the canvas.
-    expect(scenePosition(HD, 0, 0, 0)).toEqual({ x: -960, y: 540, z: 0 });
-    // Centre.
-    expect(scenePosition(HD, 960, 540, 0)).toEqual({ x: 0, y: 0, z: 0 });
-    // Bottom-right.
-    expect(scenePosition(HD, 1920, 1080, 5)).toEqual({ x: 960, y: -540, z: 5 });
+    expect(scenePosition(HD, 0, 0)).toEqual({ x: -960, y: 540, z: 0 });
+    expect(scenePosition(HD, 960, 540)).toEqual({ x: 0, y: 0, z: 0 });
+    expect(scenePosition(HD, 1920, 1080, -25)).toEqual({ x: 960, y: -540, z: -25 });
   });
 });
 
@@ -106,8 +103,10 @@ describe("authored paint (1.4)", () => {
   });
 
   it("reports what it cannot reproduce instead of approximating it", () => {
-    // Invariant 18: drawing a gradient as its first stop, or Rec.709 as
-    // sRGB, is a silent visual substitution. Each must be named.
+    // Invariant 18: drawing a gradient as its first stop is a silent visual
+    // substitution, and must be named. Rec.709 is no longer in this class:
+    // it decodes through the engine's own transfer curve into the working
+    // space (11.4), which is not an approximation.
     const gradient: ColorValue = {
       type: "linear-gradient",
       angle: 90,
@@ -120,7 +119,9 @@ describe("authored paint (1.4)", () => {
       coordinateMode: "object",
     };
     expect(resolvePaint(gradient)).toMatchObject({ kind: "unsupported" });
-    expect(resolvePaint(solid("rec709"))).toMatchObject({ kind: "unsupported" });
+    // A broadcast fill is a colour now, decoded — asserted as such in
+    // color-fill.test.ts against the engine's curve.
+    expect(resolvePaint(solid("rec709")).kind).toBe("color");
   });
 
   it("distinguishes no paint authored from paint turned off", () => {

@@ -19,7 +19,8 @@ import * as THREE from "three";
 
 import type { ColorValue, SceneDocument, SceneObject } from "@grapix/contracts";
 import { PREVIEW_OUTPUT_COLOR_SPACE } from "./color-policy";
-import { makeOrthographicSceneCamera, scenePosition } from "./camera";
+import { makeOrthographicSceneCamera, scenePosition, type SceneDepthRange } from "./camera";
+import { rec709Decode } from "./color-transfer";
 
 /// A viewport over one scene. Owns the renderer, the camera and the meshes
 /// built from the document. Dispose with `dispose()`.
@@ -44,15 +45,23 @@ export class SceneViewport {
       PREVIEW_OUTPUT_COLOR_SPACE === "srgb" ? THREE.SRGBColorSpace : THREE.LinearSRGBColorSpace;
 
     this.scene = new THREE.Scene();
-    this.camera = makeOrthographicSceneCamera(space);
+    this.camera = makeOrthographicSceneCamera(space, sceneDepthRange(document));
 
     for (const object of document.objects) {
-      const mesh = meshForObject(object, space, this.unsupported);
+      const mesh = buildViewportObject(object, space, this.unsupported);
       if (mesh) {
         this.meshes.push(mesh);
         this.scene.add(mesh);
       }
     }
+
+    // 11.6 needs the 3D objects to read as geometry, not black silhouettes.
+    // Authored scene lights belong to 3.7; these two viewport-only lights make
+    // shape and occlusion visible without pretending to reproduce Program.
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x1b2430, 1.6));
+    const key = new THREE.DirectionalLight(0xffffff, 2.2);
+    key.position.set(-700, 900, 1600);
+    this.scene.add(key);
   }
 
   /// One frame. The viewport renders on demand (an edit, a scrub), not on a
@@ -83,20 +92,7 @@ export function rectGeometry(width: number, height: number, radius: number): THR
   if (radius <= 0) {
     return new THREE.PlaneGeometry(width, height);
   }
-  const r = Math.min(radius, width / 2, height / 2);
-  const x = -width / 2;
-  const y = -height / 2;
-  const shape = new THREE.Shape();
-  shape.moveTo(x + r, y);
-  shape.lineTo(x + width - r, y);
-  shape.absarc(x + width - r, y + r, r, -Math.PI / 2, 0, false);
-  shape.lineTo(x + width, y + height - r);
-  shape.absarc(x + width - r, y + height - r, r, 0, Math.PI / 2, false);
-  shape.lineTo(x + r, y + height);
-  shape.absarc(x + r, y + height - r, r, Math.PI / 2, Math.PI, false);
-  shape.lineTo(x, y + r);
-  shape.absarc(x + r, y + r, r, Math.PI, (3 * Math.PI) / 2, false);
-  return new THREE.ShapeGeometry(shape, 8);
+  return new THREE.ShapeGeometry(rectShape(width, height, radius), 8);
 }
 
 /// What the viewport could make of an authored paint.
@@ -129,20 +125,38 @@ export function resolvePaint(value: ColorValue | undefined): PaintResolution {
       const { r, g, b, space } = value.color;
       switch (space) {
         case "srgb":
-          return { kind: "color", color: new THREE.Color().setRGB(r, g, b, THREE.SRGBColorSpace) };
+          return {
+            kind: "color",
+            color: new THREE.Color().setRGB(r, g, b, THREE.SRGBColorSpace),
+          };
         case "linear":
           return {
             kind: "color",
             color: new THREE.Color().setRGB(r, g, b, THREE.LinearSRGBColorSpace),
           };
-        case "display-p3":
         case "rec709":
-          // Three's colour management has no transform for these, and
-          // drawing them as sRGB would be visibly wrong in the saturated
-          // colours a broadcast graphic is made of.
-          return { kind: "unsupported", reason: `colour space ${space} is not converted here` };
+          // Rec.709 and sRGB share D65 primaries but not transfer curves.
+          // Decode through the engine-matched broadcast curve, then hand the
+          // resulting channels to Three in the linear working space.
+          return {
+            kind: "color",
+            color: new THREE.Color().setRGB(
+              rec709Decode(r),
+              rec709Decode(g),
+              rec709Decode(b),
+              THREE.LinearSRGBColorSpace,
+            ),
+          };
+        case "display-p3":
+          // P3 shares sRGB's transfer curve but not its primaries. Decoding
+          // alone and treating the channels as linear sRGB would be a silent
+          // gamut substitution. Three r185 has no P3 colour-space transform,
+          // so keep naming the unsupported case until 3.3 owns the matrix.
+          return {
+            kind: "unsupported",
+            reason: "Display P3 needs the 3.3 primary conversion",
+          };
       }
-      break;
     }
     case "linear-gradient":
     case "radial-gradient":
@@ -152,21 +166,45 @@ export function resolvePaint(value: ColorValue | undefined): PaintResolution {
   return { kind: "unsupported", reason: "unrecognised paint" };
 }
 
-/// Build a mesh for one scene object, in scene coordinates.
+/// Conservative Z extent of every authored surface.
 ///
-/// Returns null for every kind this layer does not draw, and for an object
-/// whose paint it cannot reproduce — each case says why, because the switch
-/// is exhaustive over the object union: adding a fourteenth kind (1.2) stops
-/// this file compiling rather than silently skipping the object
-/// (invariant 18). `unsupported` collects the reasons so the shell can show
-/// them rather than leaving a hole in the picture unexplained.
-function meshForObject(
+/// A mesh uses half its scaled bounding-box diagonal, so rotating it cannot
+/// push a corner beyond the camera's fitted near/far planes. Planar objects
+/// sit exactly at zDepth. The range includes invisible objects because making
+/// one visible must not require rebuilding the camera merely to unclip it.
+export function sceneDepthRange(document: SceneDocument): SceneDepthRange {
+  let min = 0;
+  let max = 0;
+  for (const object of document.objects) {
+    const radius =
+      object.type === "mesh"
+        ? Math.hypot(
+            object.width * object.scaleX,
+            object.height * object.scaleY,
+            object.depth * object.scaleZ,
+          ) / 2
+        : 0;
+    min = Math.min(min, object.zDepth - radius);
+    max = Math.max(max, object.zDepth + radius);
+  }
+  return { min, max };
+}
+
+/// Build one viewport object in scene coordinates.
+///
+/// Returns null for every kind this layer does not draw, and records every
+/// visually unsupported case by name. Exporting the pure scene-assembly step
+/// lets the depth contract run headlessly; only WebGL allocation remains in
+/// `SceneViewport`.
+export function buildViewportObject(
   object: SceneObject,
   space: { width: number; height: number },
   unsupported: string[],
 ): THREE.Mesh | null {
   const base = object;
-  const pos = scenePosition(space, base.x, base.y, 0);
+  // zDepth is real geometry. zIndex remains a render-order hint below, so a
+  // large 2D index can never move a plane through a 3D surface.
+  const pos = scenePosition(space, base.x, base.y, base.zDepth);
 
   let mesh: THREE.Mesh;
   switch (object.type) {
@@ -190,6 +228,11 @@ function meshForObject(
         color: paint.color,
         transparent: base.opacity < 1,
         opacity: base.opacity,
+        depthTest: true,
+        // Opaque planes participate fully in the depth buffer. Transparent
+        // planes test against nearer geometry but do not hide surfaces that
+        // still need to blend through them.
+        depthWrite: base.opacity >= 1,
       });
       mesh = new THREE.Mesh(geometry, material);
       break;
@@ -199,13 +242,13 @@ function meshForObject(
       // shows a placeholder plane the size the author gave it until the
       // texture arrives.
       const geometry = new THREE.PlaneGeometry(object.width, object.height);
-      const material = new THREE.MeshBasicMaterial({ color: 0x808080 });
+      const material = new THREE.MeshBasicMaterial({ color: 0x808080, depthTest: true, depthWrite: true });
       mesh = new THREE.Mesh(geometry, material);
       break;
     }
     case "text":
       // Shaped through cosmic-text on the engine (3.6), not drawn as a quad
-      // here — 11.6's 2D-beside-3D case covers it.
+      // here — the 2D-in-3D case below is a rect, the load-bearing one.
       return null;
     case "line":
     case "shape":
@@ -213,11 +256,40 @@ function meshForObject(
       // Vector geometry goes through the path rasteriser (3.5); this layer
       // has no tessellator and will not fake one.
       return null;
-    case "mesh":
+    case "mesh": {
+      // 3D primitives are real geometry here. An imported glTF model is the
+      // asset pipeline's (3.7), so it is named rather than faked with a box.
+      const primitive = resolveMeshGeometry(object);
+      if (primitive.kind === "unsupported") {
+        unsupported.push(`${object.id}: ${primitive.reason}`);
+        return null;
+      }
+      const paint = resolvePaint(object.fill);
+      if (paint.kind === "unsupported") {
+        unsupported.push(`${object.id}: ${paint.reason}`);
+        return null;
+      }
+      const material = new THREE.MeshStandardMaterial({
+        color: paint.kind === "color" ? paint.color : new THREE.Color(0x9aa4ae),
+        transparent: base.opacity < 1,
+        opacity: base.opacity,
+        depthTest: true,
+        depthWrite: base.opacity >= 1,
+        flatShading: true,
+      });
+      mesh = new THREE.Mesh(primitive.geometry, material);
+      // Meshes are the only objects whose X/Y rotations compose (contract
+      // comment on MeshObject). Applied here so a mesh rotated off-plane
+      // renders rotated rather than silently facing the camera.
+      mesh.rotation.x = (base.rotationX * Math.PI) / 180;
+      mesh.rotation.y = (base.rotationY * Math.PI) / 180;
+      break;
+    }
     case "light":
     case "camera":
-      // 3D scene assembly, glTF loading and lighting are 3.7 and the shell's
-      // viewport proper; the foundation is 2D only.
+      // A light or camera has no appearance of its own; its effect arrives
+      // with 3.7's scene assembly. Drawing an icon here would be the engine
+      // preview pretending to be a level editor.
       return null;
     case "layer":
     case "group":
@@ -230,8 +302,73 @@ function meshForObject(
   }
 
   mesh.position.set(pos.x, pos.y, pos.z);
+  mesh.renderOrder = base.zIndex;
   mesh.rotation.z = (base.rotation * Math.PI) / 180;
-  mesh.scale.set(base.scaleX, base.scaleY, 1);
-  mesh.visible = base.visible;
+  mesh.scale.set(base.scaleX, base.scaleY, base.scaleZ);
   return mesh;
+}
+
+/// Result of resolving authored mesh geometry.
+///
+/// Slabs and imported models carry information this thin viewport cannot yet
+/// reproduce. Returning a named refusal instead of a plausible box preserves
+/// invariant 18.
+export type MeshGeometryResolution =
+  | { kind: "geometry"; geometry: THREE.BufferGeometry }
+  | { kind: "unsupported"; reason: string };
+
+export function resolveMeshGeometry(
+  object: Extract<SceneObject, { type: "mesh" }>,
+): MeshGeometryResolution {
+  const w = object.width;
+  const h = object.height;
+  const d = object.depth;
+  switch (object.meshKind) {
+    case "cube":
+      return { kind: "geometry", geometry: new THREE.BoxGeometry(w, h, d) };
+    case "sphere":
+      return {
+        kind: "geometry",
+        geometry: new THREE.SphereGeometry(0.5, 48, 32).scale(w, h, d),
+      };
+    case "cylinder":
+      return {
+        kind: "geometry",
+        geometry: new THREE.CylinderGeometry(0.5, 0.5, 1, 48).scale(w, h, d),
+      };
+    case "torus":
+      return {
+        kind: "geometry",
+        geometry: new THREE.TorusGeometry(0.35, 0.15, 20, 64).scale(w, h, d / 0.3),
+      };
+    case "slab":
+      return {
+        kind: "unsupported",
+        reason: "slab bevel, skew and culling need the 3.7 scene assembler",
+      };
+    case "model":
+      return {
+        kind: "unsupported",
+        reason: "model assets load through 3.7, not this layer",
+      };
+  }
+}
+
+/// The 2D outline of a rounded rect. Kept separate from triangulation so a
+/// future exact slab extrusion can reuse the authored outline.
+function rectShape(width: number, height: number, radius: number): THREE.Shape {
+  const r = Math.min(radius, width / 2, height / 2);
+  const x = -width / 2;
+  const y = -height / 2;
+  const shape = new THREE.Shape();
+  shape.moveTo(x + r, y);
+  shape.lineTo(x + width - r, y);
+  shape.absarc(x + width - r, y + r, r, -Math.PI / 2, 0, false);
+  shape.lineTo(x + width, y + height - r);
+  shape.absarc(x + width - r, y + height - r, r, 0, Math.PI / 2, false);
+  shape.lineTo(x + r, y + height);
+  shape.absarc(x + r, y + height - r, r, Math.PI / 2, Math.PI, false);
+  shape.lineTo(x, y + r);
+  shape.absarc(x + r, y + r, r, Math.PI, (3 * Math.PI) / 2, false);
+  return shape;
 }

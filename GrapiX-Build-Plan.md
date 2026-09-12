@@ -16,7 +16,7 @@ automatable before it is clickable.
 
 ---
 
-**164 steps across 19 phases.**
+**171 steps across 19 phases.**
 
 
 ## Phase P — Parallel tracks — start on day one
@@ -232,6 +232,40 @@ Deferred to here on purpose. Everything above is usable without it, and this is 
 | `11.15` | Motion preset browser; save selection as preset | UI | 1.6 | Library grows from real designer work |
 | `11.16` | Live conformance indicator | UI | 7.5 | Drift visible as it happens, not at publish |
 | `11.17` | Import UI with tier and substitution report | UI | 7.2 | Nothing substituted without being named |
+
+| `11.18` | Editor 1.x panel parity in the Editor 2.0 workspace | UI | 11.5, 11.8, 11.9, 11.12, 11.13, 11.16, 7.1 | Templates/scenes CRUD, object creation and management, object details/properties, fonts, assets and materials are reachable and functional in Tauri; reuse existing modules, preserve selection, validate writes, undo and save/reopen |
+| `11.19` | Data binding panel integrated with object properties | UI | 11.18, 8.6 | Discover the data schema; create, edit and remove property bindings, preview sample data, show invalid paths/types explicitly and preserve bindings through save/reopen |
+| `11.20` | Editable animation contract and service integration | CON | 1.6, 7.1, 8.12 | Document existing timeline/preset consumers and extend only missing scene channels, easing and validated edit operations; Rust/TS round-trip keys, evaluate rational-rate frames consistently, preserve old scenes and undo/revision semantics without widening preset-only MCP authoring |
+| `11.21` | Inspector keyframe diamonds and Auto-Key | UI | 11.9, 11.20 | Position, Scale, Rotation, Opacity, Size and other supported properties show empty/filled current-playhead diamonds; toggling keys and Auto-Key creates or updates exactly one key, with defined first-key/base-value/off behavior, multi-select and undo/redo |
+| `11.22` | Selection-driven timeline and keyframe editing | UI | 11.10, 11.21 | Object selection automatically reveals property tracks; expand/collapse, select, drag/move, delete and copy/paste keys with frame snapping, explicit collision behavior and one undo per gesture; preserve flat node count from 100 to 100,000 keys |
+| `11.23` | Simple easing, Custom Bezier and starter presets | UI | 11.11, 11.15, 11.22 | Linear, Ease In, Ease Out, Ease In-Out and Custom Bezier persist and evaluate correctly; Fade, Slide, Scale and Pop use the existing preset library, supported parameters and save-selection workflow; advanced curves appear on demand and scrubbing avoids static-layer repaint |
+| `11.24` | Spacebar preview and integrated Editor parity verification | UI | 11.6, 11.19, 11.23 | Spacebar smoothly plays/pauses local animation without stealing typing/control shortcuts; verify panel-to-animation workflows, frame-consistent scrubbing, undo/redo and save/reopen in Tauri on Windows/macOS, measure playback on target hardware and confirm no Program/output side effects |
+
+### Phase 11 UI requirements — Editor 2.0 parity and animation
+
+**Status: Planned.** The new requirements are tracked by 11.18–11.24; they do not claim that the existing component-level steps deliver a complete editor. All dependencies listed in a row must be done before that step starts.
+
+**Inspection baseline (12 September 2026):** `Editor/web/main.ts` mounts object-manager and inspector projections and the Three.js viewport. Reusable scene/template, font, material and motion-preset modules exist under `Editor/src`, but are not all integrated into the shell entry point. No interactive timeline module is present there. `Shared/contracts/src/scene.rs` currently stores scene timeline duration; `design_system.rs` already defines normalized motion channels, keys and outgoing easing token references. These are foundations to extend, not systems to replace. Verify current wiring again when implementation begins.
+
+- Visual direction: keep the UI clean, minimal and Figma-like; target roughly 70% Figma simplicity and 30% simplified After Effects animation control. Reveal advanced controls only when needed; do not copy After Effects complexity.
+
+- Editor 1.x parity is required in Editor 2.0: restore the templates/scenes manager, object creation and object manager, object details and type-aware property inspector, data binding panel, font manager, asset browser and material manager as reachable, functional panels in the Tauri workspace.
+
+- Inspect and reuse the existing architecture before implementation. Extend the current object-manager, inspector, scene-manager, font-manager, material-manager, motion-preset-browser, agent-surface and viewport modules and Rust editor services; do not unnecessarily rewrite working systems or create a second scene model.
+
+- Place keyframe diamonds beside supported animatable properties, including Position, Scale, Rotation, Opacity and Size. Empty means no keyframe at the current playhead; filled means a keyframe exists there. Indicate animation elsewhere separately so an empty diamond does not imply the whole track is unanimated. Clicking adds or removes the current-frame key, with accessible labels and keyboard operation.
+
+- Provide a clearly visible Auto-Key mode. When enabled, changing an animatable property at a new timeline position creates a keyframe; editing an existing key updates it without duplicates. Specify base-value and first-key behavior, multi-selection, undo/redo and Auto-Key-off behavior before implementation so edits do not unexpectedly alter other frames.
+
+- Selecting an object automatically reveals its animation tracks. Expand/collapse tracks by property and keep selection synchronized across viewport, object manager, inspector and timeline. Support selecting, dragging/moving, deleting and copying/pasting keyframes, with frame snapping, defined collision behavior and one undo transaction per gesture.
+
+- Offer Linear, Ease In, Ease Out, Ease In-Out and Custom Bezier easing. Keep common easing one action away and show the curve editor on demand. Add simple Fade, Slide, Scale and Pop presets through the existing preset library, with adjustable supported parameters and save-selection-as-preset.
+
+- Spacebar toggles smooth local animation preview and pause from the current playhead; it must not steal typing or native control shortcuts when an input, editable field or button has focus. Scrubbing and playback evaluate the same animation at the scene rational frame rate, preserve editing state and never send Program/take/output commands.
+
+- Preserve Rust-owned contracts and generated TypeScript, validated writes, revision checks, undo transactions, design-system motion tokens and the existing preview/production separation. Reconcile editable scene channels with existing normalized preset channels and easing tokens; extend contracts only where necessary. Human keyframe authoring must not silently widen the agent/MCP surface, which selects and parameterizes presets under ADR Part G.
+
+- Acceptance requires actual Tauri workflows on Windows and macOS: create/open a scene or template, add/select/edit objects, bind data, manage fonts/assets/materials, animate with diamonds and Auto-Key, edit/copy keys, apply easing/presets, preview, undo/redo, save and reopen. Verify animation persistence and evaluated values, report unsupported cases, and retain the 11.10 flat-node-count and 11.11 no-static-repaint gates. Isolated panel projections or headless tests alone do not establish Editor 1.x parity.
 
 ## Phase 12 — Playout UI
 

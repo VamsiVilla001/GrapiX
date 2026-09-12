@@ -1,5 +1,5 @@
-// GENERATED from the Rust contracts (color.rs) by tools/contract-codegen/src/bin/gen-colour.rs.
-// Do not edit. The reference the TypeScript transfer curves must match (11.4, invariant 27).
+// GENERATED from gx-contracts::color by gx-contract-codegen.
+// Do not edit. Regenerate with `npm run codegen` (11.4, invariant 27).
 export const TRANSFER_REFERENCE = [
   { x: 0.0, srgbEncode: 0.0, srgbDecode: 0.0, rec709Encode: 0.0, rec709Decode: 0.0 },
   { x: 0.001, srgbEncode: 0.012920000000000001, srgbDecode: 7.739938080495357e-5, rec709Encode: 0.0045000000000000005, rec709Decode: 0.00022222222222222223 },

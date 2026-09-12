@@ -12,8 +12,8 @@ use std::path::PathBuf;
 use gx_asset_plane::{AssetRef, PreflightRequest, PreflightResponse, TransferState};
 use gx_contracts::auth::{Role, Scope};
 use gx_contracts::color::{
-    ColorValue, GradientCoordinateMode, GradientSpread, GradientStop, OutputTransform, Rgba,
-    SourceColorSpace, WorkingColorSpace,
+    rec709_decode, rec709_encode, srgb_decode, srgb_encode, ColorValue, GradientCoordinateMode,
+    GradientSpread, GradientStop, OutputTransform, Rgba, SourceColorSpace, WorkingColorSpace,
 };
 use gx_contracts::design_system::{
     DesignSystem, DesignSystemCommit, DesignSystemDraft, DesignSystemImport, DesignSystemSource,
@@ -30,8 +30,8 @@ use gx_contracts::material::{
     AlphaMode, BlendMode, CullMode, DepthMode, FitMode, MaterialBinding, MaterialDefinition,
     MaterialKind, MaterialSupport, MaterialTextureSlot, TextureFiltering, TextureWrapMode,
 };
-use gx_contracts::package::{PackageFileEntry, PackageManifest};
 use gx_contracts::mcp::{CapabilitySurface, EnumSurface, ScopeDenial, ToolDescriptor, ToolEffect};
+use gx_contracts::package::{PackageFileEntry, PackageManifest};
 use gx_contracts::scene::{
     AssetAvailability, AssetKind, AssetLibraryItem, BezierPath, BrushBlendMode, BrushPoint,
     CameraKind, CameraObject, EllipseObject, FillRule, GroupObject, HierarchyChildren,
@@ -256,6 +256,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     write_capability_surface(&out)?;
     write_barrel(&out)?;
+    write_transfer_reference(&workspace_root())?;
     check_advertised_types_resolve(&out)?;
     println!("generated {count} contract types into {}", out.display());
     Ok(())
@@ -361,6 +362,50 @@ fn check_advertised_types_resolve(dir: &std::path::Path) -> Result<(), Box<dyn s
         missing.join("\n  ")
     )
     .into())
+}
+
+/// Generate the cross-language colour-transfer reference from the Rust
+/// implementation that owns the curves (11.4, invariant 27).
+///
+/// Keeping this in the normal codegen binary matters: a one-shot helper made
+/// `cargo run -p gx-contract-codegen` ambiguous and broke the repository gate.
+/// The checked-in TypeScript table now changes whenever normal codegen runs.
+fn write_transfer_reference(root: &std::path::Path) -> std::io::Result<()> {
+    const STEPS: &[f64] = &[
+        0.0,
+        0.001,
+        0.003_130_8,
+        0.005,
+        0.018,
+        0.040_449_936_474_468_28,
+        0.081,
+        0.1,
+        0.18,
+        0.25,
+        0.5,
+        0.75,
+        0.9,
+        0.99,
+        1.0,
+    ];
+
+    let mut body = String::from(
+        "// GENERATED from gx-contracts::color by gx-contract-codegen.\n\
+         // Do not edit. Regenerate with `npm run codegen` (11.4, invariant 27).\n\
+         export const TRANSFER_REFERENCE = [\n",
+    );
+    for &value in STEPS {
+        body.push_str(&format!(
+            "  {{ x: {value:?}, srgbEncode: {:?}, srgbDecode: {:?}, \
+             rec709Encode: {:?}, rec709Decode: {:?} }},\n",
+            srgb_encode(value),
+            srgb_decode(value),
+            rec709_encode(value),
+            rec709_decode(value),
+        ));
+    }
+    body.push_str("] as const;\n");
+    std::fs::write(root.join("Editor/src/transfer-reference.ts"), body)
 }
 
 /// Emit the capability surface as *data*, not just as a type.
