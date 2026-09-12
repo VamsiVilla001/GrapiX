@@ -20,11 +20,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use gx_contracts::material::{validate_material, MaterialSupport};
 use gx_contracts::color::OutputTransform;
+use gx_contracts::material::MaterialSupport;
 use gx_contracts::scene::{
     resolve_hierarchy, HierarchyDiagnostic, ResolvedObject, SceneDocument, SceneObject,
 };
+use gx_contracts::validate::validate_scene_document;
 use gx_contracts::{ContentHash, Refusal};
 
 use crate::mesh::{prepare_meshes, AssetBytes, PreparedMeshes};
@@ -73,116 +74,19 @@ impl PreparedScene {
         asset_bytes: &AssetBytes,
         support: &MaterialSupport,
     ) -> Result<Self, Refusal> {
-        if document.canvas.width == 0 || document.canvas.height == 0 {
-            return Err(Refusal::SceneParseFailed {
-                detail: "scene canvas dimensions must be non-zero".into(),
-            });
-        }
-        // Every asset the library declares must be present. Checked before
-        // the objects, because "the logo has not arrived" is a more useful
-        // answer than "object logo_1 cannot resolve its asset".
-        for asset in &document.assets {
-            let hash = asset
-                .checksum
-                .as_ref()
-                .ok_or_else(|| Refusal::AssetMissing {
-                    // An asset still importing has no content address yet, so the
-                    // scene cannot be rendered from it either.
-                    hash: ContentHash(format!("{} (no content hash yet)", asset.asset_id)),
-                })?;
-            if !available.contains(hash) {
-                return Err(Refusal::AssetMissing { hash: hash.clone() });
-            }
-        }
-
-        // Every reference an object makes must resolve inside the document.
-        // The document is self-describing (1.1), so an id that does not
-        // resolve here will never resolve later.
-        for object in &document.objects {
-            match object {
-                SceneObject::Text(text) => {
-                    if document.font(&text.font_id).is_none() {
-                        return Err(Refusal::SceneFontUnknown {
-                            font_id: text.font_id.clone(),
-                            object: text.base.id.clone(),
-                        });
-                    }
-                }
-                SceneObject::Image(image) => {
-                    if document.asset(&image.asset_id).is_none() {
-                        return Err(Refusal::SceneAssetUnknown {
-                            asset_id: image.asset_id.clone(),
-                            object: image.base.id.clone(),
-                        });
-                    }
-                }
-                SceneObject::Mesh(mesh) => {
-                    if let Some(model) = &mesh.model_asset_id {
-                        if document.asset(model).is_none() {
-                            return Err(Refusal::SceneAssetUnknown {
-                                asset_id: model.clone(),
-                                object: mesh.base.id.clone(),
-                            });
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        // Materials are checked against what this engine declared it can
-        // draw, so an unsupported blend or fit mode refuses with the allowed
-        // list attached rather than being drawn as its nearest neighbour
-        // (1.3, invariant 18).
-        for material in &document.materials {
-            validate_material(material, support).map_err(|refusal| refusal.code)?;
-        }
-
-        // Text fills: the software rasteriser supports solid colours only.
-        // A gradient would need a fill rule we do not implement here, so it
-        // refuses at publish rather than approximating at frame time.
-        for object in &document.objects {
-            if let SceneObject::Text(text) = object {
-                if let Some(
-                    gx_contracts::color::ColorValue::LinearGradient { .. }
-                    | gx_contracts::color::ColorValue::RadialGradient { .. },
-                ) = &text.base.fill
-                {
-                    return Err(Refusal::UnsupportedPathGradient {
-                        object: text.base.id.clone(),
-                        paint: "text fill".into(),
-                    });
-                }
-            }
-        }
-
-        // PBR materials on meshes: a fixed-function software rasteriser
-        // cannot evaluate PBR lighting.  Refuse at publish time.
-        if !document.materials.is_empty() {
-            let pbr_materials: std::collections::HashSet<&str> = document
-                .materials
-                .iter()
-                .filter(|m| m.kind == gx_contracts::material::MaterialKind::Pbr)
-                .map(|m| m.material_id.as_str())
-                .collect();
-            if !pbr_materials.is_empty() {
-                for object in &document.objects {
-                    if let SceneObject::Mesh(mesh) = object {
-                        if let Some(slots) = &mesh.base.material_slots {
-                            for (slot_name, binding) in slots {
-                                if pbr_materials.contains(binding.material_id.as_str()) {
-                                    return Err(Refusal::NotImplemented {
-                                        what: format!(
-                                            "PBR material '{}' on mesh '{}' slot '{}' requires a GPU rasteriser",
-                                            binding.material_id, mesh.base.id, slot_name
-                                        ),
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        // Document-level validation is the shared implementation in
+        // `gx_contracts::validate`, not a copy here. The Editor must be able
+        // to give a designer the same answer before publish, and it cannot
+        // call into this crate (invariant 3) — so the rules live in contracts
+        // and both sides run them (invariant 27, and 7.4's done-when).
+        //
+        // The validator reports every fault because an author fixing a scene
+        // needs the whole list. Preparation only needs to know it cannot
+        // proceed, so it takes the first and stops.
+        if let Some(refusal) =
+            validate_scene_document(&document, support, available, true).into_iter().next()
+        {
+            return Err(refusal.code);
         }
 
         let resolution = resolve_hierarchy(&document.objects);
@@ -436,6 +340,45 @@ mod tests {
             }
             other => panic!("an unresolvable font must refuse by name, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn the_editor_validator_and_the_engine_refuse_the_same_scene_for_the_same_reason() {
+        // 7.4's done-when: "shares one enum with the engine". This is that
+        // claim as a test. The Editor cannot call into this crate (invariant
+        // 3), so the rules live in `gx_contracts::validate` and both sides run
+        // them — and if anyone ever reintroduces a private copy here, the two
+        // answers drift and this fails.
+        let text = SceneObject::Text(TextObject {
+            base: ObjectBase::new("title", "title"),
+            text: "Hello".into(),
+            font_id: "font_absent".into(),
+            size: 72.0,
+            ..text_defaults()
+        });
+        let scene = document(vec![text]);
+        let support = MaterialSupport::fixed_function();
+
+        let engine = PreparedScene::prepare(
+            scene.clone(),
+            &HashSet::new(),
+            &AssetBytes::new(),
+            &support,
+        )
+        .expect_err("the engine refuses an unresolvable font");
+
+        let editor = gx_contracts::validate::validate_scene_document(
+            &scene,
+            &support,
+            &HashSet::new(),
+            true,
+        );
+
+        assert_eq!(
+            editor.first().map(|refusal| &refusal.code),
+            Some(&engine),
+            "the Editor must refuse exactly what the engine refuses"
+        );
     }
 
     #[test]

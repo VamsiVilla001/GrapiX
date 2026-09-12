@@ -14,6 +14,7 @@ pub mod material;
 pub mod package;
 pub mod platform;
 pub mod scene;
+pub mod validate;
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
