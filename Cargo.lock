@@ -1868,7 +1868,11 @@ version = "0.1.0"
 dependencies = [
  "gx-asset-plane",
  "gx-contracts",
+ "gx-control-plane",
  "gx-mcp-server",
+ "gx-media-plane",
+ "gx-playout",
+ "parking_lot",
  "serde",
  "serde_json",
 ]

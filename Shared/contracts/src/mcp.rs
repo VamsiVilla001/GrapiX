@@ -138,6 +138,7 @@ pub const TOOLS: &[ToolDescriptor] = &[
     tool("render.preview", "render", ToolEffect::Read, Scope::Author, "PreviewRequest", "PreviewFrame", "An actual frame. The agent can see its own output."),
     // packages (8.10).
     tool("packages.build", "packages", ToolEffect::Write, Scope::Author, "PackageBuild", "PackageManifest", "Build and verify a package. All-or-nothing."),
+    tool("packages.inspect", "packages", ToolEffect::Read, Scope::Author, "PackageRef", "PackageManifest", "Read a package's manifest. Verifies without publishing."),
     tool("packages.publish", "packages", ToolEffect::Write, Scope::Author, "PackagePublish", "PublishResult", "Publish a package. Returns Take ID and revision."),
     // playout and outputs (8.11) — scope-gated, and the reason the whole
     // scope model exists.

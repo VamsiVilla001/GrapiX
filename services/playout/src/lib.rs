@@ -75,6 +75,19 @@ impl PublishedLibrary {
     pub fn revision(&self, take_id: &TakeId, revision: Revision) -> Option<&PublishedScene> {
         self.revisions.get(&(take_id.clone(), revision))
     }
+
+    /// Every published identity with the revisions it holds, in take order.
+    ///
+    /// Returned as *all* revisions rather than only the latest, because an
+    /// operator pins an exact one: a listing that showed only the newest
+    /// would make a valid pin look unavailable.
+    pub fn takes(&self) -> Vec<(TakeId, Vec<Revision>)> {
+        let mut by_take: BTreeMap<TakeId, Vec<Revision>> = BTreeMap::new();
+        for (take_id, revision) in self.revisions.keys() {
+            by_take.entry(take_id.clone()).or_default().push(*revision);
+        }
+        by_take.into_iter().collect()
+    }
 }
 
 /// The operator-selected conditions for one output configuration.

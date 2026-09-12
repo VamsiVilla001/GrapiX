@@ -397,6 +397,15 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
       "summary": "Build and verify a package. All-or-nothing."
     },
     {
+      "name": "packages.inspect",
+      "group": "packages",
+      "effect": "read",
+      "requiredScope": "author",
+      "input": "PackageRef",
+      "output": "PackageManifest",
+      "summary": "Read a package's manifest. Verifies without publishing."
+    },
+    {
       "name": "packages.publish",
       "group": "packages",
       "effect": "write",

@@ -32,6 +32,23 @@ pub trait ToolHandler {
     fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal>;
 }
 
+/// `system.capability`: the discovery surface, as a tool.
+///
+/// Lives here rather than in a tool crate because it needs no state beyond the
+/// contracts themselves, and because the server registers it by construction —
+/// an agent must be able to ask what it may do before it can do anything.
+pub struct CapabilityTool;
+
+impl ToolHandler for CapabilityTool {
+    fn handle(&self, _args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
+        serde_json::to_value(gx_contracts::mcp::capability_surface()).map_err(|error| {
+            Refusal::TransportFailed {
+                detail: error.to_string(),
+            }
+        })
+    }
+}
+
 /// A parsed JSON-RPC 2.0 request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -91,10 +108,17 @@ impl Server {
     /// message: a caller that had to prove itself per request would eventually
     /// be trusted on the strength of a handler that forgot to ask.
     pub fn new(scopes: Vec<Scope>) -> Self {
-        Self {
+        let mut server = Self {
             handlers: BTreeMap::new(),
             scopes,
-        }
+        };
+        // Registered by construction rather than left to the caller. This is
+        // the one tool an agent must call before it knows anything else, and
+        // a server that answered "no handler" to capability discovery would
+        // be undiscoverable by the very mechanism that exists to make it
+        // discoverable (D.1 principle 2).
+        server.register("system.capability", Box::new(CapabilityTool));
+        server
     }
 
     /// Register a handler for one tool. The tool must exist in the registry.
@@ -137,8 +161,14 @@ impl Server {
                     "version": TOOL_SCHEMA_VERSION,
                 },
             })),
-            "tools/list" => Ok(serde_json::to_value(ToolRegistry::all())
-                .expect("the tool registry always serialises")),
+            // The spec's shape is an object, not a bare array: the field is
+            // what makes room for `nextCursor` later without the reply
+            // changing type. A client reading `result.tools` against an array
+            // finds nothing and concludes the server has no tools at all —
+            // which is the discovery failure this surface exists to prevent.
+            "tools/list" => Ok(serde_json::json!({
+                "tools": ToolRegistry::all(),
+            })),
             "tools/call" => self.call(request.params),
             other => Err((
                 METHOD_NOT_FOUND,
@@ -320,29 +350,42 @@ mod tests {
     }
 
     #[test]
-    fn capability_discovery_needs_no_scope() {
+    fn capability_discovery_answers_with_no_scope_at_all() {
+        // The one tool with no scope requirement, and the one registered by
+        // construction: an agent that cannot ask what it may do cannot use
+        // the surface at all (D.1 principle 2).
         let server = Server::new(Vec::new());
-        // system.capability is the one tool with no scope requirement: an
-        // agent cannot discover what it may do if it cannot ask.
-        let handler = server.authorised_handler("system.capability");
-        match handler {
-            Err(Refusal::NotImplemented { .. }) => {}
-            Err(other) => panic!("expected NotImplemented, got {other:?}"),
-            Ok(_) => panic!("no handler is registered, but the gate passed"),
-        }
+        let reply = call(&server, "system.capability", serde_json::Value::Null)
+            .expect("capability always answers");
+        assert!(reply.error.is_none(), "capability must not refuse");
+
+        let surface = reply.result.expect("a surface");
+        assert_eq!(
+            surface["tools"].as_array().map(Vec::len),
+            Some(ToolRegistry::all().len()),
+            "the surface carries the whole registry"
+        );
+        assert!(
+            surface["refusals"]
+                .as_array()
+                .expect("refusal codes")
+                .contains(&serde_json::json!("revisionMismatch")),
+            "an agent learns the refusals it may receive"
+        );
     }
 
     #[test]
-    fn tools_list_returns_the_whole_registry() {
+    fn tools_list_returns_the_whole_registry_under_the_spec_field() {
         let server = Server::new(Vec::new());
         let reply = server
             .handle(request(1, "tools/list", serde_json::Value::Null))
             .expect("tools/list always replies");
-        let listed = reply
-            .result
-            .expect("a result")
+        let result = reply.result.expect("a result");
+        // Named field, not a bare array: a spec-conformant client reads
+        // `result.tools`, and an array there reads as "no tools".
+        let listed = result["tools"]
             .as_array()
-            .expect("an array")
+            .expect("the registry arrives under `tools`")
             .len();
         assert_eq!(listed, ToolRegistry::all().len());
     }

@@ -1856,3 +1856,92 @@ pixel gate all clean.
 - The `system.capability` tool has a descriptor and a generated payload but no
   registered handler in the server yet — `tools/list` returns it, a call finds
   no handler.
+
+---
+
+## 2026-09-12 - Phase 8's three Partial steps completed
+
+Requested: complete the partial steps in phase 8. All three are now
+Implemented, and `system.capability` - which had a descriptor and a generated
+payload but no registered handler - answers.
+
+**8.9, the one that was actually fake.** The previous session returned a frame
+the *caller* supplied, which proves nothing: an agent cannot see its own
+output by being handed its own input. The frame now comes from the media
+plane, which exists to carry confidence frames back to the surfaces (ADR-001).
+`SharedMediaPreview` holds a `LocalMediaConsumer` and takes the freshest
+published frame; `PreviewSource` is the seam so nothing here needs to know how
+a frame was made. Invariant 3 forbids Playout importing renderer internals, so
+the media plane is the only correct boundary - not a convenience.
+
+Nothing published is a refusal, not an empty frame: a black image returned as
+"the preview" is indistinguishable from a scene that renders black, which is
+the silent substitution invariant 18 forbids.
+
+**What 8.9 still does not do, and why it is not 8.9's gap.** The L0 mapping is
+`map_anon` - in-process. A consumer in a different process than the worker
+cannot read those frames. That is step 5.4 ("Media plane local: shared memory
+or handle passing"), which is not started. 8.9's dependency is 3.11, which is
+done, and the tool is complete against it.
+
+**8.10.** `packages.build`, `packages.inspect` and `packages.publish` over the
+verified writer and reader. Inspect is not a cheaper path that skips
+verification - reading verifies, so inspect is the same check without the
+publication. Publish is additive and the test proves it: the same package
+published twice yields revisions 1 and 2 rather than editing an issued one
+(invariant 30).
+
+`packages.inspect` was missing from the tool registry. A handler registered
+under a name the registry does not carry answers nobody, so it was declared
+before it was implemented.
+
+**8.11.** take, cue, clear, library, outputs.list and outputs.configure, wired
+to `gx_playout` over an `EnginePeer` - generic, so production supplies a
+transport client and a test supplies a stub without either being a special
+case. `configure_output` returns only the engine's liveness decision, so the
+handler reports that rather than echoing the request: a refused live output
+must not read as a configured one (invariant 20).
+
+`playout.library` lists *every* revision, not the newest. An operator pins an
+exact one, and a listing showing only the latest would make a valid pin look
+unavailable.
+
+### Two real defects, found by writing the tests
+
+**A tool nobody could call.** `system.capability` was declared, generated into
+the capability surface, and listed by `tools/list` - with no handler. An agent
+discovering it and calling it got nothing. It is now registered by
+construction in `Server::new` rather than left to each caller, because the
+discovery surface failing is worse than any tool failing: it is the mechanism
+that exists so an agent never has to guess.
+
+**`tools/list` broke the spec it claims.** It returned a bare array. The 2025
+MCP spec's result is an object, `{"tools": [...]}` - and a conformant client
+reading `result.tools` against an array finds nothing and concludes the server
+has no tools at all. Fixed, and the test now pins the field rather than the
+length alone.
+
+### Verification
+
+Driven over the real transport, not just the handlers: `tests/surface.rs`
+feeds newline-delimited JSON-RPC through `Server::serve` and asserts on the
+bytes that come back. The author-token refusal is proven with a *registered,
+panicking* handler behind the gate - so the test distinguishes "the gate
+refused" from "nothing was registered", which the handler-level test cannot.
+
+- Rust: **410** passed, 0 failed (`--workspace --exclude gx-engine-host`)
+- Conformance: 135 passed, 0 failed
+- TypeScript: 18 passed; typecheck, codegen:check (143 files), boundaries clean
+- Pixel gate: exit 0
+
+`gx-engine-host` remains excluded - the pre-existing Windows process-cleanup
+issue, unrelated to this work.
+
+### Not claimed
+
+- Cross-process preview. See 5.4 above.
+- `render.preview` takes no arguments: it returns what was published, not a
+  render of a scene you name. Rendering on demand needs the engine raster path
+  (13.x).
+- `outputs.list` reports the engine's capability, not a per-adapter inventory -
+  there is no adapter registry to enumerate yet.
