@@ -1752,6 +1752,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "gx-editor-mcp"
+version = "0.1.0"
+dependencies = [
+ "gx-contracts",
+ "gx-editor",
+ "gx-mcp-server",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "gx-editor-shell"
 version = "0.1.0"
 dependencies = [

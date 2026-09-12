@@ -1,0 +1,20 @@
+[package]
+name = "gx-editor-mcp"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# The Editor's MCP tool bodies (build plan 8.3, 8.4, 8.8).
+#
+# Handlers only: the transport and the scope gate live in `gx-mcp-server`, and
+# by the time any function here runs, the caller has already been authorised.
+# A handler that re-checked scope would be a second gate waiting to disagree
+# with the first (invariant 27).
+
+[dependencies]
+gx-contracts = { workspace = true }
+gx-mcp-server = { path = "../mcp-server" }
+gx-editor = { path = "../editor" }
+serde = { workspace = true }
+serde_json = { workspace = true }

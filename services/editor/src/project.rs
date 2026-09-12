@@ -51,6 +51,25 @@ impl From<Refusal> for EditorError {
     }
 }
 
+impl From<EditorError> for Refusal {
+    /// Flatten an Editor failure into the shared refusal vocabulary.
+    ///
+    /// A refusal passes through unchanged: it was already the named condition
+    /// and re-wrapping it would bury the name a caller is meant to act on. The
+    /// rest are failures of the machine rather than decisions about the
+    /// request — a disk that would not write is not a judgement on the scene —
+    /// so they become `TransportFailed`, which is the variant that means
+    /// exactly "nothing was decided" (invariant 17).
+    fn from(value: EditorError) -> Self {
+        match value {
+            EditorError::Refused(refusal) => refusal,
+            other => Refusal::TransportFailed {
+                detail: other.to_string(),
+            },
+        }
+    }
+}
+
 /// Projects on disk, and the scenes inside them.
 ///
 /// Rooted explicitly rather than at the platform data root, so a test and a
