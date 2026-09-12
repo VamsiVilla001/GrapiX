@@ -7,11 +7,10 @@
 
 #![forbid(unsafe_code)]
 
-use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use gx_asset_plane::{PublishRefusal, PublishReply, PublishRequest};
+use gx_asset_plane::{publish_scene, PublishRefusal, PublishReply};
 use gx_contracts::scene::{SceneCanvas, SceneDocument, SceneTimeline};
 use gx_contracts::RationalRate;
 
@@ -135,32 +134,12 @@ fn new_scene(specification: &str) -> Result<SceneDocument, EditorError> {
 }
 
 fn publish((engine, scene): (SocketAddr, SceneDocument)) -> Result<(), EditorError> {
-    let request = serde_json::to_vec(&PublishRequest { scene })
-        .map_err(|error| EditorError::Protocol(error.to_string()))?;
-    let mut stream =
-        TcpStream::connect(engine).map_err(|error| EditorError::Connect(error.to_string()))?;
-    stream
-        .write_all(&(request.len() as u32).to_be_bytes())
-        .and_then(|_| stream.write_all(&request))
-        .and_then(|_| stream.flush())
-        .map_err(|error| EditorError::Protocol(error.to_string()))?;
-    let mut prefix = [0_u8; 4];
-    stream
-        .read_exact(&mut prefix)
-        .map_err(|error| EditorError::Protocol(error.to_string()))?;
-    let length = u32::from_be_bytes(prefix) as usize;
-    if length > 64 * 1024 * 1024 {
-        return Err(EditorError::Protocol(format!(
-            "reply frame is {length} bytes"
-        )));
-    }
-    let mut bytes = vec![0; length];
-    stream
-        .read_exact(&mut bytes)
-        .map_err(|error| EditorError::Protocol(error.to_string()))?;
-    match serde_json::from_slice(&bytes)
-        .map_err(|error| EditorError::Protocol(error.to_string()))?
-    {
+    match publish_scene(engine, scene).map_err(|error| match error {
+        gx_asset_plane::PublishClientError::Connect(source) => {
+            EditorError::Connect(source.to_string())
+        }
+        other => EditorError::Protocol(other.to_string()),
+    })? {
         PublishReply::Published { take_id, revision } => {
             println!("published {} revision {}", take_id.0, revision.0)
         }

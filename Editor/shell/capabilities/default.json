@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "What the Editor's web layer may reach. Deliberately short: file dialogs for authoring, and the shell's own commands. No filesystem-wide access, no shell execution, no network plugin — publication goes through the one Rust command that speaks the asset plane.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:allow-open",
+    "dialog:allow-save"
+  ]
+}

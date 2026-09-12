@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GrapiX Playout</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!--
+      Playout operator surface.
+
+      Two things on this page are requirements rather than decoration:
+
+      * The clock indicator's prominence is driven by the severity the engine
+        supplied (invariant 11 / ADR-002). `nominal` may be quiet; `warning` is
+        rendered in a band that has no dismiss control; `critical` covers the
+        transport with #transportBlock so it cannot be pressed casually.
+      * Nothing here offers or displays a wall-clock time (invariants 8 and 9).
+        Scheduling is "next opportunity" or a frame number, results are the
+        frame the *engine* committed to, and the activity log is sequenced
+        rather than timestamped.
+    -->
+
+    <div id="shellNotice" class="notice" role="alert" hidden>
+      <p class="notice__title">Not running inside the Playout shell</p>
+      <p class="notice__body">
+        This page is open in a plain browser. The Tauri command bridge
+        (<code>window.__TAURI__.core.invoke</code>) is not present, so no engine
+        command can be sent. Launch the GrapiX Playout window to operate.
+      </p>
+    </div>
+
+    <header class="bar" id="connectionBar">
+      <h1 class="bar__mark">GrapiX <strong>PLAYOUT</strong></h1>
+
+      <div class="field field--grow">
+        <label class="field__label" for="endpointInput">Control endpoint</label>
+        <input
+          class="field__input field__input--mono"
+          id="endpointInput"
+          type="text"
+          spellcheck="false"
+          autocomplete="off"
+          placeholder="host:port"
+        />
+      </div>
+
+      <div class="field">
+        <label class="field__label" for="tokenInput">Token <span class="field__hint">optional</span></label>
+        <input
+          class="field__input field__input--mono"
+          id="tokenInput"
+          type="password"
+          spellcheck="false"
+          autocomplete="off"
+          placeholder="none"
+        />
+      </div>
+
+      <button class="btn btn--primary" id="connectButton" type="button">Connect</button>
+      <button class="btn" id="refreshButton" type="button" title="Request engine status now">Status</button>
+
+      <div class="bar__state">
+        <span class="chip chip--idle" id="connectionState">DISCONNECTED</span>
+        <span class="bar__detail" id="connectionDetail">No engine connection.</span>
+      </div>
+    </header>
+
+    <!--
+      The severity band. Present for `warning` and `critical`, absent for
+      `nominal`. It carries no close button on purpose: a warning that can be
+      dismissed is a warning that gets dismissed.
+    -->
+    <div class="band" id="severityBand" role="status" aria-live="assertive" hidden>
+      <span class="band__word" id="severityWord">WARNING</span>
+      <span class="band__label" id="severityLabel"></span>
+      <span class="band__note" id="severityNote"></span>
+    </div>
+
+    <main class="grid">
+      <section class="panel panel--clock" id="clockPanel" aria-labelledby="clockPanelTitle">
+        <header class="panel__head">
+          <h2 class="panel__title" id="clockPanelTitle">Clock &amp; reference</h2>
+          <span class="chip chip--idle" id="clockSeverityChip">NO DATA</span>
+        </header>
+
+        <p class="clock__label" id="clockLabel">Awaiting engine status.</p>
+        <p class="clock__prominence" id="clockProminence">Prominence: &mdash;</p>
+
+        <dl class="readout">
+          <div class="readout__row">
+            <dt class="readout__key">Rate</dt>
+            <dd class="readout__val">
+              <span class="num num--lg" id="clockRate">&mdash;</span>
+              <span class="readout__aside num" id="clockRational">&mdash;</span>
+            </dd>
+          </div>
+          <div class="readout__row">
+            <dt class="readout__key">Clock source</dt>
+            <dd class="readout__val" id="clockSource">&mdash;</dd>
+          </div>
+          <div class="readout__row">
+            <dt class="readout__key">Reference</dt>
+            <dd class="readout__val" id="referenceState">&mdash;</dd>
+          </div>
+          <div class="readout__row">
+            <dt class="readout__key">Free running</dt>
+            <dd class="readout__val" id="clockFreeRun">&mdash;</dd>
+          </div>
+          <div class="readout__row">
+            <dt class="readout__key">Device tier</dt>
+            <dd class="readout__val">
+              <span class="chip chip--idle" id="deviceTier">&mdash;</span>
+              <span class="readout__aside" id="deviceTierNote">Tier unknown.</span>
+            </dd>
+          </div>
+          <div class="readout__row">
+            <dt class="readout__key">Epoch</dt>
+            <dd class="readout__val num" id="epochValue">&mdash;</dd>
+          </div>
+          <div class="readout__row">
+            <dt class="readout__key">Current frame</dt>
+            <dd class="readout__val"><span class="num num--lg" id="currentFrame">&mdash;</span></dd>
+          </div>
+        </dl>
+
+        <h3 class="panel__sub">Degradations</h3>
+        <ul class="list" id="degradationList">
+          <li class="list__empty">No engine status yet.</li>
+        </ul>
+      </section>
+
+      <section class="panel panel--program" aria-labelledby="programPanelTitle">
+        <header class="panel__head">
+          <h2 class="panel__title" id="programPanelTitle">Program</h2>
+          <span class="chip chip--idle" id="programChip">UNKNOWN</span>
+        </header>
+
+        <p class="program__empty" id="programEmpty">No engine status yet.</p>
+
+        <dl class="readout" id="programDetail" hidden>
+          <div class="readout__row">
+            <dt class="readout__key">Take id</dt>
+            <dd class="readout__val readout__val--mono" id="programTakeId">&mdash;</dd>
+          </div>
+          <div class="readout__row">
+            <dt class="readout__key">Revision</dt>
+            <dd class="readout__val num" id="programRevision">&mdash;</dd>
+          </div>
+          <div class="readout__row">
+            <dt class="readout__key">Committed at</dt>
+            <dd class="readout__val">
+              <span class="num num--lg" id="programCommittedFrame">&mdash;</span>
+              <span class="readout__aside">frame the engine chose</span>
+            </dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="panel panel--transport" id="transportPanel" aria-labelledby="transportPanelTitle">
+        <header class="panel__head">
+          <h2 class="panel__title" id="transportPanelTitle">Transport</h2>
+          <span class="panel__note">Intent only &mdash; the engine chooses the frame</span>
+        </header>
+
+        <div class="transport__inputs">
+          <div class="field">
+            <label class="field__label" for="takeIdInput">Take id</label>
+            <input
+              class="field__input field__input--mono"
+              id="takeIdInput"
+              type="text"
+              spellcheck="false"
+              autocomplete="off"
+              placeholder="published scene id"
+            />
+          </div>
+          <div class="field field--narrow">
+            <label class="field__label" for="revisionInput">Revision</label>
+            <input
+              class="field__input field__input--mono"
+              id="revisionInput"
+              type="number"
+              min="0"
+              step="1"
+              inputmode="numeric"
+              placeholder="0"
+            />
+          </div>
+          <div class="field field--frame">
+            <label class="field__label" for="frameInput">Frame <span class="field__hint">or blank</span></label>
+            <input
+              class="field__input field__input--mono"
+              id="frameInput"
+              type="number"
+              min="0"
+              step="1"
+              inputmode="numeric"
+              placeholder="next opportunity"
+              aria-describedby="frameMode"
+            />
+          </div>
+          <p class="transport__mode" id="frameMode">Scheduling: <strong>next opportunity</strong></p>
+        </div>
+
+        <div class="transport__buttons">
+          <button class="btn btn--cue" id="cueButton" type="button">CUE</button>
+          <button class="btn btn--clear" id="clearButton" type="button">CLEAR</button>
+          <button class="btn btn--take" id="takeButton" type="button">TAKE</button>
+        </div>
+
+        <div class="commit" id="commitReadout" hidden>
+          <p class="commit__head" id="commitHead">Engine committed</p>
+          <p class="commit__frame"><span class="num num--xl" id="commitFrame">&mdash;</span></p>
+          <p class="commit__meta">
+            <span id="commitRate">&mdash;</span>
+            <span class="commit__sep">/</span>
+            <span id="commitClock">&mdash;</span>
+          </p>
+          <p class="commit__note" id="commitNote"></p>
+        </div>
+
+        <!--
+          Invariant 11: `critical` must block. The overlay disables the
+          buttons for real (not only visually) and requires a deliberate
+          acknowledgement that arms exactly one command.
+        -->
+        <div class="block" id="transportBlock" hidden>
+          <div class="block__body">
+            <p class="block__word" id="transportBlockWord">TRANSPORT BLOCKED</p>
+            <p class="block__label" id="transportBlockLabel"></p>
+            <p class="block__why" id="transportBlockWhy">
+              The engine reports a critical clock state. Program commands are
+              held until you acknowledge it.
+            </p>
+            <button class="btn btn--ack" id="acknowledgeButton" type="button">
+              ACKNOWLEDGE &mdash; ARM ONE COMMAND
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel panel--output" aria-labelledby="outputPanelTitle">
+        <header class="panel__head">
+          <h2 class="panel__title" id="outputPanelTitle">Output</h2>
+          <span class="chip chip--idle" id="outputChip">NOT CONFIGURED</span>
+        </header>
+
+        <div class="field">
+          <label class="field__label" for="adapterInput">Adapter</label>
+          <input
+            class="field__input field__input--mono"
+            id="adapterInput"
+            type="text"
+            spellcheck="false"
+            autocomplete="off"
+            placeholder="adapter name"
+          />
+        </div>
+
+        <label class="check" for="liveCheckbox">
+          <input class="check__box" id="liveCheckbox" type="checkbox" />
+          <span class="check__text">Live to air</span>
+        </label>
+        <p class="check__gate" id="liveGate">Engine has not reported liveness yet.</p>
+
+        <label class="check" for="freeRunCheckbox">
+          <input class="check__box" id="freeRunCheckbox" type="checkbox" />
+          <span class="check__text">Operator accepts a free-running clock</span>
+        </label>
+        <p class="check__gate">
+          Sent to the engine as stated. The engine decides whether the output
+          may be live.
+        </p>
+
+        <button class="btn btn--primary" id="configureButton" type="button">Configure output</button>
+
+        <dl class="readout" id="outputResult" hidden>
+          <div class="readout__row">
+            <dt class="readout__key">Adapter</dt>
+            <dd class="readout__val readout__val--mono" id="outputAdapter">&mdash;</dd>
+          </div>
+          <div class="readout__row">
+            <dt class="readout__key">Engine reports</dt>
+            <dd class="readout__val" id="outputLive">&mdash;</dd>
+          </div>
+        </dl>
+
+        <p class="refusal" id="outputRefusal" hidden></p>
+      </section>
+
+      <section class="panel panel--log" aria-labelledby="logPanelTitle">
+        <header class="panel__head">
+          <h2 class="panel__title" id="logPanelTitle">Activity</h2>
+          <span class="panel__note">newest first &mdash; sequenced, not timestamped</span>
+        </header>
+        <ol class="log" id="logList" aria-live="polite">
+          <li class="log__empty">Nothing sent yet.</li>
+        </ol>
+      </section>
+    </main>
+
+    <script type="module" src="main.js"></script>
+  </body>
+</html>

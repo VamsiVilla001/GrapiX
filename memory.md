@@ -1411,3 +1411,83 @@ assignment instead of a loop.
 host-integration tests which have a pre-existing Windows process cleanup
 issue). 126 conformance checks pass. TypeScript typecheck and vitest pass.
 Codebase is clean and committed.
+
+---
+
+## 2026-09-12 — the Tauri 2 shells (11.1), both products
+
+Requested: launch the Editor and Playout alongside the renderer to see the
+work in progress. There was nothing to launch — both products were
+type-level TypeScript modules with no shell, so this session built them.
+
+**The command surface is the invariant.** `Editor/shell/src/lib.rs` exposes
+new, load, save and publish. `Playout/shell/src/lib.rs` exposes cue, take,
+clear, configure-output and status. Neither exposes the other's. Invariants 4
+and 5 are held by the *absence* of a capability rather than by a flag on a
+shared command: a flag can be set wrongly, an absent command cannot be
+reached however the web layer asks.
+
+**ADR-002 is structural in Playout's shell.** No command accepts a time. The
+web layer's optional frame becomes intent in exactly one place — `scheduled`,
+which maps `None` to `NextOpportunity` — and there is no `Now` to send. Every
+reply renders the frame the *engine* committed to, labelled as the engine's
+decision, never the requested frame.
+
+**One publish client, not two.** The Editor shell needed to publish, and the
+mock editor already had hand-rolled framing for the same plane. Rather than
+copy it, `publish_scene` moved into `Shared/asset-plane/src/publish.rs` beside
+the server that enforces the same bound, and the mock was migrated onto it.
+Two dialects of one plane is the drift invariant 27 exists to stop.
+
+**Severity is not recomputed in the UI.** `clock_summary` decides once on the
+shared side; `Playout/web/main.js` mirrors `clock-display.ts`'s
+severity-to-prominence rule and reads `clock.severity` rather than deriving it
+from `status.clock`/`status.reference`. An unrecognised severity escalates to
+blocking, because the one thing that must never happen is a non-nominal state
+rendered quietly (invariant 11).
+
+### Defects found by actually running it
+
+- **The Editor's out-of-shell curtain defaulted to hidden.** A module that
+  failed to load left a broken window with no explanation. Inverted: the
+  curtain is visible in the markup and comes down only once the shell is
+  confirmed. The default is now the failure state.
+- **Playout's blocking overlay was permanently rendered** and intercepting
+  clicks on CUE/TAKE — a control an operator could see and could not press.
+  Author `display` rules on `.block`/`.band`/`.readout` were defeating the
+  UA rule for the `hidden` attribute.
+- **Playout's panels collapsed at 1100×760 and 900×600**, clipping TAKE and
+  Configure out of existence: `min-height: 0` plus `overflow: hidden` gave
+  each grid item a zero automatic minimum.
+- **The Editor's integration test was not isolated.** It asserted revision 1
+  and got 4 — the worker had correctly restored the machine's real recovery
+  journal, which held earlier runs of the same scene id. The engine was right;
+  the test now gets its own journal path.
+
+### Verified by execution
+
+`cargo test --workspace --exclude gx-engine-host` — 291 passed, 0 failed.
+The Editor shell's integration test publishes to a *real* worker and gets
+revision 1, then 2 on republish (additive, invariant 30). Conformance: 126
+passed, 0 failed. `check:boundaries`, `codegen:check` (137 files current),
+`typecheck` and `test:ts` (9 passed) all clean.
+
+Driven in a headless browser against stubbed wire shapes: free-run renders a
+persistent band with no dismiss control; reference-lost disables TAKE, covers
+the transport, and the click genuinely never reaches the engine (0 invokes);
+`30000/1001` renders as `29.97` with the exact rational shown beside it.
+
+Engine, Editor and Playout ran together — engine 7m, Editor 6m52s, Playout
+concurrently — which was the original request.
+
+### Not done, and not claimed
+
+- **11.1's done-when is "installers produced by CI", which has not happened.**
+  The shells build and run on Windows; no bundle has been produced, nothing is
+  signed or notarised, and the macOS leg has never been run. 11.1 stays
+  **active**, not done.
+- No dockable workspace (11.5), no overlay layer or hit-testing (11.7).
+- The Editor viewport draws the scene but nothing edits it yet: objects are
+  listed, not manipulated.
+- Playout's web layer was built by a subagent and verified by driving it;
+  its CSS has not been reviewed line by line.

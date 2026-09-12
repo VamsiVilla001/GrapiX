@@ -19,6 +19,8 @@ members = [
   "conformance",
   "tools/contract-codegen",
   "Shared/project-store",
+  "Editor/shell",
+  "Playout/shell",
 ]
 
 [workspace.package]
@@ -51,6 +53,9 @@ ttf-parser       = "0.25"
 ts-rs            = { version = "10", features = ["serde-json-impl"] }
 url              = "2"
 gx-project-store = { path = "Shared/project-store" }
+tauri            = { version = "2", features = [] }
+tauri-build      = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
 
 [profile.release]
 lto = "thin"

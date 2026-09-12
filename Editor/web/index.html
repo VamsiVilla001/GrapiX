@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GrapiX Editor</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!-- Visible by default, and hidden by `main.js` only once the shell is
+         confirmed present. The default must be the failure state: if the
+         module fails to load at all, an author sees this explanation rather
+         than a silently broken window. -->
+    <div id="not-in-shell" class="curtain">
+      <div class="curtain-card">
+        <h1>Not running inside the Editor shell</h1>
+        <p>
+          This page is the Editor's web layer. It needs the Tauri shell for
+          file access and the asset plane. Launch it with
+          <code>npm run editor</code> from the repository root.
+        </p>
+      </div>
+    </div>
+    <header class="bar">
+      <div class="brand">
+        <span class="mark">GrapiX</span>
+        <span class="product">Editor</span>
+      </div>
+
+      <div class="scene-identity">
+        <label class="field">
+          <span class="label">Scene id</span>
+          <input id="scene-id" type="text" spellcheck="false" autocomplete="off" />
+        </label>
+        <label class="field">
+          <span class="label">Name</span>
+          <input id="scene-name" type="text" spellcheck="false" autocomplete="off" />
+        </label>
+      </div>
+
+      <div class="actions">
+        <button id="new-scene" type="button">New</button>
+        <button id="open-scene" type="button">Open…</button>
+        <button id="save-scene" type="button">Save…</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="viewport-pane">
+        <div class="pane-head">
+          <h2>Viewport</h2>
+          <span id="canvas-size" class="meta"></span>
+        </div>
+        <div class="viewport-stage">
+          <canvas id="viewport"></canvas>
+        </div>
+        <p class="pane-note">
+          Preview only. The render engine is the sole rasteriser of production
+          pixels; this surface never becomes the output.
+        </p>
+      </section>
+
+      <aside class="inspector">
+        <section class="panel">
+          <h2>Objects</h2>
+          <ul id="object-list" class="object-list"></ul>
+          <p id="object-empty" class="empty">No objects in this scene.</p>
+        </section>
+
+        <section class="panel" id="unsupported-panel" hidden>
+          <h2>Not drawn by this preview</h2>
+          <ul id="unsupported-list" class="reason-list"></ul>
+          <p class="panel-note">
+            These are reported rather than approximated. The engine refuses by
+            name for the same reason.
+          </p>
+        </section>
+
+        <section class="panel">
+          <h2>Publish</h2>
+          <label class="field">
+            <span class="label">Asset plane</span>
+            <input id="endpoint" type="text" spellcheck="false" autocomplete="off" />
+          </label>
+          <button id="publish" type="button" class="primary">Publish scene</button>
+          <p class="panel-note">
+            Publication creates an immutable revision. It cannot put anything
+            to air — only Playout can take a revision to Program.
+          </p>
+          <div id="publish-result" class="result" hidden></div>
+        </section>
+      </aside>
+    </main>
+
+    <footer class="log-bar">
+      <h2 class="log-title">Activity</h2>
+      <ul id="log" class="log"></ul>
+    </footer>
+
+    <script type="module" src="main.js"></script>
+  </body>
+</html>

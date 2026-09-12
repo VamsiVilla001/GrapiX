@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "What Playout's web layer may reach. Only the core defaults and this shell's own commands: Playout opens no files and runs nothing. Its entire authority is the control plane, and that is reached through Rust commands that cannot express a wall-clock time.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

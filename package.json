@@ -17,7 +17,11 @@
     "test:rust": "cargo test --workspace",
     "conformance": "cargo run -p gx-conformance",
     "check": "npm run check:boundaries && npm run codegen:check && npm run typecheck && npm run test:ts && npm run test:rust && npm run conformance",
-    "test:ts": "node --test \"*/tests/**/*.test.mjs\" \"services/*/tests/**/*.test.mjs\" \"Shared/*/tests/**/*.test.mjs\" && npm --prefix Editor run test:unit"
+    "test:ts": "node --test \"*/tests/**/*.test.mjs\" \"services/*/tests/**/*.test.mjs\" \"Shared/*/tests/**/*.test.mjs\" && npm --prefix Editor run test:unit",
+    "build:web": "npm --prefix Editor run build:web",
+    "editor": "npm run build:web && tauri dev --config Editor/shell/tauri.conf.json",
+    "playout": "tauri dev --config Playout/shell/tauri.conf.json",
+    "shells": "npm run build:web && node tools/launch-shells.mjs"
   },
   "devDependencies": {
     "typescript": "~5.6.3"

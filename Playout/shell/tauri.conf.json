@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "GrapiX Playout",
+  "version": "0.1.0",
+  "identifier": "com.grapix.playout",
+  "build": {
+    "frontendDist": "../web"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "GrapiX Playout",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi"],
+    "icon": ["icons/icon.png"],
+    "copyright": "GrapiX",
+    "category": "Video",
+    "shortDescription": "GrapiX Playout",
+    "longDescription": "Program control surface for GrapiX broadcast graphics."
+  }
+}

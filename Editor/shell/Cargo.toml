@@ -1,0 +1,34 @@
+[package]
+name = "gx-editor-shell"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# The Tauri 2 shell for the Editor (build plan 11.1).
+#
+# The command surface below is the enforcement point for invariants 4 and 5:
+# this binary exposes authoring and publication, and exposes no cue, take,
+# clear or output command at all. A capability the shell does not expose
+# cannot be reached from the web layer whatever it asks for.
+
+[lib]
+name = "gx_editor_shell"
+crate-type = ["lib", "cdylib", "staticlib"]
+path = "src/lib.rs"
+
+[[bin]]
+name = "gx-editor"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+gx-contracts = { workspace = true }
+gx-asset-plane = { workspace = true }
+gx-project-store = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tauri = { workspace = true }
+tauri-plugin-dialog = { workspace = true }

@@ -10,8 +10,8 @@ pub mod publish;
 pub mod store;
 pub mod transfer;
 pub use publish::{
-    AssetPublishPeer, AssetPublishServer, PublishRefusal, PublishReply, PublishRequest,
-    MAX_PUBLISH_FRAME_BYTES,
+    publish_scene, AssetPublishPeer, AssetPublishServer, PublishClientError, PublishRefusal,
+    PublishReply, PublishRequest, MAX_PUBLISH_FRAME_BYTES,
 };
 pub use store::{content_hash, read_image_geometry, AssetStore, AssetStoreError, ImageGeometry};
 pub use transfer::Transfer;

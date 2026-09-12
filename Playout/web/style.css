@@ -1,0 +1,1025 @@
+/* GrapiX Playout — operator surface.
+ *
+ * Direction: broadcast hardware panel. Dense, flat, high contrast, square
+ * corners, no decorative motion. Neutrals are tinted (never #000 or #fff) so
+ * the state colours below are the only saturated things on screen.
+ *
+ * State is never carried by colour alone. Every severity is also a word, a
+ * rule weight and a position, so the surface reads the same to an operator
+ * who cannot separate red from amber.
+ */
+
+:root {
+  /* Neutrals — cool-tinted, never pure. */
+  --bg: #0d1013;
+  --bg-panel: #14181c;
+  --bg-panel-2: #191e23;
+  --bg-inset: #0a0d0f;
+  --line: #262d34;
+  --line-strong: #3a444d;
+
+  --ink: #e4e9ed;
+  --ink-dim: #97a3ad;
+  --ink-faint: #6a757e;
+
+  /* State — chosen to differ in lightness as well as hue. */
+  --nominal: #4ec27a;
+  --nominal-bg: #12241a;
+  --warning: #f0a93c;
+  --warning-bg: #2a1f0c;
+  --critical: #ff5f56;
+  --critical-bg: #2e1113;
+  --live: #e23b3b;
+  --info: #6fb3d9;
+
+  --focus: #8ab4f8;
+
+  /* 4px spacing grid. */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+
+  --r: 2px;
+
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, "Liberation Mono", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Several classes below set `display`, and any author `display` beats the UA
+ * rule for `[hidden]`. Without this the blocking overlay would stay on screen
+ * and keep intercepting clicks — a control the operator can see and cannot
+ * press. `hidden` is load-bearing here, so it is made authoritative. */
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+p,
+dl,
+dd,
+ol,
+ul {
+  margin: 0;
+}
+
+ol,
+ul {
+  padding: 0;
+  list-style: none;
+}
+
+code {
+  font-family: var(--mono);
+  color: var(--ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* Tabular figures everywhere a number can change under the operator's eye. */
+.num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: 0.01em;
+}
+
+.num--lg {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.num--xl {
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+/* ---------------------------------------------------------------- notice */
+
+.notice {
+  padding: var(--s4) var(--s5);
+  background: var(--warning-bg);
+  border-bottom: 3px solid var(--warning);
+}
+
+.notice__title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--warning);
+}
+
+.notice__body {
+  margin-top: var(--s1);
+  max-width: 78ch;
+  color: var(--ink-dim);
+}
+
+/* ------------------------------------------------------- connection bar */
+
+.bar {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--s3);
+  flex: 0 0 auto;
+  padding: var(--s3) var(--s4);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.bar__mark {
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  padding-bottom: 5px;
+  white-space: nowrap;
+}
+
+.bar__mark strong {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.bar__state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.bar__detail {
+  font-size: 11px;
+  color: var(--ink-dim);
+  max-width: 42ch;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- fields */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  min-width: 0;
+}
+
+.field--grow {
+  flex: 1 1 220px;
+  max-width: 320px;
+}
+
+.field--narrow {
+  max-width: 132px;
+}
+
+/* Wide enough for the "next opportunity" placeholder to read in full: a
+ * truncated default is how an operator comes to think a frame is required. */
+.field--frame {
+  max-width: 176px;
+}
+
+.field__label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.field__hint {
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--ink-faint);
+}
+
+.field__input {
+  width: 100%;
+  padding: 6px var(--s2);
+  background: var(--bg-inset);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.field__input--mono {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.field__input::placeholder {
+  color: var(--ink-faint);
+}
+
+.field__input:disabled {
+  color: var(--ink-faint);
+  background: #0f1215;
+  border-color: var(--line);
+}
+
+.field__input[aria-invalid="true"] {
+  border-color: var(--critical);
+}
+
+/* --------------------------------------------------------------- buttons */
+
+.btn {
+  padding: 7px var(--s3);
+  background: var(--bg-panel-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 120ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.btn:hover:not(:disabled) {
+  background: #222a31;
+}
+
+.btn:active:not(:disabled) {
+  background: #2b343c;
+}
+
+.btn:disabled {
+  color: var(--ink-faint);
+  background: #101317;
+  border-color: var(--line);
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  border-color: var(--line-strong);
+  background: #253039;
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: #2e3c47;
+}
+
+.btn--cue,
+.btn--take,
+.btn--clear {
+  padding: var(--s3) var(--s2);
+  font-size: 14px;
+  letter-spacing: 0.14em;
+}
+
+.btn--cue {
+  border-color: var(--info);
+  color: var(--info);
+}
+
+.btn--cue:hover:not(:disabled) {
+  background: #142029;
+}
+
+/* TAKE puts pixels on air. It is the only filled, full-width control. */
+.btn--take {
+  grid-column: 1 / -1;
+  padding: 13px var(--s2);
+  background: var(--live);
+  border-color: #ff7a72;
+  color: #fff5f4;
+  font-size: 20px;
+  letter-spacing: 0.24em;
+}
+
+.btn--take:hover:not(:disabled) {
+  background: #f04a49;
+}
+
+.btn--take:active:not(:disabled) {
+  background: #c73130;
+}
+
+.btn--take:disabled {
+  background: #3a2020;
+  border-color: #4d2a2a;
+  color: #8a6a6a;
+}
+
+.btn--clear {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
+.btn--clear:hover:not(:disabled) {
+  background: #241b0a;
+}
+
+.btn--ack {
+  padding: var(--s3) var(--s4);
+  background: var(--critical-bg);
+  border-color: var(--critical);
+  color: var(--critical);
+  font-size: 13px;
+}
+
+.btn--ack:hover:not(:disabled) {
+  background: #3d1719;
+}
+
+/* ----------------------------------------------------------------- chips */
+
+.chip {
+  display: inline-block;
+  padding: 2px var(--s2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  background: var(--bg-inset);
+  color: var(--ink-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.chip--idle {
+  color: var(--ink-faint);
+}
+
+.chip--nominal {
+  border-color: var(--nominal);
+  background: var(--nominal-bg);
+  color: var(--nominal);
+}
+
+.chip--warning {
+  border-color: var(--warning);
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.chip--critical {
+  border-color: var(--critical);
+  background: var(--critical-bg);
+  color: var(--critical);
+}
+
+.chip--live {
+  border-color: var(--live);
+  background: var(--live);
+  color: #fff5f4;
+}
+
+.chip--ok {
+  border-color: var(--info);
+  color: var(--info);
+}
+
+/* --------------------------------------------------------- severity band */
+
+/* Persistent by construction: no dismiss control exists (invariant 11). */
+.band {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  flex: 0 0 auto;
+  padding: var(--s2) var(--s4);
+  border-bottom: 1px solid var(--line);
+}
+
+.band--warning {
+  background: var(--warning-bg);
+  border-top: 4px solid var(--warning);
+  color: var(--warning);
+}
+
+.band--critical {
+  color: var(--critical);
+  border-top: 4px solid var(--critical);
+  background: var(--critical-bg)
+    repeating-linear-gradient(
+      135deg,
+      rgba(255, 95, 86, 0.13) 0 10px,
+      transparent 10px 20px
+    );
+}
+
+.band__word {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  padding: 1px var(--s2);
+  border: 1px solid currentColor;
+  border-radius: var(--r);
+  white-space: nowrap;
+}
+
+.band__label {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.band__note {
+  margin-left: auto;
+  font-size: 11px;
+  opacity: 0.85;
+  text-align: right;
+}
+
+/* ----------------------------------------------------------------- grid */
+
+.grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  gap: var(--s3);
+  padding: var(--s3);
+  grid-template-columns: minmax(300px, 340px) minmax(380px, 1.05fr) minmax(320px, 1fr);
+  /* Row 1 is sized by the transport and output panels, whose content is
+   * bounded. Row 2 takes the rest, so Program and the activity log — the two
+   * that grow without bound — are the ones that scroll.
+   *
+   * The floor on row 2 is what makes a short window degrade honestly: rather
+   * than squeezing those panels to nothing and clipping controls out of
+   * existence, the grid itself starts to scroll. */
+  grid-template-rows: auto minmax(220px, 1fr);
+  grid-template-areas:
+    "clock transport output"
+    "clock program   log";
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.panel--clock {
+  grid-area: clock;
+}
+.panel--transport {
+  grid-area: transport;
+}
+.panel--program {
+  grid-area: program;
+}
+.panel--output {
+  grid-area: output;
+}
+.panel--log {
+  grid-area: log;
+}
+
+@media (max-width: 1180px) {
+  .grid {
+    grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(220px, 1fr);
+    grid-template-areas:
+      "clock transport"
+      "clock output"
+      "program log";
+  }
+}
+
+@media (max-width: 820px) {
+  .grid {
+    display: block;
+    overflow: auto;
+  }
+
+  .panel {
+    margin-bottom: var(--s3);
+  }
+}
+
+/* --------------------------------------------------------------- panels */
+
+/* `overflow: visible` is deliberate. A grid item whose overflow is not
+ * visible contributes a zero automatic minimum height, which lets its row
+ * collapse and silently clip whatever is at the bottom — for the transport
+ * panel that is the TAKE button. Leaving overflow visible makes each panel's
+ * real height the floor for its row, so a window too short to hold the
+ * surface scrolls `.grid` instead of hiding controls.
+ *
+ * The two panels that may legitimately shrink opt in below, and scroll their
+ * own content. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  min-width: 0;
+  padding: var(--s3);
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  align-content: start;
+}
+
+.panel--clock {
+  min-height: 0;
+  border-left: 3px solid var(--line-strong);
+  overflow-y: auto;
+}
+
+.panel--clock[data-severity="nominal"] {
+  border-left-color: var(--nominal);
+}
+
+.panel--clock[data-severity="warning"] {
+  border-left-color: var(--warning);
+  background: linear-gradient(180deg, var(--warning-bg) 0, var(--bg-panel) 72px);
+}
+
+.panel--clock[data-severity="critical"] {
+  border-left-color: var(--critical);
+  background: linear-gradient(180deg, var(--critical-bg) 0, var(--bg-panel) 72px);
+}
+
+/* Tighter than the other panels: this one carries the most controls, and at
+ * the 1280x820 window with a persistent severity band on screen the whole
+ * surface has to fit without scrolling. */
+.panel--transport {
+  position: relative;
+  gap: var(--s2);
+  border-color: var(--line-strong);
+}
+
+.panel--log {
+  min-height: 160px;
+  overflow: hidden;
+}
+
+.panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  flex: 0 0 auto;
+  padding-bottom: var(--s2);
+  border-bottom: 1px solid var(--line);
+}
+
+.panel__title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.panel__sub {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.panel__note {
+  font-size: 10px;
+  color: var(--ink-faint);
+  text-align: right;
+}
+
+/* ---------------------------------------------------------------- clock */
+
+.clock__label {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+
+.panel--clock[data-severity="warning"] .clock__label {
+  color: var(--warning);
+}
+
+.panel--clock[data-severity="critical"] .clock__label {
+  color: var(--critical);
+}
+
+.clock__prominence {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* -------------------------------------------------------------- readout */
+
+.readout {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+
+.readout__row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  padding: 5px var(--s2);
+  background: var(--bg-panel-2);
+}
+
+.readout__key {
+  flex: 0 0 118px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.readout__val {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  min-width: 0;
+  margin: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.readout__val--mono {
+  font-family: var(--mono);
+}
+
+.readout__aside {
+  font-size: 10px;
+  color: var(--ink-faint);
+}
+
+/* ----------------------------------------------------------------- list */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+}
+
+.list__empty {
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.list__item {
+  display: flex;
+  gap: var(--s2);
+  align-items: baseline;
+  padding: var(--s2);
+  background: var(--bg-inset);
+  border-left: 3px solid var(--line-strong);
+  border-radius: var(--r);
+  font-size: 12px;
+}
+
+.list__item--warn {
+  border-left-color: var(--warning);
+  color: var(--warning);
+}
+
+.list__item--crit {
+  border-left-color: var(--critical);
+  color: var(--critical);
+}
+
+.list__tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  flex: 0 0 auto;
+}
+
+/* -------------------------------------------------------------- program */
+
+.program__empty {
+  padding: var(--s4) var(--s2);
+  color: var(--ink-dim);
+  font-size: 14px;
+  letter-spacing: 0.04em;
+}
+
+/* ------------------------------------------------------------ transport */
+
+.transport__inputs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--s3);
+}
+
+.transport__mode {
+  flex: 1 1 100%;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.transport__mode strong {
+  font-family: var(--mono);
+  color: var(--ink);
+}
+
+.transport__buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s2);
+}
+
+.commit {
+  padding: var(--s3);
+  background: var(--bg-inset);
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--nominal);
+  border-radius: var(--r);
+}
+
+.commit__head {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--nominal);
+}
+
+.commit__frame {
+  margin-top: 2px;
+}
+
+.commit__meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.commit__sep {
+  color: var(--ink-faint);
+  padding: 0 var(--s1);
+}
+
+.commit__note {
+  margin-top: var(--s1);
+  font-size: 11px;
+  color: var(--warning);
+}
+
+/* ---------------------------------------------------- blocking overlay */
+
+.block {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s4);
+  background: rgba(10, 6, 7, 0.9)
+    repeating-linear-gradient(
+      135deg,
+      rgba(255, 95, 86, 0.14) 0 14px,
+      transparent 14px 28px
+    );
+  border: 3px solid var(--critical);
+  border-radius: var(--r);
+}
+
+.block__body {
+  max-width: 46ch;
+  text-align: center;
+}
+
+.block__word {
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: var(--critical);
+}
+
+.block__label {
+  margin-top: var(--s2);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.block__why {
+  margin-top: var(--s2);
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.block__body .btn--ack {
+  margin-top: var(--s3);
+}
+
+/* Armed: the overlay is gone, but the panel keeps a critical edge so the
+ * operator is never left thinking the state cleared. */
+.panel--transport.is-armed {
+  border-color: var(--critical);
+  box-shadow: inset 0 0 0 1px var(--critical);
+}
+
+/* --------------------------------------------------------------- checks */
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  cursor: pointer;
+}
+
+.check:has(.check__box:disabled) {
+  cursor: not-allowed;
+  color: var(--ink-faint);
+}
+
+.check__box {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--live);
+  cursor: inherit;
+}
+
+.check__text {
+  font-size: 13px;
+}
+
+.check__gate {
+  margin-top: -6px;
+  padding-left: 23px;
+  font-size: 10px;
+  color: var(--ink-faint);
+}
+
+.check__gate--blocked {
+  color: var(--warning);
+}
+
+/* -------------------------------------------------------------- refusal */
+
+.refusal {
+  padding: var(--s2) var(--s3);
+  background: var(--critical-bg);
+  border-left: 3px solid var(--critical);
+  border-radius: var(--r);
+  font-size: 12px;
+}
+
+.refusal__name {
+  display: block;
+  font-family: var(--mono);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--critical);
+}
+
+.refusal__detail {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-dim);
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------------------------ log */
+
+.log {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+
+.log__empty {
+  padding: var(--s3);
+  background: var(--bg-panel-2);
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.log__row {
+  display: grid;
+  grid-template-columns: 44px 92px 1fr;
+  gap: var(--s2);
+  align-items: baseline;
+  padding: 5px var(--s2);
+  background: var(--bg-panel-2);
+  border-left: 3px solid var(--line-strong);
+  font-size: 12px;
+}
+
+.log__row--ok {
+  border-left-color: var(--nominal);
+}
+
+.log__row--refused {
+  border-left-color: var(--critical);
+}
+
+.log__row--error {
+  border-left-color: var(--warning);
+}
+
+.log__row--info {
+  border-left-color: var(--info);
+}
+
+.log__seq {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-faint);
+}
+
+.log__kind {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--ink-dim);
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+.log__text {
+  min-width: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.log__row--ok .log__text {
+  color: var(--ink);
+}
+
+.log__row--refused .log__text {
+  color: var(--critical);
+}
+
+.log__row--error .log__text {
+  color: var(--warning);
+}
+
+.log__detail {
+  display: block;
+  color: var(--ink-dim);
+  font-size: 11px;
+}
+
+.log__frame {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn {
+    transition: none;
+  }
+}

@@ -7,7 +7,9 @@
   "main": "src/index.ts",
   "scripts": {
     "typecheck": "tsc --build",
-    "test:unit": "vitest run"
+    "test:unit": "vitest run",
+    "build:web": "esbuild web/main.ts --bundle --format=esm --target=es2022 --outfile=web/main.js --sourcemap",
+    "watch:web": "esbuild web/main.ts --bundle --format=esm --target=es2022 --outfile=web/main.js --sourcemap --watch"
   },
   "dependencies": {
     "@grapix/contracts": "*",
@@ -15,6 +17,7 @@
   },
   "devDependencies": {
     "@types/three": "0.185.0",
+    "esbuild": "^0.28.2",
     "vitest": "^3"
   }
 }

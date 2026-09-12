@@ -10,6 +10,14 @@ build/
 
 # Tauri
 **/src-tauri/target/
+# Tauri 2 writes generated capability schemas beside the shell crate.
+Editor/shell/gen/
+Playout/shell/gen/
+
+# The Editor's web bundle is built from web/main.ts by esbuild. The source is
+# committed; the bundle and its map are not.
+Editor/web/main.js
+Editor/web/main.js.map
 
 # Local
 .env

@@ -113,6 +113,80 @@ impl<P: AssetPublishPeer> AssetPublishServer<P> {
 /// exhaust the engine process before it has a chance to refuse.
 pub const MAX_PUBLISH_FRAME_BYTES: usize = 64 * 1024 * 1024;
 
+/// A failure to complete one publication round-trip.
+///
+/// A refusal is a reply, not an error: `Refused` means the engine understood
+/// the request and declined it by name. The other variants are the cases
+/// where no reply was obtained at all, which a caller must not report as a
+/// refusal it never received.
+#[derive(Debug)]
+pub enum PublishClientError {
+    Connect(io::Error),
+    Transport(io::Error),
+    /// The reply frame exceeded the plane's bound, so it was not read.
+    ReplyTooLarge { bytes: usize },
+    /// A reply arrived but is not a `PublishReply`.
+    Malformed(serde_json::Error),
+}
+
+impl std::fmt::Display for PublishClientError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Connect(source) => write!(f, "cannot reach the asset plane: {source}"),
+            Self::Transport(source) => write!(f, "asset-plane transport failed: {source}"),
+            Self::ReplyTooLarge { bytes } => {
+                write!(f, "asset-plane reply frame is {bytes} bytes")
+            }
+            Self::Malformed(source) => write!(f, "asset-plane reply is not a reply: {source}"),
+        }
+    }
+}
+
+impl std::error::Error for PublishClientError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Connect(source) | Self::Transport(source) => Some(source),
+            Self::Malformed(source) => Some(source),
+            Self::ReplyTooLarge { .. } => None,
+        }
+    }
+}
+
+/// Publish one complete authored document over the asset plane.
+///
+/// The single client implementation. Framing and the bound live here beside
+/// the server that enforces them, so an Editor and a mock cannot drift into
+/// two dialects of the same plane (invariant 27).
+pub fn publish_scene(
+    engine: SocketAddr,
+    scene: SceneDocument,
+) -> Result<PublishReply, PublishClientError> {
+    let request =
+        serde_json::to_vec(&PublishRequest { scene }).map_err(PublishClientError::Malformed)?;
+    let mut stream = TcpStream::connect(engine).map_err(PublishClientError::Connect)?;
+    stream
+        .write_all(&(request.len() as u32).to_be_bytes())
+        .and_then(|()| stream.write_all(&request))
+        .and_then(|()| stream.flush())
+        .map_err(PublishClientError::Transport)?;
+
+    let mut prefix = [0_u8; 4];
+    stream
+        .read_exact(&mut prefix)
+        .map_err(PublishClientError::Transport)?;
+    let length = u32::from_be_bytes(prefix) as usize;
+    // The bound is checked before allocating: a peer cannot make this side
+    // reserve memory by claiming a large frame.
+    if length > MAX_PUBLISH_FRAME_BYTES {
+        return Err(PublishClientError::ReplyTooLarge { bytes: length });
+    }
+    let mut bytes = vec![0; length];
+    stream
+        .read_exact(&mut bytes)
+        .map_err(PublishClientError::Transport)?;
+    serde_json::from_slice(&bytes).map_err(PublishClientError::Malformed)
+}
+
 fn handle_publish<P: AssetPublishPeer>(
     mut stream: TcpStream,
     peer: Arc<Mutex<P>>,

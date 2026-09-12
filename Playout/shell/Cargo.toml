@@ -1,0 +1,34 @@
+[package]
+name = "gx-playout-shell"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# The Tauri 2 shell for Playout (build plan 11.1).
+#
+# The command surface below is the enforcement point for invariants 4 and 5:
+# this binary exposes cue, take, clear, output configuration and status, and
+# exposes no authoring or publication command at all. It is also where
+# ADR-002's intent rule is kept honest: no command here accepts a time, only
+# `NextOpportunity` or a frame number.
+
+[lib]
+name = "gx_playout_shell"
+crate-type = ["lib", "cdylib", "staticlib"]
+path = "src/lib.rs"
+
+[[bin]]
+name = "gx-playout"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+gx-contracts = { workspace = true }
+gx-control-plane = { workspace = true }
+gx-control-transport = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tauri = { workspace = true }
