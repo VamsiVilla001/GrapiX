@@ -1945,3 +1945,108 @@ issue, unrelated to this work.
   (13.x).
 - `outputs.list` reports the engine's capability, not a per-adapter inventory -
   there is no adapter registry to enumerate yet.
+
+---
+
+## 2026-09-12 — Phase 10, a review council, and the Editor's design modules
+
+**Requested:** implement phases 9, 10 and 11; use a council to find more ways
+to improve phase 10; and give phase 11 the design modules — object manager,
+scene/template manager, object inspector — with AI accessibility.
+
+### Phase 9 is not startable, and was not started
+
+`P.3` (participants recruited, first sessions booked) is `active`. Every 9.x
+step's evidence is a research session with people in a suite and a control
+room. Nothing in-repo can produce that, so 9.1–9.7 stay untouched rather than
+being filled in with plausible-looking findings. Recorded as blocked, not done.
+
+### Phase 10 — all five steps, then a council took them apart
+
+Built ingest for W3C Design Tokens, Figma variables and published styles, and
+Claude Design exports; the unexpressible report; the versioned immutable store;
+and the drift report. Then ran four reviewers in parallel over it. **One died on
+a usage limit and I did that slice myself — it was the one that found the worst
+bug.**
+
+**Three defects worth recording, because each was invisible from the inside:**
+
+1. **The type ramp lied.** The contract holds one legibility floor, so only one
+   declared font size can map. Deciding which as each size arrived recorded a
+   mapping for a value that a later, smaller size then displaced — and the
+   displaced size appeared on neither the mapping list nor the unexpressible
+   list. The draft claimed to have captured a value it had discarded, which is
+   precisely what 10.3 exists to prevent. The floor is now chosen once the whole
+   ramp is read. A test pins it; the original test passed because it only
+   asserted the floor, never the mappings.
+
+2. **A version was four writes.** Each atomic, the set not. A crash between them
+   left a directory that `versions()` counted and `current_version()` returned,
+   holding tokens enforced against every scene with no record that a human
+   confirmed them. Versions are now assembled in a candidate directory and
+   renamed in one step — and that rename is also the compare-and-swap that stops
+   two concurrent confirms interleaving their files. `confirm` returns what it
+   reads back rather than what it meant to write.
+
+3. **Provenance hashed a re-print, not the file.** Ingest took a parsed `Value`,
+   so duplicate JSON keys had already collapsed and number spelling had already
+   been normalised before anything was hashed. The record could not answer the
+   one question it exists for. Ingest now takes bytes, keeps them verbatim, and
+   hashes them through the asset store's existing `content_hash` — which also
+   deleted a second hex renderer and a canonicaliser that was a no-op in this
+   workspace. It also gave the ingest functions' `Result` a real use: a
+   malformed source is now refused by name instead of arriving as an empty token
+   set indistinguishable from a source that held nothing.
+
+**A discovery lie, and the gate that ends the class.** `designsystem.get`,
+`.commit`, `.import` and `.list_versions` were declared in the registry with no
+handler behind them, and `commit`'s declared output contradicted what the store
+returns. Worse, the capability surface named a `DesignSystem` type that was
+never generated into TypeScript, so the one consumer trusting the surface had to
+hand-mirror it — the thing invariant 22 exists to forbid. All four are now
+implemented and driven over real JSON-RPC. Codegen now **fails the build** when
+the registry advertises a type that does not resolve; the 25 pre-existing
+unbacked names are recorded as an explicit ratchet that may only shrink.
+
+**10.5 reported over a fixture nobody could build.** `drift_report` was pure and
+unreachable: `PublishedScene` carried no stamp, and no crate could legally see
+both the design-system store and the published library (invariant 1). The types
+moved to contracts, the manifest's stamp is now stored with the revision instead
+of being read and dropped, and drift runs against genuinely published takes.
+
+### Phase 11 — design modules on one surface
+
+`Editor/src/agent-surface.ts` is the foundation and the whole idea: **a panel is
+described once**, and the same node tree renders as accessible DOM and projects
+as the state an agent reads. Two descriptions would drift, and the drift would
+be an agent operating a control that is no longer there.
+
+The rule that falls out: **an action that cannot run carries the reason**. Not a
+disabled flag — a sentence. The panels spend it on the cases that bite:
+visibility under a hidden parent names the parent; an inherited lock cannot be
+released from the child; a material in use names its user count; an unresolved
+font names itself, because both platforms substitute a system face and put the
+right graphic on air in the wrong typeface.
+
+Built: object manager treegrid, type-aware inspector, scene/template manager,
+design system panel, import report, material manager, font manager. Mixed is a
+state rather than an absence. One gesture over N objects is one undo
+transaction carrying N changes.
+
+**Recorded honestly.** 11.14 and 11.16 are done — Needs satisfied, done-whens
+met. 11.8, 11.9, 11.12, 11.13 and 11.17 are built and covered but stay
+**active**: their Needs chains run back through 11.5 to 9.7, blocked on P.3, and
+the plan says Phase 11 is built against research output rather than guesswork.
+11.13 says "ported, not redesigned" and the 1.x panel is not in this tree to
+port from.
+
+### Verification
+
+Rust 429 passed, conformance 135 passed / 0 failed, TypeScript 18 + Editor 67
+passed, boundaries / codegen / typecheck clean. The Editor shell builds and runs
+with both panels mounted; the earlier clipped-layout capture is gone.
+
+**Delegation failed repeatedly.** Four council members ran, one died; all five
+Phase 11 module agents died on the same usage limit within four seconds. The
+Phase 11 modules were written inline. Worth knowing before planning around
+subagents in this environment.
