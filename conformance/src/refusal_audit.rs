@@ -548,6 +548,41 @@ fn limitations() -> &'static [Limitation] {
             variant: "ProjectIdLocationMismatch",
             reason: "project-store loading is not an EnginePeer request",
         },
+        // Phases 5 and 6, in flight. Each of these is replaced by a real
+        // driver as its step lands; a limitation naming an unbuilt step is
+        // honest, and leaving one here after the step exists is not.
+        Limitation {
+            variant: "AssetChunkOutOfOrder",
+            reason: "the chunked transfer server is build-plan step 5.3",
+        },
+        Limitation {
+            variant: "AssetTransferAlreadyComplete",
+            reason: "the chunked transfer server is build-plan step 5.3",
+        },
+        Limitation {
+            variant: "EmptyAssetTransfer",
+            reason: "the chunked transfer server is build-plan step 5.3",
+        },
+        Limitation {
+            variant: "AssetHashMismatch",
+            reason: "the chunked transfer server is build-plan step 5.3",
+        },
+        Limitation {
+            variant: "MediaTransportUnavailable",
+            reason: "the shared-memory media transport is build-plan step 5.4",
+        },
+        Limitation {
+            variant: "RundownCursorOutOfRange",
+            reason: "the rundown and sequence engine is build-plan step 6.4",
+        },
+        Limitation {
+            variant: "RundownEntryUnknown",
+            reason: "the rundown and sequence engine is build-plan step 6.4",
+        },
+        Limitation {
+            variant: "AutomationExecutionDeferred",
+            reason: "automation trigger evaluation is build-plan step 6.6",
+        },
     ]
 }
 
@@ -723,6 +758,32 @@ fn all_refusal_variants() -> Vec<Refusal> {
             project_id: "audit".into(),
             location: "audit".into(),
         },
+        Refusal::AssetChunkOutOfOrder {
+            hash: ContentHash("audit".into()),
+            expected: 1,
+            received: 3,
+        },
+        Refusal::AssetTransferAlreadyComplete {
+            hash: ContentHash("audit".into()),
+        },
+        Refusal::EmptyAssetTransfer {
+            hash: ContentHash("audit".into()),
+        },
+        Refusal::AssetHashMismatch {
+            expected: ContentHash("expected".into()),
+            actual: ContentHash("actual".into()),
+        },
+        Refusal::MediaTransportUnavailable {
+            detail: "audit".into(),
+        },
+        Refusal::RundownCursorOutOfRange { cursor: 9, len: 2 },
+        Refusal::RundownEntryUnknown {
+            entry_id: "audit".into(),
+        },
+        Refusal::AutomationExecutionDeferred {
+            trigger: "audit".into(),
+            matched: "audit".into(),
+        },
     ]
 }
 
@@ -793,6 +854,14 @@ fn refusal_variant_name(refusal: &Refusal) -> &'static str {
         Refusal::ProjectJsonCorrupt { .. } => "ProjectJsonCorrupt",
         Refusal::UnknownProjectSchema { .. } => "UnknownProjectSchema",
         Refusal::ProjectIdLocationMismatch { .. } => "ProjectIdLocationMismatch",
+        Refusal::AssetChunkOutOfOrder { .. } => "AssetChunkOutOfOrder",
+        Refusal::AssetTransferAlreadyComplete { .. } => "AssetTransferAlreadyComplete",
+        Refusal::EmptyAssetTransfer { .. } => "EmptyAssetTransfer",
+        Refusal::AssetHashMismatch { .. } => "AssetHashMismatch",
+        Refusal::MediaTransportUnavailable { .. } => "MediaTransportUnavailable",
+        Refusal::RundownCursorOutOfRange { .. } => "RundownCursorOutOfRange",
+        Refusal::RundownEntryUnknown { .. } => "RundownEntryUnknown",
+        Refusal::AutomationExecutionDeferred { .. } => "AutomationExecutionDeferred",
     }
 }
 

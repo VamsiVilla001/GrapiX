@@ -334,6 +334,14 @@ fn refusal_name(refusal: &Refusal) -> &'static str {
         Refusal::FontStylesheetImportCycle { .. } => "fontStylesheetImportCycle",
         Refusal::FontFileReadFailed { .. } => "fontFileReadFailed",
         Refusal::FontCacheWriteFailed { .. } => "fontCacheWriteFailed",
+        Refusal::AssetChunkOutOfOrder { .. } => "assetChunkOutOfOrder",
+        Refusal::AssetTransferAlreadyComplete { .. } => "assetTransferAlreadyComplete",
+        Refusal::EmptyAssetTransfer { .. } => "emptyAssetTransfer",
+        Refusal::AssetHashMismatch { .. } => "assetHashMismatch",
+        Refusal::MediaTransportUnavailable { .. } => "mediaTransportUnavailable",
+        Refusal::RundownCursorOutOfRange { .. } => "rundownCursorOutOfRange",
+        Refusal::RundownEntryUnknown { .. } => "rundownEntryUnknown",
+        Refusal::AutomationExecutionDeferred { .. } => "automationExecutionDeferred",
     }
 }
 

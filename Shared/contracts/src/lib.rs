@@ -443,6 +443,48 @@ pub enum Refusal {
         project_id: String,
         location: String,
     },
+    /// A chunked asset transfer received a chunk out of order.
+    ///
+    /// Named separately from `FrameNotReachable`, which is about Program
+    /// frames: a chunk index and a frame number are different quantities and
+    /// reusing one refusal for both tells an operator the wrong thing.
+    AssetChunkOutOfOrder {
+        hash: ContentHash,
+        expected: u32,
+        received: u32,
+    },
+    /// A chunk arrived for a transfer that is already complete.
+    AssetTransferAlreadyComplete { hash: ContentHash },
+    /// A transfer was declared with no chunks. Zero chunks would verify
+    /// vacuously and promote empty bytes under a name asserting they were
+    /// checked.
+    EmptyAssetTransfer { hash: ContentHash },
+    /// Transferred bytes do not hash to the content address they were
+    /// declared under.
+    ///
+    /// Distinct from `AssetMissing`: the bytes arrived and are wrong, which is
+    /// a corruption or a substitution, not an absence (invariant 28).
+    AssetHashMismatch {
+        expected: ContentHash,
+        actual: ContentHash,
+    },
+    /// A media-plane shared buffer could not be established or mapped.
+    ///
+    /// The media plane drops rather than queues, but failing to create the
+    /// transport at all is not a drop — it is the absence of a path, and a
+    /// consumer must be told rather than left watching a frame that never
+    /// updates (invariant 13).
+    MediaTransportUnavailable { detail: String },
+    /// A rundown cursor names a position the rundown does not have.
+    RundownCursorOutOfRange { cursor: usize, len: usize },
+    /// A rundown entry id that the loaded rundown does not contain.
+    RundownEntryUnknown { entry_id: String },
+    /// An automation trigger evaluated true, and execution is not implemented.
+    ///
+    /// The deferral is a refusal rather than silence so an automation author
+    /// learns their trigger fired and did nothing, instead of concluding the
+    /// condition never matched.
+    AutomationExecutionDeferred { trigger: String, matched: String },
 }
 
 impl std::fmt::Display for Refusal {
@@ -660,6 +702,38 @@ impl std::fmt::Display for Refusal {
             } => write!(
                 f,
                 "project id {project_id} does not match its location {location}"
+            ),
+            Refusal::AssetChunkOutOfOrder {
+                hash,
+                expected,
+                received,
+            } => write!(
+                f,
+                "asset {hash} expected chunk {expected}, received {received}"
+            ),
+            Refusal::AssetTransferAlreadyComplete { hash } => {
+                write!(f, "asset {hash} transfer is already complete")
+            }
+            Refusal::EmptyAssetTransfer { hash } => {
+                write!(f, "asset {hash} was declared with no chunks")
+            }
+            Refusal::AssetHashMismatch { expected, actual } => write!(
+                f,
+                "transferred bytes hash to {actual}, not the declared {expected}"
+            ),
+            Refusal::MediaTransportUnavailable { detail } => {
+                write!(f, "media transport unavailable: {detail}")
+            }
+            Refusal::RundownCursorOutOfRange { cursor, len } => write!(
+                f,
+                "rundown cursor {cursor} is outside a rundown of {len} entries"
+            ),
+            Refusal::RundownEntryUnknown { entry_id } => {
+                write!(f, "rundown has no entry {entry_id}")
+            }
+            Refusal::AutomationExecutionDeferred { trigger, matched } => write!(
+                f,
+                "automation trigger {trigger} matched ({matched}); execution is deferred, not performed"
             ),
         }
     }
