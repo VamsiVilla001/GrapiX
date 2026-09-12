@@ -106,6 +106,21 @@ impl Projects {
         self.project_directory(project).is_dir()
     }
 
+    /// The design-system store inside an existing project (G.3, 10.4).
+    ///
+    /// Goes through the same `require_project` guard every other write uses,
+    /// so confirming a brand pack cannot conjure a project directory any more
+    /// than saving a scene can.
+    pub fn design_system(
+        &self,
+        project: &str,
+    ) -> Result<crate::design_system::DesignSystemStore, EditorError> {
+        self.require_project(project)?;
+        Ok(crate::design_system::DesignSystemStore::at(
+            self.project_directory(project),
+        ))
+    }
+
     /// Bring a project into being. The only thing that does.
     pub fn create_project(&self, project: &str) -> Result<(), EditorError> {
         let scenes = self.scenes_directory(project);

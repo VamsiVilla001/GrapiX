@@ -131,8 +131,10 @@ pub const TOOLS: &[ToolDescriptor] = &[
     tool("bindings.schema", "bindings", ToolEffect::Read, Scope::Author, "SceneRef", "BindingSchema", "The data shape this scene's bindings expect."),
     // designsystem and motion (8.7) — admin, because an author works inside
     // the system and may not change it (Part G).
-    tool("designsystem.get", "designsystem", ToolEffect::Read, Scope::Author, "()", "DesignSystem", "The active design system and its version."),
-    tool("designsystem.commit", "designsystem", ToolEffect::Write, Scope::ConfigureOutput, "DesignSystemDraft", "Revision", "Confirm a draft as a new version. Admin-scoped: an author works inside the system and cannot change it."),
+    tool("designsystem.get", "designsystem", ToolEffect::Read, Scope::Author, "ProjectRef", "DesignSystem", "The active design system and its version, for one project."),
+    tool("designsystem.commit", "designsystem", ToolEffect::Write, Scope::ConfigureOutput, "DesignSystemCommit", "DesignSystem", "Confirm a draft as a new version, naming who confirmed it. Admin-scoped: an author works inside the system and cannot change it."),
+    tool("designsystem.import", "designsystem", ToolEffect::Write, Scope::ConfigureOutput, "DesignSystemImport", "DesignSystemDraft", "Propose a draft from a source document. Returns the draft and everything the source held that tokens cannot express. Never commits."),
+    tool("designsystem.list_versions", "designsystem", ToolEffect::Read, Scope::Author, "ProjectRef", "DesignSystemVersions", "Every confirmed version, with the source and the human behind each."),
     // validate (8.8) and render (8.9).
     tool("validate.preflight", "validate", ToolEffect::Read, Scope::Author, "SceneRef", "PreflightReport", "Structured refusals with allowed values."),
     tool("render.preview", "render", ToolEffect::Read, Scope::Author, "PreviewRequest", "PreviewFrame", "An actual frame. The agent can see its own output."),

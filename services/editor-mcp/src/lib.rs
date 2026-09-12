@@ -381,6 +381,124 @@ impl ToolHandler for BindingsSchema {
     }
 }
 
+// --- designsystem (8.7, build plan 10.1-10.4) ------------------------------
+
+/// `designsystem.import`: propose a draft from a source. Never commits.
+///
+/// This is the tool that carries the unexpressible report (10.3) to a
+/// reviewer. Without it the report exists and nobody can read it, which is the
+/// same as not having one: G.2's "report what could not be expressed" is a
+/// promise to a human, not to a test.
+///
+/// The argument is the generated contract type, so the shape an agent reads
+/// off the capability surface is the shape this parses (invariant 22).
+pub struct DesignSystemImportTool(pub Projects);
+
+impl ToolHandler for DesignSystemImportTool {
+    fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
+        use gx_contracts::design_system::{DesignSystemImport, DesignSystemSourceKind};
+
+        let args: DesignSystemImport = parse(args)?;
+        // The project must exist before an import is proposed against it, by
+        // the same rule every other write obeys (7.1).
+        self.0.design_system(&args.project).map_err(Refusal::from)?;
+
+        // The document travels as text and is hashed as text, so the bytes
+        // recorded in provenance are the bytes the caller supplied rather than
+        // a re-encoding of a value we parsed on the way through.
+        let source = args.document.as_bytes();
+        let draft = match args.kind {
+            DesignSystemSourceKind::W3c => gx_editor::ingest_w3c(&args.name, source),
+            DesignSystemSourceKind::Figma => gx_editor::ingest_figma(&args.name, source),
+            DesignSystemSourceKind::ClaudeDesign => {
+                gx_editor::ingest_claude_design(&args.name, source)
+            }
+        }?;
+
+        serde_json::to_value(draft).map_err(|error| Refusal::TransportFailed {
+            detail: error.to_string(),
+        })
+    }
+}
+
+/// `designsystem.commit`: confirm a draft as the next immutable version.
+pub struct DesignSystemCommitTool(pub Projects);
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DesignSystemCommitArgs {
+    project: String,
+    #[serde(flatten)]
+    commit: gx_contracts::design_system::DesignSystemCommit,
+}
+
+impl ToolHandler for DesignSystemCommitTool {
+    fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
+        let args: DesignSystemCommitArgs = parse(args)?;
+        let store = self.0.design_system(&args.project).map_err(Refusal::from)?;
+        // `confirmed_by` travels in the request and is passed straight
+        // through. Nothing here may supply it: a confirmation this handler
+        // invented would satisfy the store's check while defeating its point.
+        let system = store
+            .confirm(&args.commit.draft, &args.commit.confirmed_by)
+            .map_err(Refusal::from)?;
+        serde_json::to_value(system).map_err(|error| Refusal::TransportFailed {
+            detail: error.to_string(),
+        })
+    }
+}
+
+/// `designsystem.get`: the active system and its version.
+pub struct DesignSystemGet(pub Projects);
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectRefArgs {
+    project: String,
+}
+
+impl ToolHandler for DesignSystemGet {
+    fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
+        let args: ProjectRefArgs = parse(args)?;
+        let store = self.0.design_system(&args.project).map_err(Refusal::from)?;
+        let Some(version) = store.current_version().map_err(Refusal::from)? else {
+            // "No system confirmed yet" is an answer, and it is a different
+            // answer from "here is the system". Returning an empty token set
+            // would make a project with no brand pack look like one whose
+            // palette permits nothing (invariant 17).
+            return Err(Refusal::NotImplemented {
+                what: format!(
+                    "project {} has no confirmed design system version",
+                    args.project
+                ),
+            });
+        };
+        let system = store.load(version).map_err(Refusal::from)?;
+        serde_json::to_value(system).map_err(|error| Refusal::TransportFailed {
+            detail: error.to_string(),
+        })
+    }
+}
+
+/// `designsystem.list_versions`: the history, with provenance.
+pub struct DesignSystemListVersions(pub Projects);
+
+impl ToolHandler for DesignSystemListVersions {
+    fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
+        let args: ProjectRefArgs = parse(args)?;
+        let store = self.0.design_system(&args.project).map_err(Refusal::from)?;
+        let mut versions = Vec::new();
+        for version in store.versions().map_err(Refusal::from)? {
+            let provenance = store.provenance(version).map_err(Refusal::from)?;
+            versions.push(serde_json::json!({
+                "version": version,
+                "provenance": provenance,
+            }));
+        }
+        Ok(serde_json::json!({ "versions": versions }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

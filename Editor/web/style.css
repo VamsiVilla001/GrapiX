@@ -31,6 +31,12 @@
   padding: 0;
 }
 
+/* Keep the startup curtain and conditional panels hidden when the web layer
+ * dismisses them, even when their classes set an explicit display mode. */
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   height: 100%;

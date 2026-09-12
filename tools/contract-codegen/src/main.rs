@@ -16,8 +16,11 @@ use gx_contracts::color::{
     SourceColorSpace, WorkingColorSpace,
 };
 use gx_contracts::design_system::{
-    DurationSpec, MotionChannel, MotionKey, MotionPhase, MotionPhases, MotionPreset, MotionTokens,
-    NamedEasing, PresetParam, Stagger, TokenRef,
+    DesignSystem, DesignSystemCommit, DesignSystemDraft, DesignSystemImport, DesignSystemSource,
+    DesignSystemSourceKind, DesignSystemVersion, DesignSystemVersions, DraftVisualTokens,
+    DriftEntry, DriftReport, DurationSpec, MotionChannel, MotionKey, MotionPhase, MotionPhases,
+    MotionPreset, MotionTokens, NamedEasing, PresetParam, Provenance, Stagger, StampedTemplate,
+    TokenMapping, TokenRef, UnexpressibleToken, VisualTokens,
 };
 use gx_contracts::font::{
     EmbeddingPolicy, FontDefinition, FontFaceDefinition, FontFormat, FontLoadStatus, FontSource,
@@ -228,12 +231,136 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Stagger,
         MotionPreset,
         PresetParam,
+        // Design-system ingest and review (Part G.2, build plan 10.1–10.3)
+        DesignSystemSourceKind,
+        DesignSystemSource,
+        TokenMapping,
+        UnexpressibleToken,
+        DraftVisualTokens,
+        DesignSystemDraft,
+        // The active system itself. `designsystem.get` declares `DesignSystem`
+        // as its output, so omitting these leaves the capability surface
+        // naming a type no agent can resolve — which is the hand-mirrored
+        // type invariant 22 forbids.
+        VisualTokens,
+        DesignSystem,
+        DesignSystemCommit,
+        DesignSystemImport,
+        Provenance,
+        DesignSystemVersion,
+        DesignSystemVersions,
+        StampedTemplate,
+        DriftEntry,
+        DriftReport,
     );
 
     write_capability_surface(&out)?;
     write_barrel(&out)?;
+    check_advertised_types_resolve(&out)?;
     println!("generated {count} contract types into {}", out.display());
     Ok(())
+}
+
+/// Every type name the tool registry advertises must be a type an agent can
+/// actually resolve.
+///
+/// `mcp.rs` promises that a tool's `input`/`output` names resolve against the
+/// generated types, so the schema is never written twice (invariant 22). That
+/// promise is only true if the name exists: `designsystem.get` advertised
+/// `DesignSystem` while the export list omitted it, so the one consumer that
+/// trusted the surface had no type to import and would have hand-written one.
+///
+/// The staleness gate could not catch it — it compares generated output against
+/// the export list, never the export list against what the registry claims. So
+/// the check belongs here, where both sides are in scope, and it fails the
+/// build rather than reporting a warning nobody reads.
+fn check_advertised_types_resolve(dir: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+    // Shapes that are not contract types: the unit input, and the primitives a
+    // tool may name directly.
+    const NOT_A_CONTRACT_TYPE: &[&str] = &["()", "String", "bool", "u32", "u64", "f64"];
+
+    // Names the registry already advertised without a contract type behind
+    // them, recorded when this gate was added. Each is an argument or result
+    // shape that exists only as a local struct inside a handler crate, so
+    // there is nothing for the export list to export yet: moving them into
+    // `Shared/contracts` is Phase 8's work, not this gate's.
+    //
+    // This list may only shrink. It is a ratchet, not an exemption: a *new*
+    // unresolved name fails the build, which is what stops the next tool from
+    // advertising a type no agent can resolve. Deleting an entry here after
+    // moving its type into contracts is the intended direction of travel.
+    const KNOWN_UNBACKED: &[&str] = &[
+        "ApplyPreset",
+        "AssetList",
+        "AssetRelink",
+        "BindingSchema",
+        "FontList",
+        "LibraryList",
+        "MaterialAssign",
+        "MaterialList",
+        "ObjectList",
+        "ObjectUpdate",
+        "OutputList",
+        "OutputState",
+        "PackageBuild",
+        "PackagePublish",
+        "PackageRef",
+        "PreflightReport",
+        "PreviewFrame",
+        "PreviewRequest",
+        "ProjectCreate",
+        "ProjectList",
+        "ProjectRef",
+        "PublishResult",
+        "SceneCreate",
+        "SceneList",
+        "SceneRef",
+    ];
+
+    let mut missing: Vec<String> = Vec::new();
+    let mut resolved_debt: Vec<&str> = Vec::new();
+    for tool in gx_contracts::mcp::ToolRegistry::all() {
+        for advertised in [tool.input, tool.output] {
+            if NOT_A_CONTRACT_TYPE.contains(&advertised) {
+                continue;
+            }
+            let exists = dir.join(format!("{advertised}.ts")).exists();
+            let known = KNOWN_UNBACKED.contains(&advertised);
+            if exists && known {
+                resolved_debt.push(advertised);
+            } else if !exists && !known {
+                missing.push(format!("{} advertises {advertised}", tool.name));
+            }
+        }
+    }
+
+    if !resolved_debt.is_empty() {
+        // The ratchet only tightens. A name that now resolves must leave the
+        // list, or the list stops describing the debt it claims to track.
+        resolved_debt.sort_unstable();
+        resolved_debt.dedup();
+        return Err(format!(
+            "{} advertised type(s) now resolve and must be removed from \
+             KNOWN_UNBACKED in this file: {}",
+            resolved_debt.len(),
+            resolved_debt.join(", ")
+        )
+        .into());
+    }
+
+    if missing.is_empty() {
+        return Ok(());
+    }
+    missing.sort();
+    missing.dedup();
+    Err(format!(
+        "the tool registry advertises {} type name(s) with no generated type. \
+         Add the type to the export list in this file, or move it into \
+         `Shared/contracts` first:\n  {}",
+        missing.len(),
+        missing.join("\n  ")
+    )
+    .into())
 }
 
 /// Emit the capability surface as *data*, not just as a type.

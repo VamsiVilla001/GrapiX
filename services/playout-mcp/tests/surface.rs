@@ -123,7 +123,7 @@ fn an_author_token_is_refused_at_the_wire_before_the_handler_runs() {
     // and has a take in it, so a reply carrying a frame would mean the gate
     // had been bypassed.
     let mut library = PublishedLibrary::default();
-    library.publish("lower-third", serde_json::Value::Null);
+    library.publish("lower-third", serde_json::Value::Null, None);
 
     let mut server = Server::new(vec![Scope::Author]);
     // Registered under its real name with a real body. The refusal below is

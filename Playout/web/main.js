@@ -1047,6 +1047,19 @@ async function boot() {
   } catch (err) {
     logFailure("SESSION", err);
   }
+
+  // Attach to the engine on launch. This reads status and nothing else - it
+  // cues nothing, takes nothing and configures no output. Those stay behind
+  // the operator's own actions and, when the clock is critical, behind the
+  // transport gate as well.
+  //
+  // Opening disconnected would be the worse default: an operator would face a
+  // surface reporting "no engine status" while Program is on air behind it,
+  // and could not tell that from an engine that is genuinely unreachable.
+  // Invariant 11 is the same rule for the reference indicator - a blank one
+  // is never acceptable - and the failure path below still shows exactly
+  // which condition stopped the connection.
+  await run(doConnect);
 }
 
 boot();

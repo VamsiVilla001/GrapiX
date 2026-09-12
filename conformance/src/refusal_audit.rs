@@ -350,6 +350,7 @@ fn drive_playout_refusals(report: &mut Report) {
         take_id: TakeId("audit/rundown".into()),
         revision: Revision(1),
         document: serde_json::Value::Null,
+        design_system_version: None,
     };
     let rundown = Rundown::new(vec![RundownEntry {
         id: "opening".into(),
@@ -735,6 +736,10 @@ fn limitations() -> &'static [Limitation] {
         Limitation {
             variant: "ProjectIdLocationMismatch",
             reason: "project-store loading is not an EnginePeer request",
+        },
+        Limitation {
+            variant: "DesignSourceUnreadable",
+            reason: "design-system ingest is not an EnginePeer request",
         },
     ]
 }

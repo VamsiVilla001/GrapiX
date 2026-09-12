@@ -232,15 +232,20 @@ impl ToolHandler for PackagesPublish {
         // new revision rather than editing the one already issued (invariant
         // 30), which is why the library assigns it rather than the manifest.
         let scene = serde_json::to_value(&verified.scene).map_err(transport_failed)?;
-        let published = self
-            .0
-            .lock()
-            .publish(verified.manifest.scene_id.clone(), scene);
+        // The stamp is stored with the revision, not merely echoed back. It
+        // is what makes "which templates predate v4" a query over the library
+        // rather than an investigation (7.6, 10.5); reading it and dropping it
+        // left the drift report with nothing real to read.
+        let published = self.0.lock().publish(
+            verified.manifest.scene_id.clone(),
+            scene,
+            verified.manifest.design_system_version,
+        );
 
         let result = PublishResult {
             take_id: published.take_id,
             revision: published.revision,
-            design_system_version: verified.manifest.design_system_version,
+            design_system_version: published.design_system_version,
         };
         serde_json::to_value(result).map_err(transport_failed)
     }
@@ -626,7 +631,7 @@ mod tests {
 
     fn program_tools() -> (std::sync::Arc<ProgramTools<TestPeer>>, PublishedScene) {
         let mut library = PublishedLibrary::default();
-        let published = library.publish("lower-third", serde_json::Value::Null);
+        let published = library.publish("lower-third", serde_json::Value::Null, None);
         (
             std::sync::Arc::new(ProgramTools {
                 playout: Mutex::new(Playout::new(TestPeer { committed: 120 })),
@@ -710,7 +715,7 @@ mod tests {
         // An operator pins an exact revision, so a listing that showed only
         // the latest would make a valid pin look unavailable.
         let (tools, published) = program_tools();
-        tools.library.lock().publish("lower-third", serde_json::Value::Null);
+        tools.library.lock().publish("lower-third", serde_json::Value::Null, None);
 
         let answer = PlayoutLibrary(tools)
             .handle(serde_json::Value::Null)
@@ -755,7 +760,7 @@ mod tests {
         // reference all permit it, and the refusal names which condition
         // failed so an operator can act on it.
         let mut library = PublishedLibrary::default();
-        library.publish("s", serde_json::Value::Null);
+        library.publish("s", serde_json::Value::Null, None);
         struct SubT0(TestPeer);
         impl EnginePeer for SubT0 {
             fn capability(&self) -> EngineCapability {

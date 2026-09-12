@@ -29,6 +29,14 @@ pub struct PublishedScene {
     pub take_id: TakeId,
     pub revision: Revision,
     pub document: serde_json::Value,
+    /// The design system this revision was built against (Part G, 7.6).
+    ///
+    /// Carried from the package manifest so brand-pack drift is listable
+    /// rather than invisible (10.5). Absent means the package predates
+    /// stamping, which is a different statement from "built against no
+    /// system" — hence an `Option` rather than a zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub design_system_version: Option<u32>,
 }
 
 /// Immutable revisions grouped by their stable take identity.
@@ -45,7 +53,12 @@ impl PublishedLibrary {
     /// publication contract. Reusing it adds a revision instead of changing an
     /// existing one, so a rundown pin cannot drift after republish (invariant
     /// 30).
-    pub fn publish(&mut self, scene_id: impl Into<String>, document: serde_json::Value) -> PublishedScene {
+    pub fn publish(
+        &mut self,
+        scene_id: impl Into<String>,
+        document: serde_json::Value,
+        design_system_version: Option<u32>,
+    ) -> PublishedScene {
         let take_id = TakeId(scene_id.into());
         let revision = self
             .latest
@@ -57,11 +70,29 @@ impl PublishedLibrary {
             take_id: take_id.clone(),
             revision,
             document,
+            design_system_version,
         };
         self.latest.insert(take_id.clone(), revision);
         self.revisions
             .insert((take_id, revision), published.clone());
         published
+    }
+
+    /// Every *latest* published revision with the version it was built
+    /// against, ready for a drift report (10.5).
+    ///
+    /// The latest revision per identity rather than all of them: drift asks
+    /// "which templates are behind", and an older revision of a template that
+    /// has since been republished is not a template anyone would re-publish.
+    pub fn stamped_templates(&self) -> Vec<gx_contracts::design_system::StampedTemplate> {
+        self.latest
+            .keys()
+            .filter_map(|take_id| self.latest(take_id))
+            .map(|scene| gx_contracts::design_system::StampedTemplate {
+                template_id: scene.take_id.0.clone(),
+                design_system_version: scene.design_system_version,
+            })
+            .collect()
     }
 
     /// Return the latest immutable revision for an identity.
@@ -515,6 +546,7 @@ mod tests {
 
     fn scene(id: &str, revision: u64) -> PublishedScene {
         PublishedScene {
+            design_system_version: None,
             take_id: TakeId(id.into()),
             revision: Revision(revision),
             document: serde_json::json!({"id": id, "revision": revision}),
@@ -531,13 +563,50 @@ mod tests {
     #[test]
     fn republishing_preserves_take_id_and_creates_a_new_immutable_revision() {
         let mut library = PublishedLibrary::default();
-        let first = library.publish("lower-third", serde_json::json!({"text": "first"}));
-        let second = library.publish("lower-third", serde_json::json!({"text": "second"}));
+        let first = library.publish("lower-third", serde_json::json!({"text": "first"}), None);
+        let second = library.publish("lower-third", serde_json::json!({"text": "second"}), None);
 
         assert_eq!(first.take_id, second.take_id);
         assert_eq!(first.revision, Revision(1));
         assert_eq!(second.revision, Revision(2));
         assert_eq!(library.revision(&first.take_id, first.revision), Some(&first));
+    }
+
+    #[test]
+    fn the_drift_report_lists_published_templates_behind_the_current_version() {
+        // 10.5's done-when, over the real published library rather than a
+        // hand-assembled fixture. The stamp travels from the package manifest
+        // into the revision, which is what makes "which templates predate v4"
+        // a query instead of an investigation.
+        let mut library = PublishedLibrary::default();
+        library.publish("lower-third", serde_json::Value::Null, Some(3));
+        library.publish("bug", serde_json::Value::Null, Some(4));
+        library.publish("astons", serde_json::Value::Null, Some(1));
+        library.publish("legacy-ticker", serde_json::Value::Null, None);
+
+        // Republishing an old template onto the current version takes it off
+        // the list: drift asks what is behind *now*, and a superseded
+        // revision is not something anyone would re-publish.
+        library.publish("astons", serde_json::Value::Null, Some(4));
+
+        let report = gx_contracts::design_system::drift_report(4, &library.stamped_templates());
+
+        let behind: Vec<(&str, Option<u32>)> = report
+            .behind
+            .iter()
+            .map(|entry| (entry.template_id.as_str(), entry.versions_behind))
+            .collect();
+        assert_eq!(
+            behind,
+            vec![("lower-third", Some(1))],
+            "every template behind the current version, and how far"
+        );
+
+        // An unstamped package predates stamping. Reporting it as "behind"
+        // would claim a conformance fact nobody can verify, so it is listed
+        // separately.
+        assert_eq!(report.unstamped.len(), 1);
+        assert_eq!(report.unstamped[0].template_id, "legacy-ticker");
     }
 
     #[test]

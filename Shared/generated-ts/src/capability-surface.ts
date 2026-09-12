@@ -172,6 +172,7 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
     "invalidColor",
     "platformDirectoryUnavailable",
     "sceneParseFailed",
+    "designSourceUnreadable",
     "sceneUnknownField",
     "sceneFontUnknown",
     "sceneAssetUnknown",
@@ -356,18 +357,36 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
       "group": "designsystem",
       "effect": "read",
       "requiredScope": "author",
-      "input": "()",
+      "input": "ProjectRef",
       "output": "DesignSystem",
-      "summary": "The active design system and its version."
+      "summary": "The active design system and its version, for one project."
     },
     {
       "name": "designsystem.commit",
       "group": "designsystem",
       "effect": "write",
       "requiredScope": "configureOutput",
-      "input": "DesignSystemDraft",
-      "output": "Revision",
-      "summary": "Confirm a draft as a new version. Admin-scoped: an author works inside the system and cannot change it."
+      "input": "DesignSystemCommit",
+      "output": "DesignSystem",
+      "summary": "Confirm a draft as a new version, naming who confirmed it. Admin-scoped: an author works inside the system and cannot change it."
+    },
+    {
+      "name": "designsystem.import",
+      "group": "designsystem",
+      "effect": "write",
+      "requiredScope": "configureOutput",
+      "input": "DesignSystemImport",
+      "output": "DesignSystemDraft",
+      "summary": "Propose a draft from a source document. Returns the draft and everything the source held that tokens cannot express. Never commits."
+    },
+    {
+      "name": "designsystem.list_versions",
+      "group": "designsystem",
+      "effect": "read",
+      "requiredScope": "author",
+      "input": "ProjectRef",
+      "output": "DesignSystemVersions",
+      "summary": "Every confirmed version, with the source and the human behind each."
     },
     {
       "name": "validate.preflight",

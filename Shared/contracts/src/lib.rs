@@ -364,6 +364,12 @@ pub enum Refusal {
     /// A scene document that is not readable as a scene at all: malformed
     /// JSON, a wrong type, or an object kind this schema does not know.
     SceneParseFailed { detail: String },
+    /// A design-system source document could not be read: malformed JSON, or
+    /// bytes that are not UTF-8. Its own variant because a refusal names its
+    /// failing condition (invariant 17) — folding it into `NotImplemented`
+    /// would tell a reviewer the importer is unfinished when in fact the file
+    /// they supplied is unreadable.
+    DesignSourceUnreadable { detail: String },
     /// A scene carried a field this schema does not know, named by its JSON
     /// path. Refused rather than dropped: a key that is silently ignored is a
     /// feature the author believes they used (3.4).
@@ -597,6 +603,9 @@ impl std::fmt::Display for Refusal {
             }
             Refusal::SceneParseFailed { detail } => {
                 write!(f, "scene document is not readable: {detail}")
+            }
+            Refusal::DesignSourceUnreadable { detail } => {
+                write!(f, "design system source is not readable: {detail}")
             }
             Refusal::SceneUnknownField { path } => {
                 write!(f, "scene carries a field this schema does not know: {path}")
@@ -893,6 +902,9 @@ impl Refusal {
             Self::SceneParseFailed {
                 detail: "audit".into(),
             },
+            Self::DesignSourceUnreadable {
+                detail: "audit".into(),
+            },
             Self::SceneUnknownField {
                 path: "audit".into(),
             },
@@ -1032,6 +1044,7 @@ impl Refusal {
             Self::UnknownProjectSchema { .. } => "unknownProjectSchema",
             Self::ProjectIdLocationMismatch { .. } => "projectIdLocationMismatch",
             Self::SceneParseFailed { .. } => "sceneParseFailed",
+            Self::DesignSourceUnreadable { .. } => "designSourceUnreadable",
             Self::SceneUnknownField { .. } => "sceneUnknownField",
             Self::SceneFontUnknown { .. } => "sceneFontUnknown",
             Self::SceneAssetUnknown { .. } => "sceneAssetUnknown",

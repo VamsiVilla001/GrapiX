@@ -314,6 +314,217 @@ pub struct DesignSystem {
     pub motion: MotionTokens,
 }
 
+/// The external format a design-system draft came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum DesignSystemSourceKind {
+    W3c,
+    Figma,
+    ClaudeDesign,
+}
+
+/// The complete source document retained beside an imported draft.
+///
+/// Import is deliberately not a destructive projection. The mapped tokens are
+/// what GrapiX can enforce; `document` is the source **as supplied**, so a
+/// reviewer can inspect and re-export everything it actually contained.
+///
+/// It is the original text rather than a re-print of the parse, and `sha256`
+/// is taken over those same bytes. A hash over a re-serialisation answers "is
+/// this equivalent to what we parsed?", which is not the question provenance
+/// asks: a duplicated JSON key, or a number re-spelled by whichever toolchain
+/// last wrote the file, would silently change what the record refers to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DesignSystemSource {
+    pub kind: DesignSystemSourceKind,
+    pub sha256: crate::ContentHash,
+    pub document: String,
+}
+
+/// One source value that became a GrapiX token.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenMapping {
+    pub source_path: String,
+    pub token_path: String,
+}
+
+/// A source value the current token contract cannot express.
+///
+/// Keeping the original value is part of the report: a path and a vague
+/// message are not enough for a human to judge whether accepting the draft
+/// would discard a load-bearing brand rule.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct UnexpressibleToken {
+    pub source_path: String,
+    pub source_type: String,
+    pub reason: String,
+    pub value: serde_json::Value,
+}
+
+/// Visual tokens while an import is awaiting human review.
+///
+/// `min_text_size` stays optional here and required in [`VisualTokens`]. An
+/// importer may not invent a legibility threshold merely to make a draft look
+/// complete; confirmation refuses until a human supplies one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftVisualTokens {
+    pub palette: Vec<Named<crate::color::Rgba>>,
+    pub spacing: Vec<f64>,
+    pub min_text_size: Option<f64>,
+}
+
+/// A lossless import proposal. It cannot become active without confirmation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DesignSystemDraft {
+    pub name: String,
+    pub visual: DraftVisualTokens,
+    pub motion: MotionTokens,
+    pub brief: String,
+    pub mappings: Vec<TokenMapping>,
+    pub unexpressible: Vec<UnexpressibleToken>,
+    pub source: DesignSystemSource,
+}
+
+/// A draft plus the human confirming it (G.2, build plan 10.4).
+///
+/// The confirmation is deliberately *not* a field on [`DesignSystemDraft`]. A
+/// draft is a proposal, and a proposal that can carry its own confirmation is
+/// one an importer could fill in on the reviewer's behalf — which is exactly
+/// the auto-accept G.2 forbids. Keeping it in the request makes confirming an
+/// act a caller performs rather than a property the draft already had.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DesignSystemCommit {
+    pub draft: DesignSystemDraft,
+    /// Who accepted it. Recorded into provenance; never invented.
+    pub confirmed_by: String,
+}
+
+/// A request to propose a draft from a source document (10.1-10.3).
+///
+/// `kind` is named by the caller rather than sniffed from the document. A
+/// guess would select a mapper, and the wrong mapper does not fail loudly — it
+/// reads the wrong fields and produces a plausible token set, which is the
+/// silent substitution invariant 18 forbids.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DesignSystemImport {
+    pub project: String,
+    pub name: String,
+    pub kind: DesignSystemSourceKind,
+    /// The source document as text, exactly as the file holds it.
+    ///
+    /// Text rather than embedded JSON so the bytes that are hashed into
+    /// provenance are the bytes the reviewer supplied. Re-encoding a parsed
+    /// value here would mean the record identifies our re-print rather than
+    /// their file.
+    pub document: String,
+}
+
+/// Who confirmed a version, from what source, with which importer (G.3).
+///
+/// Lives in contracts rather than beside the store because it is a wire shape
+/// that `designsystem.list_versions` returns: a copy in TypeScript would be
+/// the hand-mirrored type invariant 22 forbids.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct Provenance {
+    pub source_kind: DesignSystemSourceKind,
+    pub source_sha256: crate::ContentHash,
+    pub importer_version: u32,
+    pub confirmed_by: String,
+}
+
+/// One confirmed version and where it came from.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DesignSystemVersion {
+    pub version: u32,
+    pub provenance: Provenance,
+}
+
+/// The version history, oldest first.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DesignSystemVersions {
+    pub versions: Vec<DesignSystemVersion>,
+}
+
+// ---------------------------------------------------------------------------
+// Drift across published templates (build plan 10.5)
+// ---------------------------------------------------------------------------
+
+/// One published template and the design-system version it was stamped with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct StampedTemplate {
+    pub template_id: String,
+    /// Absent means the package predates stamping — a different statement from
+    /// "built against no system", and the reason this is an `Option`.
+    pub design_system_version: Option<u32>,
+}
+
+/// One template that is not on the current version.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DriftEntry {
+    pub template_id: String,
+    pub stamped_version: Option<u32>,
+    pub versions_behind: Option<u32>,
+}
+
+/// Which published templates are behind the current design system (10.5).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DriftReport {
+    pub current_version: u32,
+    pub behind: Vec<DriftEntry>,
+    pub unstamped: Vec<DriftEntry>,
+}
+
+/// List every template behind `current_version`.
+///
+/// Unstamped templates are reported separately rather than counted as
+/// "infinitely behind": the honest answer is that the package predates
+/// stamping and its conformance is unknown, which is a different job to do
+/// than re-publishing a template that is merely two versions old. Collapsing
+/// the two would put a template on a re-publish list for a reason nobody can
+/// verify.
+pub fn drift_report(current_version: u32, templates: &[StampedTemplate]) -> DriftReport {
+    let mut behind = Vec::new();
+    let mut unstamped = Vec::new();
+
+    for template in templates {
+        match template.design_system_version {
+            None => unstamped.push(DriftEntry {
+                template_id: template.template_id.clone(),
+                stamped_version: None,
+                versions_behind: None,
+            }),
+            Some(stamped) if stamped < current_version => behind.push(DriftEntry {
+                template_id: template.template_id.clone(),
+                stamped_version: Some(stamped),
+                versions_behind: Some(current_version - stamped),
+            }),
+            Some(_) => {}
+        }
+    }
+
+    behind.sort_by(|a, b| a.template_id.cmp(&b.template_id));
+    unstamped.sort_by(|a, b| a.template_id.cmp(&b.template_id));
+
+    DriftReport {
+        current_version,
+        behind,
+        unstamped,
+    }
+}
+
 /// Milliseconds to whole frames at a rational rate, rounded to nearest.
 ///
 /// `ms * num / (den * 1000)`, with round-half-away-from-zero, in integer

@@ -14,10 +14,15 @@
 
 #![forbid(unsafe_code)]
 
+pub mod design_system;
 pub mod fidelity;
 pub mod import;
 pub mod project;
 
+pub use design_system::{
+    drift_report, ingest_claude_design, ingest_figma, ingest_w3c, DesignSystemStore, DriftEntry,
+    DriftReport, Provenance, StampedTemplate,
+};
 pub use fidelity::{FidelityRecord, FidelityVerdict};
 pub use import::{import_svg, ImportOutcome};
 pub use project::{EditorError, Projects};
