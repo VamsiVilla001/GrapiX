@@ -148,6 +148,7 @@ mod tests {
                 size_bytes: 1,
                 sha256: hash(),
             }],
+            design_system_version: None,
         }
     }
 

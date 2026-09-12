@@ -1603,3 +1603,99 @@ permissive than MIT.
 - **6.2 is Partial**: `continue` and `out` have no control-plane message.
 - The `gx-engine-host` integration tests are still excluded from the workspace
   run — a pre-existing Windows process-cleanup issue, unrelated to this work.
+
+---
+
+## 2026-09-12 — Phase 7, the Editor service
+
+Requested: start phase 7. Five of the seven steps are Implemented, two are
+Partial and say why.
+
+**Delegation was attempted and failed.** Four subagents were dispatched and all
+four died within eight seconds on a provider usage limit, having written
+nothing. The tree was verified clean and the phase was built inline instead.
+Worth recording because the parallel decomposition was sound and would be the
+right shape to retry: validator, design system, packager, editor service.
+
+**The import tiers were ported, not invented.** The plan asks for "four tiers"
+and neither it nor the ADRs define them. 1.x's importer counted exactly this
+ladder — `native`, `genericContainers`, `flattened`, `rasterizedObjects` — and
+carried per-object reasons on `DesignImportIssue`. ADR-0002 A.4 says port,
+don't redesign, so that is what `ImportTier` is. What 2.0 adds is that the
+ladder is a closed ordered enum rather than four counters, and that
+`ImportReport::validate` refuses a report in which anything landed below
+`Native`, or was dropped, without a substitution saying why. 7.2's done-when
+stops being an intention and becomes a property.
+
+### 7.4 — the extraction that makes "shares one enum" true
+
+The engine decided renderability inside `PreparedScene::prepare`. The Editor
+needed the same answer before publish and cannot call into the worker
+(invariant 3). Two copies would drift, and the laxer one wins the race to
+mislead: a scene that saves clean and refuses at take.
+
+So the document-level checks moved into `gx_contracts::validate` and the engine
+now calls them. **All 62 existing worker tests passed unchanged**, which is the
+evidence the extraction preserved behaviour rather than reimplementing it, and
+a new test pins the two answers together so a future private copy in the worker
+fails the build.
+
+The validator reports every fault where the engine stops at the first — an
+author fixing a scene needs the whole list, not one per attempt.
+
+One thing improved on the way: PBR-on-a-fixed-function-peer was a hardcoded
+assumption. It is now inferred from the peer's declared `MaterialSupport`, so
+the same scene is valid against a peer with a shader path (invariant 21).
+
+### 7.6 — a real defect, found by writing the done-when as a test
+
+`write_package` verified the package **after** the atomic rename. So a
+re-package that failed verification had already replaced the last good package,
+and its only remaining cleanup was to delete the destination entirely. A failed
+build took the previous artefact with it — the exact opposite of the
+all-or-nothing the step asks for.
+
+The ordering is the fix, and the guarantee belongs in `gx-fs` beside the other
+atomic ones rather than open-coded per caller: `write_atomic_verified` runs the
+check against the candidate at its temporary path, while the destination still
+holds its previous contents. A rejection removes the candidate and leaves the
+destination byte-identical, now asserted on the filesystem rather than on a
+return value.
+
+### 7.5 — the reason is charged by the type system
+
+ADR-0002 G.4's argument drives it: a system that cannot be overridden gets
+bypassed entirely, which is worse than one that bends. So three severities,
+only `Error` blocks, every rule overridable.
+
+`Override::new` is the only constructor and refuses an empty reason. A runtime
+check on an `Option<String>` would be forgettable at exactly one call site, and
+that site would become the one everybody used. Deserialisation re-applies the
+requirement, because editing the file would otherwise be the way around it.
+
+An override downgrades its refusal to `Info` rather than deleting it, so
+`by_frequency` can answer G.4's real question: the rules overridden most often
+are the rules that are wrong.
+
+### Verified by execution
+
+356 Rust tests pass. Conformance 135 passed, 0 failed, 8 skipped — up from 134,
+with `ProjectNotFound` driven through the real Editor service rather than
+excused. Pixel gate still passes clean. `codegen:check` (137 files current),
+`check:boundaries`, `typecheck` and `test:ts` all clean.
+
+### Not done, and not claimed
+
+- **7.2 is Partial.** The pipeline, the ladder and the report are real, and one
+  SVG source drives all four tiers with a substitution recorded for every
+  demotion. But **SVG is the only format parsed.** Figma, PSD and AI need
+  format parsers this crate does not contain. Claiming them on the strength of
+  a trait would be precisely the unnamed substitution the report exists to
+  prevent.
+- **7.3 is Partial.** The comparison, the record and storage beside the
+  template are implemented and tested. But the Editor cannot render — invariant
+  3 forbids it importing the worker — so both frames arrive as input from the
+  caller, and nothing yet wires a real source render to a real imported render.
+  The seam is documented in the module rather than hidden.
+- The `gx-engine-host` integration tests remain excluded from the workspace
+  run, a pre-existing Windows process-cleanup issue unrelated to this work.

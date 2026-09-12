@@ -1673,6 +1673,7 @@ dependencies = [
  "gx-contracts",
  "gx-control-plane",
  "gx-control-transport",
+ "gx-editor",
  "gx-media-plane",
  "gx-mock-engine",
  "gx-playout",
@@ -1734,6 +1735,19 @@ name = "gx-decklink"
 version = "0.1.0"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "gx-editor"
+version = "0.1.0"
+dependencies = [
+ "gx-asset-plane",
+ "gx-contracts",
+ "gx-fs",
+ "gx-project-store",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

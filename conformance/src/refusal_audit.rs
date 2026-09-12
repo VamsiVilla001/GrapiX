@@ -44,6 +44,7 @@ pub fn refusal_audit_suite(report: &mut Report) {
     drive_media_refusals(report);
     drive_asset_refusals(report);
     drive_playout_refusals(report);
+    drive_editor_refusals(report);
     record_surface_limitations(report);
 }
 
@@ -294,6 +295,52 @@ fn drive_contract_refusals(report: &mut Report) {
                 Err(Refusal::UnknownPackageFormatVersion { received: 0 })
             ),
             "an unknown package format was not refused by name",
+        ),
+    );
+}
+
+fn drive_editor_refusals(report: &mut Report) {
+    // 7.1: a write must refuse a project that does not exist rather than
+    // creating one. Driven against a root that is deliberately empty, so the
+    // refusal is the real one the service produces.
+    let root = std::env::temp_dir().join(format!(
+        "gx-conformance-editor-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos()
+    ));
+    let projects = gx_editor::Projects::at_root(&root);
+    let scene = gx_contracts::scene::SceneDocument {
+        id: "audit".into(),
+        name: "audit".into(),
+        version: 1,
+        revision: Some(Revision(1)),
+        active_camera_id: None,
+        canvas: gx_contracts::scene::SceneCanvas {
+            width: 16,
+            height: 16,
+            frame_rate: RationalRate::P50,
+        },
+        timeline: gx_contracts::scene::SceneTimeline { duration_frames: 1 },
+        data_context: Default::default(),
+        assets: Vec::new(),
+        fonts: Vec::new(),
+        materials: Vec::new(),
+        objects: Vec::new(),
+    };
+
+    let outcome = projects.write_scene("no-such-project", &scene);
+    report.record(
+        PLANE,
+        "ProjectNotFound is produced for a write into a project that does not exist",
+        expect(
+            matches!(
+                outcome,
+                Err(gx_editor::EditorError::Refused(Refusal::ProjectNotFound { .. }))
+            ) && !root.join("no-such-project").exists(),
+            "a write into a missing project was not refused by name, or created one anyway",
         ),
     );
 }
@@ -557,6 +604,7 @@ fn is_driven(variant: &str) -> bool {
             | "RundownCursorOutOfRange"
             | "RundownEntryUnknown"
             | "AutomationExecutionDeferred"
+            | "ProjectNotFound"
     )
 }
 
@@ -749,6 +797,9 @@ fn all_refusal_variants() -> Vec<Refusal> {
         },
         Refusal::InvalidFontUrl {
             url: "audit".into(),
+        },
+        Refusal::ProjectNotFound {
+            project: "audit".into(),
         },
         Refusal::FontEmbeddingRefused {
             font_id: "audit".into(),
@@ -957,6 +1008,7 @@ fn refusal_variant_name(refusal: &Refusal) -> &'static str {
         Refusal::ProjectJsonCorrupt { .. } => "ProjectJsonCorrupt",
         Refusal::UnknownProjectSchema { .. } => "UnknownProjectSchema",
         Refusal::ProjectIdLocationMismatch { .. } => "ProjectIdLocationMismatch",
+        Refusal::ProjectNotFound { .. } => "ProjectNotFound",
         Refusal::AssetChunkOutOfOrder { .. } => "AssetChunkOutOfOrder",
         Refusal::AssetTransferAlreadyComplete { .. } => "AssetTransferAlreadyComplete",
         Refusal::EmptyAssetTransfer { .. } => "EmptyAssetTransfer",

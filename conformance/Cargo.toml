@@ -22,3 +22,4 @@ gx-mock-engine = { path = "../mocks/mock-engine" }
 serde_json = { workspace = true }
 gx-control-transport = { workspace = true }
 gx-playout = { path = "../services/playout" }
+gx-editor = { path = "../services/editor" }

@@ -21,6 +21,7 @@ members = [
   "Shared/project-store",
   "Editor/shell",
   "Playout/shell",
+  "services/editor",
   "services/playout",
   "tools/pixel-gate",
 ]

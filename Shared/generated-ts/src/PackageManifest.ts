@@ -19,4 +19,19 @@ sceneRevision: Revision,
  * manifest itself: a manifest cannot hash itself without a circular
  * definition.
  */
-files: Array<PackageFileEntry>, };
+files: Array<PackageFileEntry>, 
+/**
+ * The design system this package was built against (Part G, 7.6).
+ *
+ * Absent means the package predates design-system stamping, which is a
+ * different statement from "built against no system" and is why this is
+ * an `Option` rather than a zero. Present, it makes brand-pack drift
+ * listable rather than invisible: "which templates predate v4" becomes a
+ * query instead of an investigation.
+ *
+ * It sits inside the manifest, so it is covered by the same per-file
+ * digests and archive verification as every payload member. A stamp the
+ * manifest did not cover could be edited afterwards, which would make it
+ * a decoration rather than a record.
+ */
+designSystemVersion?: number, };

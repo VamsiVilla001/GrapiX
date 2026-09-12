@@ -488,6 +488,13 @@ pub enum Refusal {
     /// learns their trigger fired and did nothing, instead of concluding the
     /// condition never matched.
     AutomationExecutionDeferred { trigger: String, matched: String },
+    /// A write named a project that does not exist.
+    ///
+    /// Creating it implicitly would be the silent fallback invariant 18
+    /// forbids, in its most expensive form: a typo in a project name becomes
+    /// a second, near-identical project, and the author's work is split
+    /// across both without either looking wrong.
+    ProjectNotFound { project: String },
 }
 
 impl std::fmt::Display for Refusal {
@@ -738,6 +745,9 @@ impl std::fmt::Display for Refusal {
                 f,
                 "automation trigger {trigger} matched ({matched}); execution is deferred, not performed"
             ),
+            Refusal::ProjectNotFound { project } => {
+                write!(f, "no project named {project}")
+            }
         }
     }
 }

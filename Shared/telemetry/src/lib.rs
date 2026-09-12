@@ -342,6 +342,7 @@ fn refusal_name(refusal: &Refusal) -> &'static str {
         Refusal::RundownCursorOutOfRange { .. } => "rundownCursorOutOfRange",
         Refusal::RundownEntryUnknown { .. } => "rundownEntryUnknown",
         Refusal::AutomationExecutionDeferred { .. } => "automationExecutionDeferred",
+        Refusal::ProjectNotFound { .. } => "projectNotFound",
     }
 }
 

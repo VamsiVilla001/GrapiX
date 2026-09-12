@@ -1,0 +1,22 @@
+[package]
+name = "gx-editor"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# The headless Editor service (build plan 7.1, 7.2, 7.3).
+#
+# Note what is absent from these dependencies: `gx-render-worker`. Invariant 3
+# forbids the Editor importing renderer internals, so the rules it shares with
+# the engine reach it through `gx-contracts` — which is why the scene validator
+# lives there (7.4) rather than in the worker.
+
+[dependencies]
+gx-contracts = { workspace = true }
+gx-project-store = { workspace = true }
+gx-asset-plane = { workspace = true }
+gx-fs = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
