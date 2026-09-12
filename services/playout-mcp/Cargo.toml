@@ -1,0 +1,19 @@
+[package]
+name = "gx-playout-mcp"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# The Program-side MCP tool bodies (build plan 8.7, 8.9, 8.10, 8.11).
+#
+# These are the tools ADR-0002 D.3 gates: an author token must never reach
+# playout.take or outputs.configure. The gate itself is in `gx-mcp-server`;
+# what lives here is what happens once a caller has been allowed through.
+
+[dependencies]
+gx-contracts = { workspace = true }
+gx-mcp-server = { path = "../mcp-server" }
+gx-asset-plane = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

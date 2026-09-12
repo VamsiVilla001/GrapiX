@@ -26,6 +26,7 @@ members = [
   "services/editor-mcp",
   "services/mcp-server",
   "services/playout",
+  "services/playout-mcp",
   "tools/pixel-gate",
 ]
 

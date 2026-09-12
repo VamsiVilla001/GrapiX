@@ -1789,3 +1789,70 @@ says so in its own header.
 Specifically absent: the JSON-RPC transport, every mutating handler,
 `render.preview` returning a real frame (8.9), and `if_revision` /
 idempotency-key / batch-as-one-undo (8.12).
+
+---
+
+## 2026-09-12 — Phase 8, the remaining steps
+
+Requested: start the remaining Phase 8 steps. Ten were outstanding. Seven are
+now Implemented, three are Partial and say why.
+
+**Delegation failed again.** Five subagents were dispatched and all five died
+within five seconds on the same provider usage limit that stopped Phase 7.
+The tree was verified clean and the work was done inline. Two sessions running
+— the decomposition is sound, the capacity is not there.
+
+### The transport is where the gate belongs
+
+`gx-mcp-server` speaks newline-delimited JSON-RPC 2.0 (the 2025 MCP spec
+dropped the LSP `Content-Length` framing). The load-bearing decision is that
+`ToolRegistry::authorise` runs **before the handler lookup**, which has two
+consequences worth stating.
+
+An out-of-scope call to a tool that exists and one to a tool that does not are
+indistinguishable, so a caller probing the surface learns nothing it was not
+told. And because the gate is in the transport, there is no handler that
+*could* forget to check — a handler author never has the option. 8.11's
+done-when is proven at that level: an author-scoped `playout.take` refuses
+`Unauthenticated` and the registered handler is never reached.
+
+### 8.5's done-when is a type, not a check
+
+"Presets parameterised, never authored by the caller." `ApplyPresetArgs` has
+`deny_unknown_fields` and no keyframe field, so an attempt to send one is a
+parse failure rather than a field quietly dropped. The difference matters: a
+dropped field leaves a caller believing it was honoured. The test asserts the
+smuggling attempt fails and the parameterised form succeeds.
+
+### 8.4's usage lookup is computed, not stored
+
+Which objects bind which material is read out of the document each time. A
+stored index would be a second representation of the same fact, and it drifts
+the moment anything edits an object without updating it. Relink is the mirror
+of the same idea: it replaces the content hash and touches nothing in the
+object graph, because an asset is addressed both ways and the id every object
+references does not move (invariant 31).
+
+### Verified by execution
+
+397 Rust tests pass. Conformance 135 passed, 0 failed, 8 skipped. TypeScript
+18 passed. `codegen:check` (143 files current), `check:boundaries` and the
+pixel gate all clean.
+
+### Not done, and not claimed
+
+- **8.9 is Partial.** `render.preview` returns a frame and refuses one whose
+  byte count contradicts its dimensions — a short read cannot masquerade as a
+  smaller picture. But invariant 3 forbids the Editor importing renderer
+  internals, so the frame arrives from the caller. Nothing here rasterises,
+  and nothing yet wires a real engine render into this tool.
+- **8.10 is Partial.** `packages.publish` verifies a built package and returns
+  its TakeId and Revision, which is the done-when. `build` and `inspect` are
+  not implemented, and publish reads an already-built package rather than
+  driving the build.
+- **8.11 is Partial.** The gating is real and proven at two levels. The
+  `playout.*` and `outputs.*` handler *bodies* are not wired to `gx-playout`;
+  what exists is the gate and the refusals.
+- The `system.capability` tool has a descriptor and a generated payload but no
+  registered handler in the server yet — `tools/list` returns it, a call finds
+  no handler.

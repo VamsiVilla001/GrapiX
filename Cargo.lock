@@ -1863,6 +1863,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "gx-playout-mcp"
+version = "0.1.0"
+dependencies = [
+ "gx-asset-plane",
+ "gx-contracts",
+ "gx-mcp-server",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "gx-playout-shell"
 version = "0.1.0"
 dependencies = [

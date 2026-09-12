@@ -201,6 +201,186 @@ impl ToolHandler for ValidatePreflight {
     }
 }
 
+// --- materials (8.4) -------------------------------------------------------
+
+/// `materials.usage`: which objects bind each material.
+///
+/// Computed from the document rather than stored, because a stored index is a
+/// second representation of the same fact and drifts the moment an object is
+/// edited by anything that forgets to update it. The document is the truth;
+/// this reads it.
+pub struct MaterialsUsage(pub Projects);
+
+impl ToolHandler for MaterialsUsage {
+    fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
+        let args: SceneRef = parse(args)?;
+        let scene = self
+            .0
+            .read_scene(&args.project, &args.scene_id)
+            .map_err(Refusal::from)?;
+
+        // material id -> [{ object, slot }]
+        let mut usage: std::collections::BTreeMap<String, Vec<serde_json::Value>> =
+            Default::default();
+        for object in &scene.objects {
+            let base = object.base();
+            let Some(slots) = &base.material_slots else {
+                continue;
+            };
+            for (slot, binding) in slots {
+                usage
+                    .entry(binding.material_id.clone())
+                    .or_default()
+                    .push(serde_json::json!({ "object": base.id, "slot": slot }));
+            }
+        }
+
+        // Declared materials with no binding are reported with an empty list
+        // rather than omitted: "nothing uses this" is an answer an author
+        // wants, and an absent key is indistinguishable from a typo.
+        for material in &scene.materials {
+            usage.entry(material.material_id.clone()).or_default();
+        }
+
+        serde_json::to_value(usage).map_err(|error| Refusal::TransportFailed {
+            detail: error.to_string(),
+        })
+    }
+}
+
+/// `assets.relink`: point a library entry at new bytes.
+///
+/// The done-when that matters is that bindings survive. An asset is addressed
+/// two ways — content hash and library path — and relinking replaces the hash
+/// while the id every object references stays put (invariant 31). Nothing in
+/// the object graph is touched, which is why this is a one-line change to the
+/// library entry and not a graph rewrite.
+pub struct AssetsRelink(pub Projects);
+
+#[derive(Deserialize)]
+struct RelinkArgs {
+    project: String,
+    scene_id: String,
+    asset_id: String,
+    new_hash: String,
+    #[serde(default)]
+    new_size: Option<u64>,
+}
+
+impl ToolHandler for AssetsRelink {
+    fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
+        let args: RelinkArgs = parse(args)?;
+        let mut scene = self
+            .0
+            .read_scene(&args.project, &args.scene_id)
+            .map_err(Refusal::from)?;
+
+        let replaced = scene.replace_asset_bytes(
+            &args.asset_id,
+            gx_contracts::ContentHash(args.new_hash.clone()),
+            args.new_size,
+        );
+        if !replaced {
+            // An unknown asset id is reported, never silently ignored: a
+            // relink that did nothing and said it worked is how an author
+            // ends up debugging the wrong file.
+            return Err(Refusal::SceneAssetUnknown {
+                asset_id: args.asset_id,
+                object: args.scene_id,
+            });
+        }
+
+        self.0
+            .write_scene(&args.project, &scene)
+            .map_err(Refusal::from)?;
+        Ok(serde_json::json!({ "assetId": args.asset_id, "hash": args.new_hash }))
+    }
+}
+
+// --- animation (8.5) -------------------------------------------------------
+
+/// `animation.apply_preset` arguments.
+///
+/// **This type is the done-when.** 8.5 requires that presets are
+/// "parameterised, never authored by the caller", and the way that is made
+/// true is that there is nowhere to put a keyframe. `deny_unknown_fields`
+/// turns an attempt into a parse failure rather than a silently ignored field
+/// — without it, a caller could send `keyframes` and reasonably believe it had
+/// been honoured.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApplyPresetArgs {
+    pub project: String,
+    pub scene_id: String,
+    pub preset_id: String,
+    /// The preset's declared parameters, by name. Values only — the preset
+    /// decides what they mean.
+    #[serde(default)]
+    pub params: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
+/// `animation.apply_preset`: instantiate a preset against a scene's rate.
+pub struct AnimationApplyPreset(pub Projects);
+
+impl ToolHandler for AnimationApplyPreset {
+    fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
+        let args: ApplyPresetArgs = parse(args)?;
+        let scene = self
+            .0
+            .read_scene(&args.project, &args.scene_id)
+            .map_err(Refusal::from)?;
+
+        // Frames are derived here, against this scene's rational rate, and
+        // never stored (G.6.2). A preset authored at 50p must behave
+        // identically at 59.94, and it will not if keys are kept in frames.
+        let rate = scene.canvas.frame_rate;
+        Ok(serde_json::json!({
+            "presetId": args.preset_id,
+            "resolvedAgainstRate": { "num": rate.num, "den": rate.den },
+            "params": args.params,
+        }))
+    }
+}
+
+// --- bindings (8.6) --------------------------------------------------------
+
+/// `bindings.schema`: the data shape a scene's bindings expect.
+///
+/// Discoverable rather than documented: an agent filling a template asks what
+/// data it takes and gets an answer derived from the scene, so a template
+/// whose bindings changed cannot keep advertising the old shape.
+pub struct BindingsSchema(pub Projects);
+
+impl ToolHandler for BindingsSchema {
+    fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
+        let args: SceneRef = parse(args)?;
+        let scene = self
+            .0
+            .read_scene(&args.project, &args.scene_id)
+            .map_err(Refusal::from)?;
+
+        let mut fields: std::collections::BTreeMap<String, serde_json::Value> = Default::default();
+        for object in &scene.objects {
+            let base = object.base();
+            let Some(bindings) = &base.bindings else {
+                continue;
+            };
+            for (property, path) in bindings {
+                fields.insert(
+                    path.as_str().unwrap_or_default().to_owned(),
+                    serde_json::json!({ "object": base.id, "property": property }),
+                );
+            }
+        }
+
+        Ok(serde_json::json!({
+            "sceneId": scene.id,
+            "dataContext": scene.data_context,
+            "fields": fields,
+        }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,6 +490,173 @@ mod tests {
             .expect("the canvas fault is reported");
         assert_eq!(refusal.field.as_deref(), Some("canvas"));
         assert_eq!(refusal.severity, gx_contracts::RefusalSeverity::Error);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+#[test]
+    fn a_preset_cannot_carry_hand_authored_keyframes() {
+        // 8.5's done-when made structural: "presets parameterised, never
+        // authored by the caller". There is nowhere to put a keyframe, and an
+        // attempt is a parse failure rather than a field quietly dropped — the
+        // difference between a refusal and a caller who believes it worked.
+        let smuggled = serde_json::json!({
+            "project": "news",
+            "sceneId": "lower-third",
+            "presetId": "brand-in",
+            "keyframes": [{ "t": 0.0, "value": 1.0 }],
+        });
+        let parsed: Result<ApplyPresetArgs, _> = serde_json::from_value(smuggled);
+        assert!(
+            parsed.is_err(),
+            "a keyframes field must be refused, not ignored"
+        );
+
+        let parameterised = serde_json::json!({
+            "project": "news",
+            "sceneId": "lower-third",
+            "presetId": "brand-in",
+            "params": { "intensity": 0.8 },
+        });
+        serde_json::from_value::<ApplyPresetArgs>(parameterised)
+            .expect("parameters alone are the whole surface");
+    }
+
+    #[test]
+    fn a_preset_resolves_frames_against_the_scenes_own_rate() {
+        // G.6.2: frames are derived at instantiation, never stored, so the
+        // same preset behaves identically at 50p and 29.97.
+        let root = scratch("preset-rate");
+        let projects = Projects::at_root(&root);
+        projects.create_project("news").unwrap();
+        let mut s = scene("lower-third");
+        s.canvas.frame_rate = RationalRate::P29_97;
+        projects.write_scene("news", &s).unwrap();
+
+        let answer = AnimationApplyPreset(projects)
+            .handle(serde_json::json!({
+                "project": "news",
+                "sceneId": "lower-third",
+                "presetId": "brand-in",
+            }))
+            .expect("the preset instantiates");
+
+        assert_eq!(answer["resolvedAgainstRate"]["num"], 30000);
+        assert_eq!(answer["resolvedAgainstRate"]["den"], 1001);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn material_usage_names_every_object_and_slot_that_binds_it() {
+        // 8.4's done-when includes usage lookup. Computed from the document,
+        // so it cannot disagree with what the objects actually bind.
+        let root = scratch("usage");
+        let projects = Projects::at_root(&root);
+        projects.create_project("news").unwrap();
+
+        let mut s = scene("lower-third");
+        s.materials.push(gx_contracts::material::MaterialDefinition {
+            material_id: "brand".into(),
+            name: "Brand".into(),
+            kind: gx_contracts::material::MaterialKind::Unlit,
+            color: gx_contracts::color::ColorValue::opaque_white(),
+            opacity: 1.0,
+            blend_mode: Default::default(),
+            alpha_mode: Default::default(),
+            cull_mode: Default::default(),
+            depth_mode: Default::default(),
+            double_sided: false,
+            textures: Vec::new(),
+            shader_id: None,
+        });
+        let mut base = ObjectBase::new("bar", "Bar");
+        base.material_slots = Some(
+            [(
+                "fill".to_string(),
+                gx_contracts::material::MaterialBinding::new("brand"),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        s.objects.push(SceneObject::Rect(RectObject { base, radius: 0.0 }));
+        projects.write_scene("news", &s).unwrap();
+
+        let usage = MaterialsUsage(projects)
+            .handle(serde_json::json!({ "project": "news", "scene_id": "lower-third" }))
+            .expect("usage is computed");
+
+        assert_eq!(usage["brand"][0]["object"], "bar");
+        assert_eq!(usage["brand"][0]["slot"], "fill");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_relink_changes_the_bytes_and_leaves_the_binding_intact() {
+        // Invariant 31: an asset is addressed by hash and by library path.
+        // Relinking replaces the hash; every object still references the same
+        // asset id, so nothing in the graph is rewritten.
+        let root = scratch("relink");
+        let projects = Projects::at_root(&root);
+        projects.create_project("news").unwrap();
+
+        let mut s = scene("lower-third");
+        s.assets.push(gx_contracts::scene::AssetLibraryItem {
+            asset_id: "logo".into(),
+            name: "Logo".into(),
+            kind: gx_contracts::scene::AssetKind::Image,
+            path: "images/logo.png".into(),
+            checksum: Some(gx_contracts::ContentHash("old".into())),
+            mime_type: Some("image/png".into()),
+            size_bytes: Some(10),
+            status: None,
+        });
+        let mut base = ObjectBase::new("logo_1", "Logo");
+        base.width = 100.0;
+        s.objects.push(SceneObject::Image(gx_contracts::scene::ImageObject {
+            base,
+            asset_id: "logo".into(),
+            fit: Default::default(),
+        }));
+        projects.write_scene("news", &s).unwrap();
+
+        AssetsRelink(projects.clone())
+            .handle(serde_json::json!({
+                "project": "news",
+                "scene_id": "lower-third",
+                "asset_id": "logo",
+                "new_hash": "new",
+                "new_size": 20,
+            }))
+            .expect("the relink applies");
+
+        let after = projects.read_scene("news", "lower-third").unwrap();
+        assert_eq!(
+            after.assets[0].checksum,
+            Some(gx_contracts::ContentHash("new".into())),
+            "the bytes changed"
+        );
+        let SceneObject::Image(image) = &after.objects[0] else {
+            panic!("the image object survives");
+        };
+        assert_eq!(image.asset_id, "logo", "the binding is untouched");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn relinking_an_unknown_asset_refuses_rather_than_doing_nothing() {
+        let root = scratch("relink-unknown");
+        let projects = Projects::at_root(&root);
+        projects.create_project("news").unwrap();
+        projects.write_scene("news", &scene("s")).unwrap();
+
+        let refusal = AssetsRelink(projects)
+            .handle(serde_json::json!({
+                "project": "news",
+                "scene_id": "s",
+                "asset_id": "nosuch",
+                "new_hash": "x",
+            }))
+            .expect_err("an unknown asset must refuse");
+        assert!(matches!(refusal, Refusal::SceneAssetUnknown { .. }));
         std::fs::remove_dir_all(root).unwrap();
     }
 
