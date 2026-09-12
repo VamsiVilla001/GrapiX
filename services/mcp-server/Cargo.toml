@@ -1,0 +1,22 @@
+[package]
+name = "gx-mcp-server"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# The MCP transport (build plan 8.1, transport half).
+#
+# The scope gate lives here and nowhere else: every call passes through
+# `ToolRegistry::authorise` before a handler is reached, so a tool cannot be
+# reached by a caller that does not hold its scope — and a handler author never
+# has the option of forgetting to check.
+
+[lib]
+name = "gx_mcp_server"
+path = "src/lib.rs"
+
+[dependencies]
+gx-contracts = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

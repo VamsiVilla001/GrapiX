@@ -22,6 +22,7 @@ members = [
   "Editor/shell",
   "Playout/shell",
   "services/editor",
+  "services/mcp-server",
   "services/playout",
   "tools/pixel-gate",
 ]

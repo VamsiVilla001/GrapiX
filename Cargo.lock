@@ -1783,6 +1783,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "gx-mcp-server"
+version = "0.1.0"
+dependencies = [
+ "gx-contracts",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "gx-media-plane"
 version = "0.1.0"
 dependencies = [
