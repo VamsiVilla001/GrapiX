@@ -275,6 +275,45 @@ impl MotionPreset {
     }
 }
 
+/// The visual tokens enforcement checks a scene against (Part G.4).
+///
+/// Deliberately small. The ADR's own warning is that a design system which
+/// tries to encode everything becomes a system people bypass entirely, and
+/// that "if a rule matters, make it a token" — so what is here is what G.4
+/// actually names as enforceable: the palette, the spacing scale, and the
+/// smallest text that stays legible on a broadcast display.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct VisualTokens {
+    /// The colours a scene may use. A fill outside this set is an `error`.
+    pub palette: Vec<Named<crate::color::Rgba>>,
+    /// The spacing scale, in scene units. Off-scale spacing is a `warning`
+    /// rather than an error: it is usually a mistake and occasionally a
+    /// deliberate optical correction, and blocking it would be the
+    /// over-strictness G.4 warns about.
+    pub spacing: Vec<f64>,
+    /// The smallest text size that stays legible at broadcast viewing
+    /// distance. Below it is an `error`, because it is unreadable on air
+    /// rather than merely unusual.
+    pub min_text_size: f64,
+}
+
+/// A design system at one version.
+///
+/// The version is not decoration: a package stamped with the system it was
+/// built against makes brand-pack drift *listable* rather than invisible
+/// (Part G's risk table), which is what 7.6 stamps onto every package.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DesignSystem {
+    pub name: String,
+    /// Monotonic. A package records this, so "which templates predate v4"
+    /// is a query rather than an investigation.
+    pub version: u32,
+    pub visual: VisualTokens,
+    pub motion: MotionTokens,
+}
+
 /// Milliseconds to whole frames at a rational rate, rounded to nearest.
 ///
 /// `ms * num / (den * 1000)`, with round-half-away-from-zero, in integer

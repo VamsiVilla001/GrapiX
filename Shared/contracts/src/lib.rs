@@ -8,6 +8,7 @@
 pub mod auth;
 pub mod color;
 pub mod design_system;
+pub mod enforce;
 pub mod font;
 pub mod import;
 pub mod material;
