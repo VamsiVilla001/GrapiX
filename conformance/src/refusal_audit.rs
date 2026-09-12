@@ -566,8 +566,10 @@ fn record_surface_limitations(report: &mut Report) {
         "every declared refusal is driven or has a named limitation",
         expect(
             all.iter()
-                .all(|name| is_driven(name) || registered.contains(name))
-                && registered.iter().all(|name| all.contains(name)),
+                .all(|name| is_driven(name) || registered.contains(&name.as_str()))
+                && registered
+                    .iter()
+                    .all(|name| all.iter().any(|found| found == name)),
             "the refusal register has a missing or stale variant; add a driver or named limitation",
         ),
     );
@@ -941,83 +943,25 @@ fn all_refusal_variants() -> Vec<Refusal> {
     ]
 }
 
-fn refusal_variant_name(refusal: &Refusal) -> &'static str {
-    match refusal {
-        Refusal::RevisionMismatch { .. } => "RevisionMismatch",
-        Refusal::TierTooLow { .. } => "TierTooLow",
-        Refusal::ReferenceUnlocked { .. } => "ReferenceUnlocked",
-        Refusal::UnsupportedBlendMode { .. } => "UnsupportedBlendMode",
-        Refusal::UnsupportedFitMode { .. } => "UnsupportedFitMode",
-        Refusal::UnsupportedCullMode { .. } => "UnsupportedCullMode",
-        Refusal::UnsupportedAlphaMode { .. } => "UnsupportedAlphaMode",
-        Refusal::UnsupportedDepthMode { .. } => "UnsupportedDepthMode",
-        Refusal::UnsupportedPathGradient { .. } => "UnsupportedPathGradient",
-        Refusal::VectorTessellationFailed { .. } => "VectorTessellationFailed",
-        Refusal::AssetMissing { .. } => "AssetMissing",
-        Refusal::ProtocolMismatch { .. } => "ProtocolMismatch",
-        Refusal::InvalidRate { .. } => "InvalidRate",
-        Refusal::PlatformNotCertified { .. } => "PlatformNotCertified",
-        Refusal::UnknownTake { .. } => "UnknownTake",
-        Refusal::FrameNotReachable { .. } => "FrameNotReachable",
-        Refusal::MultipleClockDomains { .. } => "MultipleClockDomains",
-        Refusal::Unauthenticated => "Unauthenticated",
-        Refusal::TransportFailed { .. } => "TransportFailed",
-        Refusal::NotImplemented { .. } => "NotImplemented",
-        Refusal::FontMissing { .. } => "FontMissing",
-        Refusal::FontUrlNotHttps { .. } => "FontUrlNotHttps",
-        Refusal::FontUrlHasCredentials { .. } => "FontUrlHasCredentials",
-        Refusal::InvalidFontUrl { .. } => "InvalidFontUrl",
-        Refusal::FontEmbeddingRefused { .. } => "FontEmbeddingRefused",
-        Refusal::FontPathUnsafe { .. } => "FontPathUnsafe",
-        Refusal::FontPathOutsideRoot { .. } => "FontPathOutsideRoot",
-        Refusal::FontFetchHostNotTrusted { .. } => "FontFetchHostNotTrusted",
-        Refusal::FontFetchAddressDenied { .. } => "FontFetchAddressDenied",
-        Refusal::FontStylesheetImportDepthExceeded { .. } => "FontStylesheetImportDepthExceeded",
-        Refusal::FontFetchTooLarge { .. } => "FontFetchTooLarge",
-        Refusal::FontFetchFailed { .. } => "FontFetchFailed",
-        Refusal::FontStylesheetImportCycle { .. } => "FontStylesheetImportCycle",
-        Refusal::FontFileReadFailed { .. } => "FontFileReadFailed",
-        Refusal::FontCacheWriteFailed { .. } => "FontCacheWriteFailed",
-        Refusal::AdobeFontLicenceRestricted { .. } => "AdobeFontLicenceRestricted",
-        Refusal::InvalidFontData { .. } => "InvalidFontData",
-        Refusal::InvalidColor { .. } => "InvalidColor",
-        Refusal::PlatformDirectoryUnavailable { .. } => "PlatformDirectoryUnavailable",
-        Refusal::SceneParseFailed { .. } => "SceneParseFailed",
-        Refusal::SceneUnknownField { .. } => "SceneUnknownField",
-        Refusal::SceneFontUnknown { .. } => "SceneFontUnknown",
-        Refusal::SceneAssetUnknown { .. } => "SceneAssetUnknown",
-        Refusal::SceneMaterialUnknown { .. } => "SceneMaterialUnknown",
-        Refusal::MeshMaterialUnassigned { .. } => "MeshMaterialUnassigned",
-        Refusal::MeshModelAssetWrongKind { .. } => "MeshModelAssetWrongKind",
-        Refusal::MeshModelInvalid { .. } => "MeshModelInvalid",
-        Refusal::MeshMaterialElementsMismatch { .. } => "MeshMaterialElementsMismatch",
-        Refusal::MeshMaterialRequiresLight { .. } => "MeshMaterialRequiresLight",
-        Refusal::LightHasNoResponsiveMaterial { .. } => "LightHasNoResponsiveMaterial",
-        Refusal::SceneActiveCameraUnknown { .. } => "SceneActiveCameraUnknown",
-        Refusal::UnknownOutputAdapter { .. } => "UnknownOutputAdapter",
-        Refusal::UnknownPackageFormatVersion { .. } => "UnknownPackageFormatVersion",
-        Refusal::UnsafePackagePath { .. } => "UnsafePackagePath",
-        Refusal::DuplicatePackagePath { .. } => "DuplicatePackagePath",
-        Refusal::InvalidPackageHash { .. } => "InvalidPackageHash",
-        Refusal::PackageEntryMissing { .. } => "PackageEntryMissing",
-        Refusal::PackageEntryUnreadable { .. } => "PackageEntryUnreadable",
-        Refusal::PackageFileLengthMismatch { .. } => "PackageFileLengthMismatch",
-        Refusal::PackageFileHashMismatch { .. } => "PackageFileHashMismatch",
-        Refusal::PackageScenePinMismatch { .. } => "PackageScenePinMismatch",
-        Refusal::PackageAssetNotPackaged { .. } => "PackageAssetNotPackaged",
-        Refusal::ProjectJsonCorrupt { .. } => "ProjectJsonCorrupt",
-        Refusal::UnknownProjectSchema { .. } => "UnknownProjectSchema",
-        Refusal::ProjectIdLocationMismatch { .. } => "ProjectIdLocationMismatch",
-        Refusal::ProjectNotFound { .. } => "ProjectNotFound",
-        Refusal::AssetChunkOutOfOrder { .. } => "AssetChunkOutOfOrder",
-        Refusal::AssetTransferAlreadyComplete { .. } => "AssetTransferAlreadyComplete",
-        Refusal::EmptyAssetTransfer { .. } => "EmptyAssetTransfer",
-        Refusal::AssetHashMismatch { .. } => "AssetHashMismatch",
-        Refusal::MediaTransportUnavailable { .. } => "MediaTransportUnavailable",
-        Refusal::RundownCursorOutOfRange { .. } => "RundownCursorOutOfRange",
-        Refusal::RundownEntryUnknown { .. } => "RundownEntryUnknown",
-        Refusal::AutomationExecutionDeferred { .. } => "AutomationExecutionDeferred",
+/// The variant's audit name.
+///
+/// The audit reports PascalCase variant names while the wire carries camelCase
+/// codes, so this converts rather than keeping a second table: the contract's
+/// `code_name` is the one exhaustive list, and a variant added there appears
+/// here without anyone maintaining a parallel register (invariant 27).
+fn refusal_variant_name(refusal: &Refusal) -> String {
+    let code = refusal.code_name();
+    let mut name = String::with_capacity(code.len());
+    let mut capitalise = true;
+    for character in code.chars() {
+        if capitalise {
+            name.extend(character.to_uppercase());
+            capitalise = false;
+        } else {
+            name.push(character);
+        }
     }
+    name
 }
 
 #[cfg(test)]
@@ -1032,7 +976,9 @@ mod tests {
         let limitations: Vec<_> = limitations().iter().map(|item| item.variant).collect();
         assert!(all
             .iter()
-            .all(|name| is_driven(name) || limitations.contains(name)));
-        assert!(limitations.iter().all(|name| all.contains(name)));
+            .all(|name| is_driven(name) || limitations.contains(&name.as_str())));
+        assert!(limitations
+            .iter()
+            .all(|name| all.iter().any(|found| found == name)));
     }
 }

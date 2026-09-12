@@ -752,6 +752,99 @@ impl std::fmt::Display for Refusal {
     }
 }
 
+impl Refusal {
+    /// The refusal's wire code: the `refusal` tag serde emits for it.
+    ///
+    /// One exhaustive match, in the crate that owns the enum, because three
+    /// copies of this table had grown up outside it — the telemetry audit
+    /// register, the conformance variant register, and the MCP capability
+    /// surface each maintained their own. Each was individually correct and
+    /// collectively a drift risk: a variant added to two of them and not the
+    /// third produces a refusal that one surface can name and another cannot
+    /// (invariant 27).
+    ///
+    /// The match is exhaustive, so a new variant cannot be added without
+    /// naming it here, and every consumer inherits that guarantee.
+    pub const fn code_name(&self) -> &'static str {
+        match self {
+            Self::RevisionMismatch { .. } => "revisionMismatch",
+            Self::TierTooLow { .. } => "tierTooLow",
+            Self::ReferenceUnlocked { .. } => "referenceUnlocked",
+            Self::UnsupportedBlendMode { .. } => "unsupportedBlendMode",
+            Self::UnsupportedFitMode { .. } => "unsupportedFitMode",
+            Self::UnsupportedCullMode { .. } => "unsupportedCullMode",
+            Self::UnsupportedAlphaMode { .. } => "unsupportedAlphaMode",
+            Self::UnsupportedDepthMode { .. } => "unsupportedDepthMode",
+            Self::UnsupportedPathGradient { .. } => "unsupportedPathGradient",
+            Self::VectorTessellationFailed { .. } => "vectorTessellationFailed",
+            Self::AssetMissing { .. } => "assetMissing",
+            Self::ProtocolMismatch { .. } => "protocolMismatch",
+            Self::InvalidRate { .. } => "invalidRate",
+            Self::PlatformNotCertified { .. } => "platformNotCertified",
+            Self::UnknownTake { .. } => "unknownTake",
+            Self::FrameNotReachable { .. } => "frameNotReachable",
+            Self::MultipleClockDomains { .. } => "multipleClockDomains",
+            Self::Unauthenticated => "unauthenticated",
+            Self::TransportFailed { .. } => "transportFailed",
+            Self::NotImplemented { .. } => "notImplemented",
+            Self::FontMissing { .. } => "fontMissing",
+            Self::FontUrlNotHttps { .. } => "fontUrlNotHttps",
+            Self::FontUrlHasCredentials { .. } => "fontUrlHasCredentials",
+            Self::InvalidFontUrl { .. } => "invalidFontUrl",
+            Self::FontEmbeddingRefused { .. } => "fontEmbeddingRefused",
+            Self::FontPathUnsafe { .. } => "fontPathUnsafe",
+            Self::FontPathOutsideRoot { .. } => "fontPathOutsideRoot",
+            Self::FontFetchHostNotTrusted { .. } => "fontFetchHostNotTrusted",
+            Self::FontFetchAddressDenied { .. } => "fontFetchAddressDenied",
+            Self::FontStylesheetImportDepthExceeded { .. } => "fontStylesheetImportDepthExceeded",
+            Self::FontFetchTooLarge { .. } => "fontFetchTooLarge",
+            Self::FontFetchFailed { .. } => "fontFetchFailed",
+            Self::AdobeFontLicenceRestricted { .. } => "adobeFontLicenceRestricted",
+            Self::InvalidFontData { .. } => "invalidFontData",
+            Self::InvalidColor { .. } => "invalidColor",
+            Self::PlatformDirectoryUnavailable { .. } => "platformDirectoryUnavailable",
+            Self::UnknownPackageFormatVersion { .. } => "unknownPackageFormatVersion",
+            Self::UnsafePackagePath { .. } => "unsafePackagePath",
+            Self::DuplicatePackagePath { .. } => "duplicatePackagePath",
+            Self::InvalidPackageHash { .. } => "invalidPackageHash",
+            Self::PackageEntryMissing { .. } => "packageEntryMissing",
+            Self::PackageEntryUnreadable { .. } => "packageEntryUnreadable",
+            Self::PackageFileLengthMismatch { .. } => "packageFileLengthMismatch",
+            Self::PackageFileHashMismatch { .. } => "packageFileHashMismatch",
+            Self::PackageScenePinMismatch { .. } => "packageScenePinMismatch",
+            Self::PackageAssetNotPackaged { .. } => "packageAssetNotPackaged",
+            Self::ProjectJsonCorrupt { .. } => "projectJsonCorrupt",
+            Self::UnknownProjectSchema { .. } => "unknownProjectSchema",
+            Self::ProjectIdLocationMismatch { .. } => "projectIdLocationMismatch",
+            Self::SceneParseFailed { .. } => "sceneParseFailed",
+            Self::SceneUnknownField { .. } => "sceneUnknownField",
+            Self::SceneFontUnknown { .. } => "sceneFontUnknown",
+            Self::SceneAssetUnknown { .. } => "sceneAssetUnknown",
+            Self::SceneMaterialUnknown { .. } => "sceneMaterialUnknown",
+            Self::MeshMaterialUnassigned { .. } => "meshMaterialUnassigned",
+            Self::MeshModelAssetWrongKind { .. } => "meshModelAssetWrongKind",
+            Self::MeshModelInvalid { .. } => "meshModelInvalid",
+            Self::MeshMaterialElementsMismatch { .. } => "meshMaterialElementsMismatch",
+            Self::MeshMaterialRequiresLight { .. } => "meshMaterialRequiresLight",
+            Self::LightHasNoResponsiveMaterial { .. } => "lightHasNoResponsiveMaterial",
+            Self::SceneActiveCameraUnknown { .. } => "sceneActiveCameraUnknown",
+            Self::UnknownOutputAdapter { .. } => "unknownOutputAdapter",
+            Self::FontStylesheetImportCycle { .. } => "fontStylesheetImportCycle",
+            Self::FontFileReadFailed { .. } => "fontFileReadFailed",
+            Self::FontCacheWriteFailed { .. } => "fontCacheWriteFailed",
+            Self::AssetChunkOutOfOrder { .. } => "assetChunkOutOfOrder",
+            Self::AssetTransferAlreadyComplete { .. } => "assetTransferAlreadyComplete",
+            Self::EmptyAssetTransfer { .. } => "emptyAssetTransfer",
+            Self::AssetHashMismatch { .. } => "assetHashMismatch",
+            Self::MediaTransportUnavailable { .. } => "mediaTransportUnavailable",
+            Self::RundownCursorOutOfRange { .. } => "rundownCursorOutOfRange",
+            Self::RundownEntryUnknown { .. } => "rundownEntryUnknown",
+            Self::AutomationExecutionDeferred { .. } => "automationExecutionDeferred",
+            Self::ProjectNotFound { .. } => "projectNotFound",
+        }
+    }
+}
+
 impl std::error::Error for Refusal {}
 
 /// How urgently a structured refusal must be acted on (0.6). Not everything is
