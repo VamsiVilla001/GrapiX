@@ -1,0 +1,8 @@
+{
+  "id": "reference-rate-30", "name": "30 rate reference", "version": 1,
+  "canvas": { "width": 320, "height": 180, "frameRate": { "num": 30, "den": 1 } }, "timeline": { "durationFrames": 60 }, "dataContext": {}, "assets": [], "fonts": [], "materials": [],
+  "objects": [
+    { "type": "rect", "id": "background", "name": "30 background", "width": 320, "height": 180, "fill": { "type": "solid", "color": { "r": 0.4, "g": 0.1, "b": 0.6, "a": 1, "space": "srgb" } } },
+    { "type": "ellipse", "id": "disc", "name": "30 disc", "x": 70, "y": 30, "width": 180, "height": 120, "fill": { "type": "solid", "color": { "r": 0.9, "g": 0.5, "b": 0.1, "a": 1, "space": "srgb" } } }
+  ]
+}

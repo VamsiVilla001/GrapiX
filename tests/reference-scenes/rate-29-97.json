@@ -1,0 +1,8 @@
+{
+  "id": "reference-rate-29-97", "name": "29.97 rate reference", "version": 1,
+  "canvas": { "width": 320, "height": 180, "frameRate": { "num": 30000, "den": 1001 } }, "timeline": { "durationFrames": 60 }, "dataContext": {}, "assets": [], "fonts": [], "materials": [],
+  "objects": [
+    { "type": "rect", "id": "background", "name": "29.97 background", "width": 320, "height": 180, "fill": { "type": "solid", "color": { "r": 0.1, "g": 0.2, "b": 0.7, "a": 1, "space": "srgb" } } },
+    { "type": "rect", "id": "bar", "name": "29.97 bar", "x": 24, "y": 72, "width": 272, "height": 36, "fill": { "type": "solid", "color": { "r": 1, "g": 0.4, "b": 0.1, "a": 1, "space": "srgb" } } }
+  ]
+}

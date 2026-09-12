@@ -183,11 +183,27 @@ const INITIAL_STATE = {
   "3.11": "done",  // Preview (sRGB) and Program (Rec.709) dual emission; bounded latest-frame slots; drop counters by cause; a stalled preview consumer never blocks program
   "3.12": "done",  // WAL recovery journal: atomic write, schema version, epoch advance on restore, output-inhibited until re-configured; runbook at docs/engine-recovery-runbook.md
   "3.13": "done",  // refusal coverage audit: every Refusal variant driven or given a named limitation; blend and fit modes included; 126 conformance checks pass
+  // Phase 4 — the pixel gate. The instrument, built before anything else
+  // changes pixels.
+  "4.1": "done",   // six reference scenes: colour ramp, safe areas, text, vector, 3D mesh, and every rate family; a coverage test fails the build if a fixed-function blend or fit mode has no reference scene
+  "4.2": "done",   // headless harness: prepares a scene and renders through PreparedScene::frame with no display and no GPU; dependency-free stored-DEFLATE PNG encoder with an own-output round-trip test
+  "4.3": "done",   // baselines committed, and proven deterministic — two captures are byte-identical
+  "4.4": "done",   // `check` reports scene, differing pixel count and worst channel delta, exit non-zero; verified against a real one-channel mutation: "colour-ramp-50: 1 differing pixels; worst channel delta 1". Wired into CI
+  "4.5": "active", // EXTERNAL: Windows-versus-macOS pixel equality needs a macOS host, which does not exist here. Nothing about it is claimed
   // Phase 5 — transport, local.
-  "5.1": "done",   // control plane over a local transport (loopback TCP, not yet named pipe)
+  "5.1": "done",   // control plane over a named pipe (Windows) and a unix domain socket, behind one Endpoint abstraction; one SequenceTracker for every transport, so ordered/acknowledged/sequenced holds identically. Was previously marked done on loopback TCP alone, which the plan's own done-when did not support — corrected. The unix leg is code-complete and unverified: no macOS or Linux host here
   "5.2": "done",   // session/auth/epoch; Program survives a control disconnect
+  "5.3": "done",   // hash preflight plus chunked verified transfer, one client and one server sharing the dialect; republishing three assets with one changed moves only the changed bytes, asserted by counting wire bytes
+  "5.4": "done",   // L0 media slot over a shared mapping: the consumer borrows the producer's pages (asserted by address equality), a stalled consumer drops rather than blocking the producer, and a generation counter checked before and after a read makes a torn frame unobservable
   "5.5": "done",   // locality declared in the capability exchange
-  "5.6": "done"    // conformance suite passes over the real transport AND the real engine
+  "5.6": "done",   // conformance suite passes over the real transport AND the real engine
+  // Phase 6 — Playout service, headless.
+  "6.1": "done",   // published library store: republishing a scene keeps its TakeId and issues a new immutable revision (invariant 30)
+  "6.2": "active", // PARTIAL and named as such: cue, take and clear are intent-only and return the engine-committed frame, and a test asserts the wire carries neither `now` nor `wallClock`. `continue` and `out` do not exist on the control plane, so they are not implemented — no wire message was invented to claim the row
+  "6.3": "done",   // revision pinning: a stale take refuses with RevisionMismatch and leaves Program on the current revision
+  "6.4": "done",   // rundown persisted through gx_fs::write_atomic; the cursor survives a drop and reload
+  "6.5": "done",   // output configuration calls gx_control_plane::capability::live_allowed rather than re-deriving it (invariants 20, 27); a T2 request refuses as TierTooLow naming the actual tier
+  "6.6": "done"    // a matching automation trigger returns AutomationExecutionDeferred carrying the trigger and what it matched — the deferral is a named refusal, never silence
 };
 
 let state = Object.assign({}, INITIAL_STATE);

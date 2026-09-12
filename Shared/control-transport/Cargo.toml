@@ -13,6 +13,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 
+[target.'cfg(windows)'.dependencies]
+interprocess = { workspace = true }
+
 [dev-dependencies]
 gx-mock-engine = { path = "../../mocks/mock-engine" }
 socket2 = "0.6"

@@ -6,12 +6,18 @@
 #![forbid(unsafe_code)]
 
 pub mod package;
+pub mod preflight;
 pub mod publish;
 pub mod store;
 pub mod transfer;
 pub use publish::{
     publish_scene, AssetPublishPeer, AssetPublishServer, PublishClientError, PublishRefusal,
     PublishReply, PublishRequest, MAX_PUBLISH_FRAME_BYTES,
+};
+pub use preflight::{
+    publish_assets, AssetBytes, AssetPublishSummary, AssetTransferClient, AssetTransferClientError,
+    AssetTransferMetrics, AssetTransferReply, AssetTransferRequest, AssetTransferServer,
+    ASSET_TRANSFER_CHUNK_BYTES, MAX_ASSET_FRAME_BYTES,
 };
 pub use store::{content_hash, read_image_geometry, AssetStore, AssetStoreError, ImageGeometry};
 pub use transfer::Transfer;

@@ -22,7 +22,10 @@ use gx_control_plane::capability::{check_clock_domain, check_protocol, live_allo
 use gx_control_plane::intent::{resolve_intent, ClockState, Lead, TakeAt, TakeRequest};
 use gx_control_plane::message::{ClientRequest, EngineReply, OutputConfig};
 use gx_control_plane::peer::{EnginePeer, FaultInjection};
+use gx_asset_plane::Transfer;
 use gx_mock_engine::MockEngine;
+use gx_media_plane::LocalMediaTransport;
+use gx_playout::{evaluate_automation, AutomationTrigger, PublishedScene, Rundown, RundownEntry};
 
 use crate::{expect, Report};
 
@@ -38,6 +41,9 @@ pub fn refusal_audit_suite(report: &mut Report) {
     drive_control_refusals(report);
     drive_contract_refusals(report);
     drive_material_refusals(report);
+    drive_media_refusals(report);
+    drive_asset_refusals(report);
+    drive_playout_refusals(report);
     record_surface_limitations(report);
 }
 
@@ -291,6 +297,130 @@ fn drive_contract_refusals(report: &mut Report) {
     );
 }
 
+fn drive_playout_refusals(report: &mut Report) {
+    let scene = PublishedScene {
+        take_id: TakeId("audit/rundown".into()),
+        revision: Revision(1),
+        document: serde_json::Value::Null,
+    };
+    let rundown = Rundown::new(vec![RundownEntry {
+        id: "opening".into(),
+        scene,
+    }]);
+
+    report.record(
+        PLANE,
+        "RundownCursorOutOfRange is produced for a cursor beyond the sequence",
+        expect(
+            matches!(
+                rundown.at(1),
+                Err(Refusal::RundownCursorOutOfRange { cursor: 1, len: 1 })
+            ),
+            "a cursor beyond the rundown was not refused with its cursor and sequence length",
+        ),
+    );
+    report.record(
+        PLANE,
+        "RundownEntryUnknown is produced for a missing entry identity",
+        expect(
+            matches!(
+                rundown.entry("missing"),
+                Err(Refusal::RundownEntryUnknown { entry_id }) if entry_id == "missing"
+            ),
+            "a missing rundown entry was not refused with its identity",
+        ),
+    );
+    report.record(
+        PLANE,
+        "AutomationExecutionDeferred is produced when an automation trigger matches",
+        expect(
+            matches!(
+                evaluate_automation(
+                    &rundown,
+                    &[AutomationTrigger {
+                        name: "open-sting".into(),
+                        entry_id: "opening".into(),
+                    }]
+                ),
+                Err(Refusal::AutomationExecutionDeferred { trigger, matched })
+                    if trigger == "open-sting" && matched == "opening"
+            ),
+            "a matching automation trigger was silent instead of explicitly deferred",
+        ),
+    );
+}
+
+fn drive_media_refusals(report: &mut Report) {
+    report.record(
+        PLANE,
+        "MediaTransportUnavailable is produced when a local mapping cannot be established",
+        expect(
+            matches!(
+                LocalMediaTransport::establish(0),
+                Err(Refusal::MediaTransportUnavailable { detail }) if detail.contains("capacity")
+            ),
+            "an unavailable local media mapping was not refused as MediaTransportUnavailable",
+        ),
+    );
+}
+
+
+fn drive_asset_refusals(report: &mut Report) {
+    let hash = ContentHash("audit-asset".into());
+    let mut out_of_order = Transfer::new(hash.clone(), 2).expect("non-empty transfer must start");
+    report.record(
+        PLANE,
+        "AssetChunkOutOfOrder is produced for a skipped asset chunk",
+        expect(
+            matches!(
+                out_of_order.accept_chunk(1),
+                Err(Refusal::AssetChunkOutOfOrder {
+                    expected: 0,
+                    received: 1,
+                    ..
+                })
+            ),
+            "a skipped asset chunk was not refused as AssetChunkOutOfOrder",
+        ),
+    );
+    report.record(
+        PLANE,
+        "EmptyAssetTransfer is produced for a zero-chunk asset",
+        expect(
+            matches!(
+                Transfer::new(hash.clone(), 0),
+                Err(Refusal::EmptyAssetTransfer { .. })
+            ),
+            "a zero-chunk asset was not refused as EmptyAssetTransfer",
+        ),
+    );
+    let mut complete = Transfer::new(hash.clone(), 1).expect("one-chunk transfer must start");
+    complete.accept_chunk(0).expect("the first chunk must arrive");
+    report.record(
+        PLANE,
+        "AssetTransferAlreadyComplete is produced for a post-completion chunk",
+        expect(
+            matches!(
+                complete.accept_chunk(1),
+                Err(Refusal::AssetTransferAlreadyComplete { .. })
+            ),
+            "a post-completion asset chunk was not refused as AssetTransferAlreadyComplete",
+        ),
+    );
+    let mut mismatch = Transfer::new(hash.clone(), 1).expect("one-chunk transfer must start");
+    mismatch.accept_chunk(0).expect("the first chunk must arrive");
+    report.record(
+        PLANE,
+        "AssetHashMismatch is produced for bytes under the wrong content address",
+        expect(
+            matches!(
+                mismatch.verify(&ContentHash("other-asset".into())),
+                Err(Refusal::AssetHashMismatch { .. })
+            ),
+            "mismatched asset bytes were not refused as AssetHashMismatch",
+        ),
+    );
+}
 fn drive_material_refusals(report: &mut Report) {
     for mode in BlendMode::ALL {
         let refusal = validate_material(&material_with_blend(mode), &MaterialSupport::none())
@@ -361,7 +491,6 @@ fn blend_check_name(mode: BlendMode) -> &'static str {
         BlendMode::InverseAlphaMask => "blend InverseAlphaMask is refused with its allowed list",
     }
 }
-
 fn fit_check_name(mode: FitMode) -> &'static str {
     match mode {
         FitMode::Stretch => "fit Stretch is refused with its allowed list",
@@ -419,6 +548,14 @@ fn is_driven(variant: &str) -> bool {
             | "SceneUnknownField"
             | "UnknownPackageFormatVersion"
             | "UnsafePackagePath"
+            | "MediaTransportUnavailable"
+            | "AssetChunkOutOfOrder"
+            | "AssetTransferAlreadyComplete"
+            | "EmptyAssetTransfer"
+            | "AssetHashMismatch"
+            | "RundownCursorOutOfRange"
+            | "RundownEntryUnknown"
+            | "AutomationExecutionDeferred"
     )
 }
 
@@ -547,41 +684,6 @@ fn limitations() -> &'static [Limitation] {
         Limitation {
             variant: "ProjectIdLocationMismatch",
             reason: "project-store loading is not an EnginePeer request",
-        },
-        // Phases 5 and 6, in flight. Each of these is replaced by a real
-        // driver as its step lands; a limitation naming an unbuilt step is
-        // honest, and leaving one here after the step exists is not.
-        Limitation {
-            variant: "AssetChunkOutOfOrder",
-            reason: "the chunked transfer server is build-plan step 5.3",
-        },
-        Limitation {
-            variant: "AssetTransferAlreadyComplete",
-            reason: "the chunked transfer server is build-plan step 5.3",
-        },
-        Limitation {
-            variant: "EmptyAssetTransfer",
-            reason: "the chunked transfer server is build-plan step 5.3",
-        },
-        Limitation {
-            variant: "AssetHashMismatch",
-            reason: "the chunked transfer server is build-plan step 5.3",
-        },
-        Limitation {
-            variant: "MediaTransportUnavailable",
-            reason: "the shared-memory media transport is build-plan step 5.4",
-        },
-        Limitation {
-            variant: "RundownCursorOutOfRange",
-            reason: "the rundown and sequence engine is build-plan step 6.4",
-        },
-        Limitation {
-            variant: "RundownEntryUnknown",
-            reason: "the rundown and sequence engine is build-plan step 6.4",
-        },
-        Limitation {
-            variant: "AutomationExecutionDeferred",
-            reason: "automation trigger evaluation is build-plan step 6.6",
         },
     ]
 }

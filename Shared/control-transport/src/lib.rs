@@ -1,22 +1,13 @@
 //! protocol v3 over a stream: the L0 control transport.
 //!
-//! ADR-001 gives the control plane a named pipe or Unix socket at L0 and
-//! QUIC/TLS at L1. This crate is the L0 binding: loopback TCP on 4400, with
-//! the framing and dispatch shared by both halves.
+//! ADR-001 gives the control plane named-pipe IPC on Windows, Unix-domain
+//! sockets on macOS/Linux, and QUIC/TLS at L1. TCP remains available for
+//! existing loopback callers, but local IPC is selected explicitly through
+//! [`Server::bind_local`] and [`Client::connect_local`].
 //!
-//! **Why both halves live here.** ADR-001 places protocol clients in `Shared`.
-//! The server is the same wire format read in the other direction, and two
-//! copies of framing plus dispatch would be exactly the parallel
-//! implementation invariant 27 forbids. Nothing in this crate contains product
-//! logic: the server is generic over `EnginePeer` and has never heard of a
-//! scene.
-//!
-//! **What this is not.** It is TCP on loopback, not a named pipe. The
-//! difference matters for L0 security posture — a pipe can carry an OS-level
-//! peer identity where loopback TCP cannot — and it is recorded as a gap
-//! rather than dressed up. What the choice buys today is one code path across
-//! Windows and Unix, and the bind policy in `gx_control_plane::bind` refusing
-//! anything that is not loopback without a token.
+//! The framing, acknowledgement cache and `SequenceTracker` dispatch are
+//! shared for every endpoint. Locality is an optimisation, never a second
+//! control-plane protocol (invariant 13).
 
 #![forbid(unsafe_code)]
 
@@ -27,15 +18,28 @@ pub mod server;
 pub use auth::{Claims, ClaimsError, Token, TokenError};
 pub use client::{Client, Reconciliation, REQUEST_TIMEOUT};
 pub use server::{ServeError, Server};
+pub use gx_control_plane::bind::Endpoint;
 
 #[cfg(test)]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    #[cfg(windows)]
+    use std::io::{Read, Write};
+    #[cfg(windows)]
+    use std::path::PathBuf;
+    #[cfg(windows)]
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     use gx_contracts::{DeviceTier, RationalRate, ReferenceState, Refusal, Revision, TakeId};
     use gx_control_plane::intent::{ClearRequest, TakeAt, TakeRequest};
-    use gx_control_plane::message::{ClientRequest, EngineEvent, EngineReply, OutputConfig};
+    use gx_control_plane::message::{ClientRequest, EngineEvent, EngineReply, Envelope, OutputConfig};
     use gx_control_plane::peer::{EnginePeer, FaultInjection};
+    #[cfg(windows)]
+    use gx_control_plane::bind::connect_endpoint;
+    #[cfg(windows)]
+    use gx_control_plane::framing::{decode_body, decode_length, encode, LENGTH_PREFIX};
+    #[cfg(windows)]
+    use gx_control_plane::sequence::{MessageId, Sequence};
     use gx_mock_engine::MockEngine;
 
     use super::*;
@@ -217,6 +221,95 @@ mod tests {
         assert!(
             seen_by_b.program.is_some(),
             "the second client must see Program state set by the first"
+        );
+    }
+    #[cfg(windows)]
+    fn local_pipe() -> PathBuf {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        PathBuf::from(format!(
+            r"\\.\pipe\grapix-control-transport-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
+
+    #[cfg(windows)]
+    fn write_envelope(
+        stream: &mut gx_control_plane::bind::ControlStream,
+        envelope: &Envelope<ClientRequest>,
+    ) {
+        let frame = encode(envelope).expect("encode request");
+        stream.write_all(&frame).expect("write request");
+        stream.flush().expect("flush request");
+    }
+
+    #[cfg(windows)]
+    fn read_reply(stream: &mut gx_control_plane::bind::ControlStream) -> Envelope<EngineReply> {
+        loop {
+            let mut prefix = [0u8; LENGTH_PREFIX];
+            stream.read_exact(&mut prefix).expect("read reply prefix");
+            let len = decode_length(prefix).expect("valid reply length");
+            let mut body = vec![0; len];
+            stream.read_exact(&mut body).expect("read reply body");
+            let envelope: Envelope<serde_json::Value> = decode_body(&body).expect("decode envelope");
+            if envelope.id.is_reply() {
+                return Envelope::new(
+                    envelope.id,
+                    envelope.seq,
+                    serde_json::from_value(envelope.payload).expect("decode reply"),
+                );
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn named_pipe_round_trip_acknowledges_duplicates_and_closes_on_a_gap() {
+        let pipe = local_pipe();
+        let mut engine = MockEngine::new();
+        engine.publish(TakeId("pipe-take".into()), Revision(1));
+        let server = Server::bind_local(&pipe, None, engine).expect("bind owner-only named pipe");
+        server.serve_in_background();
+
+        let mut client = Client::connect_local(&pipe).expect("connect local client");
+        assert!(matches!(client.handle(ClientRequest::Status), EngineReply::Status(_)));
+        drop(client);
+
+        let endpoint = Endpoint::Local(pipe);
+        let mut raw = connect_endpoint(&endpoint).expect("connect raw local client");
+        let take = Envelope::new(
+            MessageId("req.take".into()),
+            Sequence(1),
+            ClientRequest::Take(TakeRequest {
+                take_id: TakeId("pipe-take".into()),
+                revision: Revision(1),
+                at: TakeAt::NextOpportunity,
+            }),
+        );
+        write_envelope(&mut raw, &take);
+        let first = read_reply(&mut raw);
+        assert!(matches!(first.payload, EngineReply::Taken(ref committed) if committed.frame == 1));
+
+        write_envelope(&mut raw, &take);
+        let duplicate = read_reply(&mut raw);
+        assert_eq!(duplicate.seq, first.seq, "a duplicate must receive its recorded acknowledgement");
+        assert!(matches!(duplicate.payload, EngineReply::Taken(ref committed) if committed.frame == 1));
+
+        let status = Envelope::new(MessageId("req.status".into()), Sequence(2), ClientRequest::Status);
+        write_envelope(&mut raw, &status);
+        let status = read_reply(&mut raw);
+        assert!(
+            matches!(status.payload, EngineReply::Status(ref state)
+                if state.program.as_ref().is_some_and(|program| program.committed_frame == 1)),
+            "a duplicate take must leave only its original Program commit"
+        );
+
+        let gap = Envelope::new(MessageId("req.gap".into()), Sequence(4), ClientRequest::Status);
+        write_envelope(&mut raw, &gap);
+        let mut byte = [0u8; 1];
+        assert!(
+            !matches!(raw.read(&mut byte), Ok(read) if read > 0),
+            "a sequence gap must close the pipe"
         );
     }
 }

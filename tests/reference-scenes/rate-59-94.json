@@ -1,0 +1,8 @@
+{
+  "id": "reference-rate-59-94", "name": "59.94 rate reference", "version": 1,
+  "canvas": { "width": 320, "height": 180, "frameRate": { "num": 60000, "den": 1001 } }, "timeline": { "durationFrames": 120 }, "dataContext": {}, "assets": [], "fonts": [], "materials": [],
+  "objects": [
+    { "type": "rect", "id": "background", "name": "59.94 background", "width": 320, "height": 180, "fill": { "type": "solid", "color": { "r": 0.7, "g": 0.1, "b": 0.2, "a": 1, "space": "srgb" } } },
+    { "type": "ellipse", "id": "disc", "name": "59.94 disc", "x": 110, "y": 40, "width": 100, "height": 100, "fill": { "type": "solid", "color": { "r": 0.1, "g": 0.9, "b": 0.8, "a": 1, "space": "srgb" } } }
+  ]
+}

@@ -838,6 +838,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "doctest-file"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2db04e74f0a9a93103b50e90b96024c9b2bdca8bce6a632ec71b88736d3d359"
+
+[[package]]
 name = "document-features"
 version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1669,6 +1675,7 @@ dependencies = [
  "gx-control-transport",
  "gx-media-plane",
  "gx-mock-engine",
+ "gx-playout",
  "serde_json",
 ]
 
@@ -1700,9 +1707,11 @@ name = "gx-control-plane"
 version = "0.1.0"
 dependencies = [
  "gx-contracts",
+ "interprocess",
  "serde",
  "serde_json",
  "ts-rs",
+ "widestring",
 ]
 
 [[package]]
@@ -1713,6 +1722,7 @@ dependencies = [
  "gx-control-plane",
  "gx-mock-engine",
  "hmac",
+ "interprocess",
  "serde",
  "serde_json",
  "sha2",
@@ -1762,6 +1772,7 @@ name = "gx-media-plane"
 version = "0.1.0"
 dependencies = [
  "gx-contracts",
+ "memmap2",
  "serde",
  "ts-rs",
 ]
@@ -1794,6 +1805,26 @@ dependencies = [
  "gx-contracts",
  "gx-control-plane",
  "gx-control-transport",
+]
+
+[[package]]
+name = "gx-pixel-gate"
+version = "0.1.0"
+dependencies = [
+ "gx-contracts",
+ "gx-render-worker",
+ "sha2",
+]
+
+[[package]]
+name = "gx-playout"
+version = "0.1.0"
+dependencies = [
+ "gx-contracts",
+ "gx-control-plane",
+ "gx-fs",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2031,7 +2062,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.58.0",
+ "windows-core 0.61.2",
 ]
 
 [[package]]
@@ -2234,6 +2265,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c033f80b2c113cdf91ab7a33faa9cbc014726dcad99880c8609af2a370edf37d"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "interprocess"
+version = "2.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6cb02ffbf25e8ef0f4a95bff054eef75f6d1bf16919474cf2caa63b21997478a"
+dependencies = [
+ "doctest-file",
+ "libc",
+ "recvmsg",
+ "widestring",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3575,6 +3619,12 @@ dependencies = [
  "font-types 0.12.5",
  "once_cell",
 ]
+
+[[package]]
+name = "recvmsg"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3edd4d5d42c92f0a659926464d4cce56b562761267ecf0f469d85b7de384175"
 
 [[package]]
 name = "redox_syscall"
@@ -5733,6 +5783,12 @@ dependencies = [
  "thiserror 2.0.20",
  "web-sys",
 ]
+
+[[package]]
+name = "widestring"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
 
 [[package]]
 name = "winapi"

@@ -1491,3 +1491,115 @@ concurrently — which was the original request.
   listed, not manipulated.
 - Playout's web layer was built by a subagent and verified by driving it;
   its CSS has not been reviewed line by line.
+
+---
+
+## 2026-09-12 — phases 4, 5 and 6, five slices in parallel
+
+Requested: start phases 4, 5 and 6. Five genuinely independent slices ran
+concurrently; the shared groundwork ran first, inline, because it could not.
+
+**The prerequisite was the refusal enum.** An earlier session lost time to two
+agents adding `Refusal` variants at once. So all eight variants these phases
+needed were added first — chunked-transfer failures, media transport
+unavailability, rundown cursor and entry faults, automation deferral — each
+with an interim `Limitation` in the refusal audit naming the step that would
+drive it. Every slice then deleted its own limitation and added a real driver.
+Conformance went 126 → 134 passing checks: the new refusals are driven, not
+excused.
+
+### Phase 4 — the pixel gate, and it bites
+
+Six reference scenes covering the colour ramp, safe areas, text, vector, a 3D
+mesh and every rate family. A coverage test holds the set against
+`MaterialSupport::fixed_function()`, so adding a supported blend or fit mode
+without a reference scene fails the build rather than going silently ungated.
+
+The harness renders headlessly through `PreparedScene::frame` with no display
+and no GPU, and writes PNG through a hand-written stored-DEFLATE encoder that
+adds no dependency.
+
+**Verified by mutation, not by assertion.** Flipping one channel of one pixel
+in a committed baseline — 255 to 254 — and running the gate:
+`colour-ramp-50: 1 differing pixels; worst channel delta 1`, exit 1. That is
+the milestone's claim ("nothing after this changes pixels unmeasured")
+actually demonstrated.
+
+A limit worth recording: the PNG decoder reads only stored DEFLATE blocks,
+which is its own encoder's output. That is sufficient — the gate only ever
+compares baselines it wrote — but it is not a general PNG reader, and a first
+attempt to mutate a baseline with ordinary zlib compression was rejected as
+"compressed DEFLATE blocks are unsupported" rather than silently passing.
+
+### 5.1 — a false `done`, corrected
+
+The tracker said 5.1 was **done**. The plan's done-when is "control plane over
+named pipe and unix socket". The transport was loopback TCP, and
+`progress.html`'s own comment admitted "not yet named pipe" while claiming the
+row. That is precisely what LLM-GOVERNANCE exists to prevent, so it went back
+into scope rather than being left standing.
+
+Now: a named pipe on Windows and a unix domain socket elsewhere, behind one
+`Endpoint`, with `Server::bind_local` / `Client::connect_local` added rather
+than existing signatures changed. Every transport shares one `SequenceTracker`,
+so ordered/acknowledged/sequenced holds identically — the guarantee is not
+re-implemented per platform (invariant 27). 79 tests pass, including a pipe
+round trip, duplicate suppression and gap detection.
+
+The unix leg is **code-complete and unverified**: there is no macOS or Linux
+host here. It is written down that way rather than claimed.
+
+### 5.3 — and a refusal-naming fault found on the way
+
+`Transfer` was raising `FrameNotReachable` for an out-of-order *chunk*,
+`NotImplemented` for a zero-chunk transfer, and `AssetMissing` for a hash
+mismatch. A chunk index and a Program frame are different quantities; reusing
+one refusal for both tells an operator the wrong thing (invariant 17). Fixed
+to the four properly named variants.
+
+The done-when — "re-publish moves no unchanged bytes" — is tested as such:
+`republish_sends_only_the_changed_asset_bytes` counts wire bytes and asserts
+the unchanged assets contribute zero.
+
+### 5.4 — no-copy, proven by address
+
+A shared mapping via `memmap2`, double-buffered with a generation counter
+checked before and after each read, so a torn frame is unobservable. The
+producer's `try_write` drops as `ConsumerBusy` rather than waiting, which is
+what keeps invariant 14: no media path influences Program cadence.
+
+"Frames reach a consumer with no copy" is asserted by comparing the producer's
+and consumer's byte addresses, not by inspection.
+
+### Phase 6 — Playout service, and one honest Partial
+
+6.1, 6.3, 6.4, 6.5 and 6.6 are Implemented, each with a test that would fail if
+the property broke. 6.5 calls `live_allowed` rather than re-deriving the rule,
+because a second implementation of that decision is how a client and an engine
+come to disagree about what is live (invariants 20, 27).
+
+**6.2 is Partial and says so.** The plan names cue, take, continue, out and
+clear. `ClientRequest` carries Cue, Take and Clear only. Rather than invent
+wire messages to make a row look finished, the two that do not exist are named
+as not implemented.
+
+### Verified by execution
+
+312 Rust tests pass. Conformance 134 passed, 0 failed, 8 skipped.
+`check:boundaries`, `codegen:check` (137 files current), `typecheck` and
+`test:ts` all clean. Pixel gate passes clean and fails on a one-pixel change.
+
+Three dependencies entered the tree and are recorded in
+`docs/dependency-policy.md` with reasons: `memmap2` (media mapping),
+`interprocess` and `widestring` (local transport). 0BSD was added to the
+accepted licence list, being public-domain-equivalent and strictly more
+permissive than MIT.
+
+### Not done, and not claimed
+
+- **4.5 is an External gate.** Windows-versus-macOS pixel equality needs a
+  macOS host. Nothing about it is claimed.
+- **5.1's unix leg has never executed.** Windows only.
+- **6.2 is Partial**: `continue` and `out` have no control-plane message.
+- The `gx-engine-host` integration tests are still excluded from the workspace
+  run — a pre-existing Windows process-cleanup issue, unrelated to this work.

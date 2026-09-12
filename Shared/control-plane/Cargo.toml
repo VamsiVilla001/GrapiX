@@ -11,5 +11,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 ts-rs = { workspace = true }
 
+
+[target.'cfg(windows)'.dependencies]
+interprocess = { workspace = true }
+widestring = { workspace = true }
 [dev-dependencies]
 serde_json = { workspace = true }

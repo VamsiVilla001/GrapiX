@@ -26,9 +26,7 @@ pub struct Transfer {
 impl Transfer {
     pub fn new(hash: ContentHash, total_chunks: u32) -> Result<Self, Refusal> {
         if total_chunks == 0 {
-            return Err(Refusal::NotImplemented {
-                what: "zero-chunk transfer".to_string(),
-            });
+            return Err(Refusal::EmptyAssetTransfer { hash });
         }
         Ok(Self {
             hash,
@@ -59,14 +57,15 @@ impl Transfer {
     /// buffering would mean holding unverified bytes with nowhere to put them.
     pub fn accept_chunk(&mut self, index: u32) -> Result<(), Refusal> {
         if self.is_complete() {
-            return Err(Refusal::NotImplemented {
-                what: "chunk after completion".to_string(),
+            return Err(Refusal::AssetTransferAlreadyComplete {
+                hash: self.hash.clone(),
             });
         }
         if index != self.next_chunk {
-            return Err(Refusal::FrameNotReachable {
-                requested: u64::from(index),
-                earliest: u64::from(self.next_chunk),
+            return Err(Refusal::AssetChunkOutOfOrder {
+                hash: self.hash.clone(),
+                expected: self.next_chunk,
+                received: index,
             });
         }
         self.next_chunk += 1;
@@ -96,8 +95,9 @@ impl Transfer {
             Ok(())
         } else {
             self.state = TransferState::HashMismatch;
-            Err(Refusal::AssetMissing {
-                hash: self.hash.clone(),
+            Err(Refusal::AssetHashMismatch {
+                expected: self.hash.clone(),
+                actual: computed.clone(),
             })
         }
     }
@@ -160,7 +160,11 @@ mod tests {
         let err = t.accept_chunk(3).expect_err("a skipped chunk must refuse");
         assert!(matches!(
             err,
-            Refusal::FrameNotReachable { earliest: 1, .. }
+            Refusal::AssetChunkOutOfOrder {
+                expected: 1,
+                received: 3,
+                ..
+            }
         ));
         assert_eq!(
             t.resume_from(),
@@ -178,7 +182,7 @@ mod tests {
         let err = t
             .verify(&hash("something-else"))
             .expect_err("a mismatched hash must refuse");
-        assert!(matches!(err, Refusal::AssetMissing { .. }));
+        assert!(matches!(err, Refusal::AssetHashMismatch { .. }));
         assert_eq!(t.state(), TransferState::HashMismatch);
         assert!(
             !t.may_promote(),
@@ -209,11 +213,22 @@ mod tests {
     }
 
     #[test]
-    fn a_chunk_after_completion_is_refused() {
+    fn a_chunk_after_completion_is_refused_by_name() {
         let mut t = transfer();
         for i in 0..4 {
             t.accept_chunk(i).unwrap();
         }
-        assert!(t.accept_chunk(4).is_err());
+        assert!(matches!(
+            t.accept_chunk(4),
+            Err(Refusal::AssetTransferAlreadyComplete { .. })
+        ));
+    }
+
+    #[test]
+    fn a_zero_chunk_transfer_is_refused_by_name() {
+        assert!(matches!(
+            Transfer::new(hash("empty"), 0),
+            Err(Refusal::EmptyAssetTransfer { .. })
+        ));
     }
 }

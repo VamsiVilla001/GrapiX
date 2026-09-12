@@ -1,0 +1,17 @@
+[package]
+name = "gx-playout"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "gx_playout"
+path = "src/lib.rs"
+
+[dependencies]
+gx-contracts = { workspace = true }
+gx-control-plane = { workspace = true }
+gx-fs = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

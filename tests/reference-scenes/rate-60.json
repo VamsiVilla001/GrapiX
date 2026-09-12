@@ -1,0 +1,8 @@
+{
+  "id": "reference-rate-60", "name": "60 rate reference", "version": 1,
+  "canvas": { "width": 320, "height": 180, "frameRate": { "num": 60, "den": 1 } }, "timeline": { "durationFrames": 120 }, "dataContext": {}, "assets": [], "fonts": [], "materials": [],
+  "objects": [
+    { "type": "rect", "id": "background", "name": "60 background", "width": 320, "height": 180, "fill": { "type": "solid", "color": { "r": 0.1, "g": 0.4, "b": 0.5, "a": 1, "space": "srgb" } } },
+    { "type": "shape", "id": "diamond", "name": "60 vector", "x": 120, "y": 35, "fill": { "type": "solid", "color": { "r": 0.9, "g": 0.2, "b": 0.5, "a": 1, "space": "srgb" } }, "path": { "closed": true, "vertices": [ { "x": 40, "y": 0 }, { "x": 80, "y": 55 }, { "x": 40, "y": 110 }, { "x": 0, "y": 55 } ], "inTangents": [ { "x": 0, "y": 0 }, { "x": 0, "y": 0 }, { "x": 0, "y": 0 }, { "x": 0, "y": 0 } ], "outTangents": [ { "x": 0, "y": 0 }, { "x": 0, "y": 0 }, { "x": 0, "y": 0 }, { "x": 0, "y": 0 } ] } }
+  ]
+}

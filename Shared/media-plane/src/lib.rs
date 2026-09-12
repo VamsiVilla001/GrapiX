@@ -5,7 +5,11 @@
 
 #![forbid(unsafe_code)]
 
+pub mod shared;
 pub mod slot;
+pub use shared::{
+    LocalMediaConsumer, LocalMediaProducer, LocalMediaTransport, PublishDisposition, SharedFrame,
+};
 pub use slot::{DropCause, LatestFrameSlot};
 
 use gx_contracts::{Locality, MediaCodec};

@@ -229,6 +229,33 @@ impl AssetStore {
         self.cache_directory.join(&hash.0)
     }
 
+    /// Whether the cache holds bytes that still verify as this content address.
+    pub fn contains(&self, hash: &ContentHash) -> Result<bool, AssetStoreError> {
+        let path = self.cache_path(hash);
+        Ok(path.is_file() && hash_file(&path)? == *hash)
+    }
+
+    /// Promote a complete transfer only after checking its declared address.
+    pub fn promote_verified(
+        &self,
+        expected: &ContentHash,
+        bytes: &[u8],
+    ) -> Result<(), AssetStoreError> {
+        let actual = content_hash(bytes);
+        if actual != *expected {
+            return Err(Refusal::AssetHashMismatch {
+                expected: expected.clone(),
+                actual,
+            }
+            .into());
+        }
+        // Verification precedes the atomic write so no caller can create a
+        // cache filename that asserts bytes were checked when they were not
+        // (invariant 28).
+        self.store_bytes(bytes)?;
+        Ok(())
+    }
+
     fn store_bytes(&self, bytes: &[u8]) -> Result<ContentHash, AssetStoreError> {
         let expected = content_hash(bytes);
         let path = self.cache_path(&expected);
