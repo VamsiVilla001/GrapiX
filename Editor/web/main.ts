@@ -88,6 +88,19 @@ import {
   MAX_HISTORY,
   type SceneSession,
 } from "../src/workspace";
+import { sizeCanvasForRatio, watchDevicePixelRatio } from "../src/dpi";
+import { probeWebGpu, summariseGpuReport, type GpuReport } from "../src/gpu-probe";
+import {
+  allPanels,
+  defaultLayout,
+  isRefused as isLayoutRefused,
+  movePanel,
+  persistLayout,
+  restoreLayout,
+  REGIONS,
+  type Layout,
+  type RegionId,
+} from "../src/workspace-layout";
 import { phaseAddress } from "../src/timeline/phases";
 import { keyId, parseKeyId, timelineModel, type TimelineModel } from "../src/timeline/model";
 import {
@@ -333,6 +346,10 @@ let playback:
       totalRenderMs: number;
     }
   | undefined;
+
+/** The WebGPU measurement from startup (11.2), kept so the probe result is
+ *  readable from the running app rather than only in the log. */
+let gpuReport: GpuReport | undefined;
 let autoKey = false;
 /** One-gesture-per-entry history over whole documents. Whole-scene snapshots
  *  are simple and correct: every edit already produces a new `SceneDocument`,
@@ -1116,6 +1133,11 @@ function paintTimeline(model: TimelineModel): void {
     phases: scene?.timeline.phases ?? [],
     ...(graphTrack === undefined ? {} : { graphTrack }),
   };
+  // Every layer gets a backing store in *device* pixels and a transform that
+  // keeps the drawing code in CSS pixels (ADR-0002 B.2). Sized here rather
+  // than at creation because the ratio changes while the app runs — a window
+  // dragged to a 125% monitor must not keep a 100% backing store.
+  const ratio = window.devicePixelRatio;
   for (const layer of dirty) {
     const canvas = timelineLayers[layer];
     const context = canvas.getContext("2d");
@@ -1125,6 +1147,10 @@ function paintTimeline(model: TimelineModel): void {
       log(`timeline layer ${layer} has no 2D context`, "bad");
       continue;
     }
+    sizeCanvasForRatio(canvas, timelineViewport.width, timelineViewport.height, ratio);
+    // `setTransform` rather than `scale`: assigning `canvas.width` resets the
+    // transform, and `scale` would compound across paints that did not.
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
     paintLayer(context as unknown as DrawingContext, layer, state);
   }
 }
@@ -3002,6 +3028,18 @@ async function start(): Promise<void> {
   window.addEventListener("resize", () => {
     if (scene) renderTimeline(scene);
   });
+  // B.2: recompute on a scale-factor change, never cache the ratio at
+  // startup. A browser has no `ScaleFactorChanged`, so the ratio is observed
+  // through a re-arming media query — see `Editor/src/dpi.ts` for why arming
+  // it once would catch only the first monitor move.
+  watchDevicePixelRatio(window, (ratio) => {
+    if (!scene) return;
+    // The document is untouched: a 1920×1080 scene is 1920×1080 on any
+    // monitor. Only the backing stores and the raster change.
+    renderTimeline(scene);
+    viewport?.render();
+    log(`display scale changed to ${Math.round(ratio * 100)}%`);
+  });
   ui.undo.addEventListener("click", () => undo());
   ui.redo.addEventListener("click", () => redo());
   ui.previewPlay.addEventListener("click", () => togglePreview());
@@ -3060,6 +3098,14 @@ async function start(): Promise<void> {
     setSelection([]);
   });
 
+  // 11.2: measure WebGPU once at startup and say what it means for the WASM
+  // fallback. Recorded rather than acted on — this decides a later design
+  // question, it does not change how the Editor draws today.
+  gpuReport = await probeWebGpu(
+    (navigator as Navigator & { gpu?: Parameters<typeof probeWebGpu>[0] }).gpu,
+  );
+  log(summariseGpuReport(gpuReport), gpuReport.kind === "available" ? "good" : "bad");
+
   try {
     animationSurface = await invoke<AnimationSurface>("cmd_animation_surface");
   } catch (error) {
@@ -3069,6 +3115,7 @@ async function start(): Promise<void> {
   await loadMotionLibrary();
   await loadObjectKinds();
   await loadProjects();
+  applyStoredLayout();
 
   try {
     ui.endpoint.value = await invoke<string>("cmd_default_endpoint");
@@ -3080,6 +3127,79 @@ async function start(): Promise<void> {
   ui.sceneId.value = "untitled";
   ui.sceneName.value = "Untitled";
   await newScene();
+}
+
+// ---------------------------------------------------------------------------
+// Dockable workspace (11.5). The model in `workspace-layout.ts` decides where
+// panels belong; this moves the DOM to match and writes the result back.
+//
+// The arrangement itself is provisional until the 9.4 card sort exists — see
+// `PROVISIONAL_DEFAULT_LAYOUT`.
+// ---------------------------------------------------------------------------
+
+let layout: Layout = defaultLayout();
+
+/// Every panel the markup actually carries, addressed by `data-panel`.
+///
+/// Read from the DOM rather than restated in TypeScript so a panel added to
+/// the markup cannot be silently absent from the workspace model.
+function panelsInMarkup(): string[] {
+  return Array.from(document.querySelectorAll<HTMLElement>("[data-panel]")).map(
+    (element) => element.dataset.panel!,
+  );
+}
+
+function regionElement(region: RegionId): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`.dock-region[data-region="${region}"]`);
+}
+
+/// Move the DOM to match the layout.
+function renderLayout(): void {
+  for (const region of REGIONS) {
+    const host = regionElement(region);
+    if (!host) continue;
+    for (const panel of layout.regions[region].panels) {
+      const element = document.querySelector<HTMLElement>(`[data-panel="${panel}"]`);
+      // A panel named by the layout but absent from the markup was already
+      // reported by `restoreLayout`; skipping quietly here is correct because
+      // the reason has been given once. `element !== host` guards the case
+      // where a container is also addressable as a panel — appending a region
+      // into itself throws and takes the shell with it.
+      if (element && element !== host && element.parentElement !== host) host.append(element);
+    }
+    host.hidden = layout.regions[region].panels.length === 0;
+    host.classList.toggle("collapsed", layout.regions[region].collapsed);
+  }
+}
+
+function applyStoredLayout(): void {
+  const restored = restoreLayout(window.localStorage, panelsInMarkup());
+  layout = restored.layout;
+  // Every reconciliation note is surfaced. A panel that moved or vanished
+  // because a stored layout said so is exactly the kind of change an author
+  // would otherwise be left to discover (invariant 18).
+  for (const note of restored.notes) log(`workspace layout: ${note}`);
+  renderLayout();
+}
+
+/// Dock a panel into a region, reporting any refusal by name.
+function dockPanel(panel: string, region: RegionId, index?: number): void {
+  const next = movePanel(layout, panel, region, index);
+  if (isLayoutRefused(next)) {
+    log(next.refused, "bad");
+    return;
+  }
+  layout = next;
+  persistLayout(window.localStorage, layout);
+  renderLayout();
+  log(`moved ${panel} to ${region}`, "good");
+}
+
+function resetLayout(): void {
+  layout = defaultLayout();
+  persistLayout(window.localStorage, layout);
+  renderLayout();
+  log("workspace layout reset to the default", "good");
 }
 
 void start();

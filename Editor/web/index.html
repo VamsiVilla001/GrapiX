@@ -52,8 +52,12 @@
       <nav id="scene-tabs" class="scene-tabs" aria-label="Open scenes"></nav>
     </header>
 
+    <!-- Dockable workspace (11.5). Panels are addressed by `data-panel` and
+         moved between these regions by `workspace-layout.ts`. The arrangement
+         is provisional until the 9.4 card sort exists. -->
     <main class="workspace">
-      <section class="viewport-pane">
+      <aside class="dock-region" data-region="left" hidden></aside>
+      <section class="viewport-pane" data-panel="viewport">
         <div class="pane-head">
           <h2>Viewport</h2>
           <span id="canvas-size" class="meta"></span>
@@ -77,8 +81,8 @@
         </p>
       </section>
 
-      <aside class="inspector">
-        <section class="panel">
+      <aside class="inspector dock-region" data-region="right">
+        <section data-panel="scene-manager" class="panel">
           <div class="panel-title-row">
             <h2>Project scenes</h2>
             <button id="project-refresh" type="button">Refresh</button>
@@ -99,7 +103,7 @@
           </p>
         </section>
 
-        <section class="panel">
+        <section data-panel="object-manager" class="panel">
           <h2>Objects</h2>
           <!-- Object lifecycle (11.18). The kind list is read from Rust so the
                menu cannot offer a kind `create_object` would refuse. -->
@@ -121,36 +125,36 @@
           <p id="object-empty" class="empty">No objects in this scene.</p>
         </section>
 
-        <section class="panel">
+        <section data-panel="inspector" class="panel">
           <h2>Inspector</h2>
           <!-- Type-aware, and Mixed across a multi-selection (11.9). -->
           <div id="inspector-mount" class="panel-mount"></div>
         </section>
-        <section class="panel">
+        <section data-panel="fonts" class="panel">
           <h2>Fonts</h2>
           <div id="font-mount" class="asset-manager-mount"></div>
           <p id="font-empty" class="empty">No fonts in this scene.</p>
         </section>
 
-        <section class="panel">
+        <section data-panel="text-styles" class="panel">
           <h2>Text styles</h2>
           <div id="text-style-mount" class="asset-manager-mount"></div>
           <p id="text-style-empty" class="empty">No text styles in this scene.</p>
         </section>
 
-        <section class="panel">
+        <section data-panel="materials" class="panel">
           <h2>Materials</h2>
           <div id="material-mount" class="asset-manager-mount"></div>
           <p id="material-empty" class="empty">No materials in this scene.</p>
         </section>
 
-        <section class="panel">
+        <section data-panel="assets" class="panel">
           <h2>Assets</h2>
           <div id="asset-mount" class="asset-manager-mount"></div>
           <p id="asset-empty" class="empty">No assets in this scene.</p>
         </section>
 
-        <section class="panel" id="take-page-panel">
+        <section data-panel="take-page" class="panel" id="take-page-panel">
           <h2>Take page</h2>
           <p class="panel-note">
             Fill only the fields this template declares. Preview and saved pages
@@ -177,7 +181,7 @@
           </div>
         </section>
 
-        <section class="panel" id="animation-panel">
+        <section data-panel="animation" class="panel" id="animation-panel">
           <div class="panel-title-row">
             <h2>Animation</h2>
             <button id="preview-play" type="button" aria-pressed="false">Play</button>
@@ -206,7 +210,7 @@
         </section>
 
 
-        <section class="panel">
+        <section data-panel="bindings" class="panel">
           <h2>Data bindings</h2>
           <!-- Object properties and scene data paths share one semantic tree
                with the agent surface. Bindings are authored here; resolution
@@ -214,14 +218,14 @@
           <div id="bindings-mount" class="panel-mount"></div>
         </section>
 
-        <section class="panel" id="control-panel">
+        <section data-panel="control-contract" class="panel" id="control-panel">
           <h2>Template controls</h2>
           <!-- Declared here, filled later by Take Pages: the author controls
                exactly which object properties an operator may drive. -->
           <div id="control-mount" class="control-contract-mount"></div>
         </section>
 
-        <section class="panel" id="unsupported-panel" hidden>
+        <section data-panel="unsupported" class="panel" id="unsupported-panel" hidden>
           <h2>Not drawn by this preview</h2>
           <ul id="unsupported-list" class="reason-list"></ul>
           <p class="panel-note">
@@ -230,7 +234,7 @@
           </p>
         </section>
 
-        <section class="panel">
+        <section data-panel="publish" class="panel">
           <h2>Publish</h2>
           <label class="field">
             <span class="label">Asset plane</span>
@@ -246,7 +250,11 @@
       </aside>
     </main>
 
-    <section class="timeline-bar" aria-label="Timeline">
+    <!-- The bottom dock region. The timeline is the panel inside it, not the
+         region itself: a region is a container panels move between, and an
+         element that were both would be asked to contain itself. -->
+    <div class="dock-region" data-region="bottom">
+      <section class="timeline-bar" data-panel="timeline" aria-label="Timeline">
       <div class="timeline-head">
         <h2>Timeline</h2>
         <span id="timeline-meta" class="meta"></span>
@@ -294,6 +302,7 @@
       </div>
       <div id="timeline-mount" class="timeline-mount"></div>
     </section>
+    </div>
 
     <div
       id="keyframe-context-menu"

@@ -1,0 +1,147 @@
+# GrapiX installers — build plan 11.1 ("Installers produced by CI").
+#
+# Separate from `check.yml` on purpose. The gate must stay fast enough to run
+# on every push; a release build compiles the whole workspace unoptimised-free
+# and bundles it, which is minutes of work nobody needs on a typo fix.
+#
+# **Signing is real here, and it is gated on secrets that do not exist yet.**
+# Every signing step below is conditional on its secret being present, so this
+# workflow produces:
+#
+#   - **unsigned** installers today, and on any fork, and says so in the
+#     artefact name; and
+#   - **signed and notarised** installers the moment the identities in
+#     `docs/release-signing.md` are provisioned and the secrets added.
+#
+# What it must never do is make an absent secret look like a success. An
+# unsigned build is a legitimate artefact for testing and an illegitimate one
+# for release, and the name is what keeps those apart.
+
+name: installers
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why this manual run"
+        required: false
+
+concurrency:
+  group: installers-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    name: bundle (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            # MSI is the target declared in Editor/shell/tauri.conf.json.
+            bundles: msi
+          - os: macos-latest
+            bundles: dmg
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-release-
+
+      # Linux would need webkit2gtk here; both target platforms ship their
+      # webview with the OS, so there is deliberately no system-deps step.
+      - name: Install dependencies
+        run: npm ci
+
+      # The frontend is embedded into the binary at compile time, so it must
+      # be built before the bundler runs. A stale bundle here ships an Editor
+      # whose UI predates its Rust.
+      - name: Build the web layer
+        run: npm run build:web
+
+      # --- Signing material, only when the secrets exist -------------------
+      #
+      # `tauri build` reads these from the environment. When a secret is
+      # absent the variable is empty and the bundler produces an unsigned
+      # artefact rather than failing, which is what makes a fork buildable.
+
+      - name: Import Apple signing identity
+        if: matrix.os == 'macos-latest' && env.APPLE_CERTIFICATE != ''
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p runner build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p runner build.keychain
+          security import certificate.p12 -k build.keychain \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k runner build.keychain
+          rm certificate.p12
+
+      - name: Bundle the Editor
+        env:
+          # Windows Authenticode. Absent on a fork; the bundler then produces
+          # an unsigned MSI.
+          TAURI_WINDOWS_SIGN_COMMAND: ${{ secrets.WINDOWS_SIGN_COMMAND }}
+          # macOS Developer ID and notarytool credentials.
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npx tauri build --config Editor/shell/tauri.conf.json --bundles ${{ matrix.bundles }}
+
+      # Whether this run signed anything is recorded with the artefact, not
+      # left to be inferred from which secrets happened to be configured.
+      - name: Record the signing state
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            if [ -n "${{ secrets.APPLE_SIGNING_IDENTITY }}" ]; then
+              echo "signed=true" >> "$GITHUB_ENV"
+            else
+              echo "signed=false" >> "$GITHUB_ENV"
+            fi
+          else
+            if [ -n "${{ secrets.WINDOWS_SIGN_COMMAND }}" ]; then
+              echo "signed=true" >> "$GITHUB_ENV"
+            else
+              echo "signed=false" >> "$GITHUB_ENV"
+            fi
+          fi
+
+      - name: Fail a tagged release that produced unsigned artefacts
+        if: startsWith(github.ref, 'refs/tags/v') && env.signed != 'true'
+        run: |
+          echo "A tagged release must be signed and notarised (build plan 11.1)."
+          echo "See docs/release-signing.md for the identities and secrets required."
+          exit 1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          # The name carries the signing state, so an unsigned artefact cannot
+          # be mistaken for a releasable one after the fact.
+          name: grapix-editor-${{ matrix.os }}-${{ env.signed == 'true' && 'signed' || 'UNSIGNED' }}
+          path: |
+            target/release/bundle/**/*.msi
+            target/release/bundle/**/*.dmg
+          if-no-files-found: error
+          retention-days: 30

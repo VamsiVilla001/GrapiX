@@ -114,6 +114,118 @@ not a euphemism for nearly done.
 ---
 
 
+## 2026-09-13 — the blocked Phase 11 steps, and a viewport I broke and fixed
+
+**Two of the four "blocked" steps were mis-blocked.** 11.2 (WebGPU probe) and
+11.3 (DPI) were both recorded as blocked on 11.1, whose own done-when is
+*signed and notarised installers*. A capability probe and DPI correctness need
+a **running** webview, not a notarised one. The shell has been running all
+session. Both were executable and both turned up real defects.
+
+### 11.3 — DPI was not implemented, only available
+
+`backingStoreSize` existed in `camera.ts` with a correct implementation and a
+test, and **nothing called it**: it was dead code reachable only from its own
+test. The timeline canvases were sized `canvas.width = viewport.width` — CSS
+pixels, not CSS × ratio — so on a 125% monitor they rendered at 1:1 and were
+upscaled by the compositor. That is not a visible error, it is *softness*, and
+it is exactly what ADR-0002 B.2 warns about at 125% and 150%.
+
+There was also **no scale-change listener of any kind**, so B.2's "recompute on
+`ScaleFactorChanged`, don't cache at startup" was unimplemented. A browser has
+no such event; `Editor/src/dpi.ts` observes the ratio with a `matchMedia`
+query that must be **re-armed after every change**, because the query pins one
+exact ratio and stops matching the moment the ratio moves. Arming it once
+catches the first monitor move and goes silent for every one after.
+
+Measured live at the four required scales — backing store equals CSS × ratio
+exactly at 100%, 125%, 150% and 200%.
+
+**A limit of the harness worth recording:** CDP's
+`Emulation.setDeviceMetricsOverride` changes `devicePixelRatio` *without*
+dispatching resolution media-query events — a freshly-armed listener saw
+nothing at any scale. So the watcher's live delivery is unproven; its logic is
+unit-tested, and the pre-existing `resize` listener covers real Windows scale
+changes, which do resize the window.
+
+### 11.2 — WebGPU measured on Windows
+
+`Editor/src/gpu-probe.ts` reports three *different* outcomes rather than one
+"unavailable": no `navigator.gpu`, a null adapter, and an adapter that cannot
+name itself. They mean different things — the first is a platform verdict, the
+second a driver one, the third only a reporting gap — and collapsing them
+would turn one into another.
+
+Result recorded in `docs/webgpu-capability.md`: WebView2/Chromium 152,
+nvidia/ampere, 19 features, `maxTextureDimension2D` 16384, 2 GiB max buffer.
+**The WASM fallback is real on Windows.** macOS is untested and is the platform
+ADR-0002 actually doubted (Safari/WKWebView), so the decision stays open.
+
+### 11.1 — an installer really was produced
+
+`@tauri-apps/cli` was **not a dependency at all**, while `package.json`'s
+`editor` and `playout` scripts invoked `tauri`. No checkout could have run
+them. Declared it, then ran the bundler — which failed with `Couldn't find a
+.ico icon`: `tauri.conf.json` listed only `icon.png` though `icons/icon.ico`
+was sitting there. Nobody knew because nothing had ever run the bundler.
+
+With that fixed: **`GrapiX Editor_0.1.0_x64_en-US.msi`, 3.9 MB**, at
+`target/release/bundle/msi/`. `.github/workflows/installers.yml` builds both
+legs; every signing step is conditional on a secret that does not exist, and a
+tagged release **fails** rather than shipping unsigned. Artefact names carry
+`signed` or `UNSIGNED` so the two can never be confused later.
+`docs/release-signing.md` lists what must be procured.
+
+### 11.5 — the mechanism, not the arrangement
+
+11.5's done-when is "Layout follows the card sort" (9.4, blocked on P.3). The
+arrangement is research output and is **not guessable**; inventing one would
+fabricate the evidence this phase is supposed to be built against. So
+`workspace-layout.ts` is the docking mechanism — regions, moves, collapse,
+resize, persistence, reset — and the arrangement is one constant,
+`PROVISIONAL_DEFAULT_LAYOUT`, carrying a notice that 11.5 cannot be closed
+while it is still there.
+
+### The viewport: a regression I introduced, then a bug I found under it
+
+Adding dock regions put four children into `.workspace`, which was a
+**two-column** grid (`1fr 330px`). The layout wrapped and the viewport was
+squeezed into the 330 px column, rendering at 293×165. That was mine.
+
+Fixing the grid exposed an older bug underneath. `.viewport-surface`'s grid row
+measured **1080 px** — sized by the SVG overlay's intrinsic height, with the
+canvas's `max-height: 100%` then resolving against that same 1080. The canvas
+rendered at the correct aspect and sat near the bottom of a row far taller than
+the stage. `grid-template-rows: minmax(0, 1fr)` breaks the circularity: the row
+is now 358 px, the canvas is centred and inside the stage, and **the overlay
+matches the canvas exactly** — which matters because hit-testing maps through
+it, so any mismatch would have made clicks land off-target.
+
+No `aspect-ratio: 16/9` was added. A scene is not necessarily 16:9 and
+hardcoding one would silently letterbox a vertical canvas.
+
+### Verified by execution
+
+| What | Result |
+|---|---|
+| DPI at the four required scales | backing store = CSS × ratio exactly at 1×, 1.25×, 1.5×, 2× |
+| WebGPU on Windows | available; nvidia/ampere; 19 features; recorded in `docs/webgpu-capability.md` |
+| Installer | `GrapiX Editor_0.1.0_x64_en-US.msi`, 3,923,968 bytes |
+| Viewport | surface row 1080 px → 358 px; canvas centred and inside the stage; overlay dimensions equal to the canvas |
+| `npm run check` | **exit 0** — codegen 177 files, **297 TS tests** (27 files), **492 Rust tests**, CONFORMANT |
+
+### Status — all four remain active, deliberately
+
+- **11.1**: an installer is produced, but it is unsigned and has never run in
+  CI. Needs the two identities in `docs/release-signing.md` (gated on P.2).
+- **11.2**: Windows recorded; macOS not run, and it is the doubted platform.
+- **11.3**: correct at all four scales on Windows; macOS is 1×/2× only per B.2,
+  and the live scale-change event is unproven.
+- **11.5**: mechanism built; the arrangement awaits the 9.4 card sort.
+
+---
+
+
 ## 2026-09-13 — 11.26, 11.27 and 11.28 closed out
 
 The three slices the dead subagents left had working panels but unproven

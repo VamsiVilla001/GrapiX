@@ -298,10 +298,46 @@ button.primary:hover:not(:disabled) {
 
 /* --- Workspace ---------------------------------------------------------- */
 
+/* The dockable workspace (11.5): left, centre and right regions across the
+   main row, with the timeline as the bottom region below it. `auto` on the
+   flanks so a region holding nothing collapses and the viewport keeps the
+   space.
+
+   The previous rule (`1fr 330px`) predates docking and wrapped the viewport
+   into the narrow column the moment a third child appeared. */
 .workspace {
   display: grid;
-  grid-template-columns: 1fr 330px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   min-height: 0;
+}
+
+.dock-region {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* A flanking region is sized by its panels but never crowds the viewport out. */
+.workspace > .dock-region {
+  width: 330px;
+  max-width: 38vw;
+  border-left: 1px solid var(--rule);
+}
+
+.workspace > .dock-region[data-region="left"] {
+  border-left: 0;
+  border-right: 1px solid var(--rule);
+}
+
+.workspace > .dock-region:empty,
+.dock-region[hidden] {
+  display: none;
+}
+
+.dock-region.collapsed > .panel {
+  display: none;
 }
 
 .viewport-pane {
@@ -356,6 +392,14 @@ button.primary:hover:not(:disabled) {
 
 .viewport-surface {
   display: grid;
+  /* Both the canvas and the overlay share one cell, and that cell must be
+     bounded by the stage — not by its own contents. Without an explicit
+     `minmax(0, 1fr)` the SVG overlay's intrinsic 1080 height sizes the row,
+     `max-height: 100%` then resolves against that same 1080, and the canvas
+     ends up centred in a row far taller than the stage: it renders correctly
+     but sits near the bottom, cropped by the pane. */
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   place-items: center;
   width: 100%;
   height: 100%;
@@ -366,8 +410,16 @@ button.primary:hover:not(:disabled) {
 #viewport,
 #viewport-overlay {
   grid-area: 1 / 1;
+  /* Fit inside the cell while keeping the scene's aspect. The document is in
+     scene coordinates; this only decides how much of the pane it occupies. */
   max-width: 100%;
   max-height: 100%;
+  /* Deliberately no `aspect-ratio` here: a scene is not necessarily 16:9, and
+     hardcoding one would silently letterbox a vertical or square canvas. The
+     canvas carries its own aspect through its width/height attributes and the
+     overlay through its viewBox; bounding the cell above is enough. */
+  width: auto;
+  height: auto;
   display: block;
 }
 

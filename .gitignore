@@ -30,3 +30,4 @@ Editor/web/main.js.map
 
 # ts-rs per-crate export dirs; the codegen binary is the only generator
 bindings/
+target/release/bundle/
