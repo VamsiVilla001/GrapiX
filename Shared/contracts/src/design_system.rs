@@ -538,6 +538,219 @@ pub fn ms_to_frames(ms: f64, rate: RationalRate) -> u64 {
     frames.round().max(0.0) as u64
 }
 
+/// The starter motion library: Fade, Slide, Scale and Pop (11.23).
+///
+/// Library *data*, not an authoring path. G.6.7's rule stands — the model
+/// selects and parameterises a preset, it never authors one — and these four
+/// exist so the library is not empty on day one, which is what would otherwise
+/// push an author into hand-keying the motion every template needs.
+///
+/// Every preset declares `out`. A graphic that goes to air and never clears is
+/// the failure G.6.6 names, and `presetBlocker` in the browser refuses a
+/// preset without one — so a starter preset missing it would be shipped
+/// broken.
+///
+/// Positions are expressed as **normalised offsets**: `-1.0` is one
+/// object-width, so Slide means the same thing on a lower-third and on a
+/// full-frame card (G.6.4).
+pub fn starter_presets() -> Vec<MotionPreset> {
+    let ease_out = || Some(TokenRef("easing.ease-out".into()));
+    let ease_in = || Some(TokenRef("easing.ease-in".into()));
+    let ease_in_out = || Some(TokenRef("easing.ease-in-out".into()));
+
+    let phase = |ms: f64, channels: Vec<MotionChannel>| MotionPhase {
+        duration: DurationSpec::Ms(ms),
+        channels,
+    };
+    let channel = |property: &str, keys: Vec<MotionKey>| MotionChannel {
+        property: property.to_owned(),
+        keys,
+    };
+    let duration_param = |name: &str, default: f64| PresetParam::Duration {
+        name: name.to_owned(),
+        min: 80.0,
+        max: 2_000.0,
+        default: DurationSpec::Ms(default),
+    };
+
+    vec![
+        MotionPreset {
+            id: "fade".into(),
+            applies_to: ANY_VISIBLE.iter().map(|kind| (*kind).to_owned()).collect(),
+            phases: MotionPhases {
+                r#in: phase(
+                    300.0,
+                    vec![channel(
+                        "opacity",
+                        vec![
+                            MotionKey { t: 0.0, v: 0.0, out: ease_out() },
+                            MotionKey { t: 1.0, v: 1.0, out: None },
+                        ],
+                    )],
+                ),
+                out: phase(
+                    240.0,
+                    vec![channel(
+                        "opacity",
+                        vec![
+                            MotionKey { t: 0.0, v: 1.0, out: ease_in() },
+                            MotionKey { t: 1.0, v: 0.0, out: None },
+                        ],
+                    )],
+                ),
+                hold: None,
+                r#continue: Vec::new(),
+                update: None,
+            },
+            params: vec![duration_param("duration", 300.0)],
+            stagger: None,
+        },
+        MotionPreset {
+            id: "slide".into(),
+            applies_to: ANY_VISIBLE.iter().map(|kind| (*kind).to_owned()).collect(),
+            phases: MotionPhases {
+                r#in: phase(
+                    400.0,
+                    vec![channel(
+                        "position.x",
+                        vec![
+                            // One object-width to the left, arriving on its
+                            // authored position.
+                            MotionKey { t: 0.0, v: -1.0, out: ease_out() },
+                            MotionKey { t: 1.0, v: 0.0, out: None },
+                        ],
+                    )],
+                ),
+                out: phase(
+                    320.0,
+                    vec![channel(
+                        "position.x",
+                        vec![
+                            MotionKey { t: 0.0, v: 0.0, out: ease_in() },
+                            MotionKey { t: 1.0, v: -1.0, out: None },
+                        ],
+                    )],
+                ),
+                hold: None,
+                r#continue: Vec::new(),
+                update: None,
+            },
+            params: vec![duration_param("duration", 400.0)],
+            stagger: Some(Stagger::CapTotal { max_total: 1_200.0 }),
+        },
+        MotionPreset {
+            id: "scale".into(),
+            applies_to: ANY_VISIBLE.iter().map(|kind| (*kind).to_owned()).collect(),
+            phases: MotionPhases {
+                r#in: phase(
+                    320.0,
+                    vec![
+                        channel(
+                            "scale.x",
+                            vec![
+                                MotionKey { t: 0.0, v: 0.0, out: ease_out() },
+                                MotionKey { t: 1.0, v: 1.0, out: None },
+                            ],
+                        ),
+                        channel(
+                            "scale.y",
+                            vec![
+                                MotionKey { t: 0.0, v: 0.0, out: ease_out() },
+                                MotionKey { t: 1.0, v: 1.0, out: None },
+                            ],
+                        ),
+                    ],
+                ),
+                out: phase(
+                    260.0,
+                    vec![
+                        channel(
+                            "scale.x",
+                            vec![
+                                MotionKey { t: 0.0, v: 1.0, out: ease_in() },
+                                MotionKey { t: 1.0, v: 0.0, out: None },
+                            ],
+                        ),
+                        channel(
+                            "scale.y",
+                            vec![
+                                MotionKey { t: 0.0, v: 1.0, out: ease_in() },
+                                MotionKey { t: 1.0, v: 0.0, out: None },
+                            ],
+                        ),
+                    ],
+                ),
+                hold: None,
+                r#continue: Vec::new(),
+                update: None,
+            },
+            params: vec![duration_param("duration", 320.0)],
+            stagger: None,
+        },
+        MotionPreset {
+            id: "pop".into(),
+            applies_to: ANY_VISIBLE.iter().map(|kind| (*kind).to_owned()).collect(),
+            phases: MotionPhases {
+                // The overshoot is the whole point: 0 → 1.12 → 1. A "pop" that
+                // eased straight to 1 is a scale, and the two are different
+                // instructions to a designer.
+                r#in: phase(
+                    360.0,
+                    vec![
+                        channel(
+                            "scale.x",
+                            vec![
+                                MotionKey { t: 0.0, v: 0.0, out: ease_out() },
+                                MotionKey { t: 0.65, v: 1.12, out: ease_in_out() },
+                                MotionKey { t: 1.0, v: 1.0, out: None },
+                            ],
+                        ),
+                        channel(
+                            "scale.y",
+                            vec![
+                                MotionKey { t: 0.0, v: 0.0, out: ease_out() },
+                                MotionKey { t: 0.65, v: 1.12, out: ease_in_out() },
+                                MotionKey { t: 1.0, v: 1.0, out: None },
+                            ],
+                        ),
+                    ],
+                ),
+                out: phase(
+                    220.0,
+                    vec![
+                        channel(
+                            "scale.x",
+                            vec![
+                                MotionKey { t: 0.0, v: 1.0, out: ease_in() },
+                                MotionKey { t: 1.0, v: 0.0, out: None },
+                            ],
+                        ),
+                        channel(
+                            "scale.y",
+                            vec![
+                                MotionKey { t: 0.0, v: 1.0, out: ease_in() },
+                                MotionKey { t: 1.0, v: 0.0, out: None },
+                            ],
+                        ),
+                    ],
+                ),
+                hold: None,
+                r#continue: Vec::new(),
+                update: None,
+            },
+            params: vec![duration_param("duration", 360.0)],
+            stagger: None,
+        },
+    ]
+}
+
+/// Object kinds a transform or opacity preset can drive: everything that
+/// draws. Containers are excluded because their transform reaches their
+/// children, which is a different instruction.
+const ANY_VISIBLE: &[&str] = &[
+    "text", "rect", "ellipse", "image", "line", "shape", "paint", "mesh",
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;

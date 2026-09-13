@@ -119,6 +119,14 @@ describe("material usage is read from the document, never indexed", () => {
     expect(del.unavailable).toBeUndefined();
   });
 
+  it("marks the selected material for the rendered panel", () => {
+    const document = scene([], [brandMaterial, altMaterial]);
+    const panel = materialManagerPanel(document, { selectedMaterialId: "alt" });
+
+    expect(findNode(panel, "material/brand")!.selected).toBe(false);
+    expect(findNode(panel, "material/alt")!.selected).toBe(true);
+  });
+
   it("deleting an in-use material is refused, naming the count", () => {
     const document = scene([meshWith("a", "brand"), meshWith("b", "brand")], [brandMaterial]);
     const panel = materialManagerPanel(document);
@@ -187,5 +195,13 @@ describe("an unresolved font blocks the take", () => {
     );
     expect(fontUsers(document, "inter")).toEqual(["a", "b"]);
     expect(findNode(fontManagerPanel(document), "font/inter/usage")!.value).toBe("a, b");
+  });
+
+  it("marks the selected font for the rendered panel", () => {
+    const document = scene([], [], [font("inter", "Inter"), font("gotham", "Gotham")]);
+    const panel = fontManagerPanel(document, { selectedFontId: "gotham" });
+
+    expect(findNode(panel, "font/inter")!.selected).toBe(false);
+    expect(findNode(panel, "font/gotham")!.selected).toBe(true);
   });
 });

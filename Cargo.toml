@@ -43,6 +43,7 @@ gx-asset-plane   = { path = "Shared/asset-plane" }
 gx-media-plane   = { path = "Shared/media-plane" }
 gx-telemetry     = { path = "Shared/telemetry" }
 gx-fs            = { path = "Shared/fs" }
+gx-editor        = { path = "services/editor" }
 gx-decklink      = { path = "Shared/decklink" }
 gx-control-transport = { path = "Shared/control-transport" }
 serde            = { version = "1", features = ["derive"] }

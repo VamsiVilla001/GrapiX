@@ -487,7 +487,7 @@ mod tests {
                 height: 1080,
                 frame_rate: RationalRate::P50,
             },
-            timeline: SceneTimeline { duration_frames: 1 },
+            timeline: SceneTimeline { duration_frames: 1, channels: Vec::new() },
             data_context: Default::default(),
             assets,
             fonts,

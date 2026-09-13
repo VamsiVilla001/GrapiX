@@ -114,6 +114,678 @@ not a euphemism for nearly done.
 ---
 
 
+## 2026-09-13 — scenes became entities (11.29)
+
+Requested by the user: *"a broadcast has multiple graphics/scenes and each
+scene shall be a separate distinct component or entity … such scene is the top
+layer and its children must be viewport, object inspector, timeline, object
+manager."*
+
+**What was actually wrong.** The shell held one implicit document in module
+globals — `scene`, `selection`, `currentFrame`, `collapsed`, `undoStack`,
+`redoStack`. `showScene` overwrote all of them. So opening a second graphic
+destroyed the first one's place in its own document **and its entire undo
+history**, and nothing reported it, because nothing had failed. The panels were
+siblings of a single anonymous document rather than children of a named scene.
+
+**The fix is an ownership change, not a widget.** `Editor/src/workspace.ts`
+makes the scene the owner of record: a `SceneSession` carries the document, its
+origin, selection, collapse state, playhead, dirty flag and *its own* undo and
+redo stacks. The flat globals in `main.ts` remain as the working copy of
+whichever session is active, captured back on the way out and restored on the
+way in. That was a deliberate trade: rewriting two thousand lines of panel code
+to reach through a session on every property access would have risked far more
+than it bought, and the observable contract — no state or history crossing
+between scenes — is the same either way and is what the tests pin.
+
+Three decisions worth keeping:
+
+- **Per-scene history is a correctness property, not a convenience.** One
+  shared stack would let Ctrl+Z in a lower-third restore a document belonging
+  to a different graphic. There is now no global stack to reach.
+- **Opening a scene twice reveals the session already showing it.** Two
+  sessions over one stored scene would give an author two divergent histories
+  for one graphic and no answer to which one a save should win with.
+- **Closing with unsaved work refuses by name** and asks before discarding.
+  Losing an edit to a mis-clicked tab is exactly the silent loss invariant 18
+  forbids. Transient gesture state — a half-drawn marquee, an open speed graph
+  — is explicitly *not* carried across a switch; it belongs to the gesture.
+
+### Verified by execution
+
+| What | Result |
+|---|---|
+| `npm --prefix Editor run test:unit` | **243 passed** (20 files), up from 231; 12 are the new workspace tests |
+| `npm --prefix Editor run typecheck`, `npm run typecheck:web` | exit 0 — the strict gate caught an `exactOptionalPropertyTypes` violation assigning `undefined` to `activeKey` |
+| live Tauri: two scenes open | tabs `Untitled · Lower third · Bug`, the active one marked |
+| live: playhead per scene | Bug 60 and Lower third 20, each still 60 and 20 after switching away and back |
+| live: undo isolation | added an object in Lower third (1 → 2 rows), switched to Bug: **still 1 row and Bug's Undo button disabled** while Lower third held history; undo in Lower third returned 2 → 1 and Bug stayed at 1 |
+| live: close refusal | the edited tab showed `Lower third •`; declining the confirm kept all three tabs and both its objects and logged "Lower third has unsaved changes; save it or close it explicitly"; accepting closed it, activated the neighbour and logged "Closed Lower third, discarding unsaved changes" |
+
+**The disabled Undo button on the inactive scene is the load-bearing evidence.**
+A shared history would have shown it enabled.
+
+**One invalid probe, corrected.** The first isolation run reported frame 0 for
+both scenes and looked like a failure. `cmd_new_scene` returns
+`durationFrames: 0`, so the playhead was clamping correctly and the *test* was
+wrong. Re-run against scenes with a real duration, it showed 60 and 20.
+
+---
+
+
+## 2026-09-13 — project scene CRUD, local preview, and a gate that was never running
+
+### The gate hole, first, because it invalidates earlier claims
+
+`package.json`'s `check` script chained `npm run test:rust`, **and no such
+script existed.** `npm run check` therefore died at that link with
+`npm error Missing script: "test:rust"` — after boundaries, codegen, typecheck
+and the TS tests had passed, and *before* `cargo test` and conformance ever
+ran. Every "npm run check passed" in this file that predates today should be
+read as "passed up to the Rust leg".
+
+Added `"test:rust": "cargo test --workspace"`. The first honest run
+immediately failed on something real: `conformance`'s
+`every_declared_refusal_is_driven_or_has_a_named_limitation`. The authoring
+refusals added with 11.18 — `SceneObjectKindNotCreatable` and
+`SceneObjectNameEmpty` — were declared in `Refusal::all_variants()` with
+neither a conformance driver nor a named limitation. The audit existed to
+catch exactly that and could not, because nothing reached it.
+
+Both are now driven against the real producer in `drive_authoring_refusals`
+(`conformance/src/refusal_audit.rs`): a kind needing caller-supplied data
+(`image` with no asset) and an all-whitespace name, each asserting the scene
+was left empty as well as refused. `cargo test -p gx-conformance --lib` — 4
+passed.
+
+**The lesson worth keeping: when a check passes, confirm what it checked.**
+This is the third instance this week of a gate that looked green over a hole
+(after `Editor/tsconfig.json` excluding `web/`, and codegen missing reference
+tables).
+
+### Project and scene CRUD, over 7.1's store (11.18)
+
+The Editor could author objects but had nowhere to put a scene: `cmd_save_scene`
+wrote to a file path from a dialog. `services/editor`'s `Projects` (7.1) already
+had the whole store — `create_project`, `list_scenes`, `write_scene`,
+`read_scene`, `delete_scene`, each behind a `require_project` guard — and the
+shell simply did not depend on it. It does now (`gx-editor` added to the
+workspace and to `Editor/shell/Cargo.toml`).
+
+Three decisions the shell layer makes, each because the store cannot:
+
+- **Create and update are different operations.** `write_scene` alone cannot
+  tell them apart, so `scene_create` refuses an id that already exists and
+  `scene_update` refuses one that does not. Overwriting someone else's scene
+  because two authors picked "lower-third" is the kind of loss no undo reaches.
+- **Project and scene ids are one canonical filename.** `require_component`
+  runs `is_canonical_filename` (2.2) before any store call, so `../escape`
+  is refused by name rather than resolved.
+- **An unreadable scene is listed, not hidden.** `scene_catalog_from` reads
+  every scene through the closed reader; one that will not parse becomes a row
+  carrying `unavailableReason`, and `scene-manager.ts` disables open/duplicate/
+  publish on it while leaving delete available. A file that vanishes from a list
+  because it went bad is the worst possible report.
+
+`EditorError::ProjectFailed` was added rather than reusing `Protocol`, which
+would have printed a disk error as "asset plane protocol failed".
+
+### Local animation preview (11.24)
+
+`Editor/src/preview-playback.ts`. Two functions, both pure:
+`previewFrameAtElapsed` derives each frame from the playback start time and the
+scene's rational rate (`elapsedMs * num / (1000 * den)`), never by accumulating
+an interval — a late `requestAnimationFrame` callback may skip a preview frame
+but cannot walk the playhead off scene time (invariant 12). `previewSceneAt`
+composes the already-pinned `evaluateChannel` mirror over a document and returns
+a copy plus named issues; it does not introduce a second easing implementation.
+
+`SceneViewport.updateDocument` mutates the existing Three objects in place and
+rebuilds geometry only when an authored width/height actually changed.
+Rebuilding the renderer per animation callback would have turned a 50 fps
+preview into allocator pressure.
+
+Spacebar is guarded by target, not by a modal flag: any `input`, `textarea`,
+`select`, `button`, `a`, `[contenteditable]`, `[role=button]` or `[role=slider]`
+under the event target keeps its own space key.
+
+### Verified by execution
+
+| What | Result |
+|---|---|
+| `cargo test -p gx-editor-shell --lib` | **11 passed** — create/update/delete distinction, duplicate project, unreadable-row catalogue, `../escape` confinement |
+| `cargo test -p gx-conformance --lib` | **4 passed** — including the refusal audit that was failing |
+| `npm --prefix Editor run test:unit` | **231 passed** (19 files), up from 221; 5 are the new preview tests |
+| `npm --prefix Editor run typecheck`, `npm run typecheck:web` | exit 0 — the strict web gate caught two real bugs first (an exact-optional violation and a possibly-undefined id) |
+| live Tauri CRUD smoke | created a project, saved a scene, refused "new scene" against unsaved project changes by name, updated, duplicated (`lower-third-copy`), deleted, and **reopened after a full process restart** with the scene and both assets intact |
+| live Tauri preview smoke | Spacebar played from frame 0 at 50/1, advanced to 100, stopped exactly at duration; Spacebar toggled pause mid-run and the frame held; focusing `#scene-id` left the shortcut alone; publish surface untouched; **mean 0.37 ms, p95 0.60 ms** per frame update against a 20 ms budget |
+| live scrub check | selecting the card and scrubbing 0 → 50 → 100 moved the evaluated outline x −50 → 650 → 1350, tracking the authored 100 → 800 → 1500 |
+| live undo/redo | create → 2 rows, Ctrl+Z → 1, Ctrl+Y → 2 in the integrated shell |
+
+**A trap worth recording.** Tauri embeds `frontendDist` at *compile* time. The
+first preview smoke found no `#preview-play` button at all: `npm run build:web`
+had rebuilt the bundle, but the running binary still served the frontend
+embedded in the last `cargo build`. A web-only rebuild is invisible to a shell
+binary that was not rebuilt after it.
+
+### Status
+
+11.18 stays **active**: the templates/scenes CRUD half now exists and the
+assets panel is mounted, but 11.5 (dockable workspace) is still blocked on P.3.
+11.24 stays **active**, not done: every done-when clause was verified on
+Windows, and its macOS leg cannot be run from this machine. That is the only
+outstanding evidence for it.
+
+---
+
+
+## 2026-09-13 — the Editor can author a document (11.18, partial)
+
+**The gap.** The Editor could open a scene and change what was already in it,
+but there was **no create, delete or duplicate anywhere in the contracts**. A
+tool that cannot make an object is a reader with an inspector attached. This
+was the largest hole in Phase 11 and it had been invisible because every
+*existing* step worked on scenes that arrived from somewhere else.
+
+**Where the rules live.** `Shared/contracts/src/authoring.rs`, not the shell:
+deleting a group is a document rule, and every peer that edits a scene has to
+do it the same way. Three disciplines, each with a test that fails without it:
+
+1. **A created object is visible and selectable.** Sized, filled, centred in
+   the canvas. A zero-sized transparent object is a defect no error message
+   covers, because the author never finds out.
+2. **A refused edit writes nothing.** Validation precedes mutation, so a scene
+   that refused is the scene that was passed in.
+3. **The consequence is reported, not assumed.** `delete_object` returns
+   `removed_object_ids`, `removed_channel_count` and `cleared_active_camera`.
+   The editor reads "Deleted g1, and with it 2 child object(s), 1 animation
+   channel(s), the scene's active camera". A group that silently eats its
+   children is how authors lose work.
+
+**Kinds that cannot be completed refuse by name, with what they need.**
+`image` wants an asset, `mesh` a model, `shape` a path, `paint` brush points,
+`marker` a timeline frame. Creating one blank would make an object that
+refuses the moment it renders. The menu is populated from `cmd_object_kinds`,
+so it cannot offer a kind `create_object` would reject — the two cannot drift.
+
+**Deleting cleans up after itself**: descendants, their channels, the active
+camera if it went, and any surviving container's claim on a removed child
+(otherwise the resolver reports `MissingChild` for a deliberate edit). The
+walk carries a `visited` set because the resolver tolerates cyclic edges in a
+scene being repaired (1.2), so delete has to as well.
+
+**One scaffolding for every edit.** `runGesture` assumed each command returned
+a bare `SceneDocument`; the new ones return a report. Rather than guess at the
+shape — the silent structural fallback invariant 18 forbids — the busy/commit/
+one-undo-entry scaffolding was extracted into `runEdit`, which takes the label
+as a function of the *result*, because a delete's sentence is only knowable
+after Rust has reported what went.
+
+**Verified live in the Tauri WebView.** Create, duplicate and rename with the
+selection following the new object; a group delete taking 2 children + 1
+channel + the active camera while an unrelated object and its channel
+survived; **one undo restoring all four objects**; save → reopen persisting
+the deletion; and delete/duplicate/rename each refusing a two-object selection
+by name with nothing destroyed. 135 contract tests, 9 shell, 221 Editor,
+codegen 168 files, boundaries — all green.
+
+Font (11.13) and material (11.12) panels are now mounted and functional, built
+in parallel by a subagent and verified here live rather than on its word:
+"Show usage" names the object ids, and an absent list says what is absent.
+
+**Recorded `active`, not `done`, and the remainder is named**: the
+templates/scenes CRUD panel (`scene-manager.ts` is built but unmounted) and
+the assets panel are still missing from 11.18's done-when, and the dependency
+11.5 is blocked on P.3 regardless.
+
+---
+
+
+## 2026-09-13 — easing curves, the starter motion library, and a third gate hole (11.23)
+
+**The easings were already right**; what 11.23 added is that an author can
+*assign* one, and that the library is not empty.
+
+**Starter presets are library data, in Rust.** `starter_presets()` in
+`design_system.rs` returns Fade, Slide, Scale and Pop as `MotionPreset` values,
+so they go through 11.15's existing browser — `presetBlocker` still refuses a
+preset with no `out` phase (G.6.6) — rather than beside it. G.6.7's rule is
+untouched: the model selects and parameterises, and there is still nowhere to
+put a keyframe.
+
+**Instantiation does three conversions, once.** This is the part worth
+remembering:
+- **Time** — normalised `t` to frames at the scene's rational rate. Slide's
+  400 ms is 20 frames at 50p, resolved at instantiation and never stored.
+- **Property** — the preset vocabulary (`position.x`, `scale.y`) to scene
+  properties (`x`, `scaleY`). An unmapped path **refuses**; a preset that
+  applied "most of" its channels is motion nobody can account for.
+- **Value** — G.6.4 normalised offsets to scene units. A rect at x=40 with
+  width=100 resolves Slide's `-1.0` to **-60**, arriving back at 40. That is
+  what makes one preset work on a lower-third and on a full-frame card, and it
+  needs the object's own geometry, so it cannot be done anywhere but here.
+
+Easing tokens (`{easing.ease-out}`) map to scene easings by name. Anything a
+brand defines beyond the four standard curves resolves **linear** — a named
+limit, not a silent one: honouring it needs the design system's token set
+threaded through instantiation, which it is not yet.
+
+**Verified by execution.** 125 contract tests; 219 Editor tests. Live: the
+pickers populated from Rust (fade/slide/scale/pop, six easings); applying
+Slide produced x −60 → 40 over 20 frames; "Set easing to ease-in on 2 keys"
+across a multi-selection; **save → reopen returned both keys still carrying
+`ease-in`**, which is the persistence half of the done-when; Pop's overshoot
+survived as 0 → 1.12 → 1; an unknown object refused "scene has no object nope".
+
+### A third gate hole, and the worst one
+
+**`Editor/web/main.ts` was never typechecked.** `Editor/tsconfig.json` includes
+only `src/**/*.ts`, so the shell's entire entry point — a thousand lines of
+wiring — sat outside `npm run typecheck`. That is why a missing `rowWindow`
+import passed earlier in this session, and why `propertyLabel` being missing
+here only surfaced as an empty dropdown in a live smoke test.
+
+Added `typecheck:web` (strict, `--noUncheckedIndexedAccess`,
+`--exactOptionalPropertyTypes`) to the root `typecheck` script. Its first run
+found **four more real bugs**, including a missing `toggleIntent` import that
+would have broken the inspector's diamond toggle at runtime.
+
+**Three holes found this session, all the same shape**: a gate that looked like
+it covered something it did not — codegen missing the reference tables, the
+Editor typecheck missing `web/`, and `npm --prefix Editor run typecheck` not
+being the root gate. When a check passes, confirm *what* it checked.
+
+Recorded `active`, not `done`: Needs 11.11 and 11.22, whose chain (11.5) is unmet.
+
+---
+
+
+## 2026-09-13 — selection-driven timeline and keyframe editing (11.22)
+
+Built on 11.10's virtualised timeline and 11.21's undo stack. The editing
+rules already existed in Rust from 11.20 — `move_keyframe` refuses a move onto
+an occupied frame — so this step is the *gestures*, not the rules.
+
+**Two new modules.** `timeline/model.ts` grew a row model: an object gets a
+collapsible group row, its animated properties get track rows beneath it, and
+the object selection decides which objects appear at all. Selecting nothing
+shows the whole document, because an empty timeline is a worse default than a
+full one. `timeline/key-edit.ts` is pure: it turns a gesture into the list of
+shell calls that would perform it, so **"one undo per gesture" is a property
+of the returned list** rather than of whoever remembered to batch.
+
+**Three decisions worth keeping.**
+- **A colliding gesture is refused whole, never partially applied.** A partial
+  move would leave a selection the author cannot undo in one step and cannot
+  reason about — some keys moved, some refused, no single state to return to.
+- **Order the calls so a run cannot collide with itself.** Sliding 0,10,20 one
+  frame right moves the rightmost key first; starting at 0 would refuse
+  against the key still sitting on 10. Leftward moves start from the leftmost.
+- **A landing frame occupied by a key that is itself moving is free.** Keys
+  vacate their own frames, so the whole run slides; selecting only part of it
+  correctly refuses.
+
+Copy stores frames **relative to the earliest key**, because paste lands at the
+playhead and an author copying a run expects its shape, not its old frames.
+
+**Verified by execution.**
+- `Editor/tests/timeline-editing.test.ts` — 16 tests over selection reveal,
+  collapse, snapping, self-collision ordering, vacating frames, and
+  copy/paste. 216 Editor tests total; typecheck, codegen (166) and boundaries
+  clean.
+- Live in the Tauri WebView: selection revealed only Card's tracks; the group
+  collapsed and expanded; a drag logged "Move key +10 frames"; deleting a
+  two-key selection logged "Delete 2 keys" and took the scene 5 keys → 3, and
+  **one undo restored both** (3 → 5); paste landed at the playhead (5 → 6);
+  and a second paste onto the same frame refused by name with the count
+  unchanged — **nothing is ever overwritten**.
+
+### Two bugs this turned up
+
+1. **The structure key was built from `tracks`, but the DOM renders `rows`.**
+   Collapsing a group changes only the rows, so the rebuild was skipped and the
+   collapse silently did nothing. Keyed on rows now.
+2. **`setPointerCapture` with no matching release.** `overlay.ts` releases;
+   this did not. The browser drops capture on pointerup, but a *cancelled*
+   gesture never gets one, and a stage still holding capture retargets later
+   pointer events to itself.
+
+Recorded `active`, not `done`: Needs 11.10, whose chain (11.5) is unmet.
+
+---
+
+
+## 2026-09-13 — speed graph, the channel evaluator, and a hole in the codegen gate (11.11)
+
+**The gap found first.** There was **no channel evaluator anywhere** — not in
+Rust, not in TypeScript. `SceneEasing` and `CubicBezier` were data with nothing
+that read them. So the speed graph had no curve to draw, and 11.24's playback
+would have had nothing to play. 11.11 had to build the evaluator before it
+could build the view.
+
+**Rust owns it.** `gx_contracts::animation` gained `ease_at`,
+`easing_control_points`, `evaluate_channel` and `evaluate_scene_at`. The solve
+is Newton-Raphson with a bisection fallback — the method browsers use for
+`cubic-bezier()`, and matching them is deliberate. Two decisions worth keeping:
+- **Outside the keyed range the value holds flat, never extrapolates.**
+  Extrapolation invents motion nobody authored, which on air is a graphic
+  drifting for no reason.
+- **`Hold` returns 0 progress**, which is what produces a step rather than a
+  ramp; the next key takes over exactly at its own frame.
+
+**The mirror is pinned, following 11.4.** A browser cannot call Rust once per
+pixel, so the solve is mirrored in `Editor/src/timeline/easing.ts` and pinned
+against `Editor/src/easing-reference.ts`, which `gx-contract-codegen` generates
+**by running the Rust**. Negative control: perturbing the TS curve by one part
+in 10,000 failed the test naming the easing and the exact `t` (`ease-in at
+t=0.05: TS 0.004473821 vs Rust 0.004474615`).
+
+**A real hole in the gate, closed.** `tools/codegen-check.mjs` only snapshotted
+`Shared/generated-ts/src`. The reference tables live in `Editor/src`, so a
+**stale table** would leave the pin passing while Rust and TypeScript had
+actually diverged — the pin compares TS against the table, not against Rust.
+This affected 11.4's colour curves too, and had been true since 11.4 landed.
+The gate now covers both tables (166 files); verified by making one stale and
+watching it fail with `stale in the commit: Editor\src\easing-reference.ts`.
+
+**The view.** `speed-graph.ts` plots value against frame, sampling **once per
+visible pixel column** and building handles only for keys in the visible span,
+so a 20,000-key channel costs what a two-key one costs. Curve editing is
+`bezierFromHandleDrag`, the inverse of the handle placement: `x1` clamps to
+0–1 because the contract refuses anything else, while `y1` stays free because
+overshoot is a legitimate effect, not an error.
+
+**Verified by execution.**
+- `cargo test -p gx-contracts` — 121 passed (7 new evaluator tests).
+- `Editor/tests/speed-graph.test.ts` — 12 passed, including the whole
+  Rust-generated table and the overshoot fixture.
+- Live in the WebView, contexts instrumented: **ten scrubs → static 0,
+  content 0, interaction 10.** The playhead never touches the ruler. A zoom
+  correctly cascades to all three *and* repaints the same canvas elements.
+- 201 Editor tests, root typecheck, codegen and boundaries all clean.
+
+### Two traps this cost time on
+
+1. **`npm --prefix Editor run typecheck` is not the gate.** It builds the
+   Editor project alone. The root `npm run typecheck` covers
+   `Shared/generated-ts/tests`, where a genuinely broken fixture had been
+   sitting since 11.20 added `SceneTimeline.channels`. Run the root one.
+2. **Zoom was rebuilding the timeline DOM.** `renderTimeline` now takes a
+   structure key (tracks + row window + canvas size) and only recreates
+   elements when that changes; geometry alone repaints. Rebuilding three
+   canvases per tick of a zoom drag is exactly the waste the layer split
+   exists to remove.
+
+Recorded `active`, not `done`: Needs 11.10, whose chain (11.5) is unmet.
+
+---
+
+
+## 2026-09-13 — the blocked sweep was wrong, and the virtualised timeline (11.10)
+
+**The correction first.** The previous entry marked every open Phase 11 step
+`blocked`. That was wrong, and the user pushed back. Three pieces of evidence,
+all in the repo:
+
+1. **`docs/README.md:34-44` defines the vocabulary**, and says "Nothing may be
+   described in any other terms." `External gate` means *"Blocked on hardware,
+   vendor SDK or lab time."* 11.10, 11.11, 11.18, 11.22, 11.23 and 11.24 need
+   none of those. They were **Planned** — "decided, not built" — and calling
+   them blocked overstated the obstacle by a wide margin.
+2. **The dependency sentence is scoped.** `GrapiX-Build-Plan.md:246` — "All
+   dependencies listed in a row must be done before that step starts" — sits
+   under the heading *"Phase 11 UI requirements — Editor 2.0 parity and
+   animation"* and opens "The new requirements are tracked by 11.18–11.24".
+   Rows 11.1–11.17 are a **separate table** (216–234). The sentence governs the
+   second table, not the component rows.
+3. **The repo's own precedent contradicted the sweep.** `11.8` is recorded
+   `active` with the comment "ACTIVE, not done: its Needs column is 11.5 …
+   which is blocked on P.3" — 11.8 was *built anyway*. So were 11.9, 11.12,
+   11.13, 11.17, 11.19. 11.10's Needs is **also 11.5**. Same dependency, same
+   phase, same table, opposite treatment.
+
+Corrected: only `11.1`, `11.2`, `11.3` (signing identity, macOS hardware) and
+`11.5` (the card sort needs recruited participants) remain `blocked`, and each
+is a genuine External gate. The rest returned to `pending`.
+
+**A council was attempted and died.** Four read-only scouts were dispatched to
+rule on the above; all four exited 1 at ~20 seconds having emitted one line —
+the same failure memory records for 2026-09-11 and 09-12. The runtime will not
+sustain subagents here. **Do the council's work inline; do not retry the
+dispatch.** It cost two minutes to learn again.
+
+### 11.10 — timeline: virtualised rows, canvas layers, dirty-rect repaint
+
+Ported the architecture from 1.x (`Editor/apps/editor-web/src/components/
+timeline/*` on the `Basic-v0.4…` branch), adapted to 2.0: no React, `RationalRate
+{num,den}`, and **keys identified by frame** because `SceneKeyframe` carries no
+id and `move_keyframe` refuses a move onto an occupied frame, so frame is unique
+within a channel by contract (11.20).
+
+Four modules under `Editor/src/timeline/`:
+- `key-index.ts` — frames in a sorted `Int32Array`, visible run by two binary
+  searches. O(log n + visible), and 100,000 keys is 400 KB rather than 100,000
+  object headers. Hit tolerance is in **frames, not pixels**, so a gesture means
+  the same thing at every zoom.
+- `viewport.ts` — integer frames are canonical; seconds are derived from the
+  rational rate on demand, never accumulated. `rowWindow` is the virtualisation.
+- `repaint-plan.ts` — three layers, and `planRepaint(previous, next)` as a pure
+  function of two **flat scalar** snapshots. Flat because a nested compare is
+  where "did the keys change?" silently becomes O(keys) per frame; key data is a
+  revision counter instead.
+- `panel.ts` — DOM structure and painting kept **separate**, so the node-count
+  property is a headless test. A test that needed a canvas context could not
+  prove the thing the step is measured on.
+
+**Verified by execution.**
+- `Editor/tests/timeline.test.ts` — 14 tests. Node count identical for 100 and
+  100,000 keys; only ~visible keys drawn; 500 tracks render the same row count
+  as 12; scrub dirties `interaction` alone.
+- **Negative control**: appending one DOM node per key turned the flatness test
+  red — `expected 112 to be 100012`. Reverted.
+- Live in the Tauri WebView2 shell: 6 tracks at 102 keys → **13 DOM nodes**; the
+  same 6 tracks at 30,000 keys → **13**; 20 tracks at exactly **100,000 keys** →
+  17 nodes, 10 row headers, 30 markers drawn, 11,400 rasterised pixels on the
+  content layer. Clicking the stage moved the playhead 0→50 and **the canvas
+  elements survived** (marked and re-checked), proving a scrub rebuilds no DOM.
+- Full Editor suite 189 passed; typecheck and web build clean.
+
+**Recorded `active`, not `done`**, following 11.8: the done-when is proven, the
+Needs column (11.5) is not met.
+
+**Note.** The Tauri shell **embeds the frontend at build time**. An `index.html`
+change needs `cargo build -p gx-editor-shell` before it appears, or `need(id)`
+throws at startup and the curtain never lifts. That cost a smoke-test cycle.
+
+---
+
+
+## 2026-09-13 — the scene checks 1.12 names, green against all three mocks
+
+With every open Phase 11 row dependency-blocked on P.2/P.3 (see the tracker
+note below), the next actionable step was **1.12**, whose recorded gap was
+exact: *"The mocks are ready; the checks are not written yet."*
+
+**What was missing.** The suite ran against `MockEngine` as a library and over
+a socket, but nothing exercised the scene contract, and the other two mocks —
+`gx-mock-editor` and `gx-mock-playout` — were never driven at all. "Green
+against all three mocks" was true of one.
+
+**`conformance/src/scene_plane.rs`.** Two suites. `scene_plane_suite` binds a
+mock engine behind a real control server *and* a real asset-publish server
+sharing one peer, then drives the four rules 1.12 names over the wire:
+
+- **Round-trip.** A document with a non-default transform, a data context, an
+  asset with a checksum and a keyframe channel publishes and comes back from
+  the peer identical. An empty scene would have proved nothing.
+- **Unknown kind.** Raw framed bytes carrying `"type":"hologram"` refuse as
+  `sceneParseFailed`; a known kind carrying `hologramDensity` refuses as
+  `sceneUnknownField` *naming the path*. Kept as two checks because collapsing
+  them would leave an author unable to tell a typo from a version mismatch.
+  The typed client cannot express either, so these frame their own request.
+- **Missing asset blocks the take.** A declared hash that has not arrived
+  refuses as `AssetMissing`; the *same* take commits once `hold_asset` runs —
+  which is what makes it a blocker rather than a permanent refusal.
+- **Revision pinning.** Republish issues revision 2; a take of revision 1
+  refuses as `RevisionMismatch { expected: 2, actual: 1 }`; revision 2 takes.
+
+Plus one the others implied: a refused publication leaves no revision behind
+(`UnknownTake` afterwards, not a half-created take id).
+
+`mock_product_suite` then runs all three mock **binaries** as processes: the
+engine serves both planes, `gx-mock-editor` authors and publishes with no real
+peer, `gx-mock-playout` takes the revision the editor just made, and a take of
+an unpublished revision exits non-zero with a named refusal. Two products, one
+engine, neither aware of the other.
+
+**The gate.** `npm run conformance` now builds the three mocks before running,
+because the product suite would otherwise *skip* on a clean checkout — honest,
+but then the gate would not cover what 1.12 claims. CI already runs
+`npm run check` on every `pull_request` across Windows and macOS.
+
+**Verified by execution.**
+- `npm run conformance` — **156 passed, 0 failed**, 8 skipped (up from 135;
+  every skip pre-existing and externally gated). CONFORMANT.
+- `cargo test -p gx-conformance` — 4 passed. Boundaries and codegen gates OK.
+- **Negative control**, because a check that cannot fail is not a check:
+  replacing the mock's `check_published` asset+revision arms with `Ok(())`
+  turned three of the new checks red — the asset blocker, the stale revision,
+  and the cross-process refusal — and the run reported NOT CONFORMANT. Reverted;
+  `git diff -- mocks/` is empty.
+
+**Note for the next session.** The mock is the contract's mirror: it refuses
+where the real engine refuses. The negative control above is the cheap way to
+prove a new conformance check is real — break the mock, watch it go red, revert.
+
+---
+
+
+## 2026-09-13 — inspector keyframes, Auto-Key, multi-select, undo/redo (11.21)
+
+Continued straight into 11.21 (deps 11.9, 11.20 both done). Done-when: diamonds
+for the supported properties, toggle/Auto-Key that *creates or updates exactly
+one key* with **defined first-key/base-value/off behavior**, plus multi-select
+and undo/redo.
+
+**Contract (`animation.rs`).** `set_base_property` writes an animatable numeric
+base field by name (refusing unknown property/object, non-finite value).
+`apply_property_edit(scene, object, property, value, frame, AutoKey)` is the
+defined behaviour in one place: **Off** changes the base only; **On** validates
+the key first, then writes base *and* upserts one key at `frame` with the same
+value — created when absent (including the first key on a fresh channel, eased
+in-out), updated in place otherwise, keeping the key's own easing. Validate
+before mutate, so a refused edit leaves the object untouched (tested).
+`SceneObject::base_mut` is the single mutable reach into the transform.
+
+**Shell.** `cmd_property_edit` and `cmd_set_base_property` join the keyframe
+commands. All authoring stays on the Tauri surface; the MCP surface is
+untouched (still preset-only).
+
+**UI.** `keyframe-editor.ts` was reworked from single-object to selection-wide:
+each row carries `objectIds`, a Mixed base value (`null` when they differ), and
+a `keyState` of none/all/partial rendered as ◇/◆/◈. `toggleIntent` decides
+remove-when-all, else create-on-the-missing. `main.ts` gained a whole-document
+undo/redo history where **one gesture is one entry**: a multi-object edit
+threads the scene through N shell calls (`runGesture`) and records only the
+pre-gesture document, so undo reverses the whole gesture. Auto-Key is a header
+checkbox; base-value inputs dispatch through it; Ctrl+Z / Ctrl+Y (and buttons)
+drive history but never steal a focused field's own edit history. Bindings edits
+now also route through the history.
+
+**Verified by execution.**
+- `cargo test -p gx-contracts` — 114 passed (5 new: base setter, Auto-Key
+  off/on/first-key/update-in-place, and refused-edit-leaves-untouched).
+- `cargo test -p gx-editor-shell --lib` — 6 passed incl. `property_edit`
+  off/on and a refused out-of-range on-edit.
+- `npm --prefix Editor run test:unit` — 175 passed; the keyframe test now
+  pins Mixed values, partial `keyState` and `toggleIntent`.
+- Live WebView2 smoke on a two-rect scene: multi-select showed Mixed `x` and a
+  shared `opacity`; Auto-Key off set the base on both with no key; on wrote a
+  key on both in one "on 2 objects" gesture; undo reverted the whole gesture,
+  a second undo reached the original, redo re-applied; the diamond toggled
+  none→all→none across both, and a partial (◈) selection filled only the
+  object that lacked a key.
+
+**Note.** No new contract *types* were added (the shell command takes
+primitives + `SceneDocument`), so codegen is unchanged (164 files current).
+`AutoKey` is Rust-only.
+
+---
+
+
+## 2026-09-13 — editable animation contract and Editor service (11.20)
+
+Resumed the session that died mid-11.20. The step's done-when: *extend only
+missing scene channels, easing and validated edit operations; Rust/TS
+round-trip keys, evaluate rational-rate frames consistently, preserve old
+scenes and undo/revision semantics **without widening preset-only MCP
+authoring***.
+
+**What was added.** `Shared/contracts/src/animation.rs` is the new home of the
+editable model: `SceneEasing` (linear/hold/ease-in/out/in-out/custom-bezier),
+`CubicBezier`, `SceneKeyframe` (absolute frame + value + easing), and
+`KeyframeChannel`. `SceneTimeline` grew `channels: Vec<KeyframeChannel>` behind
+`#[serde(default)]`, so a scene written before the field existed still parses
+and equals an empty channel set. Scene keys are **absolute frames**; preset
+keys stay normalised 0–1 (G.6.2) and convert once through
+`instantiate_phase_channels` against the scene's rational rate
+(`ms_to_frames`), never stored as a float rate. `SceneObject::kind()` returns
+the serde tag so the resolver can gate animatable kinds.
+
+The validated edit operations — `create_keyframe`, `set_keyframe`,
+`move_keyframe`, `remove_keyframe` — live in the contract, so the Editor
+service and any future consumer share one rule (invariant 27). Each failure is
+a named refusal, eight new ones: `SceneDuplicateObjectId`, `SceneObjectUnknown`,
+`AnimationPropertyUnsupported`, `KeyframeOutOfRange`, `DuplicateKeyframeFrame`,
+`AnimationChannelUnknown`, `KeyframeUnknown`, `InvalidKeyframeEasing`.
+
+**The MCP boundary held.** The first pass added `animation.keyframe_*` MCP
+tools; that is exactly the "widening preset-only MCP authoring" the done-when
+forbids (G.6.1: the model never authors a preset, and by extension never
+hand-authors keyframes over the automation surface). Reverted: the MCP
+animation surface is still `animation.apply_preset` alone. Editable keyframes
+are exposed only through the Editor's own Tauri commands (`cmd_keyframe_create`
+/`_update`/`_move`/`_remove`, `cmd_animation_surface`), which is where
+human authoring belongs.
+
+**UI.** `Editor/src/keyframe-editor.ts` projects the contract into an
+accessible panel: filled/empty diamonds at the playhead for every animatable
+property, a keyframe strip, value/easing/bezier/move detail editor, and a
+right-click context menu on the viewport and inspector fields. The vocabulary
+(properties, kinds, easings) is read from Rust via `cmd_animation_surface`,
+not restated in TS.
+
+**Verified by execution.**
+- `cargo test -p gx-contracts` — 109 passed, incl. 5 animation-op tests.
+- `cargo test -p gx-conformance` — the refusal audit *drives* all eight new
+  refusals against the real contract functions (not limitations).
+- `cargo test -p gx-editor-shell` — lib (5) and the `publish` integration
+  test round-trip the extended scene through a freshly built real worker;
+  a channel-less `new_scene` still publishes revision 1 then 2.
+- `npm --prefix Editor run test:unit` — 174 passed incl. `keyframe-editor`.
+- `npm run codegen` + `tools/codegen-check.mjs` — 157 types, gate clean.
+- Live WebView2 smoke: loaded a rect scene, created an `x` key at frame 0,
+  updated it to 333 + custom-bezier, moved 0→80 (playhead followed), created
+  an opacity key via the inspector context menu, and an out-of-range move to
+  250 was **refused by name** ("outside the 100-frame timeline") with the key
+  left in place.
+
+**A leaked worker bit again (memory rule 26).** The workspace `cargo test`
+left `gx-render-worker.exe` running; the next build failed "access is denied"
+and the `publish` test ran against a stale binary that rejected
+`timeline.channels`. `taskkill`/`Get-Process | Stop-Process`, rebuild, re-run
+— green.
+
+**Not done, and not claimed.** 11.21 (Auto-Key, multi-select keyframing,
+undo/redo) is only groundwork — the diamonds and single-key toggle exist, but
+Auto-Key, multi-select and an undo stack do not, and the inspector value-edit
+path is still unwired in the shell. `gx-engine-host` integration tests hang in
+this headless environment (GPU/window/child process); its lib tests pass and
+it compiles clean against the new contracts.
+
+---
+
+
 ## 2026-09-11 — Phase 3 begins: scene parse to prepared scene (3.4)
 
 Scoped by the user: "start phase 3". Eight slices were dispatched; the task
@@ -2094,3 +2766,81 @@ front sphere over the plane. The captured frame contained 51,275 red,
 
 The concurrently added build-plan steps 11.18–11.24 and their tracker entries
 were preserved. They remain Planned and dependency-gated.
+
+---
+
+## 2026-09-12 — Structured Editor viewport overlays (11.7)
+
+The interaction layer is now an SVG sibling over the Three.js canvas, never
+part of the raster. `Editor/src/overlay.ts` derives one model from the scene:
+rotated selection bounds, eight resize handles for unlocked objects, locked
+selection state, guide lines, marquee bounds, scene-coordinate hit testing and
+CSS-to-scene coordinate conversion. The DOM renderer is a projection of that
+model rather than a second source of interaction state.
+
+The live shell wires canvas clicks and object-manager Select actions to the
+same `selection` state. Pointer drags render crosshair guides and a marquee,
+then select intersecting visible leaves; all transient primitives disappear on
+release. `zDepth` decides hit order before `zIndex`, matching the viewport's
+real geometry rather than letting an ordering hint become fake depth. Loading a
+new scene clears selection because it is view state, not document state.
+
+### Verified by execution
+
+| What | Result |
+|---|---|
+| `npm --prefix Editor run test:unit` | **159 passed, 0 failed** |
+| `npm run typecheck` | **exit 0** |
+| `npm run build:web` | **exit 0** |
+| `cargo build -p gx-editor-shell --offline` | **exit 0** |
+| Windows Tauri/WebView2 reference-scene smoke | 17 object rows; clicking `reference 3D cube` produced one selected treegrid row, one selection outline and eight handles |
+| Live pointer-drag inspection | one marquee and two guides during drag; all transient primitives removed on release |
+
+The captured viewport visibly showed the independent cyan selection, handle,
+guide and marquee primitives over the rendered canvas. This satisfies 11.7's
+done-when: the raster can be replaced without replacing the interaction layer.
+
+---
+
+## 2026-09-12 — Data binding property panel built; 11.19 remains active
+
+`Editor/src/bindings.ts` now owns the Editor-side binding grammar and one
+strict resolution path. Object properties bind to dot paths such as
+`match.homeScore` and array paths such as `teams.0.name`. The same table drives
+panel visibility, type/range validation and assignment for text, image asset
+ids, visibility and transform fields. A bad path, wrong type, invalid range,
+unsupported property, non-string binding or unknown image asset refuses the
+whole resolution by a named code; the preview never combines newly resolved
+values with stale authored ones.
+
+The new accessible `Data bindings` panel is rendered from the same `UiNode`
+tree exposed to agents. It lists one selected object's bindable properties and
+every leaf in `SceneDocument.dataContext`, adds/changes/removes a binding as one
+undoable transaction, and keeps the original authored value intact. Resolution
+happens before `SceneViewport` construction, so Three.js accepts a resolved
+scene and contains no data-binding policy.
+
+### Verified by execution
+
+| What | Result |
+|---|---|
+| `npm --prefix Editor run test:unit` | **170 passed, 0 failed**; 11 binding tests cover path grammar, strict resolution, panel state and edits |
+| strict standalone typecheck of `Editor/web/main.ts` | **exit 0** |
+| `npm run build:web` | **exit 0** |
+| `cargo build -p gx-editor-shell --offline` | **exit 0** |
+| live Windows Tauri/WebView2 bound-scene smoke | 3 objects and 4 data fields loaded; `live.headline` displayed `"LIVE SCORE"`, `live.image` displayed `"badge-alt"` |
+| transform binding interaction | authored position x=40 produced no hit; bound x=240 selected `Moving box`; changing X to `live.y` moved the selection outline from x=215 to x=65 |
+| Rust workspace split gate | **429 passed** outside `gx-engine-host`; **5 passed** in `gx-engine-host` |
+| `cargo run -q -p gx-conformance --offline` | **135 passed, 0 failed, 8 skipped** |
+
+`npm run check` reached and passed boundaries, codegen (159 files),
+TypeScript (18 + 170 tests) and entered `cargo test --workspace`; the wrapper
+timed out while that unfiltered Rust command was still running. Re-running the
+same Rust workspace as its non-host and host packages completed green as
+recorded above, followed by a green conformance run.
+
+**Status correction before leaving the step.** The current build plan makes
+11.18 and 8.6 prerequisites of 11.19, not the older dependency line used when
+the work began. 8.6 is done; 11.18 is not. The exact 11.19 done-when also
+requires binding preservation through save/reopen, which was not exercised.
+The implementation is therefore recorded **active**, not done.

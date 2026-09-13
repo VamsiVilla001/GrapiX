@@ -29,6 +29,16 @@ export class SceneViewport {
   readonly scene: THREE.Scene;
   readonly camera: THREE.OrthographicCamera;
   private readonly meshes: THREE.Mesh[] = [];
+  private readonly rendered = new Map<
+    string,
+    {
+      readonly mesh: THREE.Mesh;
+      readonly type: SceneObject["type"];
+      width: number;
+      height: number;
+      depth: number;
+    }
+  >();
   /// Objects this layer could not draw, and why — a gradient it has no
   /// texture for, a colour space it cannot convert. Read by the shell so a
   /// missing object is explained rather than merely absent.
@@ -51,6 +61,13 @@ export class SceneViewport {
       const mesh = buildViewportObject(object, space, this.unsupported);
       if (mesh) {
         this.meshes.push(mesh);
+        this.rendered.set(object.id, {
+          mesh,
+          type: object.type,
+          width: object.width,
+          height: object.height,
+          depth: object.type === "mesh" ? object.depth : 0,
+        });
         this.scene.add(mesh);
       }
     }
@@ -69,6 +86,54 @@ export class SceneViewport {
   /// viewport's.
   render(): void {
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /// Update the already-allocated scene graph for one evaluated preview frame.
+  ///
+  /// Transform/opacity animation mutates Three objects in place. Geometry is
+  /// rebuilt only when an authored width or height channel actually changes;
+  /// recreating the renderer or every mesh on each animation callback would
+  /// turn a 50 fps preview into allocator pressure rather than useful work.
+  updateDocument(document: SceneDocument): string[] {
+    const issues: string[] = [];
+    const space = { width: document.canvas.width, height: document.canvas.height };
+    const seen = new Set<string>();
+    for (const object of document.objects) {
+      const rendered = this.rendered.get(object.id);
+      if (!rendered) continue;
+      seen.add(object.id);
+      if (rendered.type !== object.type) {
+        issues.push(
+          `${object.id}: preview object kind changed from ${rendered.type} to ${object.type}`,
+        );
+        continue;
+      }
+      const depth = object.type === "mesh" ? object.depth : 0;
+      if (
+        rendered.width !== object.width ||
+        rendered.height !== object.height ||
+        rendered.depth !== depth
+      ) {
+        const geometry = resizedViewportGeometry(object);
+        if (geometry === undefined) {
+          issues.push(`${object.id}: animated size cannot be represented by the viewport`);
+        } else {
+          rendered.mesh.geometry.dispose();
+          rendered.mesh.geometry = geometry;
+          rendered.width = object.width;
+          rendered.height = object.height;
+          rendered.depth = depth;
+        }
+      }
+      applyViewportObjectState(rendered.mesh, object, space);
+    }
+    for (const [id, rendered] of this.rendered) {
+      if (!seen.has(id)) {
+        rendered.mesh.visible = false;
+        issues.push(`${id}: evaluated preview no longer contains this rendered object`);
+      }
+    }
+    return issues;
   }
 
   dispose(): void {
@@ -202,9 +267,6 @@ export function buildViewportObject(
   unsupported: string[],
 ): THREE.Mesh | null {
   const base = object;
-  // zDepth is real geometry. zIndex remains a render-order hint below, so a
-  // large 2D index can never move a plane through a 3D surface.
-  const pos = scenePosition(space, base.x, base.y, base.zDepth);
 
   let mesh: THREE.Mesh;
   switch (object.type) {
@@ -278,11 +340,6 @@ export function buildViewportObject(
         flatShading: true,
       });
       mesh = new THREE.Mesh(primitive.geometry, material);
-      // Meshes are the only objects whose X/Y rotations compose (contract
-      // comment on MeshObject). Applied here so a mesh rotated off-plane
-      // renders rotated rather than silently facing the camera.
-      mesh.rotation.x = (base.rotationX * Math.PI) / 180;
-      mesh.rotation.y = (base.rotationY * Math.PI) / 180;
       break;
     }
     case "light":
@@ -301,11 +358,55 @@ export function buildViewportObject(
       return null;
   }
 
-  mesh.position.set(pos.x, pos.y, pos.z);
-  mesh.renderOrder = base.zIndex;
-  mesh.rotation.z = (base.rotation * Math.PI) / 180;
-  mesh.scale.set(base.scaleX, base.scaleY, base.scaleZ);
+  applyViewportObjectState(mesh, object, space);
   return mesh;
+}
+
+function applyViewportObjectState(
+  mesh: THREE.Mesh,
+  object: SceneObject,
+  space: { width: number; height: number },
+): void {
+  // zDepth is real geometry. zIndex remains a render-order hint, so a large
+  // 2D index can never move a plane through a 3D surface.
+  const position = scenePosition(space, object.x, object.y, object.zDepth);
+  mesh.position.set(position.x, position.y, position.z);
+  mesh.renderOrder = object.zIndex;
+  mesh.rotation.z = (object.rotation * Math.PI) / 180;
+  // Meshes are the only objects whose X/Y rotations compose. The two fields
+  // still exist on every base, so non-meshes explicitly remain in-plane.
+  mesh.rotation.x = object.type === "mesh" ? (object.rotationX * Math.PI) / 180 : 0;
+  mesh.rotation.y = object.type === "mesh" ? (object.rotationY * Math.PI) / 180 : 0;
+  mesh.scale.set(object.scaleX, object.scaleY, object.scaleZ);
+  mesh.visible = object.visible;
+
+  const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+  for (const material of materials) {
+    const nextTransparent = object.opacity < 1;
+    if (material.transparent !== nextTransparent) {
+      material.transparent = nextTransparent;
+      material.needsUpdate = true;
+    }
+    material.opacity = object.opacity;
+    material.depthWrite = object.opacity >= 1;
+  }
+}
+
+function resizedViewportGeometry(object: SceneObject): THREE.BufferGeometry | undefined {
+  switch (object.type) {
+    case "rect":
+      return rectGeometry(object.width, object.height, object.radius);
+    case "ellipse":
+      return new THREE.CircleGeometry(1, 64).scale(object.width / 2, object.height / 2, 1);
+    case "image":
+      return new THREE.PlaneGeometry(object.width, object.height);
+    case "mesh": {
+      const resolved = resolveMeshGeometry(object);
+      return resolved.kind === "geometry" ? resolved.geometry : undefined;
+    }
+    default:
+      return undefined;
+  }
 }
 
 /// Result of resolving authored mesh geometry.

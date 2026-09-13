@@ -323,7 +323,7 @@ fn drive_editor_refusals(report: &mut Report) {
             height: 16,
             frame_rate: RationalRate::P50,
         },
-        timeline: gx_contracts::scene::SceneTimeline { duration_frames: 1 },
+        timeline: gx_contracts::scene::SceneTimeline { duration_frames: 1, channels: Vec::new() },
         data_context: Default::default(),
         assets: Vec::new(),
         fonts: Vec::new(),
@@ -341,6 +341,229 @@ fn drive_editor_refusals(report: &mut Report) {
                 Err(gx_editor::EditorError::Refused(Refusal::ProjectNotFound { .. }))
             ) && !root.join("no-such-project").exists(),
             "a write into a missing project was not refused by name, or created one anyway",
+        ),
+    );
+
+    drive_animation_refusals(report);
+}
+
+/// The editable-animation edit operations live in `gx_contracts` and are the
+/// Editor service's producers (11.20). Each refusal is driven against the real
+/// function, so a variant that stopped being produced fails here rather than
+/// drifting into an unreachable name.
+fn drive_animation_refusals(report: &mut Report) {
+    use gx_contracts::animation::{
+        create_keyframe, move_keyframe, set_keyframe, SceneEasing, SceneKeyframe,
+    };
+    use gx_contracts::scene::{ObjectBase, RectObject, SceneCanvas, SceneDocument, SceneObject, SceneTimeline};
+
+    let scene_with = |objects: Vec<SceneObject>| SceneDocument {
+        id: "audit".into(),
+        name: "audit".into(),
+        version: 1,
+        revision: Some(Revision(1)),
+        active_camera_id: None,
+        canvas: SceneCanvas {
+            width: 16,
+            height: 16,
+            frame_rate: RationalRate::P50,
+        },
+        timeline: SceneTimeline {
+            duration_frames: 100,
+            channels: Vec::new(),
+        },
+        data_context: Default::default(),
+        assets: Vec::new(),
+        fonts: Vec::new(),
+        materials: Vec::new(),
+        objects,
+    };
+    let rect = |id: &str| {
+        SceneObject::Rect(RectObject {
+            base: ObjectBase::new(id, id),
+            radius: 0.0,
+        })
+    };
+    let key = |frame: u64, value: f64| SceneKeyframe {
+        frame,
+        value,
+        easing: SceneEasing::Linear,
+        bezier: None,
+    };
+
+    let mut duplicate = scene_with(vec![rect("card"), rect("card")]);
+    report.record(
+        PLANE,
+        "SceneDuplicateObjectId is produced for two objects sharing an id",
+        expect(
+            matches!(
+                set_keyframe(&mut duplicate, "card", "x", key(0, 0.0)),
+                Err(Refusal::SceneDuplicateObjectId { .. })
+            ),
+            "a duplicate object id was not refused by name",
+        ),
+    );
+
+    let mut missing = scene_with(vec![rect("card")]);
+    report.record(
+        PLANE,
+        "SceneObjectUnknown is produced for an edit naming an absent object",
+        expect(
+            matches!(
+                set_keyframe(&mut missing, "ghost", "x", key(0, 0.0)),
+                Err(Refusal::SceneObjectUnknown { .. })
+            ),
+            "an unknown object id was not refused by name",
+        ),
+    );
+
+    let mut unsupported = scene_with(vec![rect("card")]);
+    report.record(
+        PLANE,
+        "AnimationPropertyUnsupported is produced for a non-animatable property",
+        expect(
+            matches!(
+                set_keyframe(&mut unsupported, "card", "text", key(0, 0.0)),
+                Err(Refusal::AnimationPropertyUnsupported { .. })
+            ),
+            "a non-animatable property was not refused by name",
+        ),
+    );
+
+    let mut out_of_range = scene_with(vec![rect("card")]);
+    report.record(
+        PLANE,
+        "KeyframeOutOfRange is produced for a frame past the timeline",
+        expect(
+            matches!(
+                set_keyframe(&mut out_of_range, "card", "x", key(200, 0.0)),
+                Err(Refusal::KeyframeOutOfRange { .. })
+            ),
+            "a frame past the timeline was not refused by name",
+        ),
+    );
+
+    let mut bad_easing = scene_with(vec![rect("card")]);
+    report.record(
+        PLANE,
+        "InvalidKeyframeEasing is produced for custom-bezier with no controls",
+        expect(
+            matches!(
+                set_keyframe(
+                    &mut bad_easing,
+                    "card",
+                    "x",
+                    SceneKeyframe {
+                        frame: 0,
+                        value: 0.0,
+                        easing: SceneEasing::CustomBezier,
+                        bezier: None,
+                    },
+                ),
+                Err(Refusal::InvalidKeyframeEasing { .. })
+            ),
+            "a custom-bezier key with no controls was not refused by name",
+        ),
+    );
+
+    let mut duplicate_frame = scene_with(vec![rect("card")]);
+    set_keyframe(&mut duplicate_frame, "card", "x", key(20, 0.0)).expect("first key lands");
+    report.record(
+        PLANE,
+        "DuplicateKeyframeFrame is produced for a second key at one frame",
+        expect(
+            matches!(
+                create_keyframe(&mut duplicate_frame, "card", "x", key(20, 1.0)),
+                Err(Refusal::DuplicateKeyframeFrame { .. })
+            ),
+            "a duplicate frame was not refused by name",
+        ),
+    );
+
+    let mut no_channel = scene_with(vec![rect("card")]);
+    report.record(
+        PLANE,
+        "AnimationChannelUnknown is produced for a move on an absent channel",
+        expect(
+            matches!(
+                move_keyframe(&mut no_channel, "card", "x", 0, 10),
+                Err(Refusal::AnimationChannelUnknown { .. })
+            ),
+            "a move on an absent channel was not refused by name",
+        ),
+    );
+
+    let mut no_key = scene_with(vec![rect("card")]);
+    set_keyframe(&mut no_key, "card", "x", key(10, 0.0)).expect("seed key lands");
+    report.record(
+        PLANE,
+        "KeyframeUnknown is produced for a move of a key that is not there",
+        expect(
+            matches!(
+                move_keyframe(&mut no_key, "card", "x", 40, 60),
+                Err(Refusal::KeyframeUnknown { .. })
+            ),
+            "a move of an absent key was not refused by name",
+        ),
+    );
+
+    drive_authoring_refusals(report);
+}
+
+/// The object-lifecycle authoring operations (11.18) are also Editor-service
+/// producers in `gx_contracts`. A kind that needs data the caller has not
+/// supplied, and an empty name, are refused by name rather than making a
+/// broken or nameless object — driven here against the real constructor so a
+/// producer that stopped refusing fails the gate.
+fn drive_authoring_refusals(report: &mut Report) {
+    use gx_contracts::authoring::create_object;
+    use gx_contracts::scene::{SceneCanvas, SceneDocument, SceneTimeline};
+
+    let empty_scene = || SceneDocument {
+        id: "audit".into(),
+        name: "audit".into(),
+        version: 1,
+        revision: Some(Revision(1)),
+        active_camera_id: None,
+        canvas: SceneCanvas {
+            width: 16,
+            height: 16,
+            frame_rate: RationalRate::P50,
+        },
+        timeline: SceneTimeline {
+            duration_frames: 100,
+            channels: Vec::new(),
+        },
+        data_context: Default::default(),
+        assets: Vec::new(),
+        fonts: Vec::new(),
+        materials: Vec::new(),
+        objects: Vec::new(),
+    };
+
+    let mut needs_asset = empty_scene();
+    report.record(
+        PLANE,
+        "SceneObjectKindNotCreatable is produced for a kind that needs data the caller has not supplied",
+        expect(
+            matches!(
+                create_object(&mut needs_asset, "image", "Logo"),
+                Err(Refusal::SceneObjectKindNotCreatable { .. })
+            ) && needs_asset.objects.is_empty(),
+            "a kind that cannot be created was not refused by name, or wrote an object anyway",
+        ),
+    );
+
+    let mut empty_name = empty_scene();
+    report.record(
+        PLANE,
+        "SceneObjectNameEmpty is produced for a create with no name",
+        expect(
+            matches!(
+                create_object(&mut empty_name, "rect", "   "),
+                Err(Refusal::SceneObjectNameEmpty)
+            ) && empty_name.objects.is_empty(),
+            "an empty object name was not refused by name, or wrote an object anyway",
         ),
     );
 }
@@ -608,6 +831,16 @@ fn is_driven(variant: &str) -> bool {
             | "RundownEntryUnknown"
             | "AutomationExecutionDeferred"
             | "ProjectNotFound"
+            | "SceneDuplicateObjectId"
+            | "SceneObjectUnknown"
+            | "AnimationPropertyUnsupported"
+            | "KeyframeOutOfRange"
+            | "InvalidKeyframeEasing"
+            | "DuplicateKeyframeFrame"
+            | "AnimationChannelUnknown"
+            | "KeyframeUnknown"
+            | "SceneObjectKindNotCreatable"
+            | "SceneObjectNameEmpty"
     )
 }
 

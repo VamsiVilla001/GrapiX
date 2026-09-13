@@ -1768,6 +1768,7 @@ version = "0.1.0"
 dependencies = [
  "gx-asset-plane",
  "gx-contracts",
+ "gx-editor",
  "gx-project-store",
  "serde",
  "serde_json",

@@ -28,6 +28,7 @@ tauri-build = { workspace = true }
 gx-contracts = { workspace = true }
 gx-asset-plane = { workspace = true }
 gx-project-store = { workspace = true }
+gx-editor = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tauri = { workspace = true }

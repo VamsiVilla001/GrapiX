@@ -57,6 +57,22 @@ describe("the scene list", () => {
     expect(item.actions!.find((a) => a.name === "open")!.unavailable).toBeUndefined();
     expect(item.actions!.find((a) => a.name === "duplicate")!.unavailable).toBeUndefined();
   });
+
+  it("keeps an unreadable file visible but disables content actions with its reason", () => {
+    const reason = "scene file is unreadable: unknown field /legacy";
+    const panel = sceneManagerPanel({
+      project: "news",
+      scenes: [scene({ sceneId: "legacy", unavailableReason: reason })],
+      currentDesignSystemVersion: 4,
+    });
+
+    const item = findNode(panel, "scene/legacy")!;
+    expect(item.description).toContain(reason);
+    expect(item.actions!.find((a) => a.name === "open")!.unavailable).toBe(reason);
+    expect(item.actions!.find((a) => a.name === "duplicate")!.unavailable).toBe(reason);
+    expect(item.actions!.find((a) => a.name === "publish")!.unavailable).toBe(reason);
+    expect(item.actions!.find((a) => a.name === "delete")!.unavailable).toBeUndefined();
+  });
 });
 
 describe("conformance, computed continuously", () => {

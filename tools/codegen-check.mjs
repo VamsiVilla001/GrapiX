@@ -10,13 +10,29 @@
 import { execFileSync } from "node:child_process";
 import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const GENERATED = join(ROOT, "Shared", "generated-ts", "src");
 
+/// Generated files that do not live under `Shared/generated-ts`.
+///
+/// The cross-language reference tables are produced by the same codegen run
+/// from the Rust implementations that own the curves — colour transfer (11.4)
+/// and easing (11.11). They were outside this gate, and that was a real hole:
+/// each is pinned by a TypeScript test that compares the mirror against the
+/// table, so a *stale table* leaves the test passing while Rust and TypeScript
+/// have actually diverged. Checking them here is what makes "changed on one
+/// side and not the other fails the gate in the same run" true rather than
+/// nearly true.
+const GENERATED_FILES = [
+  join("Editor", "src", "transfer-reference.ts"),
+  join("Editor", "src", "easing-reference.ts"),
+];
+
 const backup = mkdtempSync(join(tmpdir(), "gx-codegen-"));
+const fileBackup = mkdtempSync(join(tmpdir(), "gx-codegen-files-"));
 let restored = false;
 
 function snapshot(dir, prefix = "") {
@@ -35,15 +51,26 @@ function snapshot(dir, prefix = "") {
   return out;
 }
 
+function snapshotFiles() {
+  const out = new Map();
+  for (const relative of GENERATED_FILES) {
+    out.set(relative, readFileSync(join(ROOT, relative), "utf8"));
+  }
+  return out;
+}
+
 try {
   cpSync(GENERATED, backup, { recursive: true });
-  const before = snapshot(backup);
+  for (const relative of GENERATED_FILES) {
+    cpSync(join(ROOT, relative), join(fileBackup, basename(relative)));
+  }
+  const before = new Map([...snapshot(backup), ...snapshotFiles()]);
 
   execFileSync("cargo", ["run", "-q", "-p", "gx-contract-codegen"], {
     cwd: ROOT,
     stdio: ["ignore", "ignore", "inherit"],
   });
-  const after = snapshot(GENERATED);
+  const after = new Map([...snapshot(GENERATED), ...snapshotFiles()]);
 
   const problems = [];
   for (const [name, text] of after) {
@@ -65,6 +92,12 @@ try {
 } finally {
   // On failure the regenerated files are left in place: that is what the
   // developer needs to commit. On success they are identical anyway.
-  if (!restored) cpSync(backup, GENERATED, { recursive: true });
+  if (!restored) {
+    cpSync(backup, GENERATED, { recursive: true });
+    for (const relative of GENERATED_FILES) {
+      cpSync(join(fileBackup, basename(relative)), join(ROOT, relative));
+    }
+  }
+  rmSync(fileBackup, { recursive: true, force: true });
   rmSync(backup, { recursive: true, force: true });
 }

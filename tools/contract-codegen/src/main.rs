@@ -10,6 +10,10 @@
 use std::path::PathBuf;
 
 use gx_asset_plane::{AssetRef, PreflightRequest, PreflightResponse, TransferState};
+use gx_contracts::animation::{
+    ease_at, easing_control_points, AnimationSurface, CubicBezier, KeyframeChannel, SceneEasing,
+    SceneKeyframe,
+};
 use gx_contracts::auth::{Role, Scope};
 use gx_contracts::color::{
     rec709_decode, rec709_encode, srgb_decode, srgb_encode, ColorValue, GradientCoordinateMode,
@@ -32,6 +36,7 @@ use gx_contracts::material::{
 };
 use gx_contracts::mcp::{CapabilitySurface, EnumSurface, ScopeDenial, ToolDescriptor, ToolEffect};
 use gx_contracts::package::{PackageFileEntry, PackageManifest};
+use gx_contracts::authoring::{ObjectDeletion, ObjectDuplication};
 use gx_contracts::scene::{
     AssetAvailability, AssetKind, AssetLibraryItem, BezierPath, BrushBlendMode, BrushPoint,
     CameraKind, CameraObject, EllipseObject, FillRule, GroupObject, HierarchyChildren,
@@ -133,9 +138,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         AssetLibraryItem,
         SceneCanvas,
         SceneTimeline,
+        // gx-contracts: editable scene animation (11.20)
+        SceneEasing,
+        AnimationSurface,
+        CubicBezier,
+        SceneKeyframe,
+        KeyframeChannel,
         Vec2,
         Vec3,
         ObjectBase,
+        ObjectDeletion,
+        ObjectDuplication,
         TextLayout,
         TextAutoFit,
         WritingMode,
@@ -257,6 +270,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     write_capability_surface(&out)?;
     write_barrel(&out)?;
     write_transfer_reference(&workspace_root())?;
+    write_easing_reference(&workspace_root())?;
     check_advertised_types_resolve(&out)?;
     println!("generated {count} contract types into {}", out.display());
     Ok(())
@@ -406,6 +420,84 @@ fn write_transfer_reference(root: &std::path::Path) -> std::io::Result<()> {
     }
     body.push_str("] as const;\n");
     std::fs::write(root.join("Editor/src/transfer-reference.ts"), body)
+}
+
+/// Generate the cross-language easing reference from the Rust evaluator that
+/// owns the curves (11.11, invariant 27).
+///
+/// Same argument as the colour transfer table above, for the same reason: the
+/// speed graph has to draw the curve the engine will render, and a browser
+/// cannot call Rust once per pixel. So the solve is mirrored in TypeScript and
+/// pinned here — an easing changed on one side and not the other fails the
+/// gate in the same run rather than shipping a preview that lies about what
+/// goes to air.
+fn write_easing_reference(root: &std::path::Path) -> std::io::Result<()> {
+    const STEPS: &[f64] = &[
+        0.0, 0.05, 0.1, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.75, 0.8, 0.9, 0.95, 1.0,
+    ];
+    /// An overshooting curve, deliberately: y outside 0–1 is legal and the
+    /// mirror must reproduce it rather than clamping.
+    const CUSTOM: CubicBezier = CubicBezier {
+        x1: 0.34,
+        y1: 1.56,
+        x2: 0.64,
+        y2: 1.0,
+    };
+
+    // Wire names through serde rather than formatting the variant, so the
+    // table reports exactly what the contract renames them to.
+    let wire = |easing: SceneEasing| -> String {
+        serde_json::to_value(easing)
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .expect("SceneEasing serialises to a string")
+    };
+
+    let mut body = String::from(
+        "// GENERATED from gx-contracts::animation by gx-contract-codegen.\n\
+         // Do not edit. Regenerate with `npm run codegen` (11.11, invariant 27).\n\
+         export const EASING_REFERENCE = [\n",
+    );
+    for easing in SceneEasing::ALL {
+        if *easing == SceneEasing::CustomBezier {
+            continue;
+        }
+        for &t in STEPS {
+            body.push_str(&format!(
+                "  {{ easing: {:?}, t: {t:?}, y: {:?} }},\n",
+                wire(*easing),
+                ease_at(*easing, None, t),
+            ));
+        }
+    }
+    body.push_str("] as const;\n\nexport const CUSTOM_BEZIER_REFERENCE = {\n");
+    body.push_str(&format!(
+        "  points: {{ x1: {:?}, y1: {:?}, x2: {:?}, y2: {:?} }},\n  samples: [\n",
+        CUSTOM.x1, CUSTOM.y1, CUSTOM.x2, CUSTOM.y2
+    ));
+    for &t in STEPS {
+        body.push_str(&format!(
+            "    {{ t: {t:?}, y: {:?} }},\n",
+            ease_at(SceneEasing::CustomBezier, Some(CUSTOM), t),
+        ));
+    }
+    body.push_str("  ],\n} as const;\n\nexport const NAMED_EASING_POINTS = {\n");
+    for easing in SceneEasing::ALL {
+        if *easing == SceneEasing::CustomBezier {
+            continue;
+        }
+        let points = easing_control_points(*easing);
+        body.push_str(&format!(
+            "  {:?}: {{ x1: {:?}, y1: {:?}, x2: {:?}, y2: {:?} }},\n",
+            wire(*easing),
+            points.x1,
+            points.y1,
+            points.x2,
+            points.y2
+        ));
+    }
+    body.push_str("} as const;\n");
+    std::fs::write(root.join("Editor/src/easing-reference.ts"), body)
 }
 
 /// Emit the capability surface as *data*, not just as a type.

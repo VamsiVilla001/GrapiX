@@ -5,6 +5,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod animation;
+pub mod authoring;
 pub mod auth;
 pub mod color;
 pub mod design_system;
@@ -502,6 +504,52 @@ pub enum Refusal {
     /// a second, near-identical project, and the author's work is split
     /// across both without either looking wrong.
     ProjectNotFound { project: String },
+    /// An object id appears twice in one scene document. The hierarchy
+    /// resolver can still report it, but an edit addressed by id would not be
+    /// able to say which object it changed.
+    SceneDuplicateObjectId { object_id: String },
+    /// An edit names an object id the scene does not contain.
+    SceneObjectUnknown { object_id: String },
+    /// A kind the authoring surface cannot complete on its own, with what it
+    /// needs. An `image` with no asset or a `text` with no font would refuse
+    /// the moment it was rendered, so it is refused at creation instead of
+    /// being made blank and left for the author to discover.
+    SceneObjectKindNotCreatable { kind: String, needs: String },
+    /// An object was created or renamed with a blank name. The name is what
+    /// the author reads in every panel; an empty one makes an object that
+    /// cannot be told from its siblings.
+    SceneObjectNameEmpty,
+    /// A frame is outside the scene's declared timeline duration.
+    KeyframeOutOfRange {
+        object: String,
+        property: String,
+        frame: u64,
+        duration_frames: u64,
+    },
+    /// Two keys on one channel claim the same frame.
+    DuplicateKeyframeFrame {
+        object: String,
+        property: String,
+        frame: u64,
+    },
+    /// A channel targets a property that cannot be animated on this object
+    /// kind. It is a refusal, not a silent no-op: otherwise an edit can say it
+    /// succeeded and change nothing.
+    AnimationPropertyUnsupported { object: String, property: String },
+    /// An edit names a channel that does not exist.
+    AnimationChannelUnknown { object: String, property: String },
+    /// An edit names a keyframe the channel does not contain.
+    KeyframeUnknown {
+        object: String,
+        property: String,
+        frame: u64,
+    },
+    /// A keyframe's easing payload disagrees with its named easing.
+    InvalidKeyframeEasing {
+        object: String,
+        property: String,
+        detail: String,
+    },
 }
 
 impl std::fmt::Display for Refusal {
@@ -758,6 +806,54 @@ impl std::fmt::Display for Refusal {
             Refusal::ProjectNotFound { project } => {
                 write!(f, "no project named {project}")
             }
+            Refusal::SceneDuplicateObjectId { object_id } => {
+                write!(f, "object id {object_id} appears more than once")
+            }
+            Refusal::SceneObjectUnknown { object_id } => {
+                write!(f, "scene has no object {object_id}")
+            }
+            Refusal::SceneObjectKindNotCreatable { kind, needs } => {
+                write!(f, "cannot create a {kind} without {needs}")
+            }
+            Refusal::SceneObjectNameEmpty => {
+                write!(f, "an object needs a name")
+            }
+            Refusal::KeyframeOutOfRange {
+                object,
+                property,
+                frame,
+                duration_frames,
+            } => write!(
+                f,
+                "keyframe for {object}.{property} is at frame {frame}, outside the {duration_frames}-frame timeline"
+            ),
+            Refusal::DuplicateKeyframeFrame {
+                object,
+                property,
+                frame,
+            } => write!(
+                f,
+                "object {object} already has a keyframe for {property} at frame {frame}"
+            ),
+            Refusal::AnimationPropertyUnsupported { object, property } => {
+                write!(f, "object {object} cannot animate {property}")
+            }
+            Refusal::AnimationChannelUnknown { object, property } => {
+                write!(f, "object {object} has no animation channel for {property}")
+            }
+            Refusal::KeyframeUnknown {
+                object,
+                property,
+                frame,
+            } => write!(
+                f,
+                "object {object} has no keyframe for {property} at frame {frame}"
+            ),
+            Refusal::InvalidKeyframeEasing {
+                object,
+                property,
+                detail,
+            } => write!(f, "invalid easing for {object}.{property}: {detail}"),
         }
     }
 }
@@ -916,6 +1012,46 @@ impl Refusal {
                 asset_id: "audit".into(),
                 object: "audit".into(),
             },
+            Self::SceneDuplicateObjectId {
+                object_id: "audit".into(),
+            },
+            Self::SceneObjectUnknown {
+                object_id: "audit".into(),
+            },
+            Self::SceneObjectKindNotCreatable {
+                kind: "audit".into(),
+                needs: "audit".into(),
+            },
+            Self::SceneObjectNameEmpty,
+            Self::KeyframeOutOfRange {
+                object: "audit".into(),
+                property: "audit".into(),
+                frame: 2,
+                duration_frames: 1,
+            },
+            Self::DuplicateKeyframeFrame {
+                object: "audit".into(),
+                property: "audit".into(),
+                frame: 1,
+            },
+            Self::AnimationPropertyUnsupported {
+                object: "audit".into(),
+                property: "audit".into(),
+            },
+            Self::AnimationChannelUnknown {
+                object: "audit".into(),
+                property: "audit".into(),
+            },
+            Self::KeyframeUnknown {
+                object: "audit".into(),
+                property: "audit".into(),
+                frame: 1,
+            },
+            Self::InvalidKeyframeEasing {
+                object: "audit".into(),
+                property: "audit".into(),
+                detail: "audit".into(),
+            },
             Self::UnknownPackageFormatVersion { received: 0 },
             Self::UnsafePackagePath {
                 path: "audit".into(),
@@ -1048,6 +1184,16 @@ impl Refusal {
             Self::SceneUnknownField { .. } => "sceneUnknownField",
             Self::SceneFontUnknown { .. } => "sceneFontUnknown",
             Self::SceneAssetUnknown { .. } => "sceneAssetUnknown",
+            Self::SceneDuplicateObjectId { .. } => "sceneDuplicateObjectId",
+            Self::SceneObjectUnknown { .. } => "sceneObjectUnknown",
+            Self::SceneObjectKindNotCreatable { .. } => "sceneObjectKindNotCreatable",
+            Self::SceneObjectNameEmpty => "sceneObjectNameEmpty",
+            Self::KeyframeOutOfRange { .. } => "keyframeOutOfRange",
+            Self::DuplicateKeyframeFrame { .. } => "duplicateKeyframeFrame",
+            Self::AnimationPropertyUnsupported { .. } => "animationPropertyUnsupported",
+            Self::AnimationChannelUnknown { .. } => "animationChannelUnknown",
+            Self::KeyframeUnknown { .. } => "keyframeUnknown",
+            Self::InvalidKeyframeEasing { .. } => "invalidKeyframeEasing",
             Self::SceneMaterialUnknown { .. } => "sceneMaterialUnknown",
             Self::MeshMaterialUnassigned { .. } => "meshMaterialUnassigned",
             Self::MeshModelAssetWrongKind { .. } => "meshModelAssetWrongKind",

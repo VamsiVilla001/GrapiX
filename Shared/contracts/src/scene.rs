@@ -139,13 +139,20 @@ pub struct SceneCanvas {
     pub frame_rate: RationalRate,
 }
 
-/// The scene timeline. Minimal for the lean core: duration and markers. The
-/// keyframe model lands with the motion consumers that read it.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+/// The scene timeline: its duration and editable per-object channels.
+///
+/// Keys are absolute frames at the canvas rate, unlike preset keys, which are
+/// normalised 0–1 until instantiation (G.6.2). `#[serde(default)]` keeps a
+/// scene authored before the field existed valid and equivalent to an empty
+/// channel set.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct SceneTimeline {
     /// Total duration in frames at the canvas rate.
     pub duration_frames: u64,
+    /// Editable keyframe channels, one per object/property.
+    #[serde(default)]
+    pub channels: Vec<crate::animation::KeyframeChannel>,
 }
 
 /// The live data a scene's bindings resolve against. Opaque here — the
@@ -856,6 +863,25 @@ pub enum SceneObject {
 }
 
 impl SceneObject {
+    /// The wire kind name, matched against `SceneObject`'s serde tag.
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            SceneObject::Text(_) => "text",
+            SceneObject::Rect(_) => "rect",
+            SceneObject::Ellipse(_) => "ellipse",
+            SceneObject::Image(_) => "image",
+            SceneObject::Line(_) => "line",
+            SceneObject::Shape(_) => "shape",
+            SceneObject::Paint(_) => "paint",
+            SceneObject::Mesh(_) => "mesh",
+            SceneObject::Light(_) => "light",
+            SceneObject::Camera(_) => "camera",
+            SceneObject::Layer(_) => "layer",
+            SceneObject::Marker(_) => "marker",
+            SceneObject::Group(_) => "group",
+        }
+    }
+
     pub fn base(&self) -> &ObjectBase {
         match self {
             SceneObject::Text(o) => &o.base,
@@ -871,6 +897,27 @@ impl SceneObject {
             SceneObject::Layer(o) => &o.base,
             SceneObject::Marker(o) => &o.base,
             SceneObject::Group(o) => &o.base,
+        }
+    }
+
+    /// Mutable access to the shared base. The editable-property setters in
+    /// `crate::animation` write through this, so the one place that knows how
+    /// to reach an object's transform is here, not copied per caller.
+    pub fn base_mut(&mut self) -> &mut ObjectBase {
+        match self {
+            SceneObject::Text(o) => &mut o.base,
+            SceneObject::Rect(o) => &mut o.base,
+            SceneObject::Ellipse(o) => &mut o.base,
+            SceneObject::Image(o) => &mut o.base,
+            SceneObject::Line(o) => &mut o.base,
+            SceneObject::Shape(o) => &mut o.base,
+            SceneObject::Paint(o) => &mut o.base,
+            SceneObject::Mesh(o) => &mut o.base,
+            SceneObject::Light(o) => &mut o.base,
+            SceneObject::Camera(o) => &mut o.base,
+            SceneObject::Layer(o) => &mut o.base,
+            SceneObject::Marker(o) => &mut o.base,
+            SceneObject::Group(o) => &mut o.base,
         }
     }
 
@@ -1622,9 +1669,7 @@ mod parse_tests {
                 height: 1080,
                 frame_rate: RationalRate::P50,
             },
-            timeline: SceneTimeline {
-                duration_frames: 100,
-            },
+            timeline: SceneTimeline { duration_frames: 100, channels: Vec::new() },
             data_context: serde_json::Map::new(),
             assets: vec![],
             fonts: vec![],
@@ -1869,9 +1914,7 @@ mod tests {
                 height: 1080,
                 frame_rate: RationalRate::P50,
             },
-            timeline: SceneTimeline {
-                duration_frames: 250,
-            },
+            timeline: SceneTimeline { duration_frames: 250, channels: Vec::new() },
             data_context: serde_json::Map::new(),
             assets: vec![AssetLibraryItem {
                 asset_id: "asset_logo".into(),

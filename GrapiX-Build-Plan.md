@@ -105,6 +105,25 @@ Headless. The engine must be complete and testable before anything draws a pixel
 | `3.12` | WAL recovery journal; restore starts output-inhibited | BE | 2.1 | Forced kill restores without an unrecovered output |
 | `3.13` | Refusal coverage audit — every unsupported case refuses by name | BE | 0.6 | No silent fallback anywhere; blend and fit modes included |
 
+**Open defect — the engine-host test leg does not terminate (found 13 September 2026).**
+`cargo test -p gx-engine-host` hangs indefinitely in
+`the_host_spawns_when_nothing_is_listening` (`services/render-engine/host/tests/ensure.rs`).
+The sibling `ensure_refuses_a_reserved_port` passes in the same run, so this is
+neither a compile cost nor an environment problem: it is the spawn-and-adopt
+path itself. The hang survives an external `timeout`, which points at a spawned
+`gx-render-worker` the harness never reaps.
+
+Because of it, `npm run test:rust` runs `cargo test --workspace --exclude
+gx-engine-host` so the gate terminates, and `npm run test:rust:host` runs the
+host leg alone. **That exclusion is a named hole, not a permanent carve-out**,
+and it is recorded here rather than left in a script where nobody would find
+it. Until the hang is fixed, no run of `npm run check` has exercised host
+supervision, and no claim about it should rest on that gate.
+
+This was invisible until today because `npm run check` referenced a `test:rust`
+script that did not exist, so the gate died before the Rust leg for as long as
+that chain has been in place.
+
 ## Phase 4 — Pixel gate
 
 The instrument. Built before anything that could change pixels, so there is a baseline to compare against.
@@ -240,6 +259,11 @@ Deferred to here on purpose. Everything above is usable without it, and this is 
 | `11.22` | Selection-driven timeline and keyframe editing | UI | 11.10, 11.21 | Object selection automatically reveals property tracks; expand/collapse, select, drag/move, delete and copy/paste keys with frame snapping, explicit collision behavior and one undo per gesture; preserve flat node count from 100 to 100,000 keys |
 | `11.23` | Simple easing, Custom Bezier and starter presets | UI | 11.11, 11.15, 11.22 | Linear, Ease In, Ease Out, Ease In-Out and Custom Bezier persist and evaluate correctly; Fade, Slide, Scale and Pop use the existing preset library, supported parameters and save-selection workflow; advanced curves appear on demand and scrubbing avoids static-layer repaint |
 | `11.24` | Spacebar preview and integrated Editor parity verification | UI | 11.6, 11.19, 11.23 | Spacebar smoothly plays/pauses local animation without stealing typing/control shortcuts; verify panel-to-animation workflows, frame-consistent scrubbing, undo/redo and save/reopen in Tauri on Windows/macOS, measure playback on target hardware and confirm no Program/output side effects |
+| `11.25` | Named animation phases on the scene timeline | CON | 11.20, 11.22 | The scene timeline carries named `in`, `hold`, `out`, `continue` and `update` phases as frame spans over the existing channels, matching the `MOTION_PHASES` vocabulary presets already use; phases round-trip Rust/TS, are authored and previewed independently in the Editor, refuse overlap and out-of-range spans by name, and a scene authored before phases existed still parses unchanged |
+| `11.26` | Template control contract: declared operator fields | CON | 11.18, 11.19 | A scene declares which object properties an operator may fill, as a typed, named field list carried on the document; each field names its target object/property, its type and its default, refuses an unknown or non-fillable target by name, round-trips Rust/TS, and is authored in the Editor without widening the preset-only MCP authoring surface |
+| `11.27` | Take-page authoring: fill and save a template instance | UI | 11.26 | The Editor renders the operator form generated from 11.26's declared fields, fills values against a template, reports a value the field's type refuses rather than coercing it, previews the filled result in the viewport, and saves and reopens named instances without mutating the template they were filled from |
+| `11.28` | Named text style presets | UI | 11.13, 11.14 | Font, size, tracking, line height, case and fill/stroke are saved as one named, reusable style; applying a style to a text object sets exactly those properties as one undo entry; a style whose font the scene does not carry refuses by name; styles resolve design-system tokens rather than duplicating their values, and survive save/reopen |
+| `11.29` | Multi-scene workspace: scenes as first-class entities | UI | 11.18 | A broadcast carries many graphics, so each open scene is a distinct session owning its own document, selection, playhead, collapse state and undo history; one workspace module lists every open scene and switches the active one; viewport, object manager, inspector, timeline, animation and binding panels are children of the active scene and render it alone; switching preserves each scene's own state, an edit or undo in one scene cannot alter another, and closing a scene with unsaved changes refuses by name |
 
 ### Phase 11 UI requirements — Editor 2.0 parity and animation
 
@@ -266,6 +290,57 @@ Deferred to here on purpose. Everything above is usable without it, and this is 
 - Preserve Rust-owned contracts and generated TypeScript, validated writes, revision checks, undo transactions, design-system motion tokens and the existing preview/production separation. Reconcile editable scene channels with existing normalized preset channels and easing tokens; extend contracts only where necessary. Human keyframe authoring must not silently widen the agent/MCP surface, which selects and parameterizes presets under ADR Part G.
 
 - Acceptance requires actual Tauri workflows on Windows and macOS: create/open a scene or template, add/select/edit objects, bind data, manage fonts/assets/materials, animate with diamonds and Auto-Key, edit/copy keys, apply easing/presets, preview, undo/redo, save and reopen. Verify animation persistence and evaluated values, report unsupported cases, and retain the 11.10 flat-node-count and 11.11 no-static-repaint gates. Isolated panel projections or headless tests alone do not establish Editor 1.x parity.
+
+### Phase 11 additions — broadcast CG editor parity (13 September 2026)
+
+**Status: Planned.** Tracked by 11.25–11.28. Added after comparing the Editor
+against the authoring UI of established broadcast real-time graphics tools:
+Vizrt (Viz Artist Stage/Directors, Viz Trio Page Editor and Tab Fields, Viz
+Template Wizard variants), Ross XPression (Scene Director, Take Item Template
+Data, Font Manager), Singular.live Composer (In/Out timelines, Control Nodes,
+subcompositions), and the CasparCG ecosystem (Loopic, the OGraf typed template
+definition). These four rows are the modules that survived that comparison as
+genuinely missing rather than merely different.
+
+- **11.25 exists because the contract is already half-committed.** `MOTION_PHASES`
+  (`in`, `out`, `hold`, `continue`, `update`) is in `Shared/contracts/src/mcp.rs`
+  and `MotionPhases` in `design_system.rs` — but only presets speak it. The scene
+  timeline is one linear span, so an authored scene cannot say where its take-in
+  ends and its take-out begins. Every tool surveyed models this. Without it
+  Playout (Phase 12) can only cut.
+
+- **11.26 is the typed handoff Phase 12 consumes.** Four independent tools
+  converged on the same idea: Viz Trio Tab Fields, XPression's Template Data
+  tab, Singular Control Nodes and Loopic's OGraf definition all let the author
+  declare which properties an operator may drive. 11.19 binds data *into*
+  properties; nothing declares the outward contract. Invariants 4 and 5 split
+  authoring from taking, so this interface is load-bearing rather than cosmetic.
+
+- **11.27 separates the template from a filled instance**, as Viz Trio's Page
+  Editor and XPression's take items do. A filled page must never mutate the
+  template it came from.
+
+- **11.28 is a named applyable style, which design tokens are not.** 10.x tokens
+  are defaults; Viz's Fontstyle Editor and XPression's style reuse are saved
+  bundles an author applies. 11.28 resolves tokens rather than copying them, so
+  the two do not become two sources of brand truth.
+
+**Deliberately not added, and why.** Rundown and playlist authoring belong to
+Playout (Phase 12) — CasparCG's client, SOFIE and Singular Studio all place it
+in the control application, not the design editor. In-editor scripting (Viz
+scene scripts, Singular composition scripts, Loopic actions) is refused because
+ADR Part G routes programmatic authoring through MCP agents. A Graphic Hub-style
+asset database browser duplicates Phases 7–9. Viz's full spline editor is
+excluded by this phase's own "do not copy After Effects complexity" rule.
+
+**Deferred pending a scoping decision, not dropped.** Live data-source connectors
+(XPression DataLinq, Viz DataPool, Singular's Sheets widget and Data Streams)
+have no home in the plan today: 8.6 makes a data *schema* discoverable and
+`Editor/src/bindings.ts` resolves against a static `dataContext`, but no step
+authors where live data comes from. The authoring surface would be Phase 11 and
+the ingest runtime would not. Subcompositions as addressable overlay units,
+template variants and a selectable poster frame are also recorded here as
+understood gaps that depend on 11.26/11.27 landing first.
 
 ## Phase 12 — Playout UI
 

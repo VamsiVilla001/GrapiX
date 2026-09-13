@@ -10,8 +10,8 @@
 
 use gx_conformance::{
     asset_plane_suite, control_plane_delivery_suite, control_plane_fault_suite,
-    control_plane_suite, media_plane_suite, refusal_audit_suite, timing_plane_suite, Outcome,
-    Report,
+    control_plane_suite, media_plane_suite, mock_product_suite, refusal_audit_suite,
+    scene_plane_suite, timing_plane_suite, Outcome, Report,
 };
 use gx_contracts::{DeviceTier, Locality, RationalRate};
 use gx_control_plane::peer::EnginePeer;
@@ -66,6 +66,17 @@ fn main() {
     control_plane_delivery_suite(&mut report);
     asset_plane_suite(&mut report);
     timing_plane_suite(&mut report);
+
+    // The scene contract, over real sockets against the mock peer: round-trip,
+    // unknown-kind refusal, missing-asset blocking and revision pinning (1.12).
+    report.set_peer("mock engine, over the asset and control planes");
+    scene_plane_suite(&mut report);
+
+    // The same rules again, but driven by the other two mocks as real
+    // processes. 1.12 is "green against all three mocks", not against one.
+    mock_product_suite(&mut report);
+
+    report.set_peer("plane contract, no peer");
     refusal_audit_suite(&mut report);
 
     print_report(&report);

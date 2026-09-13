@@ -42,7 +42,14 @@
         <button id="new-scene" type="button">New</button>
         <button id="open-scene" type="button">Open…</button>
         <button id="save-scene" type="button">Save…</button>
+        <button id="undo" type="button" disabled>Undo</button>
+        <button id="redo" type="button" disabled>Redo</button>
       </div>
+
+      <!-- The scene switcher (11.29). A broadcast carries many graphics; each
+           open scene is its own session, and the panels below render whichever
+           one is active. -->
+      <nav id="scene-tabs" class="scene-tabs" aria-label="Open scenes"></nav>
     </header>
 
     <main class="workspace">
@@ -52,7 +59,17 @@
           <span id="canvas-size" class="meta"></span>
         </div>
         <div class="viewport-stage">
-          <canvas id="viewport"></canvas>
+          <div class="viewport-surface">
+            <canvas id="viewport"></canvas>
+            <!-- Interaction stays in this SVG, never in the raster canvas.
+                 The render engine can replace the canvas without replacing
+                 selection, guides, handles or marquee behavior (11.7). -->
+            <svg
+              id="viewport-overlay"
+              aria-label="Viewport selection controls"
+              tabindex="0"
+            ></svg>
+          </div>
         </div>
         <p class="pane-note">
           Preview only. The render engine is the sole rasteriser of production
@@ -62,7 +79,40 @@
 
       <aside class="inspector">
         <section class="panel">
+          <div class="panel-title-row">
+            <h2>Project scenes</h2>
+            <button id="project-refresh" type="button">Refresh</button>
+          </div>
+          <div class="project-tools">
+            <label class="frame-control">
+              <span>Project</span>
+              <select id="project-select" aria-label="Current project"></select>
+            </label>
+            <button id="project-create" type="button">New project</button>
+            <button id="project-save-scene" type="button">Save here</button>
+          </div>
+          <!-- Scene/template CRUD (11.18), projected from scene-manager.ts so
+               the human controls and agent snapshot have one description. -->
+          <div id="scene-manager-mount" class="scene-manager-mount"></div>
+          <p id="scene-manager-empty" class="empty">
+            No projects. Create one before saving a project scene.
+          </p>
+        </section>
+
+        <section class="panel">
           <h2>Objects</h2>
+          <!-- Object lifecycle (11.18). The kind list is read from Rust so the
+               menu cannot offer a kind `create_object` would refuse. -->
+          <div class="object-tools">
+            <label class="frame-control">
+              <span>New</span>
+              <select id="object-kind" aria-label="Kind of object to create"></select>
+            </label>
+            <button id="object-create" type="button">Add</button>
+            <button id="object-duplicate" type="button">Duplicate</button>
+            <button id="object-rename" type="button">Rename</button>
+            <button id="object-delete" type="button">Delete</button>
+          </div>
           <!-- The object manager treegrid (11.8). Built by `object-manager.ts`
                as a node tree and rendered here, so the ARIA a screen reader
                announces and the snapshot an agent reads come from one
@@ -75,6 +125,60 @@
           <h2>Inspector</h2>
           <!-- Type-aware, and Mixed across a multi-selection (11.9). -->
           <div id="inspector-mount" class="panel-mount"></div>
+        </section>
+        <section class="panel">
+          <h2>Fonts</h2>
+          <div id="font-mount" class="asset-manager-mount"></div>
+          <p id="font-empty" class="empty">No fonts in this scene.</p>
+        </section>
+
+        <section class="panel">
+          <h2>Materials</h2>
+          <div id="material-mount" class="asset-manager-mount"></div>
+          <p id="material-empty" class="empty">No materials in this scene.</p>
+        </section>
+
+        <section class="panel">
+          <h2>Assets</h2>
+          <div id="asset-mount" class="asset-manager-mount"></div>
+          <p id="asset-empty" class="empty">No assets in this scene.</p>
+        </section>
+
+        <section class="panel" id="animation-panel">
+          <div class="panel-title-row">
+            <h2>Animation</h2>
+            <button id="preview-play" type="button" aria-pressed="false">Play</button>
+            <span id="preview-status" class="meta" aria-live="polite">Paused at frame 0</span>
+            <label class="autokey-control">
+              <input id="auto-key" type="checkbox" />
+              <span>Auto-Key</span>
+            </label>
+            <label class="frame-control">
+              <span>Frame</span>
+              <input
+                id="animation-frame"
+                type="number"
+                min="0"
+                step="1"
+                value="0"
+                aria-label="Current animation frame"
+              />
+            </label>
+          </div>
+          <div id="animation-mount" class="panel-mount"></div>
+          <p class="panel-note">
+            Right-click the viewport or an inspector property to add or remove
+            a key at the current frame.
+          </p>
+        </section>
+
+
+        <section class="panel">
+          <h2>Data bindings</h2>
+          <!-- Object properties and scene data paths share one semantic tree
+               with the agent surface. Bindings are authored here; resolution
+               happens before the preview, never inside the renderer (11.19). -->
+          <div id="bindings-mount" class="panel-mount"></div>
         </section>
 
         <section class="panel" id="unsupported-panel" hidden>
@@ -101,6 +205,48 @@
         </section>
       </aside>
     </main>
+
+    <section class="timeline-bar" aria-label="Timeline">
+      <div class="timeline-head">
+        <h2>Timeline</h2>
+        <span id="timeline-meta" class="meta"></span>
+        <button id="timeline-graph-close" type="button" hidden>Back to dope sheet</button>
+        <label class="frame-control">
+          <span>Easing</span>
+          <select id="timeline-easing" aria-label="Easing for the selected keys">
+            <option value="">—</option>
+          </select>
+        </label>
+        <label class="frame-control">
+          <span>Preset</span>
+          <select id="timeline-preset" aria-label="Starter motion preset">
+            <option value="">—</option>
+          </select>
+        </label>
+        <button id="timeline-preset-apply" type="button">Apply in</button>
+        <label class="frame-control">
+          <span>Zoom</span>
+          <input
+            id="timeline-zoom"
+            type="range"
+            min="1"
+            max="40"
+            step="1"
+            value="6"
+            aria-label="Timeline zoom, pixels per frame"
+          />
+        </label>
+      </div>
+      <div id="timeline-mount" class="timeline-mount"></div>
+    </section>
+
+    <div
+      id="keyframe-context-menu"
+      class="context-menu"
+      role="menu"
+      aria-label="Keyframe actions"
+      hidden
+    ></div>
 
     <footer class="log-bar">
       <h2 class="log-title">Activity</h2>

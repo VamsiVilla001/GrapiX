@@ -29,6 +29,10 @@ export interface ManagedScene {
   /// Present and null-ish means published before stamping existed. Kept
   /// separate from "never published", which is not drift at all.
   readonly publishedUnstamped?: boolean;
+  /// Present when the file exists but cannot be read as a scene. The row stays
+  /// visible so the author can delete it, while actions that need content name
+  /// the reason they cannot run.
+  readonly unavailableReason?: string;
 }
 
 export interface SceneManagerInput {
@@ -89,14 +93,24 @@ function sceneActions(scene: ManagedScene): UiAction[] {
   const unsaved = scene.unsavedChanges
     ? `${scene.name} has unsaved changes`
     : undefined;
+  const unreadable = scene.unavailableReason;
+  const publishUnavailable = unreadable ?? unsaved;
 
   return [
-    { name: "open", label: "Open" },
-    { name: "duplicate", label: "Duplicate" },
+    {
+      name: "open",
+      label: "Open",
+      ...(unreadable === undefined ? {} : { unavailable: unreadable }),
+    },
+    {
+      name: "duplicate",
+      label: "Duplicate",
+      ...(unreadable === undefined ? {} : { unavailable: unreadable }),
+    },
     {
       name: "publish",
       label: "Publish",
-      ...(unsaved === undefined ? {} : { unavailable: unsaved }),
+      ...(publishUnavailable === undefined ? {} : { unavailable: publishUnavailable }),
     },
     {
       name: "delete",
@@ -114,7 +128,11 @@ export function sceneManagerPanel(input: SceneManagerInput): UiNode {
       id: `scene/${scene.sceneId}`,
       role: "listitem",
       label: scene.name,
-      description: scene.unsavedChanges ? "unsaved changes" : "saved",
+      description: scene.unavailableReason
+        ? `unavailable: ${scene.unavailableReason}`
+        : scene.unsavedChanges
+          ? "unsaved changes"
+          : "saved",
       actions: sceneActions(scene),
       children: [
         {

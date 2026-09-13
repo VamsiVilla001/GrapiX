@@ -9,8 +9,10 @@
 //! precisely the paths nobody ran.
 
 mod refusal_audit;
+mod scene_plane;
 
 pub use refusal_audit::refusal_audit_suite;
+pub use scene_plane::{mock_product_suite, scene_plane_suite};
 
 use gx_asset_plane::{is_syntactically_safe, Transfer};
 use gx_contracts::{

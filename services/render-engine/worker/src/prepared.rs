@@ -213,9 +213,7 @@ mod tests {
                 height: 1080,
                 frame_rate: RationalRate::P50,
             },
-            timeline: SceneTimeline {
-                duration_frames: 100,
-            },
+            timeline: SceneTimeline { duration_frames: 100, channels: Vec::new() },
             data_context: serde_json::Map::new(),
             assets: Vec::new(),
             fonts: Vec::new(),
