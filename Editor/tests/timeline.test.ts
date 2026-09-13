@@ -166,6 +166,7 @@ describe("repaint planning", () => {
     rowWindowLast: 10,
     contentRevision: 1,
     selectionRevision: 1,
+    phaseRevision: 1,
     currentFrame: 0,
     marqueeRevision: 0,
     dragRevision: 0,
@@ -177,6 +178,14 @@ describe("repaint planning", () => {
     expect([...dirty]).toEqual(["interaction"]);
     expect(dirty.has("static")).toBe(false);
     expect(dirty.has("content")).toBe(false);
+  });
+
+  it("a phase edit dirties static, and a scrub still does not", () => {
+    // Phases are painted with the ruler, so editing one must reach `static` —
+    // and the 11.11 gate above must survive that new dependency.
+    const phased = planRepaint(base, { ...base, phaseRevision: 2 });
+    expect(phased.has("static")).toBe(true);
+    expect(planRepaint(base, { ...base, currentFrame: 99 }).has("static")).toBe(false);
   });
 
   it("a key edit dirties content, and a selection change does too", () => {

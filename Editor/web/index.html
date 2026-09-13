@@ -264,6 +264,21 @@
           </select>
         </label>
         <button id="timeline-preset-apply" type="button">Apply in</button>
+        <!-- Named phases (11.25). The scene timeline speaks the same operator
+             vocabulary presets do: in, hold, out, continue, update. -->
+        <label class="frame-control">
+          <span>Phase</span>
+          <select id="phase-kind" aria-label="Phase to set from the selected key span">
+            <option value="in">in</option>
+            <option value="hold">hold</option>
+            <option value="out">out</option>
+            <option value="continue">continue</option>
+            <option value="update">update</option>
+          </select>
+        </label>
+        <button id="phase-set" type="button">Set from selection</button>
+        <button id="phase-play" type="button">Play phase</button>
+        <button id="phase-remove" type="button">Remove phase</button>
         <label class="frame-control">
           <span>Zoom</span>
           <input

@@ -262,6 +262,26 @@ pub fn keyframe_remove(
     remove_keyframe(&mut scene, object_id, property, frame).map_err(animation_refused)?;
     Ok(scene)
 }
+
+/// Set or move a named timeline phase (11.25). Every rule — span validity,
+/// range, overlap — lives in `gx_contracts::phases`; the shell only carries
+/// the refusal out.
+pub fn phase_set(
+    mut scene: SceneDocument,
+    phase: gx_contracts::phases::TimelinePhase,
+) -> Result<SceneDocument, EditorError> {
+    gx_contracts::phases::set_phase(&mut scene.timeline, phase).map_err(animation_refused)?;
+    Ok(scene)
+}
+
+pub fn phase_remove(
+    mut scene: SceneDocument,
+    address: &str,
+) -> Result<SceneDocument, EditorError> {
+    gx_contracts::phases::remove_phase(&mut scene.timeline, address)
+        .map_err(animation_refused)?;
+    Ok(scene)
+}
 /// Apply a property value edit with Auto-Key behaviour resolved in Rust.
 ///
 /// `auto_key` off changes the base value only; on also upserts one key at
@@ -892,6 +912,22 @@ fn cmd_keyframe_remove(
 ) -> Result<SceneDocument, EditorError> {
     keyframe_remove(scene, &object_id, &property, frame)
 }
+
+#[tauri::command]
+fn cmd_phase_set(
+    scene: SceneDocument,
+    phase: gx_contracts::phases::TimelinePhase,
+) -> Result<SceneDocument, EditorError> {
+    phase_set(scene, phase)
+}
+
+#[tauri::command]
+fn cmd_phase_remove(
+    scene: SceneDocument,
+    address: String,
+) -> Result<SceneDocument, EditorError> {
+    phase_remove(scene, &address)
+}
 #[tauri::command]
 fn cmd_property_edit(
     scene: SceneDocument,
@@ -1061,6 +1097,8 @@ pub fn run() {
             cmd_keyframe_update,
             cmd_keyframe_move,
             cmd_keyframe_remove,
+            cmd_phase_set,
+            cmd_phase_remove,
             cmd_property_edit,
             cmd_starter_presets,
             cmd_preset_apply,
@@ -1310,6 +1348,48 @@ mod tests {
             .expect_err("a frame past the timeline refuses");
         assert!(matches!(error, EditorError::AnimationRefused { cause: Refusal::KeyframeOutOfRange { .. }, .. }));
         assert_eq!(before.objects.len(), 1);
+    }
+
+    #[test]
+    fn phase_commands_carry_the_contract_refusal_rather_than_flattening_it() {
+        use gx_contracts::phases::{PhaseKind, TimelinePhase};
+
+        let span = |kind: PhaseKind, start_frame: u64, end_frame: u64| TimelinePhase {
+            kind,
+            name: None,
+            start_frame,
+            end_frame,
+        };
+        let mut scene = new_scene("phased", "Phased");
+        scene.timeline.duration_frames = 100;
+
+        let scene = phase_set(scene, span(PhaseKind::In, 0, 50)).expect("in lands");
+        // Adjacency is legal: half-open spans share no frame.
+        let scene = phase_set(scene, span(PhaseKind::Hold, 50, 80)).expect("adjacent hold lands");
+        assert_eq!(scene.timeline.phases.len(), 2);
+
+        let overlap = phase_set(scene.clone(), span(PhaseKind::Out, 49, 90))
+            .expect_err("a span claiming frame 49 twice is refused");
+        assert!(matches!(
+            overlap,
+            EditorError::AnimationRefused {
+                cause: Refusal::TimelinePhaseOverlap { .. },
+                ..
+            }
+        ));
+
+        let absent = phase_remove(scene.clone(), "out")
+            .expect_err("removing a phase that is not there is reported");
+        assert!(matches!(
+            absent,
+            EditorError::AnimationRefused {
+                cause: Refusal::TimelinePhaseUnknown { .. },
+                ..
+            }
+        ));
+
+        let scene = phase_remove(scene, "in").expect("in is removed");
+        assert_eq!(scene.timeline.phases.len(), 1);
     }
 
     #[test]

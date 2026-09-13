@@ -17,11 +17,14 @@
 // browser. A test that had to obtain a canvas context could not prove the
 // thing this step is measured on.
 
+import type { TimelinePhase } from "@grapix/contracts";
+
 import type { DrawingContext } from "./drawing";
 import { visibleRange, type KeyIndex } from "./key-index";
 import { buildSpeedGraph, paintSpeedGraph } from "./speed-graph";
 import { keyId, type TimelineModel } from "./model";
 import { TIMELINE_LAYERS, type DirtyRect, type TimelineLayerId } from "./repaint-plan";
+import { phaseBands, phaseColour, PHASE_BAND_HEIGHT } from "./phases";
 import {
   contentHeight,
   frameToX,
@@ -180,6 +183,8 @@ export interface PaintState {
   /// When set, the content layer draws that track's speed graph instead of
   /// the dope sheet. "Advanced curves appear on demand" (11.23) is this flag.
   readonly graphTrack?: number;
+  /// Named phase spans, drawn with the ruler on the static layer (11.25).
+  readonly phases?: readonly TimelinePhase[];
 }
 
 /// Paint one layer, optionally confined to a dirty rectangle.
@@ -229,6 +234,18 @@ export function paintLayer(
       context.lineTo(x, viewport.height);
     }
     context.stroke();
+
+    // Phase bands last on this layer, so they read above the row banding they
+    // span. A scrub cannot reach here, which is what keeps 11.11's gate.
+    //
+    // Colour only: the label belongs in the DOM, not in pixels. Painted text
+    // is invisible to a screen reader and to `agentView`, and adding
+    // `fillText` here would widen `DrawingContext` — which exists narrow so a
+    // recording stub can assert what was drawn without a browser.
+    for (const band of phaseBands(state.phases ?? [], viewport)) {
+      context.fillStyle = phaseColour(band.phase.kind);
+      context.fillRect(band.x, 0, band.width, PHASE_BAND_HEIGHT);
+    }
   }
 
   if (layer === "content") {

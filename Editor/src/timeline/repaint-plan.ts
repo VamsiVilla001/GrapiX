@@ -52,6 +52,10 @@ export interface TimelineSnapshot {
   /// Bumped when the selected set changes. Selection is a fill colour, not a
   /// structure, so it dirties content without dirtying geometry.
   readonly selectionRevision: number;
+  /// Bumped when a phase is added, moved or removed (11.25). Phases are
+  /// painted with the ruler on `static` because they are frame geometry that
+  /// changes only when an author edits one — never on a scrub.
+  readonly phaseRevision: number;
 
   // Interaction.
   readonly currentFrame: number;
@@ -79,9 +83,11 @@ export function planRepaint(
 ): Set<TimelineLayerId> {
   if (!previous) return new Set(TIMELINE_LAYERS);
 
-  if (geometryChanged(previous, next)) {
+  if (geometryChanged(previous, next) || previous.phaseRevision !== next.phaseRevision) {
     // Everything is positioned in the same space, so a change to that space
-    // stales all of it.
+    // stales all of it. A phase edit changes the static layer specifically,
+    // and the cheapest correct answer is the same full repaint a zoom gets:
+    // phase edits are rare, and a scrub still cannot reach this branch.
     return new Set(TIMELINE_LAYERS);
   }
 

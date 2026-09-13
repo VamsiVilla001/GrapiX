@@ -114,6 +114,65 @@ not a euphemism for nearly done.
 ---
 
 
+## 2026-09-13 — the phase UI, and 11.25–11.28 driven live
+
+11.25's contract landed earlier today; this is its authoring surface, plus the
+first live exercise of the three slices the dead subagents left behind.
+
+**The span comes from the key selection, not from two number fields.** An
+author selecting the keys of a build and naming them `in` is one gesture;
+typing a start and an end is two chances to be wrong about a span they can
+already see. A single selected key means "from here to the next frame", because
+a zero-length span is refused by the contract and silently widening one would
+be the substitution invariant 18 forbids.
+
+**Bands paint on the static layer, colour only.** `phaseRevision` joins the
+repaint snapshot so a phase edit dirties `static` while a scrub still cannot —
+there is now a test asserting both halves of that in one place, because adding
+a new static dependency is exactly how 11.11's gate would have been lost. The
+label is *not* painted: `DrawingContext` has no `fillText` and should not grow
+one, painted text is invisible to a screen reader and to `agentView`, and the
+narrow interface is what lets a recording stub assert what was drawn without a
+browser. Labels live in the DOM instead.
+
+**One clock, one stop frame.** Playing a phase reuses `startPreview` with the
+phase's end rather than the scene's duration. A second playback implementation
+for "play this bit" is how the two drift apart on rate handling.
+
+### Verified live in Tauri
+
+| Check | Result |
+|---|---|
+| Phase kinds offered | exactly `in, hold, out, continue, update` — the `MOTION_PHASES` vocabulary |
+| No key selection | `phase refused: select the keys the phase should cover`, nothing authored |
+| Set from selection | `Set in over frames 0–50`, matching the two selected keys |
+| Persistence | saved and re-read from the project store as `{kind: in, start: 0, end: 50}` |
+| Overlap | `animation refused: phases in and out claim the same frames`, and the document still held **one** phase |
+| Play outside a phase | `no phase covers frame 80` |
+| **Play a phase** | started at the phase's own start and **stopped at frame 50, not the scene's 100**; 50 frame updates, mean 1.34 ms, p95 1.70 ms |
+| Remove + undo | `Remove phase in`, then one undo restored it |
+| 11.26 declare | `declare control cardX` from the object's fillable properties (`x`, `y`, `zDepth`, `rotation`, …) |
+| **11.27 generated form** | declaring `cardX` produced a `take-page/field/cardX` row — the form is built from declared fields, never hard-coded |
+| 11.27 type refusal | `template control field cardX requires number, not text` — reported in the panel, **not coerced to 0** |
+| 11.28 panel | honest empty state, and "Save selected text as style" **disabled carrying its reason**: `the selected object is not text` |
+| `npm run check` | **exit 0** — codegen 177 files, **261 TS tests** (24 files), **491 Rust tests**, CONFORMANT |
+
+### Status
+
+11.25 is now complete against its done-when: phases round-trip, are authored
+and previewed independently in the Editor, refuse overlap and out-of-range by
+name, and a pre-phases scene still parses. Recorded **done**.
+
+11.26–11.28 stay **active**. Their panels work live as shown above, but each
+done-when has clauses these checks did not reach: 11.26's round-trip of a
+declared field through save/reopen, 11.27's saving and reopening a named
+instance, and 11.28's token rule — that a style resolves a design-system token
+at apply time rather than copying it, which is the whole argument for the
+design and is currently covered only by Rust unit tests, not live.
+
+---
+
+
 ## 2026-09-13 — broadcast parity steps 11.25–11.28 begun
 
 Four steps were added to Phase 11 after comparing the Editor against Vizrt/Viz

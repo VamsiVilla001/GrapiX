@@ -24,6 +24,7 @@ import type {
   SceneKeyframe,
   TextStyle,
   TakePage,
+  TimelinePhase,
 } from "@grapix/contracts";
 import { presetBlocker } from "../src/motion-preset-browser";
 import { SceneViewport } from "../src/viewport";
@@ -87,7 +88,8 @@ import {
   MAX_HISTORY,
   type SceneSession,
 } from "../src/workspace";
-import { keyId, timelineModel, type TimelineModel } from "../src/timeline/model";
+import { phaseAddress } from "../src/timeline/phases";
+import { keyId, parseKeyId, timelineModel, type TimelineModel } from "../src/timeline/model";
 import {
   isRefused as isKeyEditRefused,
   planCopy,
@@ -240,6 +242,10 @@ const ui = {
   timelineEasing: need<HTMLSelectElement>("timeline-easing"),
   timelinePreset: need<HTMLSelectElement>("timeline-preset"),
   timelinePresetApply: need<HTMLButtonElement>("timeline-preset-apply"),
+  phaseKind: need<HTMLSelectElement>("phase-kind"),
+  phaseSet: need<HTMLButtonElement>("phase-set"),
+  phasePlay: need<HTMLButtonElement>("phase-play"),
+  phaseRemove: need<HTMLButtonElement>("phase-remove"),
   undo: need<HTMLButtonElement>("undo"),
   redo: need<HTMLButtonElement>("redo"),
   objectEmpty: need<HTMLParagraphElement>("object-empty"),
@@ -317,6 +323,8 @@ let currentFrame = 0;
 let playback:
   | {
       readonly startFrame: number;
+      /// Where this run stops: the scene's duration, or one phase's end.
+      readonly stopFrame: number;
       readonly startTime: number;
       requestId: number;
       lastFrame: number;
@@ -995,6 +1003,9 @@ let keyDrag:
 /// Which track is open as a speed graph, if any. Advanced curves appear on
 /// demand rather than permanently (11.23).
 let graphTrack: number | undefined;
+/// Bumped when a phase is added, moved or removed, so the static layer — and
+/// only then — repaints. A scrub never touches this (11.25).
+let phaseRevision = 0;
 
 function timelineSnapshot(model: TimelineModel): TimelineSnapshot {
   return {
@@ -1007,6 +1018,7 @@ function timelineSnapshot(model: TimelineModel): TimelineSnapshot {
     rowWindowLast: model.tracks.length,
     contentRevision,
     selectionRevision,
+    phaseRevision,
     currentFrame,
     marqueeRevision: 0,
     dragRevision: 0,
@@ -1101,6 +1113,7 @@ function paintTimeline(model: TimelineModel): void {
     viewport: timelineViewport,
     currentFrame,
     selected: selectedKeys,
+    phases: scene?.timeline.phases ?? [],
     ...(graphTrack === undefined ? {} : { graphTrack }),
   };
   for (const layer of dirty) {
@@ -1536,7 +1549,9 @@ function previewTick(now: number): void {
     active.startFrame,
     now - active.startTime,
     scene.canvas.frameRate,
-    Number(scene.timeline.durationFrames),
+    // A phase stops at its own end; the whole scene stops at its duration.
+    // One clock, one stop frame — not a second playback implementation.
+    active.stopFrame,
   );
   if (next.frame !== active.lastFrame) {
     const began = performance.now();
@@ -1556,24 +1571,24 @@ function previewTick(now: number): void {
   }
 }
 
-function togglePreview(): void {
-  if (playback) {
-    pausePreview("paused");
-    return;
-  }
+/// Start the clock from the playhead, stopping at `stopFrame`.
+///
+/// Shared by whole-scene preview and single-phase preview so the two cannot
+/// disagree about timing; `what` only names it in the log.
+function startPreview(stopFrame: number, what: string): void {
   if (!scene) {
     log("preview refused: nothing is open", "bad");
     return;
   }
-  const duration = Number(scene.timeline.durationFrames);
-  if (duration <= 0) {
-    log("preview refused: the scene timeline has no frames", "bad");
+  if (stopFrame <= 0) {
+    log(`preview refused: ${what} has no frames`, "bad");
     return;
   }
-  const startFrame = currentFrame >= duration ? 0 : currentFrame;
+  const startFrame = currentFrame >= stopFrame ? 0 : currentFrame;
   if (startFrame !== currentFrame) setCurrentFrame(startFrame);
   const active = {
     startFrame,
+    stopFrame,
     startTime: performance.now(),
     requestId: 0,
     lastFrame: startFrame,
@@ -1585,9 +1600,21 @@ function togglePreview(): void {
   updatePlaybackControls();
   active.requestId = requestAnimationFrame(previewTick);
   log(
-    `Preview playing from frame ${startFrame} at ${scene.canvas.frameRate.num}/${scene.canvas.frameRate.den} fps`,
+    `Preview playing ${what} from frame ${startFrame} at ${scene.canvas.frameRate.num}/${scene.canvas.frameRate.den} fps`,
     "good",
   );
+}
+
+function togglePreview(): void {
+  if (playback) {
+    pausePreview("paused");
+    return;
+  }
+  if (!scene) {
+    log("preview refused: nothing is open", "bad");
+    return;
+  }
+  startPreview(Number(scene.timeline.durationFrames), "the scene");
 }
 
 function previewShortcutOwnsTarget(event: KeyboardEvent): boolean {
@@ -1716,6 +1743,100 @@ async function runEdit(
     animationBusy = false;
     ui.animationMount.removeAttribute("aria-busy");
   }
+}
+
+// ---------------------------------------------------------------------------
+// Named timeline phases (11.25). The span comes from the author's key
+// selection, because that is the thing they already framed: selecting the keys
+// of a build and naming them `in` is one gesture, where typing two frame
+// numbers is two chances to be wrong.
+// ---------------------------------------------------------------------------
+
+/// The half-open span the selected keys cover.
+///
+/// `end` is one past the last selected key, matching Rust's `[start, end)`.
+/// A single selected key would otherwise produce an empty span, which the
+/// contract refuses — so one key means "from here to the next frame".
+function selectedKeySpan(): { start: number; end: number } | undefined {
+  const frames = [...selectedKeys]
+    .map((id) => parseKeyId(id)?.frame)
+    .filter((frame): frame is number => frame !== undefined);
+  if (frames.length === 0) return undefined;
+  const start = Math.min(...frames);
+  const end = Math.max(...frames);
+  return { start, end: end > start ? end : start + 1 };
+}
+
+async function setPhaseFromSelection(): Promise<void> {
+  if (!scene) return;
+  const span = selectedKeySpan();
+  if (!span) {
+    log("phase refused: select the keys the phase should cover", "bad");
+    return;
+  }
+  const kind = ui.phaseKind.value as TimelinePhase["kind"];
+  // Only `continue` needs a name, because it is the only kind a timeline may
+  // carry more than one of. Naming the others would invent an address.
+  let name: string | undefined;
+  if (kind === "continue") {
+    const entered = window.prompt("Name for this continue phase", "continue");
+    if (entered === null) return;
+    if (entered.trim() === "") {
+      log("phase refused: a continue phase needs a name to be addressable", "bad");
+      return;
+    }
+    name = entered.trim();
+  }
+  const phase = {
+    kind,
+    ...(name === undefined ? {} : { name }),
+    startFrame: span.start as unknown as bigint,
+    endFrame: span.end as unknown as bigint,
+  } satisfies TimelinePhase;
+
+  await runEdit(async (start) => ({
+    next: await invoke<SceneDocument>("cmd_phase_set", { scene: start, phase }),
+    label: `Set ${phaseAddress(phase)} over frames ${span.start}–${span.end}`,
+  }));
+  phaseRevision += 1;
+  if (scene) paintTimeline(currentTimelineModel(scene));
+}
+
+/// The phase under the playhead, which is what the phase buttons act on.
+function phaseAtPlayhead(): TimelinePhase | undefined {
+  return scene?.timeline.phases.find(
+    (phase) => currentFrame >= Number(phase.startFrame) && currentFrame < Number(phase.endFrame),
+  );
+}
+
+async function removePhaseAtPlayhead(): Promise<void> {
+  const phase = phaseAtPlayhead();
+  if (!phase) {
+    log(`no phase covers frame ${currentFrame}`, "bad");
+    return;
+  }
+  const address = phaseAddress(phase);
+  await runEdit(async (start) => ({
+    next: await invoke<SceneDocument>("cmd_phase_remove", { scene: start, address }),
+    label: `Remove phase ${address}`,
+  }));
+  phaseRevision += 1;
+  if (scene) paintTimeline(currentTimelineModel(scene));
+}
+
+/// Play one phase, and stop at its end rather than the scene's.
+///
+/// Reuses the same clock as the whole-scene preview — there is one playback
+/// implementation, and a phase is a different stop frame, not a second one.
+function playPhaseAtPlayhead(): void {
+  const phase = phaseAtPlayhead();
+  if (!phase) {
+    log(`no phase covers frame ${currentFrame}`, "bad");
+    return;
+  }
+  if (playback) pausePreview("starting a phase");
+  setCurrentFrame(Number(phase.startFrame));
+  startPreview(Number(phase.endFrame), phaseAddress(phase));
 }
 
 /** Run a sequence of shell calls as one gesture, threading the scene through
@@ -2852,6 +2973,9 @@ async function start(): Promise<void> {
   });
   ui.timelineEasing.addEventListener("change", onEasingChosen);
   ui.timelinePresetApply.addEventListener("click", () => void applyStarterPreset());
+  ui.phaseSet.addEventListener("click", () => void setPhaseFromSelection());
+  ui.phaseRemove.addEventListener("click", () => void removePhaseAtPlayhead());
+  ui.phasePlay.addEventListener("click", () => playPhaseAtPlayhead());
   ui.objectManager.addEventListener("click", onObjectManagerClick);
   ui.sceneTabs.addEventListener("click", onSceneTabsClick);
   ui.objectCreate.addEventListener("click", () => void createObject());
