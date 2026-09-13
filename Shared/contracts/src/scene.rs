@@ -2109,6 +2109,58 @@ mod tests {
     }
 
     #[test]
+    fn declared_controls_and_text_styles_survive_the_closed_reader() {
+        // 11.26 and 11.28 both require a round trip, and the empty-list case
+        // above proves nothing about either: the fields serialise whether or
+        // not anything reads them back correctly. This carries real entries
+        // through `parse_scene_document` — the *closed* reader the engine uses
+        // (invariant 45), not plain serde — so a field the schema would refuse
+        // fails here rather than at publish.
+        use crate::control::{ControlField, ControlFieldKind, ControlValue};
+        use crate::design_system::TokenRef;
+        use crate::text_style::{StyleColor, StyleNumber, TextStyle};
+
+        let mut scene = sample_scene();
+        scene.controls.push(ControlField {
+            field_id: "headline".into(),
+            label: "Headline".into(),
+            object_id: "text_title".into(),
+            property: "text".into(),
+            kind: ControlFieldKind::Text,
+            default: Some(ControlValue::Text("LIVE".into())),
+        });
+        scene.text_styles.push(TextStyle {
+            style_id: "headline".into(),
+            name: "Headline".into(),
+            font_id: "font_inter".into(),
+            // One token and one literal, because the two serialise through
+            // different arms of an untagged enum and only testing one would
+            // leave the other free to break.
+            size: StyleNumber::Literal(48.0),
+            line_height: Some(StyleNumber::Token(TokenRef("type.leading".into()))),
+            letter_spacing: None,
+            text_case: TextCase::Upper,
+            fill: Some(StyleColor::Token(TokenRef("palette.brand".into()))),
+            stroke: None,
+            stroke_width: None,
+        });
+
+        let json = serde_json::to_vec(&scene).expect("serialises");
+        let back = parse_scene_document(&json).expect("the closed reader accepts both lists");
+        assert_eq!(back, scene);
+
+        // And the wire shape is the camelCase one the Editor reads.
+        let wire: serde_json::Value = serde_json::from_slice(&json).unwrap();
+        assert_eq!(wire["controls"][0]["fieldId"], "headline");
+        assert_eq!(wire["controls"][0]["objectId"], "text_title");
+        // A token survives as its `{group.name}` reference rather than being
+        // flattened to the value it currently resolves to — which is the whole
+        // argument for 11.28's design.
+        assert_eq!(wire["textStyles"][0]["fill"], "palette.brand");
+        assert_eq!(wire["textStyles"][0]["size"], 48.0);
+    }
+
+    #[test]
     fn replacing_asset_bytes_keeps_the_binding() {
         // 1.7's done-when: a replace-in-place changes the hash, and the image
         // object binding the asset id needs no edit to see the new bytes.

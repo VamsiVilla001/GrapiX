@@ -114,6 +114,55 @@ not a euphemism for nearly done.
 ---
 
 
+## 2026-09-13 — 11.26, 11.27 and 11.28 closed out
+
+The three slices the dead subagents left had working panels but unproven
+done-when clauses. Those clauses are now met, and the evidence that mattered
+was not the panels rendering — it was the isolation and persistence properties
+underneath them.
+
+**The round-trip test that existed proved nothing.** `a_scene_document_round_trips_through_json`
+used a fixture with empty `controls` and `text_styles`: the fields serialise
+whether or not anything reads them back. Replaced by a test carrying a real
+declared field and a real style through `parse_scene_document` — the *closed*
+reader the engine uses (invariant 45), not plain serde — which also pins the
+wire shape. Its load-bearing assertion is that a token survives as
+`"palette.brand"` rather than as the value it currently resolves to. A style
+that serialised its resolved colour would be a copy of the brand pack, which is
+the second source of truth 11.28 exists to prevent.
+
+### Verified live in Tauri
+
+| Check | Result |
+|---|---|
+| 11.28 gating | with a rect selected the save action was **disabled carrying its reason** (`the selected object is not text`); selecting the text object made it available |
+| 11.28 save | `Saved text style Headline`, listed in the panel |
+| 11.28 persistence | re-read from the store as `{styleId: text-style-1, name: Headline, font: inter, size: 36}` |
+| 11.26 declare | `declare control headline` from the title's fillable properties |
+| 11.26 round-trip | re-read as `{fieldId: headline, label: Headline, objectId: title, property: text, kind: text}` — target, type and label all intact |
+| 11.27 named instance | saved `page-a` / "Page A" against template `lower`; `cmd_take_page_list` returned it from disk |
+| **11.27 isolation** | cleared the field to `""`, reopened `page-a`, value restored to `FINAL SCORE` — while the template was **byte-identical** and its authored text still read `SCORE` |
+| `npm run check` | **exit 0** — codegen 177 files, 261 TS tests, **492 Rust tests**, CONFORMANT |
+
+**The instance/template split is the result worth keeping.** The take page
+carries `FINAL SCORE` while the template it was filled from still says `SCORE`.
+A fill that leaked into its template would corrupt every future instance of
+that graphic, and nothing would report it — the filled preview would look
+correct.
+
+### Status
+
+11.26, 11.27 and 11.28 are recorded **done**. With 11.25 done earlier, all four
+broadcast-parity steps added today are closed.
+
+Still open in Phase 11: 11.18 (needs 11.5, blocked on P.3), 11.24 (macOS leg),
+11.29 (panels are a fixed column, not the dockable workspace 11.5 owns), and
+the deferred candidates recorded in the build plan — live data-source
+connectors, subcompositions, template variants and a poster frame.
+
+---
+
+
 ## 2026-09-13 — the phase UI, and 11.25–11.28 driven live
 
 11.25's contract landed earlier today; this is its authoring surface, plus the
