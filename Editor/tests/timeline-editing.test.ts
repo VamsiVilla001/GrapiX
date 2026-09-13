@@ -48,11 +48,14 @@ function scene(
           easing: "linear" as const,
         })),
       })),
+      phases: [],
     },
     dataContext: {},
     assets: [],
     fonts: [],
     materials: [],
+    controls: [],
+    textStyles: [],
     objects,
   } as SceneDocument;
 }

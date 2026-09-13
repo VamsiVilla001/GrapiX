@@ -133,6 +133,12 @@
         </section>
 
         <section class="panel">
+          <h2>Text styles</h2>
+          <div id="text-style-mount" class="asset-manager-mount"></div>
+          <p id="text-style-empty" class="empty">No text styles in this scene.</p>
+        </section>
+
+        <section class="panel">
           <h2>Materials</h2>
           <div id="material-mount" class="asset-manager-mount"></div>
           <p id="material-empty" class="empty">No materials in this scene.</p>
@@ -142,6 +148,33 @@
           <h2>Assets</h2>
           <div id="asset-mount" class="asset-manager-mount"></div>
           <p id="asset-empty" class="empty">No assets in this scene.</p>
+        </section>
+
+        <section class="panel" id="take-page-panel">
+          <h2>Take page</h2>
+          <p class="panel-note">
+            Fill only the fields this template declares. Preview and saved pages
+            remain separate from the reusable template.
+          </p>
+          <div class="take-page-identity">
+            <label class="field">
+              <span class="label">Page id</span>
+              <input id="take-page-id" type="text" spellcheck="false" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span class="label">Page name</span>
+              <input id="take-page-name" type="text" spellcheck="false" autocomplete="off" />
+            </label>
+          </div>
+          <div id="take-page-mount" class="take-page-mount"></div>
+          <div class="take-page-actions">
+            <button id="take-page-preview" type="button">Preview values</button>
+            <button id="take-page-save" type="button">Save page</button>
+          </div>
+          <div class="take-page-reopen">
+            <select id="take-page-select" aria-label="Saved take page"></select>
+            <button id="take-page-open" type="button">Open page</button>
+          </div>
         </section>
 
         <section class="panel" id="animation-panel">
@@ -179,6 +212,13 @@
                with the agent surface. Bindings are authored here; resolution
                happens before the preview, never inside the renderer (11.19). -->
           <div id="bindings-mount" class="panel-mount"></div>
+        </section>
+
+        <section class="panel" id="control-panel">
+          <h2>Template controls</h2>
+          <!-- Declared here, filled later by Take Pages: the author controls
+               exactly which object properties an operator may drive. -->
+          <div id="control-mount" class="control-contract-mount"></div>
         </section>
 
         <section class="panel" id="unsupported-panel" hidden>

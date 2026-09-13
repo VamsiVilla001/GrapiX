@@ -114,6 +114,88 @@ not a euphemism for nearly done.
 ---
 
 
+## 2026-09-13 — broadcast parity steps 11.25–11.28 begun
+
+Four steps were added to Phase 11 after comparing the Editor against Vizrt/Viz
+Trio, Ross XPression, Singular.live and the CasparCG ecosystem (Loopic, OGraf).
+The comparison, the ranked gaps, and the candidates deliberately **not** taken
+are recorded in `GrapiX-Build-Plan.md` under "Phase 11 additions".
+
+**11.25, named timeline phases, is the one with a real argument behind it.**
+`MOTION_PHASES` (`in`, `out`, `hold`, `continue`, `update`) has been in
+`mcp.rs` since presets existed, and `MotionPhases` in `design_system.rs` with
+it — but only *presets* spoke that vocabulary. A scene timeline was one
+undifferentiated span, so an authored graphic could not say where its take-in
+ended and its take-out began. `Shared/contracts/src/phases.rs` gives the scene
+timeline the same five names as frame spans, and a test pins `PhaseKind::ALL`
+against `MOTION_PHASES` so the two cannot drift apart again.
+
+Two decisions in it worth keeping:
+
+- **Spans are half-open, `[start, end)`.** Adjacency then costs nothing: an
+  `in` ending at 50 and a `hold` starting at 50 share no frame. With inclusive
+  ends the author writes 49 and every duration calculation carries a `+ 1`
+  somebody eventually forgets.
+- **Phases need not tile the timeline.** `phase_at_frame` returns `None` for an
+  unnamed frame rather than inventing a containing phase.
+
+Each way of being wrong is its own refusal: `TimelinePhaseOverlap`,
+`TimelinePhaseOutOfRange`, `TimelinePhaseInvalidSpan`, `TimelinePhaseUnknown`.
+An author who inverted a span is told that, not that it is out of range. All
+four are driven in `conformance/src/refusal_audit.rs` — the step that was
+missed with 11.18 and cost a gate failure this morning.
+
+**The other three were built by subagents that died mid-flight.** 11.26
+(`control.rs`, declared operator fields), 11.27 (`take-page.ts`, filling a
+template instance) and 11.28 (`text_style.rs`, named styles) all landed
+modules, contracts, shell commands, mounted panels and tests before their
+workers hit an external quota limit. What they left compiles and passes, but
+the test counts are thin (3, 2, 2) and **none of it has been exercised live**,
+so all three stay active.
+
+One spec error of mine, corrected mid-flight and worth recording: I specified
+`apply_text_style(scene, object_id, style_id)` resolving design-system tokens.
+Both text-style agents independently reported it unimplementable, and they were
+right — `DesignSystem` is stored per project and versioned by
+`DesignSystemStore`, deliberately **not** on `SceneDocument`, because a scene
+carrying its own copy of the brand pack is the second source of brand truth
+11.28 exists to prevent. The signature now takes `tokens: Option<&DesignSystem>`
+explicitly, with `TextStyleTokenUnresolved` rather than any literal fallback.
+
+### Two stale-binary traps, the same shape
+
+`cargo test -p gx-editor-shell --test publish` failed with
+`PublishRefused { detail: "scene carries a field this schema does not know:
+controls" }`. Not a contract break: the test publishes to a **real worker
+process**, and `target/debug/gx-render-worker` was built before the new fields
+existed. Rebuilding the worker fixed it. This is the same trap as the Tauri
+`frontendDist` one recorded above — a separately-built binary going stale while
+the source that feeds it moves on. Both times the symptom pointed somewhere
+other than the cause.
+
+### Verified by execution
+
+| What | Result |
+|---|---|
+| `cargo test -p gx-contracts phases` | **10 passed** — overlap refused, adjacency allowed, inverted span named separately, unnamed frame reports none, pre-phases scene parses, names match `MOTION_PHASES` |
+| `npm run check` | **exit 0** — boundaries, codegen **177 files**, typecheck, **250 TS tests** (23 files), **490 Rust tests**, conformance CONFORMANT |
+
+Adding `phases` to `SceneTimeline` and `controls`/`textStyles` to
+`SceneDocument` broke every struct literal across the workspace and every TS
+fixture. They are converted to `..Default::default()` (Rust) or carry the new
+fields explicitly (TS). Note that **`vitest` does not typecheck** — five broken
+fixtures passed the unit run and were caught only by `tsc --build` in the gate.
+
+### Status
+
+11.25–11.28 are all **active**. 11.25's contract half is complete and driven,
+but its done-when also requires phases be authored and previewed in the Editor,
+and there is no timeline phase UI yet. 11.26–11.28 have panels mounted but no
+live verification, which their done-when clauses require.
+
+---
+
+
 ## 2026-09-13 — scenes became entities (11.29)
 
 Requested by the user: *"a broadcast has multiple graphics/scenes and each

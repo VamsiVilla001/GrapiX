@@ -153,6 +153,10 @@ pub struct SceneTimeline {
     /// Editable keyframe channels, one per object/property.
     #[serde(default)]
     pub channels: Vec<crate::animation::KeyframeChannel>,
+    /// Named operator phases over those channels (11.25). `#[serde(default)]`
+    /// keeps a scene authored before phases existed valid and unphased.
+    #[serde(default)]
+    pub phases: Vec<crate::phases::TimelinePhase>,
 }
 
 /// The live data a scene's bindings resolve against. Opaque here — the
@@ -1405,6 +1409,16 @@ pub struct SceneDocument {
     /// published package depend on outside state.
     #[serde(default)]
     pub materials: Vec<crate::material::MaterialDefinition>,
+    /// Operator-facing fields explicitly declared by the template author.
+    /// Omitted by pre-11.26 documents, which therefore retain an empty
+    /// operator contract when reopened.
+    #[serde(default)]
+    pub controls: Vec<crate::control::ControlField>,
+    /// Named text-style bundles are carried with a scene, while any token
+    /// reference they hold resolves against the active project design system.
+    /// Older documents omit this list and reopen with no saved styles.
+    #[serde(default)]
+    pub text_styles: Vec<crate::text_style::TextStyle>,
     /// The scene graph, in draw order.
     #[serde(default)]
     pub objects: Vec<SceneObject>,
@@ -1560,6 +1574,14 @@ mod parse_tests {
     }
 
     #[test]
+    fn a_scene_authored_before_text_styles_parses_with_an_empty_style_list() {
+        let document = parse_scene_document(authored("", "").as_bytes())
+            .expect("a pre-11.28 scene must remain readable");
+
+        assert!(document.text_styles.is_empty());
+    }
+
+    #[test]
     fn an_unknown_field_on_an_object_is_refused_and_named() {
         // 3.4's done-when. Before this existed serde dropped the key and the
         // scene rendered without whatever it was for.
@@ -1669,11 +1691,13 @@ mod parse_tests {
                 height: 1080,
                 frame_rate: RationalRate::P50,
             },
-            timeline: SceneTimeline { duration_frames: 100, channels: Vec::new() },
+            timeline: SceneTimeline { duration_frames: 100, ..Default::default() },
             data_context: serde_json::Map::new(),
             assets: vec![],
             fonts: vec![],
             materials: vec![],
+            controls: vec![],
+            text_styles: vec![],
             objects: super::tests::catalogue(),
         };
         let bytes = serde_json::to_vec(&document).unwrap();
@@ -1914,7 +1938,7 @@ mod tests {
                 height: 1080,
                 frame_rate: RationalRate::P50,
             },
-            timeline: SceneTimeline { duration_frames: 250, channels: Vec::new() },
+            timeline: SceneTimeline { duration_frames: 250, ..Default::default() },
             data_context: serde_json::Map::new(),
             assets: vec![AssetLibraryItem {
                 asset_id: "asset_logo".into(),
@@ -1928,6 +1952,8 @@ mod tests {
             }],
             fonts: vec![],
             materials: vec![],
+            controls: vec![],
+            text_styles: vec![],
             objects: vec![
                 SceneObject::Rect(RectObject {
                     base: bg,

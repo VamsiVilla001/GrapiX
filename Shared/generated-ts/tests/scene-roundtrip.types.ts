@@ -193,7 +193,7 @@ const scene: SceneDocument = {
   version: 1,
   revision: 3n,
   canvas: { width: 1920, height: 1080, frameRate: { num: 50, den: 1 } },
-  timeline: { durationFrames: 250n, channels: [] },
+  timeline: { durationFrames: 250n, channels: [], phases: [] },
   dataContext: {},
   assets: [
     {
@@ -209,6 +209,8 @@ const scene: SceneDocument = {
   ],
   fonts: [],
   materials: [],
+  controls: [],
+  textStyles: [],
   objects: catalogue,
 };
 

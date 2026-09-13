@@ -15,6 +15,7 @@
 
 use std::path::{Path, PathBuf};
 
+use gx_contracts::control::TakePage;
 use gx_contracts::scene::{parse_scene_document, SceneDocument};
 use gx_contracts::Refusal;
 
@@ -97,6 +98,14 @@ impl Projects {
         self.project_directory(project).join("scenes")
     }
 
+    fn take_pages_directory(&self, project: &str) -> PathBuf {
+        self.project_directory(project).join("take-pages")
+    }
+
+    fn take_page_path(&self, project: &str, page_id: &str) -> PathBuf {
+        self.take_pages_directory(project).join(format!("{page_id}.json"))
+    }
+
     fn scene_path(&self, project: &str, scene_id: &str) -> PathBuf {
         self.scenes_directory(project).join(format!("{scene_id}.json"))
     }
@@ -128,6 +137,51 @@ impl Projects {
             path: scenes,
             source,
         })
+    }
+
+    /// Write a filled take-page instance into an existing project.
+    ///
+    /// Pages live beside, rather than inside, their templates: filling one must
+    /// never rewrite the authored scene it references.
+    pub fn write_take_page(&self, project: &str, page: &TakePage) -> Result<(), EditorError> {
+        self.require_project(project)?;
+        let directory = self.take_pages_directory(project);
+        std::fs::create_dir_all(&directory).map_err(|source| EditorError::Io {
+            path: directory,
+            source,
+        })?;
+        let bytes = serde_json::to_vec_pretty(page).map_err(EditorError::Serialize)?;
+        gx_fs::write_atomic(&self.take_page_path(project, &page.page_id), &bytes)
+            .map_err(EditorError::Write)
+    }
+
+    /// Read a filled take-page without opening or changing its template.
+    pub fn read_take_page(&self, project: &str, page_id: &str) -> Result<TakePage, EditorError> {
+        self.require_project(project)?;
+        let path = self.take_page_path(project, page_id);
+        let bytes = std::fs::read(&path).map_err(|source| EditorError::Io { path, source })?;
+        serde_json::from_slice(&bytes).map_err(EditorError::Serialize)
+    }
+
+    /// Take-page ids in a project, sorted as scene ids are.
+    pub fn list_take_pages(&self, project: &str) -> Result<Vec<String>, EditorError> {
+        self.require_project(project)?;
+        let directory = self.take_pages_directory(project);
+        let mut ids = match std::fs::read_dir(&directory) {
+            Ok(entries) => entries
+                .filter_map(Result::ok)
+                .filter_map(|entry| {
+                    let path = entry.path();
+                    (path.extension().and_then(|extension| extension.to_str()) == Some("json"))
+                        .then(|| path.file_stem()?.to_str().map(str::to_owned))
+                        .flatten()
+                })
+                .collect::<Vec<_>>(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(source) => return Err(EditorError::Io { path: directory, source }),
+        };
+        ids.sort();
+        Ok(ids)
     }
 
     /// The projects that exist, in directory order.
@@ -247,11 +301,13 @@ mod tests {
                 height: 1080,
                 frame_rate: RationalRate::P50,
             },
-            timeline: SceneTimeline { duration_frames: 1, channels: Vec::new() },
+            timeline: SceneTimeline { duration_frames: 1, ..Default::default() },
             data_context: Default::default(),
             assets: Vec::new(),
             fonts: Vec::new(),
             materials: Vec::new(),
+            controls: Vec::new(),
+            text_styles: Vec::new(),
             objects: Vec::new(),
         }
     }

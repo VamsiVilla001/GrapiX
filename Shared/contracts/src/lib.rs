@@ -7,6 +7,7 @@
 
 pub mod animation;
 pub mod authoring;
+pub mod control;
 pub mod auth;
 pub mod color;
 pub mod design_system;
@@ -17,7 +18,9 @@ pub mod material;
 pub mod mcp;
 pub mod package;
 pub mod platform;
+pub mod phases;
 pub mod scene;
+pub mod text_style;
 pub mod validate;
 
 use serde::{Deserialize, Serialize};
@@ -510,6 +513,28 @@ pub enum Refusal {
     SceneDuplicateObjectId { object_id: String },
     /// An edit names an object id the scene does not contain.
     SceneObjectUnknown { object_id: String },
+    /// A template control names no object or property the control vocabulary
+    /// exposes. Storing it would create an operator field that can never be
+    /// filled, so declaration refuses before changing the document.
+    ControlFieldTargetUnknown { object_id: String, property: String },
+    /// Two declared controls use one stable id, making a saved page ambiguous.
+    ControlFieldDuplicate { field_id: String },
+    /// A field operation or page value names no control in the template.
+    ControlFieldUnknown { field_id: String },
+    /// A page value has a different concrete type than its declared field.
+    ControlValueTypeMismatch {
+        field_id: String,
+        expected: String,
+        actual: String,
+    },
+    /// A saved text style names a font the scene does not carry. Applying it
+    /// would make a renderer substitute a face, so the style refuses instead.
+    TextStyleFontUnknown { style_id: String, font_id: String },
+    /// A style id was requested but is not declared by this scene.
+    TextStyleUnknown { style_id: String },
+    /// A style references a design token the active project has not confirmed.
+    /// Resolving to a last-known or default value would fork brand truth.
+    TextStyleTokenUnresolved { style_id: String, token: String },
     /// A kind the authoring surface cannot complete on its own, with what it
     /// needs. An `image` with no asset or a `text` with no font would refuse
     /// the moment it was rendered, so it is refused at creation instead of
@@ -519,6 +544,26 @@ pub enum Refusal {
     /// the author reads in every panel; an empty one makes an object that
     /// cannot be told from its siblings.
     SceneObjectNameEmpty,
+    /// Two named phases claim the same frame. Refused rather than resolved by
+    /// precedence: "which phase is frame 50 in" must have one answer, and an
+    /// operator taking a graphic out cannot be told it is also building on.
+    TimelinePhaseOverlap { earlier: String, later: String },
+    /// A phase runs past the scene's declared duration. Also raised when the
+    /// duration is shortened underneath an existing phase.
+    TimelinePhaseOutOfRange {
+        phase: String,
+        end_frame: u64,
+        duration_frames: u64,
+    },
+    /// A phase span is empty or inverted. Distinct from out-of-range so an
+    /// author who swapped start and end is told that, not something else.
+    TimelinePhaseInvalidSpan {
+        phase: String,
+        start_frame: u64,
+        end_frame: u64,
+    },
+    /// An edit names a phase the timeline does not carry.
+    TimelinePhaseUnknown { phase: String },
     /// A frame is outside the scene's declared timeline duration.
     KeyframeOutOfRange {
         object: String,
@@ -812,11 +857,60 @@ impl std::fmt::Display for Refusal {
             Refusal::SceneObjectUnknown { object_id } => {
                 write!(f, "scene has no object {object_id}")
             }
+            Refusal::ControlFieldTargetUnknown {
+                object_id,
+                property,
+            } => write!(f, "template control target {object_id}.{property} is unavailable"),
+            Refusal::ControlFieldDuplicate { field_id } => {
+                write!(f, "template already declares control field {field_id}")
+            }
+            Refusal::ControlFieldUnknown { field_id } => {
+                write!(f, "template has no control field {field_id}")
+            }
+            Refusal::ControlValueTypeMismatch {
+                field_id,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "template control field {field_id} requires {expected}, not {actual}"
+            ),
+            Refusal::TextStyleFontUnknown { style_id, font_id } => {
+                write!(f, "text style {style_id} names unknown font {font_id}")
+            }
+            Refusal::TextStyleUnknown { style_id } => {
+                write!(f, "scene has no text style {style_id}")
+            }
+            Refusal::TextStyleTokenUnresolved { style_id, token } => {
+                write!(f, "text style {style_id} cannot resolve token {token}")
+            }
             Refusal::SceneObjectKindNotCreatable { kind, needs } => {
                 write!(f, "cannot create a {kind} without {needs}")
             }
             Refusal::SceneObjectNameEmpty => {
                 write!(f, "an object needs a name")
+            }
+            Refusal::TimelinePhaseOverlap { earlier, later } => {
+                write!(f, "phases {earlier} and {later} claim the same frames")
+            }
+            Refusal::TimelinePhaseOutOfRange {
+                phase,
+                end_frame,
+                duration_frames,
+            } => write!(
+                f,
+                "phase {phase} ends at frame {end_frame}, past the scene's {duration_frames} frames"
+            ),
+            Refusal::TimelinePhaseInvalidSpan {
+                phase,
+                start_frame,
+                end_frame,
+            } => write!(
+                f,
+                "phase {phase} spans frames {start_frame} to {end_frame}, which contains no frames"
+            ),
+            Refusal::TimelinePhaseUnknown { phase } => {
+                write!(f, "the timeline has no phase {phase}")
             }
             Refusal::KeyframeOutOfRange {
                 object,
@@ -1018,11 +1112,54 @@ impl Refusal {
             Self::SceneObjectUnknown {
                 object_id: "audit".into(),
             },
+            Self::ControlFieldTargetUnknown {
+                object_id: "audit".into(),
+                property: "audit".into(),
+            },
+            Self::ControlFieldDuplicate {
+                field_id: "audit".into(),
+            },
+            Self::ControlFieldUnknown {
+                field_id: "audit".into(),
+            },
+            Self::ControlValueTypeMismatch {
+                field_id: "audit".into(),
+                expected: "text".into(),
+                actual: "number".into(),
+            },
+            Self::TextStyleFontUnknown {
+                style_id: "audit".into(),
+                font_id: "audit".into(),
+            },
+            Self::TextStyleUnknown {
+                style_id: "audit".into(),
+            },
+            Self::TextStyleTokenUnresolved {
+                style_id: "audit".into(),
+                token: "{palette.audit}".into(),
+            },
             Self::SceneObjectKindNotCreatable {
                 kind: "audit".into(),
                 needs: "audit".into(),
             },
             Self::SceneObjectNameEmpty,
+            Self::TimelinePhaseOverlap {
+                earlier: "audit".into(),
+                later: "audit".into(),
+            },
+            Self::TimelinePhaseOutOfRange {
+                phase: "audit".into(),
+                end_frame: 2,
+                duration_frames: 1,
+            },
+            Self::TimelinePhaseInvalidSpan {
+                phase: "audit".into(),
+                start_frame: 1,
+                end_frame: 1,
+            },
+            Self::TimelinePhaseUnknown {
+                phase: "audit".into(),
+            },
             Self::KeyframeOutOfRange {
                 object: "audit".into(),
                 property: "audit".into(),
@@ -1166,6 +1303,13 @@ impl Refusal {
             Self::InvalidFontData { .. } => "invalidFontData",
             Self::InvalidColor { .. } => "invalidColor",
             Self::PlatformDirectoryUnavailable { .. } => "platformDirectoryUnavailable",
+            Self::ControlFieldTargetUnknown { .. } => "controlFieldTargetUnknown",
+            Self::ControlFieldDuplicate { .. } => "controlFieldDuplicate",
+            Self::ControlFieldUnknown { .. } => "controlFieldUnknown",
+            Self::ControlValueTypeMismatch { .. } => "controlValueTypeMismatch",
+            Self::TextStyleFontUnknown { .. } => "textStyleFontUnknown",
+            Self::TextStyleUnknown { .. } => "textStyleUnknown",
+            Self::TextStyleTokenUnresolved { .. } => "textStyleTokenUnresolved",
             Self::UnknownPackageFormatVersion { .. } => "unknownPackageFormatVersion",
             Self::UnsafePackagePath { .. } => "unsafePackagePath",
             Self::DuplicatePackagePath { .. } => "duplicatePackagePath",
@@ -1188,6 +1332,10 @@ impl Refusal {
             Self::SceneObjectUnknown { .. } => "sceneObjectUnknown",
             Self::SceneObjectKindNotCreatable { .. } => "sceneObjectKindNotCreatable",
             Self::SceneObjectNameEmpty => "sceneObjectNameEmpty",
+            Self::TimelinePhaseOverlap { .. } => "timelinePhaseOverlap",
+            Self::TimelinePhaseOutOfRange { .. } => "timelinePhaseOutOfRange",
+            Self::TimelinePhaseInvalidSpan { .. } => "timelinePhaseInvalidSpan",
+            Self::TimelinePhaseUnknown { .. } => "timelinePhaseUnknown",
             Self::KeyframeOutOfRange { .. } => "keyframeOutOfRange",
             Self::DuplicateKeyframeFrame { .. } => "duplicateKeyframeFrame",
             Self::AnimationPropertyUnsupported { .. } => "animationPropertyUnsupported",

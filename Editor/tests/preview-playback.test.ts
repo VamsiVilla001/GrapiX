@@ -69,11 +69,14 @@ function documentWithChannels(): SceneDocument {
           ],
         },
       ],
+      phases: [],
     },
     dataContext: {},
     assets: [],
     fonts: [],
     materials: [],
+    controls: [],
+    textStyles: [],
     objects: [card],
   } as SceneDocument;
 }

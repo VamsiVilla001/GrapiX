@@ -23,6 +23,7 @@
 // files differ over something neither would call an edit.
 
 import type { SceneDocument } from "@grapix/contracts";
+import type { TakePageState } from "./take-page";
 
 /// Where an open scene came from, and therefore where saving sends it back.
 ///
@@ -56,6 +57,10 @@ export interface SceneSession {
   redoStack: SceneDocument[];
   /// Edited since the last save to its origin.
   dirty: boolean;
+  /// Operator values belong to this template session, never the next tab.
+  takePage: TakePageState;
+  /// The filled copy currently shown in the preview, never an authored edit.
+  takePagePreview: SceneDocument | null;
 }
 
 export interface Workspace {
@@ -123,6 +128,8 @@ export function openSession(
     undoStack: [],
     redoStack: [],
     dirty: false,
+    takePage: { values: {}, pageId: "", name: "" },
+    takePagePreview: null,
   };
   workspace.sessions.push(session);
   workspace.activeKey = session.key;

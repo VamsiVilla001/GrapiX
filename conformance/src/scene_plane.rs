@@ -86,6 +86,7 @@ fn populated_scene(id: &str, asset: Option<ContentHash>) -> SceneDocument {
                     bezier: None,
                 }],
             }],
+            ..Default::default()
         },
         data_context,
         assets: asset
@@ -103,6 +104,8 @@ fn populated_scene(id: &str, asset: Option<ContentHash>) -> SceneDocument {
             .collect(),
         fonts: Vec::new(),
         materials: Vec::new(),
+        controls: Vec::new(),
+        text_styles: Vec::new(),
         objects: vec![SceneObject::Rect(RectObject { base, radius: 4.0 })],
     }
 }

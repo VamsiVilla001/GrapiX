@@ -15,6 +15,7 @@ use gx_contracts::animation::{
     SceneKeyframe,
 };
 use gx_contracts::auth::{Role, Scope};
+use gx_contracts::control::{ControlField, ControlFieldKind, ControlValue, TakePage};
 use gx_contracts::color::{
     rec709_decode, rec709_encode, srgb_decode, srgb_encode, ColorValue, GradientCoordinateMode,
     GradientSpread, GradientStop, OutputTransform, Rgba, SourceColorSpace, WorkingColorSpace,
@@ -37,6 +38,7 @@ use gx_contracts::material::{
 use gx_contracts::mcp::{CapabilitySurface, EnumSurface, ScopeDenial, ToolDescriptor, ToolEffect};
 use gx_contracts::package::{PackageFileEntry, PackageManifest};
 use gx_contracts::authoring::{ObjectDeletion, ObjectDuplication};
+use gx_contracts::text_style::{StyleColor, StyleNumber, TextStyle};
 use gx_contracts::scene::{
     AssetAvailability, AssetKind, AssetLibraryItem, BezierPath, BrushBlendMode, BrushPoint,
     CameraKind, CameraObject, EllipseObject, FillRule, GroupObject, HierarchyChildren,
@@ -185,6 +187,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         GroupObject,
         SceneObject,
         SceneDocument,
+        // gx-contracts: declared template controls (11.26)
+        ControlFieldKind,
+        ControlValue,
+        ControlField,
+        TakePage,
+        // gx-contracts: named text styles (11.28)
+        StyleNumber,
+        StyleColor,
+        TextStyle,
         // gx-contracts: hierarchy resolution (1.2)
         HierarchyDiagnosticCode,
         HierarchyDiagnostic,

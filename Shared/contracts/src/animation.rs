@@ -866,12 +866,14 @@ mod tests {
             },
             timeline: SceneTimeline {
                 duration_frames: 100,
-                channels: vec![],
+                ..Default::default()
             },
             data_context: Default::default(),
             assets: vec![],
             fonts: vec![],
             materials: vec![],
+            controls: vec![],
+            text_styles: vec![],
             objects,
         }
     }

@@ -174,11 +174,13 @@ pub fn import_svg(
             height: 1080,
             frame_rate: RationalRate::P50,
         },
-        timeline: SceneTimeline { duration_frames: 1, channels: Vec::new() },
+        timeline: SceneTimeline { duration_frames: 1, ..Default::default() },
         data_context: Default::default(),
         assets: Vec::new(),
         fonts: Vec::new(),
         materials: Vec::new(),
+        controls: Vec::new(),
+        text_styles: Vec::new(),
         objects,
     };
 

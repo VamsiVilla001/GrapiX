@@ -675,8 +675,9 @@ mod tests {
             id: "scene".to_string(), name: "mesh".to_string(), version: 1,
             revision: Some(Revision(1)), active_camera_id: None,
             canvas: SceneCanvas { width: 1920, height: 1080, frame_rate: RationalRate::P50 },
-            timeline: SceneTimeline { duration_frames: 1, channels: Vec::new() }, data_context: Default::default(),
-            assets: Vec::new(), fonts: Vec::new(), materials, objects,
+            timeline: SceneTimeline { duration_frames: 1, ..Default::default() }, data_context: Default::default(),
+            assets: Vec::new(), fonts: Vec::new(), materials,
+            controls: Vec::new(), text_styles: Vec::new(), objects,
         }
     }
 

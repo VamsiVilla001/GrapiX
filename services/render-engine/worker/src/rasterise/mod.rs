@@ -286,6 +286,8 @@ mod tests {
             assets: Vec::new(),
             fonts: Vec::new(),
             materials: Vec::new(),
+            controls: Vec::new(),
+            text_styles: Vec::new(),
             objects,
         }
     }

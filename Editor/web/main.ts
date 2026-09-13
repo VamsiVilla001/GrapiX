@@ -14,12 +14,16 @@
 
 import type {
   AnimationSurface,
+  ControlField,
+  ControlValue,
   ObjectDeletion,
   ObjectDuplication,
   MotionPreset,
   SceneDocument,
   SceneEasing,
   SceneKeyframe,
+  TextStyle,
+  TakePage,
 } from "@grapix/contracts";
 import { presetBlocker } from "../src/motion-preset-browser";
 import { SceneViewport } from "../src/viewport";
@@ -29,6 +33,7 @@ import { inspectorPanel } from "../src/inspector";
 import { fontManagerPanel, fontUsers } from "../src/font-manager";
 import { materialManagerPanel, usersOf } from "../src/material-manager";
 import { assetManagerPanel, assetUsers } from "../src/asset-manager";
+import { textStylePanel, textStyleUsers } from "../src/text-style";
 import {
   sceneManagerPanel,
   type ManagedScene,
@@ -39,6 +44,14 @@ import {
   resolveSceneBindings,
   type BindingIssue,
 } from "../src/bindings";
+import {
+  EMPTY_TAKE_PAGE_STATE,
+  inputTypeFor,
+  takePagePanel,
+  valueForField,
+  type TakePageState,
+} from "../src/take-page";
+import { controlContractPanel, type ControlProperty } from "../src/control-contract";
 import {
   boundsFromDrag,
   buildViewportOverlay,
@@ -152,6 +165,18 @@ interface ProjectSceneCatalog {
   readonly scenes: readonly ListedScene[];
 }
 
+interface ListedTakePage {
+  readonly pageId: string;
+  readonly name: string;
+  readonly sceneId: string;
+  readonly unavailableReason?: string;
+}
+
+interface ProjectTakePageCatalog {
+  readonly project: string;
+  readonly pages: readonly ListedTakePage[];
+}
+
 const tauri = window.__TAURI__;
 
 // ---------------------------------------------------------------------------
@@ -191,12 +216,22 @@ const ui = {
   objectRename: need<HTMLButtonElement>("object-rename"),
   objectDelete: need<HTMLButtonElement>("object-delete"),
   bindings: need<HTMLDivElement>("bindings-mount"),
+  controlMount: need<HTMLDivElement>("control-mount"),
   fontMount: need<HTMLDivElement>("font-mount"),
   fontEmpty: need<HTMLParagraphElement>("font-empty"),
   materialMount: need<HTMLDivElement>("material-mount"),
+  textStyleMount: need<HTMLDivElement>("text-style-mount"),
+  textStyleEmpty: need<HTMLParagraphElement>("text-style-empty"),
   materialEmpty: need<HTMLParagraphElement>("material-empty"),
   assetMount: need<HTMLDivElement>("asset-mount"),
   assetEmpty: need<HTMLParagraphElement>("asset-empty"),
+  takePageId: need<HTMLInputElement>("take-page-id"),
+  takePageName: need<HTMLInputElement>("take-page-name"),
+  takePageMount: need<HTMLDivElement>("take-page-mount"),
+  takePagePreview: need<HTMLButtonElement>("take-page-preview"),
+  takePageSave: need<HTMLButtonElement>("take-page-save"),
+  takePageSelect: need<HTMLSelectElement>("take-page-select"),
+  takePageOpen: need<HTMLButtonElement>("take-page-open"),
   inspector: need<HTMLDivElement>("inspector-mount"),
   animationFrame: need<HTMLInputElement>("animation-frame"),
   autoKey: need<HTMLInputElement>("auto-key"),
@@ -258,6 +293,7 @@ let projects: string[] = [];
 let currentProject: string | undefined;
 let projectCatalog: ProjectSceneCatalog | undefined;
 /** Set only when the open document came from the selected project's store. */
+let takePageCatalog: ProjectTakePageCatalog | undefined;
 let projectSceneId: string | undefined;
 let projectSceneProject: string | undefined;
 let projectSceneDirty = false;
@@ -270,6 +306,10 @@ let collapsed: string[] = [];
 let selectedFontId: string | undefined;
 let selectedMaterialId: string | undefined;
 let selectedAssetId: string | undefined;
+let takePageState: TakePageState = EMPTY_TAKE_PAGE_STATE;
+let takePagePreviewDocument: SceneDocument | null = null;
+let controlProperties: readonly ControlProperty[] | undefined;
+let controlPropertiesKind: string | undefined;
 let marquee: OverlayBounds | undefined;
 let guides: OverlayGuide[] = [];
 let animationSurface: AnimationSurface | null = null;
@@ -392,6 +432,8 @@ function captureActiveSession(): void {
   session.undoStack = undoStack;
   session.redoStack = redoStack;
   session.path = scenePath;
+  session.takePage = takePageState;
+  session.takePagePreview = takePagePreviewDocument;
   session.dirty = projectSceneDirty;
 }
 
@@ -408,6 +450,8 @@ function restoreSession(session: SceneSession): void {
   projectSceneId = session.origin?.sceneId;
   projectSceneProject = session.origin?.project;
   projectSceneDirty = session.dirty;
+  takePageState = session.takePage;
+  takePagePreviewDocument = session.takePagePreview;
   if (session.origin) currentProject = session.origin.project;
   // Transient interaction state belongs to a gesture, not to a scene: a
   // marquee half-drawn in one graphic must not reappear over another.
@@ -564,14 +608,15 @@ function renderSceneState(): void {
   ui.canvas.width = scene.canvas.width;
   ui.canvas.height = scene.canvas.height;
 
-  const resolution = resolveSceneBindings(scene);
+  const previewInput = takePagePreviewDocument ?? scene;
+  const resolution = resolveSceneBindings(previewInput);
   bindingPreviewIssues = resolution.ok
     ? []
     : resolution.issues.map(
         (issue) =>
           `Binding ${issue.objectId}.${issue.property} refused [${issue.code}]: ${issue.reason}`,
       );
-  resolvedScene = resolution.ok ? resolution.document : scene;
+  resolvedScene = resolution.ok ? resolution.document : previewInput;
   const animation = previewSceneAt(resolvedScene, currentFrame, animationSurface);
   previewScene = animation.document;
   viewport?.dispose();
@@ -640,6 +685,230 @@ function renderProjectManager(): void {
   );
 }
 
+function hexForTakePageColor(value: ControlValue | undefined): string {
+  if (value?.type !== "color" || value.value.type !== "solid") return "#000000";
+  const component = (channel: number): string =>
+    Math.round(Math.max(0, Math.min(1, channel)) * 255)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${component(value.value.color.r)}${component(value.value.color.g)}${component(value.value.color.b)}`;
+}
+
+function takePageValueFromInput(field: ControlField, input: HTMLInputElement): ControlValue {
+  switch (field.kind) {
+    case "text":
+      return { type: "text", value: input.value };
+    case "asset":
+      return { type: "asset", value: input.value };
+    case "boolean":
+      return { type: "boolean", value: input.checked };
+    case "color": {
+      const hex = input.value;
+      const channels = [1, 3, 5].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16) / 255);
+      return {
+        type: "color",
+        value: {
+          type: "solid",
+          color: { r: channels[0]!, g: channels[1]!, b: channels[2]!, a: 1, space: "srgb" },
+        },
+      };
+    }
+    case "number": {
+      const number = Number(input.value);
+      // A malformed numeric entry deliberately remains a text control value.
+      // Rust owns rejection and returns ControlValueTypeMismatch by field id.
+      return Number.isFinite(number) && input.value.trim() !== ""
+        ? { type: "number", value: number }
+        : { type: "text", value: input.value };
+    }
+  }
+}
+
+function renderTakePagePanel(document_: SceneDocument): void {
+
+  ui.takePageId.value = takePageState.pageId;
+  ui.takePageName.value = takePageState.name;
+  ui.takePageMount.replaceChildren(
+    renderNode(document, takePagePanel(document_, takePageState)) as unknown as Node,
+  );
+  for (const field of document_.controls) {
+    const row = document.getElementById(`take-page/field/${field.fieldId}`);
+    if (!row) throw new Error(`take-page panel omitted declared field ${field.fieldId}`);
+    row.textContent = "";
+    const input = document.createElement("input");
+    input.type = inputTypeFor(field.kind);
+    input.setAttribute("aria-label", field.label);
+    input.dataset.takePageField = field.fieldId;
+    const value = valueForField(field, takePageState);
+    if (field.kind === "boolean") {
+      input.checked = value?.type === "boolean" ? value.value : false;
+    } else if (field.kind === "color") {
+      input.value = hexForTakePageColor(value);
+    } else if (value?.type === field.kind) {
+      input.value = String(value.value);
+    }
+    input.addEventListener("input", () => {
+      takePageState = {
+        ...takePageState,
+        values: { ...takePageState.values, [field.fieldId]: takePageValueFromInput(field, input) },
+      };
+      takePagePreviewDocument = null;
+      document.getElementById("take-page/refusal")?.remove();
+    });
+    row.append(input);
+  }
+
+  // Narrowed into a local so the optional-chain guard actually applies to the
+  // access below; `takePageCatalog?.x === y` does not narrow the field itself.
+  const pageCatalog = takePageCatalog;
+  const catalog =
+    pageCatalog && pageCatalog.project === projectSceneProject
+      ? pageCatalog.pages.filter((page) => page.sceneId === document_.id)
+      : [];
+  ui.takePageSelect.replaceChildren();
+  for (const page of catalog) {
+    const option = document.createElement("option");
+    option.value = page.pageId;
+    option.textContent = page.unavailableReason ? `${page.name} — ${page.unavailableReason}` : page.name;
+    option.disabled = page.unavailableReason !== undefined;
+    ui.takePageSelect.append(option);
+  }
+  ui.takePageSelect.disabled = catalog.length === 0;
+  ui.takePageOpen.disabled = catalog.length === 0;
+  ui.takePageSave.disabled = projectSceneProject === undefined;
+}
+async function loadControlProperties(kind: string): Promise<void> {
+  try {
+    const pairs = await invoke<readonly [string, ControlField["kind"]][]>("cmd_control_properties", { kind });
+    if (controlPropertiesKind !== kind) return;
+    controlProperties = pairs.map(([property, fieldKind]) => ({ property, kind: fieldKind }));
+  } catch (error) {
+    controlProperties = [];
+    log(`control vocabulary unavailable: ${describe(error)}`, "bad");
+  }
+  if (scene) renderPanels(scene);
+}
+
+function renderControlContract(document_: SceneDocument): void {
+  const selected = selection.length === 1
+    ? document_.objects.find((object) => object.id === selection[0])
+    : undefined;
+  if (selected?.type !== controlPropertiesKind) {
+    controlPropertiesKind = selected?.type;
+    controlProperties = selected === undefined ? [] : undefined;
+    if (selected !== undefined) void loadControlProperties(selected.type);
+  }
+  ui.controlMount.replaceChildren(
+    renderNode(
+      document,
+      controlContractPanel(document_, {
+        selectedIds: selection,
+        ...(selected?.type === controlPropertiesKind && controlProperties !== undefined
+          ? { fillableProperties: controlProperties }
+          : {}),
+      }),
+    ) as unknown as Node,
+  );
+}
+
+async function replaceControlField(next: ControlField, label: string): Promise<void> {
+  if (!scene) return;
+  try {
+    const updated = await invoke<SceneDocument>("cmd_control_replace", { scene, field: next });
+    commitScene(scene, updated, label);
+  } catch (error) {
+    log(`control field refused: ${describe(error)}`, "bad");
+  }
+}
+
+async function onControlContractClick(event: MouseEvent): Promise<void> {
+  if (!scene) return;
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  const button = target.closest<HTMLButtonElement>("button[data-action][data-for]");
+  const nodeId = button?.dataset.for;
+  const action = button?.dataset.action;
+  if (!nodeId || !action || button?.disabled) return;
+
+  if (nodeId.startsWith("control/property/") && action === "declare") {
+    const property = nodeId.slice("control/property/".length);
+    const candidate = controlProperties?.find((entry) => entry.property === property);
+    const objectId = selection.length === 1 ? selection[0] : undefined;
+    if (!candidate || !objectId) return;
+    const fieldId = window.prompt("Stable field id", property);
+    if (fieldId === null || fieldId.trim() === "") return;
+    const label = window.prompt("Operator label", property);
+    if (label === null || label.trim() === "") return;
+    try {
+      const updated = await invoke<SceneDocument>("cmd_control_declare", {
+        scene,
+        field: { fieldId: fieldId.trim(), label: label.trim(), objectId, property, kind: candidate.kind },
+      });
+      commitScene(scene, updated, `declare control ${fieldId.trim()}`);
+    } catch (error) {
+      log(`control field refused: ${describe(error)}`, "bad");
+    }
+    return;
+  }
+
+  if (!nodeId.startsWith("control/field/")) return;
+  const fieldId = nodeId.slice("control/field/".length);
+  const field = scene.controls.find((candidate) => candidate.fieldId === fieldId);
+  if (!field) return;
+  if (action === "remove") {
+    try {
+      const updated = await invoke<SceneDocument>("cmd_control_remove", { scene, fieldId });
+      commitScene(scene, updated, `remove control ${fieldId}`);
+    } catch (error) {
+      log(`control field refused: ${describe(error)}`, "bad");
+    }
+    return;
+  }
+  if (action === "setLabel") {
+    const label = window.prompt("Operator label", field.label);
+    if (label !== null && label.trim() !== "") {
+      await replaceControlField({ ...field, label: label.trim() }, `label control ${fieldId}`);
+    }
+    return;
+  }
+  if (action !== "setDefault") return;
+  const entered = window.prompt(
+    `Default ${field.kind} value`,
+    field.default?.value === undefined ? "" : String(field.default.value),
+  );
+  if (entered === null) return;
+  let defaultValue: Exclude<ControlField["default"], undefined>;
+  switch (field.kind) {
+    case "text": defaultValue = { type: "text", value: entered }; break;
+    case "asset": defaultValue = { type: "asset", value: entered }; break;
+    case "boolean":
+      if (entered !== "true" && entered !== "false") {
+        log("control default refused: boolean must be true or false", "bad");
+        return;
+      }
+      defaultValue = { type: "boolean", value: entered === "true" };
+      break;
+    case "number": {
+      const value = Number(entered);
+      if (!Number.isFinite(value)) {
+        log("control default refused: number must be finite", "bad");
+        return;
+      }
+      defaultValue = { type: "number", value };
+      break;
+    }
+    case "color":
+      try {
+        defaultValue = JSON.parse(entered) as ControlValue;
+      } catch {
+        log("control default refused: color must be a ColorValue JSON object", "bad");
+        return;
+      }
+      break;
+  }
+  await replaceControlField({ ...field, default: defaultValue }, `default control ${fieldId}`);
+}
+
 function renderPanels(document_: SceneDocument): void {
   renderProjectManager();
   ui.objectEmpty.hidden = document_.objects.length > 0;
@@ -657,6 +926,11 @@ function renderPanels(document_: SceneDocument): void {
   );
   ui.fontMount.replaceChildren(renderNode(document, fonts) as unknown as Node);
 
+  ui.textStyleEmpty.hidden = document_.textStyles.length > 0;
+  ui.textStyleMount.replaceChildren(
+    renderNode(document, textStylePanel(document_, { selectedObjectIds: selection })) as unknown as Node,
+  );
+
   ui.materialEmpty.hidden = document_.materials.length > 0;
   const materials = materialManagerPanel(
     document_,
@@ -669,6 +943,7 @@ function renderPanels(document_: SceneDocument): void {
     selectedAssetId === undefined ? {} : { selectedAssetId },
   );
   ui.assetMount.replaceChildren(renderNode(document, assets) as unknown as Node);
+  renderTakePagePanel(document_);
 
 
   const inspector = inspectorPanel(document_, selection);
@@ -680,6 +955,7 @@ function renderPanels(document_: SceneDocument): void {
 
   const bindings = bindingPanel(document_, selection);
   ui.bindings.replaceChildren(renderNode(document, bindings) as unknown as Node);
+  renderControlContract(document_);
   renderTimeline(document_);
 }
 
@@ -1366,6 +1642,7 @@ function commitScene(previous: SceneDocument, next: SceneDocument, label: string
   scene = next;
   markActiveDirty();
   // An edit that created or removed objects says what should now be selected;
+  takePagePreviewDocument = null;
   // applied here, against the document that actually contains them.
   if (pendingSelection !== undefined) {
     selection = [...new Set(pendingSelection)];
@@ -1389,6 +1666,7 @@ function undo(): void {
   if (!scene || !previous) return;
   redoStack.push(scene);
   scene = previous;
+  takePagePreviewDocument = null;
   markActiveDirty();
   renderSceneState();
   updateHistoryButtons();
@@ -1401,6 +1679,7 @@ function redo(): void {
   if (!scene || !next) return;
   undoStack.push(scene);
   scene = next;
+  takePagePreviewDocument = null;
   markActiveDirty();
   renderSceneState();
   updateHistoryButtons();
@@ -1885,6 +2164,86 @@ function onFontManagerClick(event: MouseEvent): void {
   );
 }
 
+async function saveSelectedTextStyle(): Promise<void> {
+  if (!scene) return;
+  const objectId = soleSelection("save as a text style");
+  if (!objectId) return;
+  const object = scene.objects.find((candidate) => candidate.id === objectId);
+  if (!object || object.type !== "text") {
+    log("text style save refused: the selected object is not text", "bad");
+    return;
+  }
+  const name = window.prompt("Text style name", object.name);
+  if (name === null || name.trim() === "") return;
+  let index = scene.textStyles.length + 1;
+  let styleId = `text-style-${index}`;
+  while (scene.textStyles.some((style) => style.styleId === styleId)) {
+    index += 1;
+    styleId = `text-style-${index}`;
+  }
+  const style: TextStyle = {
+    styleId,
+    name: name.trim(),
+    fontId: object.fontId,
+    size: object.size,
+    textCase: object.textCase,
+    ...(object.lineHeight === undefined ? {} : { lineHeight: object.lineHeight }),
+    ...(object.letterSpacing === undefined ? {} : { letterSpacing: object.letterSpacing }),
+    ...(object.fill === undefined ? {} : { fill: object.fill }),
+    ...(object.stroke === undefined ? {} : { stroke: object.stroke }),
+    ...(object.strokeWidth === undefined ? {} : { strokeWidth: object.strokeWidth }),
+  };
+  await runEdit(async (start) => ({
+    next: await invoke<SceneDocument>("cmd_text_style_save", { scene: start, style }),
+    label: `Saved text style ${style.name}`,
+  }));
+}
+
+async function onTextStyleClick(event: MouseEvent): Promise<void> {
+  if (!scene) return;
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  const button = target.closest<HTMLButtonElement>("button[data-action][data-for]");
+  const action = button?.dataset.action;
+  const nodeId = button?.dataset.for;
+  if (!action || !nodeId || button.disabled) return;
+
+  if (nodeId === "text-styles" && action === "save") {
+    await saveSelectedTextStyle();
+    return;
+  }
+  if (!nodeId.startsWith("text-style/")) return;
+  const styleId = nodeId.slice("text-style/".length);
+  if (!styleId || styleId.includes("/")) return;
+  if (action === "reveal") {
+    const users = textStyleUsers(scene, styleId);
+    log(
+      users.length === 0
+        ? `Text style ${styleId} has no object users.`
+        : `Text style ${styleId} is used by object(s): ${users.join(", ")}.`,
+    );
+    return;
+  }
+  if (action !== "apply") return;
+  if (selection.length === 0) {
+    log("text style apply refused: select one or more text objects", "bad");
+    return;
+  }
+  await runGesture(
+    selection.map((objectId) => ({
+      command: "cmd_text_style_apply",
+      args: {
+        objectId,
+        styleId,
+        ...(projectSceneProject === undefined ? {} : { project: projectSceneProject }),
+      },
+    })),
+    selection.length === 1
+      ? `Applied text style ${styleId}`
+      : `Applied text style ${styleId} to ${selection.length} objects`,
+  );
+}
+
 function onMaterialManagerClick(event: MouseEvent): void {
   if (!scene) return;
   const target = event.target;
@@ -2005,11 +2364,133 @@ async function refreshProjectCatalog(): Promise<void> {
   const project = currentProject;
   if (project === undefined) {
     projectCatalog = undefined;
+    takePageCatalog = undefined;
     renderProjectManager();
+    if (scene) renderTakePagePanel(scene);
     return;
   }
-  projectCatalog = await invoke<ProjectSceneCatalog>("cmd_scene_list", { project });
+  const [scenes, pages] = await Promise.all([
+    invoke<ProjectSceneCatalog>("cmd_scene_list", { project }),
+    invoke<ProjectTakePageCatalog>("cmd_take_page_list", { project }),
+  ]);
+  projectCatalog = scenes;
+  takePageCatalog = pages;
   renderProjectManager();
+  if (scene) renderTakePagePanel(scene);
+}
+
+
+/// Drop a stale refusal from the take-page state.
+///
+/// The key is removed rather than set to `undefined`: under
+/// `exactOptionalPropertyTypes` "there is no refusal" is the absence of the
+/// property, and the two must not become separately representable.
+function withoutTakePageRefusal(state: TakePageState): TakePageState {
+  const { refusal: _cleared, ...rest } = state;
+  return rest;
+}
+
+function effectiveTakePageValues(template: SceneDocument): Record<string, ControlValue> {
+  const defaults: Record<string, ControlValue> = {};
+  for (const field of template.controls) {
+    if (field.default !== undefined) defaults[field.fieldId] = field.default;
+  }
+  // An unknown saved field remains present deliberately: Rust then names it
+  // instead of the UI silently deleting an operator's value.
+  return { ...defaults, ...takePageState.values };
+}
+
+async function previewTakePageValues(): Promise<boolean> {
+  if (!scene) {
+    log("take-page preview refused: nothing is open", "bad");
+    return false;
+  }
+  const template = JSON.stringify(scene);
+  try {
+    const filled = await invoke<SceneDocument>("cmd_take_page_preview", {
+      scene,
+      values: effectiveTakePageValues(scene),
+    });
+    if (JSON.stringify(scene) !== template) {
+      throw new Error("take-page preview changed the open template");
+    }
+    takePageState = withoutTakePageRefusal(takePageState);
+    takePagePreviewDocument = filled;
+    renderSceneState();
+    log(`previewed take-page values for ${scene.name}`, "good");
+    return true;
+  } catch (error) {
+    takePageState = { ...takePageState, refusal: describe(error) };
+    renderPanels(scene);
+    log(`take-page preview refused: ${takePageState.refusal}`, "bad");
+    return false;
+  }
+}
+
+async function saveTakePage(): Promise<void> {
+  if (!scene) {
+    log("take-page save refused: nothing is open", "bad");
+    return;
+  }
+  const project = projectSceneProject;
+  if (project === undefined || projectSceneId !== scene.id) {
+    log("take-page save refused: save this template in a project first", "bad");
+    return;
+  }
+  const pageId = ui.takePageId.value.trim();
+  const name = ui.takePageName.value.trim();
+  if (!pageId || !name) {
+    log("take-page save refused: page id and name are both required", "bad");
+    return;
+  }
+  takePageState = {
+    ...takePageState,
+    pageId,
+    name,
+    values: effectiveTakePageValues(scene),
+  };
+  if (!(await previewTakePageValues())) return;
+  const page: TakePage = { pageId, name, sceneId: scene.id, values: takePageState.values };
+  try {
+    takePageCatalog = await invoke<ProjectTakePageCatalog>("cmd_take_page_save", { project, page });
+    renderPanels(scene);
+    log(`saved take page ${project}/${pageId}`, "good");
+  } catch (error) {
+    log(`take-page save refused: ${describe(error)}`, "bad");
+  }
+}
+
+async function openTakePage(): Promise<void> {
+  if (!scene) return;
+  const project = projectSceneProject;
+  const pageId = ui.takePageSelect.value;
+  if (project === undefined || !pageId) {
+    log("take-page open refused: no saved page is selected", "bad");
+    return;
+  }
+  try {
+    const page = await invoke<TakePage>("cmd_take_page_read", { project, pageId });
+    if (page.sceneId !== scene.id) {
+      log(
+        `take-page open refused: ${page.pageId} belongs to template ${page.sceneId}, not ${scene.id}`,
+        "bad",
+      );
+      return;
+    }
+    // A `BTreeMap` generates with optional values, so a key present with no
+    // value is expressible on the wire but meaningless here: an absent field
+    // is absent, not set-to-nothing. Drop those rather than widening the
+    // state type and letting `undefined` masquerade as an entered value.
+    const stored: Record<string, ControlValue> = {};
+    for (const [fieldId, value] of Object.entries(page.values)) {
+      if (value !== undefined) stored[fieldId] = value;
+    }
+    takePageState = { pageId: page.pageId, name: page.name, values: stored };
+    await previewTakePageValues();
+    log(`opened take page ${project}/${pageId}`, "good");
+  } catch (error) {
+    log(`take-page open refused: ${describe(error)}`, "bad");
+  }
 }
 
 async function loadProjects(preferred?: string): Promise<void> {
@@ -2360,6 +2841,15 @@ async function start(): Promise<void> {
     renderProjectManager();
   });
   ui.publish.addEventListener("click", () => void publish());
+  ui.takePagePreview.addEventListener("click", () => void previewTakePageValues());
+  ui.takePageSave.addEventListener("click", () => void saveTakePage());
+  ui.takePageOpen.addEventListener("click", () => void openTakePage());
+  ui.takePageId.addEventListener("input", () => {
+    takePageState = { ...withoutTakePageRefusal(takePageState), pageId: ui.takePageId.value };
+  });
+  ui.takePageName.addEventListener("input", () => {
+    takePageState = { ...withoutTakePageRefusal(takePageState), name: ui.takePageName.value };
+  });
   ui.timelineEasing.addEventListener("change", onEasingChosen);
   ui.timelinePresetApply.addEventListener("click", () => void applyStarterPreset());
   ui.objectManager.addEventListener("click", onObjectManagerClick);
@@ -2369,9 +2859,11 @@ async function start(): Promise<void> {
   ui.objectRename.addEventListener("click", () => void renameObject());
   ui.objectDelete.addEventListener("click", () => void deleteObject());
   ui.fontMount.addEventListener("click", onFontManagerClick);
+  ui.textStyleMount.addEventListener("click", (event) => void onTextStyleClick(event));
   ui.materialMount.addEventListener("click", onMaterialManagerClick);
   ui.assetMount.addEventListener("click", onAssetManagerClick);
   ui.bindings.addEventListener("click", onBindingsClick);
+  ui.controlMount.addEventListener("click", (event) => void onControlContractClick(event));
   ui.animationFrame.addEventListener("change", () => {
     setCurrentFrame(Number(ui.animationFrame.value));
   });

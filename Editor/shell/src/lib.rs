@@ -18,7 +18,7 @@
 //! asset plane's published contract and holds no GPU state.
 
 #![forbid(unsafe_code)]
-
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
@@ -34,6 +34,11 @@ use gx_contracts::design_system::{starter_presets, MotionPreset};
 use gx_contracts::platform::service_data_root;
 use gx_editor::project::Projects;
 use gx_asset_plane::{publish_scene, PublishClientError, PublishRefusal, PublishReply};
+use gx_contracts::control::{
+    apply_control_values, declare_control_field, fillable_properties, remove_control_field, ControlField,
+    ControlFieldKind, ControlValue, TakePage,
+};
+use gx_contracts::text_style::{apply_text_style, TextStyle};
 use gx_contracts::scene::{parse_scene_document, SceneCanvas, SceneDocument, SceneTimeline};
 use gx_contracts::{RationalRate, Refusal, Revision, TakeId};
 use serde::{Deserialize, Serialize};
@@ -75,6 +80,8 @@ pub enum EditorError {
     /// Project or scene CRUD could not complete. The detail retains the
     /// store's named refusal or IO path; this is not an asset-plane failure.
     ProjectFailed { detail: String },
+    /// A take-page fill violated the shared control contract.
+    ControlRefused { detail: String, cause: Refusal },
 }
 
 impl std::fmt::Display for EditorError {
@@ -91,6 +98,7 @@ impl std::fmt::Display for EditorError {
             }
             Self::PublishRefused { detail } => write!(f, "publication refused: {detail}"),
             Self::AnimationRefused { detail, .. } => write!(f, "animation edit refused: {detail}"),
+            Self::ControlRefused { detail, .. } => write!(f, "take-page control refused: {detail}"),
             Self::ProjectFailed { detail } => write!(f, "project operation failed: {detail}"),
             Self::Protocol { detail } => write!(f, "asset plane protocol failed: {detail}"),
         }
@@ -131,6 +139,8 @@ pub fn new_scene(id: &str, name: &str) -> SceneDocument {
         assets: Vec::new(),
         fonts: Vec::new(),
         materials: Vec::new(),
+        controls: Vec::new(),
+        text_styles: Vec::new(),
         objects: Vec::new(),
     }
 }
@@ -167,6 +177,13 @@ pub fn save_scene(path: &PathBuf, scene: &SceneDocument) -> Result<(), EditorErr
 }
 fn animation_refused(cause: Refusal) -> EditorError {
     EditorError::AnimationRefused {
+        detail: cause.to_string(),
+        cause,
+    }
+}
+
+fn control_refused(cause: Refusal) -> EditorError {
+    EditorError::ControlRefused {
         detail: cause.to_string(),
         cause,
     }
@@ -298,6 +315,43 @@ pub fn preset_apply(
     Ok(scene)
 }
 
+/// Resolve the project's confirmed design system when this document belongs to
+/// a project. An unsaved scene has none; token-backed styles then refuse in
+/// the shared resolver rather than receiving a made-up brand pack.
+fn current_design_system(
+    project: Option<&str>,
+) -> Result<Option<gx_contracts::design_system::DesignSystem>, EditorError> {
+    let Some(project) = project else {
+        return Ok(None);
+    };
+    let design_system = projects()?.design_system(project).map_err(project_failed)?;
+    design_system
+        .current_version()
+        .map_err(project_failed)?
+        .map(|version| design_system.load(version).map_err(project_failed))
+        .transpose()
+}
+
+/// Apply a named style after loading only the active project's confirmed
+/// token set. The shared contract validates and writes atomically.
+pub fn text_style_apply(
+    mut scene: SceneDocument,
+    object_id: &str,
+    style_id: &str,
+    project: Option<&str>,
+) -> Result<SceneDocument, EditorError> {
+    let tokens = current_design_system(project)?;
+    apply_text_style(&mut scene, object_id, style_id, tokens.as_ref()).map_err(animation_refused)?;
+    Ok(scene)
+}
+
+/// Store a newly authored style in the document. Applying remains the shared
+/// contract operation because that is where design tokens resolve.
+pub fn text_style_save(mut scene: SceneDocument, style: TextStyle) -> SceneDocument {
+    scene.text_styles.push(style);
+    scene
+}
+
 
 
 /// A created object: the document, and the id to select.
@@ -411,6 +465,28 @@ pub struct ProjectSceneCatalog {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_design_system_version: Option<u32>,
     pub scenes: Vec<ListedScene>,
+}
+
+/// A take page as the project manager lists it.
+///
+/// The template id is carried visibly so an operator cannot reopen values
+/// against a different scene by accident.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListedTakePage {
+    pub page_id: String,
+    pub name: String,
+    pub scene_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unavailable_reason: Option<String>,
+}
+
+/// The saved take-page instances for one project.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectTakePageCatalog {
+    pub project: String,
+    pub pages: Vec<ListedTakePage>,
 }
 
 fn require_component(value: &str, label: &str) -> Result<(), EditorError> {
@@ -568,6 +644,96 @@ pub fn scene_delete(project: &str, scene_id: &str) -> Result<ProjectSceneCatalog
     scene_delete_in(&projects()?, project, scene_id)
 }
 
+/// Preview operator values through Rust's one control-value application.
+///
+/// The returned document is a filled copy. The template passed in stays
+/// untouched, so the browser cannot accidentally persist operator data into
+/// the reusable scene.
+pub fn take_page_preview(
+    scene: &SceneDocument,
+    values: &BTreeMap<String, ControlValue>,
+) -> Result<SceneDocument, EditorError> {
+    apply_control_values(scene, values).map_err(control_refused)
+}
+
+fn take_page_catalog_from(
+    store: &Projects,
+    project: &str,
+) -> Result<ProjectTakePageCatalog, EditorError> {
+    require_component(project, "project")?;
+    let ids = store.list_take_pages(project).map_err(project_failed)?;
+    let mut pages = Vec::with_capacity(ids.len());
+    for page_id in ids {
+        match store.read_take_page(project, &page_id) {
+            Ok(page) => pages.push(ListedTakePage {
+                page_id,
+                name: page.name,
+                scene_id: page.scene_id,
+                unavailable_reason: None,
+            }),
+            Err(error) => pages.push(ListedTakePage {
+                name: page_id.clone(),
+                scene_id: String::new(),
+                page_id,
+                unavailable_reason: Some(format!(
+                    "take-page file is unreadable: {}",
+                    describe_project_error(&error)
+                )),
+            }),
+        }
+    }
+    Ok(ProjectTakePageCatalog {
+        project: project.to_owned(),
+        pages,
+    })
+}
+
+/// List saved template instances in a project.
+pub fn take_page_list(project: &str) -> Result<ProjectTakePageCatalog, EditorError> {
+    take_page_catalog_from(&projects()?, project)
+}
+
+/// Save a filled template instance without rewriting its scene.
+fn take_page_save_in(
+    store: &Projects,
+    project: &str,
+    page: &TakePage,
+) -> Result<ProjectTakePageCatalog, EditorError> {
+    require_component(project, "project")?;
+    require_component(&page.page_id, "take page id")?;
+    require_component(&page.scene_id, "template scene id")?;
+    if !scene_exists(store, project, &page.scene_id)? {
+        return Err(project_condition(format!(
+            "template scene id {:?} does not exist in project {:?}; create it first",
+            page.scene_id, project
+        )));
+    }
+    store.write_take_page(project, page).map_err(project_failed)?;
+    take_page_catalog_from(store, project)
+}
+
+pub fn take_page_save(
+    project: &str,
+    page: &TakePage,
+) -> Result<ProjectTakePageCatalog, EditorError> {
+    take_page_save_in(&projects()?, project, page)
+}
+
+/// Reopen one saved instance exactly as its operator values were saved.
+fn take_page_read_from(
+    store: &Projects,
+    project: &str,
+    page_id: &str,
+) -> Result<TakePage, EditorError> {
+    require_component(project, "project")?;
+    require_component(page_id, "take page id")?;
+    store.read_take_page(project, page_id).map_err(project_failed)
+}
+
+pub fn take_page_read(project: &str, page_id: &str) -> Result<TakePage, EditorError> {
+    take_page_read_from(&projects()?, project, page_id)
+}
+
 
 /// Publish one complete document and report the revision it became.
 ///
@@ -621,6 +787,65 @@ fn cmd_load_scene(path: String) -> Result<SceneDocument, EditorError> {
 #[tauri::command]
 fn cmd_save_scene(path: String, scene: SceneDocument) -> Result<(), EditorError> {
     save_scene(&PathBuf::from(path), &scene)
+}
+
+#[tauri::command]
+fn cmd_text_style_save(scene: SceneDocument, style: TextStyle) -> SceneDocument {
+    text_style_save(scene, style)
+}
+
+#[tauri::command]
+fn cmd_text_style_apply(
+    scene: SceneDocument,
+    object_id: String,
+    style_id: String,
+    project: Option<String>,
+) -> Result<SceneDocument, EditorError> {
+    text_style_apply(scene, &object_id, &style_id, project.as_deref())
+}
+
+/// Read the one Rust-owned property vocabulary an object kind may expose to an
+/// operator. The web layer consumes this rather than maintaining a second list.
+#[tauri::command]
+fn cmd_control_properties(kind: String) -> Vec<(String, ControlFieldKind)> {
+    fillable_properties(&kind)
+        .iter()
+        .map(|(property, kind)| ((*property).to_owned(), *kind))
+        .collect()
+}
+
+/// Declare one operator-facing field after the shared contract validates it.
+#[tauri::command]
+fn cmd_control_declare(
+    mut scene: SceneDocument,
+    field: ControlField,
+) -> Result<SceneDocument, EditorError> {
+    declare_control_field(&mut scene, field).map_err(control_refused)?;
+    Ok(scene)
+}
+
+/// Remove one declared operator-facing field by its stable id.
+#[tauri::command]
+fn cmd_control_remove(
+    mut scene: SceneDocument,
+    field_id: String,
+) -> Result<SceneDocument, EditorError> {
+    remove_control_field(&mut scene, &field_id).map_err(control_refused)?;
+    Ok(scene)
+}
+
+/// Replace a field's label or default without creating a parallel update rule.
+/// The shared remove/declaration operations validate a copy first, so refusal
+/// returns the caller's original document unchanged.
+#[tauri::command]
+fn cmd_control_replace(
+    scene: SceneDocument,
+    field: ControlField,
+) -> Result<SceneDocument, EditorError> {
+    let mut updated = scene.clone();
+    remove_control_field(&mut updated, &field.field_id).map_err(control_refused)?;
+    declare_control_field(&mut updated, field).map_err(control_refused)?;
+    Ok(updated)
 }
 #[tauri::command]
 fn cmd_animation_surface() -> AnimationSurface {
@@ -765,6 +990,32 @@ fn cmd_scene_delete(
     scene_delete(&project, &scene_id)
 }
 
+#[tauri::command]
+fn cmd_take_page_preview(
+    scene: SceneDocument,
+    values: BTreeMap<String, ControlValue>,
+) -> Result<SceneDocument, EditorError> {
+    take_page_preview(&scene, &values)
+}
+
+#[tauri::command]
+fn cmd_take_page_list(project: String) -> Result<ProjectTakePageCatalog, EditorError> {
+    take_page_list(&project)
+}
+
+#[tauri::command]
+fn cmd_take_page_save(
+    project: String,
+    page: TakePage,
+) -> Result<ProjectTakePageCatalog, EditorError> {
+    take_page_save(&project, &page)
+}
+
+#[tauri::command]
+fn cmd_take_page_read(project: String, page_id: String) -> Result<TakePage, EditorError> {
+    take_page_read(&project, &page_id)
+}
+
 
 #[tauri::command]
 fn cmd_starter_presets() -> Vec<MotionPreset> {
@@ -801,6 +1052,8 @@ pub fn run() {
             cmd_new_scene,
             cmd_load_scene,
             cmd_save_scene,
+            cmd_text_style_save,
+            cmd_text_style_apply,
             cmd_publish,
             cmd_animation_surface,
             cmd_default_endpoint,
@@ -823,6 +1076,14 @@ pub fn run() {
             cmd_scene_create,
             cmd_scene_update,
             cmd_scene_delete,
+            cmd_control_properties,
+            cmd_control_declare,
+            cmd_control_remove,
+            cmd_control_replace,
+            cmd_take_page_preview,
+            cmd_take_page_list,
+            cmd_take_page_save,
+            cmd_take_page_read,
         ])
         .run(tauri::generate_context!())
         .expect("the Editor shell failed to start");
@@ -1117,6 +1378,79 @@ mod tests {
         let traversal = scene_create_in(&store, "news", &new_scene("../escape", "Escape"))
             .expect_err("scene ids are one filename, never a path");
         assert!(traversal.to_string().contains("not one canonical filename"));
+        std::fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    fn take_page_template() -> SceneDocument {
+        let created =
+            object_create(new_scene("lower-third", "Lower Third"), "rect", "Background")
+                .expect("create rect object");
+        let mut template = created.scene;
+        declare_control_field(
+            &mut template,
+            ControlField {
+                field_id: "offset".into(),
+                label: "Horizontal offset".into(),
+                object_id: created.object_id,
+                property: "x".into(),
+                kind: ControlFieldKind::Number,
+                default: Some(ControlValue::Number(0.0)),
+            },
+        )
+        .expect("declare numeric control");
+        template
+    }
+
+    #[test]
+    fn take_page_preview_refuses_wrong_values_without_mutating_the_template() {
+        let template = take_page_template();
+        let original = template.clone();
+        let error = take_page_preview(
+            &template,
+            &BTreeMap::from([("offset".into(), ControlValue::Text("not a number".into()))]),
+        )
+        .expect_err("text must not be coerced into a numeric control");
+
+        assert!(
+            error.to_string().contains("offset requires number, not text"),
+            "the operator needs Rust's named type mismatch: {error}"
+        );
+        assert_eq!(template, original, "a refused fill must leave the template intact");
+
+        let filled = take_page_preview(
+            &template,
+            &BTreeMap::from([("offset".into(), ControlValue::Number(42.0))]),
+        )
+        .expect("a matching value fills a copy");
+        assert_ne!(filled, template, "the returned preview is the filled copy");
+        assert_eq!(template, original, "even a successful preview cannot edit the template");
+    }
+
+    #[test]
+    fn saved_take_page_reopens_with_its_values_and_its_template_unchanged() {
+        let (root, store) = scratch_projects("take-page");
+        store.create_project("news").expect("create project");
+        let template = take_page_template();
+        scene_create_in(&store, "news", &template).expect("save template");
+        let page = TakePage {
+            page_id: "headlines-at-six".into(),
+            name: "Headlines at six".into(),
+            scene_id: template.id.clone(),
+            values: BTreeMap::from([("offset".into(), ControlValue::Number(6.0))]),
+        };
+
+        let catalog = take_page_save_in(&store, "news", &page).expect("save take page");
+        assert_eq!(catalog.pages.len(), 1);
+        assert_eq!(catalog.pages[0].page_id, page.page_id);
+        assert_eq!(
+            take_page_read_from(&store, "news", &page.page_id).expect("reopen saved page"),
+            page
+        );
+        assert_eq!(
+            store.read_scene("news", &template.id).expect("read template"),
+            template,
+            "saving a page must not overwrite its template"
+        );
         std::fs::remove_dir_all(root).expect("remove fixture");
     }
 }

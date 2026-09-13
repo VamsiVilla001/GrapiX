@@ -14,6 +14,11 @@ use gx_contracts::material::{
 };
 use gx_contracts::package::{package_path_components, PackageFileEntry, PackageManifest};
 use gx_contracts::scene::parse_scene_document;
+use gx_contracts::control::{
+    apply_control_values, declare_control_field, remove_control_field, ControlField, ControlFieldKind,
+    ControlValue,
+};
+use gx_contracts::text_style::{apply_text_style, StyleColor, StyleNumber, TextStyle};
 use gx_contracts::{
     ClockSource, ContentHash, DeviceTier, Epoch, RationalRate, ReferenceState, Refusal, Revision,
     TakeId,
@@ -39,7 +44,9 @@ struct Limitation {
 /// Runs in the normal conformance gate, not as a one-off inventory script.
 pub fn refusal_audit_suite(report: &mut Report) {
     drive_control_refusals(report);
+    drive_control_contract_refusals(report);
     drive_contract_refusals(report);
+    drive_text_style_refusals(report);
     drive_material_refusals(report);
     drive_media_refusals(report);
     drive_asset_refusals(report);
@@ -299,6 +306,173 @@ fn drive_contract_refusals(report: &mut Report) {
     );
 }
 
+/// Named text styles are contract-owned edits, so every refusal must be driven
+/// against the real resolver rather than represented only in the shell.
+fn drive_text_style_refusals(report: &mut Report) {
+    use gx_contracts::scene::TextCase;
+
+    let scene = || {
+        parse_scene_document(
+            br#"{"id":"audit","name":"audit","version":1,"canvas":{"width":16,"height":16,"frameRate":{"num":50,"den":1}},"fonts":[{"fontId":"inter","family":"Inter","displayName":"Inter","faces":[],"fallbackFamilies":[],"embeddingPolicy":"package","status":"Ready"}],"objects":[{"type":"text","id":"title","name":"title","text":"Score","fontId":"inter","size":24}]}"#,
+        )
+        .expect("the text-style audit scene is valid")
+    };
+    let style = |font_id: &str| TextStyle {
+        style_id: "headline".into(),
+        name: "Headline".into(),
+        font_id: font_id.into(),
+        size: StyleNumber::Literal(48.0),
+        line_height: None,
+        letter_spacing: None,
+        text_case: TextCase::Upper,
+        fill: None,
+        stroke: None,
+        stroke_width: None,
+    };
+
+    let mut unknown_font = scene();
+    unknown_font.text_styles.push(style("missing"));
+    report.record(
+        PLANE,
+        "TextStyleFontUnknown is produced for a style whose scene lacks its font",
+        expect(
+            matches!(
+                apply_text_style(&mut unknown_font, "title", "headline", None),
+                Err(Refusal::TextStyleFontUnknown { style_id, font_id })
+                    if style_id == "headline" && font_id == "missing"
+            ),
+            "a style with an unavailable font was not refused as TextStyleFontUnknown",
+        ),
+    );
+
+    let mut unknown_style = scene();
+    report.record(
+        PLANE,
+        "TextStyleUnknown is produced for a missing named style",
+        expect(
+            matches!(
+                apply_text_style(&mut unknown_style, "title", "missing", None),
+                Err(Refusal::TextStyleUnknown { style_id }) if style_id == "missing"
+            ),
+            "an absent style was not refused as TextStyleUnknown",
+        ),
+    );
+
+    let mut unresolved_token = scene();
+    let mut token_style = style("inter");
+    token_style.fill = Some(StyleColor::Token(gx_contracts::design_system::TokenRef(
+        "palette.brand".into(),
+    )));
+    unresolved_token.text_styles.push(token_style);
+    report.record(
+        PLANE,
+        "TextStyleTokenUnresolved is produced without a confirmed design system",
+        expect(
+            matches!(
+                apply_text_style(&mut unresolved_token, "title", "headline", None),
+                Err(Refusal::TextStyleTokenUnresolved { style_id, token })
+                    if style_id == "headline" && token == "{palette.brand}"
+            ),
+            "a style with no supplied token set was not refused as TextStyleTokenUnresolved",
+        ),
+    );
+}
+
+/// Drives the template-control contract at the same public functions the
+/// Editor shell calls. A declaration or fill that cannot be applied is named,
+/// never retained as an operator field that does nothing.
+fn drive_control_contract_refusals(report: &mut Report) {
+    use gx_contracts::scene::{ObjectBase, RectObject, SceneCanvas, SceneDocument, SceneObject, SceneTimeline};
+
+    let scene = || SceneDocument {
+        id: "audit".into(),
+        name: "audit".into(),
+        version: 1,
+        revision: None,
+        active_camera_id: None,
+        canvas: SceneCanvas { width: 16, height: 16, frame_rate: RationalRate::P50 },
+        timeline: SceneTimeline { duration_frames: 1, channels: Vec::new(), phases: Vec::new() },
+        data_context: Default::default(),
+        assets: Vec::new(),
+        fonts: Vec::new(),
+        materials: Vec::new(),
+        controls: Vec::new(),
+        text_styles: Vec::new(),
+        objects: vec![SceneObject::Rect(RectObject {
+            base: ObjectBase::new("card", "Card"),
+            radius: 0.0,
+        })],
+    };
+    let field = || ControlField {
+        field_id: "position".into(),
+        label: "Position".into(),
+        object_id: "card".into(),
+        property: "x".into(),
+        kind: ControlFieldKind::Number,
+        default: None,
+    };
+
+    let mut unknown_target = scene();
+    report.record(
+        PLANE,
+        "ControlFieldTargetUnknown is produced for a non-fillable target",
+        expect(
+            matches!(
+                declare_control_field(
+                    &mut unknown_target,
+                    ControlField { property: "fontId".into(), ..field() },
+                ),
+                Err(Refusal::ControlFieldTargetUnknown { object_id, property })
+                    if object_id == "card" && property == "fontId"
+            ),
+            "a non-fillable control target was not refused by name",
+        ),
+    );
+
+    let mut duplicate = scene();
+    declare_control_field(&mut duplicate, field()).expect("audit field is fillable");
+    report.record(
+        PLANE,
+        "ControlFieldDuplicate is produced for a repeated field id",
+        expect(
+            matches!(
+                declare_control_field(&mut duplicate, field()),
+                Err(Refusal::ControlFieldDuplicate { field_id }) if field_id == "position"
+            ),
+            "a duplicate template control id was not refused by name",
+        ),
+    );
+    report.record(
+        PLANE,
+        "ControlFieldUnknown is produced when removing an absent field",
+        expect(
+            matches!(
+                remove_control_field(&mut duplicate, "missing"),
+                Err(Refusal::ControlFieldUnknown { field_id }) if field_id == "missing"
+            ),
+            "an absent template control was not refused by name",
+        ),
+    );
+    report.record(
+        PLANE,
+        "ControlValueTypeMismatch is produced for a wrong page value type",
+        expect(
+            matches!(
+                apply_control_values(
+                    &duplicate,
+                    &std::collections::BTreeMap::from([(
+                        "position".into(),
+                        ControlValue::Boolean(true),
+                    )]),
+                ),
+                Err(Refusal::ControlValueTypeMismatch { field_id, expected, actual })
+                    if field_id == "position" && expected == "number" && actual == "boolean"
+            ),
+            "a wrong template control value type was not refused with both types",
+        ),
+    );
+}
+
 fn drive_editor_refusals(report: &mut Report) {
     // 7.1: a write must refuse a project that does not exist rather than
     // creating one. Driven against a root that is deliberately empty, so the
@@ -323,11 +497,13 @@ fn drive_editor_refusals(report: &mut Report) {
             height: 16,
             frame_rate: RationalRate::P50,
         },
-        timeline: gx_contracts::scene::SceneTimeline { duration_frames: 1, channels: Vec::new() },
+        timeline: gx_contracts::scene::SceneTimeline { duration_frames: 1, ..Default::default() },
         data_context: Default::default(),
         assets: Vec::new(),
         fonts: Vec::new(),
         materials: Vec::new(),
+        controls: Vec::new(),
+        text_styles: Vec::new(),
         objects: Vec::new(),
     };
 
@@ -370,12 +546,14 @@ fn drive_animation_refusals(report: &mut Report) {
         },
         timeline: SceneTimeline {
             duration_frames: 100,
-            channels: Vec::new(),
+            ..Default::default()
         },
         data_context: Default::default(),
         assets: Vec::new(),
         fonts: Vec::new(),
         materials: Vec::new(),
+        controls: Vec::new(),
+        text_styles: Vec::new(),
         objects,
     };
     let rect = |id: &str| {
@@ -508,6 +686,97 @@ fn drive_animation_refusals(report: &mut Report) {
     );
 
     drive_authoring_refusals(report);
+    drive_timeline_phase_refusals(report);
+}
+
+/// Named timeline phases (11.25). The scene timeline finally speaks the same
+/// operator vocabulary presets have always used, and each way of getting a
+/// phase wrong is refused by its own name — an author who inverted a span is
+/// told that, not that the span is out of range.
+fn drive_timeline_phase_refusals(report: &mut Report) {
+    use gx_contracts::phases::{remove_phase, set_phase, validate_phases, PhaseKind, TimelinePhase};
+    use gx_contracts::scene::SceneTimeline;
+
+    let span = |kind: PhaseKind, start_frame: u64, end_frame: u64| TimelinePhase {
+        kind,
+        name: None,
+        start_frame,
+        end_frame,
+    };
+    let timeline = || SceneTimeline {
+        duration_frames: 100,
+        ..Default::default()
+    };
+
+    let mut overlapping = timeline();
+    set_phase(&mut overlapping, span(PhaseKind::In, 0, 50)).expect("in lands");
+    report.record(
+        PLANE,
+        "TimelinePhaseOverlap is produced for two phases claiming one frame",
+        expect(
+            matches!(
+                set_phase(&mut overlapping, span(PhaseKind::Out, 49, 90)),
+                Err(Refusal::TimelinePhaseOverlap { .. })
+            ) && overlapping.phases.len() == 1,
+            "overlapping phases were not refused by name, or the refused call still wrote",
+        ),
+    );
+
+    let mut past_end = timeline();
+    report.record(
+        PLANE,
+        "TimelinePhaseOutOfRange is produced for a phase past the scene duration",
+        expect(
+            matches!(
+                set_phase(&mut past_end, span(PhaseKind::In, 90, 101)),
+                Err(Refusal::TimelinePhaseOutOfRange { .. })
+            ),
+            "a phase running past the timeline was not refused by name",
+        ),
+    );
+
+    let mut empty_span = timeline();
+    report.record(
+        PLANE,
+        "TimelinePhaseInvalidSpan is produced for a phase containing no frames",
+        expect(
+            matches!(
+                set_phase(&mut empty_span, span(PhaseKind::Out, 60, 60)),
+                Err(Refusal::TimelinePhaseInvalidSpan { .. })
+            ),
+            "an empty phase span was not refused by name",
+        ),
+    );
+
+    let mut absent = timeline();
+    report.record(
+        PLANE,
+        "TimelinePhaseUnknown is produced for removing a phase that is not there",
+        expect(
+            matches!(
+                remove_phase(&mut absent, "in"),
+                Err(Refusal::TimelinePhaseUnknown { .. })
+            ),
+            "removing an absent phase was not refused by name",
+        ),
+    );
+
+    // The phase did not change; the scene shortened underneath it. Re-checked
+    // separately because nothing about the phase itself is wrong.
+    let mut shortened = timeline();
+    set_phase(&mut shortened, span(PhaseKind::Out, 80, 100)).expect("out lands at full duration");
+    shortened.duration_frames = 60;
+    report.record(
+        PLANE,
+        "TimelinePhaseOutOfRange is produced when the duration shortens under a phase",
+        expect(
+            matches!(
+                validate_phases(&shortened),
+                Err(Refusal::TimelinePhaseOutOfRange { .. })
+            ),
+            "a phase left past the end by a shortened scene was not reported",
+        ),
+    );
 }
 
 /// The object-lifecycle authoring operations (11.18) are also Editor-service
@@ -532,12 +801,14 @@ fn drive_authoring_refusals(report: &mut Report) {
         },
         timeline: SceneTimeline {
             duration_frames: 100,
-            channels: Vec::new(),
+            ..Default::default()
         },
         data_context: Default::default(),
         assets: Vec::new(),
         fonts: Vec::new(),
         materials: Vec::new(),
+        controls: Vec::new(),
+        text_styles: Vec::new(),
         objects: Vec::new(),
     };
 
@@ -833,6 +1104,13 @@ fn is_driven(variant: &str) -> bool {
             | "ProjectNotFound"
             | "SceneDuplicateObjectId"
             | "SceneObjectUnknown"
+            | "ControlFieldTargetUnknown"
+            | "ControlFieldDuplicate"
+            | "ControlFieldUnknown"
+            | "ControlValueTypeMismatch"
+            | "TextStyleFontUnknown"
+            | "TextStyleUnknown"
+            | "TextStyleTokenUnresolved"
             | "AnimationPropertyUnsupported"
             | "KeyframeOutOfRange"
             | "InvalidKeyframeEasing"
@@ -841,6 +1119,10 @@ fn is_driven(variant: &str) -> bool {
             | "KeyframeUnknown"
             | "SceneObjectKindNotCreatable"
             | "SceneObjectNameEmpty"
+            | "TimelinePhaseOverlap"
+            | "TimelinePhaseOutOfRange"
+            | "TimelinePhaseInvalidSpan"
+            | "TimelinePhaseUnknown"
     )
 }
 

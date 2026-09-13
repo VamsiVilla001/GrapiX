@@ -61,11 +61,13 @@ fn scene(id: &str) -> gx_contracts::scene::SceneDocument {
             height: 1080,
             frame_rate: gx_contracts::RationalRate::P50,
         },
-        timeline: gx_contracts::scene::SceneTimeline { duration_frames: 1, channels: Vec::new() },
+        timeline: gx_contracts::scene::SceneTimeline { duration_frames: 1, ..Default::default() },
         data_context: Default::default(),
         assets: Vec::new(),
         fonts: Vec::new(),
         materials: Vec::new(),
+        controls: Vec::new(),
+        text_styles: Vec::new(),
         objects: Vec::new(),
     }
 }
