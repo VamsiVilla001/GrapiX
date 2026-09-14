@@ -208,12 +208,39 @@ animated scene, advances the frame source, and compares Program pixels. Frame
 1 and frame 21 differ; two frames inside a `hold` are identical while the
 output frame number advances.
 
+### The Phase 12 rows that were already built, and are now checked
+
+Asked to mark the completed tasks in the tracker, I re-read Phase 12 against
+what the Playout surface actually does rather than against what its phase
+number implies. Three rows were sitting at `pending` while their done-when was
+already satisfiable, so they were driven live against a `--tier T2` mock
+before anything was marked:
+
+- **12.6** — *"Free-run is unmissable."* The band read `FREE RUN - no external
+  reference` with **no dismiss control**, and the panel carried FreeRun /
+  NotPresent / "YES — no external reference" / 50 (50/1) / T2 with its
+  consequence / epoch / current frame. Both degradations stayed separate —
+  `freeRunning` as WARNING, `deviceBelowT0 (T2)` as CRITICAL — rather than
+  merging into one alarm. **Done.**
+- **12.7** — *"A refused live adapter names the failing condition."*
+  Configuring `decklink-live` live returned `refused: tierTooLow (actual=T2)`
+  with the engine's own detail `device tier too low: T2`, in the panel and the
+  log, and the staged live request was cleared *with an explanation* rather
+  than silently dropped. **Done.**
+- **12.1** — the shell is real and driven live every session, but the done-when
+  is *"Signed on both platforms"*. **Active**, for exactly 11.1's reason: the
+  installer pipeline exists, the identities (P.2) do not.
+
+The tracker now reads 98 of 176 steps complete, and the page was rendered to
+confirm the marks display rather than trusting the constant.
+
 ### What is still not done
 
 - 11.1, 11.2, 11.3 stay active for the same reason each already had: no CI
   run and no signing identity, macOS unmeasured, macOS unmeasured.
-- 12.4 is done; the rest of Phase 12 is untouched. The Playout shell is not
-  signed (12.1) and there is no scene manager or rundown UI (12.2, 12.3).
+- Phase 12 keeps three pending rows with nothing behind them: no scene manager
+  with Take IDs (12.2), no take list or rundown UI (12.3) though 6.4 persists
+  the cursor, and no confidence monitors (12.5).
 - The engine still re-rasterises an animated frame in software. That is
   correct and slow, and 13.x is where it stops being slow.
 
