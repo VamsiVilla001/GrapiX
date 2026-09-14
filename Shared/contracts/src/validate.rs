@@ -382,7 +382,8 @@ mod tests {
             depth_mode: Default::default(),
             double_sided: false,
             textures: Vec::new(),
-            shader_id: None,
+            lighting: None,
+        shader_id: None,
         }
     }
 

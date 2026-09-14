@@ -626,6 +626,77 @@ pub enum MeshPrimitiveKind {
     Slab,
 }
 
+impl MeshPrimitiveKind {
+    /// The element names this primitive's `material_slots` are keyed by.
+    ///
+    /// These names are part of the document, not of any renderer: a scene
+    /// authored with a material on a cube's `top` has to mean the same thing
+    /// to every engine that opens it. They live here so the authoring surface
+    /// offers exactly the keys the engine will look up — an Editor that
+    /// invented `upper` would write a slot the renderer refuses as
+    /// `MeshMaterialUnassigned`, and the author would have no way to see why.
+    ///
+    /// `Model` returns nothing because only the imported asset knows; those
+    /// names arrive in `MeshObject::material_elements`. A slab's list here is
+    /// its unbevelled one — an enabled bevel adds an element, which is a
+    /// property of the object rather than the kind, so
+    /// [`MeshObject::material_element_names`] is the authoritative answer and
+    /// this is the part of it that a kind alone can state.
+    pub const fn material_elements(self) -> &'static [&'static str] {
+        match self {
+            Self::Cube => &["front", "back", "left", "right", "top", "bottom"],
+            Self::Cylinder => &["top", "bottom", "side"],
+            Self::Slab => &["front", "back", "side"],
+            // A sphere and a torus are one closed surface; there is no face to
+            // name, so the whole object is the element.
+            Self::Sphere | Self::Torus => &["object"],
+            Self::Model => &[],
+        }
+    }
+}
+
+impl MeshObject {
+    /// The element names this mesh's `material_slots` must be keyed by.
+    ///
+    /// The authoritative answer, and the one the authoring surface offers:
+    /// it accounts for what the kind alone cannot say — an imported model's
+    /// names come from its own metadata, and a slab grows an element for each
+    /// enabled bevel. An Editor that offered the kind's fixed list would omit
+    /// `frontBevel` on a bevelled slab, and the engine would refuse the mesh
+    /// as `MeshMaterialUnassigned` for a face the author was never shown.
+    pub fn material_element_names(&self) -> Vec<String> {
+        match self.mesh_kind {
+            MeshPrimitiveKind::Model => self.material_elements.clone().unwrap_or_default(),
+            MeshPrimitiveKind::Slab => {
+                let slab = self.slab.unwrap_or_default();
+                let mut names: Vec<String> = MeshPrimitiveKind::Slab
+                    .material_elements()
+                    .iter()
+                    .map(|name| (*name).to_owned())
+                    .collect();
+                if slab.front_bevel.enabled {
+                    names.push("frontBevel".to_owned());
+                }
+                if slab.back_bevel.enabled {
+                    names.push("backBevel".to_owned());
+                }
+                names
+            }
+            kind => kind
+                .material_elements()
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect(),
+        }
+    }
+}
+
+/// The element name a planar object's single material slot is keyed by.
+///
+/// A rect, ellipse, text or image has one surface, and `fill` is what 1.x
+/// called it and what `materials.usage` already reports.
+pub const PLANAR_MATERIAL_ELEMENT: &str = "fill";
+
 /// One bevel of a slab, measured inward from its outline.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]

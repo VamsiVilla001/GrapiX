@@ -38,9 +38,14 @@ use gx_contracts::control::{
     apply_control_values, declare_control_field, fillable_properties, remove_control_field, ControlField,
     ControlFieldKind, ControlValue, TakePage,
 };
+use gx_contracts::material::{
+    assign_material, clear_material_slot, create_material, delete_material, duplicate_material,
+    relink_material, update_material, MaterialDefinition, MaterialKind, MaterialSupport,
+};
+use gx_contracts::package::package_path_components;
 use gx_contracts::text_style::{apply_text_style, TextStyle};
 use gx_contracts::scene::{parse_scene_document, SceneCanvas, SceneDocument, SceneTimeline};
-use gx_contracts::{RationalRate, Refusal, Revision, TakeId};
+use gx_contracts::{RationalRate, Refusal, Revision, StructuredRefusal, TakeId};
 use serde::{Deserialize, Serialize};
 
 /// The asset-plane endpoint an Editor publishes to by default.
@@ -82,6 +87,14 @@ pub enum EditorError {
     ProjectFailed { detail: String },
     /// A take-page fill violated the shared control contract.
     ControlRefused { detail: String, cause: Refusal },
+    /// A material-library edit was refused by the shared material contract.
+    /// Carries the whole structured refusal, not just the code: the panel
+    /// shows the field and the allowed list, which is what turns "that is not
+    /// allowed" into an edit the author can correct in one step (0.6).
+    MaterialRefused {
+        detail: String,
+        cause: StructuredRefusal,
+    },
 }
 
 impl std::fmt::Display for EditorError {
@@ -98,6 +111,7 @@ impl std::fmt::Display for EditorError {
             }
             Self::PublishRefused { detail } => write!(f, "publication refused: {detail}"),
             Self::AnimationRefused { detail, .. } => write!(f, "animation edit refused: {detail}"),
+            Self::MaterialRefused { detail, .. } => write!(f, "material refused: {detail}"),
             Self::ControlRefused { detail, .. } => write!(f, "take-page control refused: {detail}"),
             Self::ProjectFailed { detail } => write!(f, "project operation failed: {detail}"),
             Self::Protocol { detail } => write!(f, "asset plane protocol failed: {detail}"),
@@ -452,6 +466,242 @@ pub fn object_rename(
 // is one the engine will parse. The shell's only job is to name the root and
 // hand the refusals through.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// The material library (11.12). Each edit is one gesture and one undo entry,
+// and each reports what the contract said it did rather than what the click
+// asked for — a relink that touched fourteen objects names them.
+//
+// The rules live in `gx_contracts::material`, not here. The Editor is one of
+// several peers that may edit a material library, and a second set of rules
+// in the shell would be a second answer waiting to disagree with the engine's.
+// ---------------------------------------------------------------------------
+
+/// A created or duplicated material: the document, and the id to select.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MaterialCreated {
+    pub scene: SceneDocument,
+    pub material_id: String,
+}
+
+/// A relink: the document, and the objects whose bindings actually moved.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MaterialRelinked {
+    pub scene: SceneDocument,
+    pub changed_object_ids: Vec<String>,
+}
+
+/// Clearing a slot: the document, and whether anything was actually bound.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MaterialSlotCleared {
+    pub scene: SceneDocument,
+    pub cleared: bool,
+}
+
+/// The authoring baseline the Editor validates a material against.
+///
+/// Deliberately the whole vocabulary rather than `fixed_function()`. The
+/// Editor is not the peer that draws: refusing `overlay` here would stop an
+/// author expressing something the production engine may well support, which
+/// is exactly the inference invariant 21 forbids — capability belongs to the
+/// device that measured it. What the shell does refuse is what is wrong in
+/// every engine: a broken range, lighting on an unlit kind, a texture that
+/// resolves to nothing or to a font. The preview separately names what *it*
+/// cannot draw, which is a statement about the viewport, not about the scene.
+fn authoring_support() -> MaterialSupport {
+    MaterialSupport::authoring_vocabulary()
+}
+
+pub fn material_create(
+    mut scene: SceneDocument,
+    kind: MaterialKind,
+    name: &str,
+    asset_id: Option<&str>,
+) -> Result<MaterialCreated, EditorError> {
+    let material_id = create_material(&mut scene, kind, name, asset_id).map_err(material_refused)?;
+    Ok(MaterialCreated { scene, material_id })
+}
+
+pub fn material_update(
+    mut scene: SceneDocument,
+    material: MaterialDefinition,
+) -> Result<SceneDocument, EditorError> {
+    update_material(&mut scene, material, &authoring_support())
+        .map_err(material_structurally_refused)?;
+    Ok(scene)
+}
+
+pub fn material_delete(
+    mut scene: SceneDocument,
+    material_id: &str,
+) -> Result<SceneDocument, EditorError> {
+    delete_material(&mut scene, material_id).map_err(material_refused)?;
+    Ok(scene)
+}
+
+pub fn material_duplicate(
+    mut scene: SceneDocument,
+    material_id: &str,
+) -> Result<MaterialCreated, EditorError> {
+    let material_id = duplicate_material(&mut scene, material_id).map_err(material_refused)?;
+    Ok(MaterialCreated { scene, material_id })
+}
+
+pub fn material_relink(
+    mut scene: SceneDocument,
+    from_material_id: &str,
+    to_material_id: &str,
+) -> Result<MaterialRelinked, EditorError> {
+    let changed_object_ids =
+        relink_material(&mut scene, from_material_id, to_material_id).map_err(material_refused)?;
+    Ok(MaterialRelinked {
+        scene,
+        changed_object_ids,
+    })
+}
+
+pub fn material_assign(
+    mut scene: SceneDocument,
+    object_id: &str,
+    slot: &str,
+    material_id: &str,
+) -> Result<SceneDocument, EditorError> {
+    assign_material(&mut scene, object_id, slot, material_id).map_err(material_refused)?;
+    Ok(scene)
+}
+
+pub fn material_clear(
+    mut scene: SceneDocument,
+    object_id: &str,
+    slot: &str,
+) -> Result<MaterialSlotCleared, EditorError> {
+    let cleared = clear_material_slot(&mut scene, object_id, slot).map_err(material_refused)?;
+    Ok(MaterialSlotCleared { scene, cleared })
+}
+
+fn material_refused(cause: Refusal) -> EditorError {
+    EditorError::MaterialRefused {
+        detail: cause.to_string(),
+        cause: StructuredRefusal::error(cause),
+    }
+}
+
+fn material_structurally_refused(cause: StructuredRefusal) -> EditorError {
+    EditorError::MaterialRefused {
+        detail: cause.code.to_string(),
+        cause,
+    }
+}
+
+/// The bytes of one asset, as a data URL the preview can sample.
+///
+/// A data URL rather than a file path because the WebView's own origin cannot
+/// read the project directory, and rather than a custom protocol because the
+/// preview needs exactly one thing — the bytes — and a protocol would be a
+/// second surface to secure. The media type travels with it: a texture
+/// decoder that guesses the container from the extension is the silent
+/// substitution this architecture keeps refusing.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetSource {
+    pub asset_id: String,
+    pub media_type: String,
+    /// `data:<media type>;base64,…`
+    pub data_url: String,
+    pub size_bytes: u64,
+}
+
+/// Read one asset's bytes out of a project, for the preview to sample.
+///
+/// The path is the library address (invariant 31) and is treated as hostile:
+/// it goes through the package path rules, so an absolute path, a `..`
+/// component or a name needing sanitisation is refused by name rather than
+/// escaping the project directory.
+pub fn asset_source(
+    projects: &Projects,
+    project: &str,
+    asset_id: &str,
+    path: &str,
+    declared_media_type: Option<&str>,
+) -> Result<AssetSource, EditorError> {
+    package_path_components(path).map_err(material_refused)?;
+    let mut file = projects.root().join(project);
+    for component in path.split('/') {
+        file.push(component);
+    }
+    let bytes = std::fs::read(&file).map_err(|source| EditorError::ReadScene {
+        path: file.display().to_string(),
+        detail: source.to_string(),
+    })?;
+
+    // The declared type wins when the library has one, because that is what
+    // the import recorded; the extension is only a fallback for a hand-written
+    // scene, and an unrecognised extension is reported as unknown rather than
+    // guessed into `image/png`.
+    let media_type = declared_media_type
+        .map(str::to_owned)
+        .unwrap_or_else(|| media_type_for_extension(path).to_owned());
+
+    Ok(AssetSource {
+        asset_id: asset_id.to_owned(),
+        size_bytes: bytes.len() as u64,
+        data_url: format!("data:{media_type};base64,{}", base64_encode(&bytes)),
+        media_type,
+    })
+}
+
+/// The media type for a known extension, or `application/octet-stream`.
+///
+/// Deliberately short: these are the containers the preview can actually
+/// decode. An extension not on the list yields the neutral type, which the
+/// browser refuses to decode — visibly — instead of a plausible one that
+/// decodes into the wrong thing.
+fn media_type_for_extension(path: &str) -> &'static str {
+    match path.rsplit('.').next().map(str::to_ascii_lowercase).as_deref() {
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("webp") => "image/webp",
+        Some("gif") => "image/gif",
+        Some("svg") => "image/svg+xml",
+        Some("mp4") => "video/mp4",
+        Some("webm") => "video/webm",
+        Some("mov") => "video/quicktime",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Standard base64, no line breaks.
+///
+/// Hand-rolled rather than adding a dependency for forty lines: the shell's
+/// dependency list is part of its security posture, and this has one caller
+/// and one encoding.
+fn base64_encode(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        out.push(ALPHABET[(triple >> 18) as usize & 63] as char);
+        out.push(ALPHABET[(triple >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 {
+            ALPHABET[(triple >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            ALPHABET[triple as usize & 63] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
 
 /// The per-user projects root. A shell that cannot name one says so rather
 /// than writing into whatever directory it was launched from.
@@ -982,6 +1232,84 @@ fn cmd_object_rename(
 }
 
 #[tauri::command]
+fn cmd_material_create(
+    scene: SceneDocument,
+    kind: MaterialKind,
+    name: String,
+    asset_id: Option<String>,
+) -> Result<MaterialCreated, EditorError> {
+    material_create(scene, kind, &name, asset_id.as_deref())
+}
+
+#[tauri::command]
+fn cmd_material_update(
+    scene: SceneDocument,
+    material: MaterialDefinition,
+) -> Result<SceneDocument, EditorError> {
+    material_update(scene, material)
+}
+
+#[tauri::command]
+fn cmd_material_delete(
+    scene: SceneDocument,
+    material_id: String,
+) -> Result<SceneDocument, EditorError> {
+    material_delete(scene, &material_id)
+}
+
+#[tauri::command]
+fn cmd_material_duplicate(
+    scene: SceneDocument,
+    material_id: String,
+) -> Result<MaterialCreated, EditorError> {
+    material_duplicate(scene, &material_id)
+}
+
+#[tauri::command]
+fn cmd_material_relink(
+    scene: SceneDocument,
+    from_material_id: String,
+    to_material_id: String,
+) -> Result<MaterialRelinked, EditorError> {
+    material_relink(scene, &from_material_id, &to_material_id)
+}
+
+#[tauri::command]
+fn cmd_material_assign(
+    scene: SceneDocument,
+    object_id: String,
+    slot: String,
+    material_id: String,
+) -> Result<SceneDocument, EditorError> {
+    material_assign(scene, &object_id, &slot, &material_id)
+}
+
+#[tauri::command]
+fn cmd_material_clear(
+    scene: SceneDocument,
+    object_id: String,
+    slot: String,
+) -> Result<MaterialSlotCleared, EditorError> {
+    material_clear(scene, &object_id, &slot)
+}
+
+#[tauri::command]
+fn cmd_asset_source(
+    project: String,
+    asset_id: String,
+    path: String,
+    media_type: Option<String>,
+) -> Result<AssetSource, EditorError> {
+    asset_source(
+        &projects()?,
+        &project,
+        &asset_id,
+        &path,
+        media_type.as_deref(),
+    )
+}
+
+#[tauri::command]
 fn cmd_project_list() -> Result<Vec<String>, EditorError> {
     project_list()
 }
@@ -1107,6 +1435,14 @@ pub fn run() {
             cmd_object_delete,
             cmd_object_duplicate,
             cmd_object_rename,
+            cmd_material_create,
+            cmd_material_update,
+            cmd_material_delete,
+            cmd_material_duplicate,
+            cmd_material_relink,
+            cmd_material_assign,
+            cmd_material_clear,
+            cmd_asset_source,
             cmd_project_list,
             cmd_project_create,
             cmd_scene_list,

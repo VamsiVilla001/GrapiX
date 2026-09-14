@@ -82,6 +82,7 @@ export * from "./MarkerObject.js";
 export * from "./MaterialBinding.js";
 export * from "./MaterialDefinition.js";
 export * from "./MaterialKind.js";
+export * from "./MaterialLighting.js";
 export * from "./MaterialSupport.js";
 export * from "./MaterialTextureSlot.js";
 export * from "./MediaCodec.js";

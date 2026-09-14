@@ -1688,6 +1688,7 @@ dependencies = [
  "gx-contracts",
  "gx-control-plane",
  "gx-media-plane",
+ "serde",
  "serde_json",
  "ts-rs",
 ]

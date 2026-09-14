@@ -282,6 +282,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     write_barrel(&out)?;
     write_transfer_reference(&workspace_root())?;
     write_easing_reference(&workspace_root())?;
+    write_material_reference(&workspace_root())?;
     check_advertised_types_resolve(&out)?;
     println!("generated {count} contract types into {}", out.display());
     Ok(())
@@ -395,6 +396,157 @@ fn check_advertised_types_resolve(dir: &std::path::Path) -> Result<(), Box<dyn s
 /// Keeping this in the normal codegen binary matters: a one-shot helper made
 /// `cargo run -p gx-contract-codegen` ambiguous and broke the repository gate.
 /// The checked-in TypeScript table now changes whenever normal codegen runs.
+/// Generate the material vocabulary the Editor's panels offer, from the enums
+/// that own it (1.3, 11.12, invariant 27).
+///
+/// 1.3's whole claim is "one enum, consumed by validator, engine and UI". A
+/// hand-written list of blend modes in the panel would be a second copy of
+/// that enum, and the `overlay`-drawn-as-`screen` fault this module's Rust
+/// doc-comment records is precisely what a second copy produces. The same
+/// argument covers the 2D/3D split: which kinds are lit is decided in
+/// `MaterialKind::is_lit`, enforced by the engine's `prepare_meshes`, and read
+/// here — never re-derived in TypeScript from the kind's name.
+fn write_material_reference(root: &std::path::Path) -> std::io::Result<()> {
+    use gx_contracts::material::{
+        material_prerequisite, AlphaMode, BlendMode, CullMode, DepthMode, FitMode,
+        MaterialDimension, MaterialKind, STANDARD_TEXTURE_SLOTS,
+    };
+
+    fn wire<T: serde::Serialize>(value: T) -> String {
+        serde_json::to_string(&value).expect("a unit enum always serialises")
+    }
+
+    fn list<T: serde::Serialize, const N: usize>(values: [T; N]) -> String {
+        values
+            .into_iter()
+            .map(|value| wire(value))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    let mut body = String::from(
+        "// GENERATED from gx-contracts::material by gx-contract-codegen.\n\
+         // Do not edit. Regenerate with `npm run codegen` (1.3, 11.12, invariant 27).\n\
+         //\n\
+         // The authoring vocabulary, not the supported set: what a given peer\n\
+         // can actually draw is declared in its capability exchange and never\n\
+         // inferred from a list like this one (invariant 21).\n\n\
+         import type { AlphaMode, BlendMode, CullMode, DepthMode, FitMode, MaterialKind }\n\
+         \u{20} from \"@grapix/contracts\";\n\n\
+         /// Whether a material shades with the scene's lights. `null` is the\n\
+         /// honest answer for a custom shader, which decides its own.\n\
+         export type MaterialDimension = \"two-d\" | \"three-d\";\n\n\
+         export interface MaterialKindInfo {\n\
+         \u{20} readonly kind: MaterialKind;\n\
+         \u{20} readonly dimension: MaterialDimension | null;\n\
+         \u{20} readonly lit: boolean;\n\
+         \u{20} /// What the kind needs beyond a name before it can be created,\n\
+         \u{20} /// or null when it can be completed from nothing.\n\
+         \u{20} readonly needs: string | null;\n\
+         }\n\n\
+         export const MATERIAL_KINDS: readonly MaterialKindInfo[] = [\n",
+    );
+    for kind in MaterialKind::ALL {
+        let dimension = match kind.dimension() {
+            Some(MaterialDimension::TwoD) => "\"two-d\"".to_owned(),
+            Some(MaterialDimension::ThreeD) => "\"three-d\"".to_owned(),
+            None => "null".to_owned(),
+        };
+        // The sentence comes from the contract function the create path
+        // refuses with, so the panel offers exactly the reason the edit would
+        // have given. Two copies would drift into two explanations of one
+        // refusal, and the one the author reads would be the wrong one.
+        let needs = match material_prerequisite(kind) {
+            Some(needs) => wire(needs),
+            None => "null".to_owned(),
+        };
+        body.push_str(&format!(
+            "  {{ kind: {}, dimension: {dimension}, lit: {}, needs: {needs} }},\n",
+            wire(kind),
+            kind.is_lit(),
+        ));
+    }
+    body.push_str("] as const;\n\n");
+
+    body.push_str(&format!(
+        "export const BLEND_MODES: readonly BlendMode[] = [{}];\n",
+        list(BlendMode::ALL)
+    ));
+    // Which modes are a source/destination factor pair is a fact about the
+    // mode's mathematics, recorded on the Rust enum. The browser preview is a
+    // fixed-function compositor, so it reads this list rather than keeping its
+    // own — a hand-written list here is how `overlay` came to be drawn as
+    // `screen` in 1.x, which is the recorded fault behind invariant 18.
+    body.push_str(&format!(
+        "\n/// The blend modes expressible as fixed-function GPU blending.\n\
+         export const FIXED_FUNCTION_BLEND_MODES: readonly BlendMode[] = [{}];\n",
+        BlendMode::ALL
+            .into_iter()
+            .filter(|mode| mode.is_fixed_function())
+            .map(wire)
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
+    body.push_str(&format!(
+        "export const FIT_MODES: readonly FitMode[] = [{}];\n",
+        list(FitMode::ALL)
+    ));
+    body.push_str(&format!(
+        "export const CULL_MODES: readonly CullMode[] = [{}];\n",
+        list(CullMode::ALL)
+    ));
+    body.push_str(&format!(
+        "export const ALPHA_MODES: readonly AlphaMode[] = [{}];\n",
+        list(AlphaMode::ALL)
+    ));
+    body.push_str(&format!(
+        "export const DEPTH_MODES: readonly DepthMode[] = [{}];\n",
+        list(DepthMode::ALL)
+    ));
+    // The element names a material slot is keyed by. Generated for the same
+    // reason as everything above it: an Editor that offered `upper` instead of
+    // `top` would write a slot the engine refuses as unassigned, and the
+    // author would see a face with no material and no explanation.
+    body.push_str("\n/// The material slot keys each mesh primitive offers.\n");
+    body.push_str("export const MESH_MATERIAL_ELEMENTS: Readonly<Record<string, readonly string[]>> = {\n");
+    for kind in [
+        gx_contracts::scene::MeshPrimitiveKind::Model,
+        gx_contracts::scene::MeshPrimitiveKind::Cube,
+        gx_contracts::scene::MeshPrimitiveKind::Sphere,
+        gx_contracts::scene::MeshPrimitiveKind::Cylinder,
+        gx_contracts::scene::MeshPrimitiveKind::Torus,
+        gx_contracts::scene::MeshPrimitiveKind::Slab,
+    ] {
+        body.push_str(&format!(
+            "  {}: [{}],\n",
+            wire(kind),
+            kind.material_elements()
+                .iter()
+                .map(|name| format!("\"{name}\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    body.push_str("};\n\n");
+    body.push_str(&format!(
+        "/// The single slot key a rect, ellipse, text or image offers.\n\
+         export const PLANAR_MATERIAL_ELEMENT = {};\n",
+        wire(gx_contracts::scene::PLANAR_MATERIAL_ELEMENT)
+    ));
+
+    body.push_str(&format!(
+        "\n/// The texture inputs every kind but `shader` may declare.\n\
+         export const STANDARD_TEXTURE_SLOTS = [{}] as const;\n",
+        STANDARD_TEXTURE_SLOTS
+            .into_iter()
+            .map(|slot| format!("\"{slot}\""))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
+
+    std::fs::write(root.join("Editor/src/material-reference.ts"), body)
+}
+
 fn write_transfer_reference(root: &std::path::Path) -> std::io::Result<()> {
     const STEPS: &[f64] = &[
         0.0,

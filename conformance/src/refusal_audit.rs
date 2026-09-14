@@ -9,8 +9,9 @@ use gx_contracts::color::ColorValue;
 use gx_contracts::color::Rgba;
 use gx_contracts::font::{check_font_face_url, FontSource};
 use gx_contracts::material::{
-    validate_material, BlendMode, FitMode, MaterialDefinition, MaterialKind, MaterialSupport,
-    MaterialTextureSlot,
+    assign_material, create_material, delete_material, validate_material,
+    validate_material_in_scene, BlendMode, FitMode, MaterialDefinition, MaterialKind,
+    MaterialLighting, MaterialSupport, MaterialTextureSlot,
 };
 use gx_contracts::package::{package_path_components, PackageFileEntry, PackageManifest};
 use gx_contracts::scene::parse_scene_document;
@@ -50,6 +51,7 @@ pub fn refusal_audit_suite(report: &mut Report) {
     drive_contract_refusals(report);
     drive_text_style_refusals(report);
     drive_material_refusals(report);
+    drive_material_library_refusals(report);
     drive_media_refusals(report);
     drive_asset_refusals(report);
     drive_playout_refusals(report);
@@ -1062,6 +1064,179 @@ fn drive_material_refusals(report: &mut Report) {
     }
 }
 
+/// The material-library refusals (11.12).
+///
+/// Every one is reachable from a pure contract function, so each is driven
+/// here rather than recorded as a limitation: the library edits are the same
+/// code the Editor shell calls, and a refusal nothing exercises is a refusal
+/// nobody has checked still fires.
+fn drive_material_library_refusals(report: &mut Report) {
+    let mut scene = audit_scene();
+
+    let out_of_range = MaterialDefinition {
+        opacity: 2.0,
+        ..material_with_blend(BlendMode::Normal)
+    };
+    report.record(
+        PLANE,
+        "MaterialParameterOutOfRange is produced for an opacity above 1",
+        expect(
+            matches!(
+                validate_material(&out_of_range, &MaterialSupport::fixed_function()),
+                Err(ref refusal)
+                    if matches!(refusal.code, Refusal::MaterialParameterOutOfRange { ref field, .. } if field == "opacity")
+            ),
+            "an opacity of 2.0 was not refused as MaterialParameterOutOfRange",
+        ),
+    );
+
+    let lit_on_unlit = MaterialDefinition {
+        kind: MaterialKind::Unlit,
+        lighting: Some(MaterialLighting::default()),
+        ..material_with_blend(BlendMode::Normal)
+    };
+    report.record(
+        PLANE,
+        "MaterialLightingOnUnlitKind is produced for lighting on a 2D material",
+        expect(
+            matches!(
+                validate_material(&lit_on_unlit, &MaterialSupport::fixed_function()),
+                Err(ref refusal)
+                    if matches!(refusal.code, Refusal::MaterialLightingOnUnlitKind { .. })
+            ),
+            "lighting on an unlit material was not refused as MaterialLightingOnUnlitKind",
+        ),
+    );
+
+    let unknown_slot = MaterialDefinition {
+        textures: vec![MaterialTextureSlot {
+            slot: "base-color".into(),
+            asset_id: "logo".into(),
+            fit: FitMode::Contain,
+            wrap: Default::default(),
+            filtering: Default::default(),
+            color_space: gx_contracts::color::SourceColorSpace::Srgb,
+        }],
+        ..material_with_blend(BlendMode::Normal)
+    };
+    report.record(
+        PLANE,
+        "MaterialUnknownTextureSlot is produced for a slot outside the vocabulary",
+        expect(
+            matches!(
+                validate_material(&unknown_slot, &MaterialSupport::fixed_function()),
+                Err(ref refusal)
+                    if matches!(refusal.code, Refusal::MaterialUnknownTextureSlot { .. })
+            ),
+            "a non-standard texture slot was not refused as MaterialUnknownTextureSlot",
+        ),
+    );
+
+    let dangling = MaterialDefinition {
+        textures: vec![audit_texture("gone")],
+        ..material_with_blend(BlendMode::Normal)
+    };
+    report.record(
+        PLANE,
+        "MaterialTextureAssetUnknown is produced for a texture the library does not hold",
+        expect(
+            matches!(
+                validate_material_in_scene(&scene, &dangling, &MaterialSupport::fixed_function()),
+                Err(ref refusal)
+                    if matches!(refusal.code, Refusal::MaterialTextureAssetUnknown { .. })
+            ),
+            "a dangling texture asset was not refused as MaterialTextureAssetUnknown",
+        ),
+    );
+
+    let wrong_kind = MaterialDefinition {
+        kind: MaterialKind::Video,
+        textures: vec![audit_texture("logo")],
+        ..material_with_blend(BlendMode::Normal)
+    };
+    report.record(
+        PLANE,
+        "MaterialTextureAssetWrongKind is produced for a still under a video material",
+        expect(
+            matches!(
+                validate_material_in_scene(&scene, &wrong_kind, &MaterialSupport::fixed_function()),
+                Err(ref refusal)
+                    if matches!(refusal.code, Refusal::MaterialTextureAssetWrongKind { .. })
+            ),
+            "a still bound as a video base colour was not refused as MaterialTextureAssetWrongKind",
+        ),
+    );
+
+    report.record(
+        PLANE,
+        "MaterialKindNeedsPrerequisite is produced for a video material with no clip",
+        expect(
+            matches!(
+                create_material(&mut scene, MaterialKind::Video, "audit", None),
+                Err(Refusal::MaterialKindNeedsPrerequisite { .. })
+            ),
+            "a video material created with no asset was not refused as MaterialKindNeedsPrerequisite",
+        ),
+    );
+
+    report.record(
+        PLANE,
+        "MaterialUnknown is produced for a delete naming no material",
+        expect(
+            matches!(
+                delete_material(&mut scene, "not-in-this-scene"),
+                Err(Refusal::MaterialUnknown { .. })
+            ),
+            "deleting an absent material was not refused as MaterialUnknown",
+        ),
+    );
+
+    // A material with a user: the refusal carries the count, which is what
+    // makes "relink first" an instruction rather than a guess.
+    let in_use = create_material(&mut scene, MaterialKind::SolidColor, "audit fill", None)
+        .expect("a solid colour needs nothing but a name");
+    assign_material(&mut scene, "audit-rect", "fill", &in_use).expect("the audit rect exists");
+    report.record(
+        PLANE,
+        "MaterialInUse is produced for a delete while an object still binds it",
+        expect(
+            matches!(
+                delete_material(&mut scene, &in_use),
+                Err(Refusal::MaterialInUse { user_count: 1, .. })
+            ),
+            "deleting a bound material was not refused as MaterialInUse with its user count",
+        ),
+    );
+}
+
+/// One rect, one still and one clip: the smallest library the material
+/// refusals can be driven against.
+fn audit_scene() -> gx_contracts::scene::SceneDocument {
+    parse_scene_document(
+        br#"{"id":"audit","name":"audit","version":1,
+             "canvas":{"width":1920,"height":1080,"frameRate":{"num":50,"den":1}},
+             "timeline":{"durationFrames":1},"dataContext":{},
+             "assets":[
+               {"assetId":"logo","name":"logo","kind":"image","path":"a/logo.png"},
+               {"assetId":"clip","name":"clip","kind":"video","path":"a/clip.mp4"}],
+             "fonts":[],"materials":[],
+             "objects":[{"type":"rect","id":"audit-rect","name":"audit rect",
+                         "width":100,"height":100,"radius":0}]}"#,
+    )
+    .expect("the audit scene parses")
+}
+
+fn audit_texture(asset_id: &str) -> MaterialTextureSlot {
+    MaterialTextureSlot {
+        slot: "baseColor".into(),
+        asset_id: asset_id.into(),
+        fit: FitMode::Contain,
+        wrap: Default::default(),
+        filtering: Default::default(),
+        color_space: gx_contracts::color::SourceColorSpace::Srgb,
+    }
+}
+
 fn material_with_blend(blend_mode: BlendMode) -> MaterialDefinition {
     MaterialDefinition {
         material_id: "audit-material".into(),
@@ -1075,6 +1250,7 @@ fn material_with_blend(blend_mode: BlendMode) -> MaterialDefinition {
         depth_mode: Default::default(),
         double_sided: false,
         textures: Vec::new(),
+        lighting: None,
         shader_id: None,
     }
 }
@@ -1203,6 +1379,14 @@ fn is_driven(variant: &str) -> bool {
             | "TimelinePhaseOutOfRange"
             | "TimelinePhaseInvalidSpan"
             | "TimelinePhaseUnknown"
+            | "MaterialParameterOutOfRange"
+            | "MaterialLightingOnUnlitKind"
+            | "MaterialUnknownTextureSlot"
+            | "MaterialTextureAssetUnknown"
+            | "MaterialTextureAssetWrongKind"
+            | "MaterialUnknown"
+            | "MaterialInUse"
+            | "MaterialKindNeedsPrerequisite"
     )
 }
 

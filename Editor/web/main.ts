@@ -16,6 +16,8 @@ import type {
   AnimationSurface,
   ControlField,
   ControlValue,
+  MaterialDefinition,
+  MaterialTextureSlot,
   ObjectDeletion,
   ObjectDuplication,
   MotionPreset,
@@ -32,7 +34,31 @@ import { renderNode } from "../src/agent-surface";
 import { objectManagerPanel } from "../src/object-manager";
 import { inspectorPanel } from "../src/inspector";
 import { fontManagerPanel, fontUsers } from "../src/font-manager";
-import { materialManagerPanel, usersOf } from "../src/material-manager";
+import {
+  bindableAssets,
+  dimensionOf,
+  isLit,
+  materialElementsOf,
+  materialManagerPanel,
+  parseHex,
+  relinkPreview,
+  rgbaHex,
+  solidHex,
+  usersOf,
+} from "../src/material-manager";
+import {
+  ALPHA_MODES,
+  BLEND_MODES,
+  CULL_MODES,
+  DEPTH_MODES,
+  FIT_MODES,
+  MATERIAL_KINDS,
+  STANDARD_TEXTURE_SLOTS,
+} from "../src/material-reference";
+import {
+  requiredTextureAssets,
+  type AssetSource,
+} from "../src/material-preview";
 import { assetManagerPanel, assetUsers } from "../src/asset-manager";
 import { textStylePanel, textStyleUsers } from "../src/text-style";
 import {
@@ -239,6 +265,34 @@ const ui = {
   textStyleMount: need<HTMLDivElement>("text-style-mount"),
   textStyleEmpty: need<HTMLParagraphElement>("text-style-empty"),
   materialEmpty: need<HTMLParagraphElement>("material-empty"),
+  materialKind: need<HTMLSelectElement>("material-kind"),
+  materialNewAsset: need<HTMLSelectElement>("material-new-asset"),
+  materialCreate: need<HTMLButtonElement>("material-create"),
+  materialEditor: need<HTMLDivElement>("material-editor"),
+  materialEditorHeading: need<HTMLHeadingElement>("material-editor-heading"),
+  materialName: need<HTMLInputElement>("material-name"),
+  materialEditKind: need<HTMLSelectElement>("material-edit-kind"),
+  materialColor: need<HTMLInputElement>("material-color"),
+  materialColorAlpha: need<HTMLInputElement>("material-color-alpha"),
+  materialOpacity: need<HTMLInputElement>("material-opacity"),
+  materialDoubleSided: need<HTMLInputElement>("material-double-sided"),
+  materialBlend: need<HTMLSelectElement>("material-blend"),
+  materialAlpha: need<HTMLSelectElement>("material-alpha"),
+  materialCull: need<HTMLSelectElement>("material-cull"),
+  materialDepth: need<HTMLSelectElement>("material-depth"),
+  materialLighting: need<HTMLFieldSetElement>("material-lighting"),
+  materialMetallic: need<HTMLInputElement>("material-metallic"),
+  materialRoughness: need<HTMLInputElement>("material-roughness"),
+  materialEmissive: need<HTMLInputElement>("material-emissive"),
+  materialEmissiveIntensity: need<HTMLInputElement>("material-emissive-intensity"),
+  materialTextureSlot: need<HTMLSelectElement>("material-texture-slot"),
+  materialTextureAsset: need<HTMLSelectElement>("material-texture-asset"),
+  materialTextureAdd: need<HTMLButtonElement>("material-texture-add"),
+  materialTextureFit: need<HTMLSelectElement>("material-texture-fit"),
+  materialTextureWrap: need<HTMLSelectElement>("material-texture-wrap"),
+  materialTextureFiltering: need<HTMLSelectElement>("material-texture-filtering"),
+  materialTextureSpace: need<HTMLSelectElement>("material-texture-space"),
+  materialTextureHint: need<HTMLParagraphElement>("material-texture-hint"),
   assetMount: need<HTMLDivElement>("asset-mount"),
   assetEmpty: need<HTMLParagraphElement>("asset-empty"),
   takePageId: need<HTMLInputElement>("take-page-id"),
@@ -301,6 +355,17 @@ interface ObjectCreated {
   readonly scene: SceneDocument;
   readonly objectId: string;
 }
+/** A created or duplicated material, and the id the panel should select. */
+interface MaterialCreated {
+  readonly scene: SceneDocument;
+  readonly materialId: string;
+}
+/** A relink, and the objects whose bindings actually moved — named rather
+ *  than counted, so the log says which graphic changed. */
+interface MaterialRelinked {
+  readonly scene: SceneDocument;
+  readonly changedObjectIds: readonly string[];
+}
 interface ObjectDeleted {
   readonly scene: SceneDocument;
   readonly deletion: ObjectDeletion;
@@ -325,6 +390,17 @@ let pendingSelection: string[] | undefined;
 let collapsed: string[] = [];
 let selectedFontId: string | undefined;
 let selectedMaterialId: string | undefined;
+/** The texture row the sampling controls act on. A second selection inside the
+ *  selected material, so there is one place to look rather than two parallel
+ *  lists. */
+let selectedTextureSlot: string | undefined;
+/** Texture bytes, by asset id, for the life of the session. Built once per
+ *  asset because a data URL is expensive and the viewport is rebuilt on every
+ *  edit. */
+const textureSources = new Map<string, AssetSource>();
+/** Assets whose bytes could not be read. Recorded so the preview names them
+ *  once rather than re-reading a missing path on every render. */
+const textureMisses = new Set<string>();
 let selectedAssetId: string | undefined;
 let takePageState: TakePageState = EMPTY_TAKE_PAGE_STATE;
 let takePagePreviewDocument: SceneDocument | null = null;
@@ -646,8 +722,16 @@ function renderSceneState(): void {
   const animation = previewSceneAt(resolvedScene, currentFrame, animationSurface);
   previewScene = animation.document;
   viewport?.dispose();
-  viewport = new SceneViewport(ui.canvas, previewScene);
+  // A texture decodes asynchronously even from a data URL, so the first frame
+  // draws untextured; `onTextureLoad` is what asks for the second one.
+  viewport = new SceneViewport(ui.canvas, previewScene, textureSources, () => viewport?.render());
   viewport.render();
+  // Fetch anything this document needs and the cache does not hold, then
+  // rebuild once. Deliberately after the first draw: the scene appears
+  // immediately and gains its textures, rather than waiting on file reads.
+  void loadTextureSources(previewScene).then((loaded) => {
+    if (loaded) renderSceneState();
+  });
 
   renderPanels(scene);
   renderOverlayLayer();
@@ -958,11 +1042,14 @@ function renderPanels(document_: SceneDocument): void {
   );
 
   ui.materialEmpty.hidden = document_.materials.length > 0;
-  const materials = materialManagerPanel(
-    document_,
-    selectedMaterialId === undefined ? {} : { selectedMaterialId },
-  );
+  const materials = materialManagerPanel(document_, {
+    ...(selectedMaterialId === undefined ? {} : { selectedMaterialId }),
+    ...(selectedTextureSlot === undefined ? {} : { selectedTextureSlot }),
+    selectedObjectIds: selection,
+  });
   ui.materialMount.replaceChildren(renderNode(document, materials) as unknown as Node);
+  renderMaterialCreateTools(document_);
+  renderMaterialEditor(document_);
   ui.assetEmpty.hidden = document_.assets.length > 0;
   const assets = assetManagerPanel(
     document_,
@@ -1530,6 +1617,11 @@ function setCurrentFrame(next: number): void {
   const evaluated = previewSceneAt(resolvedScene ?? scene, currentFrame, animationSurface);
   previewScene = evaluated.document;
   const viewportIssues = viewport?.updateDocument(previewScene) ?? [];
+  // Which frame of a clip is on screen is the timeline's decision, never the
+  // material's (1.3), so the playhead states it in seconds.
+  viewport?.setPreviewTime(
+    (currentFrame * scene.canvas.frameRate.den) / scene.canvas.frameRate.num,
+  );
   viewport?.render();
   renderOverlayLayer();
 
@@ -2399,15 +2491,52 @@ function onMaterialManagerClick(event: MouseEvent): void {
   const button = target.closest<HTMLButtonElement>("button[data-action][data-for]");
   const row = target.closest<HTMLLIElement>('li[role="listitem"][id^="material/"]');
   const nodeId = button?.dataset.for ?? row?.id;
-  const material = scene.materials.find(
-    (candidate) => `material/${candidate.materialId}` === nodeId,
-  );
+  // A child cell's id is `material/<id>/...`, so the material is the segment
+  // after the prefix rather than the whole node id.
+  const materialId = nodeId?.startsWith("material/")
+    ? nodeId.slice("material/".length).split("/")[0]
+    : undefined;
+  const material = scene.materials.find((candidate) => candidate.materialId === materialId);
   if (!material) return;
 
+  if (material.materialId !== selectedMaterialId) {
+    // A different material means the texture selection no longer refers to
+    // anything the panel is showing.
+    selectedTextureSlot = undefined;
+  }
   selectedMaterialId = material.materialId;
-  renderPanels(scene);
 
-  if (button?.dataset.action !== undefined && button.dataset.action !== "reveal") return;
+  const action = button?.dataset.action;
+  switch (action) {
+    case "duplicate":
+      void duplicateMaterial(material.materialId);
+      return;
+    case "delete":
+      void deleteMaterial(material.materialId);
+      return;
+    case "relink":
+      void relinkMaterialTo(material.materialId);
+      return;
+    case "assign":
+      void assignMaterialToSelection(material.materialId);
+      return;
+    case "select-texture":
+    case "remove-texture": {
+      const slot = nodeId?.split("/texture/")[1];
+      if (slot === undefined) return;
+      if (action === "remove-texture") {
+        void removeMaterialTexture(slot);
+      } else {
+        selectedTextureSlot = slot;
+        renderPanels(scene);
+      }
+      return;
+    }
+    default:
+      break;
+  }
+
+  renderPanels(scene);
   const users = usersOf(scene, material.materialId);
   log(
     users.length === 0
@@ -3012,6 +3141,43 @@ async function start(): Promise<void> {
   ui.fontMount.addEventListener("click", onFontManagerClick);
   ui.textStyleMount.addEventListener("click", (event) => void onTextStyleClick(event));
   ui.materialMount.addEventListener("click", onMaterialManagerClick);
+  ui.materialKind.addEventListener("change", () => {
+    if (scene) renderMaterialCreateTools(scene);
+  });
+  ui.materialCreate.addEventListener("click", () => void createMaterial());
+  // `change` rather than `input`: one committed edit is one undo entry, and a
+  // colour picker dragged across a gradient would otherwise write a hundred.
+  ui.materialName.addEventListener("change", () => void commitMaterialEditor("Renamed"));
+  ui.materialEditKind.addEventListener("change", () => void commitMaterialEditor("Changed kind"));
+  ui.materialColor.addEventListener("change", () => void commitMaterialEditor("Set colour"));
+  ui.materialColorAlpha.addEventListener("change", () => void commitMaterialEditor("Set alpha"));
+  ui.materialOpacity.addEventListener("change", () => void commitMaterialEditor("Set opacity"));
+  ui.materialDoubleSided.addEventListener("change", () =>
+    void commitMaterialEditor("Set double-sided"),
+  );
+  ui.materialBlend.addEventListener("change", () => void commitMaterialEditor("Set blend mode"));
+  ui.materialAlpha.addEventListener("change", () => void commitMaterialEditor("Set alpha mode"));
+  ui.materialCull.addEventListener("change", () => void commitMaterialEditor("Set cull mode"));
+  ui.materialDepth.addEventListener("change", () => void commitMaterialEditor("Set depth mode"));
+  ui.materialMetallic.addEventListener("change", () => void commitMaterialEditor("Set metallic"));
+  ui.materialRoughness.addEventListener("change", () => void commitMaterialEditor("Set roughness"));
+  ui.materialEmissive.addEventListener("change", () => void commitMaterialEditor("Set emissive"));
+  ui.materialEmissiveIntensity.addEventListener("change", () =>
+    void commitMaterialEditor("Set emissive intensity"),
+  );
+  ui.materialTextureSlot.addEventListener("change", () => {
+    // The bindable assets depend on the slot, so the picker is rebuilt.
+    if (scene) renderMaterialEditor(scene);
+  });
+  ui.materialTextureAdd.addEventListener("click", () => void addMaterialTexture());
+  for (const control of [
+    ui.materialTextureFit,
+    ui.materialTextureWrap,
+    ui.materialTextureFiltering,
+    ui.materialTextureSpace,
+  ]) {
+    control.addEventListener("change", () => void commitTextureSampling());
+  }
   ui.assetMount.addEventListener("click", onAssetManagerClick);
   ui.bindings.addEventListener("click", onBindingsClick);
   ui.controlMount.addEventListener("click", (event) => void onControlContractClick(event));
@@ -3115,6 +3281,10 @@ async function start(): Promise<void> {
     log(`animation contract unavailable: ${describe(error)}`, "bad");
   }
   await loadMotionLibrary();
+  // The material vocabularies come from the generated reference rather than
+  // a command: they are compile-time facts about the contract, so there is
+  // nothing to ask the shell and nothing that can fail.
+  initialiseMaterialVocabularies();
   await loadObjectKinds();
   await loadProjects();
   applyStoredLayout();
@@ -3349,3 +3519,508 @@ function resetLayout(): void {
 }
 
 void start();
+
+// ---------------------------------------------------------------------------
+// The material library (11.12). Creating and editing 2D and 3D materials, the
+// colours and textures they paint with, and where they are used.
+//
+// Every write goes through Rust: the panel builds the whole `MaterialDefinition`
+// and `cmd_material_update` validates it against the same contract the engine
+// reads. A browser-side edit that skipped that would be a second set of rules,
+// and the first place they would disagree is a material the Editor accepted
+// and the engine refuses at take.
+// ---------------------------------------------------------------------------
+
+/** Fill a select from a list of contract values, preserving the current
+ *  choice when it is still offered. Rebuilding the options on every render
+ *  would otherwise reset a control the author is looking at. */
+function fillSelect(select: HTMLSelectElement, values: readonly string[], selected?: string): void {
+  const current = selected ?? select.value;
+  if (
+    select.options.length === values.length &&
+    values.every((value, index) => select.options[index]?.value === value)
+  ) {
+    if (current !== undefined && values.includes(current)) select.value = current;
+    return;
+  }
+  select.replaceChildren(
+    ...values.map((value) => {
+      const option = window.document.createElement("option");
+      option.value = value;
+      option.textContent = value;
+      return option;
+    }),
+  );
+  if (current !== undefined && values.includes(current)) select.value = current;
+}
+
+/** The vocabularies the panel offers, from the generated reference. */
+function initialiseMaterialVocabularies(): void {
+  fillSelect(
+    ui.materialKind,
+    MATERIAL_KINDS.map((info) => info.kind),
+    "solid-color",
+  );
+  fillSelect(
+    ui.materialEditKind,
+    MATERIAL_KINDS.map((info) => info.kind),
+  );
+  fillSelect(ui.materialBlend, BLEND_MODES);
+  fillSelect(ui.materialAlpha, ALPHA_MODES);
+  fillSelect(ui.materialCull, CULL_MODES);
+  fillSelect(ui.materialDepth, DEPTH_MODES);
+  fillSelect(ui.materialTextureSlot, [...STANDARD_TEXTURE_SLOTS]);
+  fillSelect(ui.materialTextureFit, FIT_MODES);
+  fillSelect(ui.materialTextureWrap, ["clamp", "repeat", "mirror-repeat"]);
+  fillSelect(ui.materialTextureFiltering, ["nearest", "linear"]);
+  // The source spaces a texture may be tagged with. B.1 forbids inferring
+  // one, so every value here is a statement the author makes.
+  fillSelect(ui.materialTextureSpace, ["srgb", "linear", "rec709", "display-p3"]);
+}
+
+/** The material the editor is editing, if any. */
+function selectedMaterial(): MaterialDefinition | undefined {
+  if (!scene || selectedMaterialId === undefined) return undefined;
+  return scene.materials.find((material) => material.materialId === selectedMaterialId);
+}
+
+/** Draw the editor from the selected material.
+ *
+ *  The form is a projection of the document, never a second copy of it: every
+ *  control is written from the material on each render, so an undo or an edit
+ *  from anywhere else is reflected rather than silently overwritten by a stale
+ *  field the next time the author touches an unrelated control. */
+function renderMaterialEditor(document_: SceneDocument): void {
+  const material = selectedMaterial();
+  ui.materialEditor.hidden = material === undefined;
+  if (!material) return;
+
+  ui.materialEditorHeading.textContent = `${material.name} — ${
+    dimensionOf(material.kind) === "three-d"
+      ? "3D material"
+      : dimensionOf(material.kind) === "two-d"
+        ? "2D material"
+        : "shader material"
+  }`;
+  ui.materialName.value = material.name;
+  fillSelect(
+    ui.materialEditKind,
+    MATERIAL_KINDS.map((info) => info.kind),
+    material.kind,
+  );
+  const hex = solidHex(material.color);
+  // A gradient has no single swatch. The control is disabled with the reason
+  // rather than showing a stop that is not "the colour".
+  ui.materialColor.disabled = hex === undefined;
+  ui.materialColor.title =
+    hex === undefined ? `${material.color.type} has no single colour to show` : "";
+  ui.materialColor.value = hex ?? "#ffffff";
+  ui.materialColorAlpha.disabled = hex === undefined;
+  ui.materialColorAlpha.value = String(
+    material.color.type === "solid" ? material.color.color.a : 1,
+  );
+  ui.materialOpacity.value = String(material.opacity);
+  ui.materialDoubleSided.checked = material.doubleSided;
+  ui.materialBlend.value = material.blendMode;
+  ui.materialAlpha.value = material.alphaMode;
+  ui.materialCull.value = material.cullMode;
+  ui.materialDepth.value = material.depthMode;
+
+  const lit = isLit(material.kind);
+  ui.materialLighting.hidden = !lit;
+  const lighting = material.lighting;
+  if (lit) {
+    ui.materialMetallic.value = String(lighting?.metallic ?? 0);
+    ui.materialRoughness.value = String(lighting?.roughness ?? 0.5);
+    ui.materialEmissive.value = lighting ? rgbaHex(lighting.emissive) : "#000000";
+    ui.materialEmissiveIntensity.value = String(lighting?.emissiveIntensity ?? 1);
+  }
+
+  // Only the slots this material does not already carry can be added, and
+  // only the assets the contract would accept for the chosen slot are offered
+  // — an asset picker that offers what the validator then refuses is a trap.
+  const takenSlots = new Set(material.textures.map((texture) => texture.slot));
+  const freeSlots = STANDARD_TEXTURE_SLOTS.filter((slot) => !takenSlots.has(slot));
+  fillSelect(ui.materialTextureSlot, freeSlots);
+  ui.materialTextureAdd.disabled = freeSlots.length === 0;
+  const slotForAssets = ui.materialTextureSlot.value || "baseColor";
+  const candidates = bindableAssets(document_, material.kind, slotForAssets);
+  fillSelect(
+    ui.materialTextureAsset,
+    candidates.map((asset) => asset.assetId),
+  );
+  ui.materialTextureAdd.title =
+    freeSlots.length === 0
+      ? "every standard texture slot is already bound"
+      : candidates.length === 0
+        ? `this scene has no asset a ${material.kind} material can bind to ${slotForAssets}`
+        : "";
+  if (candidates.length === 0) ui.materialTextureAdd.disabled = true;
+
+  const texture = material.textures.find((slot) => slot.slot === selectedTextureSlot);
+  const samplers = [
+    ui.materialTextureFit,
+    ui.materialTextureWrap,
+    ui.materialTextureFiltering,
+    ui.materialTextureSpace,
+  ];
+  for (const control of samplers) control.disabled = texture === undefined;
+  ui.materialTextureHint.hidden = texture !== undefined;
+  if (texture) {
+    ui.materialTextureFit.value = texture.fit;
+    ui.materialTextureWrap.value = texture.wrap;
+    ui.materialTextureFiltering.value = texture.filtering;
+    ui.materialTextureSpace.value = texture.colorSpace;
+  }
+}
+
+/** The assets a new material of the chosen kind could bind, plus the reason
+ *  the create button is unavailable when there are none. */
+function renderMaterialCreateTools(document_: SceneDocument): void {
+  const kind = ui.materialKind.value as MaterialDefinition["kind"];
+  const info = MATERIAL_KINDS.find((candidate) => candidate.kind === kind);
+  const needsAsset = info?.needs != null;
+  const candidates = needsAsset ? bindableAssets(document_, kind, "baseColor") : [];
+  fillSelect(
+    ui.materialNewAsset,
+    candidates.map((asset) => asset.assetId),
+  );
+  ui.materialNewAsset.disabled = !needsAsset;
+  // A shader material needs a WGSL asset and a compiled shader; the panel says
+  // so rather than offering a create that Rust would refuse.
+  const blocked =
+    kind === "shader"
+      ? (info?.needs ?? "a shader")
+      : needsAsset && candidates.length === 0
+        ? (info?.needs ?? "an asset")
+        : undefined;
+  ui.materialCreate.disabled = blocked !== undefined;
+  ui.materialCreate.title = blocked === undefined ? "" : `needs ${blocked}`;
+}
+
+async function createMaterial(): Promise<void> {
+  const kind = ui.materialKind.value as MaterialDefinition["kind"];
+  const name = window.prompt(`Name for the new ${kind} material`, kind);
+  // A cancelled prompt is a cancelled gesture, not an unnamed material.
+  if (name === null) return;
+  const assetId = ui.materialNewAsset.disabled ? undefined : ui.materialNewAsset.value;
+  await runEdit(async (start) => {
+    const created = await invoke<MaterialCreated>("cmd_material_create", {
+      scene: start,
+      kind,
+      name,
+      assetId: assetId === "" ? null : (assetId ?? null),
+    });
+    // Select what was just made: the author's next act is almost always to
+    // edit it or bind it to something.
+    selectedMaterialId = created.materialId;
+    selectedTextureSlot = undefined;
+    return {
+      next: created.scene,
+      label: `Added ${kind} material ${created.materialId}`,
+    };
+  });
+}
+
+/** Commit one edited material. The whole definition goes to Rust, which
+ *  validates it and hands back the document or a named refusal. */
+async function updateMaterial(next: MaterialDefinition, what: string): Promise<void> {
+  await runEdit(async (start) => ({
+    next: await invoke<SceneDocument>("cmd_material_update", { scene: start, material: next }),
+    label: `${what} on ${next.name}`,
+  }));
+}
+
+/** Read the editor's controls back into a material.
+ *
+ *  Refusals that are about the *input* — text that is not a colour, a number
+ *  that is not a number — are caught here and reported, because sending them
+ *  to Rust would turn a typo into a refusal about the document. Everything
+ *  that is about the *material* is Rust's to refuse. */
+function materialFromEditor(material: MaterialDefinition): MaterialDefinition | string {
+  const kind = ui.materialEditKind.value as MaterialDefinition["kind"];
+  const number = (input: HTMLInputElement, field: string): number | string => {
+    const value = Number(input.value);
+    return Number.isFinite(value) ? value : `${field} is not a number`;
+  };
+
+  const opacity = number(ui.materialOpacity, "opacity");
+  if (typeof opacity === "string") return opacity;
+
+  let color = material.color;
+  if (!ui.materialColor.disabled) {
+    const rgb = parseHex(ui.materialColor.value);
+    if (!rgb) return `${ui.materialColor.value} is not a colour`;
+    const alpha = number(ui.materialColorAlpha, "alpha");
+    if (typeof alpha === "string") return alpha;
+    color = {
+      type: "solid",
+      // The space the authoring surface tags a picked colour with. The picker
+      // is an sRGB control; saying so is what B.1 requires, and it is what
+      // lets the engine convert rather than guess.
+      color: { ...rgb, a: alpha, space: "srgb" },
+    };
+  }
+
+  const next: MaterialDefinition = {
+    ...material,
+    name: ui.materialName.value.trim() === "" ? material.name : ui.materialName.value.trim(),
+    kind,
+    color,
+    opacity,
+    blendMode: ui.materialBlend.value as MaterialDefinition["blendMode"],
+    alphaMode: ui.materialAlpha.value as MaterialDefinition["alphaMode"],
+    cullMode: ui.materialCull.value as MaterialDefinition["cullMode"],
+    depthMode: ui.materialDepth.value as MaterialDefinition["depthMode"],
+    doubleSided: ui.materialDoubleSided.checked,
+  };
+
+  if (isLit(kind)) {
+    const metallic = number(ui.materialMetallic, "metallic");
+    if (typeof metallic === "string") return metallic;
+    const roughness = number(ui.materialRoughness, "roughness");
+    if (typeof roughness === "string") return roughness;
+    const intensity = number(ui.materialEmissiveIntensity, "emissive intensity");
+    if (typeof intensity === "string") return intensity;
+    const emissive = parseHex(ui.materialEmissive.value);
+    if (!emissive) return `${ui.materialEmissive.value} is not a colour`;
+    next.lighting = {
+      metallic,
+      roughness,
+      emissive: { ...emissive, a: 1, space: "srgb" },
+      emissiveIntensity: intensity,
+    };
+  } else {
+    // Changing a lit material to an unlit kind drops the lighting block, which
+    // the contract would otherwise refuse. Dropping it is the honest edit: an
+    // unlit material genuinely has no surface response.
+    delete next.lighting;
+  }
+  return next;
+}
+
+async function commitMaterialEditor(what: string): Promise<void> {
+  const material = selectedMaterial();
+  if (!material) return;
+  const next = materialFromEditor(material);
+  if (typeof next === "string") {
+    log(next, "bad");
+    // Put the controls back to the document's values rather than leaving the
+    // rejected text in place looking accepted.
+    if (scene) renderMaterialEditor(scene);
+    return;
+  }
+  await updateMaterial(next, what);
+}
+
+/** Add a texture slot to the selected material. */
+async function addMaterialTexture(): Promise<void> {
+  const material = selectedMaterial();
+  if (!material) return;
+  const slot = ui.materialTextureSlot.value;
+  const assetId = ui.materialTextureAsset.value;
+  if (slot === "" || assetId === "") {
+    log("choose a slot and an asset to bind", "bad");
+    return;
+  }
+  selectedTextureSlot = slot;
+  await updateMaterial(
+    {
+      ...material,
+      textures: [
+        ...material.textures,
+        {
+          slot,
+          assetId,
+          fit: "contain",
+          wrap: "clamp",
+          filtering: "linear",
+          // Tagged at the moment of binding, and editable in the row below —
+          // never inferred later from the file (B.1).
+          colorSpace: "srgb",
+        },
+      ],
+    },
+    `Bound ${assetId} to ${slot}`,
+  );
+}
+
+async function removeMaterialTexture(slot: string): Promise<void> {
+  const material = selectedMaterial();
+  if (!material) return;
+  if (selectedTextureSlot === slot) selectedTextureSlot = undefined;
+  await updateMaterial(
+    { ...material, textures: material.textures.filter((texture) => texture.slot !== slot) },
+    `Removed texture ${slot}`,
+  );
+}
+
+async function commitTextureSampling(): Promise<void> {
+  const material = selectedMaterial();
+  if (!material || selectedTextureSlot === undefined) return;
+  await updateMaterial(
+    {
+      ...material,
+      textures: material.textures.map((texture) =>
+        texture.slot === selectedTextureSlot
+          ? {
+              ...texture,
+              fit: ui.materialTextureFit.value as MaterialTextureSlot["fit"],
+              wrap: ui.materialTextureWrap.value as MaterialTextureSlot["wrap"],
+              filtering: ui.materialTextureFiltering.value as MaterialTextureSlot["filtering"],
+              colorSpace: ui.materialTextureSpace.value as MaterialTextureSlot["colorSpace"],
+            }
+          : texture,
+      ),
+    },
+    `Set ${selectedTextureSlot} sampling`,
+  );
+}
+
+async function duplicateMaterial(materialId: string): Promise<void> {
+  await runEdit(async (start) => {
+    const created = await invoke<MaterialCreated>("cmd_material_duplicate", {
+      scene: start,
+      materialId,
+    });
+    selectedMaterialId = created.materialId;
+    return {
+      next: created.scene,
+      label: `Duplicated ${materialId} as ${created.materialId}`,
+    };
+  });
+}
+
+async function deleteMaterial(materialId: string): Promise<void> {
+  await runEdit(async (start) => {
+    const next = await invoke<SceneDocument>("cmd_material_delete", { scene: start, materialId });
+    if (selectedMaterialId === materialId) selectedMaterialId = undefined;
+    return { next, label: `Deleted material ${materialId}` };
+  });
+}
+
+/** Repoint every binding from one material onto another.
+ *
+ *  The blast radius is shown before the edit runs, not after: an author asked
+ *  to confirm "relink" with no idea how many objects move cannot answer. */
+async function relinkMaterialTo(fromMaterialId: string): Promise<void> {
+  if (!scene) return;
+  const others = scene.materials.filter(
+    (material) => material.materialId !== fromMaterialId,
+  );
+  const target = window.prompt(
+    `Relink ${fromMaterialId} onto which material?\n${others
+      .map((material) => `${material.materialId} — ${material.name}`)
+      .join("\n")}`,
+    others[0]?.materialId ?? "",
+  );
+  if (target === null || target.trim() === "") return;
+  const toMaterialId = target.trim();
+
+  const affected = relinkPreview(scene, fromMaterialId, toMaterialId);
+  if (affected.length === 0) {
+    log(`Nothing binds ${fromMaterialId}; the relink would change nothing.`);
+    return;
+  }
+  if (
+    !window.confirm(
+      `Relink ${affected.length} object(s) from ${fromMaterialId} to ${toMaterialId}?\n\n${affected.join(", ")}`,
+    )
+  ) {
+    return;
+  }
+  await runEdit(async (start) => {
+    const relinked = await invoke<MaterialRelinked>("cmd_material_relink", {
+      scene: start,
+      fromMaterialId,
+      toMaterialId,
+    });
+    return {
+      next: relinked.scene,
+      label:
+        relinked.changedObjectIds.length === 0
+          ? `Relink changed nothing`
+          : `Relinked ${relinked.changedObjectIds.join(", ")} onto ${toMaterialId}`,
+    };
+  });
+}
+
+/** Bind a material to every selected object, on every slot each one has.
+ *
+ *  All of an object's slots rather than one: the engine refuses a partly
+ *  assigned mesh, so assigning a material to one face of a cube and calling it
+ *  done would produce a scene that only fails at publish. */
+async function assignMaterialToSelection(materialId: string): Promise<void> {
+  if (!scene || selection.length === 0) return;
+  const targets = selection.flatMap((objectId) => {
+    const object = scene?.objects.find((candidate) => candidate.id === objectId);
+    return object
+      ? materialElementsOf(object).map((slot) => ({ objectId, slot }))
+      : [];
+  });
+  if (targets.length === 0) {
+    log("the selected object has no material slot", "bad");
+    return;
+  }
+  await runEdit(async (start) => {
+    // One gesture, one undo entry: the document is threaded through every
+    // assignment and only the pre-gesture document is recorded.
+    let next = start;
+    for (const target of targets) {
+      next = await invoke<SceneDocument>("cmd_material_assign", {
+        scene: next,
+        objectId: target.objectId,
+        slot: target.slot,
+        materialId,
+      });
+    }
+    return {
+      next,
+      label: `Assigned ${materialId} to ${targets.length} slot(s) on ${selection.length} object(s)`,
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Texture bytes for the preview.
+//
+// The shell reads them; this caches them by asset id for the life of the
+// document, because a data URL is expensive to build and the viewport is
+// rebuilt on every edit.
+// ---------------------------------------------------------------------------
+
+/** Fetch any texture bytes the document needs and the cache does not hold.
+ *
+ *  A failure is recorded as a miss rather than retried on every render: the
+ *  preview names the missing texture, and an asset whose bytes are not on this
+ *  machine should not make the Editor re-read a path once per keystroke. */
+async function loadTextureSources(document_: SceneDocument): Promise<boolean> {
+  // Asset paths are project-relative (invariant 31), so a scene that is not
+  // open from a project has no root to read them against. Saying nothing here
+  // is right: the preview then names each texture as having no bytes.
+  const project = projectSceneProject;
+  if (project === undefined) return false;
+  let loaded = false;
+  for (const assetId of requiredTextureAssets(document_)) {
+    if (textureSources.has(assetId) || textureMisses.has(assetId)) continue;
+    const asset = document_.assets.find((item) => item.assetId === assetId);
+    if (!asset) continue;
+    try {
+      const source = await invoke<AssetSource & { dataUrl: string; mediaType: string }>(
+        "cmd_asset_source",
+        {
+          project,
+          assetId,
+          path: asset.path,
+          mediaType: asset.mimeType ?? null,
+        },
+      );
+      textureSources.set(assetId, source);
+      loaded = true;
+    } catch (error) {
+      textureMisses.add(assetId);
+      log(`Texture ${assetId} (${asset.path}) could not be read: ${describe(error)}`, "bad");
+    }
+  }
+  return loaded;
+}

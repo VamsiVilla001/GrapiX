@@ -17,10 +17,25 @@
 
 import * as THREE from "three";
 
-import type { ColorValue, SceneDocument, SceneObject } from "@grapix/contracts";
+import type {
+  BlendMode,
+  ColorValue,
+  MaterialTextureSlot,
+  SceneDocument,
+  SceneObject,
+  SourceColorSpace,
+} from "@grapix/contracts";
 import { PREVIEW_OUTPUT_COLOR_SPACE } from "./color-policy";
 import { makeOrthographicSceneCamera, scenePosition, type SceneDepthRange } from "./camera";
 import { rec709Decode } from "./color-transfer";
+import {
+  planPreviewMaterial,
+  resolveObjectMaterial,
+  type AssetSources,
+  type PreviewMaterialPlan,
+  type PreviewSide,
+  type PreviewTexture,
+} from "./material-preview";
 
 /// A viewport over one scene. Owns the renderer, the camera and the meshes
 /// built from the document. Dispose with `dispose()`.
@@ -44,8 +59,26 @@ export class SceneViewport {
   /// missing object is explained rather than merely absent.
   readonly unsupported: string[] = [];
 
-  constructor(canvas: HTMLCanvasElement, document: SceneDocument) {
+  /// The video elements the moving textures read, and every texture this
+  /// viewport allocated. Held so the playhead can drive the first and
+  /// `dispose` can release both.
+  private readonly videos: PreviewVideo[] = [];
+  private readonly textures: THREE.Texture[] = [];
+
+  constructor(
+    canvas: HTMLCanvasElement,
+    document: SceneDocument,
+    sources: AssetSources = new Map(),
+    onTextureLoad?: () => void,
+  ) {
     const space = { width: document.canvas.width, height: document.canvas.height };
+    const context: PreviewContext = {
+      document,
+      sources,
+      videos: this.videos,
+      textures: this.textures,
+      ...(onTextureLoad === undefined ? {} : { onTextureLoad }),
+    };
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     // Colour policy (B.1): working space linear, output transform explicit.
@@ -58,7 +91,7 @@ export class SceneViewport {
     this.camera = makeOrthographicSceneCamera(space, sceneDepthRange(document));
 
     for (const object of document.objects) {
-      const mesh = buildViewportObject(object, space, this.unsupported);
+      const mesh = buildViewportObject(object, space, this.unsupported, context);
       if (mesh) {
         this.meshes.push(mesh);
         this.rendered.set(object.id, {
@@ -136,7 +169,36 @@ export class SceneViewport {
     return issues;
   }
 
+  /// Put every moving texture at one instant of the preview.
+  ///
+  /// The material names the clip; the timeline says which frame of it is on
+  /// screen (1.3). A paused element does not push new pixels on its own, so
+  /// the texture is marked dirty once the seek lands.
+  setPreviewTime(seconds: number): void {
+    for (const video of this.videos) {
+      if (!Number.isFinite(seconds) || video.element.readyState < 1) continue;
+      const duration = video.element.duration;
+      // A clip shorter than the scene repeats rather than holding its last
+      // frame, matching the loop the element was created with.
+      const at = Number.isFinite(duration) && duration > 0 ? seconds % duration : seconds;
+      if (Math.abs(video.element.currentTime - at) < 1e-3) continue;
+      video.element.currentTime = at;
+      video.texture.needsUpdate = true;
+    }
+  }
+
   dispose(): void {
+    for (const video of this.videos) {
+      video.element.pause();
+      // Dropping the source releases the decoded bytes; a data URL left on a
+      // detached element keeps the whole clip in memory for the session.
+      video.element.removeAttribute("src");
+      video.element.load();
+      video.texture.dispose();
+    }
+    this.videos.length = 0;
+    for (const texture of this.textures) texture.dispose();
+    this.textures.length = 0;
     for (const mesh of this.meshes) {
       mesh.geometry.dispose();
       const material = mesh.material;
@@ -265,8 +327,49 @@ export function buildViewportObject(
   object: SceneObject,
   space: { width: number; height: number },
   unsupported: string[],
+  context?: PreviewContext,
 ): THREE.Mesh | null {
   const base = object;
+
+  // An authored material, if this object binds one. Resolved before the
+  // geometry because it decides whether an unfilled object is still drawn:
+  // a rect with no `fill` but a material bound to its slot paints what the
+  // material says, and returning null would lose it.
+  const resolved = context
+    ? resolveObjectMaterial(context.document, object)
+    : ({ kind: "none" } as const);
+  if (resolved.kind === "unsupported") {
+    unsupported.push(`${object.id}: ${resolved.reason}`);
+    return null;
+  }
+  const plan =
+    resolved.kind === "material"
+      ? planPreviewMaterial(resolved.material, base.opacity, context!.sources)
+      : undefined;
+  if (plan?.kind === "unsupported") {
+    unsupported.push(`${object.id}: ${plan.reason}`);
+    return null;
+  }
+  const planned = plan?.kind === "plan" ? plan : undefined;
+  // The material's own paint. The object's `fill` is not it: a rect bound to a
+  // shared brand material must show the brand colour, not whatever fill the
+  // rect carried before it was assigned.
+  const materialPaint = planned ? resolvePaint(planned.color) : undefined;
+  if (materialPaint?.kind === "unsupported") {
+    unsupported.push(`${object.id}: material colour — ${materialPaint.reason}`);
+    return null;
+  }
+  // A material whose paint is off and which declares no texture paints
+  // nothing. `none` is a value, not an absence (1.4), so this is the authored
+  // answer rather than a failure — the same silence an unfilled rect gets.
+  if (
+    planned &&
+    materialPaint?.kind === "none" &&
+    planned.textures.length === 0 &&
+    planned.missingTextures.length === 0
+  ) {
+    return null;
+  }
 
   let mesh: THREE.Mesh;
   switch (object.type) {
@@ -277,7 +380,10 @@ export function buildViewportObject(
         unsupported.push(`${object.id}: ${paint.reason}`);
         return null;
       }
-      if (paint.kind === "none") {
+      // No fill and no material is nothing to draw. No fill but a bound
+      // material is a material-painted object, which is the normal case once
+      // a library exists.
+      if (paint.kind === "none" && planned === undefined) {
         return null;
       }
       const geometry =
@@ -286,25 +392,61 @@ export function buildViewportObject(
           : // An ellipse is inscribed in the base box (1.2): the unit circle
             // scaled to its radii.
             new THREE.CircleGeometry(1, 64).scale(object.width / 2, object.height / 2, 1);
-      const material = new THREE.MeshBasicMaterial({
-        color: paint.color,
-        transparent: base.opacity < 1,
-        opacity: base.opacity,
-        depthTest: true,
-        // Opaque planes participate fully in the depth buffer. Transparent
-        // planes test against nearer geometry but do not hide surfaces that
-        // still need to blend through them.
-        depthWrite: base.opacity >= 1,
-      });
+      const material = planned
+        ? buildPlannedMaterial(
+            planned,
+            materialPaint ?? paint,
+            object.width / Math.max(object.height, 1e-6),
+            context!,
+            unsupported,
+            object.id,
+          )
+        : new THREE.MeshBasicMaterial({
+            // `paint.kind` is "color" here: the only way to reach this arm
+            // with no paint is to have a material, and that takes the branch
+            // above.
+            color: paint.kind === "color" ? paint.color : new THREE.Color(0xffffff),
+            transparent: base.opacity < 1,
+            opacity: base.opacity,
+            depthTest: true,
+            // Opaque planes participate fully in the depth buffer. Transparent
+            // planes test against nearer geometry but do not hide surfaces that
+            // still need to blend through them.
+            depthWrite: base.opacity >= 1,
+          });
       mesh = new THREE.Mesh(geometry, material);
       break;
     }
     case "image": {
-      // Texture resolution is the asset pipeline's concern; the viewport
-      // shows a placeholder plane the size the author gave it until the
-      // texture arrives.
       const geometry = new THREE.PlaneGeometry(object.width, object.height);
-      const material = new THREE.MeshBasicMaterial({ color: 0x808080, depthTest: true, depthWrite: true });
+      const aspect = object.width / Math.max(object.height, 1e-6);
+      // An image object addresses its own asset; a material bound to its slot
+      // paints over that, which is how a video wall or a tinted still is
+      // authored. Either way the bytes come from the same library.
+      const imageTexture =
+        planned === undefined ? imageObjectTexture(object, aspect, context) : undefined;
+      if (imageTexture?.ok === false) {
+        unsupported.push(`${object.id}: ${imageTexture.reason}`);
+      }
+      const material = planned
+        ? buildPlannedMaterial(
+            planned,
+            materialPaint ?? { kind: "none" },
+            aspect,
+            context!,
+            unsupported,
+            object.id,
+          )
+        : new THREE.MeshBasicMaterial({
+            // Still a grey plane when the bytes are not here: the size and
+            // position are authored facts worth showing, and the missing
+            // texture is reported rather than implied by the colour.
+            ...(imageTexture?.ok ? { map: imageTexture.texture } : { color: 0x808080 }),
+            transparent: base.opacity < 1,
+            opacity: base.opacity,
+            depthTest: true,
+            depthWrite: base.opacity >= 1,
+          });
       mesh = new THREE.Mesh(geometry, material);
       break;
     }
@@ -331,14 +473,23 @@ export function buildViewportObject(
         unsupported.push(`${object.id}: ${paint.reason}`);
         return null;
       }
-      const material = new THREE.MeshStandardMaterial({
-        color: paint.kind === "color" ? paint.color : new THREE.Color(0x9aa4ae),
-        transparent: base.opacity < 1,
-        opacity: base.opacity,
-        depthTest: true,
-        depthWrite: base.opacity >= 1,
-        flatShading: true,
-      });
+      const material = planned
+        ? buildPlannedMaterial(
+            planned,
+            materialPaint ?? paint,
+            object.width / Math.max(object.height, 1e-6),
+            context!,
+            unsupported,
+            object.id,
+          )
+        : new THREE.MeshStandardMaterial({
+            color: paint.kind === "color" ? paint.color : new THREE.Color(0x9aa4ae),
+            transparent: base.opacity < 1,
+            opacity: base.opacity,
+            depthTest: true,
+            depthWrite: base.opacity >= 1,
+            flatShading: true,
+          });
       mesh = new THREE.Mesh(primitive.geometry, material);
       break;
     }
@@ -358,6 +509,17 @@ export function buildViewportObject(
       return null;
   }
 
+  if (planned) {
+    // The per-frame update multiplies the object's animated opacity back onto
+    // the material's own, and must not overwrite the transparency and depth
+    // decisions the plan made. Without this, an authored `depth: read` surface
+    // would silently become depth-writing the first time the playhead moved.
+    mesh.userData.materialPlan = {
+      opacity: planned.opacity / Math.max(object.opacity, 1e-6),
+      transparent: planned.transparent,
+      depthWrite: planned.depthWrite,
+    };
+  }
   applyViewportObjectState(mesh, object, space);
   return mesh;
 }
@@ -380,15 +542,21 @@ function applyViewportObjectState(
   mesh.scale.set(object.scaleX, object.scaleY, object.scaleZ);
   mesh.visible = object.visible;
 
+  const plan = mesh.userData.materialPlan as
+    | { opacity: number; transparent: boolean; depthWrite: boolean }
+    | undefined;
   const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
   for (const material of materials) {
-    const nextTransparent = object.opacity < 1;
+    // An authored material decides transparency and depth; the object's
+    // opacity only scales it. Without a material, the object's own opacity is
+    // the whole story and the old rules apply.
+    const nextTransparent = plan ? plan.transparent || object.opacity < 1 : object.opacity < 1;
     if (material.transparent !== nextTransparent) {
       material.transparent = nextTransparent;
       material.needsUpdate = true;
     }
-    material.opacity = object.opacity;
-    material.depthWrite = object.opacity >= 1;
+    material.opacity = plan ? plan.opacity * object.opacity : object.opacity;
+    material.depthWrite = plan ? plan.depthWrite : object.opacity >= 1;
   }
 }
 
@@ -472,4 +640,305 @@ function rectShape(width: number, height: number, radius: number): THREE.Shape {
   shape.lineTo(x, y + r);
   shape.absarc(x + r, y + r, r, Math.PI, (3 * Math.PI) / 2, false);
   return shape;
+}
+
+// ---------------------------------------------------------------------------
+// Authored materials in the preview (11.12).
+//
+// The decisions are in `material-preview.ts`, which is pure and tested
+// headless. What is left here is the part that needs a GL context and a DOM:
+// allocating textures, and holding the video elements a moving texture reads.
+// ---------------------------------------------------------------------------
+
+/// A video texture and the element behind it, kept so the playhead can drive
+/// it and so both can be released on dispose.
+interface PreviewVideo {
+  readonly element: HTMLVideoElement;
+  readonly texture: THREE.VideoTexture;
+}
+
+/// Three's blending for a mode the preview can composite.
+///
+/// Only the modes `FIXED_FUNCTION_BLEND_MODES` names reach here — the plan
+/// refuses the rest by name — so there is no "nearest match" branch. That
+/// absence is the point: a default arm is where `overlay` became `screen`.
+function applyBlending(material: THREE.Material, mode: BlendMode): void {
+  switch (mode) {
+    case "normal":
+      material.blending = THREE.NormalBlending;
+      return;
+    case "add":
+      material.blending = THREE.AdditiveBlending;
+      return;
+    case "multiply":
+      material.blending = THREE.MultiplyBlending;
+      return;
+    case "screen":
+      // src + dst·(1 − src): the screen formula written as a factor pair.
+      material.blending = THREE.CustomBlending;
+      material.blendEquation = THREE.AddEquation;
+      material.blendSrc = THREE.OneFactor;
+      material.blendDst = THREE.OneMinusSrcColorFactor;
+      return;
+    case "darken":
+    case "lighten":
+      // min/max are blend *equations*, not factor pairs; the factors are
+      // ignored by the hardware for these two.
+      material.blending = THREE.CustomBlending;
+      material.blendEquation = mode === "darken" ? THREE.MinEquation : THREE.MaxEquation;
+      material.blendSrc = THREE.OneFactor;
+      material.blendDst = THREE.OneFactor;
+      return;
+    default:
+      // Unreachable: `planPreviewMaterial` refuses every other mode before a
+      // plan exists. Throwing rather than picking one keeps it that way.
+      throw new Error(`blend mode ${mode} reached the preview without a plan`);
+  }
+}
+
+function sideOf(side: PreviewSide): THREE.Side {
+  switch (side) {
+    case "front":
+      return THREE.FrontSide;
+    case "back":
+      return THREE.BackSide;
+    case "double":
+      return THREE.DoubleSide;
+  }
+}
+
+/// The Three colour space for an authored source space, or a named refusal.
+///
+/// The same two gaps `resolvePaint` names, for the same reason: Rec.709 and
+/// P3 are not sRGB, and handing their channels to Three as if they were is a
+/// silent substitution rather than a colour conversion.
+function textureColorSpace(
+  space: SourceColorSpace,
+): { ok: true; value: string } | { ok: false; reason: string } {
+  switch (space) {
+    case "srgb":
+      return { ok: true, value: THREE.SRGBColorSpace };
+    case "linear":
+      return { ok: true, value: THREE.LinearSRGBColorSpace };
+    case "rec709":
+      return { ok: false, reason: "a Rec.709 texture needs the engine's decode, not Three's" };
+    case "display-p3":
+      return { ok: false, reason: "Display P3 needs the 3.3 primary conversion" };
+  }
+}
+
+function wrapOf(wrap: MaterialTextureSlot["wrap"]): THREE.Wrapping {
+  switch (wrap) {
+    case "clamp":
+      return THREE.ClampToEdgeWrapping;
+    case "repeat":
+      return THREE.RepeatWrapping;
+    case "mirror-repeat":
+      return THREE.MirroredRepeatWrapping;
+  }
+}
+
+/// The UV transform for a fit mode, given the texture and the box it fills.
+///
+/// Only the modes the contract calls plain UV transforms are handled; the plan
+/// carries the rest to the caller, which names them. `tile` is the wrap mode's
+/// job and needs no transform of its own.
+function applyFit(texture: THREE.Texture, fit: MaterialTextureSlot["fit"], aspect: number): void {
+  // The decoded picture's own aspect, once it has decoded. Before that the
+  // box's aspect is used, which makes the first frame a stretch rather than a
+  // wrongly cropped picture; `onTextureLoad` redraws with the real ratio.
+  const image = texture.image as { width?: number; height?: number } | undefined;
+  const ratio =
+    image?.width && image?.height ? image.width / image.height : aspect;
+  const scale = ratio / aspect;
+  switch (fit) {
+    case "stretch":
+    case "original":
+    case "tile":
+      return;
+    case "contain":
+      // Fit inside: shrink the sampled region on the long axis so the whole
+      // picture lands in the box, letterboxing the rest.
+      if (scale > 1) {
+        texture.repeat.set(1, scale);
+        texture.offset.set(0, (1 - scale) / 2);
+      } else {
+        texture.repeat.set(1 / scale, 1);
+        texture.offset.set((1 - 1 / scale) / 2, 0);
+      }
+      return;
+    case "cover":
+    case "crop":
+      if (scale > 1) {
+        texture.repeat.set(1 / scale, 1);
+        texture.offset.set((1 - 1 / scale) / 2, 0);
+      } else {
+        texture.repeat.set(1, scale);
+        texture.offset.set(0, (1 - scale) / 2);
+      }
+      return;
+    default:
+      return;
+  }
+}
+
+/// What the preview needs in order to draw authored materials.
+///
+/// Optional throughout: the viewport still draws a scene whose objects carry
+/// no material binding, which is what every scene did before 11.12 and what
+/// the depth tests below still exercise.
+export interface PreviewContext {
+  readonly document: SceneDocument;
+  readonly sources: AssetSources;
+  /// Called once a texture's bytes have decoded. A data URL still decodes
+  /// asynchronously, so without this the first frame draws untextured and
+  /// nothing ever asks for a second one.
+  readonly onTextureLoad?: () => void;
+  /// Collects the video elements a moving texture reads, so the playhead can
+  /// drive them and dispose can release them.
+  readonly videos: PreviewVideo[];
+  /// Textures allocated here, for disposal.
+  readonly textures: THREE.Texture[];
+}
+
+/// Build one texture from an asset's bytes.
+///
+/// Returns the named reason instead of a texture when the authored colour
+/// space is one this layer cannot convert — the same refusal `resolvePaint`
+/// makes, because a texture handed to Three in the wrong space is the same
+/// silent substitution as a colour handed over in the wrong space.
+function buildTexture(
+  texture: PreviewTexture,
+  aspect: number,
+  context: PreviewContext,
+): { ok: true; texture: THREE.Texture } | { ok: false; reason: string } {
+  const space = textureColorSpace(texture.colorSpace);
+  if (!space.ok) return { ok: false, reason: `${texture.slot}: ${space.reason}` };
+
+  let built: THREE.Texture;
+  if (texture.moving) {
+    // A moving texture is an element the browser decodes, not bytes this
+    // layer parses. It starts paused at its first frame: which frame is
+    // shown is the timeline's decision, never the material's (1.3), and
+    // `setPreviewTime` is how the playhead states it.
+    const element = window.document.createElement("video");
+    element.src = texture.source.dataUrl;
+    element.muted = true;
+    element.loop = true;
+    element.playsInline = true;
+    element.preload = "auto";
+    const video = new THREE.VideoTexture(element);
+    context.videos.push({ element, texture: video });
+    element.addEventListener("loadeddata", () => {
+      video.needsUpdate = true;
+      context.onTextureLoad?.();
+    });
+    built = video;
+  } else {
+    built = new THREE.TextureLoader().load(texture.source.dataUrl, () => {
+      context.onTextureLoad?.();
+    });
+  }
+
+  built.colorSpace = space.value;
+  built.wrapS = wrapOf(texture.wrap);
+  built.wrapT = wrapOf(texture.wrap);
+  const filtering =
+    texture.filtering === "nearest" ? THREE.NearestFilter : THREE.LinearFilter;
+  built.magFilter = filtering;
+  built.minFilter = filtering;
+  // `tile` is the wrap mode's job, and clamping a tiled texture would show one
+  // copy with stretched edges rather than the repeat the author asked for.
+  if (texture.fit === "tile" && texture.wrap === "clamp") {
+    built.wrapS = THREE.RepeatWrapping;
+    built.wrapT = THREE.RepeatWrapping;
+  }
+  applyFit(built, texture.fit, aspect);
+  context.textures.push(built);
+  return { ok: true, texture: built };
+}
+
+/// The texture an `image` object addresses directly.
+///
+/// An image object names its asset itself rather than through a material, so
+/// it gets the same bytes by the same route. Its authored `fit` is the one
+/// the material texture slot carries; the source space is the library's,
+/// which for a still is the space the import tagged.
+function imageObjectTexture(
+  object: Extract<SceneObject, { type: "image" }>,
+  aspect: number,
+  context: PreviewContext | undefined,
+): { ok: true; texture: THREE.Texture } | { ok: false; reason: string } | undefined {
+  if (!context) return undefined;
+  const source = context.sources.get(object.assetId);
+  if (!source) return undefined;
+  return buildTexture(
+    {
+      slot: "baseColor",
+      source,
+      fit: object.fit,
+      wrap: "clamp",
+      filtering: "linear",
+      // An image asset carries no per-object space tag; the preview surface
+      // is sRGB (B.1) and that is what the import records for a still.
+      colorSpace: "srgb",
+      moving: source.mediaType.startsWith("video/"),
+    },
+    aspect,
+    context,
+  );
+}
+
+/// Turn a plan into the Three material that draws it.
+function buildPlannedMaterial(
+  plan: PreviewMaterialPlan,
+  paint: PaintResolution,
+  aspect: number,
+  context: PreviewContext,
+  unsupported: string[],
+  objectId: string,
+): THREE.Material {
+  const color = paint.kind === "color" ? paint.color : new THREE.Color(0xffffff);
+  const maps: Partial<Record<string, THREE.Texture>> = {};
+  for (const texture of plan.textures) {
+    const built = buildTexture(texture, aspect, context);
+    if (!built.ok) {
+      unsupported.push(`${objectId}: ${built.reason}`);
+      continue;
+    }
+    maps[texture.slot] = built.texture;
+  }
+  for (const missing of plan.missingTextures) {
+    // The bytes never arrived. Said out loud, because a flat colour where a
+    // logo should be looks exactly like a material with no texture.
+    unsupported.push(`${objectId}: texture ${missing} has no bytes in the asset library`);
+  }
+
+  const shared = {
+    color,
+    transparent: plan.transparent,
+    opacity: plan.opacity,
+    depthTest: plan.depthTest,
+    depthWrite: plan.depthWrite,
+    side: sideOf(plan.side),
+    premultipliedAlpha: plan.premultipliedAlpha,
+    ...(plan.alphaTest === undefined ? {} : { alphaTest: plan.alphaTest }),
+    ...(maps.baseColor ? { map: maps.baseColor } : {}),
+  };
+
+  const material = plan.lit
+    ? new THREE.MeshStandardMaterial({
+        ...shared,
+        metalness: plan.lighting?.metallic ?? 0,
+        roughness: plan.lighting?.roughness ?? 0.5,
+        emissiveIntensity: plan.lighting?.emissiveIntensity ?? 1,
+        ...(maps.normal ? { normalMap: maps.normal } : {}),
+        ...(maps.roughness ? { roughnessMap: maps.roughness } : {}),
+        ...(maps.metallic ? { metalnessMap: maps.metallic } : {}),
+        ...(maps.emissive ? { emissiveMap: maps.emissive } : {}),
+        ...(maps.occlusion ? { aoMap: maps.occlusion } : {}),
+      })
+    : new THREE.MeshBasicMaterial(shared);
+  applyBlending(material, plan.blending);
+  return material;
 }

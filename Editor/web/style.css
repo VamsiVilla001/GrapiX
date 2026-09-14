@@ -1160,3 +1160,54 @@ button.primary:hover:not(:disabled) {
 .log li.bad .log-what {
   color: var(--bad);
 }
+
+/* The material editor (11.12). The library list stays the primary surface;
+   the editor is a section under it that appears once a material is selected,
+   so there is one place a material is looked at and edited. */
+.material-editor {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.material-editor h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.material-editor fieldset {
+  margin: 8px 0 0;
+  padding: 6px 8px 2px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.material-editor legend {
+  padding: 0 4px;
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.material-editor input[type="color"] {
+  width: 36px;
+  height: 22px;
+  padding: 0;
+}
+
+.material-editor input[type="number"],
+.material-editor input[type="text"] {
+  width: 72px;
+  padding: 3px 6px;
+}
+
+.material-editor input[type="text"]#material-name {
+  width: 140px;
+}
+
+/* A disabled control carries its reason in `title`; the cursor is the hint
+   that there is one to read. */
+.material-editor :disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}

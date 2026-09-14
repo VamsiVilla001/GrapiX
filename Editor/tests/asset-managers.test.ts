@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 import type { SceneDocument, SceneObject } from "@grapix/contracts";
 import { findNode } from "../src/agent-surface";
 import { fontManagerPanel, fontUsers } from "../src/font-manager";
-import { materialManagerPanel, relinkMaterial, usersOf } from "../src/material-manager";
+import { materialManagerPanel, relinkPreview, usersOf } from "../src/material-manager";
 
 function base(id: string): Record<string, unknown> {
   return {
@@ -76,8 +76,28 @@ function scene(
   } as unknown as SceneDocument;
 }
 
-const brandMaterial = { materialId: "brand", name: "Brand", kind: "unlit" };
-const altMaterial = { materialId: "alt", name: "Alt", kind: "unlit" };
+/** A material as the wire actually carries it.
+ *
+ *  Every field below has a serde default in `MaterialDefinition`, which means
+ *  it is always *present* in a serialised scene — a fixture carrying only the
+ *  id, name and kind is a shape no document ever has, and a panel written
+ *  against it would be written against a scene that cannot occur. */
+const material = (materialId: string, name: string): unknown => ({
+  materialId,
+  name,
+  kind: "unlit",
+  color: { type: "solid", color: { r: 1, g: 1, b: 1, a: 1, space: "srgb" } },
+  opacity: 1,
+  blendMode: "normal",
+  alphaMode: "straight",
+  cullMode: "back",
+  depthMode: "read-write",
+  doubleSided: false,
+  textures: [],
+});
+
+const brandMaterial = material("brand", "Brand");
+const altMaterial = material("alt", "Alt");
 
 const font = (fontId: string, displayName: string): unknown => ({
   fontId,
@@ -105,8 +125,10 @@ describe("material usage is read from the document, never indexed", () => {
     );
     const panel = materialManagerPanel(document);
 
-    expect(findNode(panel, "material/brand")!.description).toBe("shared by 2 objects");
-    expect(findNode(panel, "material/alt")!.description).toBe("used by 1 object");
+    // The count is the warning; the rest of the line summarises what the
+    // material paints, so the assertion is on the sentence that matters.
+    expect(findNode(panel, "material/brand")!.description).toContain("shared by 2 objects");
+    expect(findNode(panel, "material/alt")!.description).toContain("used by 1 object");
     expect(findNode(panel, "material/brand/usage")!.value).toBe("a, b");
   });
 
@@ -114,7 +136,7 @@ describe("material usage is read from the document, never indexed", () => {
     const document = scene([], [brandMaterial]);
     const panel = materialManagerPanel(document);
 
-    expect(findNode(panel, "material/brand")!.description).toBe("unused");
+    expect(findNode(panel, "material/brand")!.description).toContain("unused");
     const del = findNode(panel, "material/brand")!.actions!.find((a) => a.name === "delete")!;
     expect(del.unavailable).toBeUndefined();
   });
@@ -132,7 +154,9 @@ describe("material usage is read from the document, never indexed", () => {
     const panel = materialManagerPanel(document);
 
     const del = findNode(panel, "material/brand")!.actions!.find((a) => a.name === "delete")!;
-    expect(del.unavailable).toBe("Brand is used by 2 object(s)");
+    expect(del.unavailable).toBe(
+      "Brand is used by 2 object(s); relink them first",
+    );
   });
 });
 
@@ -144,7 +168,7 @@ describe("relink previews its blast radius", () => {
     );
     const before = JSON.stringify(document);
 
-    expect(relinkMaterial(document, "brand", "alt")).toEqual(["a", "b"]);
+    expect(relinkPreview(document, "brand", "alt")).toEqual(["a", "b"]);
     // A preview that edited would be a confirmation dialog that had already
     // done the thing it was asking about.
     expect(JSON.stringify(document)).toBe(before);
@@ -152,7 +176,7 @@ describe("relink previews its blast radius", () => {
 
   it("relinking a material to itself would change nothing, and says so", () => {
     const document = scene([meshWith("a", "brand")], [brandMaterial]);
-    expect(relinkMaterial(document, "brand", "brand")).toEqual([]);
+    expect(relinkPreview(document, "brand", "brand")).toEqual([]);
   });
 });
 

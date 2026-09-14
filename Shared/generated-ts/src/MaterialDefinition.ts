@@ -5,6 +5,7 @@ import type { ColorValue } from "./ColorValue";
 import type { CullMode } from "./CullMode";
 import type { DepthMode } from "./DepthMode";
 import type { MaterialKind } from "./MaterialKind";
+import type { MaterialLighting } from "./MaterialLighting";
 import type { MaterialTextureSlot } from "./MaterialTextureSlot";
 
 /**
@@ -21,6 +22,11 @@ color: ColorValue,
  * 0–1, multiplied with the object's own opacity.
  */
 opacity: number, blendMode: BlendMode, alphaMode: AlphaMode, cullMode: CullMode, depthMode: DepthMode, doubleSided: boolean, textures: Array<MaterialTextureSlot>, 
+/**
+ * How the surface responds to light. Present only on a lit kind, and
+ * refused on the others rather than ignored — see [`MaterialLighting`].
+ */
+lighting?: MaterialLighting, 
 /**
  * Set only for `MaterialKind::Shader`.
  */

@@ -706,7 +706,8 @@ mod tests {
             material_id: id.to_string(), name: id.to_string(), kind: MaterialKind::Unlit,
             color: ColorValue::opaque_white(), opacity: 1.0, blend_mode: Default::default(),
             alpha_mode: Default::default(), cull_mode: Default::default(), depth_mode: Default::default(),
-            double_sided: false, textures: Vec::new(), shader_id: None,
+            double_sided: false, textures: Vec::new(), lighting: None,
+        shader_id: None,
         }
     }
 
@@ -716,6 +717,35 @@ mod tests {
         base.height = 80.0;
         base.material_slots = Some(slots.iter().map(|(slot, id)| ((*slot).to_string(), MaterialBinding::new(*id))).collect::<BTreeMap<_, _>>());
         MeshObject { base, mesh_kind: kind, depth: 20.0, slab: None, model_asset_id: None, material_elements: None, anchor_3d: None, clip_name: None, clip_index: None, time_scale: None, frame_offset: None, animation_loop: false }
+    }
+
+    #[test]
+    fn the_contract_names_the_same_elements_the_geometry_builder_produces() {
+        // The authoring surface offers `MeshPrimitiveKind::material_elements`
+        // as the slot keys; this builder decides what the renderer actually
+        // looks up. Two lists for one vocabulary is how an Editor comes to
+        // write a slot named `upper` that the engine refuses as unassigned,
+        // with nothing on screen to say why — so they are checked, not
+        // assumed to agree.
+        for kind in [
+            MeshPrimitiveKind::Cube,
+            MeshPrimitiveKind::Sphere,
+            MeshPrimitiveKind::Cylinder,
+            MeshPrimitiveKind::Torus,
+            MeshPrimitiveKind::Slab,
+        ] {
+            let object = mesh(kind, &[]);
+            let (_, required, _) =
+                primitive_geometry(&object).expect("every primitive builds its own geometry");
+            assert_eq!(
+                required,
+                object.material_element_names(),
+                "{kind:?} names different elements in the contract and the builder"
+            );
+        }
+        // Only the imported asset knows a model's element names, so the
+        // contract declares none rather than a plausible default.
+        assert!(MeshPrimitiveKind::Model.material_elements().is_empty());
     }
 
     #[test]

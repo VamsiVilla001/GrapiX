@@ -253,6 +253,51 @@ pub enum Refusal {
     UnsupportedAlphaMode { mode: material::AlphaMode },
     /// A depth mode the renderer cannot reproduce exactly.
     UnsupportedDepthMode { mode: material::DepthMode },
+    /// A material parameter is outside the range its unit is defined over —
+    /// an opacity of 1.4, a roughness of -1. Refused rather than clamped:
+    /// clamping answers a question the author did not ask, and the value they
+    /// typed never appears again to tell them it was wrong.
+    MaterialParameterOutOfRange { material_id: String, field: String },
+    /// A lighting block on a material whose kind is not lit. The renderer
+    /// would never read it, so accepting it would store authored intent that
+    /// silently does nothing.
+    MaterialLightingOnUnlitKind {
+        material_id: String,
+        kind: material::MaterialKind,
+    },
+    /// A texture slot name no standard material declares. A shader may name
+    /// its own inputs; every other kind must use `STANDARD_TEXTURE_SLOTS`,
+    /// or the UI and the renderer are looking for different strings.
+    MaterialUnknownTextureSlot { material_id: String, slot: String },
+    /// A texture points at an asset id the scene's library does not hold.
+    MaterialTextureAssetUnknown {
+        material_id: String,
+        slot: String,
+        asset_id: String,
+    },
+    /// A texture points at an asset that cannot be sampled as this kind of
+    /// texture — a font in a base-colour slot, or a still where the material
+    /// declares itself a video.
+    MaterialTextureAssetWrongKind {
+        material_id: String,
+        slot: String,
+        asset_id: String,
+        actual: scene::AssetKind,
+    },
+    /// An edit named a material the scene's library does not hold.
+    MaterialUnknown { material_id: String },
+    /// A delete was refused because objects still bind the material. The
+    /// count is carried so the caller can say what would break.
+    MaterialInUse {
+        material_id: String,
+        user_count: usize,
+    },
+    /// A material of this kind cannot be created from nothing; it needs
+    /// something only the caller has, named here.
+    MaterialKindNeedsPrerequisite {
+        kind: material::MaterialKind,
+        needs: String,
+    },
     /// A vector fill or stroke uses a gradient that the active path
     /// rasteriser cannot carry exactly. It is refused at preparation rather
     /// than reduced to a stop or flat colour (invariant 18).
@@ -637,6 +682,50 @@ impl std::fmt::Display for Refusal {
                 write!(f, "unsupported alpha mode: {mode:?}")
             }
             Refusal::UnsupportedDepthMode { mode } => write!(f, "unsupported depth mode: {mode:?}"),
+            Refusal::MaterialParameterOutOfRange { material_id, field } => {
+                write!(f, "material {material_id}: {field} is out of range")
+            }
+            Refusal::MaterialLightingOnUnlitKind { material_id, kind } => write!(
+                f,
+                "material {material_id}: a {} material is not lit and cannot carry lighting",
+                kind.wire_name()
+            ),
+            Refusal::MaterialUnknownTextureSlot { material_id, slot } => write!(
+                f,
+                "material {material_id}: unknown texture slot {slot}"
+            ),
+            Refusal::MaterialTextureAssetUnknown {
+                material_id,
+                slot,
+                asset_id,
+            } => write!(
+                f,
+                "material {material_id}: texture slot {slot} references unknown asset {asset_id}"
+            ),
+            Refusal::MaterialTextureAssetWrongKind {
+                material_id,
+                slot,
+                asset_id,
+                actual,
+            } => write!(
+                f,
+                "material {material_id}: texture slot {slot} references {asset_id}, which is a {actual:?} asset"
+            ),
+            Refusal::MaterialUnknown { material_id } => {
+                write!(f, "unknown material: {material_id}")
+            }
+            Refusal::MaterialInUse {
+                material_id,
+                user_count,
+            } => write!(
+                f,
+                "material {material_id} is used by {user_count} object(s)"
+            ),
+            Refusal::MaterialKindNeedsPrerequisite { kind, needs } => write!(
+                f,
+                "a {} material needs {needs}",
+                kind.wire_name()
+            ),
             Refusal::AssetMissing { hash } => write!(f, "asset missing: {hash}"),
             Refusal::ProtocolMismatch { expected, actual } => {
                 write!(f, "protocol mismatch: expected {expected}, got {actual}")
@@ -1039,6 +1128,40 @@ impl Refusal {
             Self::UnsupportedFitMode {
                 mode: material::FitMode::NineSlice,
             },
+            Self::MaterialParameterOutOfRange {
+                material_id: "audit".into(),
+                field: "opacity".into(),
+            },
+            Self::MaterialLightingOnUnlitKind {
+                material_id: "audit".into(),
+                kind: material::MaterialKind::Unlit,
+            },
+            Self::MaterialUnknownTextureSlot {
+                material_id: "audit".into(),
+                slot: "audit".into(),
+            },
+            Self::MaterialTextureAssetUnknown {
+                material_id: "audit".into(),
+                slot: "baseColor".into(),
+                asset_id: "audit".into(),
+            },
+            Self::MaterialTextureAssetWrongKind {
+                material_id: "audit".into(),
+                slot: "baseColor".into(),
+                asset_id: "audit".into(),
+                actual: scene::AssetKind::Font,
+            },
+            Self::MaterialUnknown {
+                material_id: "audit".into(),
+            },
+            Self::MaterialInUse {
+                material_id: "audit".into(),
+                user_count: 2,
+            },
+            Self::MaterialKindNeedsPrerequisite {
+                kind: material::MaterialKind::Image,
+                needs: "audit".into(),
+            },
             Self::AssetMissing {
                 hash: ContentHash("audit".into()),
             },
@@ -1337,6 +1460,14 @@ impl Refusal {
             Self::UnsupportedCullMode { .. } => "unsupportedCullMode",
             Self::UnsupportedAlphaMode { .. } => "unsupportedAlphaMode",
             Self::UnsupportedDepthMode { .. } => "unsupportedDepthMode",
+            Self::MaterialParameterOutOfRange { .. } => "materialParameterOutOfRange",
+            Self::MaterialLightingOnUnlitKind { .. } => "materialLightingOnUnlitKind",
+            Self::MaterialUnknownTextureSlot { .. } => "materialUnknownTextureSlot",
+            Self::MaterialTextureAssetUnknown { .. } => "materialTextureAssetUnknown",
+            Self::MaterialTextureAssetWrongKind { .. } => "materialTextureAssetWrongKind",
+            Self::MaterialUnknown { .. } => "materialUnknown",
+            Self::MaterialInUse { .. } => "materialInUse",
+            Self::MaterialKindNeedsPrerequisite { .. } => "materialKindNeedsPrerequisite",
             Self::UnsupportedPathGradient { .. } => "unsupportedPathGradient",
             Self::VectorTessellationFailed { .. } => "vectorTessellationFailed",
             Self::AssetMissing { .. } => "assetMissing",

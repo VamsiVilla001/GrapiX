@@ -164,8 +164,138 @@
 
         <section data-panel="materials" class="panel">
           <h2>Materials</h2>
+          <!-- The material library (11.12). The kind list, the blend/fit/cull
+               vocabularies and the 2D/3D split are all read from
+               `material-reference.ts`, generated from the Rust enums that own
+               them, so this menu cannot offer a value the contract refuses. -->
+          <div class="object-tools">
+            <label class="frame-control">
+              <span>New</span>
+              <select id="material-kind" aria-label="Kind of material to create"></select>
+            </label>
+            <label class="frame-control">
+              <span>Asset</span>
+              <select id="material-new-asset" aria-label="Asset for the new material"></select>
+            </label>
+            <button id="material-create" type="button">Add</button>
+          </div>
           <div id="material-mount" class="asset-manager-mount"></div>
           <p id="material-empty" class="empty">No materials in this scene.</p>
+
+          <!-- The editor for the selected material. Hidden rather than
+               disabled when nothing is selected: a form with no subject has
+               no honest values to show. -->
+          <div id="material-editor" class="material-editor" hidden>
+            <h3 id="material-editor-heading">Material</h3>
+            <div class="object-tools">
+              <label class="frame-control">
+                <span>Name</span>
+                <input id="material-name" type="text" spellcheck="false" autocomplete="off" />
+              </label>
+              <label class="frame-control">
+                <span>Kind</span>
+                <select id="material-edit-kind" aria-label="Material kind"></select>
+              </label>
+            </div>
+            <div class="object-tools">
+              <label class="frame-control">
+                <span>Colour</span>
+                <input id="material-color" type="color" aria-label="Base colour" />
+              </label>
+              <label class="frame-control">
+                <span>Alpha</span>
+                <input id="material-color-alpha" type="number" min="0" max="1" step="0.05" />
+              </label>
+              <label class="frame-control">
+                <span>Opacity</span>
+                <input id="material-opacity" type="number" min="0" max="1" step="0.05" />
+              </label>
+              <label class="frame-control">
+                <span>Double sided</span>
+                <input id="material-double-sided" type="checkbox" />
+              </label>
+            </div>
+            <div class="object-tools">
+              <label class="frame-control">
+                <span>Blend</span>
+                <select id="material-blend" aria-label="Blend mode"></select>
+              </label>
+              <label class="frame-control">
+                <span>Alpha mode</span>
+                <select id="material-alpha" aria-label="Alpha interpretation"></select>
+              </label>
+              <label class="frame-control">
+                <span>Cull</span>
+                <select id="material-cull" aria-label="Cull mode"></select>
+              </label>
+              <label class="frame-control">
+                <span>Depth</span>
+                <select id="material-depth" aria-label="Depth mode"></select>
+              </label>
+            </div>
+
+            <!-- Shown only for a lit kind. An unlit material carrying lighting
+                 is refused by the contract rather than ignored, so the panel
+                 must not offer it. -->
+            <fieldset id="material-lighting" class="material-lighting">
+              <legend>3D surface</legend>
+              <div class="object-tools">
+                <label class="frame-control">
+                  <span>Metallic</span>
+                  <input id="material-metallic" type="number" min="0" max="1" step="0.05" />
+                </label>
+                <label class="frame-control">
+                  <span>Roughness</span>
+                  <input id="material-roughness" type="number" min="0" max="1" step="0.05" />
+                </label>
+                <label class="frame-control">
+                  <span>Emissive</span>
+                  <input id="material-emissive" type="color" aria-label="Emissive colour" />
+                </label>
+                <label class="frame-control">
+                  <span>Emissive ×</span>
+                  <input id="material-emissive-intensity" type="number" min="0" step="0.1" />
+                </label>
+              </div>
+            </fieldset>
+
+            <fieldset class="material-textures">
+              <legend>Textures</legend>
+              <div class="object-tools">
+                <label class="frame-control">
+                  <span>Slot</span>
+                  <select id="material-texture-slot" aria-label="Texture slot to add"></select>
+                </label>
+                <label class="frame-control">
+                  <span>Asset</span>
+                  <select id="material-texture-asset" aria-label="Asset for the texture slot"></select>
+                </label>
+                <button id="material-texture-add" type="button">Add texture</button>
+              </div>
+              <!-- The sampler controls act on the texture row selected in the
+                   list above, so there is one selection to think about rather
+                   than a second parallel one. -->
+              <div class="object-tools">
+                <label class="frame-control">
+                  <span>Fit</span>
+                  <select id="material-texture-fit" aria-label="Texture fit"></select>
+                </label>
+                <label class="frame-control">
+                  <span>Wrap</span>
+                  <select id="material-texture-wrap" aria-label="Texture wrap"></select>
+                </label>
+                <label class="frame-control">
+                  <span>Filter</span>
+                  <select id="material-texture-filtering" aria-label="Texture filtering"></select>
+                </label>
+                <label class="frame-control">
+                  <span>Space</span>
+                  <select id="material-texture-space" aria-label="Texture source colour space"></select>
+                </label>
+              </div>
+              <p id="material-texture-hint" class="empty">Select a texture to edit its sampling.</p>
+            </fieldset>
+          </div>
         </section>
 
         <section data-panel="assets" class="panel">
