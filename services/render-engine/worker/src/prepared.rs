@@ -20,11 +20,15 @@
 
 use std::collections::{HashMap, HashSet};
 
+use gx_contracts::animation::{evaluate_channel, set_base_property, validate_scene_animation};
 use gx_contracts::color::OutputTransform;
+use gx_contracts::control::validate_control_fields;
 use gx_contracts::material::MaterialSupport;
+use gx_contracts::phases::{validate_phases, PhaseKind, TimelinePhase};
 use gx_contracts::scene::{
     resolve_hierarchy, HierarchyDiagnostic, ResolvedObject, SceneDocument, SceneObject,
 };
+use gx_contracts::text_style::validate_text_styles;
 use gx_contracts::validate::validate_scene_document;
 use gx_contracts::{ContentHash, Refusal};
 
@@ -83,6 +87,10 @@ impl PreparedScene {
         // The validator reports every fault because an author fixing a scene
         // needs the whole list. Preparation only needs to know it cannot
         // proceed, so it takes the first and stops.
+        validate_scene_animation(&document)?;
+        validate_phases(&document.timeline)?;
+        validate_control_fields(&document)?;
+        validate_text_styles(&document)?;
         if let Some(refusal) =
             validate_scene_document(&document, support, available, true).into_iter().next()
         {
@@ -174,6 +182,76 @@ impl PreparedScene {
         .expect("mesh rasterisation refusal survived publish-time validation");
         surface.encode(output)
     }
+    /// Whether Program must evaluate this scene for each output frame.
+    pub fn has_animation(&self) -> bool {
+        self.document
+            .timeline
+            .channels
+            .iter()
+            .any(|channel| !channel.keys.is_empty())
+    }
+
+    /// A named phase prepared with this revision.
+    pub fn phase(&self, address: &str) -> Option<&TimelinePhase> {
+        self.document
+            .timeline
+            .phases
+            .iter()
+            .find(|phase| phase.address() == address)
+    }
+
+    /// Phases of one operator kind, in authored timeline order.
+    pub fn phases_of(&self, kind: PhaseKind) -> impl Iterator<Item = &TimelinePhase> {
+        self.document
+            .timeline
+            .phases
+            .iter()
+            .filter(move |phase| phase.kind == kind)
+    }
+
+    /// Render one authored scene frame through the same Rust evaluator the
+    /// Editor is pinned against.
+    ///
+    /// Static scenes retain the prepared-surface fast path. The software T2
+    /// reference backend re-rasterises animated geometry for correctness; the
+    /// hardware backend will map these evaluated properties to GPU uniforms.
+    pub fn frame_at(&self, scene_frame: u64, output: OutputTransform) -> Result<Frame, Refusal> {
+        if !self.has_animation() {
+            return Ok(self.frame(output));
+        }
+
+        let mut evaluated = self.document.clone();
+        for channel in &self.document.timeline.channels {
+            if let Some(value) = evaluate_channel(channel, scene_frame) {
+                set_base_property(
+                    &mut evaluated,
+                    &channel.object_id,
+                    &channel.property,
+                    value,
+                )?;
+            }
+        }
+        let resolution = resolve_hierarchy(&evaluated.objects);
+        let paths = PreparedPaths::prepare(&evaluated, &resolution.effective)?;
+        let mut surface = LyonPathRasteriser.rasterise(
+            &paths,
+            evaluated.canvas.width,
+            evaluated.canvas.height,
+        );
+        crate::text::rasterise_texts(
+            &self.texts,
+            &evaluated,
+            &resolution.effective,
+            &mut surface,
+        )?;
+        crate::mesh::rasterise_meshes(
+            &self.meshes,
+            &evaluated,
+            &resolution.effective,
+            &mut surface,
+        )?;
+        Ok(surface.encode(output))
+    }
 
     /// Glyph runs shaped from packaged fonts only.
     pub fn texts(&self) -> &PreparedTexts {
@@ -189,6 +267,9 @@ impl PreparedScene {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gx_contracts::animation::{KeyframeChannel, SceneEasing, SceneKeyframe};
+    use gx_contracts::control::{ControlField, ControlFieldKind};
+    use gx_contracts::text_style::{StyleNumber, TextStyle};
     use gx_contracts::color::ColorValue;
     use gx_contracts::font::{
         EmbeddingPolicy, FontDefinition, FontFaceDefinition, FontFormat, FontLoadStatus,
@@ -459,6 +540,142 @@ mod tests {
             prepared.diagnostics().len(),
             1,
             "the dropped edge must be reportable, not invisible"
+        );
+    }
+
+    #[test]
+    fn an_operator_contract_the_engine_cannot_address_refuses_at_publish() {
+        // The control contract, the style library and the phase list are all
+        // authoring surfaces the Editor maintains incrementally. A document
+        // that reaches the engine by any other route is held against the same
+        // rules here, before a single pixel is produced.
+        let ambiguous = ControlField {
+            field_id: "headline".into(),
+            label: "Headline".into(),
+            object_id: "bg".into(),
+            property: "opacity".into(),
+            kind: ControlFieldKind::Number,
+            default: None,
+        };
+        let scene = SceneDocument {
+            controls: vec![ambiguous.clone(), ambiguous],
+            ..document(vec![rect("bg")])
+        };
+        assert!(matches!(
+            PreparedScene::prepare(
+                scene,
+                &HashSet::new(),
+                &AssetBytes::new(),
+                &MaterialSupport::fixed_function()
+            ),
+            Err(Refusal::ControlFieldDuplicate { field_id }) if field_id == "headline"
+        ));
+
+        let styled = SceneDocument {
+            text_styles: vec![TextStyle {
+                style_id: "headline".into(),
+                name: "Headline".into(),
+                font_id: "font_absent".into(),
+                size: StyleNumber::Literal(32.0),
+                line_height: None,
+                letter_spacing: None,
+                text_case: Default::default(),
+                fill: None,
+                stroke: None,
+                stroke_width: None,
+            }],
+            ..document(vec![rect("bg")])
+        };
+        assert!(matches!(
+            PreparedScene::prepare(
+                styled,
+                &HashSet::new(),
+                &AssetBytes::new(),
+                &MaterialSupport::fixed_function()
+            ),
+            Err(Refusal::TextStyleFontUnknown { style_id, font_id })
+                if style_id == "headline" && font_id == "font_absent"
+        ));
+
+        let overlapping = SceneDocument {
+            timeline: SceneTimeline {
+                duration_frames: 100,
+                phases: vec![
+                    TimelinePhase {
+                        kind: PhaseKind::In,
+                        name: None,
+                        start_frame: 0,
+                        end_frame: 30,
+                    },
+                    TimelinePhase {
+                        kind: PhaseKind::Hold,
+                        name: None,
+                        start_frame: 20,
+                        end_frame: 40,
+                    },
+                ],
+                ..Default::default()
+            },
+            ..document(vec![rect("bg")])
+        };
+        assert!(matches!(
+            PreparedScene::prepare(
+                overlapping,
+                &HashSet::new(),
+                &AssetBytes::new(),
+                &MaterialSupport::fixed_function()
+            ),
+            Err(Refusal::TimelinePhaseOverlap { .. })
+        ));
+    }
+
+    #[test]
+    fn animated_frames_are_evaluated_before_rasterisation() {
+        let mut shape = RectObject {
+            base: ObjectBase::new("card", "card"),
+            radius: 0.0,
+        };
+        shape.base.width = 12.0;
+        shape.base.height = 12.0;
+        shape.base.fill = Some(ColorValue::opaque_white());
+        let mut scene = document(vec![SceneObject::Rect(shape)]);
+        scene.canvas.width = 64;
+        scene.canvas.height = 32;
+        scene.timeline.channels = vec![KeyframeChannel {
+            object_id: "card".into(),
+            property: "x".into(),
+            keys: vec![
+                SceneKeyframe {
+                    frame: 0,
+                    value: 0.0,
+                    easing: SceneEasing::Linear,
+                    bezier: None,
+                },
+                SceneKeyframe {
+                    frame: 100,
+                    value: 40.0,
+                    easing: SceneEasing::Linear,
+                    bezier: None,
+                },
+            ],
+        }];
+        let prepared = PreparedScene::prepare(
+            scene,
+            &HashSet::new(),
+            &AssetBytes::new(),
+            &MaterialSupport::fixed_function(),
+        )
+        .unwrap();
+
+        assert!(prepared.has_animation());
+        assert_eq!(
+            prepared.frame_at(0, OutputTransform::Srgb).unwrap(),
+            prepared.frame(OutputTransform::Srgb)
+        );
+        assert_ne!(
+            prepared.frame_at(100, OutputTransform::Srgb).unwrap(),
+            prepared.frame(OutputTransform::Srgb),
+            "the authored x channel must move pixels before output encoding"
         );
     }
 

@@ -324,6 +324,10 @@ mod tests {
             take_id: TakeId("not-published".into()),
             revision: Revision(1),
             committed_frame: 10,
+            scene_frame: 0,
+            playing: true,
+            phase: None,
+            stop_frame: None,
         });
         assert!(matches!(
             state.validate(),

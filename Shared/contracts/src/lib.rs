@@ -527,9 +527,19 @@ pub enum Refusal {
         expected: String,
         actual: String,
     },
+    /// A saved page belongs to a different template. Applying it by field id
+    /// alone could mutate an unrelated graphic whose controls happen to share
+    /// names.
+    TakePageSceneMismatch {
+        page_id: String,
+        expected: String,
+        actual: String,
+    },
     /// A saved text style names a font the scene does not carry. Applying it
     /// would make a renderer substitute a face, so the style refuses instead.
     TextStyleFontUnknown { style_id: String, font_id: String },
+    /// Two styles use one stable id, so applying by name would be ambiguous.
+    TextStyleDuplicate { style_id: String },
     /// A style id was requested but is not declared by this scene.
     TextStyleUnknown { style_id: String },
     /// A style references a design token the active project has not confirmed.
@@ -575,6 +585,17 @@ pub enum Refusal {
     DuplicateKeyframeFrame {
         object: String,
         property: String,
+        frame: u64,
+    },
+    /// Two channels target the same object/property pair. Evaluating both in
+    /// source order would create an undocumented last-writer-wins rule.
+    DuplicateAnimationChannel { object: String, property: String },
+    /// Keys must be ordered by frame because evaluation uses binary search.
+    /// Reordering silently would change the authored wire document.
+    AnimationKeyOrderInvalid {
+        object: String,
+        property: String,
+        previous: u64,
         frame: u64,
     },
     /// A channel targets a property that cannot be animated on this object
@@ -875,8 +896,19 @@ impl std::fmt::Display for Refusal {
                 f,
                 "template control field {field_id} requires {expected}, not {actual}"
             ),
+            Refusal::TakePageSceneMismatch {
+                page_id,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "take page {page_id} belongs to scene {actual}, not template {expected}"
+            ),
             Refusal::TextStyleFontUnknown { style_id, font_id } => {
                 write!(f, "text style {style_id} names unknown font {font_id}")
+            }
+            Refusal::TextStyleDuplicate { style_id } => {
+                write!(f, "scene declares text style {style_id} more than once")
             }
             Refusal::TextStyleUnknown { style_id } => {
                 write!(f, "scene has no text style {style_id}")
@@ -928,6 +960,18 @@ impl std::fmt::Display for Refusal {
             } => write!(
                 f,
                 "object {object} already has a keyframe for {property} at frame {frame}"
+            ),
+            Refusal::DuplicateAnimationChannel { object, property } => {
+                write!(f, "object {object} has more than one animation channel for {property}")
+            }
+            Refusal::AnimationKeyOrderInvalid {
+                object,
+                property,
+                previous,
+                frame,
+            } => write!(
+                f,
+                "keyframes for {object}.{property} move backwards from frame {previous} to {frame}"
             ),
             Refusal::AnimationPropertyUnsupported { object, property } => {
                 write!(f, "object {object} cannot animate {property}")
@@ -1131,12 +1175,20 @@ impl Refusal {
                 style_id: "audit".into(),
                 font_id: "audit".into(),
             },
+            Self::TakePageSceneMismatch {
+                page_id: "audit".into(),
+                expected: "audit".into(),
+                actual: "other".into(),
+            },
             Self::TextStyleUnknown {
                 style_id: "audit".into(),
             },
             Self::TextStyleTokenUnresolved {
                 style_id: "audit".into(),
                 token: "{palette.audit}".into(),
+            },
+            Self::TextStyleDuplicate {
+                style_id: "audit".into(),
             },
             Self::SceneObjectKindNotCreatable {
                 kind: "audit".into(),
@@ -1169,6 +1221,16 @@ impl Refusal {
             Self::DuplicateKeyframeFrame {
                 object: "audit".into(),
                 property: "audit".into(),
+                frame: 1,
+            },
+            Self::DuplicateAnimationChannel {
+                object: "audit".into(),
+                property: "audit".into(),
+            },
+            Self::AnimationKeyOrderInvalid {
+                object: "audit".into(),
+                property: "audit".into(),
+                previous: 2,
                 frame: 1,
             },
             Self::AnimationPropertyUnsupported {
@@ -1307,7 +1369,9 @@ impl Refusal {
             Self::ControlFieldDuplicate { .. } => "controlFieldDuplicate",
             Self::ControlFieldUnknown { .. } => "controlFieldUnknown",
             Self::ControlValueTypeMismatch { .. } => "controlValueTypeMismatch",
+            Self::TakePageSceneMismatch { .. } => "takePageSceneMismatch",
             Self::TextStyleFontUnknown { .. } => "textStyleFontUnknown",
+            Self::TextStyleDuplicate { .. } => "textStyleDuplicate",
             Self::TextStyleUnknown { .. } => "textStyleUnknown",
             Self::TextStyleTokenUnresolved { .. } => "textStyleTokenUnresolved",
             Self::UnknownPackageFormatVersion { .. } => "unknownPackageFormatVersion",
@@ -1338,6 +1402,8 @@ impl Refusal {
             Self::TimelinePhaseUnknown { .. } => "timelinePhaseUnknown",
             Self::KeyframeOutOfRange { .. } => "keyframeOutOfRange",
             Self::DuplicateKeyframeFrame { .. } => "duplicateKeyframeFrame",
+            Self::DuplicateAnimationChannel { .. } => "duplicateAnimationChannel",
+            Self::AnimationKeyOrderInvalid { .. } => "animationKeyOrderInvalid",
             Self::AnimationPropertyUnsupported { .. } => "animationPropertyUnsupported",
             Self::AnimationChannelUnknown { .. } => "animationChannelUnknown",
             Self::KeyframeUnknown { .. } => "keyframeUnknown",

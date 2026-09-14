@@ -26,7 +26,9 @@ use std::sync::Mutex;
 
 use gx_contracts::Refusal;
 use gx_contracts::{Revision, TakeId};
-use gx_control_plane::intent::{ClearRequest, CueRequest, TakeAt, TakeCommitted, TakeRequest};
+use gx_control_plane::intent::{
+    ClearRequest, CueRequest, PhaseCommitted, PhaseRequest, TakeAt, TakeCommitted, TakeRequest,
+};
 use gx_control_plane::message::{ClientRequest, EngineReply, OutputConfig};
 use gx_control_plane::peer::EnginePeer;
 use gx_control_plane::status::{clock_summary, ClockSummary, EngineStatus};
@@ -230,6 +232,23 @@ pub fn clear(state: &Connection, at: TakeAt) -> Result<TakeCommitted, PlayoutErr
         )
     })
 }
+/// Enter one authored phase on the scene currently pinned to Program.
+pub fn phase(
+    state: &Connection,
+    phase: String,
+    at: TakeAt,
+) -> Result<PhaseCommitted, PlayoutError> {
+    with_client(state, |client| {
+        match client.handle(ClientRequest::Phase(PhaseRequest { phase, at })) {
+            EngineReply::PhaseCommitted(committed) => Ok(committed),
+            EngineReply::Refused(refusal) => Err(PlayoutError::refused(refusal)),
+            other => Err(PlayoutError::UnexpectedReply {
+                detail: format!("expected a phase commitment, got {other:?}"),
+            }),
+        }
+    })
+}
+
 
 /// What an output configuration actually became.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -314,6 +333,15 @@ fn cmd_clear(
 ) -> Result<TakeCommitted, PlayoutError> {
     clear(&state, scheduled(frame))
 }
+#[tauri::command]
+fn cmd_phase(
+    state: tauri::State<'_, Connection>,
+    phase: String,
+    frame: Option<u64>,
+) -> Result<PhaseCommitted, PlayoutError> {
+    self::phase(&state, phase, scheduled(frame))
+}
+
 
 #[tauri::command]
 fn cmd_configure_output(
@@ -352,6 +380,7 @@ pub fn run() {
             cmd_cue,
             cmd_take,
             cmd_clear,
+            cmd_phase,
             cmd_configure_output,
             cmd_default_endpoint,
         ])

@@ -35,7 +35,8 @@ pub use framing::{
     decode_body, decode_length, encode, FramingError, LENGTH_PREFIX, MAX_FRAME_BYTES,
 };
 pub use intent::{
-    resolve_intent, ClearRequest, ClockState, CueRequest, Lead, TakeAt, TakeCommitted, TakeRequest,
+    resolve_intent, ClearRequest, ClockState, CueRequest, Lead, PhaseCommitted, PhaseRequest,
+    TakeAt, TakeCommitted, TakeRequest,
 };
 pub use message::{ClientRequest, EngineEvent, EngineReply, Envelope, OutputConfig};
 pub use peer::{EnginePeer, FaultInjection};

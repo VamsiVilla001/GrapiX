@@ -155,6 +155,17 @@
               <span class="readout__aside">frame the engine chose</span>
             </dd>
           </div>
+          <div class="readout__row">
+            <dt class="readout__key">Timeline phase</dt>
+            <dd class="readout__val readout__val--mono" id="programPhase">&mdash;</dd>
+          </div>
+          <div class="readout__row">
+            <dt class="readout__key">Phase origin</dt>
+            <dd class="readout__val">
+              <span class="num" id="programSceneFrame">&mdash;</span>
+              <span class="readout__aside" id="programPlaybackMode">&mdash;</span>
+            </dd>
+          </div>
         </dl>
       </section>
 
@@ -208,6 +219,23 @@
           <button class="btn btn--cue" id="cueButton" type="button">CUE</button>
           <button class="btn btn--clear" id="clearButton" type="button">CLEAR</button>
           <button class="btn btn--take" id="takeButton" type="button">TAKE</button>
+        </div>
+        <div class="phase-controls" aria-label="Program timeline phases">
+          <div class="field phase-controls__name">
+            <label class="field__label" for="continueNameInput">Continue name <span class="field__hint">optional</span></label>
+            <input
+              class="field__input field__input--mono"
+              id="continueNameInput"
+              type="text"
+              spellcheck="false"
+              autocomplete="off"
+              placeholder="unnamed continue"
+            />
+          </div>
+          <button class="btn btn--phase" id="holdButton" type="button">HOLD</button>
+          <button class="btn btn--phase" id="continueButton" type="button">CONTINUE</button>
+          <button class="btn btn--phase" id="updateButton" type="button">UPDATE</button>
+          <button class="btn btn--out" id="outButton" type="button">TAKE OUT</button>
         </div>
 
         <div class="commit" id="commitReadout" hidden>

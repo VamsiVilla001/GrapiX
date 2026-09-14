@@ -44,6 +44,7 @@
         <button id="save-scene" type="button">Save…</button>
         <button id="undo" type="button" disabled>Undo</button>
         <button id="redo" type="button" disabled>Redo</button>
+        <button id="workspace-reset" type="button">Reset layout</button>
       </div>
 
       <!-- The scene switcher (11.29). A broadcast carries many graphics; each
@@ -53,10 +54,20 @@
     </header>
 
     <!-- Dockable workspace (11.5). Panels are addressed by `data-panel` and
-         moved between these regions by `workspace-layout.ts`. The arrangement
-         is provisional until the 9.4 card sort exists. -->
+         moved between these regions by `workspace-layout.ts`. This grouping
+         is the product-owner-selected card-sort layout; every author can then
+         move and resize it without changing scene state. -->
     <main class="workspace">
       <aside class="dock-region" data-region="left" hidden></aside>
+      <div
+        class="dock-resizer"
+        data-resize-region="left"
+        role="separator"
+        aria-label="Resize left dock"
+        aria-orientation="vertical"
+        tabindex="0"
+      ></div>
+      <section class="dock-region dock-centre" data-region="centre">
       <section class="viewport-pane" data-panel="viewport">
         <div class="pane-head">
           <h2>Viewport</h2>
@@ -80,7 +91,16 @@
           pixels; this surface never becomes the output.
         </p>
       </section>
+      </section>
 
+      <div
+        class="dock-resizer"
+        data-resize-region="right"
+        role="separator"
+        aria-label="Resize right dock"
+        aria-orientation="vertical"
+        tabindex="0"
+      ></div>
       <aside class="inspector dock-region" data-region="right">
         <section data-panel="scene-manager" class="panel">
           <div class="panel-title-row">
@@ -254,6 +274,14 @@
          region itself: a region is a container panels move between, and an
          element that were both would be asked to contain itself. -->
     <div class="dock-region" data-region="bottom">
+      <div
+        class="dock-resizer"
+        data-resize-region="bottom"
+        role="separator"
+        aria-label="Resize timeline dock"
+        aria-orientation="horizontal"
+        tabindex="0"
+      ></div>
       <section class="timeline-bar" data-panel="timeline" aria-label="Timeline">
       <div class="timeline-head">
         <h2>Timeline</h2>

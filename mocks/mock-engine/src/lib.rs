@@ -11,13 +11,16 @@
 //! advances when a test says so, which is the whole point of a mock.
 
 use gx_asset_plane::{AssetPublishPeer, PublishReply};
+use gx_contracts::phases::PhaseKind;
 use gx_contracts::scene::SceneDocument;
 use gx_contracts::{
     ClockSource, ContentHash, DeviceTier, Epoch, Locality, MediaCodec, RationalRate,
     ReferenceState, Refusal, Revision, TakeId,
 };
 use gx_control_plane::capability::{check_protocol, live_allowed, EngineCapability};
-use gx_control_plane::intent::{resolve_intent, ClockState, Lead, TakeAt, TakeCommitted};
+use gx_control_plane::intent::{
+    resolve_intent, ClockState, Lead, PhaseCommitted, TakeAt, TakeCommitted,
+};
 use gx_control_plane::message::{ClientRequest, EngineEvent, EngineReply, OutputConfig};
 use gx_control_plane::peer::{EnginePeer, FaultInjection};
 use gx_control_plane::status::{Degradation, EngineStatus, ProgramState, ReferenceMonitor};
@@ -309,6 +312,10 @@ impl EnginePeer for MockEngine {
                             take_id: req.take_id,
                             revision: req.revision,
                             committed_frame: committed.frame,
+                            scene_frame: 0,
+                            playing: true,
+                            phase: None,
+                            stop_frame: None,
                         });
                         EngineReply::Cued(committed)
                     }
@@ -320,12 +327,31 @@ impl EnginePeer for MockEngine {
                 if let Err(refusal) = self.check_published(&req.take_id, req.revision) {
                     return EngineReply::Refused(refusal);
                 }
+                let in_phase = self
+                    .published_scene(&req.take_id, req.revision)
+                    .and_then(|scene| {
+                        scene
+                            .timeline
+                            .phases
+                            .iter()
+                            .find(|phase| phase.kind == PhaseKind::In)
+                    })
+                    .cloned();
                 match self.commit(req.at) {
                     Ok(committed) => {
                         self.program = Some(ProgramState {
                             take_id: req.take_id,
                             revision: req.revision,
                             committed_frame: committed.frame,
+                            scene_frame: in_phase
+                                .as_ref()
+                                .map(|phase| phase.start_frame)
+                                .unwrap_or(0),
+                            playing: true,
+                            phase: in_phase.as_ref().map(|phase| phase.address()),
+                            stop_frame: in_phase
+                                .as_ref()
+                                .map(|phase| phase.end_frame.saturating_sub(1)),
                         });
                         self.cued = None;
                         self.events.push(EngineEvent::Committed(committed));
@@ -342,6 +368,53 @@ impl EnginePeer for MockEngine {
                 }
                 Err(refusal) => EngineReply::Refused(refusal),
             },
+
+            // The phase surface exists here for the same reason every other
+            // command does: a mock that answered `NotImplemented` would teach
+            // a caller that Program phases are optional (invariant 45).
+            ClientRequest::Phase(req) => {
+                let Some(program) = self.program.clone() else {
+                    return EngineReply::Refused(Refusal::TimelinePhaseUnknown {
+                        phase: req.phase,
+                    });
+                };
+                let phase = self
+                    .published_scene(&program.take_id, program.revision)
+                    .and_then(|scene| {
+                        scene
+                            .timeline
+                            .phases
+                            .iter()
+                            .find(|phase| phase.address() == req.phase)
+                    })
+                    .cloned();
+                let Some(phase) = phase else {
+                    return EngineReply::Refused(Refusal::TimelinePhaseUnknown {
+                        phase: req.phase,
+                    });
+                };
+                match self.commit(req.at) {
+                    Ok(committed) => {
+                        self.program = Some(ProgramState {
+                            take_id: program.take_id,
+                            revision: program.revision,
+                            committed_frame: committed.frame,
+                            scene_frame: phase.start_frame,
+                            playing: true,
+                            phase: Some(phase.address()),
+                            stop_frame: Some(phase.end_frame.saturating_sub(1)),
+                        });
+                        self.events.push(EngineEvent::Committed(committed));
+                        EngineReply::PhaseCommitted(PhaseCommitted {
+                            phase: phase.address(),
+                            scene_frame: phase.start_frame,
+                            playing: true,
+                            committed,
+                        })
+                    }
+                    Err(refusal) => EngineReply::Refused(refusal),
+                }
+            }
 
             ClientRequest::ConfigureOutput(config) => self.configure_output(&config),
             ClientRequest::Performance => EngineReply::Performance(

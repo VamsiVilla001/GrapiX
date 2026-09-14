@@ -56,6 +56,28 @@ pub struct CueRequest {
 pub struct ClearRequest {
     pub at: TakeAt,
 }
+/// Ask Program to enter one authored timeline phase.
+///
+/// The phase address comes from the published scene; the engine resolves it
+/// only after pinning Program's take/revision, then commits its start against
+/// the engine clock.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PhaseRequest {
+    pub phase: String,
+    pub at: TakeAt,
+}
+
+/// The phase and scene frame the engine actually committed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PhaseCommitted {
+    pub phase: String,
+    pub scene_frame: u64,
+    pub playing: bool,
+    pub committed: TakeCommitted,
+}
+
 
 /// What the engine actually committed to.
 ///

@@ -738,6 +738,10 @@ pub fn timing_plane_suite(report: &mut Report) {
         ClientRequest::Clear(ClearRequest {
             at: TakeAt::NextOpportunity,
         }),
+        ClientRequest::Phase(gx_control_plane::intent::PhaseRequest {
+            phase: "continue:score".into(),
+            at: TakeAt::Frame { frame: 42 },
+        }),
         ClientRequest::ConfigureOutput(OutputConfig {
             adapter: "null".into(),
             live: false,

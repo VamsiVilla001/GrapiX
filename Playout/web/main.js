@@ -243,6 +243,9 @@ const ui = {
   programTakeId: id("programTakeId"),
   programRevision: id("programRevision"),
   programCommittedFrame: id("programCommittedFrame"),
+  programPhase: id("programPhase"),
+  programSceneFrame: id("programSceneFrame"),
+  programPlaybackMode: id("programPlaybackMode"),
 
   transportPanel: id("transportPanel"),
   takeIdInput: id("takeIdInput"),
@@ -252,6 +255,11 @@ const ui = {
   cueButton: id("cueButton"),
   takeButton: id("takeButton"),
   clearButton: id("clearButton"),
+  continueNameInput: id("continueNameInput"),
+  holdButton: id("holdButton"),
+  continueButton: id("continueButton"),
+  updateButton: id("updateButton"),
+  outButton: id("outButton"),
   commitReadout: id("commitReadout"),
   commitHead: id("commitHead"),
   commitFrame: id("commitFrame"),
@@ -499,6 +507,9 @@ function renderProgram(program) {
     ui.programEmpty.hidden = false;
     ui.programEmpty.textContent = "Program clear \u2014 nothing on air.";
     ui.programDetail.hidden = true;
+    ui.programPhase.textContent = EM_DASH;
+    ui.programSceneFrame.textContent = EM_DASH;
+    ui.programPlaybackMode.textContent = EM_DASH;
     return;
   }
 
@@ -508,6 +519,9 @@ function renderProgram(program) {
   ui.programTakeId.textContent = String(inner(program.takeId) ?? EM_DASH);
   ui.programRevision.textContent = formatCount(program.revision);
   ui.programCommittedFrame.textContent = formatCount(program.committedFrame);
+  ui.programPhase.textContent = program.phase ?? "full timeline";
+  ui.programSceneFrame.textContent = formatCount(program.sceneFrame);
+  ui.programPlaybackMode.textContent = program.playing === false ? "held" : "advancing";
 }
 
 /** Invariant 20: the engine decides liveness. The control is offered or not
@@ -587,6 +601,10 @@ function refreshTransportGate() {
   ui.cueButton.disabled = !usable;
   ui.takeButton.disabled = !usable;
   ui.clearButton.disabled = !usable;
+  ui.holdButton.disabled = !usable;
+  ui.continueButton.disabled = !usable;
+  ui.updateButton.disabled = !usable;
+  ui.outButton.disabled = !usable;
   ui.configureButton.disabled = !session.connected || session.busy;
   ui.refreshButton.disabled = !session.connected || session.busy;
 }
@@ -874,6 +892,10 @@ const COMMIT_HEAD = {
   CUE: "Engine committed \u2014 cued, not on air",
   TAKE: "Engine committed \u2014 on air",
   CLEAR: "Engine committed \u2014 Program cleared",
+  HOLD: "Engine committed \u2014 hold phase",
+  CONTINUE: "Engine committed \u2014 continue phase",
+  UPDATE: "Engine committed \u2014 update phase",
+  OUT: "Engine committed \u2014 take out",
 };
 
 /** Show what the *engine* decided. Never an echo of the request. */
@@ -936,6 +958,38 @@ async function doTake() {
 
 async function doClear() {
   await transport("CLEAR", "cmd_clear", {});
+}
+
+async function doPhase(phase, kind) {
+  const schedule = readFrame();
+  if (!schedule.ok) {
+    log("LOCAL", "error", `${kind} not sent`, schedule.reason);
+    return;
+  }
+  try {
+    const result = await invoke("cmd_phase", { phase, frame: schedule.frame });
+    renderCommitted(kind, result?.committed);
+    ui.commitNote.textContent = `Phase ${result?.phase ?? phase} entered at authored frame ${formatCount(
+      result?.sceneFrame,
+    )}.`;
+    logCommitted(kind, result?.committed);
+  } catch (err) {
+    ui.commitReadout.hidden = true;
+    logFailure(kind, err);
+    const described = describeError(err);
+    if (CONNECTION_LOST.has(described.code)) {
+      setDisconnected(`${described.name}${described.detail ? ` \u2014 ${described.detail}` : ""}`, true);
+      return;
+    }
+  } finally {
+    disarm();
+    refreshTransportGate();
+  }
+}
+
+async function doContinue() {
+  const name = ui.continueNameInput.value.trim();
+  await doPhase(name === "" ? "continue" : `continue:${name}`, "CONTINUE");
 }
 
 async function doConfigureOutput() {
@@ -1002,6 +1056,10 @@ ui.refreshButton.addEventListener("click", () => run(doStatus));
 ui.cueButton.addEventListener("click", () => run(doCue));
 ui.takeButton.addEventListener("click", () => run(doTake));
 ui.clearButton.addEventListener("click", () => run(doClear));
+ui.holdButton.addEventListener("click", () => run(() => doPhase("hold", "HOLD")));
+ui.continueButton.addEventListener("click", () => run(doContinue));
+ui.updateButton.addEventListener("click", () => run(() => doPhase("update", "UPDATE")));
+ui.outButton.addEventListener("click", () => run(() => doPhase("out", "OUT")));
 ui.configureButton.addEventListener("click", () => run(doConfigureOutput));
 ui.acknowledgeButton.addEventListener("click", acknowledgeCritical);
 ui.frameInput.addEventListener("input", updateFrameMode);

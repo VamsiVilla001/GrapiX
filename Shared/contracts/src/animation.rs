@@ -254,6 +254,51 @@ fn validate_key(
     }
     Ok(())
 }
+/// Validate animation channels loaded from a scene document.
+///
+/// Edit commands maintain these invariants incrementally. Publication still
+/// re-checks them because a hand-authored document can bypass those commands,
+/// and the evaluator's binary search requires strictly increasing frames.
+pub fn validate_scene_animation(scene: &SceneDocument) -> Result<(), Refusal> {
+    refuse_duplicate_object_ids(scene)?;
+    let mut channels = std::collections::BTreeSet::new();
+    for channel in &scene.timeline.channels {
+        let index = object_index(scene, &channel.object_id)?;
+        if !is_animatable(scene.objects[index].kind(), &channel.property) {
+            return Err(Refusal::AnimationPropertyUnsupported {
+                object: channel.object_id.clone(),
+                property: channel.property.clone(),
+            });
+        }
+        if !channels.insert((channel.object_id.as_str(), channel.property.as_str())) {
+            return Err(Refusal::DuplicateAnimationChannel {
+                object: channel.object_id.clone(),
+                property: channel.property.clone(),
+            });
+        }
+        for key in &channel.keys {
+            validate_key(scene, &channel.object_id, &channel.property, key)?;
+        }
+        for pair in channel.keys.windows(2) {
+            if pair[0].frame == pair[1].frame {
+                return Err(Refusal::DuplicateKeyframeFrame {
+                    object: channel.object_id.clone(),
+                    property: channel.property.clone(),
+                    frame: pair[1].frame,
+                });
+            }
+            if pair[0].frame > pair[1].frame {
+                return Err(Refusal::AnimationKeyOrderInvalid {
+                    object: channel.object_id.clone(),
+                    property: channel.property.clone(),
+                    previous: pair[0].frame,
+                    frame: pair[1].frame,
+                });
+            }
+        }
+    }
+    Ok(())
+}
 
 /// Set one object's authored base value for an animatable numeric property.
 ///
@@ -1231,4 +1276,34 @@ mod tests {
         assert!(at.contains(&("card".to_string(), "x".to_string(), 50.0)));
         assert!(at.contains(&("card".to_string(), "opacity".to_string(), 1.0)));
     }
+    #[test]
+    fn loaded_duplicate_channels_refuse_instead_of_last_writer_winning() {
+        let mut scene = scene_with(vec![rect("card")]);
+        let channel = KeyframeChannel {
+            object_id: "card".into(),
+            property: "x".into(),
+            keys: vec![key(0, 0.0)],
+        };
+        scene.timeline.channels = vec![channel.clone(), channel];
+        assert!(matches!(
+            validate_scene_animation(&scene),
+            Err(Refusal::DuplicateAnimationChannel { object, property })
+                if object == "card" && property == "x"
+        ));
+    }
+
+    #[test]
+    fn loaded_channels_must_be_strictly_ordered_for_binary_search() {
+        let mut scene = scene_with(vec![rect("card")]);
+        scene.timeline.channels = vec![KeyframeChannel {
+            object_id: "card".into(),
+            property: "x".into(),
+            keys: vec![key(20, 20.0), key(10, 10.0)],
+        }];
+        assert!(matches!(
+            validate_scene_animation(&scene),
+            Err(Refusal::AnimationKeyOrderInvalid { previous: 20, frame: 10, .. })
+        ));
+    }
+
 }

@@ -1,17 +1,14 @@
 // The dockable workspace layout (build plan 11.5).
 //
-// **What this module deliberately does not decide.** 11.5's done-when is
-// "Layout follows the card sort" — the card sort is step 9.4, blocked on P.3
-// because participants are not recruited. The *arrangement* of panels is
-// research output and is not guessable; inventing one and calling it a layout
-// would be fabricating the very evidence the plan says this phase is built
-// against.
+// **Source of the arrangement.** The product owner selected the broadcast-CG
+// card-sort grouping on 2026-09-14: scene and object navigation at left,
+// authoring inspectors at right, the scene viewport central, and the timeline
+// across the bottom. This is a recorded product decision, not a claim that the
+// participant study in 9.4 ran.
 //
-// So this module is the docking *mechanism*, which is ordinary engineering and
-// depends on no research: regions, moving a panel between them, collapse,
-// resize, persistence, and reset. The default arrangement is one clearly
-// marked constant — `PROVISIONAL_DEFAULT_LAYOUT` — that a later session
-// replaces with the card sort's result. Until then 11.5 stays open.
+// The model owns the ordinary engineering around that arrangement: regions,
+// panel moves, collapse, resize, persistence, reconciliation and reset.
+// Authors may customise it without changing scene state.
 //
 // **A layout is a workspace preference, not scene state.** It persists per
 // user and is untouched by opening, switching or closing a scene. Putting it
@@ -64,17 +61,10 @@ export function isRefused<T>(result: T | LayoutRefusal): result is LayoutRefusal
 }
 
 // ---------------------------------------------------------------------------
-// The provisional default.
-//
-// ⚠ REPLACE THIS WITH THE 9.4 CARD SORT RESULT. ⚠
-//
-// This grouping is a placeholder chosen only so the Editor is usable before
-// the research exists. It is *not* evidence, and 11.5 cannot be marked done
-// while this comment is still here. When the card sort lands, replace the
-// arrangement below and delete this notice.
+// Product-owner-selected card-sort layout.
 // ---------------------------------------------------------------------------
 
-export const PROVISIONAL_DEFAULT_LAYOUT: Layout = {
+export const CARD_SORT_LAYOUT: Layout = {
   version: LAYOUT_VERSION,
   regions: {
     left: { panels: ["scene-manager", "object-manager"], size: 0.2, collapsed: false },
@@ -100,7 +90,7 @@ export const PROVISIONAL_DEFAULT_LAYOUT: Layout = {
 };
 
 export function defaultLayout(): Layout {
-  return cloneLayout(PROVISIONAL_DEFAULT_LAYOUT);
+  return cloneLayout(CARD_SORT_LAYOUT);
 }
 /// The mutable shape operations build before handing back a `Layout`.
 ///
@@ -262,7 +252,7 @@ export function restoreLayout(
   const notes: string[] = [];
   const known = new Set(knownPanels);
   const seen = new Set<string>();
-  const next = cloneLayout(PROVISIONAL_DEFAULT_LAYOUT);
+  const next = cloneLayout(CARD_SORT_LAYOUT);
 
   for (const id of REGIONS) {
     const stored = parsed.regions[id];
@@ -295,14 +285,14 @@ export function restoreLayout(
   // than being lost.
   for (const panel of knownPanels) {
     if (seen.has(panel)) continue;
-    const home = regionOf(PROVISIONAL_DEFAULT_LAYOUT, panel) ?? "right";
+    const home = regionOf(CARD_SORT_LAYOUT, panel) ?? "right";
     next.regions[home].panels.push(panel);
     notes.push(`added ${panel} to ${home}: it is new since the layout was saved`);
   }
 
   for (const id of REQUIRED_REGIONS) {
     if (next.regions[id].panels.length === 0) {
-      const restored = PROVISIONAL_DEFAULT_LAYOUT.regions[id].panels.filter((p) => known.has(p));
+      const restored = CARD_SORT_LAYOUT.regions[id].panels.filter((p) => known.has(p));
       next.regions[id].panels = [...restored];
       next.regions[id].collapsed = false;
       notes.push(`the ${id} region was empty in the stored layout and has been restored`);

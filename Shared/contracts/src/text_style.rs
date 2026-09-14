@@ -58,6 +58,28 @@ pub struct TextStyle {
     #[ts(optional)]
     pub stroke_width: Option<StyleNumber>,
 }
+/// Validate the reusable style library carried by a loaded scene.
+///
+/// Token references intentionally remain unresolved until an author applies a
+/// style with the active project design system. Stable ids and font links do
+/// not need that external context and must be unambiguous before publication.
+pub fn validate_text_styles(scene: &SceneDocument) -> Result<(), Refusal> {
+    let mut ids = std::collections::BTreeSet::new();
+    for style in &scene.text_styles {
+        if !ids.insert(style.style_id.as_str()) {
+            return Err(Refusal::TextStyleDuplicate {
+                style_id: style.style_id.clone(),
+            });
+        }
+        if scene.font(&style.font_id).is_none() {
+            return Err(Refusal::TextStyleFontUnknown {
+                style_id: style.style_id.clone(),
+                font_id: style.font_id.clone(),
+            });
+        }
+    }
+    Ok(())
+}
 
 /// Apply one named style to one text object.
 ///
@@ -396,4 +418,15 @@ mod tests {
         ));
         assert_eq!(scene, before);
     }
+    #[test]
+    fn loaded_style_ids_are_unique_before_publication() {
+        let mut scene = scene();
+        let declared = style();
+        scene.text_styles = vec![declared.clone(), declared];
+        assert!(matches!(
+            validate_text_styles(&scene),
+            Err(Refusal::TextStyleDuplicate { style_id }) if style_id == "headline"
+        ));
+    }
+
 }

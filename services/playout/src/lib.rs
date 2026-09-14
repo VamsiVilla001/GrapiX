@@ -520,6 +520,10 @@ mod tests {
                             take_id: request.take_id,
                             revision: request.revision,
                             committed_frame: committed.frame,
+                            scene_frame: 0,
+                            playing: true,
+                            phase: None,
+                            stop_frame: None,
                         });
                         EngineReply::Taken(committed)
                     }
@@ -654,6 +658,10 @@ mod tests {
                 take_id: current.take_id,
                 revision: current.revision,
                 committed_frame: 73,
+                scene_frame: 0,
+                playing: true,
+                phase: None,
+                stop_frame: None,
             })
         );
     }

@@ -9,4 +9,21 @@ export type ProgramState = { takeId: TakeId, revision: Revision,
 /**
  * The frame the engine committed this take to.
  */
-committedFrame: bigint, };
+committedFrame: bigint, 
+/**
+ * Authored timeline frame that corresponds to `committed_frame`.
+ */
+sceneFrame: bigint, 
+/**
+ * Whether authored time advances after the commitment. Hold phases pin
+ * `scene_frame`; every other phase advances from it.
+ */
+playing: boolean, 
+/**
+ * Named authored phase currently driving Program, when one was selected.
+ */
+phase?: string, 
+/**
+ * Inclusive authored frame at which a non-looping phase stops advancing.
+ */
+stopFrame?: bigint, };

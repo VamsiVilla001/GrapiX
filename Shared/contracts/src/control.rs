@@ -230,6 +230,39 @@ pub fn declare_control_field(scene: &mut SceneDocument, field: ControlField) -> 
     scene.controls.push(field);
     Ok(())
 }
+/// Validate a control contract loaded from a scene document.
+///
+/// Authoring operations already prevent these states, but a hand-written or
+/// older document can bypass those operations. The render node runs this at
+/// publish so an ambiguous operator contract never reaches Program.
+pub fn validate_control_fields(scene: &SceneDocument) -> Result<(), Refusal> {
+    refuse_duplicate_object_ids(scene)?;
+    let mut ids = BTreeSet::new();
+    for field in &scene.controls {
+        if !ids.insert(field.field_id.as_str()) {
+            return Err(Refusal::ControlFieldDuplicate {
+                field_id: field.field_id.clone(),
+            });
+        }
+        let expected = expected_kind(scene, field)?;
+        if expected != field.kind {
+            return Err(Refusal::ControlFieldTargetUnknown {
+                object_id: field.object_id.clone(),
+                property: field.property.clone(),
+            });
+        }
+        if let Some(default) = &field.default {
+            if default.kind() != field.kind {
+                return Err(Refusal::ControlValueTypeMismatch {
+                    field_id: field.field_id.clone(),
+                    expected: field.kind.name().to_owned(),
+                    actual: default.kind().name().to_owned(),
+                });
+            }
+        }
+    }
+    Ok(())
+}
 
 /// Remove the named field; absent fields are explicit authoring errors.
 pub fn remove_control_field(scene: &mut SceneDocument, field_id: &str) -> Result<(), Refusal> {
@@ -320,6 +353,23 @@ pub fn apply_control_values(
     }
     Ok(filled)
 }
+/// Apply one saved page to the template it names.
+///
+/// Matching only field ids is insufficient: unrelated templates routinely use
+/// names such as `headline`. The scene pin is checked before any value is
+/// applied, and `apply_control_values` returns a clone, so both failure and
+/// success leave the authored template unchanged.
+pub fn apply_take_page(scene: &SceneDocument, page: &TakePage) -> Result<SceneDocument, Refusal> {
+    if page.scene_id != scene.id {
+        return Err(Refusal::TakePageSceneMismatch {
+            page_id: page.page_id.clone(),
+            expected: scene.id.clone(),
+            actual: page.scene_id.clone(),
+        });
+    }
+    validate_control_fields(scene)?;
+    apply_control_values(scene, &page.values)
+}
 
 #[cfg(test)]
 mod tests {
@@ -406,4 +456,34 @@ mod tests {
         let parsed = crate::scene::parse_scene_document(&serde_json::to_vec(&raw).unwrap()).unwrap();
         assert!(parsed.controls.is_empty());
     }
+    #[test]
+    fn a_take_page_is_pinned_to_its_template_before_values_are_applied() {
+        let mut document = scene();
+        declare_control_field(&mut document, field("headline", "text", ControlFieldKind::Text)).unwrap();
+        let page = TakePage {
+            page_id: "page-1".into(),
+            name: "Wrong template".into(),
+            scene_id: "other".into(),
+            values: BTreeMap::from([("headline".into(), ControlValue::Text("After".into()))]),
+        };
+        let refused = apply_take_page(&document, &page);
+        assert!(matches!(
+            refused,
+            Err(Refusal::TakePageSceneMismatch { page_id, expected, actual })
+                if page_id == "page-1" && expected == "template" && actual == "other"
+        ));
+        assert!(matches!(&document.objects[0], SceneObject::Text(text) if text.text == "Before"));
+    }
+
+    #[test]
+    fn a_loaded_duplicate_control_contract_refuses_at_validation() {
+        let mut document = scene();
+        let declared = field("headline", "text", ControlFieldKind::Text);
+        document.controls = vec![declared.clone(), declared];
+        assert!(matches!(
+            validate_control_fields(&document),
+            Err(Refusal::ControlFieldDuplicate { field_id }) if field_id == "headline"
+        ));
+    }
+
 }

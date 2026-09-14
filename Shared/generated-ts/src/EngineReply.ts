@@ -2,6 +2,7 @@
 import type { EngineCapability } from "./EngineCapability";
 import type { EngineStatus } from "./EngineStatus";
 import type { PerformanceSummary } from "./PerformanceSummary";
+import type { PhaseCommitted } from "./PhaseCommitted";
 import type { Refusal } from "./Refusal";
 import type { TakeCommitted } from "./TakeCommitted";
 
@@ -9,4 +10,4 @@ import type { TakeCommitted } from "./TakeCommitted";
  * Everything the engine may answer. A refusal is a reply, not an exception:
  * it travels the same path and is as much a defined outcome as success.
  */
-export type EngineReply = { "reply": "authenticated" } | { "reply": "capability" } & EngineCapability | { "reply": "status" } & EngineStatus | { "reply": "cued" } & TakeCommitted | { "reply": "taken" } & TakeCommitted | { "reply": "cleared" } & TakeCommitted | { "reply": "outputConfigured", adapter: string, live: boolean, } | { "reply": "performance" } & PerformanceSummary | { "reply": "refused" } & Refusal;
+export type EngineReply = { "reply": "authenticated" } | { "reply": "capability" } & EngineCapability | { "reply": "status" } & EngineStatus | { "reply": "cued" } & TakeCommitted | { "reply": "taken" } & TakeCommitted | { "reply": "cleared" } & TakeCommitted | { "reply": "phaseCommitted" } & PhaseCommitted | { "reply": "outputConfigured", adapter: string, live: boolean, } | { "reply": "performance" } & PerformanceSummary | { "reply": "refused" } & Refusal;

@@ -11,7 +11,9 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::capability::EngineCapability;
-use crate::intent::{ClearRequest, CueRequest, TakeCommitted, TakeRequest};
+use crate::intent::{
+    ClearRequest, CueRequest, PhaseCommitted, PhaseRequest, TakeCommitted, TakeRequest,
+};
 use crate::sequence::{MessageId, Sequence};
 use crate::status::{EngineStatus, PerformanceSummary, ReferenceTransition};
 
@@ -48,6 +50,8 @@ pub enum ClientRequest {
     Cue(CueRequest),
     Take(TakeRequest),
     Clear(ClearRequest),
+    /// Enter a named phase on the scene currently pinned to Program.
+    Phase(PhaseRequest),
     ConfigureOutput(OutputConfig),
     /// Request a point-in-time performance snapshot for the graph page.
     Performance,
@@ -68,6 +72,8 @@ pub enum EngineReply {
     /// The frame the engine committed the take to.
     Taken(TakeCommitted),
     Cleared(TakeCommitted),
+    /// The engine-resolved start of a named Program phase.
+    PhaseCommitted(PhaseCommitted),
     OutputConfigured {
         adapter: String,
         live: bool,
@@ -146,6 +152,10 @@ mod tests {
                 at: TakeAt::Frame { frame: 42 },
             }),
             ClientRequest::Clear(ClearRequest {
+                at: TakeAt::NextOpportunity,
+            }),
+            ClientRequest::Phase(PhaseRequest {
+                phase: "in".into(),
                 at: TakeAt::NextOpportunity,
             }),
             ClientRequest::ConfigureOutput(OutputConfig {

@@ -15,10 +15,12 @@ use gx_contracts::material::{
 use gx_contracts::package::{package_path_components, PackageFileEntry, PackageManifest};
 use gx_contracts::scene::parse_scene_document;
 use gx_contracts::control::{
-    apply_control_values, declare_control_field, remove_control_field, ControlField, ControlFieldKind,
-    ControlValue,
+    apply_control_values, apply_take_page, declare_control_field, remove_control_field,
+    ControlField, ControlFieldKind, ControlValue, TakePage,
 };
-use gx_contracts::text_style::{apply_text_style, StyleColor, StyleNumber, TextStyle};
+use gx_contracts::text_style::{
+    apply_text_style, validate_text_styles, StyleColor, StyleNumber, TextStyle,
+};
 use gx_contracts::{
     ClockSource, ContentHash, DeviceTier, Epoch, RationalRate, ReferenceState, Refusal, Revision,
     TakeId,
@@ -376,6 +378,22 @@ fn drive_text_style_refusals(report: &mut Report) {
             "a style with no supplied token set was not refused as TextStyleTokenUnresolved",
         ),
     );
+
+    // A style library that reached the engine without going through the
+    // Editor's own operations is held to the same rule at publication.
+    let mut ambiguous = scene();
+    ambiguous.text_styles = vec![style("inter"), style("inter")];
+    report.record(
+        PLANE,
+        "TextStyleDuplicate is produced for two styles sharing a stable id",
+        expect(
+            matches!(
+                validate_text_styles(&ambiguous),
+                Err(Refusal::TextStyleDuplicate { style_id }) if style_id == "headline"
+            ),
+            "two styles sharing one id were not refused by name",
+        ),
+    );
 }
 
 /// Drives the template-control contract at the same public functions the
@@ -471,6 +489,26 @@ fn drive_control_contract_refusals(report: &mut Report) {
             "a wrong template control value type was not refused with both types",
         ),
     );
+    report.record(
+        PLANE,
+        "TakePageSceneMismatch is produced for a page saved against another template",
+        expect(
+            matches!(
+                apply_take_page(
+                    &duplicate,
+                    &TakePage {
+                        page_id: "page_1".into(),
+                        name: "Page 1".into(),
+                        scene_id: "another-template".into(),
+                        values: Default::default(),
+                    },
+                ),
+                Err(Refusal::TakePageSceneMismatch { page_id, expected, actual })
+                    if page_id == "page_1" && expected == "audit" && actual == "another-template"
+            ),
+            "a page belonging to another template was not refused by name",
+        ),
+    );
 }
 
 fn drive_editor_refusals(report: &mut Report) {
@@ -529,7 +567,8 @@ fn drive_editor_refusals(report: &mut Report) {
 /// drifting into an unreachable name.
 fn drive_animation_refusals(report: &mut Report) {
     use gx_contracts::animation::{
-        create_keyframe, move_keyframe, set_keyframe, SceneEasing, SceneKeyframe,
+        create_keyframe, move_keyframe, set_keyframe, validate_scene_animation, SceneEasing,
+        SceneKeyframe,
     };
     use gx_contracts::scene::{ObjectBase, RectObject, SceneCanvas, SceneDocument, SceneObject, SceneTimeline};
 
@@ -682,6 +721,43 @@ fn drive_animation_refusals(report: &mut Report) {
                 Err(Refusal::KeyframeUnknown { .. })
             ),
             "a move of an absent key was not refused by name",
+        ),
+    );
+
+    // The edit operations above keep a loaded document well-formed as it is
+    // authored. `validate_scene_animation` is the publication-side check for a
+    // document that reached the engine by any other route, and it must refuse
+    // by the same named conditions rather than repairing them.
+    let mut two_channels = scene_with(vec![rect("card")]);
+    set_keyframe(&mut two_channels, "card", "x", key(0, 0.0)).expect("seed key lands");
+    let authored = two_channels.timeline.channels[0].clone();
+    two_channels.timeline.channels.push(authored);
+    report.record(
+        PLANE,
+        "DuplicateAnimationChannel is produced for two channels on one property",
+        expect(
+            matches!(
+                validate_scene_animation(&two_channels),
+                Err(Refusal::DuplicateAnimationChannel { object, property })
+                    if object == "card" && property == "x"
+            ),
+            "two channels on one object property were not refused by name",
+        ),
+    );
+
+    let mut unordered = scene_with(vec![rect("card")]);
+    set_keyframe(&mut unordered, "card", "x", key(0, 0.0)).expect("seed key lands");
+    set_keyframe(&mut unordered, "card", "x", key(20, 1.0)).expect("second key lands");
+    unordered.timeline.channels[0].keys.reverse();
+    report.record(
+        PLANE,
+        "AnimationKeyOrderInvalid is produced for keys that move backwards",
+        expect(
+            matches!(
+                validate_scene_animation(&unordered),
+                Err(Refusal::AnimationKeyOrderInvalid { previous: 20, frame: 0, .. })
+            ),
+            "a channel whose keys move backwards was not refused by name",
         ),
     );
 
@@ -1085,6 +1161,10 @@ fn is_driven(variant: &str) -> bool {
             | "FrameNotReachable"
             | "MultipleClockDomains"
             | "NotImplemented"
+            | "TextStyleDuplicate"
+            | "TakePageSceneMismatch"
+            | "DuplicateAnimationChannel"
+            | "AnimationKeyOrderInvalid"
             | "FontUrlNotHttps"
             | "FontUrlHasCredentials"
             | "InvalidFontUrl"

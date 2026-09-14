@@ -96,6 +96,7 @@ import {
   isRefused as isLayoutRefused,
   movePanel,
   persistLayout,
+  resizeRegion,
   restoreLayout,
   REGIONS,
   type Layout,
@@ -3026,6 +3027,7 @@ async function start(): Promise<void> {
   ui.timelineMount.addEventListener("pointercancel", (event) => finishKeyDrag(event, true));
   document.addEventListener("keydown", onTimelineKeyDown);
   window.addEventListener("resize", () => {
+    applyLayoutSizes();
     if (scene) renderTimeline(scene);
   });
   // B.2: recompute on a scale-factor change, never cache the ratio at
@@ -3116,6 +3118,7 @@ async function start(): Promise<void> {
   await loadObjectKinds();
   await loadProjects();
   applyStoredLayout();
+  wireDocking();
 
   try {
     ui.endpoint.value = await invoke<string>("cmd_default_endpoint");
@@ -3130,19 +3133,22 @@ async function start(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Dockable workspace (11.5). The model in `workspace-layout.ts` decides where
-// panels belong; this moves the DOM to match and writes the result back.
-//
-// The arrangement itself is provisional until the 9.4 card sort exists — see
-// `PROVISIONAL_DEFAULT_LAYOUT`.
+// Dockable workspace (11.5). The model owns valid moves and sizes; this block
+// turns pointer/keyboard gestures into those operations and persists them.
 // ---------------------------------------------------------------------------
 
 let layout: Layout = defaultLayout();
+let draggedPanel: string | null = null;
+let resizeGesture:
+  | {
+      readonly region: RegionId;
+      readonly handle: HTMLElement;
+      readonly startClient: number;
+      readonly startSize: number;
+      readonly axisSize: number;
+    }
+  | undefined;
 
-/// Every panel the markup actually carries, addressed by `data-panel`.
-///
-/// Read from the DOM rather than restated in TypeScript so a panel added to
-/// the markup cannot be silently absent from the workspace model.
 function panelsInMarkup(): string[] {
   return Array.from(document.querySelectorAll<HTMLElement>("[data-panel]")).map(
     (element) => element.dataset.panel!,
@@ -3153,36 +3159,58 @@ function regionElement(region: RegionId): HTMLElement | null {
   return document.querySelector<HTMLElement>(`.dock-region[data-region="${region}"]`);
 }
 
-/// Move the DOM to match the layout.
+function applyLayoutSizes(): void {
+  const workspace = document.querySelector<HTMLElement>(".workspace");
+  const width = workspace?.getBoundingClientRect().width ?? window.innerWidth;
+  for (const region of ["left", "right"] as const) {
+    const host = regionElement(region);
+    if (host) host.style.width = `${Math.round(layout.regions[region].size * width)}px`;
+  }
+  const bottom = regionElement("bottom");
+  if (bottom) {
+    bottom.style.height = `${Math.round(layout.regions.bottom.size * window.innerHeight)}px`;
+  }
+}
+
+function configureDockHandles(): void {
+  for (const panel of Array.from(document.querySelectorAll<HTMLElement>("[data-panel]"))) {
+    if (panel.dataset.panel === "viewport") continue;
+    const handle = panel.querySelector<HTMLElement>(
+      ":scope > .panel-title-row h2, :scope > h2, :scope > .timeline-head h2, :scope > .pane-head h2",
+    );
+    if (!handle) continue;
+    handle.draggable = true;
+    handle.dataset.dockHandle = "true";
+    handle.title = `Drag ${handle.textContent?.trim() || panel.dataset.panel} to another dock`;
+  }
+}
+
 function renderLayout(): void {
   for (const region of REGIONS) {
     const host = regionElement(region);
     if (!host) continue;
     for (const panel of layout.regions[region].panels) {
       const element = document.querySelector<HTMLElement>(`[data-panel="${panel}"]`);
-      // A panel named by the layout but absent from the markup was already
-      // reported by `restoreLayout`; skipping quietly here is correct because
-      // the reason has been given once. `element !== host` guards the case
-      // where a container is also addressable as a panel — appending a region
-      // into itself throws and takes the shell with it.
       if (element && element !== host && element.parentElement !== host) host.append(element);
     }
     host.hidden = layout.regions[region].panels.length === 0;
     host.classList.toggle("collapsed", layout.regions[region].collapsed);
+    const resizer = document.querySelector<HTMLElement>(
+      `.dock-resizer[data-resize-region="${region}"]`,
+    );
+    if (resizer) resizer.hidden = host.hidden;
   }
+  applyLayoutSizes();
+  configureDockHandles();
 }
 
 function applyStoredLayout(): void {
   const restored = restoreLayout(window.localStorage, panelsInMarkup());
   layout = restored.layout;
-  // Every reconciliation note is surfaced. A panel that moved or vanished
-  // because a stored layout said so is exactly the kind of change an author
-  // would otherwise be left to discover (invariant 18).
   for (const note of restored.notes) log(`workspace layout: ${note}`);
   renderLayout();
 }
 
-/// Dock a panel into a region, reporting any refusal by name.
 function dockPanel(panel: string, region: RegionId, index?: number): void {
   const next = movePanel(layout, panel, region, index);
   if (isLayoutRefused(next)) {
@@ -3195,11 +3223,129 @@ function dockPanel(panel: string, region: RegionId, index?: number): void {
   log(`moved ${panel} to ${region}`, "good");
 }
 
+function dropIndex(host: HTMLElement, clientY: number): number {
+  const panels = Array.from(host.querySelectorAll<HTMLElement>(":scope > [data-panel]")).filter(
+    (panel) => panel.dataset.panel !== draggedPanel,
+  );
+  const before = panels.findIndex((panel) => clientY < panel.getBoundingClientRect().top + panel.getBoundingClientRect().height / 2);
+  return before < 0 ? panels.length : before;
+}
+
+function clearDockGesture(): void {
+  document.querySelectorAll(".drop-target").forEach((node) => node.classList.remove("drop-target"));
+  document.querySelectorAll(".dock-dragging").forEach((node) => node.classList.remove("dock-dragging"));
+  draggedPanel = null;
+}
+
+function resizeBy(region: RegionId, delta: number): void {
+  const next = resizeRegion(layout, region, layout.regions[region].size + delta);
+  if (isLayoutRefused(next)) {
+    log(next.refused, "bad");
+    return;
+  }
+  layout = next;
+  persistLayout(window.localStorage, layout);
+  renderLayout();
+}
+
+function wireDocking(): void {
+  document.addEventListener("dragstart", (event) => {
+    const handle = (event.target as Element | null)?.closest<HTMLElement>("[data-dock-handle]");
+    const panel = handle?.closest<HTMLElement>("[data-panel]");
+    if (!panel?.dataset.panel || !event.dataTransfer) return;
+    draggedPanel = panel.dataset.panel;
+    panel.classList.add("dock-dragging");
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", draggedPanel);
+  });
+  document.addEventListener("dragover", (event) => {
+    if (!draggedPanel) return;
+    const host = (event.target as Element | null)?.closest<HTMLElement>(".dock-region");
+    if (!host?.dataset.region) return;
+    event.preventDefault();
+    document.querySelectorAll(".drop-target").forEach((node) => node.classList.remove("drop-target"));
+    host.classList.add("drop-target");
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  });
+  document.addEventListener("drop", (event) => {
+    const host = (event.target as Element | null)?.closest<HTMLElement>(".dock-region");
+    const region = host?.dataset.region as RegionId | undefined;
+    if (!draggedPanel || !host || !region || !REGIONS.includes(region)) return;
+    event.preventDefault();
+    const panel = draggedPanel;
+    const index = dropIndex(host, event.clientY);
+    clearDockGesture();
+    dockPanel(panel, region, index);
+  });
+  document.addEventListener("dragend", clearDockGesture);
+
+  document.addEventListener("pointerdown", (event) => {
+    const handle = (event.target as Element | null)?.closest<HTMLElement>(".dock-resizer");
+    const region = handle?.dataset.resizeRegion as RegionId | undefined;
+    if (!handle || !region || !REGIONS.includes(region)) return;
+    const horizontal = region === "bottom";
+    resizeGesture = {
+      region,
+      handle,
+      startClient: horizontal ? event.clientY : event.clientX,
+      startSize: layout.regions[region].size,
+      axisSize: horizontal
+        ? window.innerHeight
+        : (document.querySelector<HTMLElement>(".workspace")?.getBoundingClientRect().width ??
+          window.innerWidth),
+    };
+    handle.classList.add("resizing");
+    handle.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+  document.addEventListener("pointermove", (event) => {
+    if (!resizeGesture) return;
+    const horizontal = resizeGesture.region === "bottom";
+    const client = horizontal ? event.clientY : event.clientX;
+    const sign = resizeGesture.region === "left" ? 1 : -1;
+    const next = resizeRegion(
+      layout,
+      resizeGesture.region,
+      resizeGesture.startSize + (sign * (client - resizeGesture.startClient)) / resizeGesture.axisSize,
+    );
+    if (!isLayoutRefused(next)) {
+      layout = next;
+      renderLayout();
+    }
+  });
+  const finishResize = (): void => {
+    if (!resizeGesture) return;
+    resizeGesture.handle.classList.remove("resizing");
+    persistLayout(window.localStorage, layout);
+    log(`resized ${resizeGesture.region} dock`, "good");
+    resizeGesture = undefined;
+  };
+  document.addEventListener("pointerup", finishResize);
+  document.addEventListener("pointercancel", finishResize);
+  document.addEventListener("keydown", (event) => {
+    const handle = (event.target as Element | null)?.closest<HTMLElement>(".dock-resizer");
+    const region = handle?.dataset.resizeRegion as RegionId | undefined;
+    if (!region || !REGIONS.includes(region)) return;
+    const grows =
+      (region === "left" && event.key === "ArrowRight") ||
+      (region === "right" && event.key === "ArrowLeft") ||
+      (region === "bottom" && event.key === "ArrowUp");
+    const shrinks =
+      (region === "left" && event.key === "ArrowLeft") ||
+      (region === "right" && event.key === "ArrowRight") ||
+      (region === "bottom" && event.key === "ArrowDown");
+    if (!grows && !shrinks) return;
+    event.preventDefault();
+    resizeBy(region, grows ? 0.025 : -0.025);
+  });
+  document.getElementById("workspace-reset")?.addEventListener("click", resetLayout);
+}
+
 function resetLayout(): void {
   layout = defaultLayout();
   persistLayout(window.localStorage, layout);
   renderLayout();
-  log("workspace layout reset to the default", "good");
+  log("workspace layout reset to the card-sort layout", "good");
 }
 
 void start();

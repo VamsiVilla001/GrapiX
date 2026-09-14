@@ -31,7 +31,7 @@ use gx_contracts::{
     ContentHash, DeviceTier, Epoch, Locality, MediaCodec, RationalRate, Refusal, Revision, TakeId,
 };
 use gx_control_plane::capability::{check_protocol, live_allowed, EngineCapability};
-use gx_control_plane::intent::{Lead, TakeAt, TakeCommitted};
+use gx_control_plane::intent::{Lead, PhaseCommitted, TakeAt, TakeCommitted};
 use gx_control_plane::message::{ClientRequest, EngineEvent, EngineReply, OutputConfig};
 use gx_control_plane::peer::EnginePeer;
 use gx_control_plane::status::{Degradation, EngineStatus, ProgramState};
@@ -250,6 +250,62 @@ impl Engine {
             self.preview_rasterizer.take(take_key);
         }
     }
+    /// Rebuild Program/Preview bases for the current authored animation frame.
+    ///
+    /// The scene frame is relative to the engine's committed take frame, never
+    /// to wall time. This keeps reconnects and frame-pump catch-up deterministic.
+    fn evaluate_program_frame(&mut self, engine_frame: u64) {
+        let Some(program) = self.program.as_ref() else {
+            return;
+        };
+        let Some(prepared) = self
+            .prepared
+            .get(&(program.take_id.clone(), program.revision))
+        else {
+            return;
+        };
+        if !prepared.has_animation() {
+            return;
+        }
+        let elapsed = engine_frame.saturating_sub(program.committed_frame);
+        let current_phase = program
+            .phase
+            .as_deref()
+            .and_then(|address| prepared.phase(address));
+        let mut scene_frame = match current_phase {
+            Some(phase)
+                if program.playing
+                    && phase.kind == gx_contracts::phases::PhaseKind::Hold =>
+            {
+                let length = phase.end_frame - phase.start_frame;
+                phase.start_frame + (elapsed % length)
+            }
+            _ if program.playing => program.scene_frame.saturating_add(elapsed),
+            _ => program.scene_frame,
+        };
+        if let Some(stop) = program.stop_frame {
+            if current_phase.map(|phase| phase.kind)
+                != Some(gx_contracts::phases::PhaseKind::Hold)
+            {
+                scene_frame = scene_frame.min(stop);
+            }
+        }
+        scene_frame = scene_frame.min(prepared.document().timeline.duration_frames);
+        let program_frame = prepared
+            .frame_at(scene_frame, OutputTransform::Rec709)
+            .expect("published animation remains valid at every evaluated frame");
+        let preview_frame = prepared
+            .frame_at(scene_frame, OutputTransform::Srgb)
+            .expect("Preview shares Program's validated animation");
+        let take_key = key_for_take(&program.take_id);
+        self.rasterizer
+            .take_prepared(take_key, program_frame)
+            .expect("an animated non-zero canvas must retain its tile plan");
+        self.preview_rasterizer
+            .take_prepared(take_key, preview_frame)
+            .expect("Preview shares Program's animated tile plan");
+    }
+
 
     /// Publish a scene identifier so a take of it can succeed, with no
     /// content.
@@ -344,6 +400,7 @@ impl Engine {
     pub fn emit_frame(&mut self) -> Result<ProgramEmission, OutputAdapterError> {
         self.sync_clock();
         let frame_number = self.clock.frame();
+        self.evaluate_program_frame(frame_number);
         let started = Instant::now();
         let program = Arc::new(self.rasterizer.render(frame_number));
         let preview = Arc::new(self.preview_rasterizer.render(frame_number));
@@ -567,7 +624,10 @@ impl EnginePeer for Engine {
     fn handle(&mut self, request: ClientRequest) -> EngineReply {
         let persists = matches!(
             &request,
-            ClientRequest::Cue(_) | ClientRequest::Take(_) | ClientRequest::Clear(_)
+            ClientRequest::Cue(_)
+                | ClientRequest::Take(_)
+                | ClientRequest::Clear(_)
+                | ClientRequest::Phase(_)
         );
         let reply = match request {
             // Authentication is a transport concern; reaching here means the
@@ -606,6 +666,10 @@ impl EnginePeer for Engine {
                             take_id: req.take_id,
                             revision: req.revision,
                             committed_frame: committed.frame,
+                            scene_frame: 0,
+                            playing: true,
+                            phase: None,
+                            stop_frame: None,
                         });
                         EngineReply::Cued(committed)
                     }
@@ -617,12 +681,30 @@ impl EnginePeer for Engine {
                 if let Err(refusal) = self.check_published(&req.take_id, req.revision) {
                     return EngineReply::Refused(refusal);
                 }
+                let in_phase = self
+                    .prepared
+                    .get(&(req.take_id.clone(), req.revision))
+                    .and_then(|prepared| {
+                        prepared
+                            .phases_of(gx_contracts::phases::PhaseKind::In)
+                            .next()
+                    })
+                    .cloned();
                 match self.commit(req.at) {
                     Ok(committed) => {
                         self.program = Some(ProgramState {
                             take_id: req.take_id.clone(),
                             revision: req.revision,
                             committed_frame: committed.frame,
+                            scene_frame: in_phase
+                                .as_ref()
+                                .map(|phase| phase.start_frame)
+                                .unwrap_or(0),
+                            playing: true,
+                            phase: in_phase.as_ref().map(|phase| phase.address()),
+                            stop_frame: in_phase
+                                .as_ref()
+                                .map(|phase| phase.end_frame.saturating_sub(1)),
                         });
                         self.cued = None;
                         if !self.output_inhibited {
@@ -644,6 +726,49 @@ impl EnginePeer for Engine {
                 }
                 Err(refusal) => EngineReply::Refused(refusal),
             },
+
+            ClientRequest::Phase(req) => {
+                let Some(program) = self.program.clone() else {
+                    return EngineReply::Refused(Refusal::TimelinePhaseUnknown {
+                        phase: req.phase,
+                    });
+                };
+                let phase = self
+                    .prepared
+                    .get(&(program.take_id.clone(), program.revision))
+                    .and_then(|prepared| prepared.phase(&req.phase))
+                    .cloned();
+                let Some(phase) = phase else {
+                    return EngineReply::Refused(Refusal::TimelinePhaseUnknown {
+                        phase: req.phase,
+                    });
+                };
+                match self.commit(req.at) {
+                    Ok(committed) => {
+                        let playing = true;
+                        self.program = Some(ProgramState {
+                            take_id: program.take_id,
+                            revision: program.revision,
+                            committed_frame: committed.frame,
+                            scene_frame: phase.start_frame,
+                            playing,
+                            phase: Some(phase.address()),
+                            stop_frame: Some(phase.end_frame.saturating_sub(1)),
+                        });
+                        if !self.output_inhibited {
+                            self.activate_program_base();
+                        }
+                        self.events.push(EngineEvent::Committed(committed));
+                        EngineReply::PhaseCommitted(PhaseCommitted {
+                            phase: phase.address(),
+                            scene_frame: phase.start_frame,
+                            playing,
+                            committed,
+                        })
+                    }
+                    Err(refusal) => EngineReply::Refused(refusal),
+                }
+            }
 
             ClientRequest::ConfigureOutput(config) => self.configure_output(&config),
             ClientRequest::Performance => EngineReply::Performance(self.performance_summary()),
@@ -669,10 +794,16 @@ impl EnginePeer for Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gx_control_plane::intent::{ClearRequest, CueRequest, TakeRequest};
+    use gx_control_plane::intent::{ClearRequest, CueRequest, PhaseRequest, TakeRequest};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use gx_control_plane::message::OutputConfig;
+    use gx_contracts::animation::{KeyframeChannel, SceneEasing, SceneKeyframe};
+    use gx_contracts::color::ColorValue;
+    use gx_contracts::phases::{PhaseKind, TimelinePhase};
+    use gx_contracts::scene::{
+        ObjectBase, RectObject, SceneCanvas, SceneObject, SceneTimeline,
+    };
 
     fn engine() -> Engine {
         // A clock that does not advance on its own: the test drives the frame
@@ -685,6 +816,76 @@ mod tests {
         let revision = Revision(1);
         engine.publish_identifier(take_id.clone(), revision);
         (take_id, revision)
+    }
+
+    fn animated_scene() -> SceneDocument {
+        let mut shape = RectObject {
+            base: ObjectBase::new("card", "card"),
+            radius: 0.0,
+        };
+        shape.base.width = 8.0;
+        shape.base.height = 8.0;
+        shape.base.fill = Some(ColorValue::opaque_white());
+        SceneDocument {
+            id: "animated".into(),
+            name: "Animated".into(),
+            version: 1,
+            revision: Some(Revision(1)),
+            active_camera_id: None,
+            canvas: SceneCanvas {
+                width: 64,
+                height: 32,
+                frame_rate: RationalRate::P50,
+            },
+            timeline: SceneTimeline {
+                duration_frames: 100,
+                channels: vec![KeyframeChannel {
+                    object_id: "card".into(),
+                    property: "x".into(),
+                    keys: vec![
+                        SceneKeyframe {
+                            frame: 0,
+                            value: 0.0,
+                            easing: SceneEasing::Linear,
+                            bezier: None,
+                        },
+                        SceneKeyframe {
+                            frame: 100,
+                            value: 50.0,
+                            easing: SceneEasing::Linear,
+                            bezier: None,
+                        },
+                    ],
+                }],
+                phases: vec![
+                    TimelinePhase {
+                        kind: PhaseKind::In,
+                        name: None,
+                        start_frame: 0,
+                        end_frame: 20,
+                    },
+                    TimelinePhase {
+                        kind: PhaseKind::Hold,
+                        name: None,
+                        start_frame: 20,
+                        end_frame: 40,
+                    },
+                    TimelinePhase {
+                        kind: PhaseKind::Out,
+                        name: None,
+                        start_frame: 80,
+                        end_frame: 100,
+                    },
+                ],
+            },
+            data_context: Default::default(),
+            assets: Vec::new(),
+            fonts: Vec::new(),
+            materials: Vec::new(),
+            controls: Vec::new(),
+            text_styles: Vec::new(),
+            objects: vec![SceneObject::Rect(shape)],
+        }
     }
 
     #[test]
@@ -874,4 +1075,92 @@ mod tests {
         assert!(!recovered.render_program().is_black());
         std::fs::remove_file(path).expect("remove recovery fixture");
     }
+    #[test]
+    fn program_phases_resolve_on_the_engine_clock_and_hold_authored_time() {
+        let frames = Arc::new(AtomicU64::new(0));
+        let mut e = Engine::new(Arc::clone(&frames), Locality::CoLocated);
+        assert!(matches!(
+            e.publish(animated_scene()),
+            PublishReply::Published { .. }
+        ));
+        assert!(matches!(
+            e.handle(ClientRequest::Take(TakeRequest {
+                take_id: TakeId("animated".into()),
+                revision: Revision(1),
+                at: TakeAt::NextOpportunity,
+            })),
+            EngineReply::Taken(_)
+        ));
+        assert!(matches!(
+            e.handle(ClientRequest::Status),
+            EngineReply::Status(EngineStatus {
+                program: Some(ProgramState {
+                    phase: Some(phase),
+                    scene_frame: 0,
+                    ..
+                }),
+                ..
+            }) if phase == "in"
+        ));
+
+        frames.store(1, Ordering::Relaxed);
+        let start = e.emit_frame().unwrap().frame;
+        frames.store(21, Ordering::Relaxed);
+        let end = e.emit_frame().unwrap().frame;
+        assert_ne!(
+            &start.pixels[32..],
+            &end.pixels[32..],
+            "the engine must evaluate the authored animation as its clock advances"
+        );
+
+        let reply = e.handle(ClientRequest::Phase(PhaseRequest {
+            phase: "hold".into(),
+            at: TakeAt::NextOpportunity,
+        }));
+        assert!(matches!(
+            reply,
+            EngineReply::PhaseCommitted(PhaseCommitted {
+                phase,
+                scene_frame: 20,
+                playing: true,
+                ..
+            }) if phase == "hold"
+        ));
+
+        frames.store(50, Ordering::Relaxed);
+        let held_a = e.emit_frame().unwrap().frame;
+        frames.store(70, Ordering::Relaxed);
+        let held_b = e.emit_frame().unwrap().frame;
+        assert_eq!(
+            &held_a.pixels[32..],
+            &held_b.pixels[32..],
+            "a hold phase loops its authored range until another command"
+        );
+        assert!(matches!(
+            e.handle(ClientRequest::Status),
+            EngineReply::Status(EngineStatus {
+                program: Some(ProgramState {
+                    scene_frame: 20,
+                    playing: true,
+                    phase: Some(phase),
+                    ..
+                }),
+                ..
+            }) if phase == "hold"
+        ));
+    }
+
+    #[test]
+    fn an_unknown_program_phase_refuses_by_address() {
+        let mut e = engine();
+        assert!(matches!(
+            e.handle(ClientRequest::Phase(PhaseRequest {
+                phase: "continue:score".into(),
+                at: TakeAt::NextOpportunity,
+            })),
+            EngineReply::Refused(Refusal::TimelinePhaseUnknown { phase })
+                if phase == "continue:score"
+        ));
+    }
+
 }

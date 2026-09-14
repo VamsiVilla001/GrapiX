@@ -53,6 +53,25 @@ pub struct ProgramState {
     pub revision: Revision,
     /// The frame the engine committed this take to.
     pub committed_frame: u64,
+    /// Authored timeline frame that corresponds to `committed_frame`.
+    #[serde(default)]
+    pub scene_frame: u64,
+    /// Whether authored time advances after the commitment. Hold phases pin
+    /// `scene_frame`; every other phase advances from it.
+    #[serde(default = "playing_by_default")]
+    pub playing: bool,
+    /// Named authored phase currently driving Program, when one was selected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub phase: Option<String>,
+    /// Inclusive authored frame at which a non-looping phase stops advancing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub stop_frame: Option<u64>,
+}
+
+fn playing_by_default() -> bool {
+    true
 }
 
 /// The engine's reported state. The single source for every operator display.

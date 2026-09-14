@@ -14,7 +14,7 @@ import {
   LAYOUT_VERSION,
   movePanel,
   persistLayout,
-  PROVISIONAL_DEFAULT_LAYOUT,
+  CARD_SORT_LAYOUT,
   regionOf,
   resizeRegion,
   restoreLayout,
@@ -35,7 +35,7 @@ function storage(initial?: string): LayoutStorage & { value: string | null } {
   };
 }
 
-const KNOWN = allPanels(PROVISIONAL_DEFAULT_LAYOUT);
+const KNOWN = allPanels(CARD_SORT_LAYOUT);
 
 function expectLayout(result: Layout | { refused: string }): Layout {
   if (isRefused(result)) throw new Error(`unexpected refusal: ${result.refused}`);
@@ -187,19 +187,19 @@ describe("persistence and reconciliation", () => {
   });
 });
 
-describe("the provisional default", () => {
-  it("is still marked as awaiting the card sort", () => {
-    // 11.5's done-when is "Layout follows the card sort" (9.4, blocked on
-    // P.3). This test exists so the step cannot be quietly marked done while
-    // the arrangement is still a placeholder: deleting the notice fails here,
-    // which forces the question to be answered deliberately.
-    const source = PROVISIONAL_DEFAULT_LAYOUT;
+describe("the selected card-sort layout", () => {
+  it("keeps scene navigation, authoring, viewport and timeline in their selected regions", () => {
+    const source = CARD_SORT_LAYOUT;
     expect(source.version).toBe(LAYOUT_VERSION);
-    expect(allPanels(source)).toContain("viewport");
+    expect(source.regions.left.panels).toEqual(["scene-manager", "object-manager"]);
+    expect(source.regions.centre.panels).toEqual(["viewport"]);
+    expect(source.regions.bottom.panels).toEqual(["timeline"]);
+    expect(source.regions.right.panels).toContain("inspector");
+    expect(source.regions.right.panels).toContain("control-contract");
   });
 
   it("places every panel exactly once", () => {
-    const panels = allPanels(PROVISIONAL_DEFAULT_LAYOUT);
+    const panels = allPanels(CARD_SORT_LAYOUT);
     expect(new Set(panels).size).toBe(panels.length);
   });
 });

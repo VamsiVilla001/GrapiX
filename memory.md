@@ -113,6 +113,112 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-09-14 — the dockable layout decided, and Program learned to play
+
+Two things closed today, and the second one was a hole the first one exposed.
+
+### 11.5 — the layout stopped being provisional
+
+The docking mechanism had been built and tested for a while; what kept 11.5
+open was its done-when, *"Layout follows the card sort"*, where the card sort
+is 9.4 and 9.4 is blocked on P.3 (participant recruitment). The previous
+session refused to invent an arrangement, which was right, and parked it in a
+constant named `PROVISIONAL_DEFAULT_LAYOUT` carrying a notice.
+
+The user then selected the arrangement. So the constant is now
+`CARD_SORT_LAYOUT` and its doc comment says exactly what its authority is: a
+product-owner decision recorded on 2026-09-14, **not** a participant study.
+That distinction is the whole reason the row could close honestly — the layout
+is no longer guesswork waiting on research, and 9.4 is still blocked.
+
+What landed with it: drag-a-panel-to-dock with a real drop index, keyboard and
+pointer region resizing, a Reset control, and sizes persisted beside the panel
+lists. Verified live in the Tauri window — dragged the materials panel between
+docks, resized the left region, reloaded and found the size still there, and
+reset returned the card-sort arrangement.
+
+**One real regression, caused and fixed in the same session.** Adding the dock
+regions put four children into a two-column CSS grid, which wrapped into extra
+rows and squeezed the viewport into the 330px column — its canvas rendered at
+293×165. The fix was structural, not a nudge: three regions across the main
+row with the timeline as a bottom strip. A second sizing bug surfaced behind
+it: `.viewport-surface`'s grid row was sized by the SVG overlay's intrinsic
+height while the SVG sized itself from the row — circular, resolving at
+1080px, so the canvas centred inside an oversized row. `minmax(0, 1fr)` on the
+row broke the circularity. The hardcoded `aspect-ratio: 16/9` went too: a
+scene may be vertical.
+
+### 6.2 and 12.4 — continue and out finally exist
+
+The tracker had said, for a while and correctly, that 6.2 was PARTIAL because
+*"`continue` and `out` do not exist on the control plane"*. Building the phase
+UI made the reason obvious: the engine had **no idea** what a phase was. It
+prepared a scene once at publish and rendered that single frame forever.
+`PreparedScene` never looked at `timeline.channels`, `phases`, `controls` or
+`text_styles` — every authoring contract Phase 11 added stopped at the Editor.
+
+So this is engine work, and it is the honest shape of it:
+
+- **`PreparedScene::frame_at`** evaluates the authored channels through the
+  same Rust evaluator the Editor is pinned against, then re-rasterises. Static
+  scenes keep the prepared-surface fast path untouched (`has_animation()` is
+  the branch); only an animated scene pays per frame, and the comment says why
+  the software T2 reference backend re-rasterises rather than pretending
+  invariant 35 is being honoured by a backend that has no GPU uniforms yet.
+- **`ClientRequest::Phase`** carries a phase *address* (`in`, `hold`, `out`,
+  `update`, `continue:<name>`) plus the same `TakeAt` every other command
+  uses. It is intent, not a verb: the caller names which authored phase, never
+  when, and the reply carries the frame the **engine** committed plus the
+  authored scene frame it entered. The timing-plane suite serialises it with
+  everything else and still finds no time field.
+- **`ProgramState` grew `scene_frame`, `playing`, `phase`, `stop_frame`.**
+  Authored time is derived from the engine frame relative to the commitment,
+  never from wall time, so a reconnect or a frame-pump catch-up lands on the
+  same authored frame. `hold` loops its own span — an idle graphic must stay
+  on air indefinitely — while every other phase advances to its end and stops.
+- **Take auto-enters the authored `in` phase**, because an operator pressing
+  TAKE means "build this on", not "start at frame zero whatever is there".
+
+**Publication now validates what it will render.** `prepare` runs
+`validate_scene_animation`, `validate_phases`, `validate_control_fields` and
+`validate_text_styles` before anything else. Four new refusals came out of
+writing those: `DuplicateAnimationChannel` (two channels on one property would
+be an undocumented last-writer-wins), `AnimationKeyOrderInvalid` (the
+evaluator binary-searches, so backwards keys are silently wrong rather than
+loudly wrong), `TextStyleDuplicate`, and `TakePageSceneMismatch` (a page
+applied to the wrong template mutates a graphic whose fields happen to share
+names). All four are driven in the conformance refusal audit against the real
+functions — 174 passed, 0 failed, 8 skipped.
+
+**The mock engine implements the phase surface too** (invariant 45). It holds
+published documents already, so it resolves the address the same way and
+refuses `TimelinePhaseUnknown` the same way. A mock answering `NotImplemented`
+here would teach a caller that Program phases are optional.
+
+**Verified live, not only in tests.** Mock engine on 4400, a four-phase scene
+published through the asset plane by `gx-mock-editor`, and the real
+`gx-playout.exe` window driven through its own buttons: TAKE entered `in` at
+authored frame 0, HOLD 25, CONTINUE (named `score`) `continue:score` 75, TAKE
+OUT 90 — each showing the engine's committed frame — and UPDATE, which that
+scene does not declare, was refused as `timelinePhaseUnknown (phase=update)`
+in the activity log with Program left exactly where it was.
+
+Rust-side proof that authored time is real: an engine test publishes an
+animated scene, advances the frame source, and compares Program pixels. Frame
+1 and frame 21 differ; two frames inside a `hold` are identical while the
+output frame number advances.
+
+### What is still not done
+
+- 11.1, 11.2, 11.3 stay active for the same reason each already had: no CI
+  run and no signing identity, macOS unmeasured, macOS unmeasured.
+- 12.4 is done; the rest of Phase 12 is untouched. The Playout shell is not
+  signed (12.1) and there is no scene manager or rundown UI (12.2, 12.3).
+- The engine still re-rasterises an animated frame in software. That is
+  correct and slow, and 13.x is where it stops being slow.
+
+---
+
 
 ## 2026-09-13 — the blocked Phase 11 steps, and a viewport I broke and fixed
 

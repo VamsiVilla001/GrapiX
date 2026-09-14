@@ -349,6 +349,23 @@ code {
   color: var(--warning);
 }
 
+.btn--phase,
+.btn--out {
+  padding: var(--s2);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+}
+
+.btn--phase {
+  border-color: var(--info);
+  color: var(--info);
+}
+
+.btn--out {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
 .btn--clear:hover:not(:disabled) {
   background: #241b0a;
 }
@@ -765,6 +782,19 @@ code {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--s2);
+}
+
+.phase-controls {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) repeat(4, minmax(84px, auto));
+  gap: var(--s2);
+  align-items: end;
+  padding-top: var(--s2);
+  border-top: 1px solid var(--line);
+}
+
+.phase-controls__name {
+  min-width: 0;
 }
 
 .commit {
