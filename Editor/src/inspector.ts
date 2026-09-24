@@ -27,10 +27,15 @@ import { isMixed, unify, type MaybeMixed, type UiNode } from "./agent-surface";
 /// what the shared `ObjectBase` fields are.
 type AppliesTo = readonly SceneObject["type"][] | undefined;
 
+/// How a typed entry becomes a field value. `unit` is 0–1 and also accepts a
+/// percentage, because that is how the panel displays it.
+type InputKind = "string" | "nonEmptyString" | "number" | "unit" | "boolean";
+
 interface FieldSpec {
   readonly key: string;
   readonly label: string;
   readonly appliesTo: AppliesTo;
+  readonly input: InputKind;
   readonly read: (object: SceneObject) => unknown;
   readonly format?: (value: unknown) => string;
 }
@@ -43,44 +48,62 @@ const percent = (value: unknown): string => `${Math.round(Number(value) * 100)}%
 /// path all read it, so a field added in one place cannot be missing from
 /// another.
 const FIELDS: readonly FieldSpec[] = [
-  { key: "name", label: "Name", appliesTo: undefined, read: (o) => o.name },
-  { key: "visible", label: "Visible", appliesTo: undefined, read: (o) => o.visible },
-  { key: "locked", label: "Locked", appliesTo: undefined, read: (o) => o.locked },
-  { key: "opacity", label: "Opacity", appliesTo: undefined, read: (o) => o.opacity, format: percent },
-  { key: "x", label: "X", appliesTo: undefined, read: (o) => o.x },
-  { key: "y", label: "Y", appliesTo: undefined, read: (o) => o.y },
-  { key: "rotation", label: "Rotation", appliesTo: undefined, read: (o) => o.rotation },
-  { key: "scaleX", label: "Scale X", appliesTo: undefined, read: (o) => o.scaleX },
-  { key: "scaleY", label: "Scale Y", appliesTo: undefined, read: (o) => o.scaleY },
+  { key: "name", label: "Name", appliesTo: undefined, input: "nonEmptyString", read: (o) => o.name },
+  { key: "visible", label: "Visible", appliesTo: undefined, input: "boolean", read: (o) => o.visible },
+  { key: "locked", label: "Locked", appliesTo: undefined, input: "boolean", read: (o) => o.locked },
+  {
+    key: "opacity",
+    label: "Opacity",
+    appliesTo: undefined,
+    input: "unit",
+    read: (o) => o.opacity,
+    format: percent,
+  },
+  { key: "x", label: "X", appliesTo: undefined, input: "number", read: (o) => o.x },
+  { key: "y", label: "Y", appliesTo: undefined, input: "number", read: (o) => o.y },
+  { key: "rotation", label: "Rotation", appliesTo: undefined, input: "number", read: (o) => o.rotation },
+  { key: "scaleX", label: "Scale X", appliesTo: undefined, input: "number", read: (o) => o.scaleX },
+  { key: "scaleY", label: "Scale Y", appliesTo: undefined, input: "number", read: (o) => o.scaleY },
   // Type-aware fields.
   {
     key: "text",
     label: "Text",
     appliesTo: ["text"],
+    input: "string",
     read: (o) => (o.type === "text" ? o.text : undefined),
   },
   {
     key: "fontId",
     label: "Font",
     appliesTo: ["text"],
+    input: "nonEmptyString",
     read: (o) => (o.type === "text" ? o.fontId : undefined),
   },
   {
     key: "size",
     label: "Size",
     appliesTo: ["text"],
+    input: "number",
     read: (o) => (o.type === "text" ? o.size : undefined),
   },
   {
     key: "radius",
     label: "Corner radius",
     appliesTo: ["rect"],
+    input: "number",
     read: (o) => (o.type === "rect" ? o.radius : undefined),
   },
 ];
 
 function applies(spec: FieldSpec, kind: SceneObject["type"]): boolean {
   return spec.appliesTo === undefined || spec.appliesTo.includes(kind);
+}
+
+/// The one sentence for "this field is not on some of what you selected".
+/// The panel's disabled Edit button and the edit path both use it, so the
+/// refusal an author gets is the reason the button already showed.
+function notAPropertyOf(spec: FieldSpec, kinds: readonly SceneObject["type"][]): string {
+  return `${spec.label} is not a property of ${kinds.join(", ")}`;
 }
 
 /// Render a value for display, with Mixed as its own readable word.
@@ -141,7 +164,7 @@ export function inspectorPanel(
           // have selected", which is the true statement.
           ...(missing.length === 0
             ? {}
-            : { unavailable: `${spec.label} is not a property of ${missing.join(", ")}` }),
+            : { unavailable: notAPropertyOf(spec, missing) }),
         },
       ],
     };
@@ -188,7 +211,7 @@ export interface EditRefused {
 
 export type EditOutcome = EditTransaction | EditRefused;
 
-export function isRefused(outcome: EditOutcome): outcome is EditRefused {
+export function isRefused<T extends object>(outcome: T | EditRefused): outcome is EditRefused {
   return "refused" in outcome;
 }
 
@@ -217,8 +240,8 @@ export function applyEdit(
 
   const applicable = selected.filter((object) => applies(spec, object.type));
   if (applicable.length === 0) {
-    const kinds = [...new Set(selected.map((object) => object.type))].join(", ");
-    return { refused: `${spec.label} is not a property of ${kinds}` };
+    const kinds = [...new Set(selected.map((object) => object.type))];
+    return { refused: notAPropertyOf(spec, kinds) };
   }
 
   const changes: ObjectChange[] = applicable
@@ -246,4 +269,144 @@ export function applyEdit(
         : `Set ${spec.label} on ${changes.length} objects`,
     changes,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Applying a transaction
+// ---------------------------------------------------------------------------
+
+/// A transaction applied, or the reason it could not be.
+export type ApplyOutcome = { readonly document: SceneDocument } | EditRefused;
+
+/// Produce the document a transaction describes, without touching the input.
+///
+/// Every change is checked against the value it says it replaces. A change
+/// whose `from` no longer matches was computed against a document that has
+/// since moved, and writing it anyway would overwrite an edit nobody undid.
+/// The whole transaction is refused in that case: half of one gesture applied
+/// is exactly the state one-gesture-one-undo exists to rule out.
+export function applyTransaction(
+  document: SceneDocument,
+  transaction: EditTransaction,
+): ApplyOutcome {
+  let objects: SceneObject[] = [...document.objects];
+  for (const change of transaction.changes) {
+    const index = objects.findIndex((object) => object.id === change.objectId);
+    const object = objects[index];
+    if (index < 0 || object === undefined) {
+      return { refused: `object ${change.objectId} is not in ${document.name}` };
+    }
+    const current = (object as unknown as Record<string, unknown>)[change.field];
+    if (!Object.is(current, change.from)) {
+      return {
+        refused: `${change.objectId}.${change.field} is ${String(current)}, not ${String(change.from)}; the edit is stale`,
+      };
+    }
+    objects = objects.map((candidate, at) =>
+      at === index ? ({ ...candidate, [change.field]: change.to } as SceneObject) : candidate,
+    );
+  }
+  return { document: { ...document, objects } };
+}
+
+/// The transaction that undoes `transaction`: every change reversed, in
+/// reverse order. Undo in the Editor restores the pre-gesture snapshot; this
+/// is the same fact stated from the change list, which is what lets a test
+/// prove the change list and the snapshot agree.
+export function invertTransaction(transaction: EditTransaction): EditTransaction {
+  return {
+    label: `Undo ${transaction.label}`,
+    changes: [...transaction.changes]
+      .reverse()
+      .map((change) => ({ ...change, from: change.to, to: change.from })),
+  };
+}
+
+/// Turn what the author typed into a value for `field`, or say why not.
+///
+/// Out-of-range and malformed entries are refused, never clamped or coerced:
+/// clamping answers a question the author did not ask.
+export function parseFieldInput(
+  field: string,
+  raw: string,
+): { readonly value: unknown } | EditRefused {
+  const spec = FIELDS.find((candidate) => candidate.key === field);
+  if (!spec) return { refused: `no inspector field named ${field}` };
+  const trimmed = raw.trim();
+  switch (spec.input) {
+    case "string":
+      return { value: raw };
+    case "nonEmptyString":
+      return trimmed === "" ? { refused: `${spec.label} cannot be empty` } : { value: trimmed };
+    case "boolean":
+      if (trimmed === "true") return { value: true };
+      if (trimmed === "false") return { value: false };
+      return { refused: `${spec.label} needs true or false, not "${raw}"` };
+    case "number":
+    case "unit": {
+      const isPercent = spec.input === "unit" && trimmed.endsWith("%");
+      const number = Number(isPercent ? trimmed.slice(0, -1) : trimmed);
+      if (trimmed === "" || !Number.isFinite(number)) {
+        return { refused: `${spec.label} needs a finite number, not "${raw}"` };
+      }
+      const value = isPercent ? number / 100 : number;
+      if (spec.input === "unit" && (value < 0 || value > 1)) {
+        return { refused: `${spec.label} must be between 0 and 1 (0% to 100%), not ${trimmed}` };
+      }
+      return { value };
+    }
+  }
+}
+
+/// What the edit prompt should start from: the shared value, or empty when the
+/// selection is Mixed, so the author types a value rather than editing one
+/// object's.
+export function fieldEditStart(
+  document: SceneDocument,
+  selectedIds: readonly string[],
+  field: string,
+): { readonly label: string; readonly initial: string; readonly mixed: boolean } | undefined {
+  const spec = FIELDS.find((candidate) => candidate.key === field);
+  if (!spec) return undefined;
+  const values = document.objects
+    .filter((object) => selectedIds.includes(object.id) && applies(spec, object.type))
+    .map((object) => spec.read(object));
+  const value = unify(values);
+  if (value === undefined) return undefined;
+  if (isMixed(value)) return { label: spec.label, initial: "", mixed: true };
+  return { label: spec.label, initial: String(value), mixed: false };
+}
+
+/// One inspector gesture from start to finish: the transaction and the
+/// document it produces.
+///
+/// This is the path the panel's Edit control takes, so it holds the panel's
+/// rule: a field missing from part of the selection is refused with the same
+/// sentence the disabled button shows. Writing it to only the objects that
+/// have it would be an edit the panel told the author it would not make.
+export function editSelection(
+  document: SceneDocument,
+  selectedIds: readonly string[],
+  field: string,
+  value: unknown,
+): { readonly document: SceneDocument; readonly transaction: EditTransaction } | EditRefused {
+  const spec = FIELDS.find((candidate) => candidate.key === field);
+  if (spec) {
+    const kinds = [
+      ...new Set(
+        document.objects
+          .filter((object) => selectedIds.includes(object.id))
+          .map((object) => object.type),
+      ),
+    ];
+    const missing = kinds.filter((kind) => !applies(spec, kind));
+    if (missing.length > 0 && missing.length < kinds.length) {
+      return { refused: notAPropertyOf(spec, missing) };
+    }
+  }
+  const outcome = applyEdit(document, selectedIds, field, value);
+  if (isRefused(outcome)) return outcome;
+  const applied = applyTransaction(document, outcome);
+  if ("refused" in applied) return applied;
+  return { document: applied.document, transaction: outcome };
 }
