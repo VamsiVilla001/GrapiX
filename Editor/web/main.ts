@@ -29,7 +29,12 @@ import type {
 import { presetBlocker } from "../src/motion-preset-browser";
 import { SceneViewport } from "../src/viewport";
 import { renderNode } from "../src/agent-surface";
-import { objectManagerPanel } from "../src/object-manager";
+import {
+  objectManagerPanel,
+  setObjectExpanded,
+  toggleObjectLock,
+  toggleObjectVisibility,
+} from "../src/object-manager";
 import { inspectorPanel } from "../src/inspector";
 import { fontManagerPanel, fontUsers } from "../src/font-manager";
 import { materialManagerPanel, usersOf } from "../src/material-manager";
@@ -2195,10 +2200,48 @@ function finishOverlayPointer(event: PointerEvent, cancelled: boolean): void {
 function onObjectManagerClick(event: MouseEvent): void {
   const target = event.target;
   if (!(target instanceof Element)) return;
-  const button = target.closest<HTMLButtonElement>('button[data-action="select"][data-for]');
+  const button = target.closest<HTMLButtonElement>("button[data-action][data-for]");
   const id = button?.dataset.for;
-  if (!id) return;
-  setSelection(event.shiftKey || event.ctrlKey || event.metaKey ? additiveSelection([id]) : [id]);
+  const action = button?.dataset.action;
+  if (!id || !action) return;
+  if (action === "select") {
+    setSelection(event.shiftKey || event.ctrlKey || event.metaKey ? additiveSelection([id]) : [id]);
+    return;
+  }
+  if (!scene) return;
+
+  // Visibility and lock are document edits: one click, one undo entry. A
+  // refusal names its reason and commits nothing (invariant 18).
+  if (action === "toggleVisibility" || action === "toggleLock") {
+    if (animationBusy) {
+      log("an edit is already in progress", "bad");
+      return;
+    }
+    const outcome =
+      action === "toggleVisibility"
+        ? toggleObjectVisibility(scene, id)
+        : toggleObjectLock(scene, id);
+    if (!outcome.ok) {
+      log(outcome.reason, "bad");
+      return;
+    }
+    commitScene(scene, outcome.document, outcome.label);
+    return;
+  }
+
+  // Expand/collapse is view state, kept on the active scene session by
+  // `captureActiveSession`; it is never a document edit or an undo entry.
+  if (action === "expand" || action === "collapse") {
+    const change = setObjectExpanded(scene, collapsed, id, action === "expand");
+    if (!change.ok) {
+      log(change.reason, "bad");
+      return;
+    }
+    collapsed = [...change.collapsedIds];
+    const session = activeSession(workspace);
+    if (session) session.collapsed = collapsed;
+    renderPanels(scene);
+  }
 }
 
 // ---------------------------------------------------------------------------
