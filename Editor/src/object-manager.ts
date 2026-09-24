@@ -160,23 +160,34 @@ function cell(rowId: string, key: string, label: string, value: string): UiNode 
   return { id: `${rowId}/${key}`, role: "gridcell", label, value };
 }
 
-function rowActions(placement: Placement, isContainer: boolean, collapsed: boolean): UiAction[] {
+/// Why this row's visibility toggle cannot work, or `undefined` if it can.
+///
+/// One function answers for both the rendered button and the edit itself, so
+/// a control that is offered is exactly a control that will apply.
+function visibilityRefusal(placement: Placement): string | undefined {
   const { object, hiddenBy, lockedBy } = placement;
-
+  if (hiddenBy !== undefined) return `hidden by parent '${hiddenBy}'`;
   // A locked object refuses edits by name. The lock is the author's own
   // instruction, so the refusal quotes which object carries it — the lock may
   // be on an ancestor, and hunting for it is the tedious part.
-  const lockReason =
-    object.locked
-      ? `${object.name} is locked`
-      : lockedBy !== undefined
-        ? `locked by parent '${lockedBy}'`
-        : undefined;
+  if (object.locked) return `${object.name} is locked`;
+  if (lockedBy !== undefined) return `locked by parent '${lockedBy}'`;
+  return undefined;
+}
 
-  const visibilityReason =
-    hiddenBy !== undefined
-      ? `hidden by parent '${hiddenBy}'`
-      : lockReason;
+/// Why this row's lock toggle cannot work, or `undefined` if it can.
+///
+/// A lock inherited from a parent cannot be released from the child: the
+/// instruction lives on the ancestor, and pretending otherwise would let an
+/// author think they had unlocked something they had not.
+function lockRefusal(placement: Placement): string | undefined {
+  return placement.lockedBy === undefined ? undefined : `locked by parent '${placement.lockedBy}'`;
+}
+
+function rowActions(placement: Placement, isContainer: boolean, collapsed: boolean): UiAction[] {
+  const { object } = placement;
+  const visibilityReason = visibilityRefusal(placement);
+  const lockReason = lockRefusal(placement);
 
   const actions: UiAction[] = [
     { name: "select", label: "Select" },
@@ -188,10 +199,7 @@ function rowActions(placement: Placement, isContainer: boolean, collapsed: boole
     {
       name: "toggleLock",
       label: object.locked ? "Unlock" : "Lock",
-      // A lock inherited from a parent cannot be released from the child: the
-      // instruction lives on the ancestor, and pretending otherwise would let
-      // an author think they had unlocked something they had not.
-      ...(lockedBy === undefined ? {} : { unavailable: `locked by parent '${lockedBy}'` }),
+      ...(lockReason === undefined ? {} : { unavailable: lockReason }),
     },
   ];
 
@@ -255,5 +263,98 @@ export function objectManagerPanel(
     label: "Objects",
     description: `${rows.length} object(s) in ${document.name}`,
     children: rows,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The row actions, as decisions. Each returns either the result or a named
+// refusal, and a refusal carries no document: a refused click has nothing to
+// commit, so it cannot change the scene or add an undo entry.
+// ---------------------------------------------------------------------------
+
+/// The outcome of a visibility or lock toggle: a new document and the
+/// sentence the history records, or the reason nothing changed.
+export type ObjectManagerEdit =
+  | { readonly ok: true; readonly document: SceneDocument; readonly label: string }
+  | { readonly ok: false; readonly reason: string };
+
+/// The outcome of an expand or collapse: new view state, never a document.
+export type ObjectManagerViewChange =
+  | { readonly ok: true; readonly collapsedIds: readonly string[]; readonly label: string }
+  | { readonly ok: false; readonly reason: string };
+
+/// The placement the panel would give this object, ignoring collapse.
+///
+/// Collapse only decides which rows are drawn; inherited visibility and lock
+/// come from the same walk either way, so an edit and its button agree.
+function placementOf(document: SceneDocument, objectId: string): Placement | undefined {
+  return place(document, new Set()).find((placement) => placement.object.id === objectId);
+}
+
+function replaceObject(document: SceneDocument, next: SceneObject): SceneDocument {
+  return {
+    ...document,
+    objects: document.objects.map((object) => (object.id === next.id ? next : object)),
+  };
+}
+
+/// Show or hide one object, refusing exactly where the row's button does.
+export function toggleObjectVisibility(document: SceneDocument, objectId: string): ObjectManagerEdit {
+  const placement = placementOf(document, objectId);
+  if (!placement) return { ok: false, reason: `no object ${objectId} in this scene` };
+  const refusal = visibilityRefusal(placement);
+  if (refusal !== undefined) {
+    return { ok: false, reason: `cannot change visibility of ${placement.object.name}: ${refusal}` };
+  }
+  const { object } = placement;
+  const visible = !object.visible;
+  return {
+    ok: true,
+    document: replaceObject(document, { ...object, visible } as SceneObject),
+    label: `${visible ? "Showed" : "Hid"} ${object.name}`,
+  };
+}
+
+/// Lock or unlock one object, refusing an inherited lock by its owner's name.
+export function toggleObjectLock(document: SceneDocument, objectId: string): ObjectManagerEdit {
+  const placement = placementOf(document, objectId);
+  if (!placement) return { ok: false, reason: `no object ${objectId} in this scene` };
+  const refusal = lockRefusal(placement);
+  if (refusal !== undefined) {
+    return { ok: false, reason: `cannot change the lock on ${placement.object.name}: ${refusal}` };
+  }
+  const { object } = placement;
+  const locked = !object.locked;
+  return {
+    ok: true,
+    document: replaceObject(document, { ...object, locked } as SceneObject),
+    label: `${locked ? "Locked" : "Unlocked"} ${object.name}`,
+  };
+}
+
+/// Open or shut one container's rows. View state only: the document is read,
+/// never written, and the result is not an edit anyone could undo.
+export function setObjectExpanded(
+  document: SceneDocument,
+  collapsedIds: readonly string[],
+  objectId: string,
+  expanded: boolean,
+): ObjectManagerViewChange {
+  const object = document.objects.find((candidate) => candidate.id === objectId);
+  if (!object) return { ok: false, reason: `no object ${objectId} in this scene` };
+  if (childIdsOf(object) === undefined) {
+    return { ok: false, reason: `${object.name} has no children` };
+  }
+  const isCollapsed = collapsedIds.includes(objectId);
+  // A stale click (the row was redrawn between render and press) is refused
+  // by name rather than silently doing the opposite of what it said.
+  if (expanded && !isCollapsed) return { ok: false, reason: `${object.name} is already expanded` };
+  if (!expanded && isCollapsed) return { ok: false, reason: `${object.name} is already collapsed` };
+  return {
+    ok: true,
+    collapsedIds: expanded
+      ? collapsedIds.filter((id) => id !== objectId)
+      : [...collapsedIds, objectId],
+    label: `${expanded ? "Expanded" : "Collapsed"} ${object.name}`,
   };
 }
