@@ -42,6 +42,9 @@ export interface TimelineSnapshot {
   readonly pixelsPerFrame: number;
   readonly width: number;
   readonly height: number;
+  /// Vertical scroll in CSS pixels. The row window alone is not enough: a
+  /// scroll of less than a row moves every row without moving the window.
+  readonly scrollTop: number;
   readonly devicePixelRatio: number;
   readonly rowWindowFirst: number;
   readonly rowWindowLast: number;
@@ -69,6 +72,7 @@ function geometryChanged(previous: TimelineSnapshot, next: TimelineSnapshot): bo
     previous.pixelsPerFrame !== next.pixelsPerFrame ||
     previous.width !== next.width ||
     previous.height !== next.height ||
+    previous.scrollTop !== next.scrollTop ||
     previous.devicePixelRatio !== next.devicePixelRatio ||
     previous.rowWindowFirst !== next.rowWindowFirst ||
     previous.rowWindowLast !== next.rowWindowLast
