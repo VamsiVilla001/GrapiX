@@ -129,7 +129,12 @@ import {
   type TimelineSnapshot,
 } from "../src/timeline/repaint-plan";
 import {
-  clampViewport,
+  scrollViewportByWheel,
+  timelineSnapshotFor,
+  viewportForBounds,
+  watchSurfaceSize,
+} from "../src/timeline/surface";
+import {
   DEFAULT_PIXELS_PER_FRAME,
   DEFAULT_ROW_HEIGHT,
   rowWindow,
@@ -1026,21 +1031,16 @@ let graphTrack: number | undefined;
 let phaseRevision = 0;
 
 function timelineSnapshot(model: TimelineModel): TimelineSnapshot {
-  return {
-    startFrame: timelineViewport.startFrame,
-    pixelsPerFrame: timelineViewport.pixelsPerFrame,
-    width: timelineViewport.width,
-    height: timelineViewport.height,
+  // The real rendered row window and scroll offset, so a scroll is geometry.
+  return timelineSnapshotFor({
+    viewport: timelineViewport,
+    rowCount: model.rows.length,
     devicePixelRatio: window.devicePixelRatio,
-    rowWindowFirst: 0,
-    rowWindowLast: model.tracks.length,
     contentRevision,
     selectionRevision,
     phaseRevision,
     currentFrame,
-    marqueeRevision: 0,
-    dragRevision: 0,
-  };
+  });
 }
 
 /// The DOM's shape: the rows present and the canvas sizes. A change to this
@@ -1066,13 +1066,10 @@ function renderTimeline(document_: SceneDocument, structureChanged = true): void
   if (structureChanged) contentRevision += 1;
   const model = currentTimelineModel(document_);
   const bounds = ui.timelineMount.getBoundingClientRect();
-  timelineViewport = clampViewport(
-    {
-      ...timelineViewport,
-      // The header column is 210px of the grid; the stage gets the rest.
-      width: Math.max(0, bounds.width - 210),
-      height: Math.max(0, bounds.height),
-    },
+  // The header column is 210px of the grid; the stage gets the rest.
+  timelineViewport = viewportForBounds(
+    timelineViewport,
+    bounds,
     model.durationFrames,
     model.rows.length,
   );
@@ -1115,7 +1112,32 @@ function renderTimeline(document_: SceneDocument, structureChanged = true): void
     // Fresh canvases retain nothing, so this is a first paint.
     lastSnapshot = null;
   }
+  // The header column scrolls with the canvases: its spacers place row r at
+  // r * rowHeight, and the layers draw it at that minus `scrollTop`.
+  const headers = ui.timelineMount.querySelector<HTMLElement>(".timeline-headers");
+  if (headers) headers.scrollTop = timelineViewport.scrollTop;
   paintTimeline(model);
+}
+
+/** Wheel over the timeline: rows vertically, frames with Shift or a
+ *  horizontal wheel. Geometry only, so this repaints; the DOM is rebuilt only
+ *  when the row window moves, and stays bounded by the viewport either way. */
+function onTimelineWheel(event: WheelEvent): void {
+  if (!scene || !timelineLayers) return;
+  const model = currentTimelineModel(scene);
+  const next = scrollViewportByWheel(
+    timelineViewport,
+    event,
+    model.durationFrames,
+    model.rows.length,
+  );
+  const unchanged =
+    next.scrollTop === timelineViewport.scrollTop &&
+    next.startFrame === timelineViewport.startFrame;
+  if (unchanged) return;
+  event.preventDefault();
+  timelineViewport = next;
+  renderTimeline(scene, false);
 }
 
 /** Paint only the layers the transition dirtied. */
@@ -3025,6 +3047,25 @@ async function start(): Promise<void> {
   ui.timelineMount.addEventListener("pointermove", onTimelinePointerMove);
   ui.timelineMount.addEventListener("pointerup", (event) => finishKeyDrag(event, false));
   ui.timelineMount.addEventListener("pointercancel", (event) => finishKeyDrag(event, true));
+  ui.timelineMount.addEventListener("wheel", onTimelineWheel, { passive: false });
+  // Re-measure whenever the timeline's container changes size, whatever the
+  // cause: a resizer drag, a keyboard resize, a dock move, a reset, a window
+  // resize. Coalesced to one render per animation frame (11.10).
+  watchSurfaceSize(
+    ui.timelineMount,
+    {
+      createObserver: (callback) => new ResizeObserver(callback),
+      requestFrame: (callback) => window.requestAnimationFrame(callback),
+      cancelFrame: (handle) => window.cancelAnimationFrame(handle),
+      measure: () => {
+        const bounds = ui.timelineMount.getBoundingClientRect();
+        return { width: bounds.width, height: bounds.height };
+      },
+    },
+    () => {
+      if (scene) renderTimeline(scene, false);
+    },
+  );
   document.addEventListener("keydown", onTimelineKeyDown);
   window.addEventListener("resize", () => {
     applyLayoutSizes();

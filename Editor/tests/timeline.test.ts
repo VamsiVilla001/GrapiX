@@ -161,6 +161,7 @@ describe("repaint planning", () => {
     pixelsPerFrame: 6,
     width: 900,
     height: 220,
+    scrollTop: 0,
     devicePixelRatio: 1,
     rowWindowFirst: 0,
     rowWindowLast: 10,
