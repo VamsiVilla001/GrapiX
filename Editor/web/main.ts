@@ -35,9 +35,21 @@ import {
   toggleObjectLock,
   toggleObjectVisibility,
 } from "../src/object-manager";
-import { inspectorPanel } from "../src/inspector";
+import {
+  editSelection,
+  fieldEditStart,
+  inspectorPanel,
+  isRefused,
+  parseFieldInput,
+} from "../src/inspector";
 import { fontManagerPanel, fontUsers } from "../src/font-manager";
-import { materialManagerPanel, usersOf } from "../src/material-manager";
+import {
+  applyDeleteMaterial,
+  applyRelink,
+  isMaterialRefused,
+  materialManagerPanel,
+  usersOf,
+} from "../src/material-manager";
 import { assetManagerPanel, assetUsers } from "../src/asset-manager";
 import { textStylePanel, textStyleUsers } from "../src/text-style";
 import {
@@ -2140,6 +2152,43 @@ function onInspectorContextMenu(event: MouseEvent): void {
   openKeyframeMenu(event, property);
 }
 
+/** An inspector "Edit X" across the whole selection (11.9): one gesture, one
+ *  undo entry carrying every object's change. The pure `editSelection` builds
+ *  the transaction and the document it produces; `runEdit` records it through
+ *  the same history the Animation panel uses. A refused edit leaves the
+ *  document and the history untouched. */
+function onInspectorClick(event: MouseEvent): void {
+  if (!scene) return;
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  const button = target.closest<HTMLButtonElement>('button[data-action="edit"][data-for^="inspector/"]');
+  const field = button?.dataset.for?.slice("inspector/".length);
+  if (!button || !field) return;
+  if (button.dataset.unavailable !== undefined) {
+    log(`inspector edit refused: ${button.dataset.unavailable}`, "bad");
+    return;
+  }
+  const start = fieldEditStart(scene, selection, field);
+  if (!start) return;
+  const scope = selection.length > 1 ? ` on ${selection.length} objects` : "";
+  const raw = window.prompt(
+    start.mixed ? `${start.label}${scope} (currently Mixed)` : `${start.label}${scope}`,
+    start.initial,
+  );
+  if (raw === null) return;
+  const parsed = parseFieldInput(field, raw);
+  if (isRefused(parsed)) {
+    log(`inspector edit refused: ${parsed.refused}`, "bad");
+    return;
+  }
+  const outcome = editSelection(scene, selection, field, parsed.value);
+  if (isRefused(outcome)) {
+    log(`inspector edit refused: ${outcome.refused}`, "bad");
+    return;
+  }
+  void runEdit(async () => ({ next: outcome.document, label: outcome.transaction.label }));
+}
+
 
 function eventScenePoint(event: PointerEvent): OverlayPoint {
   const active = previewScene ?? scene;
@@ -2482,6 +2531,25 @@ function onMaterialManagerClick(event: MouseEvent): void {
   selectedMaterialId = material.materialId;
   renderPanels(scene);
 
+  if (button?.dataset.action === "relink") {
+    relinkSelectedMaterial(scene, material.materialId, material.name);
+    return;
+  }
+  if (button?.dataset.action === "delete") {
+    const outcome = applyDeleteMaterial(scene, material.materialId);
+    if (isMaterialRefused(outcome)) {
+      log(`material delete refused [${outcome.code}]: ${outcome.refused}`, "bad");
+      return;
+    }
+    selectedMaterialId = undefined;
+    void runEdit(async () => ({ next: outcome.document, label: `Deleted material ${material.name}` }));
+    return;
+  }
+  if (button?.dataset.action === "edit") {
+    // Said out loud rather than a button that silently only selects.
+    log(`material edit is not available in this build; ${material.name} is selected`, "bad");
+    return;
+  }
   if (button?.dataset.action !== undefined && button.dataset.action !== "reveal") return;
   const users = usersOf(scene, material.materialId);
   log(
@@ -2489,6 +2557,40 @@ function onMaterialManagerClick(event: MouseEvent): void {
       ? `Material ${material.name} has no object users.`
       : `Material ${material.name} is used by object(s): ${users.join(", ")}.`,
   );
+}
+
+/** Relink every user of one material onto another as one undo entry (11.12).
+ *  The prompt shows the blast radius first — the same objects `relinkMaterial`
+ *  previews and `applyRelink` changes — so the author confirms a known set,
+ *  never a blind repoint. */
+function relinkSelectedMaterial(document_: SceneDocument, fromId: string, fromName: string): void {
+  const preview = usersOf(document_, fromId);
+  const others = document_.materials
+    .filter((candidate) => candidate.materialId !== fromId)
+    .map((candidate) => candidate.materialId);
+  if (preview.length === 0) {
+    log(`material relink refused [relinkNoUsers]: ${fromId} has no users to relink`, "bad");
+    return;
+  }
+  if (others.length === 0) {
+    log(`material relink refused: there is no other material to relink ${fromName} onto`, "bad");
+    return;
+  }
+  const toId = window.prompt(
+    `Relink ${preview.length} object(s) from ${fromName} (${preview.join(", ")}) to which material? ` +
+      `One of: ${others.join(", ")}`,
+    others[0],
+  );
+  if (toId === null) return;
+  const outcome = applyRelink(document_, fromId, toId.trim());
+  if (isMaterialRefused(outcome)) {
+    log(`material relink refused [${outcome.code}]: ${outcome.refused}`, "bad");
+    return;
+  }
+  void runEdit(async () => ({
+    next: outcome.document,
+    label: `Relinked ${outcome.changed.length} object(s) from ${fromId} to ${toId.trim()}: ${outcome.changed.join(", ")}`,
+  }));
 }
 
 function onAssetManagerClick(event: MouseEvent): void {
@@ -3163,6 +3265,7 @@ async function start(): Promise<void> {
     if (property) openKeyframeMenu(event, property);
   });
   ui.inspector.addEventListener("contextmenu", onInspectorContextMenu);
+  ui.inspector.addEventListener("click", onInspectorClick);
   ui.overlay.addEventListener("contextmenu", (event) => openKeyframeMenu(event));
   ui.keyframeMenu.addEventListener("click", onKeyframeMenuClick);
   document.addEventListener("pointerdown", (event) => {

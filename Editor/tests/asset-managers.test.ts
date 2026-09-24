@@ -12,7 +12,14 @@ import { describe, expect, it } from "vitest";
 import type { SceneDocument, SceneObject } from "@grapix/contracts";
 import { findNode } from "../src/agent-surface";
 import { fontManagerPanel, fontUsers } from "../src/font-manager";
-import { materialManagerPanel, relinkMaterial, usersOf } from "../src/material-manager";
+import {
+  applyDeleteMaterial,
+  applyRelink,
+  isMaterialRefused,
+  materialManagerPanel,
+  relinkMaterial,
+  usersOf,
+} from "../src/material-manager";
 
 function base(id: string): Record<string, unknown> {
   return {
@@ -153,6 +160,79 @@ describe("relink previews its blast radius", () => {
   it("relinking a material to itself would change nothing, and says so", () => {
     const document = scene([meshWith("a", "brand")], [brandMaterial]);
     expect(relinkMaterial(document, "brand", "brand")).toEqual([]);
+  });
+});
+
+describe("relink and delete apply to the document", () => {
+  const bound = (document: SceneDocument): Record<string, unknown> =>
+    Object.fromEntries(document.objects.map((object) => [object.id, object.materialSlots]));
+
+  it("relink repoints every user of A to B and names exactly the previewed objects", () => {
+    const document = scene(
+      [
+        meshWith("a", "brand"),
+        {
+          ...meshWith("b", "brand"),
+          materialSlots: {
+            surface: { materialId: "brand", instanceId: "i1" },
+            rim: { materialId: "alt" },
+          },
+        } as SceneObject,
+        meshWith("c", "alt"),
+      ],
+      [brandMaterial, altMaterial],
+    );
+    const before = JSON.stringify(document);
+    const preview = relinkMaterial(document, "brand", "alt");
+
+    const outcome = applyRelink(document, "brand", "alt");
+    if (isMaterialRefused(outcome)) throw new Error(outcome.refused);
+
+    expect(outcome.changed).toEqual(preview);
+    expect(usersOf(outcome.document, "brand")).toEqual([]);
+    expect(usersOf(outcome.document, "alt")).toEqual(["a", "b", "c"]);
+    // The instance's overrides belonged to the old material, so they go; the
+    // untouched slot keeps its binding exactly.
+    expect(bound(outcome.document).b).toEqual({
+      surface: { materialId: "alt" },
+      rim: { materialId: "alt" },
+    });
+    // Pure: the input is the undo snapshot and must not have moved.
+    expect(JSON.stringify(document)).toBe(before);
+    expect(outcome.document.materials).toEqual(document.materials);
+  });
+
+  it("relink refuses by name what it cannot or need not do", () => {
+    const document = scene([meshWith("a", "brand")], [brandMaterial, altMaterial]);
+    const code = (outcome: object): string | undefined =>
+      isMaterialRefused(outcome) ? outcome.code : undefined;
+
+    expect(code(applyRelink(document, "brand", "brand"))).toBe("relinkSameMaterial");
+    expect(code(applyRelink(document, "alt", "brand"))).toBe("relinkNoUsers");
+    expect(code(applyRelink(document, "brand", "ghost"))).toBe("materialUnknown");
+    expect(code(applyRelink(document, "ghost", "brand"))).toBe("materialUnknown");
+  });
+
+  it("deletes an unused material and nothing else", () => {
+    const document = scene([meshWith("a", "brand")], [brandMaterial, altMaterial]);
+    const outcome = applyDeleteMaterial(document, "alt");
+    if (isMaterialRefused(outcome)) throw new Error(outcome.refused);
+
+    expect(outcome.document.materials).toEqual([brandMaterial]);
+    expect(outcome.document.objects).toEqual(document.objects);
+    expect(document.materials).toHaveLength(2);
+  });
+
+  it("refuses deleting an in-use material with the panel's own sentence", () => {
+    const document = scene([meshWith("a", "brand"), meshWith("b", "brand")], [brandMaterial]);
+    const shown = findNode(materialManagerPanel(document), "material/brand")!.actions!.find(
+      (action) => action.name === "delete",
+    )!.unavailable;
+
+    const outcome = applyDeleteMaterial(document, "brand");
+    expect(isMaterialRefused(outcome) && outcome.code).toBe("materialInUse");
+    expect(isMaterialRefused(outcome) && outcome.refused).toBe(shown);
+    expect(isMaterialRefused(applyDeleteMaterial(document, "ghost"))).toBe(true);
   });
 });
 
