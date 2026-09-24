@@ -359,17 +359,34 @@ impl ToolHandler for BindingsSchema {
             .read_scene(&args.project, &args.scene_id)
             .map_err(Refusal::from)?;
 
-        let mut fields: std::collections::BTreeMap<String, serde_json::Value> = Default::default();
+        // Path -> every object/property that reads it. A list, because one
+        // field commonly drives several properties, and an agent changing it
+        // must learn all of them: keying the consumer by path alone kept only
+        // the last one.
+        let mut fields: std::collections::BTreeMap<String, Vec<serde_json::Value>> =
+            Default::default();
+        // A binding that is not a string path is named, never advertised as a
+        // field — the old `unwrap_or_default` keyed it as "", a field no agent
+        // can fill, and hid which object was wrong (invariant 17).
+        let mut invalid = Vec::new();
         for object in &scene.objects {
             let base = object.base();
             let Some(bindings) = &base.bindings else {
                 continue;
             };
             for (property, path) in bindings {
-                fields.insert(
-                    path.as_str().unwrap_or_default().to_owned(),
-                    serde_json::json!({ "object": base.id, "property": property }),
-                );
+                match path.as_str() {
+                    Some(path) => fields
+                        .entry(path.to_owned())
+                        .or_default()
+                        .push(serde_json::json!({ "object": base.id, "property": property })),
+                    None => invalid.push(serde_json::json!({
+                        "object": base.id,
+                        "property": property,
+                        "binding": path,
+                        "reason": "binding path is not a string",
+                    })),
+                }
             }
         }
 
@@ -377,6 +394,7 @@ impl ToolHandler for BindingsSchema {
             "sceneId": scene.id,
             "dataContext": scene.data_context,
             "fields": fields,
+            "invalid": invalid,
         }))
     }
 }
@@ -777,6 +795,186 @@ mod tests {
             }))
             .expect_err("an unknown asset must refuse");
         assert!(matches!(refusal, Refusal::SceneAssetUnknown { .. }));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A scene whose bindings exercise the schema: a nested data context, two
+    /// objects sharing one path, an array path, an image asset binding, and a
+    /// path the data context does not carry.
+    fn bound_scene() -> SceneDocument {
+        use gx_contracts::scene::ImageObject;
+
+        let mut scene = scene("scorebug");
+        scene.data_context = serde_json::json!({
+            "match": {
+                "home": { "x": 120.5, "name": "Rovers", "logo": "home-logo" },
+                "alpha": 48.0_f64 / 255.0,
+            },
+            "flags": [true, false],
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        let bind = |pairs: &[(&str, serde_json::Value)]| {
+            Some(
+                pairs
+                    .iter()
+                    .map(|(property, path)| ((*property).to_owned(), path.clone()))
+                    .collect::<serde_json::Map<_, _>>(),
+            )
+        };
+
+        let mut bar = ObjectBase::new("bar", "Bar");
+        bar.bindings = bind(&[
+            ("x", serde_json::json!("match.home.x")),
+            ("visible", serde_json::json!("flags.0")),
+        ]);
+        let mut shadow = ObjectBase::new("shadow", "Shadow");
+        shadow.bindings = bind(&[("x", serde_json::json!("match.home.x"))]);
+        let mut logo = ObjectBase::new("logo", "Logo");
+        logo.bindings = bind(&[("assetId", serde_json::json!("match.home.logo"))]);
+        // Absent from the data context: the scene still binds it, so an agent
+        // filling this template must be told it is expected.
+        let mut referee = ObjectBase::new("referee", "Referee");
+        referee.bindings = bind(&[("x", serde_json::json!("match.referee.x"))]);
+        let unbound = ObjectBase::new("plate", "Plate");
+
+        scene.objects.push(SceneObject::Rect(RectObject { base: bar, radius: 0.0 }));
+        scene.objects.push(SceneObject::Rect(RectObject { base: shadow, radius: 0.0 }));
+        scene.objects.push(SceneObject::Image(ImageObject {
+            base: logo,
+            asset_id: "home-logo".into(),
+            fit: Default::default(),
+        }));
+        scene.objects.push(SceneObject::Rect(RectObject { base: referee, radius: 0.0 }));
+        scene.objects.push(SceneObject::Rect(RectObject { base: unbound, radius: 0.0 }));
+        scene
+    }
+
+    fn schema_of(projects: &Projects, authored: &SceneDocument) -> serde_json::Value {
+        SceneCreate(projects.clone())
+            .handle(serde_json::json!({
+                "project": "news",
+                "scene": serde_json::to_value(authored).unwrap(),
+            }))
+            .expect("the scene writes");
+        BindingsSchema(projects.clone())
+            .handle(serde_json::json!({ "project": "news", "scene_id": authored.id }))
+            .expect("the schema is derived")
+    }
+
+    #[test]
+    fn bindings_schema_names_every_bound_path_and_every_property_that_consumes_it() {
+        // 8.6's done-when: the data schema is discoverable. The schema is the
+        // set of paths the scene binds, each with every object/property that
+        // reads it, plus the data context those paths resolve against.
+        let root = scratch("bindings-schema");
+        let projects = Projects::at_root(&root);
+        projects.create_project("news").unwrap();
+        let authored = bound_scene();
+
+        let schema = schema_of(&projects, &authored);
+
+        assert_eq!(schema["sceneId"], "scorebug");
+        assert_eq!(
+            schema["dataContext"],
+            serde_json::Value::Object(authored.data_context.clone()),
+            "the whole nested data context is returned, not a sample of it"
+        );
+        assert_eq!(
+            schema["dataContext"]["match"]["alpha"].as_f64().map(f64::to_bits),
+            Some((48.0_f64 / 255.0).to_bits())
+        );
+        assert_eq!(
+            schema["fields"],
+            serde_json::json!({
+                "flags.0": [{ "object": "bar", "property": "visible" }],
+                "match.home.logo": [{ "object": "logo", "property": "assetId" }],
+                // Two consumers of one path are both named. Keying by path
+                // alone kept only the last, so an agent changing this field
+                // would not learn it also moves `bar`.
+                "match.home.x": [
+                    { "object": "bar", "property": "x" },
+                    { "object": "shadow", "property": "x" },
+                ],
+                // Absent from the data context and still advertised: the scene
+                // expects it, and hiding it would tell the agent the template
+                // takes less data than it does. Whether a path resolves is the
+                // Editor preview's check (`Editor/src/bindings.ts`), not this one.
+                "match.referee.x": [{ "object": "referee", "property": "x" }],
+            }),
+        );
+        assert!(
+            schema["dataContext"]["match"].get("referee").is_none(),
+            "the unresolved path is visible by its absence from the data context"
+        );
+        assert_eq!(schema["invalid"], serde_json::json!([]));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn bindings_schema_names_a_non_string_path_rather_than_advertising_an_empty_field() {
+        // A binding whose path is not a string cannot be a data field. Keying
+        // it as "" would advertise a field no agent can fill and hide which
+        // object is wrong; it is reported by object and property instead.
+        let root = scratch("bindings-schema-invalid");
+        let projects = Projects::at_root(&root);
+        projects.create_project("news").unwrap();
+        let mut authored = bound_scene();
+        authored.objects[0]
+            .base_mut()
+            .bindings
+            .as_mut()
+            .unwrap()
+            .insert("y".into(), serde_json::json!(42));
+
+        let schema = schema_of(&projects, &authored);
+
+        assert!(schema["fields"].get("").is_none(), "no empty field: {}", schema["fields"]);
+        assert_eq!(
+            schema["invalid"],
+            serde_json::json!([{
+                "object": "bar",
+                "property": "y",
+                "binding": 42,
+                "reason": "binding path is not a string",
+            }]),
+        );
+        assert_eq!(
+            schema["fields"]["match.home.x"].as_array().map(Vec::len),
+            Some(2),
+            "one bad binding does not hide the valid ones"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn bindings_schema_of_an_unbound_scene_is_empty_not_absent() {
+        let root = scratch("bindings-schema-empty");
+        let projects = Projects::at_root(&root);
+        projects.create_project("news").unwrap();
+
+        let schema = schema_of(&projects, &scene("plain"));
+
+        assert_eq!(schema["fields"], serde_json::json!({}));
+        assert_eq!(schema["invalid"], serde_json::json!([]));
+        assert_eq!(schema["dataContext"], serde_json::json!({}));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn bindings_schema_of_a_missing_scene_refuses_by_name() {
+        let root = scratch("bindings-schema-missing");
+        let projects = Projects::at_root(&root);
+        projects.create_project("news").unwrap();
+        let refusal = BindingsSchema(projects)
+            .handle(serde_json::json!({ "project": "news", "scene_id": "absent" }))
+            .expect_err("a schema for no scene is a refusal, not an empty answer");
+        assert!(
+            !matches!(refusal, Refusal::SceneParseFailed { .. }),
+            "the arguments were well formed; the refusal must name the missing scene: {refusal:?}"
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 

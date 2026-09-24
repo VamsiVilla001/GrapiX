@@ -1438,6 +1438,225 @@ mod tests {
         std::fs::remove_dir_all(root).expect("remove fixture");
     }
 
+    /// The bindings of every object, by id, as the closed reader returns them.
+    fn bindings_by_object(
+        scene: &SceneDocument,
+    ) -> BTreeMap<String, Option<serde_json::Map<String, serde_json::Value>>> {
+        scene
+            .objects
+            .iter()
+            .map(|object| (object.base().id.clone(), object.base().bindings.clone()))
+            .collect()
+    }
+
+    fn binding_map(pairs: &[(&str, &str)]) -> serde_json::Map<String, serde_json::Value> {
+        pairs
+            .iter()
+            .map(|(property, path)| ((*property).to_owned(), serde_json::json!(path)))
+            .collect()
+    }
+
+    /// The saved file as bytes on disk, parsed only as JSON — never through
+    /// the schema, which would hide an explicit `null` or `{}` behind `None`.
+    fn raw_scene_file(root: &std::path::Path, project: &str, scene_id: &str) -> serde_json::Value {
+        let bytes = std::fs::read(root.join(project).join("scenes").join(format!("{scene_id}.json")))
+            .expect("the saved scene file exists");
+        serde_json::from_slice(&bytes).expect("the saved scene file is JSON")
+    }
+
+    fn bound_scene() -> SceneDocument {
+        use gx_contracts::scene::{
+            AssetKind, AssetLibraryItem, ImageObject, ObjectBase, RectObject, SceneObject,
+        };
+
+        let mut scene = new_scene("scorebug", "Scorebug");
+        // A non-dyadic float: 48/255 has no exact binary representation, so a
+        // reader that is merely ULP-accurate (rule 25) returns a different
+        // number and the equality below fails.
+        scene.data_context = serde_json::json!({
+            "match": {
+                "home": { "x": 120.5, "name": "Rovers", "logo": "home-logo" },
+                "away": { "x": 1480.25, "name": "United" },
+                "alpha": 48.0_f64 / 255.0,
+            },
+            "flags": [true, false],
+            "live": true,
+        })
+        .as_object()
+        .expect("the data context is an object")
+        .clone();
+        scene.assets.push(AssetLibraryItem {
+            asset_id: "home-logo".into(),
+            name: "Home logo".into(),
+            kind: AssetKind::Image,
+            path: "assets/home-logo.png".into(),
+            checksum: None,
+            mime_type: Some("image/png".into()),
+            size_bytes: None,
+            status: None,
+        });
+
+        let mut bar = ObjectBase::new("bar", "Bar");
+        bar.width = 640.0;
+        bar.height = 72.0;
+        bar.bindings = Some(binding_map(&[("x", "match.home.x"), ("visible", "flags.0")]));
+        scene.objects.push(SceneObject::Rect(RectObject { base: bar, radius: 4.0 }));
+
+        let mut logo = ObjectBase::new("logo", "Logo");
+        logo.width = 64.0;
+        logo.height = 64.0;
+        logo.bindings = Some(binding_map(&[("assetId", "match.home.logo")]));
+        scene.objects.push(SceneObject::Image(ImageObject {
+            base: logo,
+            asset_id: "home-logo".into(),
+            fit: Default::default(),
+        }));
+        scene
+    }
+
+    #[test]
+    fn bindings_and_the_data_context_survive_save_and_reopen() {
+        // 11.19: "preserve bindings through save/reopen". Every reopen below
+        // goes through `store.read_scene`, which is `parse_scene_document` —
+        // the closed reader the engine uses — not a plain serde read.
+        let (root, store) = scratch_projects("binding-round-trip");
+        project_create_in(&store, "news").expect("create project");
+
+        // 1–2. Create, reopen, and compare the whole document.
+        let mut scene = bound_scene();
+        scene_create_in(&store, "news", &scene).expect("create bound scene");
+        let reopened = store.read_scene("news", "scorebug").expect("reopen bound scene");
+        assert_eq!(reopened, scene, "the whole bound document survives save/reopen");
+        assert_eq!(
+            bindings_by_object(&reopened),
+            BTreeMap::from([
+                (
+                    "bar".to_owned(),
+                    Some(binding_map(&[("x", "match.home.x"), ("visible", "flags.0")])),
+                ),
+                ("logo".to_owned(), Some(binding_map(&[("assetId", "match.home.logo")]))),
+            ]),
+            "each object's bindings map comes back exact, no more and no fewer"
+        );
+        let alpha = reopened.data_context["match"]["alpha"]
+            .as_f64()
+            .expect("the float stays a number");
+        assert_eq!(
+            alpha.to_bits(),
+            (48.0_f64 / 255.0).to_bits(),
+            "a non-dyadic data-context float reopens bit for bit"
+        );
+        assert_eq!(reopened.data_context["flags"], serde_json::json!([true, false]));
+        assert_eq!(reopened.data_context["live"], serde_json::json!(true));
+        assert_eq!(reopened.data_context["match"]["home"]["name"], "Rovers");
+
+        // 3. Re-point one binding and remove another; update; reopen.
+        let bar = scene.objects[0].base_mut();
+        let bindings = bar.bindings.as_mut().expect("bar is bound");
+        bindings.insert("x".into(), serde_json::json!("match.away.x"));
+        bindings.remove("visible");
+        scene_update_in(&store, "news", &scene).expect("update re-bound scene");
+        let reopened = store.read_scene("news", "scorebug").expect("reopen re-bound scene");
+        assert_eq!(reopened, scene, "an edited binding set survives save/reopen");
+        assert_eq!(
+            reopened.objects[0].base().bindings,
+            Some(binding_map(&[("x", "match.away.x")])),
+            "the re-pointed path is saved and the removed binding stays removed"
+        );
+
+        // 4. Remove every binding. Absent means absent: not `null`, not `{}`.
+        for object in &mut scene.objects {
+            object.base_mut().bindings = None;
+        }
+        scene_update_in(&store, "news", &scene).expect("update unbound scene");
+        let reopened = store.read_scene("news", "scorebug").expect("reopen unbound scene");
+        assert_eq!(reopened, scene);
+        for object in &reopened.objects {
+            assert_eq!(object.base().bindings, None, "{} has no bindings", object.base().id);
+        }
+        let raw = raw_scene_file(&root, "news", "scorebug");
+        for object in raw["objects"].as_array().expect("objects on disk") {
+            assert!(
+                object.get("bindings").is_none(),
+                "an unbound object carries no bindings key on disk: {object}"
+            );
+        }
+
+        // 5. The shape `applyBindingEdit` hands `cmd_scene_update` over Tauri
+        // IPC: JSON.stringify drops `bindings: undefined`, so an object whose
+        // last binding was removed has no key, and a bound one has a plain
+        // property -> path object. Deserialised with plain serde, as Tauri does.
+        let from_ipc: SceneDocument = serde_json::from_value(serde_json::json!({
+            "id": "scorebug",
+            "name": "Scorebug",
+            "version": 1,
+            "canvas": { "width": 1920, "height": 1080, "frameRate": { "num": 50, "den": 1 } },
+            "timeline": { "durationFrames": 0, "channels": [], "phases": [] },
+            "dataContext": {
+                "match": {
+                    "home": { "x": 120.5, "name": "Rovers", "logo": "home-logo" },
+                    "away": { "x": 1480.25, "name": "United" },
+                    "alpha": 0.18823529411764706
+                },
+                "flags": [true, false],
+                "live": true
+            },
+            "assets": [{
+                "assetId": "home-logo",
+                "name": "Home logo",
+                "kind": "image",
+                "path": "assets/home-logo.png",
+                "mimeType": "image/png"
+            }],
+            "fonts": [],
+            "materials": [],
+            "controls": [],
+            "textStyles": [],
+            "objects": [
+                {
+                    "type": "rect", "id": "bar", "name": "Bar", "visible": true, "locked": false,
+                    "opacity": 1, "x": 0, "y": 0, "zDepth": 0, "zIndex": 0, "layerId": "",
+                    "width": 640, "height": 72, "rotation": 0, "rotationX": 0, "rotationY": 0,
+                    "scaleX": 1, "scaleY": 1, "scaleZ": 1, "strokeWidth": 0, "radius": 4,
+                    "bindings": { "x": "match.away.x", "visible": "flags.1" }
+                },
+                {
+                    "type": "image", "id": "logo", "name": "Logo", "visible": true, "locked": false,
+                    "opacity": 1, "x": 0, "y": 0, "zDepth": 0, "zIndex": 0, "layerId": "",
+                    "width": 64, "height": 64, "rotation": 0, "rotationX": 0, "rotationY": 0,
+                    "scaleX": 1, "scaleY": 1, "scaleZ": 1, "strokeWidth": 0,
+                    "assetId": "home-logo", "fit": "contain"
+                }
+            ]
+        }))
+        .expect("the IPC shape deserialises as a SceneDocument");
+        assert_eq!(
+            from_ipc.data_context["match"]["alpha"].as_f64().map(f64::to_bits),
+            Some((48.0_f64 / 255.0).to_bits()),
+            "the shortest round-trip literal JS prints for 48/255 parses to the same bits"
+        );
+        scene_update_in(&store, "news", &from_ipc).expect("update from the IPC shape");
+        let reopened = store.read_scene("news", "scorebug").expect("reopen IPC-saved scene");
+        assert_eq!(reopened, from_ipc, "the IPC document survives save/reopen whole");
+        assert_eq!(
+            bindings_by_object(&reopened),
+            BTreeMap::from([
+                (
+                    "bar".to_owned(),
+                    Some(binding_map(&[("x", "match.away.x"), ("visible", "flags.1")])),
+                ),
+                ("logo".to_owned(), None),
+            ])
+        );
+        let raw = raw_scene_file(&root, "news", "scorebug");
+        assert_eq!(
+            raw["objects"][0]["bindings"],
+            serde_json::json!({ "x": "match.away.x", "visible": "flags.1" })
+        );
+        assert!(raw["objects"][1].get("bindings").is_none());
+        std::fs::remove_dir_all(root).expect("remove fixture");
+    }
+
     #[test]
     fn scene_catalog_names_unreadable_files_and_confines_ids() {
         let (root, store) = scratch_projects("scene-catalog");
