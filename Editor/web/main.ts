@@ -41,8 +41,12 @@ import {
 } from "../src/scene-manager";
 import {
   applyBindingEdit,
+  applySampleData,
   bindingPanel,
+  describeBindingIssue,
+  formatSampleData,
   resolveSceneBindings,
+  sceneBindingIssues,
   type BindingIssue,
 } from "../src/bindings";
 import {
@@ -232,6 +236,11 @@ const ui = {
   objectRename: need<HTMLButtonElement>("object-rename"),
   objectDelete: need<HTMLButtonElement>("object-delete"),
   bindings: need<HTMLDivElement>("bindings-mount"),
+  sampleDataText: need<HTMLTextAreaElement>("sample-data-text"),
+  sampleDataApply: need<HTMLButtonElement>("sample-data-apply"),
+  sampleDataRevert: need<HTMLButtonElement>("sample-data-revert"),
+  sampleDataStatus: need<HTMLParagraphElement>("sample-data-status"),
+  sampleDataIssues: need<HTMLUListElement>("sample-data-issues"),
   controlMount: need<HTMLDivElement>("control-mount"),
   fontMount: need<HTMLDivElement>("font-mount"),
   fontEmpty: need<HTMLParagraphElement>("font-empty"),
@@ -289,6 +298,10 @@ let scenePath: string | null = null;
 let previewScene: SceneDocument | null = null;
 let resolvedScene: SceneDocument | null = null;
 let bindingPreviewIssues: string[] = [];
+/** The data context the sample-data editor was last filled from. The text is
+ *  rewritten only when the document's data changes (apply, undo, open, tab
+ *  switch), so an ordinary re-render never discards the author's draft. */
+let sampleDataShown: SceneDocument["dataContext"] | undefined;
 /** Every open scene. The session is the owner of record; the flat state below
  *  is the working copy of whichever one is active (11.29). */
 const workspace = emptyWorkspace();
@@ -981,6 +994,7 @@ function renderPanels(document_: SceneDocument): void {
 
   const bindings = bindingPanel(document_, selection);
   ui.bindings.replaceChildren(renderNode(document, bindings) as unknown as Node);
+  renderSampleData(document_);
   renderControlContract(document_);
   renderTimeline(document_);
 }
@@ -2469,6 +2483,53 @@ function onBindingsClick(event: MouseEvent): void {
   commitScene(scene, outcome.document, outcome.transaction.label);
 }
 
+/** Fill the sample-data editor and list every binding that does not resolve. */
+function renderSampleData(document_: SceneDocument): void {
+  if (document_.dataContext !== sampleDataShown) {
+    sampleDataShown = document_.dataContext;
+    ui.sampleDataText.value = formatSampleData(document_.dataContext);
+    ui.sampleDataStatus.textContent = "";
+  }
+  ui.sampleDataIssues.replaceChildren(
+    ...sceneBindingIssues(document_).map((issue) => {
+      const item = document.createElement("li");
+      item.textContent = describeBindingIssue(issue);
+      return item;
+    }),
+  );
+}
+
+/** Replace the scene's data context from the editor text as one undo entry.
+ *  A refusal leaves the document and the author's text exactly as they were. */
+function onSampleDataApply(): void {
+  if (!scene) return;
+  const outcome = applySampleData(scene, ui.sampleDataText.value);
+  if (!outcome.ok) {
+    ui.sampleDataStatus.textContent = `Refused [${outcome.code}]: ${outcome.reason}`;
+    if (outcome.position) {
+      ui.sampleDataText.focus();
+      ui.sampleDataText.setSelectionRange(outcome.position.offset, outcome.position.offset + 1);
+    }
+    log(`sample data refused: ${outcome.reason}`, "bad");
+    return;
+  }
+  commitScene(scene, outcome.document, outcome.transaction.label);
+  const broken = outcome.newlyInvalid.length;
+  ui.sampleDataStatus.textContent =
+    broken === 0
+      ? "Applied."
+      : `Applied. ${broken} binding(s) no longer resolve; they are kept as authored and listed below.`;
+  for (const issue of outcome.newlyInvalid) {
+    log(`binding no longer resolves: ${describeBindingIssue(issue)}`, "bad");
+  }
+}
+
+function onSampleDataRevert(): void {
+  if (!scene) return;
+  ui.sampleDataText.value = formatSampleData(scene.dataContext);
+  ui.sampleDataStatus.textContent = "";
+}
+
 /** Show what the preview could not draw.
  *
  *  Never silently skipped: an object missing from the picture with no
@@ -3014,6 +3075,8 @@ async function start(): Promise<void> {
   ui.materialMount.addEventListener("click", onMaterialManagerClick);
   ui.assetMount.addEventListener("click", onAssetManagerClick);
   ui.bindings.addEventListener("click", onBindingsClick);
+  ui.sampleDataApply.addEventListener("click", onSampleDataApply);
+  ui.sampleDataRevert.addEventListener("click", onSampleDataRevert);
   ui.controlMount.addEventListener("click", (event) => void onControlContractClick(event));
   ui.animationFrame.addEventListener("change", () => {
     setCurrentFrame(Number(ui.animationFrame.value));

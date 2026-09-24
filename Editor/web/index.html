@@ -236,6 +236,19 @@
                with the agent surface. Bindings are authored here; resolution
                happens before the preview, never inside the renderer (11.19). -->
           <div id="bindings-mount" class="panel-mount"></div>
+          <!-- The scene's sample data (dataContext). Applied as one undoable
+               replace; bindings it invalidates are listed, never removed. -->
+          <label class="field sample-data">
+            <span class="label">Sample data (JSON object)</span>
+            <textarea id="sample-data-text" rows="8" spellcheck="false" autocomplete="off"
+                      aria-describedby="sample-data-status"></textarea>
+          </label>
+          <div class="actions">
+            <button id="sample-data-apply" type="button">Apply sample data</button>
+            <button id="sample-data-revert" type="button">Revert</button>
+          </div>
+          <p id="sample-data-status" class="panel-note" aria-live="polite"></p>
+          <ul id="sample-data-issues" class="reason-list" aria-label="Invalid bindings"></ul>
         </section>
 
         <section data-panel="control-contract" class="panel" id="control-panel">
