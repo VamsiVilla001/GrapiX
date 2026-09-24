@@ -80,9 +80,13 @@ import { previewFrameAtElapsed, previewSceneAt } from "../src/preview-playback";
 import {
   activate,
   activeSession,
+  captureWorkingCopy,
   closeSession,
   emptyWorkspace,
   isRefused as isWorkspaceRefused,
+  markEdited,
+  markSaved,
+  markSavedToFile,
   openSession,
   sceneTabs,
   MAX_HISTORY,
@@ -451,16 +455,21 @@ function plain(value: unknown): string {
 function captureActiveSession(): void {
   const session = activeSession(workspace);
   if (!session || !scene) return;
-  session.document = scene;
-  session.selection = selection;
-  session.collapsed = collapsed;
-  session.currentFrame = currentFrame;
-  session.undoStack = undoStack;
-  session.redoStack = redoStack;
-  session.path = scenePath;
-  session.takePage = takePageState;
-  session.takePagePreview = takePagePreviewDocument;
-  session.dirty = projectSceneDirty;
+  // The session's unsaved mark is not part of the working copy: only an edit
+  // or a save may change it, never a switch (11.29).
+  captureWorkingCopy(session, {
+    document: scene,
+    selection,
+    collapsed,
+    timelineCollapsed: collapsedTimelineIds,
+    currentFrame,
+    undoStack,
+    redoStack,
+    path: scenePath,
+    takePage: takePageState,
+    takePagePreview: takePagePreviewDocument,
+    projectDirty: projectSceneDirty,
+  });
 }
 
 /// Make one open scene the one every panel renders.
@@ -470,12 +479,13 @@ function restoreSession(session: SceneSession): void {
   scenePath = session.path;
   selection = session.selection;
   collapsed = session.collapsed;
+  collapsedTimelineIds = session.timelineCollapsed;
   currentFrame = session.currentFrame;
   undoStack = session.undoStack;
   redoStack = session.redoStack;
   projectSceneId = session.origin?.sceneId;
   projectSceneProject = session.origin?.project;
-  projectSceneDirty = session.dirty;
+  projectSceneDirty = session.projectDirty;
   takePageState = session.takePage;
   takePagePreviewDocument = session.takePagePreview;
   if (session.origin) currentProject = session.origin.project;
@@ -1712,7 +1722,7 @@ function commitScene(previous: SceneDocument, next: SceneDocument, label: string
 function markActiveDirty(): void {
   if (projectSceneId !== undefined) projectSceneDirty = true;
   const session = activeSession(workspace);
-  if (session) session.dirty = true;
+  if (session) markEdited(session);
 }
 
 function undo(): void {
@@ -2714,6 +2724,8 @@ async function saveProjectScene(): Promise<void> {
     return;
   }
   const next: SceneDocument = { ...scene, id, name };
+  // Taken before the await: the save belongs to the scene it was asked for.
+  const saving = activeSession(workspace);
   try {
     projectCatalog = await invoke<ProjectSceneCatalog>(
       boundHere ? "cmd_scene_update" : "cmd_scene_create",
@@ -2727,7 +2739,9 @@ async function saveProjectScene(): Promise<void> {
     ui.sceneId.value = id;
     ui.sceneId.readOnly = true;
     ui.sceneId.title = "Project scene ids are stable; use Duplicate to create a new id.";
+    if (saving) markSaved(saving, { project, sceneId: id });
     renderSceneState();
+    renderSceneTabs();
     log(`${boundHere ? "updated" : "created"} ${project}/${id}`, "good");
   } catch (error) {
     log(describe(error), "bad");
@@ -2912,6 +2926,7 @@ async function saveScene(): Promise<void> {
     log("nothing to save", "bad");
     return;
   }
+  const saving = activeSession(workspace);
   try {
     const path =
       scenePath ??
@@ -2926,6 +2941,8 @@ async function saveScene(): Promise<void> {
     scene = { ...scene, id: ui.sceneId.value.trim(), name: ui.sceneName.value.trim() };
     await invoke<void>("cmd_save_scene", { path, scene });
     scenePath = path;
+    if (saving) markSavedToFile(saving, path);
+    renderSceneTabs();
     log(`saved ${path}`, "good");
   } catch (error) {
     log(describe(error), "bad");
@@ -2984,8 +3001,11 @@ async function start(): Promise<void> {
   ui.projectSelect.addEventListener("change", () => void selectProject());
   ui.sceneManagerMount.addEventListener("click", onSceneManagerClick);
   ui.sceneName.addEventListener("input", () => {
+    // A rename is saved with the document, so it is unsaved work in any scene,
+    // bound to a project or not (11.29).
+    markActiveDirty();
+    renderSceneTabs();
     if (projectSceneId === undefined) return;
-    projectSceneDirty = true;
     renderProjectManager();
   });
   ui.publish.addEventListener("click", () => void publish());

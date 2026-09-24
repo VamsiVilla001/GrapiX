@@ -50,13 +50,24 @@ export interface SceneSession {
   path: string | null;
   selection: string[];
   collapsed: string[];
+  /// Timeline groups the author has folded. A separate view from the object
+  /// manager's folds, and just as much this scene's own: one list shared by
+  /// every tab would fold rows in a graphic the author never touched.
+  timelineCollapsed: string[];
   currentFrame: number;
   /// Whole-document snapshots. One gesture is one entry, so one undo reverses
   /// exactly one gesture.
   undoStack: SceneDocument[];
   redoStack: SceneDocument[];
-  /// Edited since the last save to its origin.
+  /// Edited since the last successful save, to a project or to a file. This is
+  /// what a close refuses on, so it is the session's own and is never derived
+  /// from the project flag below: a scene from New scene or Open file has no
+  /// project, and deriving it from one erased every edit it had.
   dirty: boolean;
+  /// Edited since the last save to its project origin. Always false for an
+  /// unbound scene. Saving to a file does not clear it, because the project
+  /// copy is still the old graphic and publishing reads the project copy.
+  projectDirty: boolean;
   /// Operator values belong to this template session, never the next tab.
   takePage: TakePageState;
   /// The filled copy currently shown in the preview, never an authored edit.
@@ -124,10 +135,12 @@ export function openSession(
     path: options.path ?? null,
     selection: [],
     collapsed: [],
+    timelineCollapsed: [],
     currentFrame: 0,
     undoStack: [],
     redoStack: [],
     dirty: false,
+    projectDirty: false,
     takePage: { values: {}, pageId: "", name: "" },
     takePagePreview: null,
   };
@@ -198,7 +211,7 @@ export function commit(session: SceneSession, next: SceneDocument): void {
   if (session.undoStack.length > MAX_HISTORY) session.undoStack.shift();
   session.redoStack = [];
   session.document = next;
-  session.dirty = true;
+  markEdited(session);
 }
 
 export function undo(session: SceneSession): SceneDocument | undefined {
@@ -206,7 +219,7 @@ export function undo(session: SceneSession): SceneDocument | undefined {
   if (!previous) return undefined;
   session.redoStack.push(session.document);
   session.document = previous;
-  session.dirty = true;
+  markEdited(session);
   return previous;
 }
 
@@ -215,14 +228,64 @@ export function redo(session: SceneSession): SceneDocument | undefined {
   if (!next) return undefined;
   session.undoStack.push(session.document);
   session.document = next;
-  session.dirty = true;
+  markEdited(session);
   return next;
 }
 
-/// Mark a session saved to its origin, and bind it to that origin.
+/// Record that a session's document changed. Every edit, undo and redo lands
+/// here, so the close refusal can never miss one.
+export function markEdited(session: SceneSession): void {
+  session.dirty = true;
+  if (session.origin !== undefined) session.projectDirty = true;
+}
+
+/// Mark a session saved to its project, and bind it to that origin.
 export function markSaved(session: SceneSession, origin?: SceneOrigin): void {
   if (origin) session.origin = origin;
   session.dirty = false;
+  session.projectDirty = false;
+}
+
+/// Mark a session saved to a file. The work is safe, so the close refusal
+/// clears; the project copy, if there is one, is still stale.
+export function markSavedToFile(session: SceneSession, path: string): void {
+  session.path = path;
+  session.dirty = false;
+}
+
+/// The shell's working copy of the active session: everything it holds in
+/// flat state while the scene is on screen.
+///
+/// `dirty` is deliberately absent. The shell has no authority over it — only
+/// an edit or a save does — so writing the working copy back cannot erase an
+/// unsaved mark, which is exactly how 11.29's close refusal used to be lost.
+export interface SessionWorkingCopy {
+  readonly document: SceneDocument;
+  readonly selection: string[];
+  readonly collapsed: string[];
+  readonly timelineCollapsed: string[];
+  readonly currentFrame: number;
+  readonly undoStack: SceneDocument[];
+  readonly redoStack: SceneDocument[];
+  readonly path: string | null;
+  readonly takePage: TakePageState;
+  readonly takePagePreview: SceneDocument | null;
+  readonly projectDirty: boolean;
+}
+
+/// Write the shell's working copy back into its session before leaving it.
+export function captureWorkingCopy(session: SceneSession, copy: SessionWorkingCopy): void {
+  session.document = copy.document;
+  session.selection = copy.selection;
+  session.collapsed = copy.collapsed;
+  session.timelineCollapsed = copy.timelineCollapsed;
+  session.currentFrame = copy.currentFrame;
+  session.undoStack = copy.undoStack;
+  session.redoStack = copy.redoStack;
+  session.path = copy.path;
+  session.takePage = copy.takePage;
+  session.takePagePreview = copy.takePagePreview;
+  session.projectDirty = copy.projectDirty;
 }
 
 /// What the scene switcher shows for one open scene.
