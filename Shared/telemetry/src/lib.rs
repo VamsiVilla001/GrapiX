@@ -358,6 +358,10 @@ mod tests {
             .with_writer(capture)
             .with_target(false)
             .without_time()
+            // The assertions read field text. Colour codes would split
+            // `event="audit"` whenever the test runs in a colour terminal,
+            // so the result would depend on the shell rather than the code.
+            .with_ansi(false)
             .finish();
         tracing::subscriber::with_default(subscriber, emit);
         let bytes = buffer.lock().expect("capture poisoned").clone();
