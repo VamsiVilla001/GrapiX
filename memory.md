@@ -44,12 +44,10 @@ not a euphemism for nearly done.
 14. `docs/adr/0002-platform-and-mcp-schema.md` is the accepted handoff and its
    **Part E is the definition of done**. Verify against it; do not claim an
    item without execution evidence.
-15. The next implementation steps are **1.3 (material model; fit and blend
-   enums as the single source of truth)** and **1.4 (colour types)**. Both are
-   unblocked, both are named residuals of 1.2, and 1.4 also gates 3.3. The
-   catalogue already has the fields that consume them — an image's fit, a
-   slab's culling, `fill`/`stroke` as CSS strings, `material_slots` as an
-   opaque map — so those four are the seams to fill, not to redesign.
+15. **Where to resume is the top dated entry below ("Resume here").** The
+   user's standing instruction is to work open rows in `progress.html`
+   order, fast, with parallel worktree agents; the user supplies test cases,
+   including the Figma corpus. (1.3 and 1.4, once named here, are done.)
 16. The structured refusal envelope is `StructuredRefusal` in `gx-contracts`
    (0.6). It uses `allowed`, never `supported` — that inconsistency is
    settled. The severity type is `RefusalSeverity`; `Severity` stays with
@@ -145,6 +143,60 @@ face, which is the silent substitution invariant 18 forbids.
 
 Nothing implemented yet; 11.13 stays `active`. No execution evidence in this
 entry. It is a plan edit and a reading of the code.
+
+---
+
+## 2026-09-25 — Resume here: the next batch, stopped before it started
+
+The user stopped the session and asked to continue in the next one. A
+seven-agent batch had been launched and was stopped before any agent
+committed. The six `feat/*` branches below exist at 434b0fe with **zero
+commits and no uncommitted changes**, so start each one fresh. No app or
+mock process was left running.
+
+**Restart this batch, in `progress.html` order:**
+1. **Live checks, one agent only, in the main checkout, no code edits:**
+   11.8, 11.9, 11.12, 11.10, 11.11, 11.22. Each fix is merged but has never
+   run in Tauri. Drive the WebView over CDP as the 09-13/09-14 sessions did.
+   The check steps for each row are in the 2026-09-25 "seven fixes merged"
+   entry's sources, i.e. each fix commit's report. Also gather evidence for
+   11.29 and 11.19, which cannot close yet because they need 11.18, which
+   needs 11.13. Close a row only on live PASS against its done-when.
+2. **Build agents in worktrees, each branch from the current GrapiX-2.0 tip.**
+   Agent worktrees open at a stale 104ab24, so re-base first.
+   - `feat/7.2-psd-ai`: PSD and AI tiers.
+   - `feat/7.2-figma`: the Figma REST-JSON tier, frame = scene per 18.3,
+     start the 18.4 coverage table. Synthetic fixtures until the user's
+     files arrive.
+   - `feat/7.3-fidelity-gate`: an independent SVG reference render against
+     the engine render, with the diff stored with the template, outside the
+     Editor crate (invariant 3).
+   - `feat/8.6-editor-mcp-server`: a shipped editor MCP binary registering
+     every handler, plus an audit of which Phase 8 rows are reachable.
+   - `feat/11.13-font-manager`: the strict font case, ported from 1.x.
+   - `feat/11.15-saved-presets`: the project preset library saved in place,
+     a Duration param on apply, the preset browser rendered.
+3. **Merge rules that worked this session:** trial-merge every branch in a
+   scratch worktree first (only import lines conflicted last time), then run
+   the full `npm run check` in Git Bash. Only then fast-forward GrapiX-2.0 and
+   log here. Don't merge into the main checkout while the live agent has the
+   app running from it.
+
+**After this batch, next in order:** 11.17 and 11.18, then 11.29–11.35
+(11.30 save model and 11.31 command registry first), then 12.2, 12.3 and
+12.5. **Skipped because blocked externally:**
+- 0.3 and 0.4 need a pushed CI run, and the user has not asked for a push;
+- 4.5 needs macOS;
+- Phase 9 needs P.3 participants.
+
+**Open housekeeping, waiting on the user:**
+- The seven merged agent worktrees under `.claude/worktrees/agent-*` are
+  still present. Remove them only when asked.
+- Unmerged `cf21bde` (material library, in the
+  `material-manager-2d-3d-680c01` worktree) now conflicts with the merged
+  TS relink/delete and duplicates it in Rust. It needs a user decision.
+
+No code changed for this entry.
 
 ---
 
