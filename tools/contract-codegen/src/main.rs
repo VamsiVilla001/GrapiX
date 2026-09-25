@@ -477,7 +477,7 @@ fn write_easing_reference(root: &std::path::Path) -> std::io::Result<()> {
             body.push_str(&format!(
                 "  {{ easing: {:?}, t: {t:?}, y: {:?} }},\n",
                 wire(*easing),
-                ease_at(*easing, None, t),
+                ease_at(*easing, None, t).expect("a named easing always has a curve"),
             ));
         }
     }
@@ -489,7 +489,8 @@ fn write_easing_reference(root: &std::path::Path) -> std::io::Result<()> {
     for &t in STEPS {
         body.push_str(&format!(
             "    {{ t: {t:?}, y: {:?} }},\n",
-            ease_at(SceneEasing::CustomBezier, Some(CUSTOM), t),
+            ease_at(SceneEasing::CustomBezier, Some(CUSTOM), t)
+                .expect("a custom easing with points always has a curve"),
         ));
     }
     body.push_str("  ],\n} as const;\n\nexport const NAMED_EASING_POINTS = {\n");

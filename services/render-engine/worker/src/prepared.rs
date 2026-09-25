@@ -222,7 +222,7 @@ impl PreparedScene {
 
         let mut evaluated = self.document.clone();
         for channel in &self.document.timeline.channels {
-            if let Some(value) = evaluate_channel(channel, scene_frame) {
+            if let Some(value) = evaluate_channel(channel, scene_frame)? {
                 set_base_property(
                     &mut evaluated,
                     &channel.object_id,
