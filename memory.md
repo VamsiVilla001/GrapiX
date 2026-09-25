@@ -113,6 +113,158 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-09-24 — 11.13's done-when rewritten to a strict font ingest/remove case
+
+**Plan change, requested by the user.** The font manager must be proven by a
+strict case: several fonts ingested into the running application in one
+action, and removed only explicitly when no longer required. `GrapiX-Build-Plan.md`
+row 11.13 now says so. The old criterion, "Ported, not redesigned", is kept,
+because the 1.x panel still exists on the archive branch
+`Basic-v0.4-2026-09-06-project-container-material-library`
+(`Editor/apps/editor-web/src/components/FontManagerPanel.tsx`,
+`Editor/services/project-api/src/fontManager.ts`, `docs/font-manager.md`).
+The old tracker note said a port could not be compared against anything
+because the 1.x tree was gone. It was only gone from disk.
+
+**What exists today, read from the code, not run:**
+- `Editor/src/font-manager.ts` lists fonts, their usage and fallbacks, and
+  blocks the take on an unresolved font. Its only actions are `reveal` and
+  `replace`. There is **no ingest action and no remove action**.
+- `Shared/asset-plane/src/fonts/manager.rs` has `create_file_font_definition`
+  with content-derived ids and the 1.x family and weight limits. It is the
+  ingest seam, but nothing in the Editor shell calls it.
+  `Editor/shell/src/lib.rs` only ever creates `fonts: Vec::new()`.
+- 1.x had import (OTF/TTF/WOFF/WOFF2 upload), link, resolve, and a per-font
+  "Remove this font definition only" action.
+
+**Decision taken as default, open to the user:** removing a font still in use
+is *refused*, naming its users. That is the same rule as the material
+manager's delete-while-in-use (11.12). The alternative is to cascade and
+clear `fontId` on the text objects. That would put text on air in a fallback
+face, which is the silent substitution invariant 18 forbids.
+
+Nothing implemented yet; 11.13 stays `active`. No execution evidence in this
+entry. It is a plan edit and a reading of the code.
+
+---
+
+## 2026-09-25 — Phase 11 re-verification, and seven fixes merged
+
+Five read-only verifier agents re-checked the Phase 11 rows that had been
+held at `active` only because 11.5 was open. None could be closed as it
+stood. Seven fix agents then worked in separate worktrees, each on a branch
+from 9ec67e2 (the agent worktrees opened at a stale 104ab24, and each one
+re-based before editing). All seven are merged into GrapiX-2.0:
+
+| Branch | Fix |
+|---|---|
+| `fix/11.29-scene-dirty` | An unsaved New/Opened scene closed silently: `session.dirty` was overwritten by the project flag on every capture. The session now owns `dirty` and `projectDirty` separately. Timeline collapse is now per scene. |
+| `fix/11.8-object-manager-actions` | Hide/Show, Lock/Unlock and Expand/Collapse were enabled buttons with no handler. They are now one-undo document edits; collapse is view state. |
+| `fix/11.9-11.12-inspector-materials` | Nothing called the inspector's `applyEdit`. Edits now apply as one transaction over N objects. Relink and delete-unused now apply as one undo each. |
+| `fix/11.10-timeline-resize` | Dock resize, move and Reset never re-rendered the timeline. A ResizeObserver fixes that, the snapshot uses the real row window, and wheel scroll was added. |
+| `fix/11.19-sample-data` | Nothing wrote `dataContext`, so a scene made in the Editor could not be bound. Sample data is now authored strictly, as one undo; broken bindings are reported, not dropped. |
+| `fix/11.19-8.6-binding-tests` | Added the missing bindings save/reopen test (it passed, no defect). Two `bindings.schema` defects were fixed (see the 8.6 note below). |
+| `fix/11.23-preset-apply-safety` | Preset apply overwrote authored keys; it now refuses on a same-frame collision and is atomic. A custom-bezier key with no points is refused at load, and the evaluator's silent linear fallback is removed in Rust. |
+
+Plus `427b1ac`: the `gx-telemetry` redaction test failed on a **clean**
+9ec67e2 in any colour terminal. That was ANSI in the captured output, not a
+redaction leak. It now uses `with_ansi(false)`.
+
+**Verified by execution:** full `npm run check` on the merged tree, run in
+Git Bash with TERM=xterm-256color, exit 0: 59 cargo suites ok; conformance
+176 passed, 0 failed, 8 skipped; codegen-check OK; node tests 18/18;
+boundaries OK; Editor vitest all passing. Each branch's new tests were shown
+to fail before its fix, and the per-branch evidence is in each commit's
+agent report.
+
+**Not verified: nothing here has been run live in Tauri.** No row changed
+state because of these fixes. Each still needs its live check, and 11.8 →
+11.9 → 11.12 → 11.18 → 11.19/11.29 still chain through 11.13.
+
+**Left open, recorded rather than fixed:**
+- `deleteProjectScene` leaves `session.origin` set.
+- The TS easing fallback `bezier ?? LINEAR` (`Editor/src/timeline/easing.ts`)
+  is now unreachable, but it does not match Rust.
+- Marquee key selection is not wired.
+- Inspector edits set base values only, never keys.
+- `bindings.schema` does not flag a path missing from the data context,
+  because that would need a second path resolver.
+- The timeline has no scrollbar and no keyboard scrolling.
+- Unmerged `cf21bde` (material library, in
+  `.claude/worktrees/material-manager-2d-3d-680c01`) now **conflicts** with
+  the merged TS relink/delete, and duplicates it in Rust. Invariant 27
+  applies if it lands.
+
+---
+
+## 2026-09-25 — application workflow rows 11.31–11.35 planned; 8.6 reopened
+
+**User request:** a proper desktop-application workflow. That means a top bar
+with File and Window menus; New/Open Project, Save (Ctrl+S), Save New Version
+(Ctrl+Shift+S), Save As, Export and Exit; Delete; a Window menu from which
+every module is reachable; and docking like XPression's. The user chose:
+- **a menu bar plus toolbar** (in-app, the same on both platforms), not a
+  native OS menu or an Office ribbon;
+- **full docking including floating OS windows**;
+- **workspace modes** (Design / Animate / Data binding) as the meaning of
+  "window mode".
+
+Recorded as five plan rows: **11.31** one command registry (menus, toolbar,
+shortcuts and the agent surface dispatch the same command and give the same
+refusal); **11.32** menu bar and toolbar; **11.33** Window menu, tabbed docks
+and saved layouts; **11.34** floating panel windows; **11.35** workspace
+modes. Save As is kept separate from Ctrl+Shift+S: Save As picks a new
+location, while Save New Version writes the next `_vNNN` copy beside the
+current file (11.30).
+
+**Architectural constraint written into 11.34:** the main window stays the
+only owner of the document. A floating window is a projection of the active
+scene that sends commands through 11.31, never a second copy of the
+document. Two live copies of a scene would be two undo histories for one
+document, and 11.29's isolation guarantee would be meaningless.
+
+**8.6 reopened to `active`.** The `fix/11.19-8.6-binding-tests` agent found
+that `bindings.schema` had no test, no caller, and no registration on any
+shipped server (no editor MCP binary exists). It also had two defects: it
+dropped all but one consumer of a shared path, and it turned a non-string
+path into a silent `""` field. The done-when "Data schema discoverable" had
+no evidence behind it. The handler is now fixed and tested on that branch,
+but is still unreachable in production, so the row stays active.
+
+Nothing implemented for 11.31–11.35 yet. No execution evidence in this entry.
+
+---
+
+## 2026-09-24 — save model decided (new row 11.30); 11.15 reopened
+
+**User decision:** every save writes progress into the same file; it never
+creates a version. A new version is created only by Ctrl+Shift+S. This is
+now row **11.30** in `GrapiX-Build-Plan.md`, and it is added to the step list
+in `progress.html`.
+
+How it maps onto what exists:
+- The scene Save button (`saveScene`, `Editor/web/main.ts:~2910`) already
+  overwrites its file in place, and the project save overwrites its entry
+  (the 2.6 backup ring still applies). There is **no Ctrl+S shortcut at
+  all** today. The only Ctrl shortcuts are undo and redo (`main.ts:~3081`).
+- Saved presets (the missing half of 11.15/11.23) therefore go into a
+  **project preset library saved in place**. They do not become a new
+  design-system version on each save. A published design-system version
+  (10.4) stays immutable, so the rule touches only the working files.
+- Version naming chosen as the default: `<name>_v002`, `_v003`, the next
+  free number, written beside the current file. The session continues in the
+  new version and the old one is left byte-identical. It is open to the user.
+
+**11.15 reopened to `active`** in `progress.html` and `progress.json`. The
+11.22/11.23 verifier found that the save-selection half does not exist: no
+command saves a preset, `preset_apply` reads only `starter_presets()`, and
+`presetBrowserPanel` is never rendered in `main.ts`. Leaving the mark would
+be a done-without-evidence claim, which LLM-GOVERNANCE forbids.
+
+No code changed for this entry; it is a plan and tracker edit.
+
+---
+
 ## 2026-09-14 — the dockable layout decided, and Program learned to play
 
 Two things closed today, and the second one was a hole the first one exposed.
