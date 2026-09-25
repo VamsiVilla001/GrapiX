@@ -24,7 +24,8 @@ use std::path::PathBuf;
 
 use gx_contracts::animation::{
     animation_surface, apply_preset_phase, apply_property_edit, create_keyframe, move_keyframe,
-    remove_keyframe, set_keyframe, AnimationSurface, AutoKey, SceneKeyframe,
+    remove_keyframe, set_keyframe, validate_scene_animation, AnimationSurface, AutoKey,
+    SceneKeyframe,
 };
 use gx_contracts::authoring::{
     create_object, delete_object, duplicate_object, rename_object, ObjectDeletion,
@@ -151,14 +152,28 @@ pub fn new_scene(id: &str, name: &str) -> SceneDocument {
 /// and every mock use (invariant 45), so a document the Editor accepts is one
 /// the engine will also parse. An Editor with a laxer reader would let an
 /// author save something that refuses only at publish.
+///
+/// Parsing checks shape, not animation. The channels are then checked with
+/// `validate_scene_animation`, the check publish runs, so a key the engine
+/// would refuse — a custom-bezier with no control points, say — is refused
+/// here by name instead of previewing as some other curve.
 pub fn load_scene(path: &PathBuf) -> Result<SceneDocument, EditorError> {
     let bytes = std::fs::read(path).map_err(|error| EditorError::ReadScene {
         path: path.display().to_string(),
         detail: error.to_string(),
     })?;
-    parse_scene_document(&bytes).map_err(|refusal| EditorError::InvalidScene {
+    let scene = parse_scene_document(&bytes).map_err(|refusal| EditorError::InvalidScene {
         detail: refusal.to_string(),
-    })
+    })?;
+    refuse_invalid_animation(scene)
+}
+
+/// Pass a freshly read document through publish's animation check.
+fn refuse_invalid_animation(scene: SceneDocument) -> Result<SceneDocument, EditorError> {
+    validate_scene_animation(&scene).map_err(|refusal| EditorError::InvalidScene {
+        detail: refusal.to_string(),
+    })?;
+    Ok(scene)
 }
 
 /// Write an authored document.
@@ -586,9 +601,10 @@ pub fn scene_list(project: &str) -> Result<ProjectSceneCatalog, EditorError> {
 pub fn scene_read(project: &str, scene_id: &str) -> Result<SceneDocument, EditorError> {
     require_component(project, "project")?;
     require_component(scene_id, "scene id")?;
-    projects()?
+    let scene = projects()?
         .read_scene(project, scene_id)
-        .map_err(project_failed)
+        .map_err(project_failed)?;
+    refuse_invalid_animation(scene)
 }
 
 fn scene_exists(store: &Projects, project: &str, scene_id: &str) -> Result<bool, EditorError> {
@@ -1260,6 +1276,58 @@ mod tests {
         assert!(
             matches!(&error, EditorError::InvalidScene { detail } if detail.contains("notAField")),
             "the refusal must name the field, got {error}"
+        );
+        std::fs::remove_dir_all(&directory).expect("remove fixture");
+    }
+
+    #[test]
+    fn a_custom_bezier_key_with_no_points_refuses_at_load_as_it_does_at_publish() {
+        let directory = std::env::temp_dir().join(format!(
+            "gx-editor-shell-bezier-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).expect("temp directory");
+        let path = directory.join("scene.json");
+
+        let mut scene = new_scene("demo", "Demo");
+        scene.timeline.duration_frames = 100;
+        scene.objects.push(gx_contracts::scene::SceneObject::Rect(
+            gx_contracts::scene::RectObject {
+                base: gx_contracts::scene::ObjectBase::new("card", "Card"),
+                radius: 0.0,
+            },
+        ));
+        scene.timeline.channels.push(gx_contracts::animation::KeyframeChannel {
+            object_id: "card".into(),
+            property: "x".into(),
+            keys: vec![
+                SceneKeyframe {
+                    frame: 0,
+                    value: 0.0,
+                    easing: gx_contracts::animation::SceneEasing::CustomBezier,
+                    bezier: None,
+                },
+                SceneKeyframe {
+                    frame: 50,
+                    value: 100.0,
+                    easing: gx_contracts::animation::SceneEasing::Linear,
+                    bezier: None,
+                },
+            ],
+        });
+        save_scene(&path, &scene).expect("the hand-written document saves");
+
+        // Publish refuses this through `validate_scene_animation`; the Editor
+        // must refuse it by name too rather than previewing it as linear.
+        let error = load_scene(&path).expect_err("a pointless custom-bezier must refuse");
+        assert!(
+            matches!(&error, EditorError::InvalidScene { detail }
+                if detail.contains("card") && detail.contains("custom-bezier")),
+            "the refusal must name the object and the easing, got {error}"
         );
         std::fs::remove_dir_all(&directory).expect("remove fixture");
     }

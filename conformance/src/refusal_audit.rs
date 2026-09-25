@@ -697,6 +697,58 @@ fn drive_animation_refusals(report: &mut Report) {
         ),
     );
 
+    // Preset application follows the same collision rule and is atomic: the
+    // authored key survives and nothing of the preset is written.
+    let slide = gx_contracts::design_system::starter_presets()
+        .into_iter()
+        .find(|preset| preset.id == "slide")
+        .expect("slide is a starter preset");
+    let mut preset_collision = scene_with(vec![rect("card")]);
+    set_keyframe(&mut preset_collision, "card", "x", key(20, 999.0)).expect("authored key lands");
+    let before = preset_collision.clone();
+    let refused = gx_contracts::animation::apply_preset_phase(
+        &mut preset_collision,
+        "card",
+        &slide.phases.r#in,
+        0,
+    );
+    report.record(
+        PLANE,
+        "DuplicateKeyframeFrame is produced for a preset landing on an authored key",
+        expect(
+            matches!(refused, Err(Refusal::DuplicateKeyframeFrame { frame: 20, .. }))
+                && preset_collision == before,
+            "a preset overwrote an authored key or mutated the scene before refusing",
+        ),
+    );
+
+    // The evaluator refuses a custom-bezier with no controls rather than
+    // easing it as linear (invariant 18).
+    let pointless = gx_contracts::animation::KeyframeChannel {
+        object_id: "card".into(),
+        property: "x".into(),
+        keys: vec![
+            SceneKeyframe {
+                frame: 0,
+                value: 0.0,
+                easing: SceneEasing::CustomBezier,
+                bezier: None,
+            },
+            key(10, 1.0),
+        ],
+    };
+    report.record(
+        PLANE,
+        "InvalidKeyframeEasing is produced by the evaluator for custom-bezier with no controls",
+        expect(
+            matches!(
+                gx_contracts::animation::evaluate_channel(&pointless, 5),
+                Err(Refusal::InvalidKeyframeEasing { .. })
+            ),
+            "the evaluator substituted a curve for a custom-bezier with no controls",
+        ),
+    );
+
     let mut no_channel = scene_with(vec![rect("card")]);
     report.record(
         PLANE,

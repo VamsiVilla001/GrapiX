@@ -626,6 +626,16 @@ pub fn scene_easing_for_token(token: Option<&TokenRef>) -> SceneEasing {
 ///   object actually sits. That is what makes one Slide preset work on a
 ///   lower-third and a full-frame card. Opacity, scale and rotation are
 ///   absolute.
+///
+/// **Nothing authored is ever overwritten, and a refusal changes nothing.**
+/// The collision rule is the one move and paste already follow (11.22): a
+/// preset key landing on a frame that already carries a key on that channel
+/// refuses with `DuplicateKeyframeFrame` naming the object, property and
+/// frame — as does a preset whose own keys round onto one frame, which would
+/// otherwise silently drop one of them. Keys elsewhere on the channel are kept
+/// and the preset's keys join them, exactly as a paste between existing keys
+/// does. The whole plan is resolved and validated before the first write, so a
+/// preset that fails on its last key leaves the scene as it found it.
 pub fn instantiate_phase_channels(
     scene: &mut SceneDocument,
     object_id: &str,
@@ -649,6 +659,9 @@ pub fn instantiate_phase_channels(
     let base = scene.objects[index].base();
     let (origin_x, origin_y, width, height) = (base.x, base.y, base.width, base.height);
 
+    // Plan: resolve and validate every key before writing any of them.
+    let mut plan: Vec<(&'static str, SceneKeyframe)> = Vec::new();
+    let mut landing = std::collections::BTreeSet::new();
     for channel in &phase.channels {
         let Some(property) = scene_property_for_preset_path(&channel.property) else {
             return Err(Refusal::AnimationPropertyUnsupported {
@@ -656,6 +669,7 @@ pub fn instantiate_phase_channels(
                 property: channel.property.clone(),
             });
         };
+        let existing = channel_index(scene, object_id, property)?;
         for key in &channel.keys {
             let frame = at_frame + (key.t * resolved_duration_frames as f64).round() as u64;
             let value = match property {
@@ -663,17 +677,39 @@ pub fn instantiate_phase_channels(
                 "y" => origin_y + key.v * height,
                 _ => key.v,
             };
-            set_keyframe(
-                scene,
-                object_id,
-                property,
-                SceneKeyframe {
+            let key = SceneKeyframe {
+                frame,
+                value,
+                easing: scene_easing_for_token(key.out.as_ref()),
+                bezier: None,
+            };
+            validate_key(scene, object_id, property, &key)?;
+            let occupied = existing.is_some_and(|index| {
+                scene.timeline.channels[index]
+                    .keys
+                    .iter()
+                    .any(|authored| authored.frame == frame)
+            });
+            if occupied || !landing.insert((property, frame)) {
+                return Err(Refusal::DuplicateKeyframeFrame {
+                    object: object_id.to_owned(),
+                    property: property.to_owned(),
                     frame,
-                    value,
-                    easing: scene_easing_for_token(key.out.as_ref()),
-                    bezier: None,
-                },
-            )?;
+                });
+            }
+            plan.push((property, key));
+        }
+    }
+
+    // Apply. Every key above was validated against the untouched scene and no
+    // two collide, so `set_keyframe` only ever inserts here. The snapshot is
+    // the guarantee rather than the expectation: if a write still refused,
+    // the channels are put back so the refusal changes nothing.
+    let snapshot = scene.timeline.channels.clone();
+    for (property, key) in plan {
+        if let Err(refusal) = set_keyframe(scene, object_id, property, key) {
+            scene.timeline.channels = snapshot;
+            return Err(refusal);
         }
     }
     Ok(())
@@ -746,7 +782,8 @@ pub const fn easing_control_points(easing: SceneEasing) -> CubicBezier {
             x2: 0.58,
             y2: 1.0,
         },
-        // Meaningless without its stored points; `ease_at` substitutes them.
+        // Meaningless without its stored points, which `ease_at` requires: a
+        // custom easing with none is refused, never solved as this line.
         SceneEasing::CustomBezier => CubicBezier {
             x1: 0.0,
             y1: 0.0,
@@ -778,24 +815,33 @@ fn bezier_axis_slope(c1: f64, c2: f64, u: f64) -> f64 {
 /// iterations over almost all of the domain; bisection is the fallback where
 /// the slope is flat enough that Newton would step wildly. This is the method
 /// browsers use for `cubic-bezier()`, and matching them is deliberate.
-pub fn ease_at(easing: SceneEasing, bezier: Option<CubicBezier>, t: f64) -> f64 {
+///
+/// `None` exactly when `easing` is custom-bezier and no control points were
+/// given: there is no curve to solve, and substituting one would be a visual
+/// change nobody named (invariant 18), so the caller refuses by name.
+pub fn ease_at(easing: SceneEasing, bezier: Option<CubicBezier>, t: f64) -> Option<f64> {
     if !t.is_finite() {
-        return 0.0;
+        return Some(0.0);
     }
     let t = t.clamp(0.0, 1.0);
     // A hold does not interpolate at all: it stays on the from-key until the
     // next one takes over. Returning 0 is what produces that step.
     if easing == SceneEasing::Hold {
-        return 0.0;
+        return Some(0.0);
     }
     let points = match (easing, bezier) {
         (SceneEasing::CustomBezier, Some(points)) => points,
-        // A custom easing with no points cannot be constructed through the
-        // edit operations, which refuse it by name. Falling back to linear
-        // here keeps a hand-written document rendering rather than panicking.
-        (SceneEasing::CustomBezier, None) => easing_control_points(SceneEasing::Linear),
+        // The edit operations and the Editor's and engine's document readers
+        // all refuse this by name (`validate_key`); reaching it means a caller
+        // skipped them, and the answer is still a refusal, not a curve.
+        (SceneEasing::CustomBezier, None) => return None,
         (named, _) => easing_control_points(named),
     };
+    Some(solve_bezier(points, t))
+}
+
+/// Eased progress along one resolved curve, `t` already clamped to 0–1.
+fn solve_bezier(points: CubicBezier, t: f64) -> f64 {
     // Linear is the identity, and worth short-circuiting: it is the default
     // easing, so this is the common path.
     if points.x1 == 0.0 && points.y1 == 0.0 && points.x2 == 1.0 && points.y2 == 1.0 {
@@ -842,15 +888,21 @@ pub fn ease_at(easing: SceneEasing, bezier: Option<CubicBezier>, t: f64) -> f64 
 /// always answers. Before the first key and after the last the value is held
 /// flat rather than extrapolated: extrapolating invents motion the author did
 /// not key, which on air is a graphic drifting for reasons nobody authored.
-pub fn evaluate_channel(channel: &KeyframeChannel, frame: u64) -> Option<f64> {
+///
+/// A segment whose outgoing key is custom-bezier with no control points
+/// refuses with `InvalidKeyframeEasing` rather than being eased as linear.
+/// Every reader already refuses such a document, so this is the last guard,
+/// not the expected path.
+pub fn evaluate_channel(channel: &KeyframeChannel, frame: u64) -> Result<Option<f64>, Refusal> {
     let keys = &channel.keys;
-    let first = keys.first()?;
-    let last = keys.last()?;
+    let (Some(first), Some(last)) = (keys.first(), keys.last()) else {
+        return Ok(None);
+    };
     if frame <= first.frame {
-        return Some(first.value);
+        return Ok(Some(first.value));
     }
     if frame >= last.frame {
-        return Some(last.value);
+        return Ok(Some(last.value));
     }
 
     // Keys are kept sorted by `set_keyframe`, so the segment is a binary
@@ -862,32 +914,36 @@ pub fn evaluate_channel(channel: &KeyframeChannel, frame: u64) -> Option<f64> {
 
     let span = to.frame.saturating_sub(from.frame);
     if span == 0 {
-        return Some(from.value);
+        return Ok(Some(from.value));
     }
     let t = (frame - from.frame) as f64 / span as f64;
     // The easing belongs to the key it leaves, matching `SceneKeyframe`'s
     // "outgoing easing toward the next key".
-    let eased = ease_at(from.easing, from.bezier, t);
-    Some(from.value + (to.value - from.value) * eased)
+    let eased = ease_at(from.easing, from.bezier, t).ok_or_else(|| {
+        Refusal::InvalidKeyframeEasing {
+            object: channel.object_id.clone(),
+            property: channel.property.clone(),
+            detail: "custom-bezier has no control points".to_owned(),
+        }
+    })?;
+    Ok(Some(from.value + (to.value - from.value) * eased))
 }
 
 /// Evaluate every channel in a scene at one frame, as (object, property,
 /// value). The Editor uses this to preview a frame; the engine will use it to
-/// resolve a scene before rastering.
+/// resolve a scene before rastering. The first channel that cannot be
+/// evaluated refuses the whole frame rather than being dropped from it.
 pub fn evaluate_scene_at(
     scene: &SceneDocument,
     frame: u64,
-) -> Vec<(String, String, f64)> {
-    scene
-        .timeline
-        .channels
-        .iter()
-        .filter_map(|channel| {
-            evaluate_channel(channel, frame).map(|value| {
-                (channel.object_id.clone(), channel.property.clone(), value)
-            })
-        })
-        .collect()
+) -> Result<Vec<(String, String, f64)>, Refusal> {
+    let mut values = Vec::with_capacity(scene.timeline.channels.len());
+    for channel in &scene.timeline.channels {
+        if let Some(value) = evaluate_channel(channel, frame)? {
+            values.push((channel.object_id.clone(), channel.property.clone(), value));
+        }
+    }
+    Ok(values)
 }
 
 #[cfg(test)]
@@ -1050,6 +1106,106 @@ mod tests {
         );
     }
 
+    fn starter(id: &str) -> crate::design_system::MotionPreset {
+        crate::design_system::starter_presets()
+            .into_iter()
+            .find(|preset| preset.id == id)
+            .expect("the preset is in the starter library")
+    }
+
+    fn scene_bytes(scene: &SceneDocument) -> String {
+        serde_json::to_string(scene).expect("a scene serialises")
+    }
+
+    #[test]
+    fn a_preset_landing_on_an_authored_key_refuses_by_name_and_changes_nothing() {
+        // Slide lays keys at 0 and 20 on x. An authored hold at 20 must not be
+        // silently replaced by the preset's arrival key (11.22: nothing is
+        // ever overwritten).
+        let mut scene = scene_with(vec![rect("card")]);
+        set_keyframe(
+            &mut scene,
+            "card",
+            "x",
+            SceneKeyframe { frame: 20, value: 999.0, easing: SceneEasing::Hold, bezier: None },
+        )
+        .unwrap();
+        let before = scene_bytes(&scene);
+        assert!(matches!(
+            apply_preset_phase(&mut scene, "card", &starter("slide").phases.r#in, 0),
+            Err(Refusal::DuplicateKeyframeFrame { object, property, frame: 20 })
+                if object == "card" && property == "x"
+        ));
+        assert_eq!(scene_bytes(&scene), before, "a refused preset leaves the scene byte-identical");
+    }
+
+    #[test]
+    fn a_preset_whose_own_keys_round_onto_one_frame_refuses_rather_than_dropping_one() {
+        // Two preset keys resolving to the same frame would make the later one
+        // silently replace the earlier — an overshoot quietly lost.
+        let mut scene = scene_with(vec![rect("card")]);
+        let phase = MotionPhase {
+            duration: crate::design_system::DurationSpec::Ms(200.0),
+            channels: vec![MotionChannel {
+                property: "opacity".into(),
+                keys: vec![
+                    crate::design_system::MotionKey { t: 0.0, v: 0.0, out: None },
+                    crate::design_system::MotionKey { t: 0.5, v: 1.2, out: None },
+                    crate::design_system::MotionKey { t: 0.52, v: 0.9, out: None },
+                    crate::design_system::MotionKey { t: 1.0, v: 1.0, out: None },
+                ],
+            }],
+        };
+        let before = scene_bytes(&scene);
+        assert!(matches!(
+            instantiate_phase_channels(&mut scene, "card", &phase, 10, 0),
+            Err(Refusal::DuplicateKeyframeFrame { frame: 5, .. })
+        ));
+        assert_eq!(scene_bytes(&scene), before);
+    }
+
+    #[test]
+    fn a_preset_refused_partway_through_leaves_the_scene_byte_identical() {
+        // Slide at 90 on a 100-frame timeline: its first key (90) is legal, its
+        // arrival (110) is not. Nothing may be written before the refusal.
+        let mut scene = scene_with(vec![rect("card")]);
+        set_keyframe(&mut scene, "card", "opacity", key(0, 1.0)).unwrap();
+        let before = scene_bytes(&scene);
+        assert!(matches!(
+            apply_preset_phase(&mut scene, "card", &starter("slide").phases.r#in, 90),
+            Err(Refusal::KeyframeOutOfRange { frame: 110, duration_frames: 100, .. })
+        ));
+        assert_eq!(scene_bytes(&scene), before, "partial mutation on refusal");
+    }
+
+    #[test]
+    fn a_preset_may_share_a_channel_with_keys_on_other_frames() {
+        // The collision rule is the frame, as it is for move and paste (11.22):
+        // keys elsewhere on the channel are kept and the preset's keys join them.
+        let mut scene = scene_with(vec![rect("card")]);
+        set_keyframe(&mut scene, "card", "opacity", key(60, 0.5)).unwrap();
+        apply_preset_phase(&mut scene, "card", &starter("fade").phases.r#in, 0).unwrap();
+        assert_eq!(
+            scene.timeline.channels[0].keys.iter().map(|key| key.frame).collect::<Vec<_>>(),
+            vec![0, 15, 60]
+        );
+    }
+
+    #[test]
+    fn a_custom_bezier_with_no_points_refuses_in_the_evaluator_rather_than_going_linear() {
+        let c = channel(vec![
+            SceneKeyframe { frame: 0, value: 0.0, easing: SceneEasing::CustomBezier, bezier: None },
+            key(100, 200.0),
+        ]);
+        assert!(matches!(
+            evaluate_channel(&c, 50),
+            Err(Refusal::InvalidKeyframeEasing { object, property, .. })
+                if object == "card" && property == "x"
+        ));
+        // Outside the eased span no curve is consulted, so the value answers.
+        assert_eq!(evaluate_channel(&c, 100), Ok(Some(200.0)));
+    }
+
     #[test]
     fn an_unmapped_preset_property_refuses_rather_than_skipping_the_channel() {
         let mut scene = scene_with(vec![rect("card")]);
@@ -1183,9 +1339,9 @@ mod tests {
     #[test]
     fn a_channel_interpolates_linearly_between_its_keys() {
         let c = channel(vec![key(0, 0.0), key(100, 200.0)]);
-        assert_eq!(evaluate_channel(&c, 0), Some(0.0));
-        assert_eq!(evaluate_channel(&c, 50), Some(100.0));
-        assert_eq!(evaluate_channel(&c, 100), Some(200.0));
+        assert_eq!(evaluate_channel(&c, 0), Ok(Some(0.0)));
+        assert_eq!(evaluate_channel(&c, 50), Ok(Some(100.0)));
+        assert_eq!(evaluate_channel(&c, 100), Ok(Some(200.0)));
     }
 
     #[test]
@@ -1193,10 +1349,10 @@ mod tests {
         // Extrapolating would invent motion nobody authored, which on air is a
         // graphic drifting for no reason.
         let c = channel(vec![key(10, 5.0), key(20, 9.0)]);
-        assert_eq!(evaluate_channel(&c, 0), Some(5.0));
-        assert_eq!(evaluate_channel(&c, 9), Some(5.0));
-        assert_eq!(evaluate_channel(&c, 1_000), Some(9.0));
-        assert_eq!(evaluate_channel(&channel(vec![]), 0), None);
+        assert_eq!(evaluate_channel(&c, 0), Ok(Some(5.0)));
+        assert_eq!(evaluate_channel(&c, 9), Ok(Some(5.0)));
+        assert_eq!(evaluate_channel(&c, 1_000), Ok(Some(9.0)));
+        assert_eq!(evaluate_channel(&channel(vec![]), 0), Ok(None));
     }
 
     #[test]
@@ -1206,9 +1362,9 @@ mod tests {
             key(100, 200.0),
         ]);
         // Flat across the whole span, then the next key takes over exactly.
-        assert_eq!(evaluate_channel(&c, 1), Some(0.0));
-        assert_eq!(evaluate_channel(&c, 99), Some(0.0));
-        assert_eq!(evaluate_channel(&c, 100), Some(200.0));
+        assert_eq!(evaluate_channel(&c, 1), Ok(Some(0.0)));
+        assert_eq!(evaluate_channel(&c, 99), Ok(Some(0.0)));
+        assert_eq!(evaluate_channel(&c, 100), Ok(Some(200.0)));
     }
 
     #[test]
@@ -1219,19 +1375,19 @@ mod tests {
             SceneEasing::EaseOut,
             SceneEasing::EaseInOut,
         ] {
-            assert_eq!(ease_at(easing, None, 0.0), 0.0, "{easing:?} must start at 0");
-            assert_eq!(ease_at(easing, None, 1.0), 1.0, "{easing:?} must end at 1");
+            assert_eq!(ease_at(easing, None, 0.0).unwrap(), 0.0, "{easing:?} must start at 0");
+            assert_eq!(ease_at(easing, None, 1.0).unwrap(), 1.0, "{easing:?} must end at 1");
             let mut previous = 0.0;
             for step in 0..=100 {
-                let value = ease_at(easing, None, step as f64 / 100.0);
+                let value = ease_at(easing, None, step as f64 / 100.0).unwrap();
                 assert!(value >= previous - 1e-9, "{easing:?} went backwards at {step}");
                 previous = value;
             }
         }
         // Ease-in starts slow: it is below the straight line at the midpoint.
-        assert!(ease_at(SceneEasing::EaseIn, None, 0.5) < 0.5);
+        assert!(ease_at(SceneEasing::EaseIn, None, 0.5).unwrap() < 0.5);
         // Ease-out starts fast, so it is above it.
-        assert!(ease_at(SceneEasing::EaseOut, None, 0.5) > 0.5);
+        assert!(ease_at(SceneEasing::EaseOut, None, 0.5).unwrap() > 0.5);
     }
 
     #[test]
@@ -1239,17 +1395,17 @@ mod tests {
         // y beyond 1 is legal — an overshoot is a deliberate animation effect,
         // and `validate_key` only constrains the x controls to 0–1.
         let overshoot = CubicBezier { x1: 0.5, y1: 0.0, x2: 0.5, y2: 1.6 };
-        let peak = ease_at(SceneEasing::CustomBezier, Some(overshoot), 0.8);
+        let peak = ease_at(SceneEasing::CustomBezier, Some(overshoot), 0.8).unwrap();
         assert!(peak > 1.0, "an overshooting curve must be allowed to exceed 1, got {peak}");
         // The solve is exact at the ends whatever the controls.
-        assert_eq!(ease_at(SceneEasing::CustomBezier, Some(overshoot), 0.0), 0.0);
-        assert_eq!(ease_at(SceneEasing::CustomBezier, Some(overshoot), 1.0), 1.0);
+        assert_eq!(ease_at(SceneEasing::CustomBezier, Some(overshoot), 0.0).unwrap(), 0.0);
+        assert_eq!(ease_at(SceneEasing::CustomBezier, Some(overshoot), 1.0).unwrap(), 1.0);
 
         // The CSS named curves are reproduced by their own control points.
         let ease_in = easing_control_points(SceneEasing::EaseIn);
         assert_eq!(
-            ease_at(SceneEasing::CustomBezier, Some(ease_in), 0.35),
-            ease_at(SceneEasing::EaseIn, None, 0.35),
+            ease_at(SceneEasing::CustomBezier, Some(ease_in), 0.35).unwrap(),
+            ease_at(SceneEasing::EaseIn, None, 0.35).unwrap(),
         );
     }
 
@@ -1260,7 +1416,7 @@ mod tests {
         let points = CubicBezier { x1: 0.17, y1: 0.67, x2: 0.83, y2: 0.67 };
         for step in 1..100 {
             let t = step as f64 / 100.0;
-            let y = ease_at(SceneEasing::CustomBezier, Some(points), t);
+            let y = ease_at(SceneEasing::CustomBezier, Some(points), t).unwrap();
             assert!(y.is_finite(), "solve produced a non-finite value at {t}");
         }
     }
@@ -1271,7 +1427,7 @@ mod tests {
         set_keyframe(&mut scene, "card", "x", key(0, 0.0)).unwrap();
         set_keyframe(&mut scene, "card", "x", key(100, 100.0)).unwrap();
         set_keyframe(&mut scene, "card", "opacity", key(0, 1.0)).unwrap();
-        let at = evaluate_scene_at(&scene, 50);
+        let at = evaluate_scene_at(&scene, 50).unwrap();
         assert_eq!(at.len(), 2);
         assert!(at.contains(&("card".to_string(), "x".to_string(), 50.0)));
         assert!(at.contains(&("card".to_string(), "opacity".to_string(), 1.0)));
