@@ -148,6 +148,45 @@ entry. It is a plan edit and a reading of the code.
 
 ---
 
+## 2026-09-25 — Phase 18 (Figma at full fidelity) and Phase 19 (Data Server) planned
+
+**User request:** Figma adaptation and import must be perfect, and scene-level
+boundaries must be kept. A data-source application like Ross DataLinq Server
+is to be built as a standalone app. It holds multiple data sources and is
+readable by both Editor and Playout.
+
+**Phase 18.** "Perfect" is written down as two measurable conditions so the
+row can close honestly:
+1. Every frame in a real corpus renders within the pixel-gate threshold of
+   Figma's own PNG render (18.8, reusing 4.4 and 7.3).
+2. There are zero unnamed substitutions in the 7.2 report.
+
+"Scene-level boundaries kept" is 18.3: one selected top-level Figma frame is
+one scene. Its size and origin come from the frame, `clipsContent` is
+honoured without widening the scene, and nothing is re-parented across
+scenes. Re-import updates in place, keyed by Figma node id, and keeps
+animation and bindings (18.9). The source is read through the Figma REST API,
+so there is no host dependency, and the token lives in the OS keychain.
+Today only SVG is parsed (7.2 is active for exactly this reason). Phase 18
+is where Figma parsing lands.
+
+**Phase 19.** This settles the deferral recorded in the Phase 11 additions.
+The first step is **ADR-0003**, because a new process in the distributed
+architecture is ADR-0001's territory, not a code decision. The ADR has two
+constraints fixed up front:
+- the engine never fetches data;
+- a take carries its data with the intent and records the data revision,
+  so a frame is reproducible.
+
+Connectors are CSV, xlsx, JSON, XML, HTTP polling, RSS, manual tables, SQL
+(Postgres, MySQL, SQL Server, ODBC) and Google Sheets. Source credentials
+are kept out of scenes, packages, logs and MCP.
+
+Plan and tracker only (Phases 18 and 19 appended to the `progress.html` step
+list; 201 steps now). No code and no execution evidence in this entry.
+
+---
+
 ## 2026-09-25 — Phase 11 re-verification, and seven fixes merged
 
 Five read-only verifier agents re-checked the Phase 11 rows that had been

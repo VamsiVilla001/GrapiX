@@ -339,12 +339,12 @@ ADR Part G routes programmatic authoring through MCP agents. A Graphic Hub-style
 asset database browser duplicates Phases 7–9. Viz's full spline editor is
 excluded by this phase's own "do not copy After Effects complexity" rule.
 
-**Deferred pending a scoping decision, not dropped.** Live data-source connectors
-(XPression DataLinq, Viz DataPool, Singular's Sheets widget and Data Streams)
-have no home in the plan today: 8.6 makes a data *schema* discoverable and
+**Live data-source connectors — scoped 25 September 2026 as Phase 19.**
+(XPression DataLinq, Viz DataPool, Singular's Sheets widget and Data Streams.)
+This was deferred: 8.6 makes a data *schema* discoverable and
 `Editor/src/bindings.ts` resolves against a static `dataContext`, but no step
-authors where live data comes from. The authoring surface would be Phase 11 and
-the ingest runtime would not. Subcompositions as addressable overlay units,
+said where live data comes from. The user decided on a standalone Data Server
+application read by both Editor and Playout; see Phase 19. Subcompositions as addressable overlay units,
 template variants and a selectable poster frame are also recorded here as
 understood gaps that depend on 11.26/11.27 landing first.
 
@@ -445,6 +445,59 @@ Depends only on Phases 1–8 plus the design system. Independent of the certific
 | `17.7` | Batch generation from a template list | AI | 17.4 | A full tournament pack generated as drafts |
 | `17.8` | Zero-edit publish rate reported per class | AI | 17.7 | Reportable metric, per tournament |
 | `17.9` | Per-class graduation with a named sign-off owner | AI | 17.8 | One class auto-publishing, with an owner |
+
+## Phase 18 — Figma import at full fidelity
+
+**Status: Planned (added 25 September 2026 at the user's request).** Figma is
+the primary design source. "Perfect" is not a feeling; it is defined here as
+two measurable things on a real corpus: **(a)** the imported scene renders
+within the pixel-gate threshold of Figma's own render of the same frame, and
+**(b)** the 7.2 compatibility report names every substitution, with zero
+unnamed ones. Anything Figma can express that the engine cannot is refused
+or substituted **by name**, never approximated silently (invariant 18). No
+Figma desktop or plugin host is required. The source is read through the
+Figma REST API and retained beside the template (7.2 "source retained").
+Every imported layer stays an ordinary scene object, so every layer is
+animatable.
+
+| Step | Work | Track | Needs | Done when |
+|---|---|---|---|---|
+| `18.1` | Figma reference corpus | RES | P.3 | At least 20 real broadcast files (lower thirds, scorebugs, full-frames, tickers, vertical social), each with Figma's own PNG render at 1× and 2× committed as the reference |
+| `18.2` | Figma REST ingest with the source retained | BE | 7.2 | A file key and a token stored in the OS keychain (never in a scene, package or log) fetch the document, components, styles, variables and image fills; the raw response is stored content-hashed beside the template, so a re-import can be diffed and an offline re-run needs no network |
+| `18.3` | Scene boundaries: one Figma frame is one scene | BE | 18.2, 11.29 | Each top-level frame the user selects becomes exactly one scene. Its resolution is the frame's width × height, its origin is the frame's top-left, and its background is the frame fill. `clipsContent` is honoured: content outside a clipping frame is kept but clipped, and never widens the scene. Nothing is re-parented across scenes. Nested frames stay nested groups with their own bounds and clipping. Multi-frame import produces N independent scene sessions |
+| `18.4` | Node and property coverage matrix | BE | 18.3, 1.2, 1.3 | Every Figma node type (frame, group, section, rectangle, ellipse, polygon, star, line, vector, boolean operation, text, component, instance, image fill) and property (per-corner radius, strokes with align/dash/cap/join, solid, linear, radial, angular and diamond gradients, image fill modes and crop, drop and inner shadow, layer and background blur, blend modes, opacity, masks, auto-layout resolved to absolute positions, constraints recorded) has a row in a committed coverage table marked **mapped**, **substituted (named)** or **refused (named)**, and each row has a test |
+| `18.5` | Text fidelity | BE | 18.4, 11.13, 3.6 | Per-character style runs, line height, letter spacing, paragraph spacing, alignment, auto-resize modes and text case survive import. Every Figma font is resolved through 11.13 ingest; a font that cannot be resolved blocks the import by name instead of falling back |
+| `18.6` | Components, instances and variants | BE | 18.4 | Components import once and instances reference them with their overrides applied. Variants are kept as named alternatives, not flattened copies. An instance's override that the engine cannot express is named in the report |
+| `18.7` | Variables and styles to design tokens | BE | 10.2, 18.2 | Figma colour, number and string variables and published styles land as 10.x tokens, and imported objects reference the tokens instead of copying their values, so a brand change flows through |
+| `18.8` | Fidelity gate on the corpus | BE | 18.1, 18.4, 7.3, 4.4 | Every corpus frame's engine render is diffed against Figma's PNG under the 4.4 threshold and the diff is stored with the template (7.3). A regression fails CI. The target is 100% of corpus frames passing with zero unnamed substitutions |
+| `18.9` | Re-import updates in place | BE | 18.3, 11.20, 11.19 | Re-importing the same file updates the existing scenes in place, keyed by the Figma node id. Animation channels, phases, bindings and control fields on unchanged nodes are preserved. A deleted node that still carried animation or bindings is reported by name, not dropped silently |
+| `18.10` | Import UI for Figma | UI | 18.3, 11.17 | Paste a Figma file or frame link, pick frames from thumbnails, see the coverage and substitution report before confirming, and land in one scene tab per frame |
+
+## Phase 19 — GrapiX Data Server (a DataLinq-class standalone application)
+
+**Status: Planned (added 25 September 2026 at the user's request).** This
+resolves the scoping decision deferred in the Phase 11 additions. Live data
+lives in its own **standalone application**, like Ross XPression DataLinq
+Server. It holds many data sources at once and serves them to both the
+Editor and Playout. Because it is a new process in the distributed
+architecture, its boundaries are fixed by an ADR before any code (19.1). Two
+constraints are carried in from existing invariants and must not be relaxed
+by that ADR:
+- the engine never fetches data itself, and a take stays intent-based;
+- the data a frame was rendered with is recorded with the take, so a frame
+  can be reproduced.
+
+| Step | Work | Track | Needs | Done when |
+|---|---|---|---|---|
+| `19.1` | ADR-0003: Data Server boundaries | CON | 1.9, 5.1 | Accepted ADR fixing: process model (desktop app plus headless service mode), transport (reuses the 5.x control plane and gx1 tokens, 2.9), who resolves a binding at take time (Playout, never the engine), how values reach the engine (as data carried with the take intent), revision pinning of data, and failure policy per field (refuse, hold last good, or warn) |
+| `19.2` | Data contract | CON | 19.1 | `DataSource`, `DataTable`, `DataRecord` and typed `DataField` values, plus a source revision and timestamp and a staleness state, defined in Rust (`gx-contracts`) with TS generated; round-trips both ways; a schema change is a named event, never silent |
+| `19.3` | Standalone Data Server app | UI | 19.2, 11.1 | Its own Tauri 2 executable, installable separately from Editor and Playout. It lists sources, their status, last update, error and sample rows, and also runs headless as a service on a playout machine |
+| `19.4` | Connectors: files and web | BE | 19.2 | CSV, Excel (xlsx), JSON and XML from a file or HTTP (with a poll interval), RSS/Atom, and manually edited tables. Each connector detects schema drift and names it, and a file watch uses 2.5 |
+| `19.5` | Connectors: databases and sheets | BE | 19.4 | SQL through PostgreSQL, MySQL, SQL Server and ODBC; Google Sheets. Source credentials live in the OS keychain and never appear in scenes, packages, logs or the MCP surface |
+| `19.6` | Many sources, change propagation and staleness | BE | 19.4 | Multiple sources run concurrently. Subscribers get a snapshot then ordered deltas. The last good value is retained, and staleness past a source's declared limit is surfaced to every subscriber (never silently stale). Reconnect resumes from a revision without a full reload |
+| `19.7` | Editor reads the Data Server | UI | 19.6, 11.19, 8.6 | The Data binding panel browses sources, tables and fields from a running server; binding a property to a server field writes a portable reference, not the value; sample data for preview is a pinned snapshot, so a scene previews offline |
+| `19.8` | Playout reads the Data Server | BE | 19.6, 6.2, 6.3 | At cue/take, Playout resolves each bound field from the server and sends the values with the intent. The committed frame records the data revision it used. A missing or stale field follows the 19.1 policy and names the field. Output is never blocked on a slow source without saying so |
+| `19.9` | Data Server soak and failure tests | BE | 19.8 | Eight hours with at least 20 sources at mixed update rates, source outages, server restarts and network loss; zero silent staleness and zero takes rendered with unrecorded data |
 
 ---
 
