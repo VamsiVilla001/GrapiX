@@ -179,3 +179,39 @@ execution evidence.
 59. **A refusal keeps its meaning when it becomes an error.** "Needs a
     credential" and "this peer is broken" are different problems, and a caller
     can only act differently on them if the classification says which.
+
+## Established by the Editor core and AI readiness merge (2 October 2026)
+
+Approved by the user on 2 October 2026. Each rule names the build-plan step
+that makes it enforceable. Until that step is `done` the rule is **Planned**:
+it binds new work now, but there is no execution evidence that the tree
+already obeys it.
+
+60. **Every mutation of Editor authoring content is a command of the one
+    command type defined in `Shared/`.** No other mutation path exists. A
+    second path is a second, unlogged history that undo, review and the agent
+    surface cannot see. Planned — enforced by 11.36.
+61. **Playout loads scene revisions only by pinned content hash.** This
+    refines invariant 30: a version number identifies a publish, and the hash
+    proves its content. An unknown or unpinned hash is refused by name.
+    Planned — enforced by 11.38.
+62. **Scene scripts have no wall-clock or network access.** Time comes only
+    from the engine frame number and rational rate, and data only through
+    bindings. A script that reads the wall clock makes the same frame render
+    two ways (invariant 8). Planned — enforced by 16.4.
+63. **No generator or model inference runs on the Take path.** Generated
+    content is baked offline into hashed assets before it can be taken.
+    Holds today because no generator exists; 16.10 must keep it.
+64. **No neural frame generation or temporal AI upscaling is applied to
+    Program.** A synthesised frame is a substitution, which invariant 18
+    forbids. Holds today because none exists.
+65. **No author- or agent-scoped tool can reach playout-control.** Program
+    operations over MCP (today `playout.cue`, `playout.take`, `playout.clear`
+    and `outputs.configure`) exist only behind operator scopes (`Cue`, `Take`,
+    `Clear`, `ConfigureOutput`), per ADR-0002 D.3 and build-plan 8.11. Agents
+    publish drafts; a human takes them to air.
+    Enforced today by the 8.13 scope tests; 8.14 extends them to every tool.
+66. **A missing glyph is a refusal, never a font substitution.** This narrows
+    invariant 18 to the glyph: a covered font that lacks a glyph renders tofu
+    or a fallback face, and either is different pixels. Planned — enforced by
+    11.42 and 11.51.

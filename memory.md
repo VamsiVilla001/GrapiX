@@ -87,10 +87,11 @@ not a euphemism for nearly done.
    contract test.** A double cast type-checks anything; it hid two real drifts
    until 1.2 replaced it with a direct assignment. Assign directly and let the
    compiler do the work.
-24. 1.x's layer masks, Photoshop layer styles, blending options and
-   `importedDesign` provenance have **no owning step in the build plan**. They
-   are outside 2.0's planned scope, not a gap in the catalogue. Adding them is
-   a plan change and the user's call.
+24. 1.x's Photoshop layer styles and blending options have **no owning step
+   in the build plan**; they are outside 2.0's planned scope, not a gap in the
+   catalogue, and adding them is a plan change and the user's call. Layer
+   masks are now owned by 11.47 and asset provenance by 11.39 (merged
+   2 October 2026).
 25. **`serde_json` needs `float_roundtrip` and it is not cosmetic.** Every
    scene object flattens `ObjectBase`, and `#[serde(flatten)]` forces
    deserialisation through `deserialize_any`, whose default float parser is
@@ -108,6 +109,58 @@ not a euphemism for nearly done.
    build enabled** (invariant 21). An engine with no rasteriser declares
    `MaterialSupport::none()`, and a validator refusing every mode against
    that list is the correct answer, not a degraded one.
+
+---
+
+## 2026-10-02 — Editor core and AI readiness proposal merged into the plan
+
+**Approval, recorded as the proposal's step 0.2 requires.** The user (Vamsi)
+approved merging `GrapiX-Editor-Core-and-AI-Readiness-Proposal.md`, archived
+as `docs/proposals/GrapiX-Editor-Core-and-AI-Readiness-Proposal.md`. The
+decisions below were all made by the user in this session, choosing between
+options that were presented with the conflicting evidence:
+
+| Question | User's decision |
+|---|---|
+| How to handle overlap | Delta steps. A proposal item that overlaps a done or active step becomes a new row that covers only the missing delta, with the step it extends in its Needs. It is folded only into pending steps. No done step was reopened. |
+| Per-scene JS (A06/B12/B13) | Accepted. A06 folded into 16.4. This reverses the 13 September refusal in the Phase 11 additions, and the plan text now says so. |
+| MCP vs playout-control (C01, invariant 6) | Keep 8.11's operator-scoped `playout.*`/`outputs.configure` tools. The rule is reworded: no author- or agent-scoped tool reaches playout-control. |
+| Materials (B06) | Unify. 11.50 collapses `MaterialKind`'s solid-colour/image/PBR/unlit split into one physically lit type, with a lossless migration. The custom `shader` kind is out of scope. |
+| Autosave (B01) | Remove 2.6's autosave ring (11.43). 2.6 is not reopened: its done-when is the kill -9 atomic-write test, and 11.43 must keep that passing. |
+| Lint severity | Refusal-class findings block publish and preflight; the rest warn (11.42). |
+| Approval roles (C02) | Admin only (13.7). |
+| Candidate invariants | All seven approved, appended as **60–66**, each marked Planned until its enforcing step lands. |
+
+**ID map** (proposal label → plan ID). A01–A05 → 11.36–11.40, A06 → 16.4
+(fold), A07 → 11.41, A08 → 11.42. B01–B04 → 11.43–11.46, B05a/b/c →
+11.47–11.49, B06–B10 → 11.50–11.54, B11 → folded into 19.4/19.6/19.8,
+B12–B15 → 11.55–11.58. B16 → 11.59 for PSD/AI/AE; its Figma rules were
+folded into 18.2–18.4. C01 → 8.14, C02 → 13.7, C03 → 13.8, C04 → 19.10,
+C05 → 15.12 (its OMT half folded into 15.8), C06 → 15.13, C07–C09 →
+16.10–16.12, C10 → folded into 17.4/17.7, C11 → 16.13. 11.31 now also needs
+11.36. The plan went from 201 to 235 steps, and `progress.html`'s PLAN was
+regenerated for exactly the touched IDs. New steps are pending, which
+`progress.json` records by omission.
+
+**Facts found while merging, not decisions:**
+- The proposal's React question was already answered: `Editor/package.json`
+  depends only on `@grapix/contracts` and `three`.
+- The proposal cites ADRs 0001–0005, but only 0001 and 0002 exist. ADR-0003
+  is reserved for the Data Server by 19.1.
+- 15.13 (ST 2110/IPMX) and 16.13 (interchange) carry no real done-when. Each
+  row says it cannot start until one is written. 15.13 also needs an ADR on
+  PTP versus invariant 13 ("Timing is a cable").
+- 11.49 (video layer) gained 16.1 in its Needs, because a clip cannot
+  composite without a decoder, and 16.1 waits on P.2.
+- A01's "Phase 7 done" was narrowed to 7.1. 7.2 and 7.3 are import work that
+  A01 does not read, and holding A01 on them would block the foundation.
+
+**Next ready step:** 11.36. Its Needs are 1.12 and 7.1, and both are done.
+The 2026-09-25 "Resume here" batch below still stands.
+
+Plan, tracker, invariants and governance count only; no code. Verified by
+parsing: the plan's step table and `progress.html` PLAN both hold 235 IDs,
+and the PLAN diff is one line.
 
 ---
 

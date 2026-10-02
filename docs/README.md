@@ -31,6 +31,10 @@ that as a real cost.
 `/memory.md` at the repository root is the session log: what changed, when, and
 what was verified. It records history; it does not grant authority.
 
+`proposals/` holds merge proposals after they have been merged into
+`/GrapiX-Build-Plan.md`. They are records only and grant no authority; the
+build plan's rows are what count.
+
 ## Status vocabulary
 
 Used verbatim from the ADR. Nothing may be described in any other terms.
