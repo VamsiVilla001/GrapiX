@@ -112,7 +112,72 @@ not a euphemism for nearly done.
 
 ---
 
-## 2026-10-03 — 11.37 done: undo/redo on the command log; resume here
+## 2026-10-03 — 11.38 done: content-hashed revisions, pinned takes; resume here
+
+**Design.** A revision's content address is
+`gx_contracts::scene::scene_content_hash`: SHA-256 over canonical JSON,
+with keys sorted at every depth, no whitespace, and the top-level `revision`
+removed, because the receiver assigns `revision` and it is not content. It
+takes JSON because Playout holds published documents as opaque JSON and the
+engine holds them as parsed scenes; canonicalisation is written out so a
+`serde_json` feature flag cannot change a hash. Cue and take carry
+`contentHash: Option<ContentHash>`. It is optional on the wire only so that a
+missing pin is refused by name. One shared
+`gx_control_plane::intent::check_reference` (unknown take → wrong revision →
+`revisionUnpinned` → `revisionHashMismatch`) serves the engine, the mock
+engine and test peers; their duplicated checks are gone (invariant 46).
+Identifier-only publishes (`--publish id:rev:sha256`) declare the hash their
+takes pin.
+
+Further changes:
+- `PROTOCOL_VERSION` is 4; the schema-mcp surface follows.
+- The engine's recovery journal is schema 2. It stores a `HeldRevision` per
+  take and validates each prepared scene against its pin. The schema version
+  is now read before the body, so an old journal refuses `UnsupportedSchema`
+  by name.
+- Playout's `PublishedScene` carries `contentHash` and `review`; every
+  publish starts as Draft. `playout.review` (scope `Take`) is the only
+  setter. Agents hold `Author`, so a draft cannot approve itself
+  (invariant 65).
+- `playout.take` and `playout.cue` over MCP require the pin. The library
+  listing shows each revision's hash and review state.
+- The Editor's publish result shows the hash, and Playout's transport panel
+  has a Content hash field. A blank field is sent unpinned and refused by
+  the engine by name.
+
+**Verified:** `npm run check` exited 0, with 249 conformance checks passed,
+0 failed and 8 skipped (the same 8 pre-existing kinds). New conformance
+checks:
+- Same content gives the same hash, and a changed canvas width changes it.
+- Unpinned and wrongly pinned takes are refused by name with Program
+  unchanged.
+- The mock Playout process refuses both by name.
+- The real `gx_playout::Playout` refuses both.
+
+Live on Windows, the Editor published `lower-third-1138` to a real worker
+and showed `hash 1a3e1317…d934`. In the Playout app, an unpinned take was
+`refused: revisionUnpinned`, `000…0` was `refused: revisionHashMismatch`
+naming both hashes, and the published hash committed frame 52931.
+
+**Found and fixed along the way:** conformance launched the real worker
+without `--recovery-journal`, so it read and wrote the user's own engine
+journal. When that journal became unreadable after the schema change, the
+whole real-engine section turned into one SKIP while the gate still exited
+0, dropping from 241 to 238 checks. Conformance now gives the worker a
+scratch journal, and the 12 real-engine checks run again.
+
+**Action for the user:** the engine journal at
+`%APPDATA%\GrapiX\GrapiX\data\render-engine\recovery.json` is schema 1. A
+worker started without `--recovery-journal` now refuses to start, by name,
+until that file is removed. It holds only crash-recovery state from earlier
+dev runs. It was left in place, not deleted.
+
+**Next ready steps:** 11.39 asset provenance (needs 11.36 and 2.7) and 11.41
+headless render (needs 11.38, 3.13 and 5.6, all done).
+
+---
+
+## 2026-10-03 — 11.37 done: undo/redo on the command log
 
 **Design, chosen as the standard option.** A session keeps a `base`
 document plus a log of `EditScene` batches. Each entry carries its edits,
