@@ -112,7 +112,73 @@ not a euphemism for nearly done.
 
 ---
 
-## 2026-10-03 — 11.36 done: one command type; resume here
+## 2026-10-03 — Font ingest integrated (11.13 evidenced, 2.8 reopened); resume here
+
+**What changed.** The council-claude font slice (`feat/council-claude-fonts`)
+is merged and wired end to end:
+- Contracts: `SceneEdit::AddFonts{fonts, assets}` and
+  `SceneEdit::RemoveFont{fontId}`, in `Shared/contracts/src/font_edit.rs`.
+  New refusals: `FontBatchEmpty`, `FontDuplicate`, `SceneAssetDuplicate`,
+  `FontUnknown`, `FontInUse{fontId, objects, textStyles}`.
+  `EditEffect::FontRemoved`. Font and asset types derive `JsonSchema`. The
+  witness covers both edits; conformance drives all five refusals.
+  `planFontRemoval` in TS states the same in-use rule (invariant 27).
+- Shell: `cmd_font_prepare_files` (native-dialog paths, read in Rust),
+  `cmd_font_prepare_link` (Google, Bunny, Adobe) and `cmd_font_bytes`. The
+  last checks that the checksum is 64 lowercase hex before touching a path
+  and re-hashes before serving. The prepare commands write only the per-user
+  cache. The guard lists them as `SHELL_PREPARE`, held to the read rule.
+- Engine: `text.rs` decodes WOFF/WOFF2 through `container::sfnt_bytes`. A
+  test asserts a WOFF2 asset shapes glyph-for-glyph like its TTF.
+- Web: Add font files and Add font link actions, Remove, and a
+  `FontRegistry` gate. `renderSceneState` does not render until the
+  browser's font set matches the scene. A file without a recorded licence
+  prompts for one, or else is kept Restricted.
+- `tsconfig.base.json` and `typecheck:web` add the `DOM.Iterable` lib, which
+  is where TypeScript declares `FontFaceSet.add/delete`.
+
+**Verified:** `npm run check` exited 0, with 239 conformance checks passed,
+0 failed and 8 skipped (5 new), and 338 Editor unit tests passed. The live
+Windows Tauri/WebView2 run over CDP, with the native file dialog and
+prompts pre-answered in the page:
+- One ingest of 5 files gave 4 fonts; the byte-identical copy was named as
+  a duplicate. That was one `cmd_execute`, then 4 `cmd_font_bytes`; 4
+  FontFaces were `loaded`.
+- A text object was created with the new font at once. Remove on that font
+  is disabled naming `Title (text-1)`, and a direct `cmd_execute` removal is
+  refused `fontInUse`.
+- An explicit removal of an unused font worked. Ingest and removal are one
+  undo entry each: 4→0→4 fonts, and the browser's faces follow.
+- Save and reopen: the stored JSON carries 3 fonts with their OFL licences
+  and SHA-256 checksums equal to the source files.
+- With one cached file hidden, the fresh registry named it:
+  `refused [assetMissing]`. The alert and Publish read
+  `unresolved font(s): Inter Regular`. The file was then restored.
+- A Google Fonts link (Roboto Slab 400/700) ingested as one command; 14
+  faces loaded from project bytes.
+
+**2.8 downgraded to `active` after re-verification.** At HEAD the fonts
+module was not compiled (1efabd0), and the guarded resolver 2.8's note
+describes does not exist (`FontFetchAddressDenied` has no producer). After
+the reattachment, Windows resolves file sources and Google/Bunny links. Still
+missing: a live Adobe run (needs a kit id), a resolver for `DirectUrl`
+sources, and macOS. **11.13 stays `active` only because it needs 2.8**;
+every one of its own criteria has live evidence above.
+
+**Known, not fixed:** ingested files get the 1.x default fallbacks `Arial,
+sans-serif`, and no ingested font carries those families. Restricted fonts
+are not yet kept out of `.gpxpkg` packages (package.rs). Some project-store
+tests write into the real per-user data directory: 15 `test-autosave-*`,
+`test-backup-*`, `test-kill-*`, `test-refusal-*` and `test-temporary-*`
+projects sit beside the user's own projects. They predate this session and
+were left in place.
+
+**Next:** close 2.8 (Adobe kit id from the user, DirectUrl, macOS), then
+11.37 undo/redo on the command log and 11.38 hashed revisions.
+
+---
+
+## 2026-10-03 — 11.36 done: one command type
 
 **What happened.** The GPT session's 11.36 agents stopped mid-edit when the
 Codex usage limit was reached; the provider asked for a ~4.5 h wait. The

@@ -16,7 +16,11 @@
 //! scene from it.
 //!
 //! What else it exposes is read-only: catalogues, the rule surfaces the
-//! panels are built from, and publication. Publication is the whole of the
+//! panels are built from, and publication. Font ingest is the one exception
+//! that writes, and it writes only the per-user content-addressed asset
+//! cache, never authoring content. It returns a prepared batch, and the batch
+//! reaches a scene only as one `addFonts` edit through `cmd_execute`.
+//! Publication is the whole of the
 //! Editor's authority over Program — it produces a revision Playout may later
 //! take, and nothing more (invariant 7: a mutable Editor scene never replaces
 //! a published one in place).
@@ -30,7 +34,12 @@ use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::{Mutex, MutexGuard};
 
-use gx_asset_plane::{publish_scene, PublishClientError, PublishRefusal, PublishReply};
+use gx_asset_plane::fonts::ingest::{
+    prepare_font_files, FontFileInput, FontIngestRefusal, PreparedFontBatch, SceneFontLibrary,
+};
+use gx_asset_plane::fonts::link::{prepare_font_link, UreqFontFetcher};
+use gx_asset_plane::fonts::manager::LinkedSource;
+use gx_asset_plane::{content_hash, publish_scene, AssetStore, PublishClientError, PublishRefusal, PublishReply};
 use gx_contracts::animation::{animation_surface, validate_scene_animation, AnimationSurface};
 use gx_contracts::command::{
     parse_command, CommandOutcome, EditorCommand, SaveScene, SaveTarget, OpenScene, SceneSource,
@@ -39,8 +48,9 @@ use gx_contracts::command::{
 use gx_contracts::control::{apply_control_values, fillable_properties, ControlFieldKind, ControlValue, TakePage};
 use gx_contracts::design_system::{starter_presets, MotionPreset};
 use gx_contracts::platform::service_data_root;
+use gx_contracts::font::EmbeddingPolicy;
 use gx_contracts::scene::SceneDocument;
-use gx_contracts::{Refusal, Revision, TakeId};
+use gx_contracts::{ContentHash, Refusal, Revision, TakeId};
 use gx_editor::{CommandError, Projects, Workspace};
 use serde::{Deserialize, Serialize};
 
@@ -58,15 +68,35 @@ pub const DEFAULT_ASSET_ENDPOINT: &str = "127.0.0.1:4401";
 /// so a panic mid-command cannot leave a half-applied edit behind it.
 pub struct ShellState {
     workspace: Mutex<Workspace>,
+    /// The per-user content-addressed asset cache, opened on first use. A
+    /// machine without a cache directory can still edit; font ingest then
+    /// refuses by name instead of the shell failing to start.
+    assets: Mutex<Option<AssetStore>>,
 }
 
 impl ShellState {
     pub fn new(workspace: Workspace) -> Self {
-        Self { workspace: Mutex::new(workspace) }
+        Self {
+            workspace: Mutex::new(workspace),
+            assets: Mutex::new(None),
+        }
     }
 
     fn workspace(&self) -> MutexGuard<'_, Workspace> {
         self.workspace.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn with_asset_store<T>(
+        &self,
+        run: impl FnOnce(&mut AssetStore) -> Result<T, EditorError>,
+    ) -> Result<T, EditorError> {
+        let mut store = self.assets.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if store.is_none() {
+            *store = Some(AssetStore::new().map_err(|error| EditorError::AssetCache {
+                detail: error.to_string(),
+            })?);
+        }
+        run(store.as_mut().expect("the asset store was opened above"))
     }
 }
 
@@ -99,6 +129,10 @@ pub enum EditorError {
     /// the wrong type. `cause` is the refusal itself, so the web layer can
     /// act on it rather than parse prose.
     CommandRefused { detail: String, cause: Refusal },
+    /// A file the author picked could not be read.
+    ReadFile { path: String, detail: String },
+    /// The per-user asset cache could not be opened or read.
+    AssetCache { detail: String },
 }
 
 impl std::fmt::Display for EditorError {
@@ -114,6 +148,8 @@ impl std::fmt::Display for EditorError {
             Self::Protocol { detail } => write!(f, "asset plane protocol failed: {detail}"),
             Self::ProjectFailed { detail } => write!(f, "project operation failed: {detail}"),
             Self::CommandRefused { detail, .. } => write!(f, "refused: {detail}"),
+            Self::ReadFile { path, detail } => write!(f, "cannot read {path}: {detail}"),
+            Self::AssetCache { detail } => write!(f, "asset cache unavailable: {detail}"),
         }
     }
 }
@@ -124,6 +160,14 @@ fn refused(cause: Refusal) -> EditorError {
     EditorError::CommandRefused {
         detail: cause.to_string(),
         cause,
+    }
+}
+
+/// A refused ingest keeps its refusal's name and says which input it was.
+fn ingest_refused(refusal: FontIngestRefusal) -> EditorError {
+    EditorError::CommandRefused {
+        detail: format!("{}: {}", refusal.source, refusal.refusal),
+        cause: refusal.refusal,
     }
 }
 
@@ -449,6 +493,119 @@ fn cmd_take_page_read(project: String, page_id: String) -> Result<TakePage, Edit
     projects()?.read_take_page(&project, &page_id).map_err(project_error)
 }
 
+/// Verify font files the author picked and cache their bytes by content hash.
+///
+/// Writes only the content-addressed cache, never the scene: the returned
+/// batch reaches the document as one `addFonts` edit through `cmd_execute`,
+/// which is what makes one ingest one undo entry (11.13). All or nothing — one
+/// unreadable or invalid file refuses the batch by that file's name.
+#[tauri::command]
+fn cmd_font_prepare_files(
+    state: tauri::State<'_, ShellState>,
+    target: SceneTarget,
+    paths: Vec<String>,
+    embedding_policy: EmbeddingPolicy,
+    license: Option<String>,
+) -> Result<PreparedFontBatch, EditorError> {
+    let scene = state
+        .workspace()
+        .document(&target)
+        .map_err(|error| command_error(error, None))?
+        .into_owned();
+    let mut files = Vec::with_capacity(paths.len());
+    for path in &paths {
+        let bytes = std::fs::read(path).map_err(|error| EditorError::ReadFile {
+            path: path.clone(),
+            detail: error.to_string(),
+        })?;
+        let name = std::path::Path::new(path)
+            .file_name()
+            .map_or_else(|| path.clone(), |name| name.to_string_lossy().into_owned());
+        files.push((name, bytes));
+    }
+    let inputs: Vec<FontFileInput<'_>> = files
+        .iter()
+        .map(|(file_name, bytes)| FontFileInput {
+            file_name: file_name.clone(),
+            bytes,
+            embedding_policy,
+            license: license.clone(),
+        })
+        .collect();
+    let library = SceneFontLibrary {
+        fonts: &scene.fonts,
+        assets: &scene.assets,
+    };
+    state.with_asset_store(|store| prepare_font_files(store, library, &inputs).map_err(ingest_refused))
+}
+
+/// Download a Google, Bunny or Adobe Fonts link into the asset cache
+/// (docs/p2-licensing-positions.md §5). Like file ingest, it returns a batch
+/// for one `addFonts` edit and never touches the scene. The network fetch runs
+/// under the asset-cache lock only, never under the workspace lock.
+#[tauri::command]
+fn cmd_font_prepare_link(
+    state: tauri::State<'_, ShellState>,
+    target: SceneTarget,
+    link: String,
+) -> Result<PreparedFontBatch, EditorError> {
+    let scene = state
+        .workspace()
+        .document(&target)
+        .map_err(|error| command_error(error, None))?
+        .into_owned();
+    let source = linked_source(&link);
+    let library = SceneFontLibrary {
+        fonts: &scene.fonts,
+        assets: &scene.assets,
+    };
+    state.with_asset_store(|store| {
+        prepare_font_link(store, &UreqFontFetcher::new(), library, &source).map_err(ingest_refused)
+    })
+}
+
+/// What the author typed: an Adobe kit URL or bare kit id becomes an Adobe
+/// Fonts link, anything else a stylesheet URL. `canonical_link_source` then
+/// refuses whatever is not a trusted host or a valid kit id, by name.
+fn linked_source(link: &str) -> LinkedSource {
+    let link = link.trim();
+    if let Some(id) = link
+        .strip_prefix("https://use.typekit.net/")
+        .and_then(|rest| rest.strip_suffix(".css"))
+    {
+        return LinkedSource::AdobeFonts { project_id: id.to_owned() };
+    }
+    if link.contains("://") {
+        LinkedSource::CssUrl { url: link.to_owned(), integrity: None }
+    } else {
+        LinkedSource::AdobeFonts { project_id: link.to_owned() }
+    }
+}
+
+/// The verified bytes of one cached font asset, for the browser's font
+/// registration. The hash is checked as a SHA-256 address before it touches a
+/// path, and the bytes are re-hashed before they leave: a cache entry that no
+/// longer matches its name is refused, never served.
+#[tauri::command]
+fn cmd_font_bytes(
+    state: tauri::State<'_, ShellState>,
+    checksum: ContentHash,
+) -> Result<tauri::ipc::Response, EditorError> {
+    let valid = checksum.0.len() == 64 && checksum.0.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+    if !valid {
+        return Err(refused(Refusal::AssetMissing { hash: checksum }));
+    }
+    let path = state.with_asset_store(|store| Ok(store.cache_path(&checksum)))?;
+    let bytes = std::fs::read(&path).map_err(|_| refused(Refusal::AssetMissing { hash: checksum.clone() }))?;
+    if content_hash(&bytes) != checksum {
+        return Err(refused(Refusal::AssetHashMismatch {
+            expected: checksum,
+            actual: content_hash(&bytes),
+        }));
+    }
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// Build and run the Editor window.
 pub fn run() {
     let workspace = Workspace::new(projects().ok());
@@ -470,6 +627,9 @@ pub fn run() {
             cmd_scene_read,
             cmd_take_page_list,
             cmd_take_page_read,
+            cmd_font_prepare_files,
+            cmd_font_prepare_link,
+            cmd_font_bytes,
         ])
         .run(tauri::generate_context!())
         .expect("the Editor shell failed to start");

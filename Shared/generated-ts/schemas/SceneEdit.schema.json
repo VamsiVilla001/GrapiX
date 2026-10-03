@@ -4,6 +4,28 @@
   "$id": "urn:grapix:schema:SceneEdit",
   "title": "SceneEdit",
   "$defs": {
+    "AddFonts": {
+      "description": "Add prepared fonts and the font assets their faces need (11.13).\nThe only way a font enters a scene.",
+      "properties": {
+        "assets": {
+          "items": {
+            "$ref": "#/$defs/AssetLibraryItem"
+          },
+          "type": "array"
+        },
+        "fonts": {
+          "items": {
+            "$ref": "#/$defs/FontDefinition"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "fonts",
+        "assets"
+      ],
+      "type": "object"
+    },
     "ApplyPreset": {
       "description": "Instantiate one phase of a starter motion preset at `atFrame`.",
       "properties": {
@@ -42,6 +64,98 @@
       "required": [
         "objectId",
         "styleId"
+      ],
+      "type": "object"
+    },
+    "AssetAvailability": {
+      "description": "Whether an asset's bytes are available where they are needed.",
+      "enum": [
+        "ready",
+        "missing",
+        "importing",
+        "unsupported",
+        "error"
+      ],
+      "type": "string"
+    },
+    "AssetKind": {
+      "description": "The kind of thing an asset is. `Font` is here so the asset store and the\nfont subsystem agree on what a font asset is.",
+      "enum": [
+        "image",
+        "video",
+        "svg",
+        "font",
+        "model",
+        "imageSequence",
+        "wgsl",
+        "script",
+        "live",
+        "renderTexture",
+        "json",
+        "lut",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "AssetLibraryItem": {
+      "description": "An asset as the library knows it. Carries **both** addresses: the content\nhash (immutable, addresses the store) and the project-relative path\n(mutable, addresses the library). The hash is what a scene's bindings\nresolve against, so re-importing over the same path — a new render of the\nsame logo — updates the hash but never the binding.",
+      "properties": {
+        "assetId": {
+          "description": "Stable scene-facing id. Survives relink; distinct from any storage id.",
+          "type": "string"
+        },
+        "checksum": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContentHash"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Content hash — the store address. `None` only while importing."
+        },
+        "kind": {
+          "$ref": "#/$defs/AssetKind"
+        },
+        "mimeType": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Display name, separate from the on-disk name (ADR-0002 B.3).",
+          "type": "string"
+        },
+        "path": {
+          "description": "Project-relative path — the library address.",
+          "type": "string"
+        },
+        "sizeBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AssetAvailability"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "assetId",
+        "name",
+        "kind",
+        "path"
       ],
       "type": "object"
     },
@@ -468,6 +582,301 @@
       ],
       "type": "object"
     },
+    "EmbeddingPolicy": {
+      "description": "Whether a font's bytes may travel inside a `.gpxpkg` — the licensing\ndecision made per font (docs/p2-licensing-positions.md §5).",
+      "oneOf": [
+        {
+          "const": "package",
+          "description": "Bytes may be packaged (licence permits redistribution: OFL, Apache…).",
+          "type": "string"
+        },
+        {
+          "const": "reference",
+          "description": "Package carries the reference; the render node resolves and caches.",
+          "type": "string"
+        },
+        {
+          "const": "restricted",
+          "description": "Workstation-only; bytes never leave the operator's machine.",
+          "type": "string"
+        }
+      ]
+    },
+    "FontDefinition": {
+      "description": "A family as the scene knows it: its faces, fallbacks and licensing\nposture. Embedded verbatim in the scene document, so a package is\nself-describing.",
+      "properties": {
+        "displayName": {
+          "type": "string"
+        },
+        "embeddingPolicy": {
+          "$ref": "#/$defs/EmbeddingPolicy"
+        },
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "errorMessage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "faces": {
+          "items": {
+            "$ref": "#/$defs/FontFaceDefinition"
+          },
+          "type": "array"
+        },
+        "fallbackFamilies": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "family": {
+          "type": "string"
+        },
+        "fontId": {
+          "type": "string"
+        },
+        "license": {
+          "description": "The declared licence. A `Package` font without one is a preflight\nrefusal (p2-licensing-positions §5: unstated licence ⇒ restricted).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sourceLabel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/FontLoadStatus"
+        }
+      },
+      "required": [
+        "fontId",
+        "family",
+        "displayName",
+        "faces",
+        "fallbackFamilies",
+        "embeddingPolicy",
+        "status"
+      ],
+      "type": "object"
+    },
+    "FontFaceDefinition": {
+      "description": "One face of a family: weight/style/stretch with a source.",
+      "properties": {
+        "errorMessage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "faceId": {
+          "type": "string"
+        },
+        "family": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/FontSource"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FontLoadStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stretch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "style": {
+          "$ref": "#/$defs/FontStyle"
+        },
+        "unicodeRange": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "weight": {
+          "description": "CSS weight scale, 1–1000.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "faceId",
+        "family",
+        "weight",
+        "style",
+        "source"
+      ],
+      "type": "object"
+    },
+    "FontFormat": {
+      "description": "Font container formats the pipeline accepts. WOFF/WOFF2 are delivery\nwrappers; the shaper sees the same tables either way.",
+      "enum": [
+        "otf",
+        "ttf",
+        "woff",
+        "woff2"
+      ],
+      "type": "string"
+    },
+    "FontLoadStatus": {
+      "description": "Load state of a font or face. `Missing` at preflight is a refusal\n(`Refusal::FontMissing`), never a fallback to a system font.",
+      "oneOf": [
+        {
+          "enum": [
+            "Loading",
+            "Ready",
+            "Missing",
+            "Invalid",
+            "Unsupported",
+            "Error"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "Unverified",
+          "description": "Linked source declared but not yet resolved; cannot preflight.",
+          "type": "string"
+        }
+      ]
+    },
+    "FontSource": {
+      "description": "Where a face's bytes come from.\n\n`rename_all_fields` (not `rename_all`) because the variant *fields* are\nwhat hit the wire: `rename_all` alone would leave `asset_id` snake_case\nwhile every other contract is camelCase.",
+      "oneOf": [
+        {
+          "description": "Packaged asset bytes, content-addressed.",
+          "properties": {
+            "assetId": {
+              "type": "string"
+            },
+            "format": {
+              "$ref": "#/$defs/FontFormat"
+            },
+            "kind": {
+              "const": "file",
+              "type": "string"
+            },
+            "originalUrl": {
+              "description": "Original public URL when this face was resolved and cached from CSS.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "stylesheetUrl": {
+              "description": "Stylesheet that declared this cached face.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "assetId",
+            "format"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A CSS stylesheet declaring `@font-face` rules (Google Fonts class).",
+          "properties": {
+            "integrity": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "cssUrl",
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "url"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "An Adobe Fonts project. Reference-only by licence; never packaged.",
+          "properties": {
+            "kind": {
+              "const": "adobeFonts",
+              "type": "string"
+            },
+            "projectId": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "projectId",
+            "url"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A direct HTTPS font file URL.",
+          "properties": {
+            "format": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FontFormat"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "const": "directUrl",
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "url"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "FontStyle": {
+      "enum": [
+        "normal",
+        "italic",
+        "oblique"
+      ],
+      "type": "string"
+    },
     "GradientCoordinateMode": {
       "description": "Whether a gradient's coordinates are the object's or the scene's. An\nobject-space gradient follows its object; a scene-space one stays put\nwhile the object moves through it.",
       "enum": [
@@ -789,6 +1198,18 @@
       },
       "required": [
         "fieldId"
+      ],
+      "type": "object"
+    },
+    "RemoveFont": {
+      "description": "Remove one font nothing names, with the font assets no other font\nuses. The only way a font leaves a scene.",
+      "properties": {
+        "fontId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fontId"
       ],
       "type": "object"
     },
@@ -1602,6 +2023,32 @@
       "properties": {
         "edit": {
           "const": "setSceneId",
+          "type": "string"
+        }
+      },
+      "required": [
+        "edit"
+      ],
+      "type": "object"
+    },
+    {
+      "$ref": "#/$defs/AddFonts",
+      "properties": {
+        "edit": {
+          "const": "addFonts",
+          "type": "string"
+        }
+      },
+      "required": [
+        "edit"
+      ],
+      "type": "object"
+    },
+    {
+      "$ref": "#/$defs/RemoveFont",
+      "properties": {
+        "edit": {
+          "const": "removeFont",
           "type": "string"
         }
       },

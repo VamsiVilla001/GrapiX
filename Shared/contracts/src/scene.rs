@@ -53,7 +53,7 @@ use crate::{ContentHash, RationalRate, Refusal, Revision};
 
 /// The kind of thing an asset is. `Font` is here so the asset store and the
 /// font subsystem agree on what a font asset is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum AssetKind {
     Image,
@@ -72,7 +72,7 @@ pub enum AssetKind {
 }
 
 /// Whether an asset's bytes are available where they are needed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum AssetAvailability {
     Ready,
@@ -87,7 +87,7 @@ pub enum AssetAvailability {
 /// (mutable, addresses the library). The hash is what a scene's bindings
 /// resolve against, so re-importing over the same path — a new render of the
 /// same logo — updates the hash but never the binding.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetLibraryItem {
     /// Stable scene-facing id. Survives relink; distinct from any storage id.

@@ -25,7 +25,7 @@ use ts_rs::TS;
 
 /// Font container formats the pipeline accepts. WOFF/WOFF2 are delivery
 /// wrappers; the shaper sees the same tables either way.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum FontFormat {
     Otf,
@@ -36,7 +36,7 @@ pub enum FontFormat {
 
 /// Whether a font's bytes may travel inside a `.gpxpkg` — the licensing
 /// decision made per font (docs/p2-licensing-positions.md §5).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum EmbeddingPolicy {
     /// Bytes may be packaged (licence permits redistribution: OFL, Apache…).
@@ -49,7 +49,7 @@ pub enum EmbeddingPolicy {
 
 /// Load state of a font or face. `Missing` at preflight is a refusal
 /// (`Refusal::FontMissing`), never a fallback to a system font.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 pub enum FontLoadStatus {
     Loading,
     Ready,
@@ -66,7 +66,7 @@ pub enum FontLoadStatus {
 /// `rename_all_fields` (not `rename_all`) because the variant *fields* are
 /// what hit the wire: `rename_all` alone would leave `asset_id` snake_case
 /// while every other contract is camelCase.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
@@ -117,7 +117,7 @@ impl FontSource {
 }
 
 /// One face of a family: weight/style/stretch with a source.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FontFaceDefinition {
     pub face_id: String,
@@ -140,7 +140,7 @@ pub struct FontFaceDefinition {
     pub error_message: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum FontStyle {
     Normal,
@@ -151,7 +151,7 @@ pub enum FontStyle {
 /// A family as the scene knows it: its faces, fallbacks and licensing
 /// posture. Embedded verbatim in the scene document, so a package is
 /// self-describing.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FontDefinition {
     pub font_id: String,

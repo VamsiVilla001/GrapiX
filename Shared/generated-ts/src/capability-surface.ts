@@ -268,7 +268,12 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
     "materialRelinkSameMaterial",
     "materialRelinkNoUsers",
     "materialUnknown",
-    "motionPresetUnknown"
+    "motionPresetUnknown",
+    "fontBatchEmpty",
+    "fontDuplicate",
+    "sceneAssetDuplicate",
+    "fontUnknown",
+    "fontInUse"
   ],
   "tools": [
     {

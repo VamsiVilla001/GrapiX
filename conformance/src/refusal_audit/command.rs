@@ -7,9 +7,9 @@
 //! left the document, history and store as they were.
 
 use gx_contracts::command::{
-    parse_command, witness, ApplyPreset, CloseScene, CreateProject, CreateScene, DeleteMaterial,
+    parse_command, witness, AddFonts, ApplyPreset, CloseScene, CreateProject, CreateScene, DeleteMaterial,
     DeleteScene, EditScene, EditorCommand, HistoryDirection, OpenScene, PresetPhase,
-    RelinkMaterial, ReplaceDataContext, SaveScene, SaveTakePage, SaveTarget, SceneEdit,
+    RelinkMaterial, RemoveFont, ReplaceDataContext, SaveScene, SaveTakePage, SaveTarget, SceneEdit,
     SceneSource, SceneTarget, SessionKey, SetBinding, SetObjectField, SetObjectLocked,
     SetObjectVisible, SetSceneId, SetSceneName, Undo,
 };
@@ -517,6 +517,68 @@ fn drive_material_and_scene_refusals(report: &mut Report, workspace: &mut Worksp
         expect(
             matches!(&refusal, Some(Refusal::MotionPresetUnknown { preset }) if preset == "no-such-preset") && unchanged,
             format!("expected no-such-preset unknown, got {refusal:?} (unchanged: {unchanged})"),
+        ),
+    );
+
+    // Fonts enter and leave only through these two edits (11.13); the witness
+    // fixture's text object names font "font".
+    let fixture_font = witness::fixture_scene().fonts[0].clone();
+    let fixture_asset = witness::fixture_scene().assets[0].clone();
+    let add = |fonts: Vec<gx_contracts::font::FontDefinition>, assets| {
+        SceneEdit::AddFonts(AddFonts { fonts, assets })
+    };
+    let remove = |font: &str| SceneEdit::RemoveFont(RemoveFont { font_id: font.into() });
+
+    let (refusal, unchanged) = edit(workspace, session, remove("font"));
+    report.record(
+        PLANE,
+        "FontInUse is produced for removing a font a text object still names",
+        expect(
+            matches!(&refusal, Some(Refusal::FontInUse { font_id, objects, .. }) if font_id == "font" && objects == &["text".to_owned()])
+                && unchanged,
+            format!("expected font in use by text, got {refusal:?} (unchanged: {unchanged})"),
+        ),
+    );
+
+    let (refusal, unchanged) = edit(workspace, session, remove("no-such-font"));
+    report.record(
+        PLANE,
+        "FontUnknown is produced for removing a font the scene lacks",
+        expect(
+            matches!(&refusal, Some(Refusal::FontUnknown { font_id }) if font_id == "no-such-font") && unchanged,
+            format!("expected no-such-font unknown, got {refusal:?} (unchanged: {unchanged})"),
+        ),
+    );
+
+    let (refusal, unchanged) = edit(workspace, session, add(Vec::new(), Vec::new()));
+    report.record(
+        PLANE,
+        "FontBatchEmpty is produced for adding no fonts",
+        expect(
+            matches!(&refusal, Some(Refusal::FontBatchEmpty)) && unchanged,
+            format!("expected an empty font add to refuse, got {refusal:?} (unchanged: {unchanged})"),
+        ),
+    );
+
+    let (refusal, unchanged) = edit(workspace, session, add(vec![fixture_font.clone()], Vec::new()));
+    report.record(
+        PLANE,
+        "FontDuplicate is produced for adding a font id the scene already has",
+        expect(
+            matches!(&refusal, Some(Refusal::FontDuplicate { font_id }) if font_id == "font") && unchanged,
+            format!("expected font duplicate, got {refusal:?} (unchanged: {unchanged})"),
+        ),
+    );
+
+    let mut fresh_font = fixture_font;
+    fresh_font.font_id = "fresh-font".into();
+    let (refusal, unchanged) = edit(workspace, session, add(vec![fresh_font], vec![fixture_asset]));
+    report.record(
+        PLANE,
+        "SceneAssetDuplicate is produced for adding an asset id the library already has",
+        expect(
+            matches!(&refusal, Some(Refusal::SceneAssetDuplicate { asset_id }) if asset_id == "asset1") && unchanged,
+            format!("expected asset1 duplicate, got {refusal:?} (unchanged: {unchanged})"),
         ),
     );
 

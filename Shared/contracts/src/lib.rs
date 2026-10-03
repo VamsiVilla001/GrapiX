@@ -10,6 +10,7 @@ pub mod command;
 pub mod object_edit;
 pub mod bindings;
 pub mod material_edit;
+pub mod font_edit;
 pub mod authoring;
 pub mod control;
 pub mod auth;
@@ -722,6 +723,24 @@ pub enum Refusal {
     MaterialUnknown { material: String },
     /// A preset id names no starter motion preset.
     MotionPresetUnknown { preset: String },
+    /// An `addFonts` edit carries no fonts. An empty add would only make an
+    /// undo entry that changes nothing.
+    FontBatchEmpty,
+    /// A font id is already in the scene, or appears twice in one add.
+    FontDuplicate { font_id: String },
+    /// An asset id is already in the scene's library, or appears twice in
+    /// one add.
+    SceneAssetDuplicate { asset_id: String },
+    /// A removal names a font the scene does not carry.
+    FontUnknown { font_id: String },
+    /// A font cannot be removed while text objects or text styles name it.
+    /// Removing it would put that text on air in a fallback face
+    /// (invariant 18).
+    FontInUse {
+        font_id: String,
+        objects: Vec<String>,
+        text_styles: Vec<String>,
+    },
 }
 
 impl std::fmt::Display for Refusal {
@@ -1185,6 +1204,26 @@ impl std::fmt::Display for Refusal {
                 write!(f, "project {project} already exists")
             }
             Refusal::MotionPresetUnknown { preset } => write!(f, "unknown motion preset {preset}"),
+            Refusal::FontBatchEmpty => f.write_str("font add carries no fonts"),
+            Refusal::FontDuplicate { font_id } => write!(f, "font {font_id} is already in the scene"),
+            Refusal::SceneAssetDuplicate { asset_id } => {
+                write!(f, "asset {asset_id} is already in the scene's library")
+            }
+            Refusal::FontUnknown { font_id } => write!(f, "unknown font {font_id}"),
+            Refusal::FontInUse {
+                font_id,
+                objects,
+                text_styles,
+            } => {
+                let mut users = Vec::new();
+                if !objects.is_empty() {
+                    users.push(format!("text object(s) {}", objects.join(", ")));
+                }
+                if !text_styles.is_empty() {
+                    users.push(format!("text style(s) {}", text_styles.join(", ")));
+                }
+                write!(f, "font {font_id} is still used by {}", users.join("; "))
+            }
         }
     }
 }
@@ -1605,6 +1644,11 @@ impl Refusal {
             Self::MaterialRelinkNoUsers { material: "audit".into() },
             Self::MaterialUnknown { material: "audit".into() },
             Self::MotionPresetUnknown { preset: "audit".into() },
+            Self::FontBatchEmpty,
+            Self::FontDuplicate { font_id: "audit".into() },
+            Self::SceneAssetDuplicate { asset_id: "audit".into() },
+            Self::FontUnknown { font_id: "audit".into() },
+            Self::FontInUse { font_id: "audit".into(), objects: vec![], text_styles: vec![] },
         ]
     }
     pub const fn code_name(&self) -> &'static str {
@@ -1742,6 +1786,11 @@ impl Refusal {
             Self::MaterialRelinkNoUsers { .. } => "materialRelinkNoUsers",
             Self::MaterialUnknown { .. } => "materialUnknown",
             Self::MotionPresetUnknown { .. } => "motionPresetUnknown",
+            Self::FontBatchEmpty => "fontBatchEmpty",
+            Self::FontDuplicate { .. } => "fontDuplicate",
+            Self::SceneAssetDuplicate { .. } => "sceneAssetDuplicate",
+            Self::FontUnknown { .. } => "fontUnknown",
+            Self::FontInUse { .. } => "fontInUse",
         }
     }
 }

@@ -324,7 +324,11 @@ fn load_definition(
         let bytes = asset_bytes.get(hash).ok_or_else(|| Refusal::AssetMissing {
             hash: hash.clone(),
         })?;
-        let ids = database.load_font_source(fontdb::Source::Binary(Arc::new(bytes.clone())));
+        // WOFF/WOFF2 are delivery wrappers; fontdb reads only sfnt. The
+        // container module is the one decoder the ingest path also verified
+        // with, so a font that ingested is a font that loads here.
+        let sfnt = gx_asset_plane::fonts::container::sfnt_bytes(bytes)?;
+        let ids = database.load_font_source(fontdb::Source::Binary(Arc::new(sfnt.into_owned())));
         if ids.is_empty() {
             return Err(Refusal::InvalidFontData {
                 detail: format!("font {} contains no readable face", face.face_id),
@@ -523,5 +527,22 @@ mod tests {
         assert!(text.glyphs.iter().any(|glyph| glyph.source_end - glyph.source_start > 1), "OpenType ligature was not formed");
         assert!(text.glyphs.iter().any(|glyph| glyph.bidi_level % 2 == 1), "RTL run was not resolved");
         assert!(text.glyphs.iter().any(|glyph| glyph.face_id == "hebrew-regular"), "declared Hebrew fallback was not used");
+    }
+
+    #[test]
+    fn a_woff2_asset_shapes_exactly_like_its_sfnt_original() {
+        const TTF: &[u8] = include_bytes!("../../../../Shared/asset-plane/tests/fixtures/fonts/inter-latin.ttf");
+        const WOFF2: &[u8] = include_bytes!("../../../../Shared/asset-plane/tests/fixtures/fonts/inter-latin.woff2");
+        let shaped = |bytes: &[u8]| {
+            let document = scene("Office 2026", "inter", vec![font("inter", "Inter", "inter", Vec::new())]);
+            let assets = AssetBytes::from([(ContentHash("inter".into()), bytes.to_vec())]);
+            prepare_texts(&document, &assets).expect("the font shapes")
+        };
+        let (from_ttf, from_woff2) = (shaped(TTF), shaped(WOFF2));
+        let glyphs = |prepared: &PreparedTexts| {
+            prepared.objects[0].glyphs.iter().map(|g| (g.glyph_id, g.x.to_bits())).collect::<Vec<_>>()
+        };
+        assert!(!from_ttf.objects[0].glyphs.is_empty());
+        assert_eq!(glyphs(&from_ttf), glyphs(&from_woff2));
     }
 }

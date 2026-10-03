@@ -1,76 +1,84 @@
 //! Editor/browser stylesheet generation (1.x `buildFontCss`,
 //! `buildFontFamilyStack`, `cssFontFamily` in shared-types).
 //!
-//! File fonts become `@font-face` rules; CSS/Adobe sources stay explicit
-//! `@import`s so their licensing and network dependency cannot be mistaken
-//! for packaged bytes — 1.x's comment on the function, carried forward
-//! because it is the reason the two are emitted differently.
+//! Every font a template uses is a project file: file faces — including the
+//! faces a font link downloaded (`link`), which keep their `original_url` only
+//! as provenance — become `@font-face` rules whose `src` is the project-local
+//! asset URL. A face that still points at the network (a CSS, Adobe or direct
+//! URL source from a scene authored before links were downloaded) emits
+//! nothing and is reported by font id: an `@import` of a remote stylesheet
+//! would make the template's typeface depend on a CDN at render time, and a
+//! silently missing rule would render a substitute.
 
-use gx_contracts::font::{is_trusted_font_css_url, FontDefinition, FontFormat, FontSource};
+use gx_contracts::font::{FontDefinition, FontFormat, FontSource};
+
+/// A generated stylesheet and the fonts it could not include.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FontStylesheet {
+    pub css: String,
+    /// Enabled fonts with a face whose bytes are not in the project, in scene
+    /// order. Each is a take blocker until its link is ingested again.
+    pub unresolved_font_ids: Vec<String>,
+}
 
 /// Build the stylesheet for a scene's fonts. `resolve_asset_url` maps a
-/// packaged asset id to a fetchable URL — the caller owns URL routing.
+/// project asset id to a fetchable URL — the caller owns URL routing.
 pub fn build_font_css(
     fonts: &[FontDefinition],
     resolve_asset_url: impl Fn(&str) -> String,
-) -> String {
-    let mut imports: Vec<String> = Vec::new();
+) -> FontStylesheet {
     let mut rules: Vec<String> = Vec::new();
+    let mut unresolved_font_ids: Vec<String> = Vec::new();
 
     for font in fonts.iter().filter(|f| f.enabled) {
         for face in &font.faces {
             match &face.source {
-                FontSource::CssUrl { url, .. } | FontSource::AdobeFonts { url, .. } => {
-                    if is_trusted_font_css_url(url) && !imports.contains(url) {
-                        imports.push(format!("@import url(\"{}\");", escape_css_string(url)));
-                    }
-                }
                 FontSource::File {
                     asset_id, format, ..
                 } => {
                     rules.push(font_face_rule(
                         &font.family,
                         &resolve_asset_url(asset_id),
-                        Some(*format),
+                        *format,
                         face,
                     ));
                 }
-                FontSource::DirectUrl { url, format } => {
-                    rules.push(font_face_rule(&font.family, url, *format, face));
+                FontSource::CssUrl { .. }
+                | FontSource::AdobeFonts { .. }
+                | FontSource::DirectUrl { .. } => {
+                    if !unresolved_font_ids.contains(&font.font_id) {
+                        unresolved_font_ids.push(font.font_id.clone());
+                    }
                 }
             }
         }
     }
 
-    imports.sort();
-    let mut parts = imports;
-    parts.extend(rules);
-    parts.join("\n\n")
+    FontStylesheet {
+        css: rules.join("\n\n"),
+        unresolved_font_ids,
+    }
 }
 
 fn font_face_rule(
     family: &str,
     url: &str,
-    format: Option<FontFormat>,
+    format: FontFormat,
     face: &gx_contracts::font::FontFaceDefinition,
 ) -> String {
     let format_hint = match format {
-        Some(FontFormat::Ttf) => Some("truetype"),
-        Some(FontFormat::Otf) => Some("opentype"),
-        Some(FontFormat::Woff) => Some("woff"),
-        Some(FontFormat::Woff2) => Some("woff2"),
-        None => None,
+        FontFormat::Ttf => "truetype",
+        FontFormat::Otf => "opentype",
+        FontFormat::Woff => "woff",
+        FontFormat::Woff2 => "woff2",
     };
     let mut lines = vec![
         "@font-face {".to_string(),
         format!("  font-family: \"{}\";", escape_css_string(family)),
-        match format_hint {
-            Some(hint) => format!(
-                "  src: url(\"{}\") format(\"{hint}\");",
-                escape_css_string(url)
-            ),
-            None => format!("  src: url(\"{}\");", escape_css_string(url)),
-        },
+        format!(
+            "  src: url(\"{}\") format(\"{format_hint}\");",
+            escape_css_string(url)
+        ),
         format!("  font-weight: {};", face.weight),
         format!(
             "  font-style: {};",
@@ -87,7 +95,10 @@ fn font_face_rule(
     if let Some(range) = &face.unicode_range {
         lines.push(format!("  unicode-range: {range};"));
     }
-    lines.push("  font-display: swap;".to_string());
+    // `block`, not `swap`: a template must not paint a substitute face while
+    // its own bytes load — that frame would be the silent substitution
+    // invariant 18 forbids.
+    lines.push("  font-display: block;".to_string());
     lines.push("}".to_string());
     lines.join("\n")
 }
@@ -191,38 +202,61 @@ mod tests {
 
     #[test]
     fn file_fonts_become_font_face_rules() {
-        let css = build_font_css(&[file_font()], |id| format!("/api/assets/{id}/content"));
+        let sheet = build_font_css(&[file_font()], |id| format!("/api/assets/{id}/content"));
+        let css = &sheet.css;
         assert!(css.contains("@font-face"));
         assert!(css.contains("font-family: \"Inter\";"));
         assert!(css.contains("src: url(\"/api/assets/asset_1/content\") format(\"woff2\");"));
-        assert!(css.contains("font-display: swap;"));
+        assert!(css.contains("font-display: block;"));
         assert!(!css.contains("@import"));
+        assert!(sheet.unresolved_font_ids.is_empty());
     }
 
     #[test]
-    fn linked_fonts_stay_imports_and_untrusted_ones_are_dropped() {
+    fn downloaded_link_faces_load_project_bytes_never_the_cdn() {
         let mut font = file_font();
-        font.faces[0].source = FontSource::CssUrl {
+        font.faces[0].unicode_range = Some("U+0000-00FF".into());
+        font.faces[0].source = FontSource::File {
+            asset_id: "asset_font_0123".into(),
+            format: FontFormat::Woff2,
+            original_url: Some("https://fonts.gstatic.com/s/inter/v13/regular.woff2".into()),
+            stylesheet_url: Some("https://fonts.googleapis.com/css2?family=Inter".into()),
+        };
+        let sheet = build_font_css(&[font], |id| format!("asset://{id}"));
+        assert!(sheet.css.contains("src: url(\"asset://asset_font_0123\") format(\"woff2\");"));
+        assert!(sheet.css.contains("unicode-range: U+0000-00FF;"));
+        assert!(!sheet.css.contains("gstatic"));
+        assert!(!sheet.css.contains("googleapis"));
+    }
+
+    #[test]
+    fn remote_sources_emit_nothing_and_are_named_unresolved() {
+        let mut google = file_font();
+        google.font_id = "font_google".into();
+        google.faces[0].source = FontSource::CssUrl {
             url: "https://fonts.googleapis.com/css2?family=Inter".into(),
             integrity: None,
         };
-        let css = build_font_css(&[font], |_| unreachable!());
-        assert!(css.starts_with("@import url(\"https://fonts.googleapis.com/css2?family=Inter\");"));
-
-        let mut evil = file_font();
-        evil.faces[0].source = FontSource::CssUrl {
-            url: "https://evil.example.com/x.css".into(),
-            integrity: None,
+        let mut adobe = file_font();
+        adobe.font_id = "font_adobe".into();
+        adobe.faces[0].source = FontSource::AdobeFonts {
+            project_id: "abc123".into(),
+            url: "https://use.typekit.net/abc123.css".into(),
         };
-        // Untrusted import contributes nothing at all.
-        assert!(build_font_css(&[evil], |_| unreachable!()).is_empty());
+        let sheet = build_font_css(&[google, adobe, file_font()], |id| format!("/a/{id}"));
+        assert!(!sheet.css.contains("@import"));
+        assert!(!sheet.css.contains("typekit"));
+        assert_eq!(sheet.unresolved_font_ids, ["font_google", "font_adobe"]);
     }
 
     #[test]
     fn disabled_fonts_emit_nothing() {
         let mut font = file_font();
         font.enabled = false;
-        assert!(build_font_css(&[font], |_| unreachable!()).is_empty());
+        assert_eq!(
+            build_font_css(&[font], |_| unreachable!()),
+            FontStylesheet::default()
+        );
     }
 
     #[test]

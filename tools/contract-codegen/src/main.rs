@@ -9,6 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
+use gx_asset_plane::fonts::ingest::{FontDisposition, PreparedFontBatch, PreparedFontSource};
 use gx_asset_plane::{AssetRef, PreflightRequest, PreflightResponse, TransferState};
 use gx_contracts::animation::{
     ease_at, easing_control_points, AnimationSurface, CubicBezier, KeyframeChannel, SceneEasing,
@@ -310,6 +311,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         PreflightRequest,
         PreflightResponse,
         TransferState,
+        // gx-asset-plane: font ingest (11.13)
+        PreparedFontBatch,
+        PreparedFontSource,
+        FontDisposition,
         // gx-media-plane
         ConsumerRole,
         MediaProfile,

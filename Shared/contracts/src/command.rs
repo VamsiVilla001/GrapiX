@@ -19,9 +19,10 @@ use crate::control::{self, ControlField, TakePage};
 use crate::design_system::{self, DesignSystem, DesignSystemCommit};
 use crate::object_edit::{self, ObjectField};
 use crate::phases::{self, TimelinePhase};
-use crate::scene::{DataContext, SceneDocument};
+use crate::font::FontDefinition;
+use crate::scene::{AssetLibraryItem, DataContext, SceneDocument};
 use crate::text_style::{self, TextStyle};
-use crate::{material_edit, ContentHash, Refusal};
+use crate::{font_edit, material_edit, ContentHash, Refusal};
 
 /// Declares one wire enum together with its named payload structs.
 ///
@@ -264,6 +265,15 @@ commands! {
         SetSceneName = "setSceneName" { pub name: String },
         /// Change the id of a scene that is not bound to a stored origin.
         SetSceneId = "setSceneId" { pub id: String },
+        /// Add prepared fonts and the font assets their faces need (11.13).
+        /// The only way a font enters a scene.
+        AddFonts = "addFonts" {
+            pub fonts: Vec<FontDefinition>,
+            pub assets: Vec<AssetLibraryItem>,
+        },
+        /// Remove one font nothing names, with the font assets no other font
+        /// uses. The only way a font leaves a scene.
+        RemoveFont = "removeFont" { pub font_id: String },
     }
 }
 
@@ -298,6 +308,7 @@ pub enum EditEffect {
     Stored { origin: SceneOrigin },
     ProjectCreated { project: String },
     TakePageSaved { project: String, page_id: String },
+    FontRemoved { font_id: String, asset_ids: Vec<String> },
     DesignSystemConfirmed { project: String, version: u32 },
 }
 
@@ -510,6 +521,14 @@ fn apply_edit(
             scene.id = p.id.clone();
             EditEffect::None
         }
+        SceneEdit::AddFonts(p) => {
+            font_edit::add_fonts(scene, &p.fonts, &p.assets)?;
+            EditEffect::None
+        }
+        SceneEdit::RemoveFont(p) => EditEffect::FontRemoved {
+            asset_ids: font_edit::remove_font(scene, &p.font_id)?,
+            font_id: p.font_id.clone(),
+        },
     })
 }
 
@@ -609,6 +628,8 @@ pub mod witness {
             SceneEdit::RelinkAsset(_) => 24,
             SceneEdit::SetSceneName(_) => 25,
             SceneEdit::SetSceneId(_) => 26,
+            SceneEdit::AddFonts(_) => 27,
+            SceneEdit::RemoveFont(_) => 28,
         }
     }
 
@@ -940,6 +961,49 @@ pub mod witness {
             SceneEdit::SetObjectLocked(SetObjectLocked {
                 object_id: "rect-1".into(),
                 locked: true,
+            }),
+            SceneEdit::AddFonts(AddFonts {
+                fonts: vec![FontDefinition {
+                    font_id: "added-font".into(),
+                    family: "Added".into(),
+                    display_name: "Added".into(),
+                    faces: vec![crate::font::FontFaceDefinition {
+                        face_id: "added-face".into(),
+                        family: "Added".into(),
+                        weight: 400,
+                        style: crate::font::FontStyle::Normal,
+                        stretch: None,
+                        unicode_range: None,
+                        source: crate::font::FontSource::File {
+                            asset_id: "added-font-asset".into(),
+                            format: crate::font::FontFormat::Woff2,
+                            original_url: None,
+                            stylesheet_url: None,
+                        },
+                        status: None,
+                        error_message: None,
+                    }],
+                    fallback_families: Vec::new(),
+                    embedding_policy: EmbeddingPolicy::Package,
+                    license: Some("OFL".into()),
+                    enabled: true,
+                    source_label: None,
+                    status: FontLoadStatus::Ready,
+                    error_message: None,
+                }],
+                assets: vec![AssetLibraryItem {
+                    asset_id: "added-font-asset".into(),
+                    name: "Added".into(),
+                    kind: AssetKind::Font,
+                    path: "assets/fonts/added.woff2".into(),
+                    checksum: Some(ContentHash("added".into())),
+                    mime_type: Some("font/woff2".into()),
+                    size_bytes: Some(1),
+                    status: None,
+                }],
+            }),
+            SceneEdit::RemoveFont(RemoveFont {
+                font_id: "added-font".into(),
             }),
         ]
     }

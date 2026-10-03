@@ -72,6 +72,7 @@ function scene(
     assets: [],
     fonts,
     materials,
+    textStyles: [],
     objects,
   } as unknown as SceneDocument;
 }

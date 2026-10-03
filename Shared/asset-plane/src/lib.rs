@@ -5,6 +5,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod fonts;
 pub mod package;
 pub mod preflight;
 pub mod publish;

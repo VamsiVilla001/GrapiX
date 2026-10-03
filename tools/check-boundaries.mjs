@@ -37,9 +37,14 @@ const SHELL_READ = [
   "cmd_object_kinds", "cmd_animation_surface", "cmd_control_properties",
   "cmd_starter_presets", "cmd_default_endpoint", "cmd_project_list",
   "cmd_scene_list", "cmd_scene_read", "cmd_take_page_list", "cmd_take_page_read",
+  "cmd_font_bytes",
 ];
-const SHELL_SURFACE = new Set([...SHELL_MUTATE, ...SHELL_READ]);
-const READ_SURFACE = new Set(SHELL_READ);
+/** Font ingest (11.13): writes only the content-addressed asset cache and
+ *  returns a batch that reaches a scene as one `addFonts` edit. Held to the
+ *  read rule: no authoring document or command parameter. */
+const SHELL_PREPARE = ["cmd_font_prepare_files", "cmd_font_prepare_link"];
+const SHELL_SURFACE = new Set([...SHELL_MUTATE, ...SHELL_READ, ...SHELL_PREPARE]);
+const READ_SURFACE = new Set([...SHELL_READ, ...SHELL_PREPARE]);
 
 const DOCUMENT_TYPES = /\b(?:SceneDocument|TakePage|TextStyle|ControlField|SceneKeyframe|TimelinePhase|DataContext|EditorCommand|SceneEdit)\b/;
 const STORE_WRITES = /\.(?:write_scene|delete_scene|create_project|write_take_page|confirm)\s*\(|\breplace_asset_bytes\s*\(|\bgx_fs::write_atomic\s*\(|\bfs::write\s*\(/;
