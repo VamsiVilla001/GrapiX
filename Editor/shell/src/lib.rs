@@ -228,6 +228,8 @@ pub fn execute(workspace: &mut Workspace, command: EditorCommand) -> Result<Comm
 pub struct PublishResult {
     pub take_id: TakeId,
     pub revision: Revision,
+    /// The content hash every cue and take of this revision must pin.
+    pub content_hash: ContentHash,
 }
 
 /// Publish one complete document and report the revision it became.
@@ -241,7 +243,15 @@ pub fn publish(endpoint: &str, scene: SceneDocument) -> Result<PublishResult, Ed
         endpoint: endpoint.to_owned(),
     })?;
     match publish_scene(address, scene) {
-        Ok(PublishReply::Published { take_id, revision }) => Ok(PublishResult { take_id, revision }),
+        Ok(PublishReply::Published {
+            take_id,
+            revision,
+            content_hash,
+        }) => Ok(PublishResult {
+            take_id,
+            revision,
+            content_hash,
+        }),
         Ok(PublishReply::Refused(PublishRefusal::InvalidPublishRequest { detail })) => {
             Err(EditorError::PublishRefused { detail })
         }

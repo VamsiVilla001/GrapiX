@@ -63,8 +63,9 @@ use gx_contracts::command::{
 };
 use gx_contracts::object_edit::ObjectField;
 use gx_contracts::{
-    ClockSource, ContentHash, DeviceTier, Epoch, Locality, MediaCodec, RationalRate,
-    ReferenceState, Refusal, RefusalSeverity, Revision, StructuredRefusal, TakeId,
+    ClockSource, ContentHash, DeviceTier, Epoch, Locality, MediaCodec, PublishedRevision,
+    RationalRate, ReferenceState, Refusal, RefusalSeverity, ReviewRequest, ReviewState, Revision,
+    StructuredRefusal, TakeId,
 };
 use gx_control_plane::message::{ClientRequest, EngineEvent, EngineReply, OutputConfig};
 use gx_control_plane::sequence::{MessageId, MessageKind, Sequence};
@@ -109,6 +110,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         TakeId,
         ContentHash,
         Revision,
+        // published revisions and review (11.38)
+        ReviewState,
+        ReviewRequest,
+        PublishedRevision,
         RationalRate,
         Locality,
         DeviceTier,

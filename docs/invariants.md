@@ -196,7 +196,9 @@ already obeys it.
 61. **Playout loads scene revisions only by pinned content hash.** This
     refines invariant 30: a version number identifies a publish, and the hash
     proves its content. An unknown or unpinned hash is refused by name.
-    Planned — enforced by 11.38.
+    Enforced by 11.38 (3 October 2026): cue and take carry the pin, one
+    shared check refuses `revisionUnpinned` and `revisionHashMismatch`, and
+    conformance runs it against the mocks, the real engine and Playout.
 62. **Scene scripts have no wall-clock or network access.** Time comes only
     from the engine frame number and rational rate, and data only through
     bindings. A script that reads the wall clock makes the same frame render

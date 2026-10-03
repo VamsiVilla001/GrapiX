@@ -11,7 +11,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 
-use gx_contracts::{Refusal, Revision, TakeId};
+use gx_contracts::scene::scene_content_hash;
+use gx_contracts::{ContentHash, Refusal, ReviewState, Revision, TakeId};
 use gx_control_plane::capability::live_allowed;
 use gx_control_plane::intent::{ClearRequest, CueRequest, TakeAt, TakeCommitted, TakeRequest};
 use gx_control_plane::message::{ClientRequest, EngineReply, OutputConfig};
@@ -37,6 +38,15 @@ pub struct PublishedScene {
     /// system" — hence an `Option` rather than a zero.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub design_system_version: Option<u32>,
+    /// The content hash every cue and take of this revision pins (11.38,
+    /// invariant 61), computed when the library receives it. Absent only in
+    /// a rundown persisted before pinning existed; such an entry is refused
+    /// `RevisionUnpinned` rather than sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<ContentHash>,
+    /// Review state, set only by a human operator (11.38, invariant 65).
+    #[serde(default)]
+    pub review: ReviewState,
 }
 
 /// Immutable revisions grouped by their stable take identity.
@@ -69,8 +79,10 @@ impl PublishedLibrary {
         let published = PublishedScene {
             take_id: take_id.clone(),
             revision,
+            content_hash: Some(scene_content_hash(&document)),
             document,
             design_system_version,
+            review: ReviewState::Draft,
         };
         self.latest.insert(take_id.clone(), revision);
         self.revisions
@@ -105,6 +117,19 @@ impl PublishedLibrary {
     /// Return exactly the version a caller pinned.
     pub fn revision(&self, take_id: &TakeId, revision: Revision) -> Option<&PublishedScene> {
         self.revisions.get(&(take_id.clone(), revision))
+    }
+
+    /// Move a revision through review. The revision's content stays
+    /// immutable; only its review state changes. This is an operator action:
+    /// it is reachable from the Playout operator surface and from no agent
+    /// tool (invariant 65).
+    pub fn set_review(&mut self, take_id: &TakeId, revision: Revision, review: ReviewState) -> Result<&PublishedScene, Refusal> {
+        let scene = self
+            .revisions
+            .get_mut(&(take_id.clone(), revision))
+            .ok_or_else(|| Refusal::UnknownTake { take_id: take_id.clone() })?;
+        scene.review = review;
+        Ok(scene)
     }
 
     /// Every published identity with the revisions it holds, in take order.
@@ -158,9 +183,11 @@ where
 
     /// Cue a pinned revision using engine-time intent.
     pub fn cue(&mut self, scene: &PublishedScene, at: TakeAt) -> Result<TakeCommitted, Refusal> {
+        let content_hash = Some(pinned(scene)?);
         let reply = self.peer.handle(ClientRequest::Cue(CueRequest {
             take_id: scene.take_id.clone(),
             revision: scene.revision,
+            content_hash,
             at,
         }));
         committed_reply(reply, "cue", |reply| match reply {
@@ -171,9 +198,11 @@ where
 
     /// Take a pinned revision using engine-time intent.
     pub fn take(&mut self, scene: &PublishedScene, at: TakeAt) -> Result<TakeCommitted, Refusal> {
+        let content_hash = Some(pinned(scene)?);
         let reply = self.peer.handle(ClientRequest::Take(TakeRequest {
             take_id: scene.take_id.clone(),
             revision: scene.revision,
+            content_hash,
             at,
         }));
         committed_reply(reply, "take", |reply| match reply {
@@ -216,6 +245,15 @@ where
             reply => Err(unexpected_reply("configure output", reply)),
         }
     }
+}
+
+/// The hash a revision pins, or the refusal for a revision that has none.
+/// Playout never sends an unpinned cue or take (invariant 61).
+fn pinned(scene: &PublishedScene) -> Result<ContentHash, Refusal> {
+    scene.content_hash.clone().ok_or_else(|| Refusal::RevisionUnpinned {
+        take_id: scene.take_id.clone(),
+        revision: scene.revision,
+    })
 }
 
 fn committed_reply<F>(reply: EngineReply, operation: &str, committed: F) -> Result<TakeCommitted, Refusal>
@@ -435,11 +473,12 @@ mod tests {
     use gx_control_plane::capability::EngineCapability;
     use gx_control_plane::message::EngineEvent;
     use gx_control_plane::status::{EngineStatus, ProgramState};
+    use gx_control_plane::intent::{check_reference, HeldRevision};
 
     #[derive(Debug)]
     struct TestPeer {
         capability: EngineCapability,
-        published: BTreeMap<TakeId, Revision>,
+        published: BTreeMap<TakeId, HeldRevision>,
         program: Option<ProgramState>,
         requests: Vec<ClientRequest>,
     }
@@ -465,7 +504,13 @@ mod tests {
         }
 
         fn publish(&mut self, scene: &PublishedScene) {
-            self.published.insert(scene.take_id.clone(), scene.revision);
+            self.published.insert(
+                scene.take_id.clone(),
+                HeldRevision {
+                    revision: scene.revision,
+                    content_hash: scene.content_hash.clone().expect("a library revision carries its hash"),
+                },
+            );
         }
 
         fn committed() -> TakeCommitted {
@@ -476,17 +521,9 @@ mod tests {
             }
         }
 
-        fn check(&self, take_id: &TakeId, revision: Revision) -> Result<(), Refusal> {
-            match self.published.get(take_id) {
-                Some(expected) if *expected == revision => Ok(()),
-                Some(expected) => Err(Refusal::RevisionMismatch {
-                    expected: *expected,
-                    actual: revision,
-                }),
-                None => Err(Refusal::UnknownTake {
-                    take_id: take_id.clone(),
-                }),
-            }
+        /// The shared rule, as every real peer applies it.
+        fn check(&self, take_id: &TakeId, revision: Revision, pin: Option<&ContentHash>) -> Result<(), Refusal> {
+            check_reference(take_id, revision, pin, self.published.get(take_id))
         }
     }
 
@@ -509,11 +546,11 @@ mod tests {
                     program: self.program.clone(),
                     degradations: Vec::new(),
                 }),
-                ClientRequest::Cue(request) => match self.check(&request.take_id, request.revision) {
+                ClientRequest::Cue(request) => match self.check(&request.take_id, request.revision, request.content_hash.as_ref()) {
                     Ok(()) => EngineReply::Cued(Self::committed()),
                     Err(refusal) => EngineReply::Refused(refusal),
                 },
-                ClientRequest::Take(request) => match self.check(&request.take_id, request.revision) {
+                ClientRequest::Take(request) => match self.check(&request.take_id, request.revision, request.content_hash.as_ref()) {
                     Ok(()) => {
                         let committed = Self::committed();
                         self.program = Some(ProgramState {
@@ -549,12 +586,57 @@ mod tests {
     }
 
     fn scene(id: &str, revision: u64) -> PublishedScene {
+        let document = serde_json::json!({"id": id, "revision": revision});
         PublishedScene {
             design_system_version: None,
             take_id: TakeId(id.into()),
             revision: Revision(revision),
-            document: serde_json::json!({"id": id, "revision": revision}),
+            content_hash: Some(scene_content_hash(&document)),
+            document,
+            review: ReviewState::Draft,
         }
+    }
+
+    #[test]
+    fn the_library_hashes_content_not_the_revision_it_assigns() {
+        let mut library = PublishedLibrary::default();
+        let document = serde_json::json!({"id": "lt", "name": "Lower third"});
+        let first = library.publish("lt", document.clone(), None);
+        let second = library.publish("lt", document, None);
+        let changed = library.publish("lt", serde_json::json!({"id": "lt", "name": "Lower third 2"}), None);
+        assert_eq!((first.revision, second.revision), (Revision(1), Revision(2)));
+        assert_eq!(first.content_hash, second.content_hash);
+        assert_ne!(first.content_hash, changed.content_hash);
+        assert_eq!(first.review, ReviewState::Draft);
+    }
+
+    #[test]
+    fn an_unpinned_rundown_entry_is_refused_before_anything_is_sent() {
+        let mut unpinned = scene("scene/old", 1);
+        unpinned.content_hash = None;
+        let mut playout = Playout::new(TestPeer::new(DeviceTier::T0));
+        playout.peer_mut().publish(&scene("scene/old", 1));
+        assert!(matches!(
+            playout.take(&unpinned, TakeAt::NextOpportunity),
+            Err(Refusal::RevisionUnpinned { revision: Revision(1), .. })
+        ));
+        assert!(playout.peer().requests.is_empty(), "nothing unpinned reaches the engine");
+    }
+
+    #[test]
+    fn review_moves_without_touching_the_revision_content() {
+        let mut library = PublishedLibrary::default();
+        let published = library.publish("lt", serde_json::json!({"id": "lt"}), None);
+        let reviewed = library
+            .set_review(&published.take_id, published.revision, ReviewState::Approved)
+            .unwrap()
+            .clone();
+        assert_eq!(reviewed.review, ReviewState::Approved);
+        assert_eq!((reviewed.document, reviewed.content_hash), (published.document, published.content_hash));
+        assert!(matches!(
+            library.set_review(&TakeId("missing".into()), Revision(1), ReviewState::Proposed),
+            Err(Refusal::UnknownTake { .. })
+        ));
     }
 
     fn entry(id: &str) -> RundownEntry {

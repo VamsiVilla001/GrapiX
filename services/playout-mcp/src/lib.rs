@@ -24,7 +24,7 @@
 
 #![forbid(unsafe_code)]
 
-use gx_control_plane::intent::TakeAt;
+use gx_control_plane::intent::{check_pin, TakeAt};
 use gx_control_plane::message::OutputConfig;
 use gx_control_plane::peer::EnginePeer;
 use gx_contracts::Refusal;
@@ -264,18 +264,32 @@ pub struct ProgramTools<P: EnginePeer> {
     pub environment: OutputEnvironment,
 }
 
-/// How a caller names the revision it wants, and when.
+/// How a caller names the revision it wants, the content hash it pins, and
+/// when.
 ///
 /// There is no `now`: the only scheduling expressible is the next opportunity
 /// or an explicit frame, which is ADR-002's intent rule made structural
-/// (invariants 8 and 9).
+/// (invariants 8 and 9). The hash is optional here only so that a missing pin
+/// is refused by name (`RevisionUnpinned`, invariant 61).
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ProgramArgs {
     take_id: String,
     revision: u64,
     #[serde(default)]
+    content_hash: Option<gx_contracts::ContentHash>,
+    #[serde(default)]
     frame: Option<u64>,
+}
+
+/// What a listing or review answers with for one revision.
+fn published_revision(scene: &PublishedScene) -> gx_contracts::PublishedRevision {
+    gx_contracts::PublishedRevision {
+        take_id: scene.take_id.clone(),
+        revision: scene.revision,
+        content_hash: scene.content_hash.clone(),
+        review: scene.review,
+    }
 }
 
 #[derive(Deserialize)]
@@ -296,17 +310,22 @@ impl<P: EnginePeer> ProgramTools<P> {
     fn pinned(&self, args: &ProgramArgs) -> Result<PublishedScene, Refusal> {
         // The exact revision, never the latest: a take against a stale
         // revision must refuse rather than quietly air a newer one
-        // (invariant 17, and 6.3).
-        self.library
+        // (invariant 17, and 6.3). And only by the hash the caller pinned
+        // (invariant 61): the content it approved is the content that airs.
+        let take_id = gx_contracts::TakeId(args.take_id.clone());
+        let revision = gx_contracts::Revision(args.revision);
+        let scene = self
+            .library
             .lock()
-            .revision(
-                &gx_contracts::TakeId(args.take_id.clone()),
-                gx_contracts::Revision(args.revision),
-            )
+            .revision(&take_id, revision)
             .cloned()
-            .ok_or_else(|| Refusal::UnknownTake {
-                take_id: gx_contracts::TakeId(args.take_id.clone()),
-            })
+            .ok_or_else(|| Refusal::UnknownTake { take_id: take_id.clone() })?;
+        let held = scene
+            .content_hash
+            .clone()
+            .ok_or_else(|| Refusal::RevisionUnpinned { take_id: take_id.clone(), revision })?;
+        check_pin(&take_id, revision, &held, args.content_hash.as_ref())?;
+        Ok(scene)
     }
 }
 
@@ -344,13 +363,18 @@ pub struct PlayoutLibrary<P: EnginePeer>(pub std::sync::Arc<ProgramTools<P>>);
 
 impl<P: EnginePeer> ToolHandler for PlayoutLibrary<P> {
     fn handle(&self, _args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
-        let takes: Vec<_> = self
-            .0
-            .library
-            .lock()
+        let library = self.0.library.lock();
+        let takes: Vec<_> = library
             .takes()
             .into_iter()
             .map(|(take_id, revisions)| {
+                // Each revision with the hash a take must pin and its review
+                // state, so the pin an operator copies is the content listed.
+                let revisions: Vec<_> = revisions
+                    .into_iter()
+                    .filter_map(|revision| library.revision(&take_id, revision))
+                    .map(published_revision)
+                    .collect();
                 serde_json::json!({
                     "takeId": take_id,
                     "revisions": revisions,
@@ -358,6 +382,22 @@ impl<P: EnginePeer> ToolHandler for PlayoutLibrary<P> {
             })
             .collect();
         Ok(serde_json::json!({ "takes": takes }))
+    }
+}
+
+/// `playout.review`: move a published revision through review.
+///
+/// Operator-scoped (`Take`), the scope a human operator holds and an agent
+/// credential never does (invariant 65): agents publish drafts, and only a
+/// human proposes or approves them (11.38). The content stays immutable.
+pub struct PlayoutReview<P: EnginePeer>(pub std::sync::Arc<ProgramTools<P>>);
+
+impl<P: EnginePeer> ToolHandler for PlayoutReview<P> {
+    fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
+        let args: gx_contracts::ReviewRequest = parse(args)?;
+        let mut library = self.0.library.lock();
+        let scene = library.set_review(&args.take_id, args.revision, args.review)?;
+        serde_json::to_value(published_revision(scene)).map_err(transport_failed)
     }
 }
 
@@ -655,9 +695,43 @@ mod tests {
             .handle(serde_json::json!({
                 "takeId": published.take_id.0,
                 "revision": published.revision.0,
+                "contentHash": published.content_hash,
             }))
             .expect("a published revision takes");
         assert_eq!(answer["frame"], 120);
+    }
+
+    #[test]
+    fn a_take_loads_only_by_its_pinned_hash() {
+        // Invariant 61 on the automation surface: no pin, or a pin naming
+        // other content, is refused by name before anything is sent.
+        let (tools, published) = program_tools();
+        let take = PlayoutTake(std::sync::Arc::clone(&tools));
+        let unpinned = take
+            .handle(serde_json::json!({ "takeId": published.take_id.0, "revision": 1 }))
+            .expect_err("an unpinned take refuses");
+        assert!(matches!(unpinned, Refusal::RevisionUnpinned { .. }));
+        let other = take
+            .handle(serde_json::json!({ "takeId": published.take_id.0, "revision": 1, "contentHash": "f".repeat(64) }))
+            .expect_err("a take of other content refuses");
+        assert!(matches!(&other, Refusal::RevisionHashMismatch { expected, .. } if Some(expected) == published.content_hash.as_ref()));
+    }
+
+    #[test]
+    fn only_an_operator_scope_moves_a_revision_through_review() {
+        // An agent publishes drafts; a human approves them (invariant 65).
+        assert!(matches!(
+            ToolRegistry::authorise("playout.review", &[Scope::Author]),
+            Err(Refusal::Unauthenticated)
+        ));
+        assert!(ToolRegistry::authorise("playout.review", &[Scope::Take]).is_ok());
+
+        let (tools, published) = program_tools();
+        let answer = PlayoutReview(std::sync::Arc::clone(&tools))
+            .handle(serde_json::json!({ "takeId": published.take_id.0, "revision": 1, "review": "approved" }))
+            .expect("an operator approves");
+        assert_eq!(answer["review"], "approved");
+        assert_eq!(answer["contentHash"], serde_json::json!(published.content_hash));
     }
 
     #[test]
@@ -667,6 +741,7 @@ mod tests {
             .handle(serde_json::json!({
                 "takeId": published.take_id.0,
                 "revision": published.revision.0,
+                "contentHash": published.content_hash,
             }))
             .expect("a published revision cues");
         assert_eq!(answer["frame"], 120);
@@ -681,6 +756,7 @@ mod tests {
             .handle(serde_json::json!({
                 "takeId": published.take_id.0,
                 "revision": 99,
+                "contentHash": published.content_hash,
             }))
             .expect_err("an unpublished revision must refuse");
         assert!(matches!(refusal, Refusal::UnknownTake { .. }));
@@ -725,7 +801,10 @@ mod tests {
         let takes = answer["takes"].as_array().unwrap();
         assert_eq!(takes.len(), 1);
         assert_eq!(takes[0]["takeId"], published.take_id.0);
-        assert_eq!(takes[0]["revisions"], serde_json::json!([1, 2]));
+        let revisions: Vec<_> = takes[0]["revisions"].as_array().unwrap().iter().map(|r| r["revision"].clone()).collect();
+        assert_eq!(revisions, [serde_json::json!(1), serde_json::json!(2)]);
+        assert_eq!(takes[0]["revisions"][0]["contentHash"], serde_json::json!(published.content_hash));
+        assert_eq!(takes[0]["revisions"][0]["review"], "draft");
     }
 
     #[test]

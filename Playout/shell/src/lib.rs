@@ -25,7 +25,7 @@ use std::net::SocketAddr;
 use std::sync::Mutex;
 
 use gx_contracts::Refusal;
-use gx_contracts::{Revision, TakeId};
+use gx_contracts::{ContentHash, Revision, TakeId};
 use gx_control_plane::intent::{
     ClearRequest, CueRequest, PhaseCommitted, PhaseRequest, TakeAt, TakeCommitted, TakeRequest,
 };
@@ -185,11 +185,14 @@ fn committed(reply: EngineReply, expected: &'static str) -> Result<TakeCommitted
     }
 }
 
-/// Cue a published revision. Prepares without going to air.
+/// Cue a published revision. Prepares without going to air. The content hash
+/// is the operator's pin; a missing one is sent as missing and refused by the
+/// engine by name (invariant 61).
 pub fn cue(
     state: &Connection,
     take_id: TakeId,
     revision: Revision,
+    content_hash: Option<ContentHash>,
     at: TakeAt,
 ) -> Result<TakeCommitted, PlayoutError> {
     with_client(state, |client| {
@@ -197,6 +200,7 @@ pub fn cue(
             client.handle(ClientRequest::Cue(CueRequest {
                 take_id,
                 revision,
+                content_hash,
                 at,
             })),
             "a cue commitment",
@@ -204,11 +208,12 @@ pub fn cue(
     })
 }
 
-/// Take a published revision to Program.
+/// Take a published revision to Program, pinned as `cue` is.
 pub fn take(
     state: &Connection,
     take_id: TakeId,
     revision: Revision,
+    content_hash: Option<ContentHash>,
     at: TakeAt,
 ) -> Result<TakeCommitted, PlayoutError> {
     with_client(state, |client| {
@@ -216,6 +221,7 @@ pub fn take(
             client.handle(ClientRequest::Take(TakeRequest {
                 take_id,
                 revision,
+                content_hash,
                 at,
             })),
             "a take commitment",
@@ -311,9 +317,10 @@ fn cmd_cue(
     state: tauri::State<'_, Connection>,
     take_id: String,
     revision: u64,
+    content_hash: Option<String>,
     frame: Option<u64>,
 ) -> Result<TakeCommitted, PlayoutError> {
-    cue(&state, TakeId(take_id), Revision(revision), scheduled(frame))
+    cue(&state, TakeId(take_id), Revision(revision), content_hash.map(ContentHash), scheduled(frame))
 }
 
 #[tauri::command]
@@ -321,9 +328,10 @@ fn cmd_take(
     state: tauri::State<'_, Connection>,
     take_id: String,
     revision: u64,
+    content_hash: Option<String>,
     frame: Option<u64>,
 ) -> Result<TakeCommitted, PlayoutError> {
-    take(&state, TakeId(take_id), Revision(revision), scheduled(frame))
+    take(&state, TakeId(take_id), Revision(revision), content_hash.map(ContentHash), scheduled(frame))
 }
 
 #[tauri::command]
@@ -403,7 +411,7 @@ mod tests {
         let state = Connection::default();
         // A command with nowhere to go must say so. Silently queuing it would
         // mean an operator pressing take and getting no answer at all.
-        let error = take(&state, TakeId("demo".into()), Revision(1), TakeAt::NextOpportunity)
+        let error = take(&state, TakeId("demo".into()), Revision(1), None, TakeAt::NextOpportunity)
             .expect_err("no connection means no take");
         assert!(matches!(error, PlayoutError::NotConnected));
     }

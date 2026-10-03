@@ -47,11 +47,7 @@ fn main() {
     }
 
     let take = client
-        .request(ClientRequest::Take(TakeRequest {
-            take_id: TakeId("lower-third".into()),
-            revision: Revision(1),
-            at: TakeAt::NextOpportunity,
-        }))
+        .request(ClientRequest::Take(TakeRequest { take_id: TakeId("lower-third".into()), revision: Revision(1), content_hash: Some(gx_contracts::ContentHash("a".repeat(64))), at: TakeAt::NextOpportunity }))
         .expect("take request");
     match take {
         EngineReply::Taken(c) => println!(

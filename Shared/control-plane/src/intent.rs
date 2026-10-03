@@ -10,7 +10,8 @@
 //! engine does not honour (invariant 27).
 
 use gx_contracts::{
-    ClockSource, Epoch, Locality, RationalRate, ReferenceState, Refusal, Revision, TakeId,
+    ClockSource, ContentHash, Epoch, Locality, RationalRate, ReferenceState, Refusal, Revision,
+    TakeId,
 };
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -28,12 +29,19 @@ pub enum TakeAt {
     Frame { frame: u64 },
 }
 
-/// Ask for a take. Revision is exact; a mismatch is refused, not coerced.
+/// Ask for a take. Revision is exact and its content hash is pinned: a
+/// mismatch on either is refused, not coerced (invariant 61).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TakeRequest {
     pub take_id: TakeId,
     pub revision: Revision,
+    /// The content hash the caller pinned. Optional on the wire only so that
+    /// a missing pin is refused by name (`RevisionUnpinned`) rather than as a
+    /// parse failure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub content_hash: Option<ContentHash>,
     pub at: TakeAt,
 }
 
@@ -47,7 +55,68 @@ pub struct TakeRequest {
 pub struct CueRequest {
     pub take_id: TakeId,
     pub revision: Revision,
+    /// As on [`TakeRequest`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub content_hash: Option<ContentHash>,
     pub at: TakeAt,
+}
+
+/// Check a cue or take's pin against the content hash of the revision it
+/// names (11.38, invariant 61). The one implementation: the engine, the mock
+/// engine and Playout all call it, so none can accept a pin another refuses
+/// (invariants 27 and 45).
+pub fn check_pin(
+    take_id: &TakeId,
+    revision: Revision,
+    held: &ContentHash,
+    pin: Option<&ContentHash>,
+) -> Result<(), Refusal> {
+    match pin {
+        None => Err(Refusal::RevisionUnpinned {
+            take_id: take_id.clone(),
+            revision,
+        }),
+        Some(pin) if pin != held => Err(Refusal::RevisionHashMismatch {
+            take_id: take_id.clone(),
+            revision,
+            expected: held.clone(),
+            actual: pin.clone(),
+        }),
+        Some(_) => Ok(()),
+    }
+}
+
+/// The revision a peer holds for one take, with the content hash it was
+/// published as.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeldRevision {
+    pub revision: Revision,
+    pub content_hash: ContentHash,
+}
+
+/// Check a cue or take against the revision a peer holds for its take: the
+/// take must be published, at exactly this revision, with this pinned hash.
+/// Separate refusals, because "no such scene", "wrong version" and "different
+/// bytes" each send an operator somewhere different. The engine and every
+/// mock call this one implementation (invariants 45 and 46).
+pub fn check_reference(
+    take_id: &TakeId,
+    revision: Revision,
+    pin: Option<&ContentHash>,
+    held: Option<&HeldRevision>,
+) -> Result<(), Refusal> {
+    let held = held.ok_or_else(|| Refusal::UnknownTake {
+        take_id: take_id.clone(),
+    })?;
+    if held.revision != revision {
+        return Err(Refusal::RevisionMismatch {
+            expected: held.revision,
+            actual: revision,
+        });
+    }
+    check_pin(take_id, revision, &held.content_hash, pin)
 }
 
 /// Clear Program. Also intent-based: the operator asks, the engine says when.

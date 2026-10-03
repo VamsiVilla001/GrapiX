@@ -31,7 +31,7 @@ use gx_contracts::{
     ContentHash, DeviceTier, Epoch, Locality, MediaCodec, RationalRate, Refusal, Revision, TakeId,
 };
 use gx_control_plane::capability::{check_protocol, live_allowed, EngineCapability};
-use gx_control_plane::intent::{Lead, PhaseCommitted, TakeAt, TakeCommitted};
+use gx_control_plane::intent::{check_reference, HeldRevision, Lead, PhaseCommitted, TakeAt, TakeCommitted};
 use gx_control_plane::message::{ClientRequest, EngineEvent, EngineReply, OutputConfig};
 use gx_control_plane::peer::EnginePeer;
 use gx_control_plane::status::{Degradation, EngineStatus, ProgramState};
@@ -62,8 +62,9 @@ pub struct Engine {
     frame_source: Arc<AtomicU64>,
     locality: Locality,
     platform_certified: bool,
-    /// What has been published, and at which revision.
-    published: HashMap<TakeId, Revision>,
+    /// What has been published: its revision and the content hash a cue or
+    /// take must pin (invariant 61).
+    published: HashMap<TakeId, HeldRevision>,
     /// The prepared scene each published revision pins (3.4). Keyed by the
     /// pinned identity, so an earlier revision keeps exactly the scene it was
     /// published with (invariant 30).
@@ -163,7 +164,9 @@ impl Engine {
         let mut prepared_scenes: Vec<_> = self
             .prepared
             .iter()
-            .filter(|((take_id, revision), _)| self.published.get(take_id) == Some(revision))
+            .filter(|((take_id, revision), _)| {
+                self.published.get(take_id).map(|held| held.revision) == Some(*revision)
+            })
             .map(|((take_id, revision), prepared)| PreparedSceneRecord {
                 take_id: take_id.clone(),
                 revision: *revision,
@@ -179,7 +182,7 @@ impl Engine {
             published: self
                 .published
                 .iter()
-                .map(|(take_id, revision)| (take_id.clone(), *revision))
+                .map(|(take_id, held)| (take_id.clone(), held.clone()))
                 .collect(),
             prepared_scenes,
             verified_assets: self.assets.iter().cloned().collect(),
@@ -315,9 +318,10 @@ impl Engine {
     /// whether it has one, and Program is the software rasteriser's take key.
     /// It is not the authoring path — a scene reaches the engine through
     /// [`Engine::publish`], and an identifier published this way has no
-    /// `PreparedScene` behind it.
-    pub fn publish_identifier(&mut self, take_id: TakeId, revision: Revision) {
-        self.published.insert(take_id, revision);
+    /// `PreparedScene` behind it. With no document to hash, the caller
+    /// declares the content hash a take must pin.
+    pub fn publish_identifier(&mut self, take_id: TakeId, revision: Revision, content_hash: ContentHash) {
+        self.published.insert(take_id, HeldRevision { revision, content_hash });
     }
 
     /// Prepare and publish one complete authored scene as a new pinned revision.
@@ -335,9 +339,9 @@ impl Engine {
         let revision = self
             .published
             .get(&take_id)
-            .copied()
-            .map(Revision::next)
+            .map(|held| held.revision.next())
             .unwrap_or(Revision(1));
+        let content_hash = document.content_hash();
         let prepared = match PreparedScene::prepare(
             document,
             &self.assets,
@@ -350,7 +354,13 @@ impl Engine {
             }
         };
         self.prepared.insert((take_id.clone(), revision), prepared);
-        self.published.insert(take_id.clone(), revision);
+        self.published.insert(
+            take_id.clone(),
+            HeldRevision {
+                revision,
+                content_hash: content_hash.clone(),
+            },
+        );
         if let Err(error) = self.persist_recovery() {
             self.output_inhibited = true;
             return PublishReply::Refused(PublishRefusal::PreparationRefused {
@@ -359,7 +369,11 @@ impl Engine {
                 },
             });
         }
-        PublishReply::Published { take_id, revision }
+        PublishReply::Published {
+            take_id,
+            revision,
+            content_hash,
+        }
     }
 
     /// The prepared scene a published revision pins, if this engine holds it.
@@ -542,21 +556,11 @@ impl Engine {
         self.clock.commit(at)
     }
 
-    /// Check a scene reference against what is published.
-    ///
-    /// Two distinct refusals, because an operator needs to tell "wrong
-    /// version" from "no such scene".
-    fn check_published(&self, take_id: &TakeId, revision: Revision) -> Result<(), Refusal> {
-        match self.published.get(take_id) {
-            None => Err(Refusal::UnknownTake {
-                take_id: take_id.clone(),
-            }),
-            Some(&published) if published != revision => Err(Refusal::RevisionMismatch {
-                expected: published,
-                actual: revision,
-            }),
-            Some(_) => Ok(()),
-        }
+    /// Check a scene reference against what is published: the shared rule
+    /// (unknown take, wrong revision, missing or wrong pin), so this engine
+    /// and every mock refuse alike.
+    fn check_published(&self, take_id: &TakeId, revision: Revision, pin: Option<&ContentHash>) -> Result<(), Refusal> {
+        check_reference(take_id, revision, pin, self.published.get(take_id))
     }
 
     fn configure_output(&mut self, config: &OutputConfig) -> EngineReply {
@@ -657,7 +661,7 @@ impl EnginePeer for Engine {
             }
 
             ClientRequest::Cue(req) => {
-                if let Err(refusal) = self.check_published(&req.take_id, req.revision) {
+                if let Err(refusal) = self.check_published(&req.take_id, req.revision, req.content_hash.as_ref()) {
                     return EngineReply::Refused(refusal);
                 }
                 match self.commit(req.at) {
@@ -678,7 +682,7 @@ impl EnginePeer for Engine {
             }
 
             ClientRequest::Take(req) => {
-                if let Err(refusal) = self.check_published(&req.take_id, req.revision) {
+                if let Err(refusal) = self.check_published(&req.take_id, req.revision, req.content_hash.as_ref()) {
                     return EngineReply::Refused(refusal);
                 }
                 let in_phase = self
@@ -811,10 +815,15 @@ mod tests {
         Engine::new(Arc::new(AtomicU64::new(0)), Locality::CoLocated)
     }
 
+    /// The content hash identifier publishes in these tests declare and pin.
+    fn pin() -> ContentHash {
+        ContentHash("a".repeat(64))
+    }
+
     fn published(engine: &mut Engine) -> (TakeId, Revision) {
         let take_id = TakeId("take/101".into());
         let revision = Revision(1);
-        engine.publish_identifier(take_id.clone(), revision);
+        engine.publish_identifier(take_id.clone(), revision, pin());
         (take_id, revision)
     }
 
@@ -894,6 +903,7 @@ mod tests {
         let reply = e.handle(ClientRequest::Take(TakeRequest {
             take_id: TakeId("nope".into()),
             revision: Revision(1),
+            content_hash: Some(pin()),
             at: TakeAt::NextOpportunity,
         }));
         assert!(matches!(
@@ -911,6 +921,7 @@ mod tests {
         let reply = e.handle(ClientRequest::Take(TakeRequest {
             take_id,
             revision,
+            content_hash: Some(pin()),
             at: TakeAt::NextOpportunity,
         }));
         let committed = match reply {
@@ -933,6 +944,7 @@ mod tests {
         let _ = e.handle(ClientRequest::Take(TakeRequest {
             take_id,
             revision,
+            content_hash: Some(pin()),
             at: TakeAt::NextOpportunity,
         }));
         let _ = e.handle(ClientRequest::Clear(ClearRequest {
@@ -962,6 +974,7 @@ mod tests {
         let reply = e.handle(ClientRequest::Take(TakeRequest {
             take_id,
             revision,
+            content_hash: Some(pin()),
             at: TakeAt::NextOpportunity,
         }));
         match reply {
@@ -977,6 +990,7 @@ mod tests {
         let _ = e.handle(ClientRequest::Cue(CueRequest {
             take_id,
             revision,
+            content_hash: Some(pin()),
             at: TakeAt::NextOpportunity,
         }));
         assert!(
@@ -1029,7 +1043,7 @@ mod tests {
         let take_id = TakeId("recovered/take".into());
         {
             let mut first = engine();
-            first.publish_identifier(take_id.clone(), Revision(1));
+            first.publish_identifier(take_id.clone(), Revision(1), pin());
             first
                 .attach_recovery_journal(
                     RecoveryJournal::open_at(path.clone()).expect("journal opens"),
@@ -1039,6 +1053,7 @@ mod tests {
                 first.handle(ClientRequest::Take(TakeRequest {
                     take_id: take_id.clone(),
                     revision: Revision(1),
+                    content_hash: Some(pin()),
                     at: TakeAt::NextOpportunity,
                 })),
                 EngineReply::Taken(_)
@@ -1087,6 +1102,7 @@ mod tests {
             e.handle(ClientRequest::Take(TakeRequest {
                 take_id: TakeId("animated".into()),
                 revision: Revision(1),
+                content_hash: Some(animated_scene().content_hash()),
                 at: TakeAt::NextOpportunity,
             })),
             EngineReply::Taken(_)

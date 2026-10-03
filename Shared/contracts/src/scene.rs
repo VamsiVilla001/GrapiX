@@ -1451,7 +1451,64 @@ pub fn new_scene(id: &str, name: &str) -> SceneDocument {
     }
 }
 
+/// The content address of one published scene revision (11.38, invariant 61).
+///
+/// SHA-256 over canonical JSON: object keys sorted at every depth, no
+/// whitespace, and the top-level `revision` removed. `revision` is assigned
+/// by whoever receives the publish, so it is not content: publishing the same
+/// document twice gives two revisions with one hash. Canonical form is
+/// written here rather than left to `serde_json`'s map type, so a feature
+/// flag elsewhere in the build cannot change a hash. Playout holds published
+/// documents as opaque JSON and the engine as parsed scenes, and both must
+/// reach the same bytes, so this takes JSON.
+pub fn scene_content_hash(document: &serde_json::Value) -> ContentHash {
+    use sha2::{Digest, Sha256};
+
+    fn write(value: &serde_json::Value, top: bool, out: &mut Vec<u8>) {
+        match value {
+            serde_json::Value::Object(map) => {
+                let mut keys: Vec<&String> = map
+                    .keys()
+                    .filter(|key| !(top && key.as_str() == "revision"))
+                    .collect();
+                keys.sort();
+                out.push(b'{');
+                for (index, key) in keys.into_iter().enumerate() {
+                    if index > 0 {
+                        out.push(b',');
+                    }
+                    out.extend(serde_json::to_vec(key).expect("a string serialises"));
+                    out.push(b':');
+                    write(&map[key], false, out);
+                }
+                out.push(b'}');
+            }
+            serde_json::Value::Array(items) => {
+                out.push(b'[');
+                for (index, item) in items.iter().enumerate() {
+                    if index > 0 {
+                        out.push(b',');
+                    }
+                    write(item, false, out);
+                }
+                out.push(b']');
+            }
+            scalar => out.extend(serde_json::to_vec(scalar).expect("a JSON scalar serialises")),
+        }
+    }
+
+    let mut canonical = Vec::new();
+    write(document, true, &mut canonical);
+    ContentHash(format!("{:x}", Sha256::digest(&canonical)))
+}
+
 impl SceneDocument {
+    /// This document's revision content address: [`scene_content_hash`] over
+    /// its JSON form.
+    pub fn content_hash(&self) -> ContentHash {
+        scene_content_hash(&serde_json::to_value(self).expect("a scene document serialises to JSON"))
+    }
+
     /// Look up an asset by its stable id.
     pub fn asset(&self, asset_id: &str) -> Option<&AssetLibraryItem> {
         self.assets.iter().find(|a| a.asset_id == asset_id)
@@ -1735,6 +1792,27 @@ mod parse_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_same_content_hashes_alike_and_one_changed_property_does_not() {
+        let scene = new_scene("lower-third", "Lower third");
+        let as_json = |scene: &SceneDocument| serde_json::to_value(scene).expect("a scene serialises");
+        let first = scene_content_hash(&as_json(&scene));
+
+        // A second publish of the same content: only the receiver-assigned
+        // revision differs, and key order is not content either.
+        let mut republished = scene.clone();
+        republished.revision = Some(Revision(7));
+        assert_eq!(scene_content_hash(&as_json(&republished)), first);
+        let reordered: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&as_json(&scene)).unwrap()).unwrap();
+        assert_eq!(scene_content_hash(&reordered), first);
+
+        let mut changed = scene.clone();
+        changed.canvas.width = 1280;
+        assert_ne!(scene_content_hash(&as_json(&changed)), first);
+        assert_eq!(first.0.len(), 64);
+    }
 
     /// 1.x's authorable object set, read off its own machine-readable claim:
     /// `programObjectTypes` plus `notRenderedByProgram` in

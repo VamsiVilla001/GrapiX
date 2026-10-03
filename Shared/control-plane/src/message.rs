@@ -117,7 +117,7 @@ impl<T> Envelope<T> {
 mod tests {
     use super::*;
     use crate::intent::TakeAt;
-    use gx_contracts::{Revision, TakeId};
+    use gx_contracts::{ContentHash, Revision, TakeId};
 
     /// Field names the control plane must never contain. Checked over the
     /// serialised form of every request, because that is what a peer sees.
@@ -144,11 +144,13 @@ mod tests {
             ClientRequest::Cue(CueRequest {
                 take_id: TakeId("t".into()),
                 revision: Revision(1),
+                content_hash: Some(ContentHash("a".repeat(64))),
                 at: TakeAt::NextOpportunity,
             }),
             ClientRequest::Take(TakeRequest {
                 take_id: TakeId("t".into()),
                 revision: Revision(1),
+                content_hash: Some(ContentHash("a".repeat(64))),
                 at: TakeAt::Frame { frame: 42 },
             }),
             ClientRequest::Clear(ClearRequest {

@@ -250,6 +250,7 @@ const ui = {
   transportPanel: id("transportPanel"),
   takeIdInput: id("takeIdInput"),
   revisionInput: id("revisionInput"),
+  hashInput: id("hashInput"),
   frameInput: id("frameInput"),
   frameMode: id("frameMode"),
   cueButton: id("cueButton"),
@@ -885,7 +886,16 @@ function readTakeTarget() {
     ui.revisionInput.setAttribute("aria-invalid", "true");
     return { ok: false, reason: "Revision is out of the range this surface can send exactly." };
   }
-  return { ok: true, takeId, revision };
+  // The pinned content hash (11.38, invariant 61). Blank is sent as blank so
+  // the engine refuses it by name (revisionUnpinned) instead of this surface
+  // guessing a hash; a malformed one is caught here.
+  const hash = ui.hashInput.value.trim().toLowerCase();
+  if (hash !== "" && !/^[0-9a-f]{64}$/.test(hash)) {
+    ui.hashInput.setAttribute("aria-invalid", "true");
+    return { ok: false, reason: "Content hash is 64 hexadecimal characters, or blank." };
+  }
+  ui.hashInput.removeAttribute("aria-invalid");
+  return { ok: true, takeId, revision, contentHash: hash === "" ? null : hash };
 }
 
 const COMMIT_HEAD = {
@@ -944,7 +954,7 @@ async function doCue() {
     log("LOCAL", "error", "CUE not sent", target.reason);
     return;
   }
-  await transport("CUE", "cmd_cue", { takeId: target.takeId, revision: target.revision });
+  await transport("CUE", "cmd_cue", { takeId: target.takeId, revision: target.revision, contentHash: target.contentHash });
 }
 
 async function doTake() {
@@ -953,7 +963,7 @@ async function doTake() {
     log("LOCAL", "error", "TAKE not sent", target.reason);
     return;
   }
-  await transport("TAKE", "cmd_take", { takeId: target.takeId, revision: target.revision });
+  await transport("TAKE", "cmd_take", { takeId: target.takeId, revision: target.revision, contentHash: target.contentHash });
 }
 
 async function doClear() {

@@ -98,7 +98,7 @@ impl EnginePeer for RecordingPeer {
 impl AssetPublishPeer for RecordingPeer {
     fn publish_scene(&mut self, scene: SceneDocument) -> PublishReply {
         let reply = self.engine.publish_scene(scene);
-        if let PublishReply::Published { take_id, revision } = &reply {
+        if let PublishReply::Published { take_id, revision, .. } = &reply {
             self.publishes.push((take_id.clone(), *revision));
         }
         reply
@@ -187,12 +187,12 @@ pub fn editor_command_suite(report: &mut Report) {
     };
 
     let fixture = new_scene(ONAIR_TAKE, "Editor command conformance on-air fixture");
-    let (take_id, revision) = match publish_scene(asset_address, fixture.clone()) {
-        Ok(PublishReply::Published { take_id, revision })
+    let (take_id, revision, content_hash) = match publish_scene(asset_address, fixture.clone()) {
+        Ok(PublishReply::Published { take_id, revision, content_hash })
             if take_id == TakeId(ONAIR_TAKE.to_owned()) && revision == Revision(1) =>
         {
             report.record(PLANE, "baseline fixture publishes as revision 1", Outcome::Pass);
-            (take_id, revision)
+            (take_id, revision, content_hash)
         }
         other => {
             report.record(
@@ -206,6 +206,7 @@ pub fn editor_command_suite(report: &mut Report) {
     let taken = control.handle(ClientRequest::Take(TakeRequest {
         take_id: take_id.clone(),
         revision,
+        content_hash: Some(content_hash),
         at: TakeAt::NextOpportunity,
     }));
     let committed = matches!(&taken, EngineReply::Taken(_));
@@ -330,7 +331,7 @@ pub fn editor_command_suite(report: &mut Report) {
         Err(error) => Err(format!("could not read the witness session: {error:?}")),
     };
     let outcome = match (published, observe(&peer)) {
-        (Ok(PublishReply::Published { take_id: published_take, revision: published_revision }), Ok(observed)) => {
+        (Ok(PublishReply::Published { take_id: published_take, revision: published_revision, .. }), Ok(observed)) => {
             let expected = Observation {
                 publishes: baseline.publishes + 1,
                 ..baseline.clone()

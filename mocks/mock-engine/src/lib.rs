@@ -19,7 +19,8 @@ use gx_contracts::{
 };
 use gx_control_plane::capability::{check_protocol, live_allowed, EngineCapability};
 use gx_control_plane::intent::{
-    resolve_intent, ClockState, Lead, PhaseCommitted, TakeAt, TakeCommitted,
+    check_reference, resolve_intent, ClockState, HeldRevision, Lead, PhaseCommitted, TakeAt,
+    TakeCommitted,
 };
 use gx_control_plane::message::{ClientRequest, EngineEvent, EngineReply, OutputConfig};
 use gx_control_plane::peer::{EnginePeer, FaultInjection};
@@ -38,8 +39,9 @@ pub struct MockEngine {
     locality: Locality,
     platform_certified: bool,
     lead: Lead,
-    /// The latest published revision for each stable take id.
-    published: HashMap<TakeId, Revision>,
+    /// The latest published revision for each stable take id, with the
+    /// content hash a cue or take must pin.
+    published: HashMap<TakeId, HeldRevision>,
     /// Immutable documents keyed by their pinned publication identity.
     documents: HashMap<(TakeId, Revision), SceneDocument>,
     /// Content hashes the asset plane says this engine has verified.
@@ -103,9 +105,10 @@ impl MockEngine {
     /// Publish a scene identifier, so a take of it can succeed.
     ///
     /// This compatibility helper models a preloaded scene without a document;
-    /// asset-plane publication below is what Editor uses.
-    pub fn publish(&mut self, take_id: TakeId, revision: Revision) {
-        self.published.insert(take_id, revision);
+    /// asset-plane publication below is what Editor uses. With no document to
+    /// hash, the caller declares the content hash a take must pin.
+    pub fn publish(&mut self, take_id: TakeId, revision: Revision, content_hash: ContentHash) {
+        self.published.insert(take_id, HeldRevision { revision, content_hash });
     }
 
     /// Mark bytes as verified and available to a subsequently taken scene.
@@ -126,12 +129,23 @@ impl MockEngine {
         let revision = self
             .published
             .get(&take_id)
-            .copied()
+            .map(|held| held.revision)
             .unwrap_or(Revision(0))
             .next();
+        let content_hash = scene.content_hash();
         self.documents.insert((take_id.clone(), revision), scene);
-        self.published.insert(take_id.clone(), revision);
-        PublishReply::Published { take_id, revision }
+        self.published.insert(
+            take_id.clone(),
+            HeldRevision {
+                revision,
+                content_hash: content_hash.clone(),
+            },
+        );
+        PublishReply::Published {
+            take_id,
+            revision,
+            content_hash,
+        }
     }
 
     /// Return the immutable document a published revision pins, if present.
@@ -191,25 +205,17 @@ impl MockEngine {
         resolve_intent(at, &self.clock_state(), self.lead)
     }
 
-    /// Check a scene reference against what is published.
-    fn check_published(&self, take_id: &TakeId, revision: Revision) -> Result<(), Refusal> {
-        match self.published.get(take_id) {
-            None => Err(Refusal::UnknownTake {
-                take_id: take_id.clone(),
-            }),
-            Some(&published) if published != revision => Err(Refusal::RevisionMismatch {
-                expected: published,
-                actual: revision,
-            }),
-            Some(_) => self
-                .published_scene(take_id, revision)
-                .into_iter()
-                .flat_map(|scene| scene.assets.iter())
-                .filter_map(|asset| asset.checksum.as_ref())
-                .find(|hash| !self.assets.contains(*hash))
-                .cloned()
-                .map_or(Ok(()), |hash| Err(Refusal::AssetMissing { hash })),
-        }
+    /// Check a scene reference against what is published (the shared rule),
+    /// then that every asset the pinned scene declares has arrived.
+    fn check_published(&self, take_id: &TakeId, revision: Revision, pin: Option<&ContentHash>) -> Result<(), Refusal> {
+        check_reference(take_id, revision, pin, self.published.get(take_id))?;
+        self.published_scene(take_id, revision)
+            .into_iter()
+            .flat_map(|scene| scene.assets.iter())
+            .filter_map(|asset| asset.checksum.as_ref())
+            .find(|hash| !self.assets.contains(*hash))
+            .cloned()
+            .map_or(Ok(()), |hash| Err(Refusal::AssetMissing { hash }))
     }
 
     fn configure_output(&mut self, config: &OutputConfig) -> EngineReply {
@@ -303,7 +309,7 @@ impl EnginePeer for MockEngine {
             }),
 
             ClientRequest::Cue(req) => {
-                if let Err(refusal) = self.check_published(&req.take_id, req.revision) {
+                if let Err(refusal) = self.check_published(&req.take_id, req.revision, req.content_hash.as_ref()) {
                     return EngineReply::Refused(refusal);
                 }
                 match self.commit(req.at) {
@@ -324,7 +330,7 @@ impl EnginePeer for MockEngine {
             }
 
             ClientRequest::Take(req) => {
-                if let Err(refusal) = self.check_published(&req.take_id, req.revision) {
+                if let Err(refusal) = self.check_published(&req.take_id, req.revision, req.content_hash.as_ref()) {
                     return EngineReply::Refused(refusal);
                 }
                 let in_phase = self
@@ -469,9 +475,14 @@ mod tests {
     use gx_control_plane::intent::{ClearRequest, CueRequest, TakeRequest};
     use gx_control_plane::status::ReferenceTransition;
 
+    /// The content hash these tests publish identifiers with and pin.
+    fn pin() -> ContentHash {
+        ContentHash("a".repeat(64))
+    }
+
     fn published_engine() -> MockEngine {
         let mut e = MockEngine::new();
-        e.publish(TakeId("lower-third".into()), Revision(4));
+        e.publish(TakeId("lower-third".into()), Revision(4), pin());
         e
     }
 
@@ -479,15 +490,41 @@ mod tests {
         ClientRequest::Take(TakeRequest {
             take_id: TakeId(id.into()),
             revision: Revision(rev),
+            content_hash: Some(pin()),
             at,
         })
+    }
+
+    #[test]
+    fn a_take_without_the_pinned_hash_is_refused_by_name() {
+        let mut e = published_engine();
+        let unpinned = e.handle(ClientRequest::Take(TakeRequest {
+            take_id: TakeId("lower-third".into()),
+            revision: Revision(4),
+            content_hash: None,
+            at: TakeAt::NextOpportunity,
+        }));
+        assert!(matches!(unpinned, EngineReply::Refused(Refusal::RevisionUnpinned { .. })));
+        let other = ContentHash("b".repeat(64));
+        let wrong = e.handle(ClientRequest::Take(TakeRequest {
+            take_id: TakeId("lower-third".into()),
+            revision: Revision(4),
+            content_hash: Some(other.clone()),
+            at: TakeAt::NextOpportunity,
+        }));
+        assert!(matches!(
+            wrong,
+            EngineReply::Refused(Refusal::RevisionHashMismatch { expected, actual, .. })
+                if expected == pin() && actual == other
+        ));
+        assert!(e.status().unwrap().program.is_none(), "neither refused take reached Program");
     }
 
     #[test]
     fn capability_declares_locality_and_clock() {
         let e = MockEngine::new();
         let cap = e.capability();
-        assert_eq!(cap.protocol, 3);
+        assert_eq!(cap.protocol, 4);
         assert_eq!(cap.locality, Locality::CoLocated);
         assert_eq!(cap.clock, ClockSource::FreeRun);
         assert_eq!(cap.reference, ReferenceState::NotPresent);
@@ -501,7 +538,7 @@ mod tests {
     fn a_lan_engine_offers_compressed_media_and_a_longer_lead() {
         let mut e = MockEngine::new().over_lan();
         assert_eq!(e.capability().media[0], MediaCodec::H264);
-        e.publish(TakeId("t".into()), Revision(1));
+        e.publish(TakeId("t".into()), Revision(1), pin());
         let reply = e.handle(take("t", 1, TakeAt::NextOpportunity));
         // Lead::LAN is 3, so the first committable frame is 3, not 1.
         assert!(matches!(reply, EngineReply::Taken(c) if c.frame == 3));
@@ -570,6 +607,7 @@ mod tests {
         let reply = e.handle(ClientRequest::Cue(CueRequest {
             take_id: TakeId("lower-third".into()),
             revision: Revision(4),
+            content_hash: Some(pin()),
             at: TakeAt::NextOpportunity,
         }));
         assert!(matches!(reply, EngineReply::Cued(_)));
@@ -671,7 +709,7 @@ mod tests {
     #[test]
     fn program_survives_a_lost_reference() {
         let mut e = MockEngine::new().genlocked(RationalRate::P50);
-        e.publish(TakeId("t".into()), Revision(1));
+        e.publish(TakeId("t".into()), Revision(1), pin());
         e.handle(take("t", 1, TakeAt::NextOpportunity));
         e.set_reference(ReferenceState::Unlocked);
         assert!(

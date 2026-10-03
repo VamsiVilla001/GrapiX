@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 use gx_contracts::scene::{parse_scene_document, SceneDocument};
-use gx_contracts::{Revision, TakeId};
+use gx_contracts::{ContentHash, Revision, TakeId};
 use serde::{Deserialize, Serialize};
 
 /// A complete, self-describing authored scene awaiting publication.
@@ -32,8 +32,13 @@ pub struct PublishRequest {
     rename_all_fields = "camelCase"
 )]
 pub enum PublishReply {
-    /// A new immutable revision. Takes must name this exact revision.
-    Published { take_id: TakeId, revision: Revision },
+    /// A new immutable revision. Takes must name this exact revision and pin
+    /// this content hash (invariant 61).
+    Published {
+        take_id: TakeId,
+        revision: Revision,
+        content_hash: ContentHash,
+    },
     /// The request was rejected as one atomic unit; no partial revision exists.
     Refused(PublishRefusal),
 }
@@ -253,10 +258,12 @@ mod tests {
     impl AssetPublishPeer for Peer {
         fn publish_scene(&mut self, scene: SceneDocument) -> PublishReply {
             let take_id = TakeId(scene.id.clone());
+            let content_hash = scene.content_hash();
             self.published.push(scene);
             PublishReply::Published {
                 take_id,
                 revision: Revision(self.published.len() as u64),
+                content_hash,
             }
         }
     }

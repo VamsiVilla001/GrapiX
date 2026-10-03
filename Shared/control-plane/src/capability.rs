@@ -107,12 +107,14 @@ mod tests {
     #[test]
     fn a_protocol_mismatch_is_refused_not_negotiated() {
         assert!(check_protocol(gx_contracts::PROTOCOL_VERSION).is_ok());
-        let err = check_protocol(2).expect_err("an older protocol must refuse");
+        // Version 3 is the protocol before cue and take carried a pinned
+        // content hash (11.38): a v3 peer would send unpinned requests.
+        let err = check_protocol(3).expect_err("an older protocol must refuse");
         assert_eq!(
             err,
             Refusal::ProtocolMismatch {
-                expected: 3,
-                actual: 2
+                expected: 4,
+                actual: 3
             }
         );
     }

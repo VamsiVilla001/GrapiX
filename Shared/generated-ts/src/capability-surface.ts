@@ -8,8 +8,8 @@
 import type { CapabilitySurface } from "./CapabilitySurface.js";
 
 export const CAPABILITY_SURFACE: CapabilitySurface = {
-  "schemaVersion": 3,
-  "protocolVersion": 3,
+  "schemaVersion": 4,
+  "protocolVersion": 4,
   "enums": [
     {
       "name": "BlendMode",
@@ -137,6 +137,8 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
   ],
   "refusals": [
     "revisionMismatch",
+    "revisionUnpinned",
+    "revisionHashMismatch",
     "tierTooLow",
     "referenceUnlocked",
     "unsupportedBlendMode",
@@ -492,7 +494,16 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
       "requiredScope": "author",
       "input": "()",
       "output": "LibraryList",
-      "summary": "Published takes and their revisions."
+      "summary": "Published takes, their revisions, each revision's content hash and review state."
+    },
+    {
+      "name": "playout.review",
+      "group": "playout",
+      "effect": "write",
+      "requiredScope": "take",
+      "input": "ReviewRequest",
+      "output": "PublishedRevision",
+      "summary": "Set a published revision's review state: draft, proposed or approved. The content does not change."
     },
     {
       "name": "playout.cue",

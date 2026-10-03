@@ -148,10 +148,7 @@ const CONFORMANCE_TOKEN: &str = "conformance-token-0123456789abcd";
 /// through a real client against it.
 fn run_over_transport(report: &mut Report, token: Option<&str>) {
     let mut engine = MockEngine::new().genlocked(RationalRate::P29_97);
-    engine.publish(
-        gx_contracts::TakeId("conformance/published".into()),
-        gx_contracts::Revision(1),
-    );
+    engine.publish(gx_contracts::TakeId("conformance/published".into()), gx_contracts::Revision(1), gx_contracts::ContentHash("a".repeat(64)));
 
     // Port 0: the OS picks a free port, so this never collides with a real
     // engine or a second run.
@@ -221,15 +218,25 @@ fn run_against_real_engine(report: &mut Report) {
         return;
     };
 
-    // A fresh loopback port, so this never collides with a live engine.
+    // A fresh loopback port, so this never collides with a live engine, and a
+    // scratch recovery journal, so the run never reads or rewrites the
+    // journal of an engine this user runs (and cannot fail because of it).
     let port = free_port();
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+    let journal = std::env::temp_dir().join(format!(
+        "gx-conformance-worker-{}-{port}/recovery.json",
+        std::process::id()
+    ));
     let child = std::process::Command::new(&worker)
         .args([
             "--port",
             &port.to_string(),
+            "--recovery-journal",
+            &journal.display().to_string(),
             "--publish",
-            "conformance/published:1",
+            // An identifier-only publish declares the hash its takes pin
+            // (11.38): the same test hash the in-process peers use.
+            &format!("conformance/published:1:{}", "a".repeat(64)),
         ])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())

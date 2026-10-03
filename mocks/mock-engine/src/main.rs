@@ -10,7 +10,7 @@
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-use gx_contracts::{DeviceTier, RationalRate, Revision, TakeId};
+use gx_contracts::{ContentHash, DeviceTier, RationalRate, Revision, TakeId};
 use gx_control_plane::bind::ENGINE_CONTROL_PORT;
 use gx_control_transport::Server;
 use gx_mock_engine::{describe, MockEngine};
@@ -51,16 +51,17 @@ fn main() {
                 _ => return usage("--tier needs T0, T1, T2 or T3"),
             },
             "--publish" => match args.next() {
-                // `id:revision`, so a client has something a take can succeed
-                // against without a publish path existing yet.
+                // `id:revision:hash`, so a client has something a take can
+                // succeed against without a publish path existing yet. The
+                // hash is what the take must pin (invariant 61).
                 Some(spec) => match parse_publish(&spec) {
-                    Some((id, revision)) => {
+                    Some((id, revision, content_hash)) => {
                         described.push("with a published scene");
-                        engine.publish(id, revision);
+                        engine.publish(id, revision, content_hash);
                     }
-                    None => return usage("--publish needs id:revision"),
+                    None => return usage("--publish needs id:revision:sha256"),
                 },
-                None => return usage("--publish needs id:revision"),
+                None => return usage("--publish needs id:revision:sha256"),
             },
             "--token" => match args.next() {
                 Some(t) => token = Some(t),
@@ -118,12 +119,14 @@ fn main() {
     server.serve();
 }
 
-fn parse_publish(spec: &str) -> Option<(TakeId, Revision)> {
-    let (id, revision) = spec.rsplit_once(':')?;
-    if id.is_empty() {
+fn parse_publish(spec: &str) -> Option<(TakeId, Revision, ContentHash)> {
+    let (rest, hash) = spec.rsplit_once(':')?;
+    let (id, revision) = rest.rsplit_once(':')?;
+    let is_hash = hash.len() == 64 && hash.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+    if id.is_empty() || !is_hash {
         return None;
     }
-    Some((TakeId(id.to_string()), Revision(revision.parse().ok()?)))
+    Some((TakeId(id.to_string()), Revision(revision.parse().ok()?), ContentHash(hash.to_string())))
 }
 
 fn usage(problem: &str) {
@@ -140,7 +143,7 @@ usage: gx-mock-engine [options]
   --genlocked         report a locked reference at 29.97 instead of free-run
   --lan               declare LAN locality, which lengthens the commit lead
   --tier <T0..T3>     report this device tier; below T0 refuses live output
-  --publish <id:rev>  preload a scene identifier so a take can succeed
+  --publish <id:rev:sha256>  preload a scene identifier with the hash a take pins
   --token <secret>    require this token on every control connection
   --help
 

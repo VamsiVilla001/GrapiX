@@ -43,7 +43,7 @@ export const capabilities = {
 export const status = "Partial" as const;
 
 /** The contract schema version an agent is talking to. Versioned alongside
- *  protocol v3 so an agent can ask what it is connected to (D.5). */
+ *  the wire protocol so an agent can ask what it is connected to (D.5). */
 export const SCHEMA_VERSION = CAPABILITY_SURFACE.schemaVersion;
 
 /** Return the capability surface (system.capability). Always call first.

@@ -70,14 +70,10 @@ mod tests {
     #[test]
     fn a_take_crosses_the_wire_and_returns_a_committed_frame() {
         let mut engine = MockEngine::new();
-        engine.publish(TakeId("lower-third".into()), Revision(4));
+        engine.publish(TakeId("lower-third".into()), Revision(4), gx_contracts::ContentHash("a".repeat(64)));
         let mut client = connected(engine);
 
-        let reply = client.handle(ClientRequest::Take(TakeRequest {
-            take_id: TakeId("lower-third".into()),
-            revision: Revision(4),
-            at: TakeAt::NextOpportunity,
-        }));
+        let reply = client.handle(ClientRequest::Take(TakeRequest { take_id: TakeId("lower-third".into()), revision: Revision(4), content_hash: Some(gx_contracts::ContentHash("a".repeat(64))), at: TakeAt::NextOpportunity }));
 
         match reply {
             EngineReply::Taken(committed) => {
@@ -95,11 +91,7 @@ mod tests {
     #[test]
     fn a_refusal_crosses_the_wire_intact() {
         let mut client = connected(MockEngine::new());
-        let reply = client.handle(ClientRequest::Take(TakeRequest {
-            take_id: TakeId("never-published".into()),
-            revision: Revision(1),
-            at: TakeAt::NextOpportunity,
-        }));
+        let reply = client.handle(ClientRequest::Take(TakeRequest { take_id: TakeId("never-published".into()), revision: Revision(1), content_hash: Some(gx_contracts::ContentHash("a".repeat(64))), at: TakeAt::NextOpportunity }));
         assert!(
             matches!(reply, EngineReply::Refused(Refusal::UnknownTake { .. })),
             "a refusal must survive serialisation with its reason, got {reply:?}"
@@ -112,7 +104,7 @@ mod tests {
         // client separates them by id prefix, which is invariant 34 doing real
         // work rather than sitting in a doc comment.
         let mut engine = MockEngine::new().genlocked(RationalRate::P50);
-        engine.publish(TakeId("t".into()), Revision(1));
+        engine.publish(TakeId("t".into()), Revision(1), gx_contracts::ContentHash("a".repeat(64)));
         engine.set_reference(ReferenceState::Unlocked);
         let mut client = connected(engine);
 
@@ -138,7 +130,7 @@ mod tests {
     #[test]
     fn many_requests_keep_their_order_and_pairing() {
         let mut engine = MockEngine::new();
-        engine.publish(TakeId("t".into()), Revision(1));
+        engine.publish(TakeId("t".into()), Revision(1), gx_contracts::ContentHash("a".repeat(64)));
         let mut client = connected(engine);
 
         // Each clear commits to a frame; the frames must not go backwards, and
@@ -203,7 +195,7 @@ mod tests {
         // One engine, many clients (ADR: Editor and Playout both connect). A
         // take through one client must be visible to the other.
         let mut engine = MockEngine::new();
-        engine.publish(TakeId("t".into()), Revision(1));
+        engine.publish(TakeId("t".into()), Revision(1), gx_contracts::ContentHash("a".repeat(64)));
         let server = Server::bind(loopback(), None, engine).expect("bind");
         let addr = server.local_addr().unwrap();
         server.serve_in_background();
@@ -211,11 +203,7 @@ mod tests {
         let mut a = Client::connect(addr).expect("client a");
         let mut b = Client::connect(addr).expect("client b");
 
-        a.handle(ClientRequest::Take(TakeRequest {
-            take_id: TakeId("t".into()),
-            revision: Revision(1),
-            at: TakeAt::NextOpportunity,
-        }));
+        a.handle(ClientRequest::Take(TakeRequest { take_id: TakeId("t".into()), revision: Revision(1), content_hash: Some(gx_contracts::ContentHash("a".repeat(64))), at: TakeAt::NextOpportunity }));
 
         let seen_by_b = b.status().expect("status via b");
         assert!(
@@ -267,7 +255,7 @@ mod tests {
     fn named_pipe_round_trip_acknowledges_duplicates_and_closes_on_a_gap() {
         let pipe = local_pipe();
         let mut engine = MockEngine::new();
-        engine.publish(TakeId("pipe-take".into()), Revision(1));
+        engine.publish(TakeId("pipe-take".into()), Revision(1), gx_contracts::ContentHash("a".repeat(64)));
         let server = Server::bind_local(&pipe, None, engine).expect("bind owner-only named pipe");
         server.serve_in_background();
 
@@ -280,11 +268,7 @@ mod tests {
         let take = Envelope::new(
             MessageId("req.take".into()),
             Sequence(1),
-            ClientRequest::Take(TakeRequest {
-                take_id: TakeId("pipe-take".into()),
-                revision: Revision(1),
-                at: TakeAt::NextOpportunity,
-            }),
+            ClientRequest::Take(TakeRequest { take_id: TakeId("pipe-take".into()), revision: Revision(1), content_hash: Some(gx_contracts::ContentHash("a".repeat(64))), at: TakeAt::NextOpportunity }),
         );
         write_envelope(&mut raw, &take);
         let first = read_reply(&mut raw);

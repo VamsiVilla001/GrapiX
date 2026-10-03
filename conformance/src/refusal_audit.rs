@@ -32,7 +32,7 @@ use gx_control_plane::peer::{EnginePeer, FaultInjection};
 use gx_asset_plane::Transfer;
 use gx_mock_engine::MockEngine;
 use gx_media_plane::LocalMediaTransport;
-use gx_playout::{evaluate_automation, AutomationTrigger, PublishedScene, Rundown, RundownEntry};
+use gx_playout::{evaluate_automation, AutomationTrigger, Playout, PublishedScene, Rundown, RundownEntry};
 
 use crate::{expect, Report};
 
@@ -136,7 +136,7 @@ fn drive_control_refusals(report: &mut Report) {
     );
 
     let mut peer = MockEngine::new().genlocked(RationalRate::P50);
-    peer.publish(TakeId("audit/published".into()), Revision(2));
+    peer.publish(TakeId("audit/published".into()), Revision(2), gx_contracts::ContentHash("a".repeat(64)));
     report.record(
         PLANE,
         "RevisionMismatch is produced for a stale published take",
@@ -145,6 +145,7 @@ fn drive_control_refusals(report: &mut Report) {
                 peer.handle(ClientRequest::Take(TakeRequest {
                     take_id: TakeId("audit/published".into()),
                     revision: Revision(1),
+                    content_hash: Some(ContentHash("a".repeat(64))),
                     at: TakeAt::NextOpportunity
                 })),
                 EngineReply::Refused(Refusal::RevisionMismatch {
@@ -163,6 +164,7 @@ fn drive_control_refusals(report: &mut Report) {
                 peer.handle(ClientRequest::Take(TakeRequest {
                     take_id: TakeId("audit/unknown".into()),
                     revision: Revision(1),
+                    content_hash: Some(ContentHash("a".repeat(64))),
                     at: TakeAt::NextOpportunity
                 })),
                 EngineReply::Refused(Refusal::UnknownTake { .. })
@@ -976,10 +978,12 @@ fn drive_playout_refusals(report: &mut Report) {
         revision: Revision(1),
         document: serde_json::Value::Null,
         design_system_version: None,
+        content_hash: None,
+        review: Default::default(),
     };
     let rundown = Rundown::new(vec![RundownEntry {
         id: "opening".into(),
-        scene,
+        scene: scene.clone(),
     }]);
 
     report.record(
@@ -1020,6 +1024,40 @@ fn drive_playout_refusals(report: &mut Report) {
                     if trigger == "open-sting" && matched == "opening"
             ),
             "a matching automation trigger was silent instead of explicitly deferred",
+        ),
+    );
+
+    // The real Playout service, in front of a peer that holds the revision at
+    // a known hash (11.38, invariant 61). A rundown entry without a pin is
+    // refused before anything is sent; one pinning other content is refused
+    // by the peer through the shared rule, under the same name the Playout
+    // mock prints. Neither reaches Program.
+    let held = ContentHash("c".repeat(64));
+    let mut peer = MockEngine::new();
+    peer.publish(TakeId("audit/rundown".into()), Revision(1), held.clone());
+    let mut playout = Playout::new(peer);
+    let unpinned = scene.clone();
+    let unpinned_result = playout.take(&unpinned, TakeAt::NextOpportunity);
+    let mut other = scene.clone();
+    other.content_hash = Some(ContentHash("d".repeat(64)));
+    let other_result = playout.take(&other, TakeAt::NextOpportunity);
+    let program_clear = playout.peer_mut().status().is_some_and(|status| status.program.is_none());
+    report.record(
+        PLANE,
+        "RevisionUnpinned is produced by Playout for a rundown entry with no content hash",
+        expect(
+            matches!(&unpinned_result, Err(Refusal::RevisionUnpinned { take_id, revision: Revision(1) }) if take_id.0 == "audit/rundown")
+                && program_clear,
+            format!("expected RevisionUnpinned from Playout, got {unpinned_result:?}"),
+        ),
+    );
+    report.record(
+        PLANE,
+        "RevisionHashMismatch is produced for a Playout take pinning other content",
+        expect(
+            matches!(&other_result, Err(Refusal::RevisionHashMismatch { expected, .. }) if *expected == held)
+                && program_clear,
+            format!("expected RevisionHashMismatch naming the held hash, got {other_result:?}"),
         ),
     );
 }
@@ -1261,6 +1299,8 @@ fn is_driven(variant: &str) -> bool {
     matches!(
         variant,
         "RevisionMismatch"
+            | "RevisionUnpinned"
+            | "RevisionHashMismatch"
             | "TierTooLow"
             | "ReferenceUnlocked"
             | "UnsupportedBlendMode"

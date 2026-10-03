@@ -180,7 +180,7 @@ mod tests {
     fn every_request_variant_survives_the_wire() {
         use crate::intent::{CueRequest, TakeRequest};
         use crate::message::OutputConfig;
-        use gx_contracts::{Revision, TakeId};
+        use gx_contracts::{ContentHash, Revision, TakeId};
 
         let requests = vec![
             ClientRequest::Capability,
@@ -188,11 +188,14 @@ mod tests {
             ClientRequest::Cue(CueRequest {
                 take_id: TakeId("t".into()),
                 revision: Revision(1),
+                content_hash: Some(ContentHash("a".repeat(64))),
                 at: TakeAt::NextOpportunity,
             }),
+            // Unpinned survives the wire too, so the peer can refuse it by name.
             ClientRequest::Take(TakeRequest {
                 take_id: TakeId("t".into()),
                 revision: Revision(9),
+                content_hash: None,
                 at: TakeAt::Frame { frame: u64::MAX },
             }),
             ClientRequest::Clear(ClearRequest {

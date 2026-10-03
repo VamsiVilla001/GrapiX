@@ -22,7 +22,7 @@ use gx_control_plane::status::ProgramState;
 use serde::{Deserialize, Serialize};
 
 /// The only journal schema this worker understands.
-pub const RECOVERY_SCHEMA_VERSION: u32 = 1;
+pub const RECOVERY_SCHEMA_VERSION: u32 = 2;
 
 /// The journal's standard location beneath the operating-system service root.
 pub const RECOVERY_JOURNAL_RELATIVE_PATH: &str = "render-engine/recovery.json";
@@ -47,7 +47,9 @@ pub struct PreparedSceneRecord {
 pub struct RecoveryState {
     pub schema_version: u32,
     pub epoch: Epoch,
-    pub published: BTreeMap<TakeId, Revision>,
+    /// Each published take's revision and the content hash it pins (schema 2,
+    /// 11.38). A schema-1 journal carries no hashes and is refused by name.
+    pub published: BTreeMap<TakeId, gx_control_plane::intent::HeldRevision>,
     pub prepared_scenes: Vec<PreparedSceneRecord>,
     pub verified_assets: BTreeSet<ContentHash>,
     pub cued: Option<ProgramState>,
@@ -96,10 +98,21 @@ impl RecoveryState {
                     ),
                 });
             }
-            if self.published.get(&scene.take_id) != Some(&scene.revision) {
+            if self.published.get(&scene.take_id).map(|held| held.revision) != Some(scene.revision) {
                 return Err(RecoveryError::InvalidState {
                     detail: format!(
                         "prepared scene {}/{} is not the published revision",
+                        scene.take_id, scene.revision.0
+                    ),
+                });
+            }
+            // The bytes behind a pinned hash must still be those bytes: a
+            // journal that disagrees would let a pin load different content.
+            let pinned = self.published.get(&scene.take_id).map(|held| &held.content_hash);
+            if pinned != Some(&scene.document.content_hash()) {
+                return Err(RecoveryError::InvalidState {
+                    detail: format!(
+                        "prepared scene {}/{} does not hash to its published pin",
                         scene.take_id, scene.revision.0
                     ),
                 });
@@ -108,7 +121,7 @@ impl RecoveryState {
 
         for (name, state) in [("cued", &self.cued), ("program", &self.program)] {
             if let Some(state) = state {
-                if self.published.get(&state.take_id) != Some(&state.revision) {
+                if self.published.get(&state.take_id).map(|held| held.revision) != Some(state.revision) {
                     return Err(RecoveryError::InvalidState {
                         detail: format!(
                             "{name} state {}/{} is not a published revision",
@@ -272,10 +285,23 @@ impl RecoveryJournal {
                 })
             }
         };
-        let state: RecoveryState = serde_json::from_slice(&bytes).map_err(|source| RecoveryError::Decode {
+        let decode = |source| RecoveryError::Decode {
             path: self.path.clone(),
             source,
-        })?;
+        };
+        // The schema version is read before the body, so a journal from
+        // another schema is refused by that name rather than as whichever
+        // field happened to change shape first.
+        let raw: serde_json::Value = serde_json::from_slice(&bytes).map_err(decode)?;
+        if let Some(found) = raw.get("schemaVersion").and_then(serde_json::Value::as_u64) {
+            if found != u64::from(RECOVERY_SCHEMA_VERSION) {
+                return Err(RecoveryError::UnsupportedSchema {
+                    found: u32::try_from(found).unwrap_or(u32::MAX),
+                    supported: RECOVERY_SCHEMA_VERSION,
+                });
+            }
+        }
+        let state: RecoveryState = serde_json::from_value(raw).map_err(decode)?;
         state.validate()?;
         Ok(Some(state))
     }

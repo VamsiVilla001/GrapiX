@@ -31,8 +31,9 @@ pub mod validate;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-/// Wire protocol version. A mismatch is an error code, never a negotiation.
-pub const PROTOCOL_VERSION: u32 = 3;
+/// Wire protocol version 4 (11.38): cue and take carry the content hash they
+/// pin. A mismatch is an error code, never a negotiation.
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// Stable identity of a published scene. Survives every republish.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
@@ -83,6 +84,42 @@ impl Revision {
             })
         }
     }
+}
+
+/// Where a published revision stands in review (11.38). Every publish starts
+/// as `Draft`. Only a human operator moves it on: no agent-scoped surface can
+/// set it (invariant 65), so an agent's draft never approves itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ReviewState {
+    #[default]
+    Draft,
+    Proposed,
+    Approved,
+}
+
+/// `playout.review`'s input: which revision, and the state an operator sets.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewRequest {
+    pub take_id: TakeId,
+    pub revision: Revision,
+    pub review: ReviewState,
+}
+
+/// One published revision as Playout lists and reviews it: the hash a cue or
+/// take must pin (invariant 61) and where it stands in review.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishedRevision {
+    pub take_id: TakeId,
+    pub revision: Revision,
+    /// Absent only for a revision recorded before pinning existed, which
+    /// cannot be taken (`RevisionUnpinned`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub content_hash: Option<ContentHash>,
+    pub review: ReviewState,
 }
 
 /// A write attempted against a stale revision (0.8).
@@ -239,6 +276,17 @@ pub enum Refusal {
     RevisionMismatch {
         expected: Revision,
         actual: Revision,
+    },
+    /// A cue or take named a revision but no content hash. Playout loads a
+    /// revision only by its pinned hash (invariant 61).
+    RevisionUnpinned { take_id: TakeId, revision: Revision },
+    /// A cue or take pinned a content hash the revision does not have: the
+    /// bytes it would load are not the bytes the caller pinned.
+    RevisionHashMismatch {
+        take_id: TakeId,
+        revision: Revision,
+        expected: ContentHash,
+        actual: ContentHash,
     },
     /// Device tier is below T0 and a live adapter was requested.
     TierTooLow { actual: DeviceTier },
@@ -767,6 +815,21 @@ impl std::fmt::Display for Refusal {
                     expected.0, actual.0
                 )
             }
+            Refusal::RevisionUnpinned { take_id, revision } => write!(
+                f,
+                "{take_id} revision {} names no content hash; revisions load only by pinned hash",
+                revision.0
+            ),
+            Refusal::RevisionHashMismatch {
+                take_id,
+                revision,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "{take_id} revision {} is {expected}, but the pin names {actual}",
+                revision.0
+            ),
             Refusal::TierTooLow { actual } => write!(f, "device tier too low: {actual:?}"),
             Refusal::ReferenceUnlocked { state } => write!(f, "reference not locked: {state:?}"),
             Refusal::UnsupportedBlendMode { mode } => write!(f, "unsupported blend mode: {mode:?}"),
@@ -1295,6 +1358,16 @@ impl Refusal {
                 expected: Revision(1),
                 actual: Revision(0),
             },
+            Self::RevisionUnpinned {
+                take_id: TakeId("audit".into()),
+                revision: Revision(1),
+            },
+            Self::RevisionHashMismatch {
+                take_id: TakeId("audit".into()),
+                revision: Revision(1),
+                expected: ContentHash("audit".into()),
+                actual: ContentHash("audit".into()),
+            },
             Self::TierTooLow {
                 actual: DeviceTier::T3,
             },
@@ -1700,6 +1773,8 @@ impl Refusal {
     pub const fn code_name(&self) -> &'static str {
         match self {
             Self::RevisionMismatch { .. } => "revisionMismatch",
+            Self::RevisionUnpinned { .. } => "revisionUnpinned",
+            Self::RevisionHashMismatch { .. } => "revisionHashMismatch",
             Self::TierTooLow { .. } => "tierTooLow",
             Self::ReferenceUnlocked { .. } => "referenceUnlocked",
             Self::UnsupportedBlendMode { .. } => "unsupportedBlendMode",

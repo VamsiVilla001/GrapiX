@@ -12,6 +12,10 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 ts-rs = { workspace = true }
 schemars = { workspace = true }
+# Already a workspace dependency (asset-plane, editor). Here it computes the
+# content address of a published scene revision (11.38, invariant 61), which
+# the engine, Playout and both mocks must agree on byte for byte.
+sha2 = { workspace = true }
 url = { workspace = true }
 directories = "6"
 unicode-normalization = "0.1"

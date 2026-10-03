@@ -145,7 +145,10 @@ pub const TOOLS: &[ToolDescriptor] = &[
     tool("packages.publish", "packages", ToolEffect::Write, Scope::Author, "PackagePublish", "PublishResult", "Publish a package. Returns Take ID and revision."),
     // playout and outputs (8.11) — scope-gated, and the reason the whole
     // scope model exists.
-    tool("playout.library", "playout", ToolEffect::Read, Scope::Author, "()", "LibraryList", "Published takes and their revisions."),
+    tool("playout.library", "playout", ToolEffect::Read, Scope::Author, "()", "LibraryList", "Published takes, their revisions, each revision's content hash and review state."),
+    // 11.38: review is an operator's act. `Take` is the scope a human
+    // operator holds and an agent credential never does (invariant 65).
+    tool("playout.review", "playout", ToolEffect::Write, Scope::Take, "ReviewRequest", "PublishedRevision", "Set a published revision's review state: draft, proposed or approved. The content does not change."),
     tool("playout.cue", "playout", ToolEffect::Write, Scope::Cue, "CueRequest", "TakeCommitted", "Cue a published revision."),
     tool("playout.take", "playout", ToolEffect::Write, Scope::Take, "TakeRequest", "TakeCommitted", "Take a published revision to Program."),
     tool("playout.clear", "playout", ToolEffect::Write, Scope::Clear, "ClearRequest", "TakeCommitted", "Clear Program."),

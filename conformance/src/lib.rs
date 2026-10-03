@@ -231,11 +231,7 @@ pub fn control_plane_suite<P: EnginePeer>(peer: &mut P, report: &mut Report) {
     };
 
     // A take of something never published must refuse, and name which failure.
-    let unknown = peer.handle(ClientRequest::Take(TakeRequest {
-        take_id: TakeId("conformance/definitely-not-published".into()),
-        revision: Revision(1),
-        at: TakeAt::NextOpportunity,
-    }));
+    let unknown = peer.handle(ClientRequest::Take(TakeRequest { take_id: TakeId("conformance/definitely-not-published".into()), revision: Revision(1), content_hash: Some(gx_contracts::ContentHash("a".repeat(64))), at: TakeAt::NextOpportunity }));
     report.record(
         PLANE,
         "an unpublished take is refused by name",
@@ -251,11 +247,7 @@ pub fn control_plane_suite<P: EnginePeer>(peer: &mut P, report: &mut Report) {
 
     // A frame already behind the engine cannot be committed to.
     let past = status.current_frame.saturating_sub(1);
-    let stale = peer.handle(ClientRequest::Take(TakeRequest {
-        take_id: TakeId("conformance/definitely-not-published".into()),
-        revision: Revision(1),
-        at: TakeAt::Frame { frame: past },
-    }));
+    let stale = peer.handle(ClientRequest::Take(TakeRequest { take_id: TakeId("conformance/definitely-not-published".into()), revision: Revision(1), content_hash: Some(gx_contracts::ContentHash("a".repeat(64))), at: TakeAt::Frame { frame: past } }));
     report.record(
         PLANE,
         "a take in the past is refused, never fired late",
@@ -285,11 +277,7 @@ pub fn control_plane_suite<P: EnginePeer>(peer: &mut P, report: &mut Report) {
     );
 
     // A cue must not reach Program.
-    let cue = peer.handle(ClientRequest::Cue(CueRequest {
-        take_id: TakeId("conformance/definitely-not-published".into()),
-        revision: Revision(1),
-        at: TakeAt::NextOpportunity,
-    }));
+    let cue = peer.handle(ClientRequest::Cue(CueRequest { take_id: TakeId("conformance/definitely-not-published".into()), revision: Revision(1), content_hash: Some(gx_contracts::ContentHash("a".repeat(64))), at: TakeAt::NextOpportunity }));
     report.record(
         PLANE,
         "cue of an unpublished scene refuses like take",
@@ -729,11 +717,13 @@ pub fn timing_plane_suite(report: &mut Report) {
         ClientRequest::Cue(CueRequest {
             take_id: TakeId("t".into()),
             revision: Revision(1),
+            content_hash: Some(gx_contracts::ContentHash("a".repeat(64))),
             at: TakeAt::NextOpportunity,
         }),
         ClientRequest::Take(TakeRequest {
             take_id: TakeId("t".into()),
             revision: Revision(1),
+            content_hash: Some(gx_contracts::ContentHash("a".repeat(64))),
             at: TakeAt::Frame { frame: 42 },
         }),
         ClientRequest::Clear(ClearRequest {

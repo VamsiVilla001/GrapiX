@@ -16,7 +16,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use gx_asset_plane::AssetPublishServer;
-use gx_contracts::{Locality, RationalRate, Revision, TakeId};
+use gx_contracts::{ContentHash, Locality, RationalRate, Revision, TakeId};
 use gx_control_plane::bind::ENGINE_CONTROL_PORT;
 use gx_control_transport::Server;
 use gx_render_worker::recovery::RecoveryJournal;
@@ -30,7 +30,7 @@ fn main() {
     let mut recovery_path: Option<PathBuf> = None;
     let mut lan = false;
     let mut rate = RationalRate::P50;
-    let mut publish_specs: Vec<(TakeId, Revision)> = Vec::new();
+    let mut publish_specs: Vec<(TakeId, Revision, ContentHash)> = Vec::new();
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -53,7 +53,7 @@ fn main() {
             },
             "--publish" => match args.next().and_then(|s| parse_publish(&s)) {
                 Some(spec) => publish_specs.push(spec),
-                None => return usage("--publish needs id:revision"),
+                None => return usage("--publish needs id:revision:sha256"),
             },
             "--token" => match args.next() {
                 Some(t) => token = Some(t),
@@ -77,8 +77,8 @@ fn main() {
 
     let mut engine = Engine::new(Arc::clone(&frame_source), locality);
     let tier = engine.device_tier();
-    for (id, revision) in publish_specs {
-        engine.publish_identifier(id, revision);
+    for (id, revision, content_hash) in publish_specs {
+        engine.publish_identifier(id, revision, content_hash);
     }
     let recovery = match recovery_path {
         Some(path) => RecoveryJournal::open_at(path),
@@ -210,9 +210,16 @@ fn parse_rate(s: &str) -> Option<RationalRate> {
     })
 }
 
-fn parse_publish(spec: &str) -> Option<(TakeId, Revision)> {
-    let (id, revision) = spec.rsplit_once(':')?;
-    Some((TakeId(id.to_string()), Revision(revision.parse().ok()?)))
+/// `id:revision:sha256`: an identifier-only publish declares the content hash
+/// a take must pin (invariant 61).
+fn parse_publish(spec: &str) -> Option<(TakeId, Revision, ContentHash)> {
+    let (rest, hash) = spec.rsplit_once(':')?;
+    let (id, revision) = rest.rsplit_once(':')?;
+    let is_hash = hash.len() == 64 && hash.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+    if id.is_empty() || !is_hash {
+        return None;
+    }
+    Some((TakeId(id.to_string()), Revision(revision.parse().ok()?), ContentHash(hash.to_string())))
 }
 
 fn usage(problem: &str) {
@@ -221,7 +228,7 @@ fn usage(problem: &str) {
     }
     eprintln!(
         "gx-render-worker [--port N] [--asset-port N] [--recovery-journal PATH] \
-         [--lan] [--rate R] [--publish id:rev ...] [--token SECRET]"
+         [--lan] [--rate R] [--publish id:rev:sha256 ...] [--token SECRET]"
     );
     std::process::exit(if problem.is_empty() { 0 } else { 2 });
 }
