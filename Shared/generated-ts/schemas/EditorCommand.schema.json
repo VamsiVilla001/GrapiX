@@ -805,13 +805,23 @@
       "type": "object"
     },
     "EditScene": {
-      "description": "Apply an ordered, atomic edit batch to one document.",
+      "description": "Apply an ordered, atomic edit batch to one document. One batch is\none undo entry, tagged with the module that issued it.",
       "properties": {
         "edits": {
           "items": {
             "$ref": "#/$defs/SceneEdit"
           },
           "type": "array"
+        },
+        "module": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EditorModule"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "target": {
           "$ref": "#/$defs/SceneTarget"
@@ -822,6 +832,25 @@
         "edits"
       ],
       "type": "object"
+    },
+    "EditorModule": {
+      "description": "The Editor module a gesture came from (11.37). Undo scoped to a module\nreverses only batches tagged with it; an untagged batch belongs to\n`Scene`. The surface that issues a gesture names its own module, because\nguessing it from edit kinds would misfile a gesture that touches several.",
+      "enum": [
+        "scene",
+        "viewport",
+        "objectManager",
+        "inspector",
+        "timeline",
+        "animation",
+        "materials",
+        "fonts",
+        "textStyles",
+        "assets",
+        "takePage",
+        "bindings",
+        "controlContract"
+      ],
+      "type": "string"
     },
     "EmbeddingPolicy": {
       "description": "Whether a font's bytes may travel inside a `.gpxpkg` — the licensing\ndecision made per font (docs/p2-licensing-positions.md §5).",
@@ -1518,8 +1547,18 @@
       "type": "string"
     },
     "Redo": {
-      "description": "Reapply the last undone batch.",
+      "description": "Reapply the latest undone batch, or the latest one `module` issued.",
       "properties": {
+        "module": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EditorModule"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "session": {
           "$ref": "#/$defs/SessionKey"
         }
@@ -2657,8 +2696,18 @@
       "type": "string"
     },
     "Undo": {
-      "description": "Restore a session's previous document.",
+      "description": "Reverse the latest applied batch, or the latest one `module` issued.",
       "properties": {
+        "module": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EditorModule"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "session": {
           "$ref": "#/$defs/SessionKey"
         }

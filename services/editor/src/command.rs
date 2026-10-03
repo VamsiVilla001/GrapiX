@@ -14,6 +14,15 @@
 //! selection, playhead, folds — stays in the browser, because it is not the
 //! scene.
 //!
+//! **History is the command log (11.37).** A session keeps a base document
+//! and the `EditScene` batches applied since, each tagged with the module that
+//! issued it. The document is always the base with the active batches
+//! replayed in order; undo deactivates a batch and replays. So undoing every
+//! batch gives back the base byte for byte, and a module's undo removes only
+//! that module's batch. When removing (or restoring) one batch would make a
+//! later batch refuse, the replay is discarded and the undo refuses
+//! `HistoryConflict` by name; nothing changes.
+//!
 //! **What reaches disk, and when.**
 //! - A `Session` edit changes memory only. Saving is a separate command, and a
 //!   save marks the session clean only once the write succeeded.
@@ -24,13 +33,13 @@
 //!   workspace is safe to recover.
 
 use std::borrow::Cow;
-use std::collections::VecDeque;
 use std::path::PathBuf;
 
 use gx_contracts::animation::validate_scene_animation;
 use gx_contracts::command::{
-    apply_edits, CommandOutcome, EditContext, EditEffect, EditorCommand, HistoryDirection,
-    SaveTarget, SceneEdit, SceneOrigin, SceneSource, SceneTarget, SessionKey, SessionView,
+    apply_edits, CommandOutcome, EditContext, EditEffect, EditorCommand, EditorModule,
+    HistoryDirection, SaveTarget, SceneEdit, SceneOrigin, SceneSource, SceneTarget, SessionKey,
+    SessionView,
 };
 use gx_contracts::control::TakePage;
 use gx_contracts::design_system::{DesignSystem, DesignSystemCommit};
@@ -83,6 +92,21 @@ impl From<EditorError> for CommandError {
     }
 }
 
+/// One `EditScene` batch in a session's history, with everything needed to
+/// replay it exactly: the context it was applied under is kept, so binding the
+/// session to a project later, or a newer design-system version, cannot change
+/// what replaying it produces.
+#[derive(Debug)]
+struct LogEntry {
+    seq: u64,
+    edits: Vec<SceneEdit>,
+    module: EditorModule,
+    origin: Option<SceneOrigin>,
+    design_system: Option<DesignSystem>,
+    /// False once undone. An inactive entry is replayed again only by redo.
+    active: bool,
+}
+
 /// One open scene.
 #[derive(Debug)]
 struct Session {
@@ -93,10 +117,14 @@ struct Session {
     origin: Option<SceneOrigin>,
     /// A file path, when the scene was opened from or saved to one.
     path: Option<String>,
-    /// Whole-document snapshots. One command is one entry, so one undo
-    /// reverses exactly one gesture.
-    undo: VecDeque<SceneDocument>,
-    redo: Vec<SceneDocument>,
+    /// The document replay starts from: as opened, with the oldest batches
+    /// folded in once history passes `MAX_HISTORY`.
+    base: SceneDocument,
+    /// Batches since `base`, in the order they were first applied.
+    log: Vec<LogEntry>,
+    /// Undone batches by `seq`, most recently undone last.
+    redo: Vec<u64>,
+    next_seq: u64,
     /// Edited since the last successful save, to a project or to a file. What
     /// a close refuses on.
     dirty: bool,
@@ -110,11 +138,13 @@ impl Session {
     fn open(key: SessionKey, document: SceneDocument, origin: Option<SceneOrigin>, path: Option<String>) -> Self {
         Self {
             key,
+            base: document.clone(),
             document,
             origin,
             path,
-            undo: VecDeque::new(),
+            log: Vec::new(),
             redo: Vec::new(),
+            next_seq: 1,
             dirty: false,
             project_dirty: false,
         }
@@ -126,7 +156,7 @@ impl Session {
             document: self.document.clone(),
             origin: self.origin.clone(),
             path: self.path.clone(),
-            undo_depth: self.undo.len() as u32,
+            undo_depth: self.log.iter().filter(|entry| entry.active).count() as u32,
             redo_depth: self.redo.len() as u32,
             dirty: self.dirty,
             project_dirty: self.project_dirty,
@@ -142,20 +172,70 @@ impl Session {
         }
     }
 
-    fn push_undo(&mut self, snapshot: SceneDocument) {
-        if self.undo.len() == MAX_HISTORY {
-            self.undo.pop_front();
-        }
-        self.undo.push_back(snapshot);
-    }
-
-    /// Record a completed edit whose before-image is `before`. A new edit
-    /// forks history, so whatever could have been redone is gone.
-    fn record(&mut self, before: SceneDocument) {
-        self.push_undo(before);
+    /// Record a batch that has just been applied to `document`. A new batch
+    /// forks history: whatever could have been redone is gone.
+    fn record(&mut self, edits: &[SceneEdit], module: EditorModule, design_system: Option<DesignSystem>) {
+        self.log.retain(|entry| entry.active);
         self.redo.clear();
+        self.log.push(LogEntry {
+            seq: self.next_seq,
+            edits: edits.to_vec(),
+            module,
+            origin: self.origin.clone(),
+            design_system,
+            active: true,
+        });
+        self.next_seq += 1;
+        // Fold the oldest batches into the base. Every entry is active here,
+        // and replay is deterministic, so the fold reproduces the state they
+        // first produced; if it ever did not, the entry stays in the log.
+        while self.log.len() > MAX_HISTORY {
+            let mut folded = self.base.clone();
+            let oldest = &self.log[0];
+            if apply_entry(&mut folded, oldest).is_err() {
+                break;
+            }
+            self.base = folded;
+            self.log.remove(0);
+        }
         self.mark_edited();
     }
+
+    /// The document with the active batches replayed over the base.
+    fn replay(&self) -> Result<SceneDocument, Refusal> {
+        let mut document = self.base.clone();
+        for entry in self.log.iter().filter(|entry| entry.active) {
+            apply_entry(&mut document, entry)?;
+        }
+        Ok(document)
+    }
+
+    /// Flip one entry and replay; on a refusal, flip it back and refuse.
+    fn toggle_and_replay(&mut self, index: usize, direction: HistoryDirection) -> Result<(), Refusal> {
+        self.log[index].active = !self.log[index].active;
+        match self.replay() {
+            Ok(document) => {
+                self.document = document;
+                Ok(())
+            }
+            Err(refusal) => {
+                self.log[index].active = !self.log[index].active;
+                Err(Refusal::HistoryConflict {
+                    session: self.key,
+                    direction,
+                    detail: format!("[{}] {refusal}", refusal.code_name()),
+                })
+            }
+        }
+    }
+}
+
+fn apply_entry(document: &mut SceneDocument, entry: &LogEntry) -> Result<(), Refusal> {
+    let context = EditContext {
+        design_system: entry.design_system.as_ref(),
+        origin: entry.origin.as_ref(),
+    };
+    apply_edits(document, &entry.edits, &context).map(|_| ())
 }
 
 /// The open scenes, plus the project store when one is available.
@@ -186,9 +266,9 @@ impl Workspace {
         match command {
             EditorCommand::OpenScene(p) => self.open(p.source),
             EditorCommand::CloseScene(p) => self.close(p.session, p.force),
-            EditorCommand::EditScene(p) => self.edit(p.target, &p.edits),
-            EditorCommand::Undo(p) => self.step_history(p.session, HistoryDirection::Undo),
-            EditorCommand::Redo(p) => self.step_history(p.session, HistoryDirection::Redo),
+            EditorCommand::EditScene(p) => self.edit(p.target, &p.edits, p.module.unwrap_or(EditorModule::Scene)),
+            EditorCommand::Undo(p) => self.step_history(p.session, HistoryDirection::Undo, p.module),
+            EditorCommand::Redo(p) => self.step_history(p.session, HistoryDirection::Redo, p.module),
             EditorCommand::SaveScene(p) => self.save(p.session, p.to),
             EditorCommand::CreateProject(p) => self.create_project(p.project),
             EditorCommand::CreateScene(p) => self.create_scene(p.project, p.scene_id, p.name),
@@ -303,7 +383,7 @@ impl Workspace {
         })
     }
 
-    fn edit(&mut self, target: SceneTarget, edits: &[SceneEdit]) -> Result<CommandOutcome, CommandError> {
+    fn edit(&mut self, target: SceneTarget, edits: &[SceneEdit], module: EditorModule) -> Result<CommandOutcome, CommandError> {
         match target {
             SceneTarget::Session { session: key } => {
                 let index = self.index(key)?;
@@ -318,7 +398,7 @@ impl Workspace {
                 // A batch that changed nothing is not a gesture: no history
                 // entry, no unsaved mark.
                 if session.document != before {
-                    session.record(before);
+                    session.record(edits, module, design_system);
                 }
                 Ok(CommandOutcome {
                     session: Some(session.view()),
@@ -366,17 +446,43 @@ impl Workspace {
         }
     }
 
-    fn step_history(&mut self, key: SessionKey, direction: HistoryDirection) -> Result<CommandOutcome, CommandError> {
+    fn step_history(
+        &mut self,
+        key: SessionKey,
+        direction: HistoryDirection,
+        module: Option<EditorModule>,
+    ) -> Result<CommandOutcome, CommandError> {
         let session = self.session_mut(key)?;
-        let restored = match direction {
-            HistoryDirection::Undo => session.undo.pop_back(),
-            HistoryDirection::Redo => session.redo.pop(),
-        }
-        .ok_or(Refusal::HistoryEmpty { session: key, direction })?;
-        let current = std::mem::replace(&mut session.document, restored);
+        let in_scope = |entry: &LogEntry| module.is_none_or(|module| entry.module == module);
+        let empty = || match module {
+            Some(module) => Refusal::ModuleHistoryEmpty { session: key, direction, module },
+            None => Refusal::HistoryEmpty { session: key, direction },
+        };
         match direction {
-            HistoryDirection::Undo => session.redo.push(current),
-            HistoryDirection::Redo => session.push_undo(current),
+            HistoryDirection::Undo => {
+                let index = session
+                    .log
+                    .iter()
+                    .rposition(|entry| entry.active && in_scope(entry))
+                    .ok_or_else(empty)?;
+                session.toggle_and_replay(index, direction)?;
+                session.redo.push(session.log[index].seq);
+            }
+            HistoryDirection::Redo => {
+                let position = session
+                    .redo
+                    .iter()
+                    .rposition(|seq| session.log.iter().any(|entry| entry.seq == *seq && in_scope(entry)))
+                    .ok_or_else(empty)?;
+                let seq = session.redo[position];
+                let index = session
+                    .log
+                    .iter()
+                    .position(|entry| entry.seq == seq)
+                    .expect("every redo seq names a logged entry");
+                session.toggle_and_replay(index, direction)?;
+                session.redo.remove(position);
+            }
         }
         session.mark_edited();
         Ok(CommandOutcome {
@@ -643,10 +749,12 @@ mod tests {
 
     use gx_contracts::animation::{KeyframeChannel, SceneEasing, SceneKeyframe};
     use gx_contracts::command::{
-        CloseScene, ConfirmDesignSystem, CreateObject, CreateProject, CreateScene, DeclareControl,
-        DeleteScene, DuplicateScene, EditScene, OpenScene, Redo, RenameObject, SaveScene,
-        SaveTakePage, SetBinding, SetSceneId, SetSceneName, Undo,
+        CloseScene, ConfirmDesignSystem, CreateKeyframe, CreateObject, CreateProject, CreateScene,
+        DeclareControl, DeleteScene, DuplicateScene, EditScene, OpenScene, Redo, RenameObject,
+        SaveScene, SaveTakePage, SetBinding, SetObjectField, SetObjectLocked, SetObjectVisible,
+        SetSceneId, SetSceneName, Undo,
     };
+    use gx_contracts::object_edit::ObjectField;
     use gx_contracts::control::{ControlField, ControlFieldKind, ControlValue};
     use gx_contracts::scene::{
         AssetKind, AssetLibraryItem, ImageObject, ObjectBase, RectObject, SceneObject,
@@ -734,13 +842,14 @@ mod tests {
     }
 
     fn edit(session: SessionKey, edits: Vec<SceneEdit>) -> EditorCommand {
-        EditorCommand::EditScene(EditScene { target: SceneTarget::Session { session }, edits })
+        EditorCommand::EditScene(EditScene { target: SceneTarget::Session { session }, edits, module: None })
     }
 
     fn stored_edit(scene_id: &str, edits: Vec<SceneEdit>) -> EditorCommand {
         EditorCommand::EditScene(EditScene {
             target: SceneTarget::Stored { project: "news".into(), scene_id: scene_id.into() },
             edits,
+            module: None,
         })
     }
 
@@ -749,11 +858,11 @@ mod tests {
     }
 
     fn undo(session: SessionKey) -> EditorCommand {
-        EditorCommand::Undo(Undo { session })
+        EditorCommand::Undo(Undo { session, module: None })
     }
 
     fn redo(session: SessionKey) -> EditorCommand {
-        EditorCommand::Redo(Redo { session })
+        EditorCommand::Redo(Redo { session, module: None })
     }
 
     fn close(session: SessionKey, force: bool) -> EditorCommand {
@@ -910,6 +1019,150 @@ mod tests {
         );
         assert!(matches!(refused, Refusal::SceneObjectUnknown { .. }));
         assert_eq!(workspace.view(session).unwrap(), before, "the created rect did not land either");
+    }
+
+    // --- history on the command log (11.37) ---------------------------------
+
+    fn tagged(session: SessionKey, module: EditorModule, edits: Vec<SceneEdit>) -> EditorCommand {
+        EditorCommand::EditScene(EditScene {
+            target: SceneTarget::Session { session },
+            edits,
+            module: Some(module),
+        })
+    }
+
+    fn content_hash(workspace: &Workspace, session: SessionKey) -> String {
+        use sha2::{Digest, Sha256};
+        let document = workspace.view(session).expect("the session is open").document;
+        format!("{:x}", Sha256::digest(serde_json::to_vec(&document).expect("a document serialises")))
+    }
+
+    fn create_rect(name: &str) -> SceneEdit {
+        SceneEdit::CreateObject(CreateObject { kind: "rect".into(), name: name.into() })
+    }
+
+    fn set_field(object: &str, field: ObjectField) -> SceneEdit {
+        SceneEdit::SetObjectField(SetObjectField { object_ids: vec![object.into()], field })
+    }
+
+    #[test]
+    fn undoing_every_command_restores_the_content_hash_and_redoing_reaches_the_edited_one() {
+        let mut workspace = Workspace::new(None);
+        let session = open_new(&mut workspace, "a", "a");
+        let original = content_hash(&workspace, session);
+        let commands = vec![
+            tagged(session, EditorModule::ObjectManager, vec![create_rect("Card")]),
+            tagged(session, EditorModule::Inspector, vec![set_field("rect-1", ObjectField::X(120.0))]),
+            tagged(
+                session,
+                EditorModule::Timeline,
+                vec![SceneEdit::CreateKeyframe(CreateKeyframe {
+                    object_id: "rect-1".into(),
+                    property: "x".into(),
+                    keyframe: SceneKeyframe { frame: 0, value: 120.0, easing: SceneEasing::Linear, bezier: None },
+                })],
+            ),
+            tagged(session, EditorModule::Scene, vec![rename_scene("Edited")]),
+            tagged(
+                session,
+                EditorModule::ObjectManager,
+                vec![SceneEdit::SetObjectVisible(SetObjectVisible { object_id: "rect-1".into(), visible: false })],
+            ),
+        ];
+        let count = commands.len();
+        for command in commands {
+            run(&mut workspace, command);
+        }
+        let edited = content_hash(&workspace, session);
+        assert_ne!(edited, original);
+
+        for _ in 0..count {
+            run(&mut workspace, undo(session));
+        }
+        assert_eq!(content_hash(&workspace, session), original, "every undo replays back to the base");
+        for _ in 0..count {
+            run(&mut workspace, redo(session));
+        }
+        assert_eq!(content_hash(&workspace, session), edited, "every redo replays forward to the edit");
+    }
+
+    #[test]
+    fn a_module_undo_reverses_only_that_modules_commands_in_an_interleaved_history() {
+        let setup = vec![create_rect("Card")];
+        let inspector_x = vec![set_field("rect-1", ObjectField::X(100.0))];
+        let hide = vec![SceneEdit::SetObjectVisible(SetObjectVisible { object_id: "rect-1".into(), visible: false })];
+        let inspector_y = vec![set_field("rect-1", ObjectField::Y(50.0))];
+        let lock = vec![SceneEdit::SetObjectLocked(SetObjectLocked { object_id: "rect-1".into(), locked: true })];
+
+        let mut workspace = Workspace::new(None);
+        let session = open_new(&mut workspace, "a", "a");
+        for (module, edits) in [
+            (EditorModule::Scene, setup.clone()),
+            (EditorModule::Inspector, inspector_x),
+            (EditorModule::ObjectManager, hide.clone()),
+            (EditorModule::Inspector, inspector_y),
+            (EditorModule::ObjectManager, lock.clone()),
+        ] {
+            run(&mut workspace, tagged(session, module, edits));
+        }
+        let module_undo = |session| EditorCommand::Undo(Undo { session, module: Some(EditorModule::Inspector) });
+        run(&mut workspace, module_undo(session));
+        run(&mut workspace, module_undo(session));
+
+        // The same document built from only the other module's commands.
+        let mut expected = Workspace::new(None);
+        let other = open_new(&mut expected, "a", "a");
+        for edits in [setup, hide, lock] {
+            run(&mut expected, edit(other, edits));
+        }
+        assert_eq!(content_hash(&workspace, session), content_hash(&expected, other));
+
+        // Nothing of the inspector's is left to undo, and the object
+        // manager's two commands are still the project-level history.
+        assert!(matches!(
+            refusal(&mut workspace, module_undo(session)),
+            Refusal::ModuleHistoryEmpty { module: EditorModule::Inspector, direction: HistoryDirection::Undo, .. }
+        ));
+        assert_eq!(workspace.view(session).unwrap().undo_depth, 3);
+
+        // A module redo brings back that module's latest undone command.
+        run(&mut workspace, EditorCommand::Redo(Redo { session, module: Some(EditorModule::Inspector) }));
+        let document = workspace.view(session).unwrap().document;
+        let card = document.objects.iter().find(|object| object.base().id == "rect-1").unwrap().base();
+        assert_eq!((card.x, card.visible, card.locked), (100.0, false, true));
+    }
+
+    #[test]
+    fn an_undo_that_would_break_a_later_command_refuses_and_changes_nothing() {
+        let mut workspace = Workspace::new(None);
+        let session = open_new(&mut workspace, "a", "a");
+        run(&mut workspace, tagged(session, EditorModule::ObjectManager, vec![create_rect("Card")]));
+        run(
+            &mut workspace,
+            tagged(
+                session,
+                EditorModule::Timeline,
+                vec![SceneEdit::CreateKeyframe(CreateKeyframe {
+                    object_id: "rect-1".into(),
+                    property: "x".into(),
+                    keyframe: SceneKeyframe { frame: 0, value: 10.0, easing: SceneEasing::Linear, bezier: None },
+                })],
+            ),
+        );
+        let before = workspace.view(session).unwrap();
+        let refused = refusal(
+            &mut workspace,
+            EditorCommand::Undo(Undo { session, module: Some(EditorModule::ObjectManager) }),
+        );
+        assert!(
+            matches!(&refused, Refusal::HistoryConflict { direction: HistoryDirection::Undo, detail, .. } if detail.starts_with("[sceneObjectUnknown]")),
+            "{refused:?}"
+        );
+        assert_eq!(workspace.view(session).unwrap(), before);
+        // Undoing in order still works: the key first, then the object.
+        run(&mut workspace, undo(session));
+        run(&mut workspace, undo(session));
+        assert!(workspace.view(session).unwrap().document.objects.is_empty());
     }
 
     // --- opening and closing ----------------------------------------------

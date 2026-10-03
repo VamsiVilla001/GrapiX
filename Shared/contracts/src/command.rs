@@ -161,6 +161,28 @@ pub enum HistoryDirection {
     Redo,
 }
 
+/// The Editor module a gesture came from (11.37). Undo scoped to a module
+/// reverses only batches tagged with it; an untagged batch belongs to
+/// `Scene`. The surface that issues a gesture names its own module, because
+/// guessing it from edit kinds would misfile a gesture that touches several.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum EditorModule {
+    Scene,
+    Viewport,
+    ObjectManager,
+    Inspector,
+    Timeline,
+    Animation,
+    Materials,
+    Fonts,
+    TextStyles,
+    Assets,
+    TakePage,
+    Bindings,
+    ControlContract,
+}
+
 commands! {
     /// The one editor command type. Every authoring mutation, from every
     /// surface (Tauri, MCP), is a value of this type.
@@ -169,12 +191,29 @@ commands! {
         OpenScene = "openScene" { pub source: SceneSource },
         /// Close a session; a dirty session refuses unless `force`.
         CloseScene = "closeScene" { pub session: SessionKey, pub force: bool },
-        /// Apply an ordered, atomic edit batch to one document.
-        EditScene = "editScene" { pub target: SceneTarget, pub edits: Vec<SceneEdit> },
-        /// Restore a session's previous document.
-        Undo = "undo" { pub session: SessionKey },
-        /// Reapply the last undone batch.
-        Redo = "redo" { pub session: SessionKey },
+        /// Apply an ordered, atomic edit batch to one document. One batch is
+        /// one undo entry, tagged with the module that issued it.
+        EditScene = "editScene" {
+            pub target: SceneTarget,
+            pub edits: Vec<SceneEdit>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub module: Option<EditorModule>,
+        },
+        /// Reverse the latest applied batch, or the latest one `module` issued.
+        Undo = "undo" {
+            pub session: SessionKey,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub module: Option<EditorModule>,
+        },
+        /// Reapply the latest undone batch, or the latest one `module` issued.
+        Redo = "redo" {
+            pub session: SessionKey,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub module: Option<EditorModule>,
+        },
         /// Persist a session's document.
         SaveScene = "saveScene" { pub session: SessionKey, pub to: SaveTarget },
         /// Create an empty project in the store.
@@ -659,9 +698,15 @@ pub mod witness {
             EditorCommand::EditScene(EditScene {
                 target: SceneTarget::Session { session },
                 edits: scene_edits(),
+                module: Some(EditorModule::Inspector),
             }),
-            EditorCommand::Undo(Undo { session }),
-            EditorCommand::Redo(Redo { session }),
+            // One module-scoped undo and one project-level redo, so both
+            // scopes run over the wire.
+            EditorCommand::Undo(Undo {
+                session,
+                module: Some(EditorModule::Inspector),
+            }),
+            EditorCommand::Redo(Redo { session, module: None }),
             EditorCommand::SaveScene(SaveScene {
                 session,
                 to: SaveTarget::File {
@@ -1188,6 +1233,7 @@ mod tests {
                     property: "x".into(),
                     path: None,
                 })],
+                module: None,
             })
         );
     }

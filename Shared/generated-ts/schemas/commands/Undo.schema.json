@@ -4,6 +4,25 @@
   "$id": "urn:grapix:schema:commands:Undo",
   "title": "Undo",
   "$defs": {
+    "EditorModule": {
+      "description": "The Editor module a gesture came from (11.37). Undo scoped to a module\nreverses only batches tagged with it; an untagged batch belongs to\n`Scene`. The surface that issues a gesture names its own module, because\nguessing it from edit kinds would misfile a gesture that touches several.",
+      "enum": [
+        "scene",
+        "viewport",
+        "objectManager",
+        "inspector",
+        "timeline",
+        "animation",
+        "materials",
+        "fonts",
+        "textStyles",
+        "assets",
+        "takePage",
+        "bindings",
+        "controlContract"
+      ],
+      "type": "string"
+    },
     "SessionKey": {
       "description": "Identity of one open editor session. A `u32`, so TS receives `number`\nrather than `bigint` (memory rule 22). Keys are monotonic from 1.",
       "format": "uint32",
@@ -12,10 +31,20 @@
     }
   },
   "additionalProperties": false,
-  "description": "Restore a session's previous document.",
+  "description": "Reverse the latest applied batch, or the latest one `module` issued.",
   "properties": {
     "command": {
       "const": "undo"
+    },
+    "module": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EditorModule"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "session": {
       "$ref": "#/$defs/SessionKey"

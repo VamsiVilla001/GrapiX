@@ -1348,6 +1348,8 @@ fn is_driven(variant: &str) -> bool {
             | "SceneAssetDuplicate"
             | "FontUnknown"
             | "FontInUse"
+            | "ModuleHistoryEmpty"
+            | "HistoryConflict"
             | "SceneNameEmpty"
             | "SceneIdInvalid"
             | "ProjectNameInvalid"

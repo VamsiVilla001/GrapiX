@@ -643,6 +643,20 @@ pub enum Refusal {
         session: command::SessionKey,
         direction: command::HistoryDirection,
     },
+    /// A module-scoped undo or redo found no batch that module issued.
+    ModuleHistoryEmpty {
+        session: command::SessionKey,
+        direction: command::HistoryDirection,
+        module: command::EditorModule,
+    },
+    /// Undoing or redoing that batch would break a later one: replaying the
+    /// history without it (or with it again) refuses. Nothing is changed;
+    /// `detail` names the refusal the replay hit.
+    HistoryConflict {
+        session: command::SessionKey,
+        direction: command::HistoryDirection,
+        detail: String,
+    },
     /// A create would overwrite a scene that is already stored.
     SceneAlreadyExists { project: String, scene_id: String },
     /// A project create names a project that already exists.
@@ -1134,6 +1148,28 @@ impl std::fmt::Display for Refusal {
                 };
                 write!(f, "session {} has nothing to {verb}", session.0)
             }
+            Refusal::ModuleHistoryEmpty {
+                session,
+                direction,
+                module,
+            } => {
+                let verb = match direction {
+                    command::HistoryDirection::Undo => "undo",
+                    command::HistoryDirection::Redo => "redo",
+                };
+                write!(f, "session {} has nothing from {module:?} to {verb}", session.0)
+            }
+            Refusal::HistoryConflict {
+                session,
+                direction,
+                detail,
+            } => {
+                let verb = match direction {
+                    command::HistoryDirection::Undo => "undo",
+                    command::HistoryDirection::Redo => "redo",
+                };
+                write!(f, "session {}: {verb} would break a later edit: {detail}", session.0)
+            }
             Refusal::SceneAlreadyExists { project, scene_id } => {
                 write!(f, "scene {scene_id} already exists in project {project}")
             }
@@ -1616,6 +1652,16 @@ impl Refusal {
             Self::SessionHasUnsavedChanges { session: command::SessionKey(1), name: "audit".into() },
             Self::SessionUnbound { session: command::SessionKey(1) },
             Self::HistoryEmpty { session: command::SessionKey(1), direction: command::HistoryDirection::Undo },
+            Self::ModuleHistoryEmpty {
+                session: command::SessionKey(1),
+                direction: command::HistoryDirection::Undo,
+                module: command::EditorModule::Scene,
+            },
+            Self::HistoryConflict {
+                session: command::SessionKey(1),
+                direction: command::HistoryDirection::Undo,
+                detail: "audit".into(),
+            },
             Self::SceneAlreadyExists { project: "audit".into(), scene_id: "audit".into() },
             Self::ProjectAlreadyExists {
                 project: "audit".into(),
@@ -1760,6 +1806,8 @@ impl Refusal {
             Self::SessionHasUnsavedChanges { .. } => "sessionHasUnsavedChanges",
             Self::SessionUnbound { .. } => "sessionUnbound",
             Self::HistoryEmpty { .. } => "historyEmpty",
+            Self::ModuleHistoryEmpty { .. } => "moduleHistoryEmpty",
+            Self::HistoryConflict { .. } => "historyConflict",
             Self::SceneAlreadyExists { .. } => "sceneAlreadyExists",
             Self::ProjectAlreadyExists { .. } => "projectAlreadyExists",
             Self::SceneNotStored { .. } => "sceneNotStored",

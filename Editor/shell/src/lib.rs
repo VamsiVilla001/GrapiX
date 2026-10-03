@@ -742,6 +742,7 @@ mod tests {
                 EditorCommand::EditScene(EditScene {
                     target: SceneTarget::Session { session },
                     edits: vec![SceneEdit::CreateObject(CreateObject { kind: kind.into(), name: "X".into() })],
+                    module: None,
                 }),
             );
             // `text` is the one creatable kind with a scene-level
@@ -775,6 +776,7 @@ mod tests {
                         },
                     }),
                 ],
+                module: None,
             }),
         )
         .expect("the template is authored");

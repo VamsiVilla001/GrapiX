@@ -64,6 +64,7 @@ export * from "./EditEffect.js";
 export * from "./EditProperty.js";
 export * from "./EditScene.js";
 export * from "./EditorCommand.js";
+export * from "./EditorModule.js";
 export * from "./EllipseObject.js";
 export * from "./EmbeddingPolicy.js";
 export * from "./EngineCapability.js";

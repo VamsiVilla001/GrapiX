@@ -112,7 +112,40 @@ not a euphemism for nearly done.
 
 ---
 
-## 2026-10-03 — Font ingest integrated (11.13 evidenced, 2.8 reopened); resume here
+## 2026-10-03 — 11.37 done: undo/redo on the command log; resume here
+
+**Design, chosen as the standard option.** A session keeps a `base`
+document plus a log of `EditScene` batches. Each entry carries its edits,
+its `EditorModule` tag and the origin and design system it was applied
+under; the last two keep replay exact after the session is bound to a
+project or a newer design system is confirmed. The document is always the
+base with the active entries replayed. Undo flips one entry and replays. A
+replay that refuses is discarded and the undo refuses `historyConflict` by
+name. Modules are tagged explicitly by the surface (`EditScene.module`,
+optional, default `scene`). They are not inferred from edit kinds, which
+would misfile mixed gestures. The web tags a gesture with the panel holding
+focus. Ctrl+Z / Ctrl+Shift+Z inside a panel are module-scoped; outside one,
+and from the header buttons, they are project-level. "Project-level" is read
+as all modules of the active scene, because 11.29's per-scene isolation
+forbids an undo crossing scenes.
+
+**Verified:** `cargo test -p gx-editor` passed 61 tests (3 new: SHA-256 hash
+round trip over 5 commands, interleaved two-module undo equal to the other
+module's commands alone, and a conflicting undo refused with nothing
+changed). `npm run check` exited 0, with 241 conformance checks passed and
+0 failed; `ModuleHistoryEmpty` and `HistoryConflict` are driven. Live
+Windows Tauri over CDP with real key events: an Inspector Ctrl+Z reverted
+X 240→860 while a later object-manager Hide stayed; a second press refused
+`moduleHistoryEmpty`; Ctrl+Shift+Z restored X; the header Undo reversed the
+Hide.
+
+**Next ready steps:** 11.38 hashed revisions (needs 11.36, 6.3, 7.6, all
+done) and 11.39 asset provenance (needs 11.36 and 2.7). 2.8 is still open
+(Adobe kit id, DirectUrl, macOS).
+
+---
+
+## 2026-10-03 — Font ingest integrated (11.13 evidenced, 2.8 reopened)
 
 **What changed.** The council-claude font slice (`feat/council-claude-fonts`)
 is merged and wired end to end:

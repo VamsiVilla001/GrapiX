@@ -21,6 +21,7 @@ import type {
   ControlField,
   ControlValue,
   EditEffect,
+  EditorModule,
   EditorCommand,
   MotionPreset,
   Refusal,
@@ -1828,27 +1829,54 @@ async function runCommand(
   }
 }
 
+/// The module a panel's gestures belong to (11.37). A gesture is tagged with
+/// the panel holding focus when it is issued, and Ctrl+Z inside a panel undoes
+/// that panel's latest command; outside any panel it is project-level.
+const PANEL_MODULE: Readonly<Record<string, EditorModule>> = {
+  viewport: "viewport",
+  "object-manager": "objectManager",
+  inspector: "inspector",
+  timeline: "timeline",
+  animation: "animation",
+  materials: "materials",
+  fonts: "fonts",
+  "text-styles": "textStyles",
+  assets: "assets",
+  "take-page": "takePage",
+  bindings: "bindings",
+  "control-contract": "controlContract",
+};
+
+function focusedPanelModule(): EditorModule | undefined {
+  const panel = document.activeElement?.closest<HTMLElement>("[data-panel]")?.dataset.panel;
+  return panel === undefined ? undefined : PANEL_MODULE[panel];
+}
+
 /** Send one gesture's edits to the active session as one atomic batch. */
 async function runEdits(
   edits: readonly SceneEdit[],
   report: string | CommandReport,
+  module: EditorModule = focusedPanelModule() ?? "scene",
 ): Promise<CommandOutcome | undefined> {
   const session = activeSession(workspace);
   if (!session || edits.length === 0) return undefined;
   const target: SceneTarget = { target: "session", session: session.key };
-  return runCommand({ command: "editScene", target, edits: [...edits] }, report);
+  return runCommand({ command: "editScene", target, edits: [...edits], module }, report);
 }
 
-async function undo(): Promise<void> {
+/// Undo the active scene's latest command, or `module`'s latest command.
+async function undo(module?: EditorModule): Promise<void> {
   const session = activeSession(workspace);
   if (!session) return;
-  await runCommand({ command: "undo", session: session.key }, "Undo");
+  const scope = module === undefined ? {} : { module };
+  await runCommand({ command: "undo", session: session.key, ...scope }, module ? `Undo (${module})` : "Undo");
 }
 
-async function redo(): Promise<void> {
+async function redo(module?: EditorModule): Promise<void> {
   const session = activeSession(workspace);
   if (!session) return;
-  await runCommand({ command: "redo", session: session.key }, "Redo");
+  const scope = module === undefined ? {} : { module };
+  await runCommand({ command: "redo", session: session.key, ...scope }, module ? `Redo (${module})` : "Redo");
 }
 
 // ---------------------------------------------------------------------------
@@ -2551,7 +2579,7 @@ async function ingestFonts(
       return;
     }
     const added = `Added ${batch.fonts.length} font(s): ${batch.fonts.map((font) => font.displayName).join(", ")}`;
-    const outcome = await runEdits([{ edit: "addFonts", fonts: batch.fonts, assets: batch.assets }], added);
+    const outcome = await runEdits([{ edit: "addFonts", fonts: batch.fonts, assets: batch.assets }], added, "fonts");
     fontNotice = outcome ? `${added}${skippedNote}` : undefined;
   } catch (error) {
     fontNotice = `Font ingest refused: ${describe(error)}`;
@@ -2571,7 +2599,7 @@ async function removeFont(fontId: string): Promise<void> {
     log(`font removal refused [${plan.code}]: ${plan.refused}`, "bad");
     return;
   }
-  const outcome = await runEdits([{ edit: "removeFont", fontId }], `Removed font ${plan.displayName}`);
+  const outcome = await runEdits([{ edit: "removeFont", fontId }], `Removed font ${plan.displayName}`, "fonts");
   if (outcome && selectedFontId === fontId) selectedFontId = undefined;
 }
 
@@ -3502,10 +3530,10 @@ async function start(): Promise<void> {
     const key = event.key.toLowerCase();
     if (key === "z" && !event.shiftKey) {
       event.preventDefault();
-      void undo();
+      void undo(focusedPanelModule());
     } else if (key === "y" || (key === "z" && event.shiftKey)) {
       event.preventDefault();
-      void redo();
+      void redo(focusedPanelModule());
     }
   });
   ui.overlay.addEventListener("pointerdown", onOverlayPointerDown);

@@ -243,6 +243,8 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
     "sessionHasUnsavedChanges",
     "sessionUnbound",
     "historyEmpty",
+    "moduleHistoryEmpty",
+    "historyConflict",
     "sceneAlreadyExists",
     "projectAlreadyExists",
     "sceneNotStored",

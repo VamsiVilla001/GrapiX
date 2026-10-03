@@ -6,12 +6,14 @@
 //! a surface might not reach. A check also asserts that the refused command
 //! left the document, history and store as they were.
 
+use gx_contracts::animation::{SceneEasing, SceneKeyframe};
 use gx_contracts::command::{
-    parse_command, witness, AddFonts, ApplyPreset, CloseScene, CreateProject, CreateScene, DeleteMaterial,
-    DeleteScene, EditScene, EditorCommand, HistoryDirection, OpenScene, PresetPhase,
-    RelinkMaterial, RemoveFont, ReplaceDataContext, SaveScene, SaveTakePage, SaveTarget, SceneEdit,
-    SceneSource, SceneTarget, SessionKey, SetBinding, SetObjectField, SetObjectLocked,
-    SetObjectVisible, SetSceneId, SetSceneName, Undo,
+    parse_command, witness, AddFonts, ApplyPreset, CloseScene, CreateKeyframe, CreateObject,
+    CreateProject, CreateScene, DeleteMaterial, DeleteScene, EditScene, EditorCommand,
+    EditorModule, HistoryDirection, OpenScene, PresetPhase, RelinkMaterial, RemoveFont,
+    ReplaceDataContext, SaveScene, SaveTakePage, SaveTarget, SceneEdit, SceneSource, SceneTarget,
+    SessionKey, SetBinding, SetObjectField, SetObjectLocked, SetObjectVisible, SetSceneId,
+    SetSceneName, Undo,
 };
 use gx_contracts::control::TakePage;
 use gx_contracts::object_edit::ObjectField;
@@ -84,6 +86,7 @@ fn refuse_edit(workspace: &mut Workspace, session: SessionKey, edits: Vec<SceneE
     let result = workspace.execute(EditorCommand::EditScene(EditScene {
         target: SceneTarget::Session { session },
         edits,
+        module: None,
     }));
     let after = workspace.view(session).ok();
     (refused(&result).cloned(), before.is_some() && before == after)
@@ -179,7 +182,7 @@ pub(super) fn drive_command_refusals(report: &mut Report) {
 
 fn drive_session_refusals(report: &mut Report, workspace: &mut Workspace, session: SessionKey) {
     let absent = SessionKey(session.0 + 1000);
-    let result = workspace.execute(EditorCommand::Undo(Undo { session: absent }));
+    let result = workspace.execute(EditorCommand::Undo(Undo { session: absent, module: None }));
     report.record(
         PLANE,
         "SessionUnknown is produced for a command naming no open session",
@@ -189,7 +192,7 @@ fn drive_session_refusals(report: &mut Report, workspace: &mut Workspace, sessio
         ),
     );
 
-    let result = workspace.execute(EditorCommand::Undo(Undo { session }));
+    let result = workspace.execute(EditorCommand::Undo(Undo { session, module: None }));
     report.record(
         PLANE,
         "HistoryEmpty is produced for an undo with nothing to undo",
@@ -200,6 +203,75 @@ fn drive_session_refusals(report: &mut Report, workspace: &mut Workspace, sessio
             ),
             format!("expected HistoryEmpty(undo) for {session:?}, got {result:?}"),
         ),
+    );
+
+    let result = workspace.execute(EditorCommand::Undo(Undo { session, module: Some(EditorModule::Timeline) }));
+    report.record(
+        PLANE,
+        "ModuleHistoryEmpty is produced for a module undo with nothing from that module",
+        expect(
+            matches!(
+                refused(&result),
+                Some(Refusal::ModuleHistoryEmpty { module: EditorModule::Timeline, direction: HistoryDirection::Undo, .. })
+            ),
+            format!("expected ModuleHistoryEmpty(timeline) for {session:?}, got {result:?}"),
+        ),
+    );
+
+    // A history where the timeline's key stands on the object manager's
+    // rect, in its own session so the fixture session keeps its state.
+    let conflict = match workspace.execute(EditorCommand::OpenScene(OpenScene {
+        source: SceneSource::New { id: "history".into(), name: "History".into() },
+    })) {
+        Ok(outcome) => outcome.session.map(|view| view.session),
+        Err(_) => None,
+    };
+    let tagged = |session, module, edit| {
+        EditorCommand::EditScene(EditScene {
+            target: SceneTarget::Session { session },
+            edits: vec![edit],
+            module: Some(module),
+        })
+    };
+    let outcome = conflict.map(|history| {
+        let built = workspace
+            .execute(tagged(
+                history,
+                EditorModule::ObjectManager,
+                SceneEdit::CreateObject(CreateObject { kind: "rect".into(), name: "Card".into() }),
+            ))
+            .and_then(|_| {
+                workspace.execute(tagged(
+                    history,
+                    EditorModule::Timeline,
+                    SceneEdit::CreateKeyframe(CreateKeyframe {
+                        object_id: "rect-1".into(),
+                        property: "x".into(),
+                        keyframe: SceneKeyframe { frame: 0, value: 10.0, easing: SceneEasing::Linear, bezier: None },
+                    }),
+                ))
+            });
+        let before = workspace.view(history).ok();
+        let result = workspace.execute(EditorCommand::Undo(Undo {
+            session: history,
+            module: Some(EditorModule::ObjectManager),
+        }));
+        let unchanged = before.is_some() && before == workspace.view(history).ok();
+        (built.is_ok(), result, unchanged)
+    });
+    report.record(
+        PLANE,
+        "HistoryConflict is produced for a module undo a later command depends on",
+        match outcome {
+            Some((true, result, unchanged)) => expect(
+                matches!(
+                    refused(&result),
+                    Some(Refusal::HistoryConflict { direction: HistoryDirection::Undo, detail, .. }) if detail.starts_with("[sceneObjectUnknown]")
+                ) && unchanged,
+                format!("expected HistoryConflict naming sceneObjectUnknown, got {result:?} (unchanged: {unchanged})"),
+            ),
+            _ => Outcome::Fail("the history session could not be built".into()),
+        },
     );
 
     let (refusal, unchanged) = refuse_edit(workspace, session, Vec::new());
@@ -406,6 +478,7 @@ fn drive_binding_refusals(report: &mut Report, workspace: &mut Workspace, sessio
         edits: vec![SceneEdit::ReplaceDataContext(ReplaceDataContext {
             data_context: scene.data_context.clone(),
         })],
+        module: None,
     }));
     report.record(
         PLANE,
@@ -421,6 +494,7 @@ fn drive_binding_refusals(report: &mut Report, workspace: &mut Workspace, sessio
     let bound = workspace.execute(EditorCommand::EditScene(EditScene {
         target: SceneTarget::Session { session },
         edits: vec![set_binding("card", "x", Some("headline"))],
+        module: None,
     }));
     let (refusal, unchanged) = edit(workspace, session, set_binding("card", "x", Some("headline")));
     report.record(
