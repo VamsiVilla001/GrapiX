@@ -110,30 +110,31 @@ pub const TOOLS: &[ToolDescriptor] = &[
         output: "CapabilitySurface",
         summary: "Every supported enum, tier, version and refusal code, as data.",
     },
-    // project, scenes, objects — the authoring surface (8.3).
+    // project, scenes, objects — the authoring surface (8.3). Every write here
+    // names an `EditorCommand` payload and runs through the Editor's one
+    // command executor (11.36, invariant 60).
     tool("project.list", "project", ToolEffect::Read, Scope::Author, "()", "ProjectList", "The projects this store holds."),
-    tool("project.create", "project", ToolEffect::Write, Scope::Author, "ProjectCreate", "Revision", "Create a project. Refuses if it already exists."),
+    tool("project.create", "project", ToolEffect::Write, Scope::Author, "CreateProject", "CommandOutcome", "Create a project. Refuses if it already exists."),
     tool("scenes.get", "scenes", ToolEffect::Read, Scope::Author, "SceneRef", "SceneDocument", "One scene document, whole."),
     tool("scenes.list", "scenes", ToolEffect::Read, Scope::Author, "ProjectRef", "SceneList", "The scene ids in a project."),
-    tool("scenes.create", "scenes", ToolEffect::Write, Scope::Author, "SceneCreate", "Revision", "Create a scene. Refuses until the project exists."),
-    tool("scenes.delete", "scenes", ToolEffect::Write, Scope::Author, "SceneRef", "Revision", "Delete a scene."),
+    tool("scenes.create", "scenes", ToolEffect::Write, Scope::Author, "CreateScene", "CommandOutcome", "Create an empty scene. Refuses until the project exists, and refuses an existing scene id."),
+    tool("scenes.delete", "scenes", ToolEffect::Write, Scope::Author, "DeleteScene", "CommandOutcome", "Delete a stored scene. Refuses a scene that is not stored."),
+    tool("scenes.edit", "scenes", ToolEffect::Write, Scope::Author, "EditScene", "CommandOutcome", "Apply one ordered, atomic batch of scene edits to a stored scene. Objects, keyframes, presets, phases, controls, text styles, bindings, materials and asset relinks are edits; the whole batch lands or none of it does."),
     tool("objects.list", "objects", ToolEffect::Read, Scope::Author, "SceneRef", "ObjectList", "Every object, with its full authored property surface."),
     tool("objects.hierarchy", "objects", ToolEffect::Read, Scope::Author, "SceneRef", "HierarchyResolution", "Resolved transforms and refused edges."),
-    tool("objects.update", "objects", ToolEffect::Write, Scope::Author, "ObjectUpdate", "Revision", "Update an object's authored properties."),
-    // materials, assets, fonts (8.4).
+    // materials, assets, fonts (8.4). Read here; their mutations are
+    // `SceneEdit` variants carried by `scenes.edit`.
     tool("materials.list", "materials", ToolEffect::Read, Scope::Author, "SceneRef", "MaterialList", "Materials and where they are used."),
-    tool("materials.assign", "materials", ToolEffect::Write, Scope::Author, "MaterialAssign", "Revision", "Bind a material to an object, face or glTF element."),
     tool("assets.list", "assets", ToolEffect::Read, Scope::Author, "SceneRef", "AssetList", "Assets by content hash and library path."),
-    tool("assets.relink", "assets", ToolEffect::Write, Scope::Author, "AssetRelink", "Revision", "Point a library path at new bytes, keeping bindings intact."),
     tool("fonts.list", "fonts", ToolEffect::Read, Scope::Author, "SceneRef", "FontList", "Fonts the scene carries, with resolution state."),
-    // animation (8.5) and bindings (8.6).
-    tool("animation.apply_preset", "animation", ToolEffect::Write, Scope::Author, "ApplyPreset", "Revision", "Instantiate a motion preset with parameters. The caller supplies parameters, never keyframes."),
+    // bindings (8.6). Animation presets (8.5) are the `applyPreset` edit.
     tool("bindings.schema", "bindings", ToolEffect::Read, Scope::Author, "SceneRef", "BindingSchema", "The data shape this scene's bindings expect."),
-    // designsystem and motion (8.7) — admin, because an author works inside
-    // the system and may not change it (Part G).
+    // designsystem and motion (8.7) — commit is admin, because an author works
+    // inside the system and may not change it (Part G). Import writes nothing:
+    // it proposes a draft, so it is a read that keeps the admin scope.
     tool("designsystem.get", "designsystem", ToolEffect::Read, Scope::Author, "ProjectRef", "DesignSystem", "The active design system and its version, for one project."),
-    tool("designsystem.commit", "designsystem", ToolEffect::Write, Scope::ConfigureOutput, "DesignSystemCommit", "DesignSystem", "Confirm a draft as a new version, naming who confirmed it. Admin-scoped: an author works inside the system and cannot change it."),
-    tool("designsystem.import", "designsystem", ToolEffect::Write, Scope::ConfigureOutput, "DesignSystemImport", "DesignSystemDraft", "Propose a draft from a source document. Returns the draft and everything the source held that tokens cannot express. Never commits."),
+    tool("designsystem.commit", "designsystem", ToolEffect::Write, Scope::ConfigureOutput, "ConfirmDesignSystem", "CommandOutcome", "Confirm a draft as a new version, naming who confirmed it. Admin-scoped: an author works inside the system and cannot change it."),
+    tool("designsystem.import", "designsystem", ToolEffect::Read, Scope::ConfigureOutput, "DesignSystemImport", "DesignSystemDraft", "Propose a draft from a source document. Returns the draft and everything the source held that tokens cannot express. Never commits."),
     tool("designsystem.list_versions", "designsystem", ToolEffect::Read, Scope::Author, "ProjectRef", "DesignSystemVersions", "Every confirmed version, with the source and the human behind each."),
     // validate (8.8) and render (8.9).
     tool("validate.preflight", "validate", ToolEffect::Read, Scope::Author, "SceneRef", "PreflightReport", "Structured refusals with allowed values."),
@@ -614,5 +615,98 @@ mod tests {
                 tool.group
             );
         }
+    }
+
+    /// Write tools that are not authoring mutations, each with the reason it
+    /// is allowed to name a non-`EditorCommand` input (11.36 guard R5).
+    const R5_EXEMPT: &[(&str, &str)] = &[
+        (
+            "packages.build",
+            "builds an immutable package artifact from a document and mutates no authoring content; \
+             pointing it at the Editor store would make Playout read Editor projects",
+        ),
+        (
+            "packages.publish",
+            "publishes an already-built immutable package as a new revision; it changes no authoring \
+             content, and publication is the Editor's whole authority over Program (invariant 7)",
+        ),
+    ];
+
+    /// The groups whose writes are authoring content (D.2).
+    const AUTHORING_GROUPS: &[&str] = &[
+        "project",
+        "scenes",
+        "objects",
+        "materials",
+        "assets",
+        "fonts",
+        "animation",
+        "bindings",
+        "designsystem",
+    ];
+
+    #[test]
+    fn every_authoring_write_tool_takes_an_editor_command_payload() {
+        // R5 (11.36, invariant 60): an MCP write that changes authoring
+        // content names an `EditorCommand` payload as its input, so it can
+        // only reach the store through the one command executor. A write in
+        // an authoring group, or any author-scoped write, counts; the only
+        // exceptions are named above with their reasons.
+        use crate::command::EditorCommand;
+
+        for tool in TOOLS {
+            if tool.effect != ToolEffect::Write {
+                continue;
+            }
+            let authoring = AUTHORING_GROUPS.contains(&tool.group)
+                || tool.required_scope == Some(Scope::Author);
+            if !authoring || R5_EXEMPT.iter().any(|(name, _)| *name == tool.name) {
+                continue;
+            }
+            assert!(
+                EditorCommand::PAYLOAD_NAMES.contains(&tool.input),
+                "{} writes authoring content but takes {}, which is not an EditorCommand payload",
+                tool.name,
+                tool.input
+            );
+        }
+    }
+
+    #[test]
+    fn every_r5_exemption_names_a_declared_non_authoring_write() {
+        // An exemption outliving its tool, or covering a tool in an authoring
+        // group, would be a silent hole in R5.
+        for (name, reason) in R5_EXEMPT {
+            let tool = TOOLS
+                .iter()
+                .find(|tool| tool.name == *name)
+                .unwrap_or_else(|| panic!("R5 exempts {name}, which is not declared"));
+            assert_eq!(tool.effect, ToolEffect::Write, "{name} is exempt but not a write");
+            assert!(
+                !AUTHORING_GROUPS.contains(&tool.group),
+                "{name} sits in authoring group {} and cannot be exempt",
+                tool.group
+            );
+            assert!(!reason.trim().is_empty(), "{name} is exempt without a reason");
+        }
+    }
+
+    #[test]
+    fn the_editor_command_rows_keep_their_scopes() {
+        // Invariant 65: moving writes onto command payloads must not move
+        // them between scopes. Scene edits are an author's act; confirming a
+        // brand pack is not (Part G).
+        let scope_of = |name: &str| {
+            TOOLS
+                .iter()
+                .find(|tool| tool.name == name)
+                .unwrap_or_else(|| panic!("{name} is declared"))
+                .required_scope
+        };
+        for name in ["project.create", "scenes.create", "scenes.delete", "scenes.edit"] {
+            assert_eq!(scope_of(name), Some(Scope::Author), "{name}");
+        }
+        assert_eq!(scope_of("designsystem.commit"), Some(Scope::ConfigureOutput));
+        assert_eq!(scope_of("designsystem.import"), Some(Scope::ConfigureOutput));
     }
 }

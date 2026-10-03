@@ -39,7 +39,7 @@ pub enum WorkingColorSpace {
 /// What a colour or a texture was authored in. There is no `Unknown`: an
 /// untagged source is a defect the importer must refuse, not a value a
 /// renderer may guess at (B.1, "never infer").
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum SourceColorSpace {
     /// IEC 61966-2-1. What a hex literal, a PNG without an ICC profile and
@@ -132,7 +132,7 @@ pub fn rec709_decode(encoded: f64) -> f64 {
 ///
 /// Components are 0–1 floats rather than 8-bit bytes because the working
 /// space is linear and 8 bits of linear has visible banding in the shadows.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Rgba {
     pub r: f64,
@@ -273,7 +273,7 @@ impl Rgba {
 }
 
 /// One stop of a gradient.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GradientStop {
     /// 0–1 along the gradient.
@@ -282,7 +282,7 @@ pub struct GradientStop {
 }
 
 /// What a gradient does outside its 0–1 span. CSS's own names.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum GradientSpread {
     #[default]
@@ -294,7 +294,7 @@ pub enum GradientSpread {
 /// Whether a gradient's coordinates are the object's or the scene's. An
 /// object-space gradient follows its object; a scene-space one stays put
 /// while the object moves through it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum GradientCoordinateMode {
     #[default]
@@ -308,7 +308,7 @@ pub enum GradientCoordinateMode {
 /// "the author has not set a fill" are different states, and collapsing them
 /// is how a transparent object becomes a black one on the other renderer.
 /// Ported from 1.x `ColorValue`, with every colour now tagged.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(
     tag = "type",
     rename_all = "kebab-case",

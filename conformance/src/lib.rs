@@ -8,9 +8,10 @@
 //! reports SKIP and says why. Defaulting it to PASS would claim coverage of
 //! precisely the paths nobody ran.
 
+mod editor_commands;
 mod refusal_audit;
 mod scene_plane;
-
+pub use editor_commands::editor_command_suite;
 pub use refusal_audit::refusal_audit_suite;
 pub use scene_plane::{mock_product_suite, scene_plane_suite};
 

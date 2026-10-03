@@ -110,9 +110,12 @@ impl Projects {
         self.scenes_directory(project).join(format!("{scene_id}.json"))
     }
 
-    /// Whether a project exists. The question every write asks first.
+    /// Whether a project exists. The question every write asks first. A name
+    /// that is not one canonical filename names no project, whatever
+    /// directory it would resolve to.
     pub fn exists(&self, project: &str) -> bool {
-        self.project_directory(project).is_dir()
+        gx_contracts::platform::is_canonical_filename(project)
+            && self.project_directory(project).is_dir()
     }
 
     /// The design-system store inside an existing project (G.3, 10.4).
@@ -132,6 +135,7 @@ impl Projects {
 
     /// Bring a project into being. The only thing that does.
     pub fn create_project(&self, project: &str) -> Result<(), EditorError> {
+        require_component(project, |project| Refusal::ProjectNameInvalid { project })?;
         let scenes = self.scenes_directory(project);
         std::fs::create_dir_all(&scenes).map_err(|source| EditorError::Io {
             path: scenes,
@@ -145,6 +149,7 @@ impl Projects {
     /// never rewrite the authored scene it references.
     pub fn write_take_page(&self, project: &str, page: &TakePage) -> Result<(), EditorError> {
         self.require_project(project)?;
+        require_component(&page.page_id, |page_id| Refusal::TakePageIdInvalid { page_id })?;
         let directory = self.take_pages_directory(project);
         std::fs::create_dir_all(&directory).map_err(|source| EditorError::Io {
             path: directory,
@@ -158,6 +163,7 @@ impl Projects {
     /// Read a filled take-page without opening or changing its template.
     pub fn read_take_page(&self, project: &str, page_id: &str) -> Result<TakePage, EditorError> {
         self.require_project(project)?;
+        require_component(page_id, |page_id| Refusal::TakePageIdInvalid { page_id })?;
         let path = self.take_page_path(project, page_id);
         let bytes = std::fs::read(&path).map_err(|source| EditorError::Io { path, source })?;
         serde_json::from_slice(&bytes).map_err(EditorError::Serialize)
@@ -212,7 +218,11 @@ impl Projects {
     /// is one place that answers "may I write into this project", and a new
     /// operation that forgets to call it fails its own test rather than
     /// silently creating directories.
+    ///
+    /// The name is checked before existence: a project is one directory under
+    /// the root, and `../elsewhere` names a directory that may well exist.
     fn require_project(&self, project: &str) -> Result<(), EditorError> {
+        require_component(project, |project| Refusal::ProjectNameInvalid { project })?;
         if self.exists(project) {
             Ok(())
         } else {
@@ -226,6 +236,7 @@ impl Projects {
     /// Write a scene into an existing project.
     pub fn write_scene(&self, project: &str, scene: &SceneDocument) -> Result<(), EditorError> {
         self.require_project(project)?;
+        require_component(&scene.id, |id| Refusal::SceneIdInvalid { id })?;
         let bytes = serde_json::to_vec_pretty(scene).map_err(EditorError::Serialize)?;
         gx_fs::write_atomic(&self.scene_path(project, &scene.id), &bytes)
             .map_err(EditorError::Write)
@@ -239,6 +250,7 @@ impl Projects {
     /// that only refuses at publish.
     pub fn read_scene(&self, project: &str, scene_id: &str) -> Result<SceneDocument, EditorError> {
         self.require_project(project)?;
+        require_component(scene_id, |id| Refusal::SceneIdInvalid { id })?;
         let path = self.scene_path(project, scene_id);
         let bytes = std::fs::read(&path).map_err(|source| EditorError::Io { path, source })?;
         parse_scene_document(&bytes).map_err(EditorError::Refused)
@@ -268,8 +280,27 @@ impl Projects {
     /// Delete a scene. Absent is reported, never treated as success.
     pub fn delete_scene(&self, project: &str, scene_id: &str) -> Result<(), EditorError> {
         self.require_project(project)?;
+        require_component(scene_id, |id| Refusal::SceneIdInvalid { id })?;
         let path = self.scene_path(project, scene_id);
         std::fs::remove_file(&path).map_err(|source| EditorError::Io { path, source })
+    }
+}
+
+/// Refuse a project, scene or take-page id that is not one canonical filename.
+///
+/// Every id becomes a path component under the store root, so an id that is
+/// not already a single, canonical component — `../escape`, `a/b`, a trailing
+/// dot Windows would drop — would address a file the store does not own.
+/// Refused rather than sanitised: rewriting the id would save the author's
+/// work under a name they did not choose.
+fn require_component(
+    value: &str,
+    refusal: impl FnOnce(String) -> Refusal,
+) -> Result<(), EditorError> {
+    if gx_contracts::platform::is_canonical_filename(value) {
+        Ok(())
+    } else {
+        Err(refusal(value.to_owned()).into())
     }
 }
 
@@ -406,6 +437,54 @@ mod tests {
             error,
             EditorError::Refused(Refusal::SceneUnknownField { .. })
         ));
+
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn an_id_that_is_not_one_canonical_filename_never_reaches_the_filesystem() {
+        let root = scratch("components");
+        let projects = Projects::at_root(root.join("store"));
+        std::fs::create_dir_all(root.join("outside").join("scenes")).unwrap();
+
+        assert!(matches!(
+            projects.create_project("../outside2"),
+            Err(EditorError::Refused(Refusal::ProjectNameInvalid { project })) if project == "../outside2"
+        ));
+        assert!(!root.join("outside2").exists(), "the refused create wrote nothing");
+        // The directory exists, so only the name check stands between this
+        // write and a file outside the store.
+        assert!(matches!(
+            projects.write_scene("../outside", &scene("escape")),
+            Err(EditorError::Refused(Refusal::ProjectNameInvalid { .. }))
+        ));
+
+        projects.create_project("news").unwrap();
+        for outcome in [
+            projects.write_scene("news", &scene("../escape")).err(),
+            projects.read_scene("news", "../escape").err(),
+            projects.delete_scene("news", "a/b").err(),
+        ] {
+            assert!(
+                matches!(outcome, Some(EditorError::Refused(Refusal::SceneIdInvalid { .. }))),
+                "a scene id is one filename, never a path: {outcome:?}"
+            );
+        }
+        let page = TakePage {
+            page_id: "../page".into(),
+            name: "Page".into(),
+            scene_id: "lower-third".into(),
+            values: Default::default(),
+        };
+        assert!(matches!(
+            projects.write_take_page("news", &page),
+            Err(EditorError::Refused(Refusal::TakePageIdInvalid { .. }))
+        ));
+        assert!(matches!(
+            projects.read_take_page("news", "../page"),
+            Err(EditorError::Refused(Refusal::TakePageIdInvalid { .. }))
+        ));
+        assert!(!root.join("outside").join("scenes").join("escape.json").exists());
 
         std::fs::remove_dir_all(root).expect("clean up");
     }

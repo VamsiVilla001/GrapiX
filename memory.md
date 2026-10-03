@@ -112,6 +112,108 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-10-03 — 11.36 done: one command type; resume here
+
+**What happened.** The GPT session's 11.36 agents stopped mid-edit when the
+Codex usage limit was reached; the provider asked for a ~4.5 h wait. The
+user chose to finish in this session with council-claude agents. Five
+slices each owned disjoint files: contracts, codegen and guard, executor,
+shell and MCP, web cutover, and conformance. They completed GPT's partial
+edits; nothing was restarted. The web slice hit Anthropic's rate limit
+after typecheck was clean, and its unit tests then passed as left.
+
+**Done-when, item by item, all by execution:**
+- One type: `EditorCommand` in `Shared/contracts/src/command.rs`, with
+  12 command variants. `SceneEdit` (27 variants) exists only inside
+  `EditorCommand::EditScene`, the design-council reading of invariant 60.
+  `cargo test -p gx-contracts` passed 195 tests, with and without
+  `fixtures`.
+- TS and schemas: `npm run codegen` generated 219 types and 41 draft
+  2020-12 schemas (2 umbrella, 12 command, 27 edit). `codegen:check` covers
+  `.json`. The codegen test validates every witness against its schema and
+  rejects an unknown key.
+- Surfaces: the shell exposes `cmd_execute` plus reads; editor MCP writes go
+  through one `CommandTool` into `Workspace::execute`; project-api 4100 is
+  not built. The plan row's wording (uncommitted from the GPT session) says
+  so and adds "no surface accepts a client-supplied whole document".
+- Guard: `node --test tools/tests/check-boundaries.test.mjs` passed 15/15.
+  That is 12 failing fixtures, a no-trigger case, an allowed-surface case,
+  and a clean real tree. The first real-tree run found 17 direct `invoke`
+  mutations in `main.ts`; the cutover removed them without weakening rules.
+- Conformance: the EDITOR-COMMAND plane ran every command and edit variant
+  against a recording mock engine. Program, outputs, publish count and the
+  pinned on-air document were unchanged; a session publish added exactly one
+  revision.
+- `npm run check` passed: 33 node tests, 325 Editor unit tests and about 564
+  Rust tests (0 failed, 1 ignored). Conformance: 234 passed, 0 failed, 8
+  skipped; the 8 skips predate this step.
+- Live, in a Windows Tauri/WebView2 Editor driven over CDP: new project,
+  add rect, undo (1→0 rows), redo (0→1), rename, save into the project,
+  close and reopen. Each write was a `cmd_execute` IPC request; every other
+  IPC was a read. `Box A` reopened at x 860, y 480. A duplicate project
+  showed `refused [projectAlreadyExists]`. Prompts were pre-answered in the
+  page because a native prompt blocks CDP input.
+
+**Behaviour changes:**
+- Project, scene and take-page ids are checked as canonical filenames on
+  every store read and write. MCP reads such as `scenes.get` previously
+  skipped the check, which left a path-traversal route.
+- Shell `invalidScene`, `animationRefused` and `controlRefused` errors are
+  replaced by `commandRefused{detail, cause}`.
+- `objects.update`, `materials.assign`, `assets.relink` and
+  `animation.apply_preset` are replaced by `scenes.edit`. Presets now write
+  keys; their params used to be echoed and never applied.
+- `designsystem.commit` takes `{project, commit:{draft, confirmedBy}}`.
+- `SceneTarget`, `SceneSource` and `SaveTarget` serialise camelCase fields.
+
+**Known gaps found, not fixed (outside 11.36):**
+- Conformance's authenticated transport pass is skipped without being
+  recorded as a SKIP: "unsupported token prefix" for `CONFORMANCE_TOKEN`.
+  Invariant 47 forbids that.
+- The mock engine does not refuse 10 render-worker refusals (mesh, camera,
+  tessellation, adapter). Completing `Refusal::all_variants` exposed them.
+  They are named limitations now, and they are an invariant 45 gap.
+- Stale files in `generated-ts/src` are still never detected (spec O6).
+- `.codex/config.toml` starts `Editor/services/editor-mcp/dist/index.js`,
+  a 1.x path that no longer exists. That is why the grapix-editor MCP
+  "closed stdout before responding". No 2.0 editor MCP binary exists until
+  8.6.
+
+**Next, in dependency order:** merge and integrate the font slice: the
+`addFonts` and `removeFont` edits, `FontInUse`, engine `sfnt_bytes`, shell
+ingest commands, and live 11.13 proof. Then 11.37 undo/redo on the command
+log, and 11.38 hashed revisions.
+
+---
+
+## 2026-10-03 — Font links download into the project, Adobe included
+
+**Position change, decided by the user.** Ingesting a font link now
+downloads its font files into the project as hashed assets and generates
+`@font-face` rules for templates. This covers Google Fonts, Bunny Fonts and
+Adobe Fonts. `docs/p2-licensing-positions.md` §5 is rewritten to say so.
+The user was shown that Adobe's terms do not permit extracting Adobe Fonts
+files, and chose to download them anyway. The doc records that the owner
+holds that risk.
+
+The implementation is on `feat/council-claude-fonts` (council-claude, an
+isolated worktree at `.claude/worktrees/council-claude-fonts`), not yet
+merged. `cargo test -p gx-asset-plane` there passed 67 tests, 0 failed.
+A throwaway example called the real `UreqFontFetcher` against live Google
+Fonts and Bunny Fonts links for Inter 400/700. Each produced one Package
+font of 14 faces, with the licence read from the files, and `@font-face`
+rules that point only at project assets. Re-ingesting added nothing. Adobe
+ran only against a fake fetcher; no kit id was available.
+
+**2.8 may be wrongly `done`.** Commit 1efabd0 (2026-09-11) replaced
+`pub mod fonts;` in `Shared/asset-plane/src/lib.rs` with the package,
+publish and store modules. The font subsystem has not compiled since. The
+worktree reattaches it. Its old css, manager, metadata and validate tests
+pass there. 2.8's state is unchanged until its done-when, "All sources
+resolve on both platforms", is re-run; macOS has not been run.
+
+---
+
 ## 2026-10-02 — Editor core and AI readiness proposal merged into the plan
 
 **Approval, recorded as the proposal's step 0.2 requires.** The user (Vamsi)

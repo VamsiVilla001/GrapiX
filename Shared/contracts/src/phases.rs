@@ -32,7 +32,7 @@ use crate::Refusal;
 /// These are exactly `crate::mcp::MOTION_PHASES`, and a test below pins them
 /// against it: a phase added to one and not the other fails the gate rather
 /// than producing a scene the agent surface cannot describe.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum PhaseKind {
     /// Build on. Triggered by Take.
@@ -69,7 +69,7 @@ impl PhaseKind {
 }
 
 /// One named span of the scene timeline.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TimelinePhase {
     pub kind: PhaseKind,

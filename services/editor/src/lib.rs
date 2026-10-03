@@ -11,14 +11,20 @@
 //! the engine arrive through `gx_contracts::validate` instead, which is the
 //! whole reason 7.4 moved them there. If something here appears to need the
 //! worker, the design is wrong rather than the invariant.
+//!
+//! **Every authoring mutation goes through [`Workspace::execute`]** (11.36,
+//! invariant 60). The Tauri shell and the Editor MCP parse an
+//! `EditorCommand` and hand it here; neither has a write path of its own.
 
 #![forbid(unsafe_code)]
 
+pub mod command;
 pub mod design_system;
 pub mod fidelity;
 pub mod import;
 pub mod project;
 
+pub use command::{CommandError, Workspace};
 pub use design_system::{
     drift_report, ingest_claude_design, ingest_figma, ingest_w3c, DesignSystemStore, DriftEntry,
     DriftReport, Provenance, StampedTemplate,

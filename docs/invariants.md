@@ -190,7 +190,9 @@ already obeys it.
 60. **Every mutation of Editor authoring content is a command of the one
     command type defined in `Shared/`.** No other mutation path exists. A
     second path is a second, unlogged history that undo, review and the agent
-    surface cannot see. Planned — enforced by 11.36.
+    surface cannot see. Enforced by 11.36 (3 October 2026): the boundary
+    guard fails a build that adds another path, and the conformance suite
+    runs every command against a recording peer.
 61. **Playout loads scene revisions only by pinned content hash.** This
     refines invariant 30: a version number identifies a publish, and the hash
     proves its content. An unknown or unpinned hash is refused by name.

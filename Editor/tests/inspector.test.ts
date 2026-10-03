@@ -8,18 +8,16 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { SceneDocument, SceneObject } from "@grapix/contracts";
+import type { SceneDocument, SceneEdit, SceneObject } from "@grapix/contracts";
 import { agentView, findNode } from "../src/agent-surface";
 import {
-  applyEdit,
-  applyTransaction,
-  editSelection,
+  fieldEditLabel,
   fieldEditStart,
+  inspectorEdits,
   inspectorPanel,
-  invertTransaction,
   isRefused,
   parseFieldInput,
-  type EditTransaction,
+  type EditRefused,
 } from "../src/inspector";
 
 function base(id: string, name: string): Record<string, unknown> {
@@ -134,146 +132,84 @@ describe("Mixed across a multi-selection", () => {
   });
 });
 
-describe("one gesture, one undo transaction", () => {
-  it("editing across N objects yields one transaction with N changes", () => {
+function group(id: string, childIds: string[], overrides: Record<string, unknown> = {}): SceneObject {
+  return { type: "group", ...base(id, id), childIds, ...overrides } as unknown as SceneObject;
+}
+
+// The edit rules (Mixed-kind refusal, unchanged-value refusal, inherited hide
+// and lock) are Rust's (`gx_contracts::object_edit`) and tested there. The
+// inspector's job is to turn one gesture into the one batch Rust applies.
+describe("one gesture is one atomic SceneEdit batch", () => {
+  it("a field edit across N objects is one setObjectField naming all N", () => {
     const document = scene([
       rect("a", { opacity: 0.1 }),
       rect("b", { opacity: 0.2 }),
       rect("c", { opacity: 0.3 }),
     ]);
-
-    const outcome = applyEdit(document, ["a", "b", "c"], "opacity", 1);
-    expect(isRefused(outcome)).toBe(false);
-    const transaction = outcome as EditTransaction;
-
-    expect(transaction.changes).toHaveLength(3);
-    expect(transaction.changes.map((change) => change.objectId)).toEqual(["a", "b", "c"]);
-    // The count is in the label because that is what the undo menu shows.
-    expect(transaction.label).toBe("Set Opacity on 3 objects");
-    // Each change carries what it replaced, so undo is a fact rather than a
-    // value recomputed later against a document that has since moved.
-    expect(transaction.changes.map((change) => change.from)).toEqual([0.1, 0.2, 0.3]);
-  });
-
-  it("objects already holding the value contribute no change", () => {
-    // Recording them would make undo step over objects it never changed.
-    const document = scene([rect("a", { opacity: 1 }), rect("b", { opacity: 0.5 })]);
-    const transaction = applyEdit(document, ["a", "b"], "opacity", 1) as EditTransaction;
-
-    expect(transaction.changes).toHaveLength(1);
-    expect(transaction.changes[0]!.objectId).toBe("b");
-    expect(transaction.label).toBe("Set Opacity");
-  });
-
-  it("applying to a Mixed field sets every applicable object", () => {
-    const document = scene([rect("a", { opacity: 0.5 }), rect("b", { opacity: 1 })]);
-    const transaction = applyEdit(document, ["a", "b"], "opacity", 0.25) as EditTransaction;
-
-    expect(transaction.changes.map((change) => [change.objectId, change.to])).toEqual([
-      ["a", 0.25],
-      ["b", 0.25],
+    expect(inspectorEdits(document, ["a", "b", "c"], "opacity", 0.75)).toEqual([
+      { edit: "setObjectField", objectIds: ["a", "b", "c"], field: { name: "opacity", value: 0.75 } },
     ]);
   });
 
-  it("a mixed-kind edit touches the objects it means something for", () => {
+  it("a mixed-kind selection is sent whole, so Rust refuses it for the selection", () => {
     const document = scene([text("t"), rect("r")]);
-    const transaction = applyEdit(document, ["t", "r"], "size", 24) as EditTransaction;
-
-    expect(transaction.changes.map((change) => change.objectId)).toEqual(["t"]);
+    expect(inspectorEdits(document, ["t", "r"], "size", 24)).toEqual([
+      { edit: "setObjectField", objectIds: ["t", "r"], field: { name: "size", value: 24 } },
+    ]);
   });
-});
 
-describe("an edit that would do nothing is refused, not silently accepted", () => {
-  it("names the condition in each case", () => {
+  it("ids no longer in the document are not sent", () => {
+    const document = scene([rect("a")]);
+    expect(inspectorEdits(document, ["a", "gone"], "x", 5)).toEqual([
+      { edit: "setObjectField", objectIds: ["a"], field: { name: "x", value: 5 } },
+    ]);
+  });
+
+  it("name, visibility and lock are the object manager's own edits, one per object", () => {
+    const document = scene([rect("a"), rect("b")]);
+    expect(inspectorEdits(document, ["a", "b"], "name", "Card")).toEqual([
+      { edit: "renameObject", objectId: "a", name: "Card" },
+      { edit: "renameObject", objectId: "b", name: "Card" },
+    ]);
+    expect(inspectorEdits(document, ["a"], "locked", true)).toEqual([
+      { edit: "setObjectLocked", objectId: "a", locked: true },
+    ]);
+  });
+
+  it("orders a group and its child so the batch cannot refuse on itself", () => {
+    // Rust refuses a change under a hidden or locked ancestor, so hiding runs
+    // innermost first and showing outermost first.
+    const document = scene([group("g", ["child"]), rect("child")]);
+    const order = (field: string, value: boolean): string[] => {
+      const edits = inspectorEdits(document, ["g", "child"], field, value);
+      if (isRefused(edits)) throw new Error(edits.refused);
+      return edits.map((edit) => ("objectId" in edit ? edit.objectId : edit.edit));
+    };
+    expect(order("visible", false)).toEqual(["child", "g"]);
+    expect(order("visible", true)).toEqual(["g", "child"]);
+    expect(order("locked", true)).toEqual(["child", "g"]);
+    expect(order("locked", false)).toEqual(["g", "child"]);
+  });
+
+  it("names what it cannot build", () => {
     const document = scene([rect("r")]);
-
-    const noField = applyEdit(document, ["r"], "notAField", 1);
-    expect(isRefused(noField) && noField.refused).toContain("no inspector field");
-
-    const noSelection = applyEdit(document, [], "opacity", 1);
-    expect(isRefused(noSelection) && noSelection.refused).toBe("nothing is selected");
-
-    const wrongKind = applyEdit(document, ["r"], "size", 12);
-    expect(isRefused(wrongKind) && wrongKind.refused).toBe("Size is not a property of rect");
-
-    const alreadySet = applyEdit(document, ["r"], "opacity", 1);
-    expect(isRefused(alreadySet) && alreadySet.refused).toContain("already has");
-  });
-});
-
-describe("an inspector gesture changes the document as one transaction", () => {
-  const opacities = (document: SceneDocument): number[] =>
-    document.objects.map((object) => object.opacity);
-
-  it("an edit over a Mixed N-object selection produces the new document", () => {
-    const document = scene([
-      rect("a", { opacity: 0.1 }),
-      rect("b", { opacity: 0.2 }),
-      rect("c", { opacity: 0.3 }),
-    ]);
-    expect(value(inspectorPanel(document, ["a", "b", "c"]), "opacity")).toBe("Mixed");
-    const before = JSON.stringify(document);
-
-    const outcome = editSelection(document, ["a", "b", "c"], "opacity", 0.75);
-    expect(isRefused(outcome)).toBe(false);
-    const { document: next, transaction } = outcome as Exclude<typeof outcome, { refused: string }>;
-
-    expect(transaction.changes).toHaveLength(3);
-    expect(transaction.label).toBe("Set Opacity on 3 objects");
-    expect(opacities(next)).toEqual([0.75, 0.75, 0.75]);
-    expect(value(inspectorPanel(next, ["a", "b", "c"]), "opacity")).toBe("75%");
-    // The input is untouched: the pre-gesture document is the undo snapshot.
-    expect(JSON.stringify(document)).toBe(before);
+    const refused = (outcome: readonly SceneEdit[] | EditRefused): string | undefined =>
+      isRefused(outcome) ? outcome.refused : undefined;
+    expect(refused(inspectorEdits(document, ["r"], "notAField", 1))).toContain("no inspector field");
+    expect(refused(inspectorEdits(document, [], "opacity", 1))).toBe("nothing is selected");
+    expect(refused(inspectorEdits(document, ["r"], "opacity", "high"))).toBe("Opacity cannot be set to high");
   });
 
-  it("undo reverts all N changes and redo reapplies them", () => {
-    const document = scene([
-      rect("a", { opacity: 0.1 }),
-      rect("b", { opacity: 0.2 }),
-      rect("c", { opacity: 0.3 }),
-    ]);
-    const transaction = applyEdit(document, ["a", "b", "c"], "opacity", 1) as EditTransaction;
-
-    const done = applyTransaction(document, transaction);
-    if (isRefused(done)) throw new Error(done.refused);
-    expect(opacities(done.document)).toEqual([1, 1, 1]);
-
-    const undone = applyTransaction(done.document, invertTransaction(transaction));
-    if (isRefused(undone)) throw new Error(undone.refused);
-    expect(undone.document).toEqual(document);
-
-    const redone = applyTransaction(undone.document, transaction);
-    if (isRefused(redone)) throw new Error(redone.refused);
-    expect(redone.document).toEqual(done.document);
+  it("the history label counts the objects Rust changed", () => {
+    expect(fieldEditLabel("opacity", 3)).toBe("Set Opacity on 3 objects");
+    expect(fieldEditLabel("opacity", 1)).toBe("Set Opacity");
   });
 
-  it("a stale transaction is refused whole, never half-applied", () => {
-    const document = scene([rect("a", { opacity: 0.1 }), rect("b", { opacity: 0.2 })]);
-    const transaction = applyEdit(document, ["a", "b"], "opacity", 1) as EditTransaction;
-    // b moved after the transaction was computed.
-    const moved = scene([rect("a", { opacity: 0.1 }), rect("b", { opacity: 0.9 })]);
-
-    const outcome = applyTransaction(moved, transaction);
-    expect(isRefused(outcome) && outcome.refused).toContain("b.opacity");
-  });
-
-  it("a field missing from part of the selection is refused as the panel says", () => {
-    const document = scene([text("t"), rect("r")]);
-    const panel = inspectorPanel(document, ["t", "r"]);
-    const shown = findNode(panel, "inspector/size")!.actions![0]!.unavailable;
-
-    const outcome = editSelection(document, ["t", "r"], "size", 24);
-    expect(isRefused(outcome) && outcome.refused).toBe(shown);
-    expect(shown).toBe("Size is not a property of rect");
-  });
-
-  it("a type-aware field edits when every selected object has it", () => {
-    const document = scene([text("t1"), text("t2", { size: 12 })]);
-    const outcome = editSelection(document, ["t1", "t2"], "size", 24);
-    if (isRefused(outcome)) throw new Error(outcome.refused);
-    expect(outcome.document.objects.map((object) => (object as { size: number }).size)).toEqual([
-      24, 24,
-    ]);
+  it("the panel explains a field missing from part of the selection before any edit", () => {
+    const panel = inspectorPanel(scene([text("t"), rect("r")]), ["t", "r"]);
+    expect(findNode(panel, "inspector/size")!.actions![0]!.unavailable).toBe(
+      "Size is not a property of rect",
+    );
   });
 });
 

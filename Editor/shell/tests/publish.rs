@@ -14,7 +14,8 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-use gx_editor_shell::{new_scene, publish, EditorError};
+use gx_contracts::scene::new_scene;
+use gx_editor_shell::{publish, EditorError};
 
 /// The worker binary, next to this test executable in target/debug.
 fn worker_binary() -> Option<PathBuf> {

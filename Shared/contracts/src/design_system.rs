@@ -30,7 +30,7 @@ use crate::RationalRate;
 /// the same reason a component hardcoding a hex colour is (G.6.1). Kept as a
 /// string with a checked shape rather than a free string, so a malformed
 /// reference is caught at parse, not at render.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 pub struct TokenRef(pub String);
 
 impl TokenRef {
@@ -75,7 +75,7 @@ impl std::error::Error for TokenRefError {}
 ///
 /// Durations and staggers are milliseconds. Easings are cubic-bezier control
 /// points, or the literal `hold` for a phase that must not interpolate.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MotionTokens {
     /// Named durations in ms, e.g. `snap: 160`, `base: 400`.
@@ -87,7 +87,7 @@ pub struct MotionTokens {
 }
 
 /// A named scalar token value.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Named<T> {
     pub name: String,
@@ -95,7 +95,7 @@ pub struct Named<T> {
 }
 
 /// An easing token: a cubic-bezier curve, or `hold`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(tag = "easing", rename_all = "camelCase")]
 pub enum NamedEasing {
     /// A named cubic-bezier: `[x1, y1, x2, y2]`.
@@ -315,7 +315,7 @@ pub struct DesignSystem {
 }
 
 /// The external format a design-system draft came from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum DesignSystemSourceKind {
     W3c,
@@ -334,7 +334,7 @@ pub enum DesignSystemSourceKind {
 /// this equivalent to what we parsed?", which is not the question provenance
 /// asks: a duplicated JSON key, or a number re-spelled by whichever toolchain
 /// last wrote the file, would silently change what the record refers to.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DesignSystemSource {
     pub kind: DesignSystemSourceKind,
@@ -343,7 +343,7 @@ pub struct DesignSystemSource {
 }
 
 /// One source value that became a GrapiX token.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TokenMapping {
     pub source_path: String,
@@ -355,7 +355,7 @@ pub struct TokenMapping {
 /// Keeping the original value is part of the report: a path and a vague
 /// message are not enough for a human to judge whether accepting the draft
 /// would discard a load-bearing brand rule.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UnexpressibleToken {
     pub source_path: String,
@@ -369,7 +369,7 @@ pub struct UnexpressibleToken {
 /// `min_text_size` stays optional here and required in [`VisualTokens`]. An
 /// importer may not invent a legibility threshold merely to make a draft look
 /// complete; confirmation refuses until a human supplies one.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DraftVisualTokens {
     pub palette: Vec<Named<crate::color::Rgba>>,
@@ -378,7 +378,7 @@ pub struct DraftVisualTokens {
 }
 
 /// A lossless import proposal. It cannot become active without confirmation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DesignSystemDraft {
     pub name: String,
@@ -397,7 +397,7 @@ pub struct DesignSystemDraft {
 /// one an importer could fill in on the reviewer's behalf — which is exactly
 /// the auto-accept G.2 forbids. Keeping it in the request makes confirming an
 /// act a caller performs rather than a property the draft already had.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DesignSystemCommit {
     pub draft: DesignSystemDraft,
@@ -743,6 +743,15 @@ pub fn starter_presets() -> Vec<MotionPreset> {
         },
     ]
 }
+/// Look up one starter preset by its stable id.
+///
+/// The starter library remains authored as one ordered data table above; this
+/// helper gives command application a closed lookup without duplicating that
+/// table or leaking an unknown id into a generic implementation refusal.
+pub fn starter_preset(id: &str) -> Option<MotionPreset> {
+    starter_presets().into_iter().find(|preset| preset.id == id)
+}
+
 
 /// Object kinds a transform or opacity preset can drive: everything that
 /// draws. Containers are excluded because their transform reaches their

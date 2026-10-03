@@ -1,312 +1,145 @@
-// The scene workspace: open scenes as first-class entities (build plan 11.29).
+// Browser-local state for Rust-owned scene sessions (11.29, 11.36).
 //
-// **A broadcast is many graphics, not one open file.** Before this module the
-// Editor held a single implicit document in shell globals, so opening a second
-// scene destroyed the first one's selection, playhead, collapse state and —
-// worst — its undo history. An author who switched away and back could not
-// undo their own work, and there was no error message for it because nothing
-// had failed: the history was simply gone.
-//
-// **A scene owns its state; the panels are its children.** Viewport, object
-// manager, inspector, timeline, animation and bindings all render the *active*
-// session. That makes the scene the top of the UI hierarchy rather than a
-// sibling of the panels, which is how every broadcast CG editor models it and
-// is what makes switching cheap and lossless.
-//
-// **Undo is per scene, and that is a correctness property, not a nicety.**
-// One shared history would let Ctrl+Z in a lower-third restore a document
-// belonging to a different graphic. This module makes that unrepresentable:
-// there is no global stack to reach.
-//
-// The state here is deliberately view state, not document state. A collapsed
-// group is not a property of the scene, and saving it would make two authors'
-// files differ over something neither would call an edit.
+// **A broadcast is many graphics, not one open file.** Each open scene is a
+// session in the Rust workspace (`gx_editor::command::Workspace`), which owns
+// its document, origin, file path, undo/redo history and unsaved marks. The
+// browser holds the last `SessionView` Rust returned for each one — a
+// read-only projection — paired with the place the author is looking:
+// selection, collapsed rows, playhead and take-page controls. Those are view
+// state, never document content, so switching tabs must keep them and no
+// edit may be needed to restore them.
 
-import type { SceneDocument } from "@grapix/contracts";
+import type { SceneDocument, SceneOrigin, SessionKey, SessionView } from "@grapix/contracts";
 import type { TakePageState } from "./take-page";
 
-/// Where an open scene came from, and therefore where saving sends it back.
-///
-/// A scene opened from a project is addressed by project and id; one created
-/// or opened from a file is not, and must not pretend to be — a save that
-/// guessed a project would write a graphic into the wrong show.
-export interface SceneOrigin {
-  readonly project: string;
-  readonly sceneId: string;
-}
-
-/// One open scene and everything the panels need to render it.
-///
-/// `document` is the authored truth. Everything beside it is the author's
-/// place in that document, which is exactly what switching must preserve.
+/** A Rust session projection paired with browser-only view state. */
 export interface SceneSession {
-  /// Stable for the lifetime of the session, independent of the document id:
-  /// renaming a scene must not detach the tab the author is looking at.
-  readonly key: string;
-  document: SceneDocument;
-  /// Absent for a scene that is not bound to a project.
-  origin?: SceneOrigin;
-  /// A file path, when the scene was opened from or saved to one.
-  path: string | null;
+  readonly key: SessionKey;
+  view: SessionView;
   selection: string[];
   collapsed: string[];
-  /// Timeline groups the author has folded. A separate view from the object
-  /// manager's folds, and just as much this scene's own: one list shared by
-  /// every tab would fold rows in a graphic the author never touched.
   timelineCollapsed: string[];
   currentFrame: number;
-  /// Whole-document snapshots. One gesture is one entry, so one undo reverses
-  /// exactly one gesture.
-  undoStack: SceneDocument[];
-  redoStack: SceneDocument[];
-  /// Edited since the last successful save, to a project or to a file. This is
-  /// what a close refuses on, so it is the session's own and is never derived
-  /// from the project flag below: a scene from New scene or Open file has no
-  /// project, and deriving it from one erased every edit it had.
-  dirty: boolean;
-  /// Edited since the last save to its project origin. Always false for an
-  /// unbound scene. Saving to a file does not clear it, because the project
-  /// copy is still the old graphic and publishing reads the project copy.
-  projectDirty: boolean;
-  /// Operator values belong to this template session, never the next tab.
   takePage: TakePageState;
-  /// The filled copy currently shown in the preview, never an authored edit.
   takePagePreview: SceneDocument | null;
 }
 
 export interface Workspace {
   readonly sessions: SceneSession[];
-  /// The session the panels render. `undefined` only when nothing is open.
-  activeKey?: string;
+  activeKey?: SessionKey;
 }
-
-/// The ceiling on a single scene's history. A runaway stack is a memory leak
-/// in a long session, and the oldest gesture is the least likely to be undone.
-export const MAX_HISTORY = 200;
 
 export function emptyWorkspace(): Workspace {
   return { sessions: [] };
-}
-
-let nextKey = 0;
-
-/// A fresh session key. Monotonic rather than random so a test can predict it
-/// and two sessions opened in one tick cannot collide.
-export function newSessionKey(): string {
-  nextKey += 1;
-  return `session-${nextKey}`;
 }
 
 export function activeSession(workspace: Workspace): SceneSession | undefined {
   return workspace.sessions.find((session) => session.key === workspace.activeKey);
 }
 
-export function sessionFor(
-  workspace: Workspace,
-  origin: SceneOrigin,
-): SceneSession | undefined {
+/** The open session showing a stored scene, if any. */
+export function sessionFor(workspace: Workspace, origin: SceneOrigin): SceneSession | undefined {
   return workspace.sessions.find(
     (session) =>
-      session.origin?.project === origin.project &&
-      session.origin?.sceneId === origin.sceneId,
+      session.view.origin?.project === origin.project &&
+      session.view.origin?.sceneId === origin.sceneId,
   );
 }
 
-/// Open a document as a new session, or reveal the one already showing it.
+/// Store a projection Rust returned, keeping the session's view state.
 ///
-/// Opening the same project scene twice returns the existing session rather
-/// than a second copy: two sessions over one stored scene would give the
-/// author two divergent histories for one graphic and no way to say which
-/// wins on save.
-export function openSession(
-  workspace: Workspace,
-  document: SceneDocument,
-  options: { origin?: SceneOrigin; path?: string | null } = {},
-): SceneSession {
-  const existing = options.origin ? sessionFor(workspace, options.origin) : undefined;
+/// A view for a key already open replaces only the projection: an edit, an
+/// undo or a save must not lose the author's selection or playhead. A new key
+/// becomes a new session with empty view state. Neither activates anything.
+export function applySessionView(workspace: Workspace, view: SessionView): SceneSession {
+  const existing = workspace.sessions.find((session) => session.key === view.session);
   if (existing) {
-    workspace.activeKey = existing.key;
+    existing.view = view;
     return existing;
   }
   const session: SceneSession = {
-    key: newSessionKey(),
-    document,
-    ...(options.origin === undefined ? {} : { origin: options.origin }),
-    path: options.path ?? null,
+    key: view.session,
+    view,
     selection: [],
     collapsed: [],
     timelineCollapsed: [],
     currentFrame: 0,
-    undoStack: [],
-    redoStack: [],
-    dirty: false,
-    projectDirty: false,
     takePage: { values: {}, pageId: "", name: "" },
     takePagePreview: null,
   };
   workspace.sessions.push(session);
-  workspace.activeKey = session.key;
   return session;
 }
 
-/// Why a workspace action could not run. Free text, shown to the author and
-/// returned to an agent verbatim: both need the specific condition.
+/// Forget a session after Rust accepted `CloseScene` for it.
+///
+/// If it was active, its left neighbour becomes active (or the first, or
+/// nothing): the author lands next to the tab they closed, not at an
+/// arbitrary end.
+export function removeSession(workspace: Workspace, key: SessionKey): SceneSession | undefined {
+  const index = workspace.sessions.findIndex((session) => session.key === key);
+  if (index < 0) return undefined;
+  const [removed] = workspace.sessions.splice(index, 1);
+  if (workspace.activeKey === key) {
+    const neighbour = workspace.sessions[index - 1] ?? workspace.sessions[0];
+    if (neighbour) workspace.activeKey = neighbour.key;
+    else delete workspace.activeKey;
+  }
+  return removed;
+}
+
+/// Why a workspace action could not run. Free text, shown to the author.
 export type WorkspaceRefusal = { readonly refused: string };
 
 export function isRefused<T>(result: T | WorkspaceRefusal): result is WorkspaceRefusal {
   return typeof result === "object" && result !== null && "refused" in result;
 }
 
-/// Make one open scene active.
-///
-/// Switching never touches either document. Because each session already
-/// carries its own place in its own scene, there is nothing to save or
-/// restore and nothing that can be lost in the exchange.
-export function activate(workspace: Workspace, key: string): SceneSession | WorkspaceRefusal {
+export function activate(workspace: Workspace, key: SessionKey): SceneSession | WorkspaceRefusal {
   const session = workspace.sessions.find((candidate) => candidate.key === key);
   if (!session) return { refused: `no open scene ${key}` };
   workspace.activeKey = session.key;
   return session;
 }
 
-/// Close an open scene.
-///
-/// Unsaved work blocks the close by name. Discarding an author's edits because
-/// they clicked the wrong tab is exactly the silent loss invariant 18 forbids;
-/// `force` is the explicit confirmation, and the caller must have asked.
-export function closeSession(
-  workspace: Workspace,
-  key: string,
-  options: { force?: boolean } = {},
-): SceneSession | WorkspaceRefusal {
-  const index = workspace.sessions.findIndex((candidate) => candidate.key === key);
-  if (index === -1) return { refused: `no open scene ${key}` };
-  const session = workspace.sessions[index]!;
-  if (session.dirty && options.force !== true) {
-    return {
-      refused: `${session.document.name} has unsaved changes; save it or close it explicitly`,
-    };
-  }
-  workspace.sessions.splice(index, 1);
-  if (workspace.activeKey === key) {
-    // Prefer the neighbour on the left, which is where the author's attention
-    // already was; falling back to the new first session keeps something open
-    // whenever anything remains.
-    const neighbour = workspace.sessions[index - 1] ?? workspace.sessions[0];
-    // Deleted rather than set to `undefined`: "no scene is active" is the
-    // absence of a key, and the two must not become separately representable.
-    if (neighbour) workspace.activeKey = neighbour.key;
-    else delete workspace.activeKey;
-  }
-  return session;
-}
-
-/// Record a completed edit on one session.
-///
-/// The session is named explicitly rather than assumed to be the active one:
-/// an edit that landed while the author switched tabs must still be recorded
-/// against the scene it actually changed.
-export function commit(session: SceneSession, next: SceneDocument): void {
-  session.undoStack.push(session.document);
-  if (session.undoStack.length > MAX_HISTORY) session.undoStack.shift();
-  session.redoStack = [];
-  session.document = next;
-  markEdited(session);
-}
-
-export function undo(session: SceneSession): SceneDocument | undefined {
-  const previous = session.undoStack.pop();
-  if (!previous) return undefined;
-  session.redoStack.push(session.document);
-  session.document = previous;
-  markEdited(session);
-  return previous;
-}
-
-export function redo(session: SceneSession): SceneDocument | undefined {
-  const next = session.redoStack.pop();
-  if (!next) return undefined;
-  session.undoStack.push(session.document);
-  session.document = next;
-  markEdited(session);
-  return next;
-}
-
-/// Record that a session's document changed. Every edit, undo and redo lands
-/// here, so the close refusal can never miss one.
-export function markEdited(session: SceneSession): void {
-  session.dirty = true;
-  if (session.origin !== undefined) session.projectDirty = true;
-}
-
-/// Mark a session saved to its project, and bind it to that origin.
-export function markSaved(session: SceneSession, origin?: SceneOrigin): void {
-  if (origin) session.origin = origin;
-  session.dirty = false;
-  session.projectDirty = false;
-}
-
-/// Mark a session saved to a file. The work is safe, so the close refusal
-/// clears; the project copy, if there is one, is still stale.
-export function markSavedToFile(session: SceneSession, path: string): void {
-  session.path = path;
-  session.dirty = false;
-}
-
-/// The shell's working copy of the active session: everything it holds in
-/// flat state while the scene is on screen.
-///
-/// `dirty` is deliberately absent. The shell has no authority over it — only
-/// an edit or a save does — so writing the working copy back cannot erase an
-/// unsaved mark, which is exactly how 11.29's close refusal used to be lost.
+/// The view state the shell's flat globals carry for the active session.
 export interface SessionWorkingCopy {
-  readonly document: SceneDocument;
   readonly selection: string[];
   readonly collapsed: string[];
   readonly timelineCollapsed: string[];
   readonly currentFrame: number;
-  readonly undoStack: SceneDocument[];
-  readonly redoStack: SceneDocument[];
-  readonly path: string | null;
   readonly takePage: TakePageState;
   readonly takePagePreview: SceneDocument | null;
-  readonly projectDirty: boolean;
 }
 
-/// Write the shell's working copy back into its session before leaving it.
+/** Save browser-only view state before leaving a tab. */
 export function captureWorkingCopy(session: SceneSession, copy: SessionWorkingCopy): void {
-  session.document = copy.document;
   session.selection = copy.selection;
   session.collapsed = copy.collapsed;
   session.timelineCollapsed = copy.timelineCollapsed;
   session.currentFrame = copy.currentFrame;
-  session.undoStack = copy.undoStack;
-  session.redoStack = copy.redoStack;
-  session.path = copy.path;
   session.takePage = copy.takePage;
   session.takePagePreview = copy.takePagePreview;
-  session.projectDirty = copy.projectDirty;
 }
 
-/// What the scene switcher shows for one open scene.
 export interface SceneTab {
-  readonly key: string;
+  readonly key: SessionKey;
   readonly label: string;
-  /// Project-qualified origin, or `undefined` for an unbound scene. Shown so
-  /// two scenes with the same name in different shows are distinguishable.
   readonly origin?: string;
   readonly active: boolean;
   readonly dirty: boolean;
 }
 
+/// One tab per open scene. The unsaved mark is Rust's: only an edit or a
+/// save changes it, never a switch.
 export function sceneTabs(workspace: Workspace): SceneTab[] {
   return workspace.sessions.map((session) => ({
     key: session.key,
-    label: session.document.name || session.document.id,
-    ...(session.origin === undefined
+    label: session.view.document.name || session.view.document.id,
+    ...(session.view.origin === undefined
       ? {}
-      : { origin: `${session.origin.project}/${session.origin.sceneId}` }),
+      : { origin: `${session.view.origin.project}/${session.view.origin.sceneId}` }),
     active: session.key === workspace.activeKey,
-    dirty: session.dirty,
+    dirty: session.view.dirty,
   }));
 }

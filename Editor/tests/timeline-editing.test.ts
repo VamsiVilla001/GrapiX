@@ -113,6 +113,20 @@ describe("key identity", () => {
   });
 });
 
+/// A gesture's edits as they cross to Rust: JSON, where every frame is a
+/// number. Reading the wire rather than the typed value is the point — the
+/// generated type says `bigint`, and `JSON.stringify` would throw on one.
+interface WireEdit {
+  readonly edit: string;
+  readonly fromFrame?: number;
+  readonly frame?: number;
+  readonly keyframe?: { readonly frame: number; readonly value: number; readonly easing: string };
+}
+
+function wire(gesture: { readonly edits: readonly unknown[] }): WireEdit[] {
+  return JSON.parse(JSON.stringify(gesture.edits));
+}
+
 describe("snapping", () => {
   it("snaps to a candidate within tolerance and rounds otherwise", () => {
     expect(snapFrame(21.4, [20, 40], SNAP_TOLERANCE_FRAMES)).toBe(20);
@@ -130,10 +144,11 @@ describe("moving keys", () => {
     const plan = planMove(model, [keyId("card", "x", 0), keyId("card", "x", 10)], 100);
     expect(isRefused(plan)).toBe(false);
     if (isRefused(plan)) return;
-    // Two calls, but the caller runs them as one undo entry; the label says so.
-    expect(plan.calls).toHaveLength(2);
+    // Two edits, sent as one batch Rust applies as one undo entry; the label
+    // says so.
+    expect(plan.edits).toHaveLength(2);
     expect(plan.label).toBe("Move 2 keys +100 frames");
-    expect(plan.calls.every((call) => call.command === "cmd_keyframe_move")).toBe(true);
+    expect(plan.edits.every((edit) => edit.edit === "moveKeyframe")).toBe(true);
   });
 
   it("orders a rightward slide from the rightmost key so it cannot self-collide", () => {
@@ -146,7 +161,7 @@ describe("moving keys", () => {
       1,
     );
     if (isRefused(plan)) throw new Error(plan.refused);
-    expect(plan.calls.map((call) => call.args.fromFrame)).toEqual([20, 10, 0]);
+    expect(wire(plan).map((edit) => edit.fromFrame)).toEqual([20, 10, 0]);
 
     // And leftward starts from the leftmost, for the same reason. Keys 10 and
     // 20 shift to 9 and 19; starting the run at 0 would legitimately refuse,
@@ -157,7 +172,7 @@ describe("moving keys", () => {
       -1,
     );
     if (isRefused(left)) throw new Error(left.refused);
-    expect(left.calls.map((call) => call.args.fromFrame)).toEqual([10, 20]);
+    expect(wire(left).map((edit) => edit.fromFrame)).toEqual([10, 20]);
   });
 
   it("refuses a landing frame an unselected key already holds, by name", () => {
@@ -205,27 +220,15 @@ describe("deleting keys", () => {
   it("is one gesture over the whole selection", () => {
     const plan = planDelete([keyId("card", "x", 0), keyId("card", "opacity", 30)]);
     if (isRefused(plan)) throw new Error(plan.refused);
-    expect(plan.calls).toHaveLength(2);
     expect(plan.label).toBe("Delete 2 keys");
-    expect(plan.calls[0]!.command).toBe("cmd_keyframe_remove");
+    expect(wire(plan)).toEqual([
+      { edit: "removeKeyframe", objectId: "card", property: "x", frame: 0 },
+      { edit: "removeKeyframe", objectId: "card", property: "opacity", frame: 30 },
+    ]);
     expect(planDelete([])).toMatchObject({ refused: "no keys are selected" });
   });
 });
 
-/// Read the frame off a paste call's keyframe payload.
-///
-/// Narrowed rather than asserted: `args` is an IPC payload typed
-/// `Record<string, unknown>`, so claiming a shape here would suppress the
-/// check instead of performing it — and this assertion is the whole point of
-/// the test.
-function pastedFrame(call: { readonly args: Record<string, unknown> }): number {
-  const keyframe = call.args.keyframe;
-  if (keyframe !== null && typeof keyframe === "object" && "frame" in keyframe) {
-    const frame = keyframe.frame;
-    if (typeof frame === "number") return frame;
-  }
-  throw new Error(`paste call carried no numeric frame: ${JSON.stringify(call.args)}`);
-}
 
 describe("copy and paste", () => {
   it("copies frames relative to the earliest key, so a run keeps its shape", () => {
@@ -240,7 +243,7 @@ describe("copy and paste", () => {
     const clipboard = planCopy(model, [keyId("card", "x", 10), keyId("card", "x", 20)]);
     const plan = planPaste(model, clipboard, 200);
     if (isRefused(plan)) throw new Error(plan.refused);
-    expect(plan.calls.map(pastedFrame)).toEqual([200, 210]);
+    expect(wire(plan).map((edit) => edit.keyframe?.frame)).toEqual([200, 210]);
     expect(plan.label).toBe("Paste 2 keys at 200");
   });
 
@@ -283,11 +286,11 @@ describe("easing assignment (11.23)", () => {
       "ease-in-out",
     );
     if (isRefused(plan)) throw new Error(plan.refused);
-    expect(plan.calls).toHaveLength(2);
+    expect(plan.edits).toHaveLength(2);
     expect(plan.label).toBe("Set easing to ease-in-out on 2 keys");
     // The fixture's key at frame 20 holds value 20: the curve changes, the key
     // does not move and does not change value.
-    expect(plan.calls[1]!.args.keyframe).toMatchObject({
+    expect(wire(plan)[1]?.keyframe).toMatchObject({
       frame: 20,
       value: 20,
       easing: "ease-in-out",

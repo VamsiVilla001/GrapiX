@@ -11,9 +11,10 @@
 //! version, and the store must refuse to invent one.
 
 use gx_contracts::auth::Scope;
+use gx_contracts::command::ConfirmDesignSystem;
 use gx_editor::Projects;
 use gx_editor_mcp::{
-    DesignSystemCommitTool, DesignSystemGet, DesignSystemImportTool, DesignSystemListVersions,
+    CommandTool, DesignSystemGet, DesignSystemImportTool, DesignSystemListVersions,
 };
 use gx_mcp_server::Server;
 
@@ -77,7 +78,7 @@ fn server_with(projects: &Projects, scopes: Vec<Scope>) -> Server {
     );
     server.register(
         "designsystem.commit",
-        Box::new(DesignSystemCommitTool(projects.clone())),
+        Box::new(CommandTool::<ConfirmDesignSystem>::new(projects.clone())),
     );
     server.register(
         "designsystem.get",
@@ -152,6 +153,8 @@ fn a_brand_pack_is_imported_reviewed_and_confirmed_over_the_wire() {
         "import proposed a draft and must not have committed it"
     );
 
+    // The commit is an `EditorCommand` payload: the project, and the commit
+    // itself — the draft plus the human confirming it.
     let committed = drive(
         &server,
         &[call(
@@ -159,8 +162,7 @@ fn a_brand_pack_is_imported_reviewed_and_confirmed_over_the_wire() {
             "designsystem.commit",
             serde_json::json!({
                 "project": "news",
-                "draft": draft,
-                "confirmedBy": "head-of-design",
+                "commit": { "draft": draft, "confirmedBy": "head-of-design" },
             }),
         )],
     );
@@ -169,11 +171,12 @@ fn a_brand_pack_is_imported_reviewed_and_confirmed_over_the_wire() {
         "unexpected refusal: {}",
         committed[0]
     );
-    // The declared output is `DesignSystem`, and this is what proves the
+    // The declared output is `CommandOutcome`, and this is what proves the
     // declaration is honest rather than aspirational.
-    assert_eq!(committed[0]["result"]["version"], 1);
-    assert_eq!(committed[0]["result"]["name"], "Brand");
-    assert_eq!(committed[0]["result"]["visual"]["minTextSize"], 18.0);
+    assert_eq!(
+        committed[0]["result"]["effects"],
+        serde_json::json!([{ "effect": "designSystemConfirmed", "project": "news", "version": 1 }])
+    );
 
     let after = drive(
         &server,
@@ -187,6 +190,8 @@ fn a_brand_pack_is_imported_reviewed_and_confirmed_over_the_wire() {
         ],
     );
     assert_eq!(after[0]["result"]["version"], 1);
+    assert_eq!(after[0]["result"]["name"], "Brand");
+    assert_eq!(after[0]["result"]["visual"]["minTextSize"], 18.0);
     let versions = after[1]["result"]["versions"]
         .as_array()
         .expect("a version list");
@@ -216,8 +221,7 @@ fn an_author_token_cannot_commit_a_brand_pack() {
             "designsystem.commit",
             serde_json::json!({
                 "project": "news",
-                "draft": serde_json::Value::Null,
-                "confirmedBy": "someone",
+                "commit": { "draft": serde_json::Value::Null, "confirmedBy": "someone" },
             }),
         )],
     );
@@ -267,8 +271,7 @@ fn a_commit_with_no_confirming_human_is_refused_at_the_wire() {
             "designsystem.commit",
             serde_json::json!({
                 "project": "news",
-                "draft": draft,
-                "confirmedBy": "   ",
+                "commit": { "draft": draft, "confirmedBy": "   " },
             }),
         )],
     );

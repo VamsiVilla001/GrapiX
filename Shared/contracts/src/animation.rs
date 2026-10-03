@@ -24,7 +24,7 @@ use crate::{RationalRate, Refusal};
 /// The easing between two keys. Closed and finite: the curve an author chooses
 /// must be one every evaluator knows by name, because a substituted curve is a
 /// visual change no one named (invariant 18).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum SceneEasing {
     Linear,
@@ -52,7 +52,7 @@ impl SceneEasing {
 /// as CSS and standard animation tooling allow. The points are stored with the
 /// key, not solved from neighbouring keys at display time, so a saved scene
 /// means the same curve when it is reopened.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CubicBezier {
     pub x1: f64,
@@ -62,7 +62,7 @@ pub struct CubicBezier {
 }
 
 /// One key on one numeric property channel.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SceneKeyframe {
     /// Absolute frame at the scene canvas rate.
@@ -465,6 +465,37 @@ pub fn create_keyframe(
     }
     set_keyframe(scene, object_id, property, key)
 }
+/// Replace an existing keyframe at its own frame.
+///
+/// `set_keyframe` intentionally creates a channel or key when absent. The
+/// inspector's update operation is narrower: it must name a key that already
+/// exists, otherwise an accidental update becomes an undeclared creation.
+pub fn update_keyframe(
+    scene: &mut SceneDocument,
+    object_id: &str,
+    property: &str,
+    key: SceneKeyframe,
+) -> Result<(), Refusal> {
+    let Some(index) = channel_index(scene, object_id, property)? else {
+        return Err(Refusal::AnimationChannelUnknown {
+            object: object_id.to_owned(),
+            property: property.to_owned(),
+        });
+    };
+    if !scene.timeline.channels[index]
+        .keys
+        .iter()
+        .any(|existing| existing.frame == key.frame)
+    {
+        return Err(Refusal::KeyframeUnknown {
+            object: object_id.to_owned(),
+            property: property.to_owned(),
+            frame: key.frame,
+        });
+    }
+    set_keyframe(scene, object_id, property, key)
+}
+
 
 /// Add or replace one key. Replacement at the same frame is explicit rather
 /// than an accidental second key: two values for one frame cannot both render.
@@ -1016,6 +1047,24 @@ mod tests {
         remove_keyframe(&mut scene, "card", "x", 0).unwrap();
         assert!(scene.timeline.channels.is_empty(), "an empty channel disappears");
     }
+    #[test]
+    fn update_requires_an_existing_keyframe() {
+        let mut scene = scene_with(vec![rect("card")]);
+
+        assert!(matches!(
+            update_keyframe(&mut scene, "card", "x", key(20, 120.0)),
+            Err(Refusal::AnimationChannelUnknown { .. })
+        ));
+
+        create_keyframe(&mut scene, "card", "x", key(20, 100.0)).unwrap();
+        update_keyframe(&mut scene, "card", "x", key(20, 120.0)).unwrap();
+        assert_eq!(scene.timeline.channels[0].keys[0].value, 120.0);
+        assert!(matches!(
+            update_keyframe(&mut scene, "card", "x", key(30, 130.0)),
+            Err(Refusal::KeyframeUnknown { frame: 30, .. })
+        ));
+    }
+
 
     #[test]
     fn a_move_onto_an_occupied_frame_refuses_by_name() {

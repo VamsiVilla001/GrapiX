@@ -72,32 +72,31 @@ written Apple licence position exists here.**
 - macOS: use VideoToolbox's ProRes decode. Windows: FFmpeg's ProRes decoder
   (LGPL-safe).
 
-## 5. Font embedding — package-owned fonts only; linked fonts resolve at the render node
+## 5. Font embedding — font links are downloaded into the project
 
-**Position: a `.gpxpkg` may embed only fonts whose licence permits
-redistribution. Linked (CSS/Adobe/direct-URL) font sources are resolved and
-downloaded at the node that renders them; the package carries the reference,
-not the bytes.**
+**Position (revised 2026-10-03 by the project owner): ingesting a font link
+downloads its font files into the project as hashed assets, and the font
+manager generates `@font-face` rules for them in the stylesheet templates
+use. This covers Google Fonts, Bunny Fonts and Adobe Fonts
+(`use.typekit.net`) links. A `.gpxpkg` carries those bytes.**
 
-This is the position ADR-0002 A.4 says must be decided, and it shapes the
-font subsystem contract:
+This supersedes the 2026-09-11 position, under which linked fonts stayed
+references resolved at the render node and Adobe Fonts were never packaged.
 
-- The font model carries an `embeddingPolicy` per font:
-  - `package` — bytes may travel inside the package (asset bytes with a
-    licence that permits redistribution: OFL, Apache-2.0, and similar).
-  - `reference` — the package stores the source reference; the render node
-    resolves it. Used for Google Fonts CSS and direct URLs.
-  - `restricted` — resolution permitted on the operator's workstation only;
-    bytes never leave it (Adobe Fonts class).
-- **Adobe Fonts are never packaged.** Their terms do not permit extracting
-  font files; the reference resolves at the render node, and a missing
-  resolution is a preflight refusal, not a fallback (A.4's one rule).
-- Google Fonts / Bunny Fonts CSS are permitted to *resolve and cache* bytes
-  at the render node (both serve OFL/Apache-2.0 fonts over HTTPS); they are
-  still carried as `reference`, not embedded.
-- Every packaged font records its declared licence string. The font manager
-  surfaces it; preflight refuses a `package` font with no licence recorded
-  (a font with no stated licence is treated as `restricted`).
+- **Adobe Fonts: risk accepted by the owner.** Adobe's terms do not permit
+  extracting font files from Adobe Fonts. The owner chose on 2026-10-03 to
+  download them anyway and owns that licensing risk. Revisit this before
+  any package leaves the owner's own use.
+- The font model still carries an `embeddingPolicy` per font (`package`,
+  `reference`, `restricted`). A downloaded link font is `package`, and its
+  faces keep `originalUrl` and `stylesheetUrl` as provenance.
+- Every packaged font records its licence. A downloaded font records the
+  licence from its name table. An Adobe Fonts file that names none records
+  "Adobe Fonts — packaging accepted by project owner 2026-10-03". Preflight
+  still refuses a `package` font with no licence recorded.
+- A failed download or an unverifiable file is a named refusal, and no part
+  of that link enters the project. Nothing falls back to a reference or a
+  system font.
 - System-installed fonts are never referenced by anything that reaches air —
   unchanged from A.4, restated here because it is also a licensing position.
 

@@ -57,88 +57,6 @@ export function relinkMaterial(
   return usersOf(document, fromMaterialId);
 }
 
-/// Why a library edit was not made. `code` is stable for a caller to branch
-/// on; `refused` is the sentence shown to the author.
-export interface MaterialRefused {
-  readonly code: "materialUnknown" | "materialInUse" | "relinkSameMaterial" | "relinkNoUsers";
-  readonly refused: string;
-}
-
-export function isMaterialRefused(outcome: object): outcome is MaterialRefused {
-  return "refused" in outcome && "code" in outcome;
-}
-
-function unknownMaterial(document: SceneDocument, materialId: string): MaterialRefused | undefined {
-  return document.materials.some((material) => material.materialId === materialId)
-    ? undefined
-    : { code: "materialUnknown", refused: `no material ${materialId} in ${document.name}` };
-}
-
-/// Repoint every binding of `fromMaterialId` at `toMaterialId`, returning the
-/// new document and the objects that changed — the same ids the preview named.
-///
-/// An `instanceId` is dropped on a repointed binding: its overrides were
-/// authored against the old material's parameters and would otherwise be
-/// applied to one that may not have them. A relink that would change nothing
-/// is refused rather than reported as success, so it never becomes an undo
-/// entry that undoes nothing.
-export function applyRelink(
-  document: SceneDocument,
-  fromMaterialId: string,
-  toMaterialId: string,
-): { readonly document: SceneDocument; readonly changed: string[] } | MaterialRefused {
-  const unknown =
-    unknownMaterial(document, fromMaterialId) ?? unknownMaterial(document, toMaterialId);
-  if (unknown) return unknown;
-  if (fromMaterialId === toMaterialId) {
-    return {
-      code: "relinkSameMaterial",
-      refused: `${fromMaterialId} is already the material its users are bound to`,
-    };
-  }
-  const changed = relinkMaterial(document, fromMaterialId, toMaterialId);
-  if (changed.length === 0) {
-    return { code: "relinkNoUsers", refused: `${fromMaterialId} has no users to relink` };
-  }
-
-  const objects = document.objects.map((object): SceneObject => {
-    const slots = object.materialSlots;
-    if (!slots || !changed.includes(object.id)) return object;
-    const next: typeof slots = {};
-    for (const [slot, binding] of Object.entries(slots)) {
-      next[slot] =
-        binding && binding.materialId === fromMaterialId ? { materialId: toMaterialId } : binding;
-    }
-    return { ...object, materialSlots: next };
-  });
-  return { document: { ...document, objects }, changed };
-}
-
-/// Remove a material nothing binds. One still in use is refused with its
-/// count — the sentence the panel's disabled Delete already shows — because
-/// deleting it would silently restyle every object that used it.
-export function applyDeleteMaterial(
-  document: SceneDocument,
-  materialId: string,
-): { readonly document: SceneDocument } | MaterialRefused {
-  const material = document.materials.find((candidate) => candidate.materialId === materialId);
-  if (!material) return unknownMaterial(document, materialId)!;
-  const users = usersOf(document, materialId);
-  if (users.length > 0) {
-    return { code: "materialInUse", refused: inUseReason(material.name, users.length) };
-  }
-  return {
-    document: {
-      ...document,
-      materials: document.materials.filter((candidate) => candidate.materialId !== materialId),
-    },
-  };
-}
-
-function inUseReason(name: string, count: number): string {
-  return `${name} is used by ${count} object(s)`;
-}
-
 export function materialManagerPanel(
   document: SceneDocument,
   state: MaterialManagerState = {},
@@ -174,7 +92,7 @@ export function materialManagerPanel(
           ...(users.length === 0
             ? {}
             : {
-                unavailable: inUseReason(material.name, users.length),
+                unavailable: `${material.name} is used by ${users.length} object(s)`,
               }),
         },
       ],

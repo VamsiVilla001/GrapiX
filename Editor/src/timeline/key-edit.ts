@@ -1,7 +1,8 @@
 // Selecting, moving, deleting and pasting keys (11.22).
 //
-// Everything here is pure: it turns a gesture into the list of shell calls
-// that would perform it, and the caller runs them as **one** undo entry. That
+// Everything here is pure: it turns a gesture into the ordered `SceneEdit`
+// batch that would perform it, and the caller sends it as **one** command,
+// which Rust applies atomically as one history entry. That
 // split is deliberate — "one undo per gesture" is then a property of the
 // returned list rather than of whoever remembered to batch.
 //
@@ -13,17 +14,14 @@
 // `planMove` detects it up front so the refusal can be shown before anything
 // is written, and the same rule still guards the write underneath.
 
+import type { CubicBezier, SceneEasing, SceneEdit } from "@grapix/contracts";
+import { wireFrame } from "../command-client";
 import { keyId, parseKeyId, type TimelineModel } from "./model";
 import { countInSpan } from "./key-index";
 
-export interface ShellCall {
-  readonly command: string;
-  readonly args: Record<string, unknown>;
-}
-
-/// A gesture: what to run, and what to call it in the undo menu.
+/** A gesture's ordered edits are one Rust history entry. */
 export interface Gesture {
-  readonly calls: readonly ShellCall[];
+  readonly edits: readonly SceneEdit[];
   readonly label: string;
 }
 
@@ -158,14 +156,12 @@ export function planMove(
   );
 
   return {
-    calls: ordered.map((key) => ({
-      command: "cmd_keyframe_move",
-      args: {
-        objectId: key!.objectId,
-        property: key!.property,
-        fromFrame: key!.frame,
-        toFrame: key!.frame + delta,
-      },
+    edits: ordered.map((key) => ({
+      edit: "moveKeyframe",
+      objectId: key!.objectId,
+      property: key!.property,
+      fromFrame: wireFrame(key!.frame),
+      toFrame: wireFrame(key!.frame + delta),
     })),
     label:
       selected.length === 1
@@ -181,9 +177,11 @@ export function planDelete(selected: readonly string[]): EditPlan {
   if (parsed.length !== selected.length) return { refused: "a selected key is unreadable" };
 
   return {
-    calls: parsed.map((key) => ({
-      command: "cmd_keyframe_remove",
-      args: { objectId: key!.objectId, property: key!.property, frame: key!.frame },
+    edits: parsed.map((key) => ({
+      edit: "removeKeyframe",
+      objectId: key!.objectId,
+      property: key!.property,
+      frame: wireFrame(key!.frame),
     })),
     label: selected.length === 1 ? "Delete key" : `Delete ${selected.length} keys`,
   };
@@ -198,15 +196,15 @@ export function planDelete(selected: readonly string[]): EditPlan {
 export function planSetEasing(
   model: TimelineModel,
   selected: readonly string[],
-  easing: string,
-  bezier?: unknown,
+  easing: SceneEasing,
+  bezier?: CubicBezier,
 ): EditPlan {
   if (selected.length === 0) return { refused: "no keys are selected" };
   if (easing === "custom-bezier" && bezier === undefined) {
     return { refused: "a custom bezier needs its control points" };
   }
 
-  const calls: ShellCall[] = [];
+  const edits: SceneEdit[] = [];
   for (const id of selected) {
     const key = parseKeyId(id);
     if (!key) return { refused: "a selected key is unreadable" };
@@ -217,23 +215,21 @@ export function planSetEasing(
     if (!source) {
       return { refused: `no key on ${key.objectId}.${key.property} at frame ${key.frame}` };
     }
-    calls.push({
-      command: "cmd_keyframe_update",
-      args: {
-        objectId: key.objectId,
-        property: key.property,
-        keyframe: {
-          frame: key.frame,
-          value: source.value,
-          easing,
-          ...(easing === "custom-bezier" ? { bezier } : {}),
-        },
+    edits.push({
+      edit: "updateKeyframe",
+      objectId: key.objectId,
+      property: key.property,
+      keyframe: {
+        frame: wireFrame(key.frame),
+        value: source.value,
+        easing,
+        ...(easing === "custom-bezier" && bezier !== undefined ? { bezier } : {}),
       },
     });
   }
 
   return {
-    calls,
+    edits,
     label:
       selected.length === 1
         ? `Set easing to ${easing}`
@@ -247,8 +243,8 @@ export interface ClipboardKey {
   readonly property: string;
   readonly offset: number;
   readonly value: number;
-  readonly easing: string;
-  readonly bezier?: unknown;
+  readonly easing: SceneEasing;
+  readonly bezier?: CubicBezier;
 }
 
 /// Copy the selection, with frames stored **relative** to the earliest key.
@@ -292,7 +288,7 @@ export function planPaste(
 ): EditPlan {
   if (clipboard.length === 0) return { refused: "the clipboard is empty" };
 
-  const calls: ShellCall[] = [];
+  const edits: SceneEdit[] = [];
   for (const key of clipboard) {
     const frame = atFrame + key.offset;
     if (frame > model.durationFrames) {
@@ -308,23 +304,21 @@ export function planPaste(
         refused: `frame ${frame} on ${key.objectId}.${key.property} already has a key`,
       };
     }
-    calls.push({
-      command: "cmd_keyframe_create",
-      args: {
-        objectId: key.objectId,
-        property: key.property,
-        keyframe: {
-          frame,
-          value: key.value,
-          easing: key.easing,
-          ...(key.bezier === undefined ? {} : { bezier: key.bezier }),
-        },
+    edits.push({
+      edit: "createKeyframe",
+      objectId: key.objectId,
+      property: key.property,
+      keyframe: {
+        frame: wireFrame(frame),
+        value: key.value,
+        easing: key.easing,
+        ...(key.bezier === undefined ? {} : { bezier: key.bezier }),
       },
     });
   }
 
   return {
-    calls,
+    edits,
     label: clipboard.length === 1 ? `Paste key at ${atFrame}` : `Paste ${clipboard.length} keys at ${atFrame}`,
   };
 }

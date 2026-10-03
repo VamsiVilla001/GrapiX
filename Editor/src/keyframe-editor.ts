@@ -17,6 +17,8 @@ import type {
   SceneObject,
 } from "@grapix/contracts";
 
+import { wireFrame } from "./command-client";
+
 /// Whether a keyframe exists at the playhead across the whole selection.
 export type KeyState = "none" | "all" | "partial";
 
@@ -229,10 +231,7 @@ export function keyframeForValue(
   easing: SceneEasing = "ease-in-out",
 ): SceneKeyframe {
   return {
-    // `ts-rs` maps Rust u64 to bigint, while serde/Tauri carries a JSON
-    // number. Keep the runtime wire value serialisable and contain that
-    // generator mismatch at this boundary.
-    frame: frame as unknown as bigint,
+    frame: wireFrame(frame),
     value,
     easing,
   };

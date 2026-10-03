@@ -19,7 +19,7 @@
 // the author presses undo once, sees eleven objects still changed, and no
 // longer trusts undo at all.
 
-import type { SceneDocument, SceneObject } from "@grapix/contracts";
+import type { ObjectField, SceneDocument, SceneEdit, SceneObject } from "@grapix/contracts";
 
 import { isMixed, unify, type MaybeMixed, type UiNode } from "./agent-surface";
 
@@ -183,143 +183,123 @@ export function inspectorPanel(
 }
 
 // ---------------------------------------------------------------------------
-// Editing
+// Command construction. The inspector decides what the author asked for; the
+// Rust edit rules (`gx_contracts::object_edit`, `authoring`) decide whether it
+// may happen, and refuse by name if not. One gesture is one `SceneEdit` batch,
+// which Rust applies atomically as one history entry.
 // ---------------------------------------------------------------------------
 
-/// One object's field changing, with the value it had.
-///
-/// The previous value travels with the change so undo is a fact rather than a
-/// recomputation: replaying an inverse derived later would depend on the
-/// document not having moved underneath it.
-export interface ObjectChange {
-  readonly objectId: string;
-  readonly field: string;
-  readonly from: unknown;
-  readonly to: unknown;
-}
-
-/// One author gesture. Undo operates on this, never on its parts.
-export interface EditTransaction {
-  readonly label: string;
-  readonly changes: readonly ObjectChange[];
-}
-
-/// Why an edit could not be made.
+/// Why an edit could not be built.
 export interface EditRefused {
   readonly refused: string;
 }
-
-export type EditOutcome = EditTransaction | EditRefused;
 
 export function isRefused<T extends object>(outcome: T | EditRefused): outcome is EditRefused {
   return "refused" in outcome;
 }
 
-/// Apply one field edit across the whole selection as a single transaction.
+/// The history label for a field edit that changed `count` objects.
+export function fieldEditLabel(field: string, count: number): string {
+  const label = FIELDS.find((candidate) => candidate.key === field)?.label ?? field;
+  return count > 1 ? `Set ${label} on ${count} objects` : `Set ${label}`;
+}
+
+function objectFieldFor(field: string, value: unknown): ObjectField | undefined {
+  switch (field) {
+    case "opacity":
+    case "x":
+    case "y":
+    case "rotation":
+    case "scaleX":
+    case "scaleY":
+    case "size":
+    case "radius":
+      return typeof value === "number" ? { name: field, value } : undefined;
+    case "text":
+    case "fontId":
+      return typeof value === "string" ? { name: field, value } : undefined;
+    default:
+      return undefined;
+  }
+}
+
+/// How many containers claim an object, walking `childIds` upward. A cycle
+/// stops the walk rather than looping.
+function depthOf(parents: ReadonlyMap<string, string>, objectId: string): number {
+  const seen = new Set([objectId]);
+  let depth = 0;
+  for (let at = parents.get(objectId); at !== undefined && !seen.has(at); at = parents.get(at)) {
+    seen.add(at);
+    depth += 1;
+  }
+  return depth;
+}
+
+/// Order a visibility or lock batch so it cannot refuse on its own members.
 ///
-/// Objects the field does not apply to are skipped rather than refused: with a
-/// mixed-kind selection, setting opacity should still set opacity everywhere it
-/// means something. What is refused is an edit that would apply to *nothing*,
-/// because silently succeeding at doing nothing is the failure this whole
-/// module is arranged against.
-export function applyEdit(
+/// Rust refuses a change under a hidden or locked ancestor. Hiding or locking
+/// therefore runs innermost first, and showing or unlocking outermost first,
+/// so a group and its child selected together change in one gesture.
+function inheritanceOrder(
+  document: SceneDocument,
+  objects: readonly SceneObject[],
+  restricting: boolean,
+): SceneObject[] {
+  const parents = new Map<string, string>();
+  for (const object of document.objects) {
+    const children = object.type === "group" || object.type === "layer" ? object.childIds : [];
+    for (const child of children) if (!parents.has(child)) parents.set(child, object.id);
+  }
+  const sign = restricting ? -1 : 1;
+  return [...objects].sort(
+    (left, right) => sign * (depthOf(parents, left.id) - depthOf(parents, right.id)),
+  );
+}
+
+/// Turn one inspector edit across the selection into the batch Rust applies.
+///
+/// Shared transform and type-aware fields are one `setObjectField` over every
+/// selected object, so a field missing from part of the selection is refused
+/// for the selection as a whole. Name, visibility and lock are the same edits
+/// the object manager sends, so they obey the same inherited-state refusals.
+export function inspectorEdits(
   document: SceneDocument,
   selectedIds: readonly string[],
   field: string,
   value: unknown,
-): EditOutcome {
+): readonly SceneEdit[] | EditRefused {
   const spec = FIELDS.find((candidate) => candidate.key === field);
-  if (!spec) {
-    return { refused: `no inspector field named ${field}` };
-  }
-
+  if (!spec) return { refused: `no inspector field named ${field}` };
   const selected = document.objects.filter((object) => selectedIds.includes(object.id));
-  if (selected.length === 0) {
-    return { refused: "nothing is selected" };
-  }
+  if (selected.length === 0) return { refused: "nothing is selected" };
 
-  const applicable = selected.filter((object) => applies(spec, object.type));
-  if (applicable.length === 0) {
-    const kinds = [...new Set(selected.map((object) => object.type))];
-    return { refused: notAPropertyOf(spec, kinds) };
-  }
-
-  const changes: ObjectChange[] = applicable
-    .map((object) => ({
-      objectId: object.id,
-      field,
-      from: spec.read(object),
-      to: value,
-    }))
-    // An object already holding the value contributes nothing. Recording it
-    // would make undo step over objects it never changed.
-    .filter((change) => !Object.is(change.from, change.to));
-
-  if (changes.length === 0) {
-    return { refused: `every selected object already has ${spec.label} set to ${String(value)}` };
-  }
-
-  return {
-    // The count is in the label because that is what the author needs to see
-    // in the undo menu: "Set Opacity on 12 objects" is a different thing to
-    // undo than "Set Opacity".
-    label:
-      changes.length === 1
-        ? `Set ${spec.label}`
-        : `Set ${spec.label} on ${changes.length} objects`,
-    changes,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Applying a transaction
-// ---------------------------------------------------------------------------
-
-/// A transaction applied, or the reason it could not be.
-export type ApplyOutcome = { readonly document: SceneDocument } | EditRefused;
-
-/// Produce the document a transaction describes, without touching the input.
-///
-/// Every change is checked against the value it says it replaces. A change
-/// whose `from` no longer matches was computed against a document that has
-/// since moved, and writing it anyway would overwrite an edit nobody undid.
-/// The whole transaction is refused in that case: half of one gesture applied
-/// is exactly the state one-gesture-one-undo exists to rule out.
-export function applyTransaction(
-  document: SceneDocument,
-  transaction: EditTransaction,
-): ApplyOutcome {
-  let objects: SceneObject[] = [...document.objects];
-  for (const change of transaction.changes) {
-    const index = objects.findIndex((object) => object.id === change.objectId);
-    const object = objects[index];
-    if (index < 0 || object === undefined) {
-      return { refused: `object ${change.objectId} is not in ${document.name}` };
+  switch (field) {
+    case "name":
+      if (typeof value !== "string") break;
+      return selected.map((object) => ({ edit: "renameObject", objectId: object.id, name: value }));
+    case "visible":
+      if (typeof value !== "boolean") break;
+      return inheritanceOrder(document, selected, !value).map((object) => ({
+        edit: "setObjectVisible",
+        objectId: object.id,
+        visible: value,
+      }));
+    case "locked":
+      if (typeof value !== "boolean") break;
+      return inheritanceOrder(document, selected, value).map((object) => ({
+        edit: "setObjectLocked",
+        objectId: object.id,
+        locked: value,
+      }));
+    default: {
+      const objectField = objectFieldFor(field, value);
+      if (!objectField) break;
+      return [
+        { edit: "setObjectField", objectIds: selected.map((object) => object.id), field: objectField },
+      ];
     }
-    const current = (object as unknown as Record<string, unknown>)[change.field];
-    if (!Object.is(current, change.from)) {
-      return {
-        refused: `${change.objectId}.${change.field} is ${String(current)}, not ${String(change.from)}; the edit is stale`,
-      };
-    }
-    objects = objects.map((candidate, at) =>
-      at === index ? ({ ...candidate, [change.field]: change.to } as SceneObject) : candidate,
-    );
   }
-  return { document: { ...document, objects } };
-}
-
-/// The transaction that undoes `transaction`: every change reversed, in
-/// reverse order. Undo in the Editor restores the pre-gesture snapshot; this
-/// is the same fact stated from the change list, which is what lets a test
-/// prove the change list and the snapshot agree.
-export function invertTransaction(transaction: EditTransaction): EditTransaction {
-  return {
-    label: `Undo ${transaction.label}`,
-    changes: [...transaction.changes]
-      .reverse()
-      .map((change) => ({ ...change, from: change.to, to: change.from })),
-  };
+  return { refused: `${spec.label} cannot be set to ${String(value)}` };
 }
 
 /// Turn what the author typed into a value for `field`, or say why not.
@@ -375,38 +355,4 @@ export function fieldEditStart(
   if (value === undefined) return undefined;
   if (isMixed(value)) return { label: spec.label, initial: "", mixed: true };
   return { label: spec.label, initial: String(value), mixed: false };
-}
-
-/// One inspector gesture from start to finish: the transaction and the
-/// document it produces.
-///
-/// This is the path the panel's Edit control takes, so it holds the panel's
-/// rule: a field missing from part of the selection is refused with the same
-/// sentence the disabled button shows. Writing it to only the objects that
-/// have it would be an edit the panel told the author it would not make.
-export function editSelection(
-  document: SceneDocument,
-  selectedIds: readonly string[],
-  field: string,
-  value: unknown,
-): { readonly document: SceneDocument; readonly transaction: EditTransaction } | EditRefused {
-  const spec = FIELDS.find((candidate) => candidate.key === field);
-  if (spec) {
-    const kinds = [
-      ...new Set(
-        document.objects
-          .filter((object) => selectedIds.includes(object.id))
-          .map((object) => object.type),
-      ),
-    ];
-    const missing = kinds.filter((kind) => !applies(spec, kind));
-    if (missing.length > 0 && missing.length < kinds.length) {
-      return { refused: notAPropertyOf(spec, missing) };
-    }
-  }
-  const outcome = applyEdit(document, selectedIds, field, value);
-  if (isRefused(outcome)) return outcome;
-  const applied = applyTransaction(document, outcome);
-  if ("refused" in applied) return applied;
-  return { document: applied.document, transaction: outcome };
 }

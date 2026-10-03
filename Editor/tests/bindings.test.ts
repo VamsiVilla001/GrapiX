@@ -5,12 +5,9 @@ import { describe, expect, it } from "vitest";
 
 import type { SceneDocument, SceneObject } from "@grapix/contracts";
 import {
-  applyBindingEdit,
-  applySampleData,
   bindingPanel,
   dataFields,
   describeBindingIssue,
-  formatSampleData,
   parseBindingPath,
   parseSampleData,
   resolveSceneBindings,
@@ -206,84 +203,39 @@ describe("binding property panel", () => {
       "Select one object; 2 are selected",
     );
   });
-
-  it("adds and removes one binding as one undoable transaction", () => {
-    const document = scene([text()]);
-    const added = applyBindingEdit(document, "headline", "text", "match.headline");
-    expect(added).toMatchObject({
-      ok: true,
-      transaction: {
-        label: "Bind Text binding",
-        changes: [{ objectId: "headline", field: "bindings.text", to: "match.headline" }],
-      },
-    });
-    if (!added.ok) return;
-    expect(added.document.objects[0]?.bindings).toEqual({ text: "match.headline" });
-
-    const removed = applyBindingEdit(added.document, "headline", "text", undefined);
-    expect(removed).toMatchObject({ ok: true, transaction: { label: "Remove Text binding" } });
-    if (removed.ok) expect(removed.document.objects[0]?.bindings).toBeUndefined();
-  });
-
-  it("refuses a path whose current value cannot drive the property", () => {
-    expect(applyBindingEdit(scene([text()]), "headline", "x", "match.headline")).toEqual({
-      ok: false,
-      reason: "match.headline is string; X requires number",
-    });
-  });
 });
 
+// Binding edits and data-context replacement are `SceneEdit`s that Rust
+// applies (gx_contracts::bindings, with its own tests). What stays in TS is
+// the author's text, the panel and the preview's resolution.
 describe("author-supplied sample data", () => {
-  const emptyScene = (objects: SceneObject[] = [text()]): SceneDocument => ({
-    ...scene(objects),
-    dataContext: {},
-  });
+  const withData = (document: SceneDocument, text: string): SceneDocument => {
+    const parsed = parseSampleData(text);
+    if (!parsed.ok) throw new Error(parsed.reason);
+    return { ...document, dataContext: parsed.data };
+  };
 
-  it("makes a new, empty scene bindable: one transaction, fields discovered at once", () => {
-    const document = emptyScene();
-    expect(applyBindingEdit(document, "headline", "text", "live.title")).toMatchObject({ ok: false });
+  it("makes a new, empty scene bindable: fields are discovered at once", () => {
+    const empty: SceneDocument = { ...scene([text()]), dataContext: {} };
+    const next = withData(empty, '{ "live": { "title": "BREAKING", "score": 3 } }');
+    expect(next.dataContext).toEqual({ live: { title: "BREAKING", score: 3 } });
+    expect(dataFields(next.dataContext).map((field) => field.path)).toEqual(["live.title", "live.score"]);
 
-    const outcome = applySampleData(document, '{ "live": { "title": "BREAKING", "score": 3 } }');
-    expect(outcome).toMatchObject({
-      ok: true,
-      transaction: {
-        label: "Replace sample data (2 fields)",
-        changes: [{ objectId: "scoreboard", field: "dataContext", from: {} }],
-      },
-      invalidBindings: [],
-      newlyInvalid: [],
-    });
-    if (!outcome.ok) return;
-    expect(outcome.transaction.changes).toHaveLength(1);
-    expect(outcome.document.dataContext).toEqual({ live: { title: "BREAKING", score: 3 } });
-    expect(dataFields(outcome.document.dataContext).map((field) => field.path)).toEqual([
-      "live.title",
-      "live.score",
-    ]);
-    // Objects are carried over untouched; only the data context changed.
-    expect(outcome.document.objects).toBe(document.objects);
-
-    const bound = applyBindingEdit(outcome.document, "headline", "text", "live.title");
-    expect(bound.ok).toBe(true);
-    if (!bound.ok) return;
-    const preview = resolveSceneBindings(bound.document);
+    const bound: SceneDocument = { ...next, objects: [text({ text: "live.title" })] };
+    const preview = resolveSceneBindings(bound);
     expect(preview.ok && preview.document.objects[0]).toMatchObject({ text: "BREAKING" });
     // The panel lists the new fields for the author to pick from.
-    const panel = bindingPanel(bound.document, ["headline"]);
+    const panel = bindingPanel(bound, ["headline"]);
     expect(panel.children?.[1]?.children?.map((node) => node.label)).toEqual(["live.title", "live.score"]);
   });
 
-  it("refuses invalid JSON with its position and leaves the document identical", () => {
-    const document = scene([text({ text: "match.headline" })]);
-    const snapshot = structuredClone(document);
-    const outcome = applySampleData(document, '{\n  "live": { "title": "A" },\n  "score": 3,\n}');
-    expect(outcome).toEqual({
+  it("refuses invalid JSON with its position", () => {
+    expect(parseSampleData('{\n  "live": { "title": "A" },\n  "score": 3,\n}')).toEqual({
       ok: false,
       code: "sampleDataInvalidJson",
       reason: `line 4, column 1: expected a double-quoted property name, found "}"`,
       position: { offset: 44, line: 4, column: 1 },
     });
-    expect(document).toEqual(snapshot);
   });
 
   it("names every other malformed input by code and position", () => {
@@ -317,68 +269,20 @@ describe("author-supplied sample data", () => {
     const document = scene([text({ text: "match.headline", x: "match.position.x" })]);
     expect(sceneBindingIssues(document)).toEqual([]);
 
-    const outcome = applySampleData(document, '{ "match": { "position": { "x": "wide" } } }');
-    expect(outcome.ok).toBe(true);
-    if (!outcome.ok) return;
-    expect(outcome.invalidBindings.map(describeBindingIssue)).toEqual([
+    const next = withData(document, '{ "match": { "position": { "x": "wide" } } }');
+    expect(sceneBindingIssues(next).map(describeBindingIssue)).toEqual([
       "headline.text → match.headline: match.headline is absent from the scene data context",
       "headline.x → match.position.x: match.position.x is string; X requires number",
     ]);
-    expect(outcome.newlyInvalid).toEqual(outcome.invalidBindings);
-    // Not dropped, not rewritten.
-    expect(outcome.document.objects[0]?.bindings).toEqual({ text: "match.headline", x: "match.position.x" });
     // The panel shows each as invalid rather than as unbound.
-    const properties = bindingPanel(outcome.document, ["headline"]).children?.[0]?.children ?? [];
+    const properties = bindingPanel(next, ["headline"]).children?.[0]?.children ?? [];
     expect(properties.find((node) => node.id === "binding/property/text")?.value).toBe(
       "match.headline — match.headline is absent from the scene data context",
     );
     // And the preview refuses the whole resolution by name.
-    expect(resolveSceneBindings(outcome.document)).toMatchObject({
+    expect(resolveSceneBindings(next)).toMatchObject({
       ok: false,
       issues: [{ code: "bindingPathInvalid" }, { code: "bindingTypeMismatch" }],
-    });
-  });
-
-  it("separates bindings already invalid from those this change broke", () => {
-    const document = scene([text({ text: "match.headline", y: "match.gone" })]);
-    const outcome = applySampleData(document, '{ "other": 1 }');
-    expect(outcome.ok).toBe(true);
-    if (!outcome.ok) return;
-    expect(outcome.invalidBindings.map((issue) => issue.property)).toEqual(["text", "y"]);
-    expect(outcome.newlyInvalid.map((issue) => issue.property)).toEqual(["text"]);
-  });
-
-  it("undo restores the previous data through whole-document history", () => {
-    // The Editor's history (main.ts `commitScene`/`undo`) snapshots the
-    // pre-gesture document. The replace must leave that snapshot intact.
-    const before = scene([text({ text: "match.headline" })]);
-    const snapshot = structuredClone(before);
-    const undoStack: SceneDocument[] = [];
-    let current = before;
-
-    const outcome = applySampleData(current, formatSampleData({ match: { headline: "Owls level" } }));
-    expect(outcome.ok).toBe(true);
-    if (!outcome.ok) return;
-    undoStack.push(current);
-    current = outcome.document;
-    expect(undoStack).toHaveLength(1);
-
-    const restored = undoStack.pop();
-    expect(restored).toBeDefined();
-    if (!restored) return;
-    current = restored;
-    expect(current.dataContext).toEqual(snapshot.dataContext);
-    expect(current).toEqual(snapshot);
-    const preview = resolveSceneBindings(current);
-    expect(preview.ok && preview.document.objects[0]).toMatchObject({ text: "Falcons lead" });
-  });
-
-  it("refuses an unchanged replace so it adds no empty undo entry", () => {
-    const document = scene([]);
-    expect(applySampleData(document, formatSampleData(document.dataContext))).toEqual({
-      ok: false,
-      code: "sampleDataUnchanged",
-      reason: "the sample data is unchanged",
     });
   });
 });

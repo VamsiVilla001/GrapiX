@@ -1,25 +1,27 @@
-// Scenes as first-class entities (11.29).
+// Scenes as first-class entities (11.29), with Rust owning each session (11.36).
 //
 // The failure these guard is the one that loses work silently: a second scene
-// opening on top of the first, taking its selection, playhead and undo history
-// with it. Nothing errors when that happens, which is why it needs a test.
+// opening on top of the first, or an edit's answer arriving, and taking the
+// author's selection, playhead or folds with it. Nothing errors when that
+// happens, which is why it needs a test. History, unsaved marks, dedupe by
+// origin and the close refusal are the Rust workspace's
+// (`gx_editor::command`), tested there.
 
 import { describe, expect, it } from "vitest";
 
-import type { SceneDocument } from "@grapix/contracts";
+import type { SceneDocument, SceneOrigin, SessionView } from "@grapix/contracts";
 import {
   activate,
   activeSession,
-  closeSession,
-  commit,
+  applySessionView,
+  captureWorkingCopy,
   emptyWorkspace,
   isRefused,
-  markSaved,
-  openSession,
-  redo,
+  removeSession,
   sceneTabs,
-  undo,
-  MAX_HISTORY,
+  sessionFor,
+  type SceneSession,
+  type Workspace,
 } from "../src/workspace";
 
 function doc(id: string, name = id): SceneDocument {
@@ -39,173 +41,167 @@ function doc(id: string, name = id): SceneDocument {
   } as SceneDocument;
 }
 
+/// A projection as Rust returns it.
+function view(
+  session: number,
+  document: SceneDocument,
+  marks: { dirty?: boolean; projectDirty?: boolean; origin?: SceneOrigin; undoDepth?: number } = {},
+): SessionView {
+  return {
+    session,
+    document,
+    ...(marks.origin === undefined ? {} : { origin: marks.origin }),
+    undoDepth: marks.undoDepth ?? 0,
+    redoDepth: 0,
+    dirty: marks.dirty ?? false,
+    projectDirty: marks.projectDirty ?? false,
+  };
+}
+
+function open(workspace: Workspace, projection: SessionView): SceneSession {
+  const session = applySessionView(workspace, projection);
+  activate(workspace, session.key);
+  return session;
+}
+
 describe("a scene is a distinct entity", () => {
   it("keeps each scene's selection, playhead and collapse across a switch", () => {
     const workspace = emptyWorkspace();
-    const lower = openSession(workspace, doc("lower-third", "Lower third"));
+    const lower = open(workspace, view(1, doc("lower-third", "Lower third")));
     lower.selection = ["card"];
     lower.currentFrame = 40;
     lower.collapsed = ["group-1"];
 
-    const bug = openSession(workspace, doc("bug", "Bug"));
+    const bug = open(workspace, view(2, doc("bug", "Bug")));
     bug.selection = ["logo"];
     bug.currentFrame = 90;
 
     // Opening the second scene must not have reached into the first.
-    expect(lower.selection).toEqual(["card"]);
-    expect(lower.currentFrame).toBe(40);
-    expect(lower.collapsed).toEqual(["group-1"]);
+    expect(lower).toMatchObject({ selection: ["card"], currentFrame: 40, collapsed: ["group-1"] });
 
     const back = activate(workspace, lower.key);
     expect(isRefused(back)).toBe(false);
-    expect(activeSession(workspace)?.key).toBe(lower.key);
-    expect(activeSession(workspace)?.selection).toEqual(["card"]);
-    expect(activeSession(workspace)?.currentFrame).toBe(40);
+    expect(activeSession(workspace)).toMatchObject({ key: 1, selection: ["card"], currentFrame: 40 });
     // And the scene switched away from kept its own place too.
     expect(bug.currentFrame).toBe(90);
   });
 
-  it("gives each scene its own undo history", () => {
+  it("an edit's answer replaces the projection and keeps the view state", () => {
     const workspace = emptyWorkspace();
-    const a = openSession(workspace, doc("a"));
-    const b = openSession(workspace, doc("b"));
+    const session = open(workspace, view(1, doc("a")));
+    session.selection = ["card"];
+    session.currentFrame = 12;
+    session.timelineCollapsed = ["group-1"];
 
-    commit(a, doc("a", "A edited"));
-    commit(b, doc("b", "B edited"));
-    commit(b, doc("b", "B edited twice"));
+    const edited = applySessionView(workspace, view(1, doc("a", "A edited"), { dirty: true, undoDepth: 1 }));
 
-    // Undoing in B must not reach A, and must reverse exactly one gesture.
-    undo(b);
-    expect(b.document.name).toBe("B edited");
-    expect(a.document.name).toBe("A edited");
-
-    undo(a);
-    expect(a.document.name).toBe("a");
-    // B is untouched by A's undo.
-    expect(b.document.name).toBe("B edited");
-
-    redo(a);
-    expect(a.document.name).toBe("A edited");
+    expect(edited).toBe(session);
+    expect(workspace.sessions).toHaveLength(1);
+    expect(session.view.document.name).toBe("A edited");
+    expect(session).toMatchObject({ selection: ["card"], currentFrame: 12, timelineCollapsed: ["group-1"] });
   });
 
-  it("an edit in one scene cannot alter another", () => {
+  it("an answer for one scene cannot alter another", () => {
     const workspace = emptyWorkspace();
-    const a = openSession(workspace, doc("a"));
-    const b = openSession(workspace, doc("b"));
-    const beforeB = b.document;
+    const a = open(workspace, view(1, doc("a")));
+    const b = open(workspace, view(2, doc("b")));
+    const beforeB = b.view;
 
-    commit(a, doc("a", "changed"));
+    applySessionView(workspace, view(1, doc("a", "changed"), { dirty: true }));
 
-    expect(b.document).toBe(beforeB);
-    expect(b.undoStack).toHaveLength(0);
+    expect(b.view).toBe(beforeB);
+    expect(a.view.document.name).toBe("changed");
   });
 
-  it("undo on a scene with no history is a no-op, not a crash", () => {
-    const session = openSession(emptyWorkspace(), doc("a"));
-    expect(undo(session)).toBeUndefined();
-    expect(redo(session)).toBeUndefined();
-    expect(session.document.id).toBe("a");
+  it("a projection for a new key is a new session, not an activation", () => {
+    const workspace = emptyWorkspace();
+    open(workspace, view(1, doc("a")));
+    const added = applySessionView(workspace, view(2, doc("b")));
+    expect(added).toMatchObject({ key: 2, selection: [], currentFrame: 0, collapsed: [] });
+    expect(workspace.activeKey).toBe(1);
   });
 
-  it("bounds one scene's history without bounding the workspace", () => {
+  it("capturing the working copy never writes Rust's projection", () => {
     const workspace = emptyWorkspace();
-    const session = openSession(workspace, doc("a"));
-    for (let index = 0; index < MAX_HISTORY + 50; index += 1) {
-      commit(session, doc("a", `edit ${index}`));
-    }
-    expect(session.undoStack).toHaveLength(MAX_HISTORY);
+    const session = open(workspace, view(1, doc("a"), { dirty: true }));
+    const projection = session.view;
+    captureWorkingCopy(session, {
+      selection: ["x"],
+      collapsed: [],
+      timelineCollapsed: ["group-9"],
+      currentFrame: 3,
+      takePage: session.takePage,
+      takePagePreview: null,
+    });
+    expect(session.view).toBe(projection);
+    expect(sceneTabs(workspace)[0]?.dirty).toBe(true);
+    expect(session.timelineCollapsed).toEqual(["group-9"]);
   });
 });
 
-describe("opening and closing", () => {
-  it("reveals the existing session rather than opening a scene twice", () => {
+describe("finding and closing", () => {
+  it("finds the open session for a stored scene by origin", () => {
     const workspace = emptyWorkspace();
     const origin = { project: "news", sceneId: "lower-third" };
-    const first = openSession(workspace, doc("lower-third"), { origin });
-    first.selection = ["card"];
-    openSession(workspace, doc("bug"));
-
-    const again = openSession(workspace, doc("lower-third"), { origin });
-
-    // Two sessions over one stored scene would mean two divergent histories
-    // for one graphic, and no answer to which one a save should win with.
-    expect(workspace.sessions).toHaveLength(2);
-    expect(again.key).toBe(first.key);
-    expect(again.selection).toEqual(["card"]);
-    expect(workspace.activeKey).toBe(first.key);
-  });
-
-  it("refuses to close a scene with unsaved changes, by name", () => {
-    const workspace = emptyWorkspace();
-    const session = openSession(workspace, doc("lower-third", "Lower third"));
-    commit(session, doc("lower-third", "Lower third"));
-
-    const refusal = closeSession(workspace, session.key);
-    expect(isRefused(refusal)).toBe(true);
-    expect(isRefused(refusal) && refusal.refused).toContain("Lower third");
-    expect(isRefused(refusal) && refusal.refused).toContain("unsaved");
-    expect(workspace.sessions).toHaveLength(1);
-
-    // Explicit confirmation closes it; saving also clears the block.
-    markSaved(session);
-    expect(isRefused(closeSession(workspace, session.key))).toBe(false);
-    expect(workspace.sessions).toHaveLength(0);
+    open(workspace, view(1, doc("bug")));
+    const bound = open(workspace, view(2, doc("lower-third"), { origin }));
+    expect(sessionFor(workspace, origin)).toBe(bound);
+    expect(sessionFor(workspace, { project: "sport", sceneId: "lower-third" })).toBeUndefined();
   });
 
   it("closing the active scene activates a neighbour, never nothing-while-scenes-remain", () => {
     const workspace = emptyWorkspace();
-    const a = openSession(workspace, doc("a"));
-    const b = openSession(workspace, doc("b"));
-    openSession(workspace, doc("c"));
+    const a = open(workspace, view(1, doc("a")));
+    const b = open(workspace, view(2, doc("b")));
+    open(workspace, view(3, doc("c")));
 
     activate(workspace, b.key);
-    closeSession(workspace, b.key);
+    removeSession(workspace, b.key);
 
-    expect(workspace.sessions.map((s) => s.document.id)).toEqual(["a", "c"]);
+    expect(workspace.sessions.map((s) => s.view.document.id)).toEqual(["a", "c"]);
     expect(activeSession(workspace)?.key).toBe(a.key);
   });
 
   it("closing the last scene leaves nothing active", () => {
     const workspace = emptyWorkspace();
-    const only = openSession(workspace, doc("a"));
-    closeSession(workspace, only.key);
+    const only = open(workspace, view(1, doc("a")));
+    removeSession(workspace, only.key);
     expect(workspace.activeKey).toBeUndefined();
     expect(activeSession(workspace)).toBeUndefined();
   });
 
   it("activating a scene that is not open is refused rather than ignored", () => {
     const workspace = emptyWorkspace();
-    openSession(workspace, doc("a"));
-    const refusal = activate(workspace, "session-does-not-exist");
-    expect(isRefused(refusal)).toBe(true);
+    open(workspace, view(1, doc("a")));
+    expect(isRefused(activate(workspace, 99))).toBe(true);
+    expect(workspace.activeKey).toBe(1);
   });
 });
 
 describe("the scene switcher", () => {
-  it("names each scene, marks the active one, and flags unsaved work", () => {
+  it("names each scene, marks the active one, and shows Rust's unsaved mark", () => {
     const workspace = emptyWorkspace();
-    const a = openSession(workspace, doc("lower-third", "Lower third"), {
-      origin: { project: "news", sceneId: "lower-third" },
-    });
-    openSession(workspace, doc("bug", "Bug"));
-    commit(a, doc("lower-third", "Lower third"));
-    activate(workspace, a.key);
+    open(workspace, view(2, doc("bug", "Bug")));
+    open(
+      workspace,
+      view(1, doc("lower-third", "Lower third"), {
+        dirty: true,
+        origin: { project: "news", sceneId: "lower-third" },
+      }),
+    );
 
     const tabs = sceneTabs(workspace);
-    expect(tabs.map((tab) => tab.label)).toEqual(["Lower third", "Bug"]);
-    expect(tabs[0]).toMatchObject({ active: true, dirty: true, origin: "news/lower-third" });
+    expect(tabs.map((tab) => tab.label)).toEqual(["Bug", "Lower third"]);
+    expect(tabs[1]).toMatchObject({ key: 1, active: true, dirty: true, origin: "news/lower-third" });
     // An unbound scene says so by absence rather than inventing a project.
-    expect(tabs[1]).toMatchObject({ active: false, dirty: false });
-    expect(tabs[1]!.origin).toBeUndefined();
+    expect(tabs[0]).toMatchObject({ active: false, dirty: false });
+    expect(tabs[0]!.origin).toBeUndefined();
   });
 
   it("a renamed scene keeps its tab identity", () => {
     const workspace = emptyWorkspace();
-    const session = openSession(workspace, doc("lower-third", "Lower third"));
-    const key = session.key;
-    commit(session, doc("lower-third", "Renamed"));
-
-    expect(session.key).toBe(key);
-    expect(sceneTabs(workspace)[0]).toMatchObject({ key, label: "Renamed" });
+    open(workspace, view(1, doc("lower-third", "Lower third")));
+    applySessionView(workspace, view(1, doc("lower-third", "Renamed"), { dirty: true }));
+    expect(sceneTabs(workspace)[0]).toMatchObject({ key: 1, label: "Renamed" });
   });
 });

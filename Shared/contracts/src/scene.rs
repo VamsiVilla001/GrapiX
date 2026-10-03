@@ -358,7 +358,7 @@ pub enum TextDirection {
 /// characters stay as they are, so a data binding can replace the text and
 /// the case still applies, and switching it off returns the author's own
 /// capitalisation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum TextCase {
     #[default]
@@ -1424,6 +1424,33 @@ pub struct SceneDocument {
     pub objects: Vec<SceneObject>,
 }
 
+/// Construct the Editor's default empty authored document.
+///
+/// This lives with the document contract so every command surface starts a
+/// scene with the same canvas, rational rate and empty authoring collections.
+pub fn new_scene(id: &str, name: &str) -> SceneDocument {
+    SceneDocument {
+        id: id.to_owned(),
+        name: name.to_owned(),
+        version: 1,
+        revision: None,
+        active_camera_id: None,
+        canvas: SceneCanvas {
+            width: 1920,
+            height: 1080,
+            frame_rate: RationalRate::P50,
+        },
+        timeline: SceneTimeline::default(),
+        data_context: Default::default(),
+        assets: Vec::new(),
+        fonts: Vec::new(),
+        materials: Vec::new(),
+        controls: Vec::new(),
+        text_styles: Vec::new(),
+        objects: Vec::new(),
+    }
+}
+
 impl SceneDocument {
     /// Look up an asset by its stable id.
     pub fn asset(&self, asset_id: &str) -> Option<&AssetLibraryItem> {
@@ -1512,7 +1539,7 @@ pub fn parse_scene_document(bytes: &[u8]) -> Result<SceneDocument, Refusal> {
 /// that is exactly what serde does with it for an `Option` field: refusing
 /// `"fill": null` while accepting a missing `fill` would be a distinction the
 /// reader cannot act on.
-fn collect_unknown_keys(
+pub(crate) fn collect_unknown_keys(
     authored: &serde_json::Value,
     understood: &serde_json::Value,
     path: String,

@@ -36,6 +36,8 @@ use gx_playout::{evaluate_automation, AutomationTrigger, PublishedScene, Rundown
 
 use crate::{expect, Report};
 
+mod command;
+
 const PLANE: &str = "refusal audit";
 
 struct Limitation {
@@ -54,6 +56,7 @@ pub fn refusal_audit_suite(report: &mut Report) {
     drive_asset_refusals(report);
     drive_playout_refusals(report);
     drive_editor_refusals(report);
+    command::drive_command_refusals(report);
     record_surface_limitations(report);
 }
 
@@ -1112,6 +1115,56 @@ fn drive_material_refusals(report: &mut Report) {
             .expect_err("an engine declaring no fit support must refuse every fit mode");
         report.record(PLANE, fit_check_name(mode), expect(matches!(refusal.code, Refusal::UnsupportedFitMode { mode: refused } if refused == mode) && refusal.allowed.as_ref().is_none_or(|allowed| allowed.is_empty()), format!("fit mode {mode:?} was not refused as itself with the empty declared allowed list")));
     }
+
+    // Cull, alpha and depth are checked in that order after blend, so each
+    // support below accepts every earlier mode and none of the one under test.
+    use gx_contracts::material::{AlphaMode, CullMode, DepthMode};
+    let support = |cull: bool, alpha: bool| MaterialSupport {
+        blend_modes: BlendMode::ALL.to_vec(),
+        fit_modes: FitMode::ALL.to_vec(),
+        cull_modes: if cull { CullMode::ALL.to_vec() } else { Vec::new() },
+        alpha_modes: if alpha { AlphaMode::ALL.to_vec() } else { Vec::new() },
+        depth_modes: Vec::new(),
+    };
+    let cull_refused = CullMode::ALL.iter().all(|&mode| {
+        let mut material = material_with_blend(BlendMode::Normal);
+        material.cull_mode = mode;
+        matches!(validate_material(&material, &support(false, false)), Err(refusal) if matches!(refusal.code, Refusal::UnsupportedCullMode { mode: refused } if refused == mode))
+    });
+    report.record(PLANE, "UnsupportedCullMode is produced for every cull mode a peer does not declare", expect(cull_refused, "a cull mode the peer does not declare was not refused as itself"));
+    let alpha_refused = AlphaMode::ALL.iter().all(|&mode| {
+        let mut material = material_with_blend(BlendMode::Normal);
+        material.alpha_mode = mode;
+        matches!(validate_material(&material, &support(true, false)), Err(refusal) if matches!(refusal.code, Refusal::UnsupportedAlphaMode { mode: refused } if refused == mode))
+    });
+    report.record(PLANE, "UnsupportedAlphaMode is produced for every alpha mode a peer does not declare", expect(alpha_refused, "an alpha mode the peer does not declare was not refused as itself"));
+    let depth_refused = DepthMode::ALL.iter().all(|&mode| {
+        let mut material = material_with_blend(BlendMode::Normal);
+        material.depth_mode = mode;
+        matches!(validate_material(&material, &support(true, true)), Err(refusal) if matches!(refusal.code, Refusal::UnsupportedDepthMode { mode: refused } if refused == mode))
+    });
+    report.record(PLANE, "UnsupportedDepthMode is produced for every depth mode a peer does not declare", expect(depth_refused, "a depth mode the peer does not declare was not refused as itself"));
+
+    // The software path fills glyphs with a solid colour only; a gradient text
+    // fill is refused at validation rather than flattened at frame time.
+    let mut scene = gx_contracts::command::witness::fixture_scene();
+    for object in &mut scene.objects {
+        if object.base().id == "text" {
+            object.base_mut().fill = Some(ColorValue::LinearGradient {
+                angle: 0.0,
+                start_x: 0.0,
+                start_y: 0.0,
+                end_x: 1.0,
+                end_y: 0.0,
+                stops: Vec::new(),
+                spread: Default::default(),
+                coordinate_mode: Default::default(),
+            });
+        }
+    }
+    let draws_everything = MaterialSupport { depth_modes: DepthMode::ALL.to_vec(), ..support(true, true) };
+    let found = gx_contracts::validate::validate_scene_document(&scene, &draws_everything, &Default::default(), false);
+    report.record(PLANE, "UnsupportedPathGradient is produced for a gradient text fill", expect(found.iter().any(|refusal| matches!(&refusal.code, Refusal::UnsupportedPathGradient { object, .. } if object == "text")), format!("a gradient text fill was not refused as UnsupportedPathGradient: {found:?}")));
 }
 
 fn material_with_blend(blend_mode: BlendMode) -> MaterialDefinition {
@@ -1184,16 +1237,22 @@ fn record_surface_limitations(report: &mut Report) {
         .iter()
         .map(refusal_variant_name)
         .collect();
+    let missing: Vec<_> = all
+        .iter()
+        .filter(|name| !is_driven(name) && !registered.contains(&name.as_str()))
+        .collect();
+    let stale: Vec<_> = registered
+        .iter()
+        .filter(|name| !all.iter().any(|found| found == *name))
+        .collect();
     report.record(
         PLANE,
         "every declared refusal is driven or has a named limitation",
         expect(
-            all.iter()
-                .all(|name| is_driven(name) || registered.contains(&name.as_str()))
-                && registered
-                    .iter()
-                    .all(|name| all.iter().any(|found| found == name)),
-            "the refusal register has a missing or stale variant; add a driver or named limitation",
+            missing.is_empty() && stale.is_empty(),
+            format!(
+                "the refusal register is out of date; undriven and unregistered: {missing:?}; limitations naming no variant: {stale:?}"
+            ),
         ),
     );
 }
@@ -1255,6 +1314,43 @@ fn is_driven(variant: &str) -> bool {
             | "TimelinePhaseOutOfRange"
             | "TimelinePhaseInvalidSpan"
             | "TimelinePhaseUnknown"
+            | "UnsupportedCullMode"
+            | "UnsupportedAlphaMode"
+            | "UnsupportedDepthMode"
+            | "UnsupportedPathGradient"
+            | "CommandUnknownField"
+            | "SessionUnknown"
+            | "HistoryEmpty"
+            | "EditBatchEmpty"
+            | "SessionUnbound"
+            | "EditTargetsEmpty"
+            | "ObjectFieldNotApplicable"
+            | "ObjectFieldValueInvalid"
+            | "ObjectFieldUnchanged"
+            | "ObjectHiddenByParent"
+            | "ObjectLocked"
+            | "BindingPropertyUnsupported"
+            | "BindingPathInvalid"
+            | "BindingTypeMismatch"
+            | "BindingValueOutOfRange"
+            | "BindingAssetUnknown"
+            | "BindingNotBound"
+            | "DataContextUnchanged"
+            | "BindingUnchanged"
+            | "SessionHasUnsavedChanges"
+            | "MaterialInUse"
+            | "MaterialUnknown"
+            | "MaterialRelinkSameMaterial"
+            | "MaterialRelinkNoUsers"
+            | "MotionPresetUnknown"
+            | "SceneNameEmpty"
+            | "SceneIdInvalid"
+            | "ProjectNameInvalid"
+            | "ProjectAlreadyExists"
+            | "SceneAlreadyExists"
+            | "SceneNotStored"
+            | "TakePageIdInvalid"
+            | "SceneIdBound"
     )
 }
 
@@ -1387,6 +1483,46 @@ fn limitations() -> &'static [Limitation] {
         Limitation {
             variant: "DesignSourceUnreadable",
             reason: "design-system ingest is not an EnginePeer request",
+        },
+        Limitation {
+            variant: "VectorTessellationFailed",
+            reason: "only the render worker's rasteriser tessellates; the mock engine draws nothing to tessellate",
+        },
+        Limitation {
+            variant: "UnknownOutputAdapter",
+            reason: "output adapters exist only in the render worker; the mock engine has no adapter registry",
+        },
+        Limitation {
+            variant: "SceneMaterialUnknown",
+            reason: "mesh preparation runs only in the render worker; the mock engine does not prepare meshes",
+        },
+        Limitation {
+            variant: "MeshMaterialUnassigned",
+            reason: "mesh preparation runs only in the render worker; the mock engine does not prepare meshes",
+        },
+        Limitation {
+            variant: "MeshModelAssetWrongKind",
+            reason: "mesh preparation runs only in the render worker; the mock engine does not prepare meshes",
+        },
+        Limitation {
+            variant: "MeshModelInvalid",
+            reason: "mesh preparation runs only in the render worker; the mock engine does not prepare meshes",
+        },
+        Limitation {
+            variant: "MeshMaterialElementsMismatch",
+            reason: "mesh preparation runs only in the render worker; the mock engine does not prepare meshes",
+        },
+        Limitation {
+            variant: "MeshMaterialRequiresLight",
+            reason: "mesh preparation runs only in the render worker; the mock engine does not prepare meshes",
+        },
+        Limitation {
+            variant: "LightHasNoResponsiveMaterial",
+            reason: "mesh preparation runs only in the render worker; the mock engine does not prepare meshes",
+        },
+        Limitation {
+            variant: "SceneActiveCameraUnknown",
+            reason: "camera resolution runs only in the render worker; the mock engine does not prepare 3D scenes",
         },
     ]
 }

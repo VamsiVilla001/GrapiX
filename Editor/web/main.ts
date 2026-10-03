@@ -3,25 +3,33 @@
 // This file is wiring, deliberately. Every decision it could get wrong lives
 // somewhere already tested:
 //
-//   - what a scene is, and whether one is valid: the Rust shell, which parses
-//     through the same `parse_scene_document` the engine uses (invariant 45);
+//   - what a scene is, whether it is valid, and whether an edit may happen:
+//     Rust. Every authoring change is one `EditorCommand` sent through
+//     `Editor/src/command-client.ts` (11.36); Rust owns the open documents,
+//     their history and the project store, and refuses by name;
 //   - how the scene is drawn: `Editor/src/viewport.ts`, tested headless;
 //   - what a colour means: `Editor/src/color-policy.ts` and the contracts.
 //
-// What is left here is turning clicks into `invoke` calls and rendering the
-// answers. In particular this layer never decides that an object "could not
-// be drawn" quietly: `SceneViewport` collects reasons, and they are shown.
+// What is left here is turning clicks into commands and pure reads, and
+// rendering the `SessionView` Rust answers with. In particular this layer
+// never decides that an object "could not be drawn" quietly: `SceneViewport`
+// collects reasons, and they are shown.
 
 import type {
   AnimationSurface,
+  CommandOutcome,
   ControlField,
   ControlValue,
-  ObjectDeletion,
-  ObjectDuplication,
+  EditEffect,
+  EditorCommand,
   MotionPreset,
+  Refusal,
   SceneDocument,
   SceneEasing,
+  SceneEdit,
   SceneKeyframe,
+  SceneTarget,
+  SessionView,
   TextStyle,
   TakePage,
   TimelinePhase,
@@ -32,21 +40,17 @@ import { renderNode } from "../src/agent-surface";
 import {
   objectManagerPanel,
   setObjectExpanded,
-  toggleObjectLock,
-  toggleObjectVisibility,
 } from "../src/object-manager";
 import {
-  editSelection,
+  fieldEditLabel,
   fieldEditStart,
+  inspectorEdits,
   inspectorPanel,
   isRefused,
   parseFieldInput,
 } from "../src/inspector";
 import { fontManagerPanel, fontUsers } from "../src/font-manager";
 import {
-  applyDeleteMaterial,
-  applyRelink,
-  isMaterialRefused,
   materialManagerPanel,
   usersOf,
 } from "../src/material-manager";
@@ -57,14 +61,14 @@ import {
   type ManagedScene,
 } from "../src/scene-manager";
 import {
-  applyBindingEdit,
-  applySampleData,
+  bindingLabel,
   bindingPanel,
+  dataFields,
   describeBindingIssue,
   formatSampleData,
+  parseSampleData,
   resolveSceneBindings,
   sceneBindingIssues,
-  type BindingIssue,
 } from "../src/bindings";
 import {
   EMPTY_TAKE_PAGE_STATE,
@@ -101,18 +105,15 @@ import { previewFrameAtElapsed, previewSceneAt } from "../src/preview-playback";
 import {
   activate,
   activeSession,
+  applySessionView,
   captureWorkingCopy,
-  closeSession,
   emptyWorkspace,
   isRefused as isWorkspaceRefused,
-  markEdited,
-  markSaved,
-  markSavedToFile,
-  openSession,
+  removeSession,
   sceneTabs,
-  MAX_HISTORY,
   type SceneSession,
 } from "../src/workspace";
+import { execute, shell, wireFrame } from "../src/command-client";
 import { sizeCanvasForRatio, watchDevicePixelRatio } from "../src/dpi";
 import { probeWebGpu, summariseGpuReport, type GpuReport } from "../src/gpu-probe";
 import {
@@ -167,35 +168,22 @@ import {
   type TimelineViewport,
 } from "../src/timeline/viewport";
 
-/** Tauri v2's global bridge. Typed narrowly: this layer uses exactly one
- *  function from it, and pretending to know more would be fiction. */
-interface TauriGlobal {
-  core: { invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> };
-  dialog?: {
-    open(options?: Record<string, unknown>): Promise<string | string[] | null>;
-    save(options?: Record<string, unknown>): Promise<string | null>;
-  };
-}
-
-declare global {
-  interface Window {
-    __TAURI__?: TauriGlobal;
-  }
-}
-
-/** What `cmd_publish` answers with. */
+/** What `cmd_publish` answers with: the shell's own transport shape. Both
+ *  fields are serde newtypes, which arrive bare or as a one-field tuple. */
 interface PublishResult {
   takeId: string | { 0: string };
   revision: number | { 0: number };
 }
 
-/** The shell's structured errors. Every variant carries enough to say what
- *  actually happened; a bare string would let a refusal read as a crash. */
+/** The shell's structured errors (`EditorError` in Editor/shell). Every
+ *  variant carries enough to say what actually happened; a bare string would
+ *  let a refusal read as a crash. `cause` is the named contract refusal. */
 interface ShellError {
   error: string;
   detail?: string;
-  path?: string;
   endpoint?: string;
+  path?: string;
+  cause?: Refusal;
 }
 
 interface ListedScene {
@@ -311,7 +299,7 @@ const ui = {
 };
 
 // ---------------------------------------------------------------------------
-// State. One open document, one viewport over it.
+// State. The active session's working copy, and one viewport over it.
 // ---------------------------------------------------------------------------
 
 let scene: SceneDocument | null = null;
@@ -333,34 +321,13 @@ let sampleDataShown: SceneDocument["dataContext"] | undefined;
 const workspace = emptyWorkspace();
 let selection: string[] = [];
 
-/** The shell's authoring results. `ObjectDeletion` and `ObjectDuplication` are
- *  generated from Rust; the wrappers are the shell's own transport shape, which
- *  pairs the edited document with what the edit did. */
-interface ObjectCreated {
-  readonly scene: SceneDocument;
-  readonly objectId: string;
-}
-interface ObjectDeleted {
-  readonly scene: SceneDocument;
-  readonly deletion: ObjectDeletion;
-}
-interface ObjectDuplicated {
-  readonly scene: SceneDocument;
-  readonly duplication: ObjectDuplication;
-}
 let projects: string[] = [];
 let currentProject: string | undefined;
 let projectCatalog: ProjectSceneCatalog | undefined;
-/** Set only when the open document came from the selected project's store. */
 let takePageCatalog: ProjectTakePageCatalog | undefined;
+/** The active session's project origin, mirrored from its `SessionView`. */
 let projectSceneId: string | undefined;
 let projectSceneProject: string | undefined;
-let projectSceneDirty = false;
-
-/** Selection an edit asked for, applied once the edited document is rendered.
- *  Set before `commitScene`, consumed by it: selecting against the old document
- *  would name an object that does not exist there yet. */
-let pendingSelection: string[] | undefined;
 let collapsed: string[] = [];
 let selectedFontId: string | undefined;
 let selectedMaterialId: string | undefined;
@@ -391,11 +358,6 @@ let playback:
  *  readable from the running app rather than only in the log. */
 let gpuReport: GpuReport | undefined;
 let autoKey = false;
-/** One-gesture-per-entry history over whole documents. Whole-scene snapshots
- *  are simple and correct: every edit already produces a new `SceneDocument`,
- *  and one undo restoring one prior document is exactly one gesture undone. */
-let undoStack: SceneDocument[] = [];
-let redoStack: SceneDocument[] = [];
 let animationBusy = false;
 let overlayDrag:
   | {
@@ -433,40 +395,37 @@ function log(message: string, outcome: Outcome = "plain"): void {
   while (ui.log.childElementCount > 200) ui.log.lastElementChild?.remove();
 }
 
-/** Turn a rejected `invoke` into one operator-facing line.
+/** Turn a rejected command or read into one operator-facing line.
  *
  *  The shell's errors are structured, so the distinct cases stay distinct:
- *  an unreachable asset plane and a refused document are different problems
- *  and an author can only act differently on them if the message says which
- *  it was (invariant 17). */
+ *  an unreachable asset plane and a refused edit are different problems and
+ *  an author can only act differently on them if the message says which it
+ *  was (invariant 17). A refusal is shown by its contract name. */
 function describe(error: unknown): string {
   if (typeof error === "object" && error !== null && "error" in error) {
-    const shell = error as ShellError;
-    switch (shell.error) {
+    const failure = error as ShellError;
+    switch (failure.error) {
+      case "commandRefused":
+        return `refused [${failure.cause?.refusal ?? "unknown"}]: ${failure.detail ?? ""}`;
+      case "projectFailed":
+        return `project store failed: ${failure.detail ?? ""}`;
       case "readScene":
-        return `cannot read ${shell.path ?? "the file"}: ${shell.detail ?? ""}`;
+        return `cannot read ${failure.path ?? "the file"}: ${failure.detail ?? ""}`;
       case "writeScene":
-        return `cannot write ${shell.path ?? "the file"}: ${shell.detail ?? ""}`;
-      case "invalidScene":
-        return `scene refused: ${shell.detail ?? ""}`;
+        return `cannot write ${failure.path ?? "the file"}: ${failure.detail ?? ""}`;
       case "invalidEndpoint":
-        return `${shell.endpoint ?? "endpoint"} is not a host:port address`;
+        return `${failure.endpoint ?? "endpoint"} is not a host:port address`;
       case "unreachable":
-        return `asset plane unreachable at ${shell.endpoint ?? ""}: ${shell.detail ?? ""}`;
+        return `asset plane unreachable at ${failure.endpoint ?? ""}: ${failure.detail ?? ""}`;
       case "publishRefused":
-        return `publication refused: ${shell.detail ?? ""}`;
-      case "animationRefused":
-        return `animation refused: ${shell.detail ?? "the edit did not apply"}`;
+        return `publication refused: ${failure.detail ?? ""}`;
+      case "protocol":
+        return `asset plane protocol failed: ${failure.detail ?? ""}`;
       default:
-        return `${shell.error}: ${shell.detail ?? ""}`;
+        return `${failure.error}: ${failure.detail ?? ""}`;
     }
   }
   return String(error);
-}
-
-function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  if (!tauri) return Promise.reject(new Error("not running inside the Editor shell"));
-  return tauri.core.invoke<T>(command, args);
 }
 
 // ---------------------------------------------------------------------------
@@ -490,40 +449,43 @@ function plain(value: unknown): string {
 function captureActiveSession(): void {
   const session = activeSession(workspace);
   if (!session || !scene) return;
-  // The session's unsaved mark is not part of the working copy: only an edit
-  // or a save may change it, never a switch (11.29).
   captureWorkingCopy(session, {
-    document: scene,
     selection,
     collapsed,
     timelineCollapsed: collapsedTimelineIds,
     currentFrame,
-    undoStack,
-    redoStack,
-    path: scenePath,
     takePage: takePageState,
     takePagePreview: takePagePreviewDocument,
-    projectDirty: projectSceneDirty,
   });
 }
 
-/// Make one open scene the one every panel renders.
+/// Mirror a session projection into the flat working copy. Shared by a tab
+/// switch and a command's answer, so the two cannot disagree about which
+/// document, file or project origin is active.
+function adoptView(view: SessionView): void {
+  scene = view.document;
+  scenePath = view.path ?? null;
+  projectSceneId = view.origin?.sceneId;
+  projectSceneProject = view.origin?.project;
+  if (view.origin) currentProject = view.origin.project;
+  ui.sceneId.readOnly = view.origin !== undefined;
+  ui.sceneId.title =
+    view.origin === undefined
+      ? ""
+      : "Project scene ids are stable; use Duplicate to create a new id.";
+}
+
+/** Make one Rust-owned session projection the one every panel renders. */
 function restoreSession(session: SceneSession): void {
   pausePreview("switched scene");
-  scene = session.document;
-  scenePath = session.path;
+  const { view } = session;
+  adoptView(view);
   selection = session.selection;
   collapsed = session.collapsed;
   collapsedTimelineIds = session.timelineCollapsed;
   currentFrame = session.currentFrame;
-  undoStack = session.undoStack;
-  redoStack = session.redoStack;
-  projectSceneId = session.origin?.sceneId;
-  projectSceneProject = session.origin?.project;
-  projectSceneDirty = session.projectDirty;
   takePageState = session.takePage;
   takePagePreviewDocument = session.takePagePreview;
-  if (session.origin) currentProject = session.origin.project;
   // Transient interaction state belongs to a gesture, not to a scene: a
   // marquee half-drawn in one graphic must not reappear over another.
   marquee = undefined;
@@ -531,53 +493,67 @@ function restoreSession(session: SceneSession): void {
   selectedKeys = new Set();
   graphTrack = undefined;
   ui.timelineGraphClose.hidden = true;
-
-  ui.sceneId.value = session.document.id;
-  ui.sceneId.readOnly = session.origin !== undefined;
-  ui.sceneId.title =
-    session.origin === undefined
-      ? ""
-      : "Project scene ids are stable; use Duplicate to create a new id.";
-  ui.sceneName.value = session.document.name;
+  ui.sceneId.value = view.document.id;
+  ui.sceneName.value = view.document.name;
   updateHistoryButtons();
   contentRevision += 1;
   renderSceneState();
 }
 
-/// Draw the scene switcher. One button per open scene, plus its own close.
+/// The scene id and name typed into the header but not yet applied.
+///
+/// Identity is document content, so it changes only through `setSceneId` /
+/// `setSceneName`, sent just before a save or publish uses it. A bound
+/// scene's id field is read-only: its id is its store address.
+function pendingIdentityEdits(document_: SceneDocument): SceneEdit[] {
+  const edits: SceneEdit[] = [];
+  const id = ui.sceneId.value.trim();
+  const name = ui.sceneName.value.trim();
+  if (!ui.sceneId.readOnly && id !== document_.id) edits.push({ edit: "setSceneId", id });
+  if (name !== document_.name) edits.push({ edit: "setSceneName", name });
+  return edits;
+}
+
+/// Whether the active scene holds work its project copy does not: Rust's
+/// project-dirty mark, or an identity typed into the header and not yet saved.
+function projectChangesUnsaved(): boolean {
+  const view = activeSession(workspace)?.view;
+  if (view?.origin === undefined) return false;
+  return view.projectDirty || pendingIdentityEdits(view.document).length > 0;
+}
+
 function renderSceneTabs(): void {
   const tabs = sceneTabs(workspace);
   ui.sceneTabs.replaceChildren();
   for (const tab of tabs) {
     const item = document.createElement("div");
     item.className = tab.active ? "scene-tab active" : "scene-tab";
-
+    // A name typed but not yet applied is unsaved work in the active tab.
+    const dirty = tab.dirty || (tab.active && scene !== null && pendingIdentityEdits(scene).length > 0);
     const open = document.createElement("button");
     open.type = "button";
-    open.dataset.sceneKey = tab.key;
+    open.dataset.sceneKey = String(tab.key);
     open.dataset.sceneAction = "activate";
-    open.textContent = tab.dirty ? `${tab.label} •` : tab.label;
+    open.textContent = dirty ? `${tab.label} •` : tab.label;
     // The origin disambiguates two graphics that share a name in different
     // shows; an unbound scene says so rather than borrowing a project.
     open.title = tab.origin ?? "not saved to a project";
     open.setAttribute("aria-pressed", String(tab.active));
-    if (tab.dirty) open.setAttribute("aria-description", "unsaved changes");
-
+    if (dirty) open.setAttribute("aria-description", "unsaved changes");
     const close = document.createElement("button");
     close.type = "button";
     close.className = "scene-tab-close";
-    close.dataset.sceneKey = tab.key;
+    close.dataset.sceneKey = String(tab.key);
     close.dataset.sceneAction = "close";
     close.textContent = "×";
     close.setAttribute("aria-label", `Close ${tab.label}`);
-
     item.append(open, close);
     ui.sceneTabs.append(item);
   }
   ui.sceneTabs.hidden = tabs.length === 0;
 }
 
-function switchToScene(key: string): void {
+function switchToScene(key: number): void {
   if (key === workspace.activeKey) return;
   captureActiveSession();
   const result = activate(workspace, key);
@@ -587,31 +563,29 @@ function switchToScene(key: string): void {
   }
   restoreSession(result);
   renderSceneTabs();
-  log(`Switched to ${result.document.name}`, "good");
+  log(`Switched to ${result.view.document.name}`, "good");
 }
 
-function closeScene(key: string): void {
+async function closeScene(key: number): Promise<void> {
   captureActiveSession();
   const session = workspace.sessions.find((candidate) => candidate.key === key);
-  const result = closeSession(workspace, key);
-  if (isWorkspaceRefused(result)) {
-    // Offer the explicit confirmation rather than discarding the work; a tab
-    // click must never be able to lose an edit on its own.
-    const name = session?.document.name ?? "this scene";
-    if (!window.confirm(`${name} has unsaved changes. Close it and lose them?`)) {
-      log(result.refused, "bad");
-      return;
-    }
-    const forced = closeSession(workspace, key, { force: true });
-    if (isWorkspaceRefused(forced)) {
-      log(forced.refused, "bad");
-      return;
-    }
-    log(`Closed ${forced.document.name}, discarding unsaved changes`, "bad");
-  } else {
-    log(`Closed ${result.document.name}`, "good");
+  if (!session) return;
+  const name = session.view.document.name;
+  // Offer the explicit confirmation rather than discarding the work; a tab
+  // click must never be able to lose an edit on its own. Rust refuses an
+  // unforced close of a dirty session by name if this view is stale.
+  const force = session.view.dirty;
+  if (force && !window.confirm(`${name} has unsaved changes. Close it and lose them?`)) {
+    log(`close refused: ${name} has unsaved changes`, "bad");
+    return;
   }
-
+  try {
+    await execute({ command: "closeScene", session: key, force });
+  } catch (error) {
+    log(describe(error), "bad");
+    return;
+  }
+  removeSession(workspace, key);
   const next = activeSession(workspace);
   if (next) {
     restoreSession(next);
@@ -622,44 +596,54 @@ function closeScene(key: string): void {
     previewScene = null;
     resolvedScene = null;
     selection = [];
-    undoStack = [];
-    redoStack = [];
     viewport?.dispose();
     viewport = null;
     ui.overlay.replaceChildren();
     updateHistoryButtons();
   }
   renderSceneTabs();
+  log(force ? `Closed ${name}, discarding unsaved changes` : `Closed ${name}`, force ? "bad" : "good");
 }
 
 function onSceneTabsClick(event: MouseEvent): void {
   const target = event.target;
   if (!(target instanceof Element)) return;
   const button = target.closest<HTMLButtonElement>("button[data-scene-key][data-scene-action]");
-  const key = button?.dataset.sceneKey;
-  if (!key) return;
-  if (button?.dataset.sceneAction === "close") closeScene(key);
+  const key = Number(button?.dataset.sceneKey);
+  if (!button || !Number.isSafeInteger(key)) return;
+  if (button.dataset.sceneAction === "close") void closeScene(key);
   else switchToScene(key);
 }
 
-function showScene(
-  next: SceneDocument,
-  path: string | null,
-  projectSource?: { readonly project: string; readonly sceneId: string },
-): void {
-  captureActiveSession();
-  const session = openSession(workspace, next, {
-    ...(projectSource === undefined ? {} : { origin: projectSource }),
-    path,
-  });
-  // `openSession` reveals an already-open scene rather than duplicating it;
-  // in that case the stored document is the author's in-progress one, and
-  // overwriting it with what was just read from disk would discard their work.
-  if (session.document !== next && !session.dirty) {
-    session.document = next;
-    session.path = path;
+/// Render the projection a command returned.
+///
+/// The active session keeps its view state — an edit is not a tab switch, so
+/// the selection, playhead, key selection and open graph survive it. Any
+/// other key (a scene just opened, or one revealed by origin) becomes the
+/// active tab. `nextSelection` is what an edit asked to have selected; it is
+/// applied against the edited document, which is the one that contains it.
+function presentView(view: SessionView, nextSelection?: readonly string[]): void {
+  const active = activeSession(workspace);
+  if (active === undefined || active.key !== view.session) {
+    captureActiveSession();
+    const session = applySessionView(workspace, view);
+    activate(workspace, session.key);
+    restoreSession(session);
+    renderSceneTabs();
+    return;
   }
-  restoreSession(session);
+  const previous = active.view.document;
+  applySessionView(workspace, view);
+  adoptView(view);
+  // The header is overwritten only where the document's identity changed
+  // (an identity edit, or undoing one): a name typed and not yet applied
+  // survives an unrelated edit.
+  if (previous.id !== view.document.id) ui.sceneId.value = view.document.id;
+  if (previous.name !== view.document.name) ui.sceneName.value = view.document.name;
+  if (nextSelection !== undefined) selection = [...new Set(nextSelection)];
+  contentRevision += 1;
+  renderSceneState();
+  updateHistoryButtons();
   renderSceneTabs();
 }
 
@@ -715,7 +699,7 @@ function managedProjectScenes(catalog: ProjectSceneCatalog): ManagedScene[] {
     sceneId: listed.sceneId,
     name: listed.name,
     unsavedChanges:
-      projectSceneDirty &&
+      projectChangesUnsaved() &&
       projectSceneId === listed.sceneId &&
       projectSceneProject === catalog.project,
     // Scene documents predate design-system stamping. A revision proves
@@ -850,7 +834,7 @@ function renderTakePagePanel(document_: SceneDocument): void {
 }
 async function loadControlProperties(kind: string): Promise<void> {
   try {
-    const pairs = await invoke<readonly [string, ControlField["kind"]][]>("cmd_control_properties", { kind });
+    const pairs = await shell().invoke<readonly [string, ControlField["kind"]][]>("cmd_control_properties", { kind });
     if (controlPropertiesKind !== kind) return;
     controlProperties = pairs.map(([property, fieldKind]) => ({ property, kind: fieldKind }));
   } catch (error) {
@@ -882,14 +866,11 @@ function renderControlContract(document_: SceneDocument): void {
   );
 }
 
+/** Control-contract edits name their panel when Rust refuses them. */
+const CONTROL_REFUSED = "control field refused";
+
 async function replaceControlField(next: ControlField, label: string): Promise<void> {
-  if (!scene) return;
-  try {
-    const updated = await invoke<SceneDocument>("cmd_control_replace", { scene, field: next });
-    commitScene(scene, updated, label);
-  } catch (error) {
-    log(`control field refused: ${describe(error)}`, "bad");
-  }
+  await runEdits([{ edit: "replaceControl", field: next }], { label, refusal: CONTROL_REFUSED });
 }
 
 async function onControlContractClick(event: MouseEvent): Promise<void> {
@@ -910,15 +891,13 @@ async function onControlContractClick(event: MouseEvent): Promise<void> {
     if (fieldId === null || fieldId.trim() === "") return;
     const label = window.prompt("Operator label", property);
     if (label === null || label.trim() === "") return;
-    try {
-      const updated = await invoke<SceneDocument>("cmd_control_declare", {
-        scene,
+    await runEdits(
+      [{
+        edit: "declareControl",
         field: { fieldId: fieldId.trim(), label: label.trim(), objectId, property, kind: candidate.kind },
-      });
-      commitScene(scene, updated, `declare control ${fieldId.trim()}`);
-    } catch (error) {
-      log(`control field refused: ${describe(error)}`, "bad");
-    }
+      }],
+      { label: `declare control ${fieldId.trim()}`, refusal: CONTROL_REFUSED },
+    );
     return;
   }
 
@@ -927,12 +906,10 @@ async function onControlContractClick(event: MouseEvent): Promise<void> {
   const field = scene.controls.find((candidate) => candidate.fieldId === fieldId);
   if (!field) return;
   if (action === "remove") {
-    try {
-      const updated = await invoke<SceneDocument>("cmd_control_remove", { scene, fieldId });
-      commitScene(scene, updated, `remove control ${fieldId}`);
-    } catch (error) {
-      log(`control field refused: ${describe(error)}`, "bad");
-    }
+    await runEdits(
+      [{ edit: "removeControl", fieldId }],
+      { label: `remove control ${fieldId}`, refusal: CONTROL_REFUSED },
+    );
     return;
   }
   if (action === "setLabel") {
@@ -1264,7 +1241,7 @@ async function runKeyEdit(plan: EditPlan): Promise<void> {
     log(`timeline: ${plan.refused}`, "bad");
     return;
   }
-  await runGesture(plan.calls, plan.label);
+  await runGesture(plan.edits, plan.label);
 }
 
 function setKeySelection(next: Iterable<string>): void {
@@ -1453,7 +1430,7 @@ async function loadMotionLibrary(): Promise<void> {
     ui.timelineEasing.append(option);
   }
   try {
-    starterPresets = await invoke<MotionPreset[]>("cmd_starter_presets");
+    starterPresets = await shell().invoke<MotionPreset[]>("cmd_starter_presets");
     for (const preset of starterPresets) {
       const option = document.createElement("option");
       option.value = preset.id;
@@ -1470,7 +1447,7 @@ async function loadMotionLibrary(): Promise<void> {
  *  drift invariant 18 exists to prevent. */
 async function loadObjectKinds(): Promise<void> {
   try {
-    for (const kind of await invoke<string[]>("cmd_object_kinds")) {
+    for (const kind of await shell().invoke<string[]>("cmd_object_kinds")) {
       const option = document.createElement("option");
       option.value = kind;
       option.textContent = kind;
@@ -1486,8 +1463,15 @@ async function loadObjectKinds(): Promise<void> {
 /** Apply the chosen easing to every selected key, as one gesture. */
 function onEasingChosen(): void {
   if (!scene) return;
-  const easing = ui.timelineEasing.value;
-  if (easing === "") return;
+  const chosen = ui.timelineEasing.value;
+  if (chosen === "") return;
+  // `find` narrows to the contract's easing union: the picker only offers
+  // what Rust declared, so an unknown value here is a stale option.
+  const easing = animationSurface?.easings.find((candidate) => candidate === chosen);
+  if (!easing) {
+    log(`timeline: ${chosen} is not a declared easing`, "bad");
+    return;
+  }
   // A custom bezier needs control points, which the key detail editor owns;
   // the picker offers a sensible starting curve rather than refusing outright.
   const bezier = easing === "custom-bezier" ? { x1: 0.34, y1: 1.56, x2: 0.64, y2: 1 } : undefined;
@@ -1526,8 +1510,11 @@ async function applyStarterPreset(): Promise<void> {
   }
   await runGesture(
     selection.map((objectId) => ({
-      command: "cmd_preset_apply",
-      args: { objectId, presetId, phase: "in", atFrame: currentFrame },
+      edit: "applyPreset",
+      objectId,
+      presetId,
+      phase: "in",
+      atFrame: wireFrame(currentFrame),
     })),
     selection.length === 1
       ? `Apply ${presetId} at frame ${currentFrame}`
@@ -1735,104 +1722,87 @@ function onPreviewShortcut(event: KeyboardEvent): void {
 }
 
 // ---------------------------------------------------------------------------
-// Undo/redo. One gesture is one entry (11.21). A multi-object gesture threads
-// the scene through several shell calls and records only the pre-gesture
-// document, so undoing it reverses the whole gesture at once.
+// Undo/redo and edits. Rust owns each session's history (11.36): one command
+// is one entry, and a batch of edits is applied atomically, so one gesture is
+// one undo however many objects or keys it touched (11.9, 11.21). A refused
+// command changes nothing and adds no entry; its refusal is shown by name.
 // ---------------------------------------------------------------------------
 
 function updateHistoryButtons(): void {
-  ui.undo.disabled = undoStack.length === 0;
-  ui.redo.disabled = redoStack.length === 0;
+  const view = activeSession(workspace)?.view;
+  ui.undo.disabled = view === undefined || view.undoDepth === 0;
+  ui.redo.disabled = view === undefined || view.redoDepth === 0;
 }
 
-/** Record a completed edit and make it the current document.
- *
- *  The edit is recorded against the session that owns the document, not
- *  against a global stack: a shared history would let Ctrl+Z in one graphic
- *  restore a document belonging to another (11.29). */
-function commitScene(previous: SceneDocument, next: SceneDocument, label: string): void {
-  undoStack.push(previous);
-  // A runaway history is a memory leak in a long session; the oldest gesture
-  // is the least likely to be undone.
-  if (undoStack.length > MAX_HISTORY) undoStack.shift();
-  redoStack = [];
-  scene = next;
-  markActiveDirty();
-  // An edit that created or removed objects says what should now be selected;
-  takePagePreviewDocument = null;
-  // applied here, against the document that actually contains them.
-  if (pendingSelection !== undefined) {
-    selection = [...new Set(pendingSelection)];
-    pendingSelection = undefined;
-  }
-  renderSceneState();
-  updateHistoryButtons();
-  renderSceneTabs();
-  log(label, "good");
+/// What a successful command reports, and how a refusal is introduced.
+interface CommandReport {
+  /** The history line. Computed from what Rust reported it did where the
+   *  consequence is only known afterwards (a delete that took children). */
+  readonly label: string | ((effects: readonly EditEffect[]) => string);
+  /** The selection the edit asks for, applied against the edited document. */
+  readonly select?: (effects: readonly EditEffect[]) => readonly string[] | undefined;
+  /** Names the panel at the start of a refusal line. */
+  readonly refusal?: string;
+  /** Also shows the refusal where the gesture was made (a panel status). */
+  readonly onRefusal?: (message: string) => void;
 }
 
-/** Mark the open scene edited, in both the project-save sense and the tab. */
-function markActiveDirty(): void {
-  if (projectSceneId !== undefined) projectSceneDirty = true;
-  const session = activeSession(workspace);
-  if (session) markEdited(session);
-}
-
-function undo(): void {
-  const previous = undoStack.pop();
-  if (!scene || !previous) return;
-  redoStack.push(scene);
-  scene = previous;
-  takePagePreviewDocument = null;
-  markActiveDirty();
-  renderSceneState();
-  updateHistoryButtons();
-  renderSceneTabs();
-  log("Undo", "good");
-}
-
-function redo(): void {
-  const next = redoStack.pop();
-  if (!scene || !next) return;
-  undoStack.push(scene);
-  scene = next;
-  takePagePreviewDocument = null;
-  markActiveDirty();
-  renderSceneState();
-  updateHistoryButtons();
-  renderSceneTabs();
-  log("Redo", "good");
-}
-
-/** The scaffolding every document edit shares: one edit at a time, one undo
- *  entry, and a refusal that leaves the document exactly as it was.
- *
- *  `apply` receives the document the gesture started from and returns the one
- *  it produced, together with the sentence describing what it did — the label
- *  is computed from the result because an edit's consequence (three objects
- *  removed, two channels with them) is only known once Rust has reported it. */
-async function runEdit(
-  apply: (start: SceneDocument) => Promise<{ next: SceneDocument; label: string }>,
-): Promise<boolean> {
-  if (!scene) return false;
+/** Run one session command: one at a time, rendering the view Rust returns. */
+async function runCommand(
+  command: EditorCommand,
+  report: string | CommandReport,
+): Promise<CommandOutcome | undefined> {
+  const spec: CommandReport = typeof report === "string" ? { label: report } : report;
   if (animationBusy) {
     log("an edit is already in progress", "bad");
-    return false;
+    return undefined;
   }
   animationBusy = true;
   ui.animationMount.setAttribute("aria-busy", "true");
-  const start = scene;
   try {
-    const { next, label } = await apply(start);
-    commitScene(start, next, label);
-    return true;
+    const outcome = await execute(command);
+    if (outcome.session) {
+      // A take-page preview is of the document as it was; only an edit,
+      // undo or redo changes the active document.
+      const changesDocument =
+        command.command === "editScene" || command.command === "undo" || command.command === "redo";
+      if (changesDocument) takePagePreviewDocument = null;
+      presentView(outcome.session, spec.select?.(outcome.effects));
+    }
+    log(typeof spec.label === "string" ? spec.label : spec.label(outcome.effects), "good");
+    return outcome;
   } catch (error) {
-    log(describe(error), "bad");
-    return false;
+    const message = describe(error);
+    spec.onRefusal?.(message);
+    log(spec.refusal === undefined ? message : `${spec.refusal}: ${message}`, "bad");
+    return undefined;
   } finally {
     animationBusy = false;
     ui.animationMount.removeAttribute("aria-busy");
   }
+}
+
+/** Send one gesture's edits to the active session as one atomic batch. */
+async function runEdits(
+  edits: readonly SceneEdit[],
+  report: string | CommandReport,
+): Promise<CommandOutcome | undefined> {
+  const session = activeSession(workspace);
+  if (!session || edits.length === 0) return undefined;
+  const target: SceneTarget = { target: "session", session: session.key };
+  return runCommand({ command: "editScene", target, edits: [...edits] }, report);
+}
+
+async function undo(): Promise<void> {
+  const session = activeSession(workspace);
+  if (!session) return;
+  await runCommand({ command: "undo", session: session.key }, "Undo");
+}
+
+async function redo(): Promise<void> {
+  const session = activeSession(workspace);
+  if (!session) return;
+  await runCommand({ command: "redo", session: session.key }, "Redo");
 }
 
 // ---------------------------------------------------------------------------
@@ -1880,16 +1850,15 @@ async function setPhaseFromSelection(): Promise<void> {
   const phase = {
     kind,
     ...(name === undefined ? {} : { name }),
-    startFrame: span.start as unknown as bigint,
-    endFrame: span.end as unknown as bigint,
+    startFrame: wireFrame(span.start),
+    endFrame: wireFrame(span.end),
   } satisfies TimelinePhase;
-
-  await runEdit(async (start) => ({
-    next: await invoke<SceneDocument>("cmd_phase_set", { scene: start, phase }),
-    label: `Set ${phaseAddress(phase)} over frames ${span.start}–${span.end}`,
-  }));
-  phaseRevision += 1;
-  if (scene) paintTimeline(currentTimelineModel(scene));
+  const outcome = await runEdits(
+    [{ edit: "setPhase", phase }],
+    `Set ${phaseAddress(phase)} over frames ${span.start}–${span.end}`,
+  );
+  if (outcome) phaseRevision += 1;
+  if (outcome && scene) paintTimeline(currentTimelineModel(scene));
 }
 
 /// The phase under the playhead, which is what the phase buttons act on.
@@ -1906,12 +1875,9 @@ async function removePhaseAtPlayhead(): Promise<void> {
     return;
   }
   const address = phaseAddress(phase);
-  await runEdit(async (start) => ({
-    next: await invoke<SceneDocument>("cmd_phase_remove", { scene: start, address }),
-    label: `Remove phase ${address}`,
-  }));
-  phaseRevision += 1;
-  if (scene) paintTimeline(currentTimelineModel(scene));
+  const outcome = await runEdits([{ edit: "removePhase", address }], `Remove phase ${address}`);
+  if (outcome) phaseRevision += 1;
+  if (outcome && scene) paintTimeline(currentTimelineModel(scene));
 }
 
 /// Play one phase, and stop at its end rather than the scene's.
@@ -1929,21 +1895,9 @@ function playPhaseAtPlayhead(): void {
   startPreview(Number(phase.endFrame), phaseAddress(phase));
 }
 
-/** Run a sequence of shell calls as one gesture, threading the scene through
- *  each and committing the result as a single undo entry. Any refusal aborts
- *  the whole gesture and leaves the document untouched. */
-async function runGesture(
-  calls: readonly { readonly command: string; readonly args: Record<string, unknown> }[],
-  label: string,
-): Promise<boolean> {
-  if (calls.length === 0) return false;
-  return runEdit(async (start) => {
-    let working = start;
-    for (const call of calls) {
-      working = await invoke<SceneDocument>(call.command, { scene: working, ...call.args });
-    }
-    return { next: working, label };
-  });
+/** Every timeline gesture is one ordered SceneEdit batch. */
+async function runGesture(edits: readonly SceneEdit[], label: string): Promise<boolean> {
+  return (await runEdits(edits, label)) !== undefined;
 }
 
 const DEFAULT_EASING = (): SceneEasing | undefined =>
@@ -1961,15 +1915,19 @@ async function editPropertyValue(property: string, value: number): Promise<void>
     log(`edit refused: ${row.label} needs a finite value`, "bad");
     return;
   }
-  const calls = row.objectIds.map((objectId) => ({
-    command: "cmd_property_edit",
-    args: { objectId, property, value, frame: model.currentFrame, autoKey },
+  const edits: SceneEdit[] = row.objectIds.map((objectId) => ({
+    edit: "editProperty",
+    objectId,
+    property,
+    value,
+    frame: wireFrame(model.currentFrame),
+    autoKey,
   }));
   const scope = row.objectIds.length > 1 ? ` on ${row.objectIds.length} objects` : "";
   const label = autoKey
     ? `Keyed ${row.label} = ${value} at frame ${model.currentFrame}${scope}`
     : `Set ${row.label} = ${value}${scope}`;
-  await runGesture(calls, label);
+  await runGesture(edits, label);
 }
 
 /** Toggle keys for a property across the selection: remove when every selected
@@ -1989,11 +1947,13 @@ async function toggleKeyframe(property: string, requestedAction?: "create" | "re
   if (intent.objectIds.length === 0) return;
 
   if (intent.action === "remove") {
-    const calls = intent.objectIds.map((objectId) => ({
-      command: "cmd_keyframe_remove",
-      args: { objectId, property, frame: model.currentFrame },
+    const edits: SceneEdit[] = intent.objectIds.map((objectId) => ({
+      edit: "removeKeyframe",
+      objectId,
+      property,
+      frame: wireFrame(model.currentFrame),
     }));
-    await runGesture(calls, `Removed ${row.label} key at frame ${model.currentFrame}`);
+    await runGesture(edits, `Removed ${row.label} key at frame ${model.currentFrame}`);
     return;
   }
 
@@ -2004,22 +1964,21 @@ async function toggleKeyframe(property: string, requestedAction?: "create" | "re
     log("keyframe refused: the animation contract declares no easing", "bad");
     return;
   }
-  const calls = intent.objectIds.map((objectId) => ({
-    command: "cmd_keyframe_create",
-    args: {
-      objectId,
-      property,
-      // Each object keys at its own current value, so a multi-select add does
-      // not flatten differing values onto a shared one.
-      keyframe: keyframeForValue(baseValueOf(scene!, objectId, property) ?? 0, model.currentFrame, easing),
-    },
+  const edits: SceneEdit[] = intent.objectIds.map((objectId) => ({
+    edit: "createKeyframe",
+    objectId,
+    property,
+    // Each object keys at its own current value, so a multi-select add does
+    // not flatten differing values onto a shared one.
+    keyframe: keyframeForValue(baseValueOf(scene!, objectId, property) ?? 0, model.currentFrame, easing),
   }));
-  await runGesture(calls, `Added ${row.label} key at frame ${model.currentFrame}`);
+  await runGesture(edits, `Added ${row.label} key at frame ${model.currentFrame}`);
 }
 
 async function updateKeyframe(rowElement: HTMLElement, row: KeyframeRow): Promise<void> {
   const model = activeKeyframeModel();
-  if (!model?.available || row.objectIds.length !== 1 || !row.currentKey) return;
+  const objectId = row.objectIds[0];
+  if (!model?.available || row.objectIds.length !== 1 || objectId === undefined || !row.currentKey) return;
   const value = Number(rowElement.querySelector<HTMLInputElement>(".keyframe-value")?.value);
   const easing = rowElement.querySelector<HTMLSelectElement>(".keyframe-easing")
     ?.value as SceneEasing | undefined;
@@ -2039,32 +1998,35 @@ async function updateKeyframe(rowElement: HTMLElement, row: KeyframeRow): Promis
     }
   }
   const keyframe: SceneKeyframe = {
+    // The key's own frame, as Rust sent it: an update never moves a key.
     frame: row.currentKey.frame,
     value,
     easing,
     ...(bezier === undefined ? {} : { bezier }),
   };
   await runGesture(
-    [{ command: "cmd_keyframe_update", args: { objectId: row.objectIds[0], property: row.property, keyframe } }],
+    [{ edit: "updateKeyframe", objectId, property: row.property, keyframe }],
     `Updated ${row.label} key at frame ${model.currentFrame}`,
   );
 }
 
 async function moveKeyframe(rowElement: HTMLElement, row: KeyframeRow): Promise<void> {
   const model = activeKeyframeModel();
-  if (!model?.available || row.objectIds.length !== 1) return;
+  const objectId = row.objectIds[0];
+  if (!model?.available || row.objectIds.length !== 1 || objectId === undefined) return;
   const toFrame = Number(rowElement.querySelector<HTMLInputElement>(".keyframe-move-to")?.value);
-  if (!Number.isInteger(toFrame)) {
-    log("keyframe refused: destination frame must be an integer", "bad");
+  if (!Number.isInteger(toFrame) || toFrame < 0) {
+    log("keyframe refused: destination frame must be a whole number from 0", "bad");
     return;
   }
   const moved = await runGesture(
-    [
-      {
-        command: "cmd_keyframe_move",
-        args: { objectId: row.objectIds[0], property: row.property, fromFrame: model.currentFrame, toFrame },
-      },
-    ],
+    [{
+      edit: "moveKeyframe",
+      objectId,
+      property: row.property,
+      fromFrame: wireFrame(model.currentFrame),
+      toFrame: wireFrame(toFrame),
+    }],
     `Moved ${row.label} key from frame ${model.currentFrame} to ${toFrame}`,
   );
   if (moved) setCurrentFrame(toFrame);
@@ -2167,10 +2129,8 @@ function onInspectorContextMenu(event: MouseEvent): void {
 }
 
 /** An inspector "Edit X" across the whole selection (11.9): one gesture, one
- *  undo entry carrying every object's change. The pure `editSelection` builds
- *  the transaction and the document it produces; `runEdit` records it through
- *  the same history the Animation panel uses. A refused edit leaves the
- *  document and the history untouched. */
+ *  atomic batch, one undo entry carrying every object's change. Rust applies
+ *  it or refuses it whole, by name. */
 function onInspectorClick(event: MouseEvent): void {
   if (!scene) return;
   const target = event.target;
@@ -2195,12 +2155,20 @@ function onInspectorClick(event: MouseEvent): void {
     log(`inspector edit refused: ${parsed.refused}`, "bad");
     return;
   }
-  const outcome = editSelection(scene, selection, field, parsed.value);
-  if (isRefused(outcome)) {
-    log(`inspector edit refused: ${outcome.refused}`, "bad");
+  const edits = inspectorEdits(scene, selection, field, parsed.value);
+  if (isRefused(edits)) {
+    log(`inspector edit refused: ${edits.refused}`, "bad");
     return;
   }
-  void runEdit(async () => ({ next: outcome.document, label: outcome.transaction.label }));
+  void runEdits(edits, {
+    // A field edit reports which objects actually changed; the count in the
+    // undo label is that one, not the selection's size.
+    label: (effects) => {
+      const changed = effects.find((effect) => effect.effect === "objectsChanged");
+      return fieldEditLabel(field, changed?.effect === "objectsChanged" ? changed.objectIds.length : edits.length);
+    },
+    refusal: "inspector edit refused",
+  });
 }
 
 
@@ -2295,22 +2263,25 @@ function onObjectManagerClick(event: MouseEvent): void {
   }
   if (!scene) return;
 
-  // Visibility and lock are document edits: one click, one undo entry. A
-  // refusal names its reason and commits nothing (invariant 18).
+  // Visibility and lock are document edits: one click, one undo entry. Rust
+  // refuses an inherited hide or lock by name and commits nothing
+  // (invariant 18).
   if (action === "toggleVisibility" || action === "toggleLock") {
-    if (animationBusy) {
-      log("an edit is already in progress", "bad");
-      return;
+    const object = scene.objects.find((candidate) => candidate.id === id);
+    if (!object) return;
+    if (action === "toggleVisibility") {
+      const visible = !object.visible;
+      void runEdits([{ edit: "setObjectVisible", objectId: id, visible }], {
+        label: `${visible ? "Showed" : "Hid"} ${object.name}`,
+        refusal: `cannot change visibility of ${object.name}`,
+      });
+    } else {
+      const locked = !object.locked;
+      void runEdits([{ edit: "setObjectLocked", objectId: id, locked }], {
+        label: `${locked ? "Locked" : "Unlocked"} ${object.name}`,
+        refusal: `cannot change the lock on ${object.name}`,
+      });
     }
-    const outcome =
-      action === "toggleVisibility"
-        ? toggleObjectVisibility(scene, id)
-        : toggleObjectLock(scene, id);
-    if (!outcome.ok) {
-      log(outcome.reason, "bad");
-      return;
-    }
-    commitScene(scene, outcome.document, outcome.label);
     return;
   }
 
@@ -2355,39 +2326,47 @@ async function createObject(): Promise<void> {
     return;
   }
   const name = window.prompt(`Name for the new ${kind}`, kind);
-  // A cancelled prompt is a cancelled gesture, not an unnamed object.
   if (name === null) return;
-  await runEdit(async (start) => {
-    const created = await invoke<ObjectCreated>("cmd_object_create", {
-      scene: start,
-      kind,
-      name,
-    });
+  await runEdits([{ edit: "createObject", kind, name }], {
+    label: (effects) => {
+      for (const effect of effects) {
+        if (effect.effect === "objectCreated") return `Added ${kind} ${effect.objectId}`;
+      }
+      return `Added ${kind}`;
+    },
     // Select what was just made: an author's next edit is almost always to it.
-    pendingSelection = [created.objectId];
-    return { next: created.scene, label: `Added ${kind} ${created.objectId}` };
+    select: (effects) => {
+      for (const effect of effects) {
+        if (effect.effect === "objectCreated") return [effect.objectId];
+      }
+      return undefined;
+    },
   });
 }
 
 async function duplicateObject(): Promise<void> {
   const objectId = soleSelection("duplicate");
   if (!objectId) return;
-  await runEdit(async (start) => {
-    const copied = await invoke<ObjectDuplicated>("cmd_object_duplicate", {
-      scene: start,
-      objectId,
-    });
-    const { newObjectId, createdObjectIds, copiedChannelCount } = copied.duplication;
-    pendingSelection = [newObjectId];
-    const extra: string[] = [];
-    if (createdObjectIds.length > 1) extra.push(`${createdObjectIds.length - 1} child object(s)`);
-    if (copiedChannelCount > 0) extra.push(`${copiedChannelCount} channel(s)`);
-    return {
-      next: copied.scene,
-      label: extra.length
-        ? `Duplicated ${objectId} as ${newObjectId}, with ${extra.join(" and ")}`
-        : `Duplicated ${objectId} as ${newObjectId}`,
-    };
+  await runEdits([{ edit: "duplicateObject", objectId }], {
+    label: (effects) => {
+      for (const effect of effects) {
+        if (effect.effect !== "objectDuplicated") continue;
+        const { newObjectId, createdObjectIds, copiedChannelCount } = effect;
+        const extra: string[] = [];
+        if (createdObjectIds.length > 1) extra.push(`${createdObjectIds.length - 1} child object(s)`);
+        if (copiedChannelCount > 0) extra.push(`${copiedChannelCount} channel(s)`);
+        return extra.length
+          ? `Duplicated ${objectId} as ${newObjectId}, with ${extra.join(" and ")}`
+          : `Duplicated ${objectId} as ${newObjectId}`;
+      }
+      return `Duplicated ${objectId}`;
+    },
+    select: (effects) => {
+      for (const effect of effects) {
+        if (effect.effect === "objectDuplicated") return [effect.newObjectId];
+      }
+      return undefined;
+    },
   });
 }
 
@@ -2397,34 +2376,28 @@ async function renameObject(): Promise<void> {
   const current = scene?.objects.find((object) => object.id === objectId)?.name ?? objectId;
   const name = window.prompt(`Rename ${objectId}`, current);
   if (name === null) return;
-  await runEdit(async (start) => ({
-    next: await invoke<SceneDocument>("cmd_object_rename", { scene: start, objectId, name }),
-    label: `Renamed ${objectId} to ${name.trim()}`,
-  }));
+  await runEdits([{ edit: "renameObject", objectId, name }], `Renamed ${objectId} to ${name.trim()}`);
 }
 
 async function deleteObject(): Promise<void> {
   const objectId = soleSelection("delete");
   if (!objectId) return;
-  await runEdit(async (start) => {
-    const deleted = await invoke<ObjectDeleted>("cmd_object_delete", {
-      scene: start,
-      objectId,
-    });
-    const { removedObjectIds, removedChannelCount, clearedActiveCamera } = deleted.deletion;
-    pendingSelection = [];
+  await runEdits([{ edit: "deleteObject", objectId }], {
     // Everything a delete took beyond the object named, said out loud: a
     // group silently eating its children is how authors lose work.
-    const also: string[] = [];
-    if (removedObjectIds.length > 1) also.push(`${removedObjectIds.length - 1} child object(s)`);
-    if (removedChannelCount > 0) also.push(`${removedChannelCount} animation channel(s)`);
-    if (clearedActiveCamera) also.push("the scene's active camera");
-    return {
-      next: deleted.scene,
-      label: also.length
-        ? `Deleted ${objectId}, and with it ${also.join(", ")}`
-        : `Deleted ${objectId}`,
-    };
+    label: (effects) => {
+      for (const effect of effects) {
+        if (effect.effect !== "objectDeleted") continue;
+        const { removedObjectIds, removedChannelCount, clearedActiveCamera } = effect;
+        const also: string[] = [];
+        if (removedObjectIds.length > 1) also.push(`${removedObjectIds.length - 1} child object(s)`);
+        if (removedChannelCount > 0) also.push(`${removedChannelCount} animation channel(s)`);
+        if (clearedActiveCamera) also.push("the scene's active camera");
+        return also.length ? `Deleted ${objectId}, and with it ${also.join(", ")}` : `Deleted ${objectId}`;
+      }
+      return `Deleted ${objectId}`;
+    },
+    select: () => [],
   });
 }
 
@@ -2479,10 +2452,7 @@ async function saveSelectedTextStyle(): Promise<void> {
     ...(object.stroke === undefined ? {} : { stroke: object.stroke }),
     ...(object.strokeWidth === undefined ? {} : { strokeWidth: object.strokeWidth }),
   };
-  await runEdit(async (start) => ({
-    next: await invoke<SceneDocument>("cmd_text_style_save", { scene: start, style }),
-    label: `Saved text style ${style.name}`,
-  }));
+  await runEdits([{ edit: "saveTextStyle", style }], `Saved text style ${style.name}`);
 }
 
 async function onTextStyleClick(event: MouseEvent): Promise<void> {
@@ -2515,15 +2485,9 @@ async function onTextStyleClick(event: MouseEvent): Promise<void> {
     log("text style apply refused: select one or more text objects", "bad");
     return;
   }
+  // The design system comes from the session's own project origin, in Rust.
   await runGesture(
-    selection.map((objectId) => ({
-      command: "cmd_text_style_apply",
-      args: {
-        objectId,
-        styleId,
-        ...(projectSceneProject === undefined ? {} : { project: projectSceneProject }),
-      },
-    })),
+    selection.map((objectId) => ({ edit: "applyTextStyle", objectId, styleId })),
     selection.length === 1
       ? `Applied text style ${styleId}`
       : `Applied text style ${styleId} to ${selection.length} objects`,
@@ -2550,13 +2514,11 @@ function onMaterialManagerClick(event: MouseEvent): void {
     return;
   }
   if (button?.dataset.action === "delete") {
-    const outcome = applyDeleteMaterial(scene, material.materialId);
-    if (isMaterialRefused(outcome)) {
-      log(`material delete refused [${outcome.code}]: ${outcome.refused}`, "bad");
-      return;
-    }
     selectedMaterialId = undefined;
-    void runEdit(async () => ({ next: outcome.document, label: `Deleted material ${material.name}` }));
+    void runEdits([{ edit: "deleteMaterial", materialId: material.materialId }], {
+      label: `Deleted material ${material.name}`,
+      refusal: "material delete refused",
+    });
     return;
   }
   if (button?.dataset.action === "edit") {
@@ -2574,18 +2536,14 @@ function onMaterialManagerClick(event: MouseEvent): void {
 }
 
 /** Relink every user of one material onto another as one undo entry (11.12).
- *  The prompt shows the blast radius first — the same objects `relinkMaterial`
- *  previews and `applyRelink` changes — so the author confirms a known set,
- *  never a blind repoint. */
+ *  The prompt shows the blast radius first — the objects `relinkMaterial`
+ *  previews — so the author confirms a known set, never a blind repoint. Rust
+ *  performs the relink and reports the objects it changed. */
 function relinkSelectedMaterial(document_: SceneDocument, fromId: string, fromName: string): void {
   const preview = usersOf(document_, fromId);
   const others = document_.materials
     .filter((candidate) => candidate.materialId !== fromId)
     .map((candidate) => candidate.materialId);
-  if (preview.length === 0) {
-    log(`material relink refused [relinkNoUsers]: ${fromId} has no users to relink`, "bad");
-    return;
-  }
   if (others.length === 0) {
     log(`material relink refused: there is no other material to relink ${fromName} onto`, "bad");
     return;
@@ -2596,15 +2554,17 @@ function relinkSelectedMaterial(document_: SceneDocument, fromId: string, fromNa
     others[0],
   );
   if (toId === null) return;
-  const outcome = applyRelink(document_, fromId, toId.trim());
-  if (isMaterialRefused(outcome)) {
-    log(`material relink refused [${outcome.code}]: ${outcome.refused}`, "bad");
-    return;
-  }
-  void runEdit(async () => ({
-    next: outcome.document,
-    label: `Relinked ${outcome.changed.length} object(s) from ${fromId} to ${toId.trim()}: ${outcome.changed.join(", ")}`,
-  }));
+  const target = toId.trim();
+  void runEdits([{ edit: "relinkMaterial", fromMaterialId: fromId, toMaterialId: target }], {
+    label: (effects) => {
+      for (const effect of effects) {
+        if (effect.effect !== "materialsRelinked") continue;
+        return `Relinked ${effect.changed.length} object(s) from ${fromId} to ${target}: ${effect.changed.join(", ")}`;
+      }
+      return `Relinked ${fromId} to ${target}`;
+    },
+    refusal: "material relink refused",
+  });
 }
 
 function onAssetManagerClick(event: MouseEvent): void {
@@ -2638,10 +2598,11 @@ function onBindingsClick(event: MouseEvent): void {
   const objectId = selection[0];
   if (!objectId) return;
 
+  const object = scene.objects.find((candidate) => candidate.id === objectId);
+  if (!object) return;
+  const previous = object.bindings?.[property];
   let path: string | undefined;
   if (action === "bind") {
-    const object = scene.objects.find((candidate) => candidate.id === objectId);
-    const previous = object?.bindings?.[property];
     const entered = window.prompt(
       `Data path for ${property} (for example match.homeScore)`,
       typeof previous === "string" ? previous : "",
@@ -2652,12 +2613,13 @@ function onBindingsClick(event: MouseEvent): void {
     return;
   }
 
-  const outcome = applyBindingEdit(scene, objectId, property, path);
-  if (!outcome.ok) {
-    log(`binding refused: ${outcome.reason}`, "bad");
-    return;
-  }
-  commitScene(scene, outcome.document, outcome.transaction.label);
+  // Rust checks the path against the data context and the property's type,
+  // and refuses an unbind of nothing, by name.
+  const verb = path === undefined ? "Remove" : previous === undefined ? "Bind" : "Change";
+  void runEdits([{ edit: "setBinding", objectId, property, ...(path === undefined ? {} : { path }) }], {
+    label: `${verb} ${bindingLabel(object, property)} binding`,
+    refusal: "binding refused",
+  });
 }
 
 /** Fill the sample-data editor and list every binding that does not resolve. */
@@ -2677,28 +2639,41 @@ function renderSampleData(document_: SceneDocument): void {
 }
 
 /** Replace the scene's data context from the editor text as one undo entry.
- *  A refusal leaves the document and the author's text exactly as they were. */
+ *  The text is parsed strictly here so a refusal can point into it; Rust
+ *  replaces the data and reports the bindings that stopped resolving. A
+ *  refusal leaves the document and the author's text exactly as they were. */
 function onSampleDataApply(): void {
   if (!scene) return;
-  const outcome = applySampleData(scene, ui.sampleDataText.value);
-  if (!outcome.ok) {
-    ui.sampleDataStatus.textContent = `Refused [${outcome.code}]: ${outcome.reason}`;
-    if (outcome.position) {
+  const parsed = parseSampleData(ui.sampleDataText.value);
+  if (!parsed.ok) {
+    ui.sampleDataStatus.textContent = `Refused [${parsed.code}]: ${parsed.reason}`;
+    if (parsed.position) {
       ui.sampleDataText.focus();
-      ui.sampleDataText.setSelectionRange(outcome.position.offset, outcome.position.offset + 1);
+      ui.sampleDataText.setSelectionRange(parsed.position.offset, parsed.position.offset + 1);
     }
-    log(`sample data refused: ${outcome.reason}`, "bad");
+    log(`sample data refused: ${parsed.reason}`, "bad");
     return;
   }
-  commitScene(scene, outcome.document, outcome.transaction.label);
-  const broken = outcome.newlyInvalid.length;
-  ui.sampleDataStatus.textContent =
-    broken === 0
-      ? "Applied."
-      : `Applied. ${broken} binding(s) no longer resolve; they are kept as authored and listed below.`;
-  for (const issue of outcome.newlyInvalid) {
-    log(`binding no longer resolves: ${describeBindingIssue(issue)}`, "bad");
-  }
+  const fields = dataFields(parsed.data).length;
+  void runEdits([{ edit: "replaceDataContext", dataContext: parsed.data }], {
+    label: `Replace sample data (${fields} field${fields === 1 ? "" : "s"})`,
+    refusal: "sample data refused",
+    onRefusal: (message) => {
+      ui.sampleDataStatus.textContent = `Refused: ${message}`;
+    },
+  }).then((outcome) => {
+    if (!outcome) return;
+    const broken = outcome.effects.flatMap((effect) =>
+      effect.effect === "dataContextReplaced" ? effect.newlyInvalid : [],
+    );
+    ui.sampleDataStatus.textContent =
+      broken.length === 0
+        ? "Applied."
+        : `Applied. ${broken.length} binding(s) no longer resolve; they are kept as authored and listed below.`;
+    for (const issue of broken) {
+      log(`binding no longer resolves: ${issue.objectId}.${issue.property} (${issue.path}): ${issue.detail}`, "bad");
+    }
+  });
 }
 
 function onSampleDataRevert(): void {
@@ -2756,15 +2731,14 @@ async function refreshProjectCatalog(): Promise<void> {
     return;
   }
   const [scenes, pages] = await Promise.all([
-    invoke<ProjectSceneCatalog>("cmd_scene_list", { project }),
-    invoke<ProjectTakePageCatalog>("cmd_take_page_list", { project }),
+    shell().invoke<ProjectSceneCatalog>("cmd_scene_list", { project }),
+    shell().invoke<ProjectTakePageCatalog>("cmd_take_page_list", { project }),
   ]);
   projectCatalog = scenes;
   takePageCatalog = pages;
   renderProjectManager();
   if (scene) renderTakePagePanel(scene);
 }
-
 
 /// Drop a stale refusal from the take-page state.
 ///
@@ -2787,27 +2761,32 @@ function effectiveTakePageValues(template: SceneDocument): Record<string, Contro
 }
 
 async function previewTakePageValues(): Promise<boolean> {
-  if (!scene) {
+  const session = activeSession(workspace);
+  if (!scene || !session) {
     log("take-page preview refused: nothing is open", "bad");
     return false;
   }
-  const template = JSON.stringify(scene);
+  // Rust fills the session's own document; nothing here is sent back. The
+  // preview belongs to the template it was asked for, so an edit landing
+  // during the round trip makes it stale rather than shown.
+  const template = scene;
+  const target: SceneTarget = { target: "session", session: session.key };
   try {
-    const filled = await invoke<SceneDocument>("cmd_take_page_preview", {
-      scene,
-      values: effectiveTakePageValues(scene),
+    const filled = await shell().invoke<SceneDocument>("cmd_take_page_preview", {
+      target,
+      values: effectiveTakePageValues(template),
     });
-    if (JSON.stringify(scene) !== template) {
-      throw new Error("take-page preview changed the open template");
+    if (scene !== template) {
+      throw new Error("the template changed while its take-page preview was being filled");
     }
     takePageState = withoutTakePageRefusal(takePageState);
     takePagePreviewDocument = filled;
     renderSceneState();
-    log(`previewed take-page values for ${scene.name}`, "good");
+    log(`previewed take-page values for ${template.name}`, "good");
     return true;
   } catch (error) {
     takePageState = { ...takePageState, refusal: describe(error) };
-    renderPanels(scene);
+    if (scene) renderPanels(scene);
     log(`take-page preview refused: ${takePageState.refusal}`, "bad");
     return false;
   }
@@ -2838,12 +2817,18 @@ async function saveTakePage(): Promise<void> {
   if (!(await previewTakePageValues())) return;
   const page: TakePage = { pageId, name, sceneId: scene.id, values: takePageState.values };
   try {
-    takePageCatalog = await invoke<ProjectTakePageCatalog>("cmd_take_page_save", { project, page });
-    renderPanels(scene);
-    log(`saved take page ${project}/${pageId}`, "good");
+    await execute({ command: "saveTakePage", project, page });
   } catch (error) {
     log(`take-page save refused: ${describe(error)}`, "bad");
+    return;
   }
+  log(`saved take page ${project}/${pageId}`, "good");
+  try {
+    takePageCatalog = await shell().invoke<ProjectTakePageCatalog>("cmd_take_page_list", { project });
+  } catch (error) {
+    log(`take-page list unavailable: ${describe(error)}`, "bad");
+  }
+  if (scene) renderPanels(scene);
 }
 
 async function openTakePage(): Promise<void> {
@@ -2855,7 +2840,7 @@ async function openTakePage(): Promise<void> {
     return;
   }
   try {
-    const page = await invoke<TakePage>("cmd_take_page_read", { project, pageId });
+    const page = await shell().invoke<TakePage>("cmd_take_page_read", { project, pageId });
     if (page.sceneId !== scene.id) {
       log(
         `take-page open refused: ${page.pageId} belongs to template ${page.sceneId}, not ${scene.id}`,
@@ -2881,7 +2866,7 @@ async function openTakePage(): Promise<void> {
 
 async function loadProjects(preferred?: string): Promise<void> {
   try {
-    setProjectOptions(await invoke<string[]>("cmd_project_list"), preferred);
+    setProjectOptions(await shell().invoke<string[]>("cmd_project_list"), preferred);
     await refreshProjectCatalog();
   } catch (error) {
     log(describe(error), "bad");
@@ -2890,12 +2875,28 @@ async function loadProjects(preferred?: string): Promise<void> {
 }
 
 function refusesDiscard(action: string): boolean {
-  if (!projectSceneDirty || projectSceneId === undefined) return false;
+  if (!projectChangesUnsaved() || projectSceneId === undefined) return false;
   log(
     `${action} refused: ${projectSceneId} has unsaved project changes; use Save here first`,
     "bad",
   );
   return true;
+}
+
+/// Apply a scene id or name typed into the header, as one edit, before a save
+/// or publish uses it. Rust validates both and refuses by name.
+async function applyPendingIdentity(): Promise<boolean> {
+  if (!scene) return false;
+  const edits = pendingIdentityEdits(scene);
+  if (edits.length === 0) return true;
+  const parts = edits.map((edit) =>
+    edit.edit === "setSceneId" ? `id ${edit.id}` : edit.edit === "setSceneName" ? `name ${edit.name}` : edit.edit,
+  );
+  const outcome = await runEdits(edits, {
+    label: `Set scene ${parts.join(" and ")}`,
+    refusal: "scene identity refused",
+  });
+  return outcome !== undefined;
 }
 
 async function createProject(): Promise<void> {
@@ -2907,13 +2908,13 @@ async function createProject(): Promise<void> {
     return;
   }
   try {
-    const listed = await invoke<string[]>("cmd_project_create", { project });
-    setProjectOptions(listed, project);
-    await refreshProjectCatalog();
-    log(`created project ${project}`, "good");
+    await execute({ command: "createProject", project });
   } catch (error) {
     log(describe(error), "bad");
+    return;
   }
+  log(`created project ${project}`, "good");
+  await loadProjects(project);
 }
 
 async function selectProject(): Promise<void> {
@@ -2934,7 +2935,8 @@ async function selectProject(): Promise<void> {
 }
 
 async function saveProjectScene(): Promise<void> {
-  if (!scene) {
+  const session = activeSession(workspace);
+  if (!scene || !session) {
     log("project save refused: nothing is open", "bad");
     return;
   }
@@ -2943,34 +2945,24 @@ async function saveProjectScene(): Promise<void> {
     log("project save refused: no project exists", "bad");
     return;
   }
-  const boundId = projectSceneProject === project ? projectSceneId : undefined;
-  const boundHere = boundId !== undefined;
-  const id = (boundId ?? ui.sceneId.value).trim();
+  const origin = session.view.origin;
+  const boundHere = origin?.project === project;
+  const id = boundHere ? origin.sceneId : ui.sceneId.value.trim();
   const name = ui.sceneName.value.trim();
   if (!id || !name) {
     log("project save refused: scene id and name are both required", "bad");
     return;
   }
-  const next: SceneDocument = { ...scene, id, name };
-  // Taken before the await: the save belongs to the scene it was asked for.
-  const saving = activeSession(workspace);
+  // Identity first, then the save: a bound scene updates its own store
+  // address; an unbound one is created in the selected project and bound.
+  if (!(await applyPendingIdentity())) return;
+  const saved = await runCommand(
+    { command: "saveScene", session: session.key, to: boundHere ? { to: "origin" } : { to: "project", project } },
+    `${boundHere ? "updated" : "created"} ${project}/${id}`,
+  );
+  if (!saved) return;
   try {
-    projectCatalog = await invoke<ProjectSceneCatalog>(
-      boundHere ? "cmd_scene_update" : "cmd_scene_create",
-      { project, scene: next },
-    );
-    scene = next;
-    scenePath = null;
-    projectSceneProject = project;
-    projectSceneId = id;
-    projectSceneDirty = false;
-    ui.sceneId.value = id;
-    ui.sceneId.readOnly = true;
-    ui.sceneId.title = "Project scene ids are stable; use Duplicate to create a new id.";
-    if (saving) markSaved(saving, { project, sceneId: id });
-    renderSceneState();
-    renderSceneTabs();
-    log(`${boundHere ? "updated" : "created"} ${project}/${id}`, "good");
+    await refreshProjectCatalog();
   } catch (error) {
     log(describe(error), "bad");
   }
@@ -2980,13 +2972,12 @@ async function openProjectScene(sceneId: string): Promise<void> {
   if (refusesDiscard(`open ${sceneId}`)) return;
   const project = currentProject;
   if (project === undefined) return;
-  try {
-    const loaded = await invoke<SceneDocument>("cmd_scene_read", { project, sceneId });
-    showScene(loaded, null, { project, sceneId });
-    log(`opened ${project}/${sceneId}`, "good");
-  } catch (error) {
-    log(describe(error), "bad");
-  }
+  // Rust reveals a scene that is already open rather than opening it twice,
+  // so the author's in-progress copy is never replaced by the stored one.
+  await runCommand(
+    { command: "openScene", source: { source: "project", project, sceneId } },
+    `opened ${project}/${sceneId}`,
+  );
 }
 
 async function duplicateProjectScene(sceneId: string): Promise<void> {
@@ -3000,43 +2991,45 @@ async function duplicateProjectScene(sceneId: string): Promise<void> {
     log("duplicate refused: scene id is empty", "bad");
     return;
   }
+  const listed = projectCatalog?.project === project
+    ? projectCatalog.scenes.find((candidate) => candidate.sceneId === sceneId)
+    : undefined;
+  const proposedName = window.prompt("Duplicate scene name", `${listed?.name ?? sceneId} Copy`);
+  if (proposedName === null) return;
+  const name = proposedName.trim();
+  if (!name) {
+    log("duplicate refused: scene name is empty", "bad");
+    return;
+  }
   try {
-    const source = await invoke<SceneDocument>("cmd_scene_read", { project, sceneId });
-    const proposedName = window.prompt("Duplicate scene name", `${source.name} Copy`);
-    if (proposedName === null) return;
-    const name = proposedName.trim();
-    if (!name) {
-      log("duplicate refused: scene name is empty", "bad");
-      return;
-    }
-    const { revision: _publishedRevision, ...unpublished } = source;
-    const duplicate = { ...unpublished, id: newId, name } as SceneDocument;
-    projectCatalog = await invoke<ProjectSceneCatalog>("cmd_scene_create", {
-      project,
-      scene: duplicate,
-    });
-    showScene(duplicate, null, { project, sceneId: newId });
-    log(`duplicated ${project}/${sceneId} as ${newId}`, "good");
+    await execute({ command: "duplicateScene", project, sourceSceneId: sceneId, sceneId: newId, name });
+  } catch (error) {
+    log(describe(error), "bad");
+    return;
+  }
+  log(`duplicated ${project}/${sceneId} as ${newId}`, "good");
+  try {
+    await refreshProjectCatalog();
   } catch (error) {
     log(describe(error), "bad");
   }
+  await runCommand(
+    { command: "openScene", source: { source: "project", project, sceneId: newId } },
+    `opened ${project}/${newId}`,
+  );
 }
 
 async function publishProjectScene(sceneId: string): Promise<void> {
   const project = currentProject;
   if (project === undefined) return;
-  if (
-    projectSceneDirty &&
-    projectSceneProject === project &&
-    projectSceneId === sceneId
-  ) {
+  if (projectChangesUnsaved() && projectSceneProject === project && projectSceneId === sceneId) {
     log(`publish refused: ${sceneId} has unsaved changes`, "bad");
     return;
   }
   const endpoint = ui.endpoint.value.trim();
+  const target: SceneTarget = { target: "stored", project, sceneId };
   try {
-    const stored = await invoke<SceneDocument>("cmd_scene_read", { project, sceneId });
-    const result = await invoke<PublishResult>("cmd_publish", { endpoint, scene: stored });
+    const result = await shell().invoke<PublishResult>("cmd_publish", { endpoint, target });
     const takeId = plain(result.takeId);
     const revision = Number(plain(result.revision));
     if (projectCatalog?.project === project) {
@@ -3059,31 +3052,33 @@ async function publishProjectScene(sceneId: string): Promise<void> {
 async function deleteProjectScene(sceneId: string): Promise<void> {
   const project = currentProject;
   if (project === undefined) return;
-  if (
-    projectSceneDirty &&
-    projectSceneProject === project &&
-    projectSceneId === sceneId
-  ) {
+  if (projectChangesUnsaved() && projectSceneProject === project && projectSceneId === sceneId) {
     log(`delete refused: ${sceneId} has unsaved changes`, "bad");
     return;
   }
+  let outcome: CommandOutcome;
   try {
-    projectCatalog = await invoke<ProjectSceneCatalog>("cmd_scene_delete", {
-      project,
-      sceneId,
-    });
-    if (projectSceneProject === project && projectSceneId === sceneId) {
-      projectSceneProject = undefined;
-      projectSceneId = undefined;
-      projectSceneDirty = false;
-      ui.sceneId.readOnly = false;
-      ui.sceneId.title = "";
-      renderProjectManager();
-      log(`deleted ${project}/${sceneId}; the document remains open outside the project`, "good");
-    } else {
-      renderProjectManager();
-      log(`deleted ${project}/${sceneId}`, "good");
-    }
+    outcome = await execute({ command: "deleteScene", project, sceneId });
+  } catch (error) {
+    log(describe(error), "bad");
+    return;
+  }
+  // An open session of the deleted scene stays open, now unbound; Rust
+  // returns its projection so the tab and header say so.
+  const unbound = outcome.session;
+  if (unbound) {
+    if (unbound.session === workspace.activeKey) presentView(unbound);
+    else applySessionView(workspace, unbound);
+    renderSceneTabs();
+  }
+  log(
+    unbound
+      ? `deleted ${project}/${sceneId}; the document remains open outside the project`
+      : `deleted ${project}/${sceneId}`,
+    "good",
+  );
+  try {
+    await refreshProjectCatalog();
   } catch (error) {
     log(describe(error), "bad");
   }
@@ -3122,63 +3117,57 @@ async function newScene(): Promise<void> {
   if (refusesDiscard("new scene")) return;
   const id = ui.sceneId.value.trim() || "untitled";
   const name = ui.sceneName.value.trim() || "Untitled";
-  try {
-    const created = await invoke<SceneDocument>("cmd_new_scene", { id, name });
-    showScene(created, null);
-    log(`new scene ${created.id}`, "good");
-  } catch (error) {
-    log(describe(error), "bad");
-  }
+  await runCommand({ command: "openScene", source: { source: "new", id, name } }, `new scene ${id}`);
 }
 
 async function openScene(): Promise<void> {
   if (refusesDiscard("open file")) return;
+  let path: string | undefined;
   try {
     const picked = await tauri?.dialog?.open({
       multiple: false,
       filters: [{ name: "Scene document", extensions: ["json"] }],
     });
-    const path = Array.isArray(picked) ? picked[0] : picked;
-    if (!path) return;
-
-    const loaded = await invoke<SceneDocument>("cmd_load_scene", { path });
-    showScene(loaded, path);
-    log(`opened ${path}`, "good");
+    path = (Array.isArray(picked) ? picked[0] : picked) ?? undefined;
   } catch (error) {
     log(describe(error), "bad");
+    return;
   }
+  if (!path) return;
+  await runCommand({ command: "openScene", source: { source: "file", path } }, `opened ${path}`);
 }
 
 async function saveScene(): Promise<void> {
-  if (!scene) {
+  const session = activeSession(workspace);
+  if (!scene || !session) {
     log("nothing to save", "bad");
     return;
   }
-  const saving = activeSession(workspace);
-  try {
-    const path =
-      scenePath ??
-      (await tauri?.dialog?.save({
+  let path: string | null | undefined = scenePath;
+  if (!path) {
+    try {
+      path = await tauri?.dialog?.save({
         defaultPath: `${scene.id}.json`,
         filters: [{ name: "Scene document", extensions: ["json"] }],
-      }));
-    if (!path) return;
-
-    // Identity edits apply on save: the fields are the document's, not a
-    // separate piece of UI state that could drift from it.
-    scene = { ...scene, id: ui.sceneId.value.trim(), name: ui.sceneName.value.trim() };
-    await invoke<void>("cmd_save_scene", { path, scene });
-    scenePath = path;
-    if (saving) markSavedToFile(saving, path);
-    renderSceneTabs();
-    log(`saved ${path}`, "good");
-  } catch (error) {
-    log(describe(error), "bad");
+      });
+    } catch (error) {
+      log(describe(error), "bad");
+      return;
+    }
   }
+  if (!path) return;
+  // Identity edits apply on save: the fields are the document's, not a
+  // separate piece of UI state that could drift from it.
+  if (!(await applyPendingIdentity())) return;
+  await runCommand(
+    { command: "saveScene", session: session.key, to: { to: "file", path } },
+    `saved ${path}`,
+  );
 }
 
 async function publish(): Promise<void> {
-  if (!scene) {
+  const session = activeSession(workspace);
+  if (!scene || !session) {
     log("nothing to publish", "bad");
     return;
   }
@@ -3187,8 +3176,10 @@ async function publish(): Promise<void> {
   ui.publishResult.hidden = true;
 
   try {
-    scene = { ...scene, id: ui.sceneId.value.trim(), name: ui.sceneName.value.trim() };
-    const result = await invoke<PublishResult>("cmd_publish", { endpoint, scene });
+    // The scene id is the TakeId, so a typed identity is applied first.
+    if (!(await applyPendingIdentity())) return;
+    const target: SceneTarget = { target: "session", session: session.key };
+    const result = await shell().invoke<PublishResult>("cmd_publish", { endpoint, target });
     const takeId = plain(result.takeId);
     const revision = plain(result.revision);
 
@@ -3215,8 +3206,8 @@ async function publish(): Promise<void> {
 
 async function start(): Promise<void> {
   // The curtain is visible in the markup, so this is the only place it comes
-  // down: no shell, no Editor. Everything below this line can assume `invoke`
-  // actually reaches Rust.
+  // down: no shell, no Editor. Everything below this line can assume the
+  // shell bridge actually reaches Rust.
   if (!tauri) return;
   ui.curtain.hidden = true;
 
@@ -3229,9 +3220,9 @@ async function start(): Promise<void> {
   ui.projectSelect.addEventListener("change", () => void selectProject());
   ui.sceneManagerMount.addEventListener("click", onSceneManagerClick);
   ui.sceneName.addEventListener("input", () => {
-    // A rename is saved with the document, so it is unsaved work in any scene,
-    // bound to a project or not (11.29).
-    markActiveDirty();
+    // A typed name is unsaved work in any scene, bound to a project or not
+    // (11.29). It becomes a `setSceneName` edit when a save or publish uses
+    // it; until then the tab and the project list show it as pending.
     renderSceneTabs();
     if (projectSceneId === undefined) return;
     renderProjectManager();
@@ -3311,8 +3302,8 @@ async function start(): Promise<void> {
     viewport?.render();
     log(`display scale changed to ${Math.round(ratio * 100)}%`);
   });
-  ui.undo.addEventListener("click", () => undo());
-  ui.redo.addEventListener("click", () => redo());
+  ui.undo.addEventListener("click", () => void undo());
+  ui.redo.addEventListener("click", () => void redo());
   ui.previewPlay.addEventListener("click", () => togglePreview());
   document.addEventListener("keydown", onPreviewShortcut);
   ui.autoKey.addEventListener("change", () => {
@@ -3352,10 +3343,10 @@ async function start(): Promise<void> {
     const key = event.key.toLowerCase();
     if (key === "z" && !event.shiftKey) {
       event.preventDefault();
-      undo();
+      void undo();
     } else if (key === "y" || (key === "z" && event.shiftKey)) {
       event.preventDefault();
-      redo();
+      void redo();
     }
   });
   ui.overlay.addEventListener("pointerdown", onOverlayPointerDown);
@@ -3379,7 +3370,7 @@ async function start(): Promise<void> {
   log(summariseGpuReport(gpuReport), gpuReport.kind === "available" ? "good" : "bad");
 
   try {
-    animationSurface = await invoke<AnimationSurface>("cmd_animation_surface");
+    animationSurface = await shell().invoke<AnimationSurface>("cmd_animation_surface");
   } catch (error) {
     animationSurface = null;
     log(`animation contract unavailable: ${describe(error)}`, "bad");
@@ -3391,7 +3382,7 @@ async function start(): Promise<void> {
   wireDocking();
 
   try {
-    ui.endpoint.value = await invoke<string>("cmd_default_endpoint");
+    ui.endpoint.value = await shell().invoke<string>("cmd_default_endpoint");
   } catch {
     // A default that cannot be read is not fatal; the author types one.
     ui.endpoint.value = "";

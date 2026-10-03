@@ -162,8 +162,8 @@ function cell(rowId: string, key: string, label: string, value: string): UiNode 
 
 /// Why this row's visibility toggle cannot work, or `undefined` if it can.
 ///
-/// One function answers for both the rendered button and the edit itself, so
-/// a control that is offered is exactly a control that will apply.
+/// This is the button's explanation only. The edit itself is
+/// `setObjectVisible`, which Rust refuses under the same conditions by name.
 function visibilityRefusal(placement: Placement): string | undefined {
   const { object, hiddenBy, lockedBy } = placement;
   if (hiddenBy !== undefined) return `hidden by parent '${hiddenBy}'`;
@@ -267,70 +267,15 @@ export function objectManagerPanel(
 }
 
 // ---------------------------------------------------------------------------
-// The row actions, as decisions. Each returns either the result or a named
-// refusal, and a refusal carries no document: a refused click has nothing to
-// commit, so it cannot change the scene or add an undo entry.
+// View-state actions only. Visibility and lock writes are SceneEdit commands
+// applied by Rust, so their inherited-state refusals cannot drift from the
+// authoring rule.
 // ---------------------------------------------------------------------------
-
-/// The outcome of a visibility or lock toggle: a new document and the
-/// sentence the history records, or the reason nothing changed.
-export type ObjectManagerEdit =
-  | { readonly ok: true; readonly document: SceneDocument; readonly label: string }
-  | { readonly ok: false; readonly reason: string };
 
 /// The outcome of an expand or collapse: new view state, never a document.
 export type ObjectManagerViewChange =
   | { readonly ok: true; readonly collapsedIds: readonly string[]; readonly label: string }
   | { readonly ok: false; readonly reason: string };
-
-/// The placement the panel would give this object, ignoring collapse.
-///
-/// Collapse only decides which rows are drawn; inherited visibility and lock
-/// come from the same walk either way, so an edit and its button agree.
-function placementOf(document: SceneDocument, objectId: string): Placement | undefined {
-  return place(document, new Set()).find((placement) => placement.object.id === objectId);
-}
-
-function replaceObject(document: SceneDocument, next: SceneObject): SceneDocument {
-  return {
-    ...document,
-    objects: document.objects.map((object) => (object.id === next.id ? next : object)),
-  };
-}
-
-/// Show or hide one object, refusing exactly where the row's button does.
-export function toggleObjectVisibility(document: SceneDocument, objectId: string): ObjectManagerEdit {
-  const placement = placementOf(document, objectId);
-  if (!placement) return { ok: false, reason: `no object ${objectId} in this scene` };
-  const refusal = visibilityRefusal(placement);
-  if (refusal !== undefined) {
-    return { ok: false, reason: `cannot change visibility of ${placement.object.name}: ${refusal}` };
-  }
-  const { object } = placement;
-  const visible = !object.visible;
-  return {
-    ok: true,
-    document: replaceObject(document, { ...object, visible } as SceneObject),
-    label: `${visible ? "Showed" : "Hid"} ${object.name}`,
-  };
-}
-
-/// Lock or unlock one object, refusing an inherited lock by its owner's name.
-export function toggleObjectLock(document: SceneDocument, objectId: string): ObjectManagerEdit {
-  const placement = placementOf(document, objectId);
-  if (!placement) return { ok: false, reason: `no object ${objectId} in this scene` };
-  const refusal = lockRefusal(placement);
-  if (refusal !== undefined) {
-    return { ok: false, reason: `cannot change the lock on ${placement.object.name}: ${refusal}` };
-  }
-  const { object } = placement;
-  const locked = !object.locked;
-  return {
-    ok: true,
-    document: replaceObject(document, { ...object, locked } as SceneObject),
-    label: `${locked ? "Locked" : "Unlocked"} ${object.name}`,
-  };
-}
 
 /// Open or shut one container's rows. View state only: the document is read,
 /// never written, and the result is not an edit anyone could undo.

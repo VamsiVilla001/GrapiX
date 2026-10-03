@@ -14,7 +14,7 @@ use crate::Refusal;
 
 /// A numeric text-style value, either literal or resolved from the active
 /// project design system when the style is applied.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum StyleNumber {
     Token(TokenRef),
@@ -23,7 +23,7 @@ pub enum StyleNumber {
 
 /// A text-style colour, either literal or resolved from the active project
 /// design system when the style is applied.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum StyleColor {
     Token(TokenRef),
@@ -34,7 +34,7 @@ pub enum StyleColor {
 ///
 /// Optional entries are deliberately absent rather than defaults: applying a
 /// style must not overwrite a property its author did not declare.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TextStyle {
     pub style_id: String,
@@ -80,6 +80,31 @@ pub fn validate_text_styles(scene: &SceneDocument) -> Result<(), Refusal> {
     }
     Ok(())
 }
+/// Save a named text style after proving its id and font are usable.
+///
+/// Styles are immutable by id at this command boundary: an existing id is
+/// ambiguous to callers that mean to save a new reusable style, so it refuses
+/// rather than silently replacing the prior definition.
+pub fn save_text_style(scene: &mut SceneDocument, style: TextStyle) -> Result<(), Refusal> {
+    if scene
+        .text_styles
+        .iter()
+        .any(|existing| existing.style_id == style.style_id)
+    {
+        return Err(Refusal::TextStyleDuplicate {
+            style_id: style.style_id,
+        });
+    }
+    if scene.font(&style.font_id).is_none() {
+        return Err(Refusal::TextStyleFontUnknown {
+            style_id: style.style_id,
+            font_id: style.font_id,
+        });
+    }
+    scene.text_styles.push(style);
+    Ok(())
+}
+
 
 /// Apply one named style to one text object.
 ///

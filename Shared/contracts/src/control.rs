@@ -15,7 +15,7 @@ use crate::scene::{SceneDocument, SceneObject};
 use crate::Refusal;
 
 /// The kind of value an operator may enter for a declared field.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum ControlFieldKind {
     Text,
@@ -38,7 +38,7 @@ impl ControlFieldKind {
 }
 
 /// A typed value supplied to a declared control field.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(tag = "type", content = "value", rename_all = "camelCase")]
 pub enum ControlValue {
     Text(String),
@@ -61,7 +61,7 @@ impl ControlValue {
 }
 
 /// One named property an operator is allowed to fill on a template.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ControlField {
     pub field_id: String,
@@ -75,7 +75,7 @@ pub struct ControlField {
 }
 
 /// A saved operator-filled instance of a template.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TakePage {
     pub page_id: String,
@@ -276,6 +276,41 @@ pub fn remove_control_field(scene: &mut SceneDocument, field_id: &str) -> Result
     scene.controls.remove(index);
     Ok(())
 }
+/// Replace an existing declared field after validating the replacement against
+/// the scene's current control vocabulary.
+///
+/// Replacement keeps its address stable: changing `field_id` is not an update
+/// of an existing control and is therefore refused as unknown.
+pub fn replace_control_field(scene: &mut SceneDocument, field: ControlField) -> Result<(), Refusal> {
+    let index = scene
+        .controls
+        .iter()
+        .position(|existing| existing.field_id == field.field_id)
+        .ok_or_else(|| Refusal::ControlFieldUnknown {
+            field_id: field.field_id.clone(),
+        })?;
+
+    let target_kind = expected_kind(scene, &field)?;
+    if target_kind != field.kind {
+        return Err(Refusal::ControlFieldTargetUnknown {
+            object_id: field.object_id,
+            property: field.property,
+        });
+    }
+    if let Some(default) = &field.default {
+        if default.kind() != field.kind {
+            return Err(Refusal::ControlValueTypeMismatch {
+                field_id: field.field_id,
+                expected: field.kind.name().to_owned(),
+                actual: default.kind().name().to_owned(),
+            });
+        }
+    }
+
+    scene.controls[index] = field;
+    Ok(())
+}
+
 
 fn set_value(object: &mut SceneObject, property: &str, value: ControlValue) {
     match (property, value) {

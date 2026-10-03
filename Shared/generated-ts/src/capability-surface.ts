@@ -141,6 +141,20 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
     "referenceUnlocked",
     "unsupportedBlendMode",
     "unsupportedFitMode",
+    "unsupportedCullMode",
+    "unsupportedAlphaMode",
+    "unsupportedDepthMode",
+    "unsupportedPathGradient",
+    "vectorTessellationFailed",
+    "unknownOutputAdapter",
+    "sceneMaterialUnknown",
+    "meshMaterialUnassigned",
+    "meshModelAssetWrongKind",
+    "meshModelInvalid",
+    "meshMaterialElementsMismatch",
+    "meshMaterialRequiresLight",
+    "lightHasNoResponsiveMaterial",
+    "sceneActiveCameraUnknown",
     "assetMissing",
     "protocolMismatch",
     "invalidRate",
@@ -221,7 +235,40 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
     "mediaTransportUnavailable",
     "rundownCursorOutOfRange",
     "rundownEntryUnknown",
-    "automationExecutionDeferred"
+    "automationExecutionDeferred",
+    "editBatchEmpty",
+    "editTargetsEmpty",
+    "commandUnknownField",
+    "sessionUnknown",
+    "sessionHasUnsavedChanges",
+    "sessionUnbound",
+    "historyEmpty",
+    "sceneAlreadyExists",
+    "projectAlreadyExists",
+    "sceneNotStored",
+    "sceneIdInvalid",
+    "projectNameInvalid",
+    "takePageIdInvalid",
+    "sceneIdBound",
+    "sceneNameEmpty",
+    "objectFieldNotApplicable",
+    "objectFieldValueInvalid",
+    "objectFieldUnchanged",
+    "objectHiddenByParent",
+    "objectLocked",
+    "bindingPropertyUnsupported",
+    "bindingPathInvalid",
+    "bindingTypeMismatch",
+    "bindingNotBound",
+    "bindingValueOutOfRange",
+    "bindingAssetUnknown",
+    "bindingUnchanged",
+    "dataContextUnchanged",
+    "materialInUse",
+    "materialRelinkSameMaterial",
+    "materialRelinkNoUsers",
+    "materialUnknown",
+    "motionPresetUnknown"
   ],
   "tools": [
     {
@@ -247,8 +294,8 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
       "group": "project",
       "effect": "write",
       "requiredScope": "author",
-      "input": "ProjectCreate",
-      "output": "Revision",
+      "input": "CreateProject",
+      "output": "CommandOutcome",
       "summary": "Create a project. Refuses if it already exists."
     },
     {
@@ -274,18 +321,27 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
       "group": "scenes",
       "effect": "write",
       "requiredScope": "author",
-      "input": "SceneCreate",
-      "output": "Revision",
-      "summary": "Create a scene. Refuses until the project exists."
+      "input": "CreateScene",
+      "output": "CommandOutcome",
+      "summary": "Create an empty scene. Refuses until the project exists, and refuses an existing scene id."
     },
     {
       "name": "scenes.delete",
       "group": "scenes",
       "effect": "write",
       "requiredScope": "author",
-      "input": "SceneRef",
-      "output": "Revision",
-      "summary": "Delete a scene."
+      "input": "DeleteScene",
+      "output": "CommandOutcome",
+      "summary": "Delete a stored scene. Refuses a scene that is not stored."
+    },
+    {
+      "name": "scenes.edit",
+      "group": "scenes",
+      "effect": "write",
+      "requiredScope": "author",
+      "input": "EditScene",
+      "output": "CommandOutcome",
+      "summary": "Apply one ordered, atomic batch of scene edits to a stored scene. Objects, keyframes, presets, phases, controls, text styles, bindings, materials and asset relinks are edits; the whole batch lands or none of it does."
     },
     {
       "name": "objects.list",
@@ -306,15 +362,6 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
       "summary": "Resolved transforms and refused edges."
     },
     {
-      "name": "objects.update",
-      "group": "objects",
-      "effect": "write",
-      "requiredScope": "author",
-      "input": "ObjectUpdate",
-      "output": "Revision",
-      "summary": "Update an object's authored properties."
-    },
-    {
       "name": "materials.list",
       "group": "materials",
       "effect": "read",
@@ -322,15 +369,6 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
       "input": "SceneRef",
       "output": "MaterialList",
       "summary": "Materials and where they are used."
-    },
-    {
-      "name": "materials.assign",
-      "group": "materials",
-      "effect": "write",
-      "requiredScope": "author",
-      "input": "MaterialAssign",
-      "output": "Revision",
-      "summary": "Bind a material to an object, face or glTF element."
     },
     {
       "name": "assets.list",
@@ -342,15 +380,6 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
       "summary": "Assets by content hash and library path."
     },
     {
-      "name": "assets.relink",
-      "group": "assets",
-      "effect": "write",
-      "requiredScope": "author",
-      "input": "AssetRelink",
-      "output": "Revision",
-      "summary": "Point a library path at new bytes, keeping bindings intact."
-    },
-    {
       "name": "fonts.list",
       "group": "fonts",
       "effect": "read",
@@ -358,15 +387,6 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
       "input": "SceneRef",
       "output": "FontList",
       "summary": "Fonts the scene carries, with resolution state."
-    },
-    {
-      "name": "animation.apply_preset",
-      "group": "animation",
-      "effect": "write",
-      "requiredScope": "author",
-      "input": "ApplyPreset",
-      "output": "Revision",
-      "summary": "Instantiate a motion preset with parameters. The caller supplies parameters, never keyframes."
     },
     {
       "name": "bindings.schema",
@@ -391,14 +411,14 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
       "group": "designsystem",
       "effect": "write",
       "requiredScope": "configureOutput",
-      "input": "DesignSystemCommit",
-      "output": "DesignSystem",
+      "input": "ConfirmDesignSystem",
+      "output": "CommandOutcome",
       "summary": "Confirm a draft as a new version, naming who confirmed it. Admin-scoped: an author works inside the system and cannot change it."
     },
     {
       "name": "designsystem.import",
       "group": "designsystem",
-      "effect": "write",
+      "effect": "read",
       "requiredScope": "configureOutput",
       "input": "DesignSystemImport",
       "output": "DesignSystemDraft",

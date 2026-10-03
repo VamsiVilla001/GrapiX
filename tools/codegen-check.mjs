@@ -1,20 +1,26 @@
 #!/usr/bin/env node
-// Fails if the committed generated TypeScript is not what a fresh run
-// produces.
+// Fails if the committed generated TypeScript or JSON Schema is not what a
+// fresh run produces.
 //
 // ADR-003 makes Rust the source of truth and TypeScript generated output. That
 // only holds if the committed output is current: a stale commit is drift
 // wearing a generated label, and it is indistinguishable from a hand edit by
 // the time someone debugs it.
+//
+// Codegen wipes and rewrites `Shared/generated-ts/schemas/` on every run, so
+// a committed schema whose command no longer exists is reported as "no longer
+// generated". The TypeScript directory is only overwritten, never wiped, so a
+// stale `.ts` file there is not detected (a known gap).
 
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const GENERATED = join(ROOT, "Shared", "generated-ts", "src");
+const SCHEMAS = join(ROOT, "Shared", "generated-ts", "schemas");
 
 /// Generated files that do not live under `Shared/generated-ts`.
 ///
@@ -32,6 +38,7 @@ const GENERATED_FILES = [
 ];
 
 const backup = mkdtempSync(join(tmpdir(), "gx-codegen-"));
+const schemaBackup = mkdtempSync(join(tmpdir(), "gx-codegen-schemas-"));
 const fileBackup = mkdtempSync(join(tmpdir(), "gx-codegen-files-"));
 let restored = false;
 
@@ -44,7 +51,7 @@ function snapshot(dir, prefix = "") {
       // Nested output (e.g. ts-rs's serde_json/JsonValue.ts) is generated
       // too, and drifts the same way a flat file does.
       for (const [k, v] of snapshot(full, rel)) out.set(k, v);
-    } else if (name.endsWith(".ts")) {
+    } else if (name.endsWith(".ts") || name.endsWith(".json")) {
       out.set(rel, readFileSync(full, "utf8"));
     }
   }
@@ -59,18 +66,23 @@ function snapshotFiles() {
   return out;
 }
 
+function snapshotSchemas(dir) {
+  return existsSync(dir) ? new Map([...snapshot(dir)].map(([name, text]) => [`schemas/${name}`, text])) : new Map();
+}
+
 try {
   cpSync(GENERATED, backup, { recursive: true });
+  if (existsSync(SCHEMAS)) cpSync(SCHEMAS, join(schemaBackup, "schemas"), { recursive: true });
   for (const relative of GENERATED_FILES) {
     cpSync(join(ROOT, relative), join(fileBackup, basename(relative)));
   }
-  const before = new Map([...snapshot(backup), ...snapshotFiles()]);
+  const before = new Map([...snapshot(backup), ...snapshotSchemas(join(schemaBackup, "schemas")), ...snapshotFiles()]);
 
   execFileSync("cargo", ["run", "-q", "-p", "gx-contract-codegen"], {
     cwd: ROOT,
     stdio: ["ignore", "ignore", "inherit"],
   });
-  const after = new Map([...snapshot(GENERATED), ...snapshotFiles()]);
+  const after = new Map([...snapshot(GENERATED), ...snapshotSchemas(SCHEMAS), ...snapshotFiles()]);
 
   const problems = [];
   for (const [name, text] of after) {
@@ -94,10 +106,13 @@ try {
   // developer needs to commit. On success they are identical anyway.
   if (!restored) {
     cpSync(backup, GENERATED, { recursive: true });
+    rmSync(SCHEMAS, { recursive: true, force: true });
+    if (existsSync(join(schemaBackup, "schemas"))) cpSync(join(schemaBackup, "schemas"), SCHEMAS, { recursive: true });
     for (const relative of GENERATED_FILES) {
       cpSync(join(fileBackup, basename(relative)), join(ROOT, relative));
     }
   }
+  rmSync(schemaBackup, { recursive: true, force: true });
   rmSync(fileBackup, { recursive: true, force: true });
   rmSync(backup, { recursive: true, force: true });
 }

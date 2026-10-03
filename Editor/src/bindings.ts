@@ -9,7 +9,6 @@
 import type { SceneDocument, SceneObject } from "@grapix/contracts";
 
 import type { UiNode } from "./agent-surface";
-import type { EditTransaction } from "./inspector";
 
 export type BindingValueKind = "number" | "string" | "boolean";
 
@@ -321,52 +320,9 @@ export function bindingPanel(document: SceneDocument, selectedIds: readonly stri
   };
 }
 
-export type BindingEditOutcome =
-  | { readonly ok: true; readonly document: SceneDocument; readonly transaction: EditTransaction }
-  | { readonly ok: false; readonly reason: string };
-
-/** Add, replace or remove one binding as one undoable author gesture. */
-export function applyBindingEdit(
-  document: SceneDocument,
-  objectId: string,
-  property: string,
-  path: string | undefined,
-): BindingEditOutcome {
-  const index = document.objects.findIndex((object) => object.id === objectId);
-  const object = document.objects[index];
-  if (index < 0 || !object) return { ok: false, reason: `no object ${objectId} in this scene` };
-  const spec = specFor(object, property);
-  if (!spec) return { ok: false, reason: `${property} is not a bindable property of ${object.type}` };
-
-  const previous = object.bindings?.[property];
-  if (path === undefined) {
-    if (previous === undefined) return { ok: false, reason: `${spec.label} is not bound` };
-  } else {
-    const found = resolveDataPath(document.dataContext, path);
-    if (!found.ok) return found;
-    const issue = valueIssue(document, object, spec, path, found.value);
-    if (issue) return { ok: false, reason: issue.reason };
-    if (previous === path) return { ok: false, reason: `${spec.label} is already bound to ${path}` };
-  }
-
-  const bindings = { ...(object.bindings ?? {}) };
-  if (path === undefined) delete bindings[property];
-  else bindings[property] = path;
-  const changed = {
-    ...object,
-    ...(Object.keys(bindings).length === 0 ? { bindings: undefined } : { bindings }),
-  } as SceneObject;
-  const objects = [...document.objects];
-  objects[index] = changed;
-
-  return {
-    ok: true,
-    document: { ...document, objects },
-    transaction: {
-      label: `${path === undefined ? "Remove" : previous === undefined ? "Bind" : "Change"} ${spec.label} binding`,
-      changes: [{ objectId, field: `bindings.${property}`, from: previous, to: path }],
-    },
-  };
+/** The author-facing name of a bindable property, as the panel shows it. */
+export function bindingLabel(object: SceneObject, property: string): string {
+  return specFor(object, property)?.label ?? property;
 }
 
 // ---------------------------------------------------------------------------
@@ -385,8 +341,7 @@ export type SampleDataRefusalCode =
   | "sampleDataNotObject"
   | "sampleDataDuplicateKey"
   | "sampleDataNumberUnrepresentable"
-  | "sampleDataTooDeep"
-  | "sampleDataUnchanged";
+  | "sampleDataTooDeep";
 
 /** Where in the author's text a refusal applies. `line` and `column` are 1-based. */
 export interface SampleDataPosition {
@@ -404,18 +359,6 @@ export interface SampleDataRefused {
 
 export type SampleDataParse =
   | { readonly ok: true; readonly data: SceneDocument["dataContext"] }
-  | SampleDataRefused;
-
-export type SampleDataOutcome =
-  | {
-      readonly ok: true;
-      readonly document: SceneDocument;
-      readonly transaction: EditTransaction;
-      /** Every binding that does not resolve against the new data. Reported, never removed. */
-      readonly invalidBindings: readonly BindingIssue[];
-      /** The subset that resolved before this change and no longer does. */
-      readonly newlyInvalid: readonly BindingIssue[];
-    }
   | SampleDataRefused;
 
 /** Nesting beyond this is refused rather than risking the scanner's stack. */
@@ -651,38 +594,4 @@ export function describeBindingIssue(issue: BindingIssue): string {
     : `${target} → ${issue.path}: ${issue.reason}`;
 }
 
-const issueKey = (issue: BindingIssue): string => `${issue.objectId}\u0000${issue.property}`;
 
-/**
- * Replace the scene's data context from author-supplied JSON as one gesture.
- *
- * Bindings are never touched: one whose path the new data no longer satisfies
- * is reported in `invalidBindings`, and the preview refuses it by name exactly
- * as it would any other invalid binding. Removing or rewriting it would quietly
- * lose authored work because the sample data changed shape (invariant 18).
- */
-export function applySampleData(document: SceneDocument, text: string): SampleDataOutcome {
-  const parsed = parseSampleData(text);
-  if (!parsed.ok) return parsed;
-  if (JSON.stringify(parsed.data) === JSON.stringify(document.dataContext)) {
-    return { ok: false, code: "sampleDataUnchanged", reason: "the sample data is unchanged" };
-  }
-
-  const next: SceneDocument = { ...document, dataContext: parsed.data };
-  const before = new Set(sceneBindingIssues(document).map(issueKey));
-  const invalidBindings = sceneBindingIssues(next);
-  const newlyInvalid = invalidBindings.filter((issue) => !before.has(issueKey(issue)));
-  const fields = dataFields(parsed.data).length;
-
-  return {
-    ok: true,
-    document: next,
-    transaction: {
-      label: `Replace sample data (${fields} field${fields === 1 ? "" : "s"})`,
-      // A scene-level field, keyed by the scene's own id because no object owns it.
-      changes: [{ objectId: document.id, field: "dataContext", from: document.dataContext, to: parsed.data }],
-    },
-    invalidBindings,
-    newlyInvalid,
-  };
-}

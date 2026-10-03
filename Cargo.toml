@@ -47,6 +47,7 @@ gx-editor        = { path = "services/editor" }
 gx-decklink      = { path = "Shared/decklink" }
 gx-control-transport = { path = "Shared/control-transport" }
 serde            = { version = "1", features = ["derive"] }
+schemars = { version = "1", default-features = false, features = ["derive", "std"] }
 # `float_roundtrip` is required, not cosmetic. Every scene object flattens
 # `ObjectBase`, and `#[serde(flatten)]` forces deserialisation through
 # `deserialize_any`, whose default float parser is accurate to within one ULP

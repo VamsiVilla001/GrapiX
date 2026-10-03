@@ -7,8 +7,9 @@
 //! done-when.
 
 use gx_contracts::auth::Scope;
+use gx_contracts::scene::SceneDocument;
 use gx_editor::Projects;
-use gx_editor_mcp::{BindingsSchema, SceneCreate};
+use gx_editor_mcp::BindingsSchema;
 use gx_mcp_server::Server;
 
 fn drive(server: &Server, requests: &[serde_json::Value]) -> Vec<serde_json::Value> {
@@ -48,13 +49,13 @@ fn scratch(label: &str) -> std::path::PathBuf {
 
 fn server_with(projects: &Projects, scopes: Vec<Scope>) -> Server {
     let mut server = Server::new(scopes);
-    server.register("scenes.create", Box::new(SceneCreate(projects.clone())));
     server.register("bindings.schema", Box::new(BindingsSchema(projects.clone())));
     server
 }
 
-/// A scene as an agent would send it: nested data, an array path, one path
-/// the data context lacks and one binding that is not a path at all.
+/// A scene as an agent would read it: nested data, an array path, one path
+/// the data context lacks and one binding that is not a path at all. Seeded
+/// through the store, because no MCP write accepts a whole document.
 fn scene() -> serde_json::Value {
     serde_json::json!({
         "id": "scorebug",
@@ -83,22 +84,20 @@ fn an_agent_discovers_a_scenes_data_schema_over_the_wire() {
     let root = scratch("schema");
     let projects = Projects::at_root(&root);
     projects.create_project("news").expect("a project exists");
+    let seeded: SceneDocument = serde_json::from_value(scene()).expect("the fixture is a scene");
+    projects.write_scene("news", &seeded).expect("the fixture is stored");
     let server = server_with(&projects, vec![Scope::Author]);
 
     let replies = drive(
         &server,
-        &[
-            call(1, "scenes.create", serde_json::json!({ "project": "news", "scene": scene() })),
-            call(
-                2,
-                "bindings.schema",
-                serde_json::json!({ "project": "news", "scene_id": "scorebug" }),
-            ),
-        ],
+        &[call(
+            1,
+            "bindings.schema",
+            serde_json::json!({ "project": "news", "scene_id": "scorebug" }),
+        )],
     );
     assert!(replies[0]["error"].is_null(), "unexpected refusal: {}", replies[0]);
-    assert!(replies[1]["error"].is_null(), "unexpected refusal: {}", replies[1]);
-    let schema = &replies[1]["result"];
+    let schema = &replies[0]["result"];
 
     assert_eq!(schema["sceneId"], "scorebug");
     assert_eq!(schema["dataContext"], scene()["dataContext"]);

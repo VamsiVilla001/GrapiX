@@ -6,6 +6,10 @@
 #![forbid(unsafe_code)]
 
 pub mod animation;
+pub mod command;
+pub mod object_edit;
+pub mod bindings;
+pub mod material_edit;
 pub mod authoring;
 pub mod control;
 pub mod auth;
@@ -40,7 +44,7 @@ impl std::fmt::Display for TakeId {
 }
 
 /// Content address of asset bytes: SHA-256, lowercase hex.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS, schemars::JsonSchema)]
 pub struct ContentHash(pub String);
 
 impl std::fmt::Display for ContentHash {
@@ -616,6 +620,108 @@ pub enum Refusal {
         property: String,
         detail: String,
     },
+    /// An `EditScene` command carried no edits: it would change nothing and
+    /// still claim a history entry.
+    EditBatchEmpty,
+    /// An object edit named no target objects.
+    EditTargetsEmpty,
+    /// A command carried a key its type does not know. Serde would drop it
+    /// in silence; the strict reader names its path instead.
+    CommandUnknownField { path: String },
+    /// A command named a session that is not open on this surface.
+    SessionUnknown { session: command::SessionKey },
+    /// A close would discard edits that were never saved.
+    SessionHasUnsavedChanges {
+        session: command::SessionKey,
+        name: String,
+    },
+    /// A save to the session's origin, but the session has no stored origin.
+    SessionUnbound { session: command::SessionKey },
+    /// Undo or redo with nothing on that stack.
+    HistoryEmpty {
+        session: command::SessionKey,
+        direction: command::HistoryDirection,
+    },
+    /// A create would overwrite a scene that is already stored.
+    SceneAlreadyExists { project: String, scene_id: String },
+    /// A project create names a project that already exists.
+    ProjectAlreadyExists { project: String },
+    /// An update or delete names a scene the project does not store.
+    SceneNotStored { project: String, scene_id: String },
+    /// A scene id is not one canonical filename, so it cannot address a
+    /// stored scene without being rewritten.
+    SceneIdInvalid { id: String },
+    /// A project name is not one canonical filename (it would escape or
+    /// rewrite its directory).
+    ProjectNameInvalid { project: String },
+    /// A take-page id is not one canonical filename.
+    TakePageIdInvalid { page_id: String },
+    /// A stored scene's id is its address and does not change in place;
+    /// Duplicate creates a new id.
+    SceneIdBound { project: String, scene_id: String },
+    /// A scene name is empty after trimming.
+    SceneNameEmpty,
+    /// An inspector field does not apply to every selected object; `kinds`
+    /// names the selected kinds it does not apply to.
+    ObjectFieldNotApplicable { field: String, kinds: Vec<String> },
+    /// An inspector value is outside the field's domain.
+    ObjectFieldValueInvalid { field: String, detail: String },
+    /// Every selected object already has the requested field value.
+    ObjectFieldUnchanged { field: String },
+    /// An object cannot be shown while an ancestor hides it.
+    ObjectHiddenByParent { object: String, parent: String },
+    /// An object is locked, by its own lock (`owner == object`) or by an
+    /// ancestor's.
+    ObjectLocked { object: String, owner: String },
+    /// The object's kind has no bindable property of that name.
+    BindingPropertyUnsupported {
+        object: String,
+        kind: String,
+        property: String,
+    },
+    /// A binding path is malformed or does not resolve in the data context.
+    BindingPathInvalid { path: String, detail: String },
+    /// The bound data value has the wrong JSON type for the property.
+    BindingTypeMismatch {
+        object: String,
+        property: String,
+        path: String,
+        expected: String,
+    },
+    /// An unbind names a property that has no binding.
+    BindingNotBound { object: String, property: String },
+    /// The bound number violates the property's range.
+    BindingValueOutOfRange {
+        object: String,
+        property: String,
+        path: String,
+        constraint: String,
+    },
+    /// The bound value names no image asset the scene carries.
+    BindingAssetUnknown {
+        object: String,
+        path: String,
+        asset: String,
+    },
+    /// The property is already bound to that path.
+    BindingUnchanged {
+        object: String,
+        property: String,
+        path: String,
+    },
+    /// A data-context replacement equals the current context.
+    DataContextUnchanged,
+    /// A material cannot be deleted while objects still use it.
+    MaterialInUse { material: String, users: Vec<String> },
+    /// A relink names the same material on both sides.
+    MaterialRelinkSameMaterial { material: String },
+    /// A relink source material has no users, so the relink would change
+    /// nothing.
+    MaterialRelinkNoUsers { material: String },
+    /// A library edit names a material the scene does not carry.
+    MaterialUnknown { material: String },
+    /// A preset id names no starter motion preset.
+    MotionPresetUnknown { preset: String },
 }
 
 impl std::fmt::Display for Refusal {
@@ -992,6 +1098,93 @@ impl std::fmt::Display for Refusal {
                 property,
                 detail,
             } => write!(f, "invalid easing for {object}.{property}: {detail}"),
+            Refusal::EditBatchEmpty => f.write_str("an edit batch must not be empty"),
+            Refusal::EditTargetsEmpty => f.write_str("an object edit must name at least one target"),
+            Refusal::CommandUnknownField { path } => {
+                write!(f, "command carries a field this schema does not know: {path}")
+            }
+            Refusal::SessionUnknown { session } => write!(f, "unknown session {}", session.0),
+            Refusal::SessionHasUnsavedChanges { session, name } => {
+                write!(f, "session {} for {name} has unsaved changes", session.0)
+            }
+            Refusal::SessionUnbound { session } => write!(f, "session {} is not stored", session.0),
+            Refusal::HistoryEmpty { session, direction } => {
+                let verb = match direction {
+                    command::HistoryDirection::Undo => "undo",
+                    command::HistoryDirection::Redo => "redo",
+                };
+                write!(f, "session {} has nothing to {verb}", session.0)
+            }
+            Refusal::SceneAlreadyExists { project, scene_id } => {
+                write!(f, "scene {scene_id} already exists in project {project}")
+            }
+            Refusal::SceneNotStored { project, scene_id } => {
+                write!(f, "scene {scene_id} is not stored in project {project}")
+            }
+            Refusal::SceneIdInvalid { id } => {
+                write!(f, "scene id {id:?} is not one canonical filename")
+            }
+            Refusal::ProjectNameInvalid { project } => {
+                write!(f, "project name {project:?} is not one canonical filename")
+            }
+            Refusal::TakePageIdInvalid { page_id } => {
+                write!(f, "take page id {page_id:?} is not one canonical filename")
+            }
+            Refusal::SceneIdBound { project, scene_id } => {
+                write!(f, "stored scene {project}/{scene_id} cannot change its id")
+            }
+            Refusal::SceneNameEmpty => f.write_str("a scene needs a name"),
+            Refusal::ObjectFieldNotApplicable { field, kinds } => {
+                write!(f, "field {field} does not apply to {}", kinds.join(", "))
+            }
+            Refusal::ObjectFieldValueInvalid { field, detail } => {
+                write!(f, "invalid value for object field {field}: {detail}")
+            }
+            Refusal::ObjectFieldUnchanged { field } => {
+                write!(f, "every selected object already has {field} set to that value")
+            }
+            Refusal::ObjectHiddenByParent { object, parent } => {
+                write!(f, "object {object} is hidden by parent {parent}")
+            }
+            Refusal::ObjectLocked { object, owner } => {
+                write!(f, "object {object} is locked by {owner}")
+            }
+            Refusal::BindingPropertyUnsupported { object, kind, property } => {
+                write!(f, "{kind} object {object} cannot bind {property}")
+            }
+            Refusal::BindingPathInvalid { path, detail } => {
+                write!(f, "binding path {path} is invalid: {detail}")
+            }
+            Refusal::BindingTypeMismatch { object, property, path, expected } => {
+                write!(f, "binding {path} for {object}.{property} must be {expected}")
+            }
+            Refusal::BindingNotBound { object, property } => {
+                write!(f, "object {object} has no binding for {property}")
+            }
+            Refusal::BindingValueOutOfRange { object, property, path, constraint } => {
+                write!(f, "binding {path} for {object}.{property} violates {constraint}")
+            }
+            Refusal::BindingAssetUnknown { object, path, asset } => {
+                write!(f, "binding {path} for {object} names unknown image asset {asset}")
+            }
+            Refusal::BindingUnchanged { object, property, path } => {
+                write!(f, "{object}.{property} is already bound to {path}")
+            }
+            Refusal::DataContextUnchanged => f.write_str("data context is unchanged"),
+            Refusal::MaterialInUse { material, users } => {
+                write!(f, "material {material} is still used by {}", users.join(", "))
+            }
+            Refusal::MaterialRelinkSameMaterial { material } => {
+                write!(f, "material {material} cannot be relinked to itself")
+            }
+            Refusal::MaterialRelinkNoUsers { material } => {
+                write!(f, "material {material} has no users to relink")
+            }
+            Refusal::MaterialUnknown { material } => write!(f, "unknown material {material}"),
+            Refusal::ProjectAlreadyExists { project } => {
+                write!(f, "project {project} already exists")
+            }
+            Refusal::MotionPresetUnknown { preset } => write!(f, "unknown motion preset {preset}"),
         }
     }
 }
@@ -1038,6 +1231,59 @@ impl Refusal {
             },
             Self::UnsupportedFitMode {
                 mode: material::FitMode::NineSlice,
+            },
+            Self::UnsupportedCullMode {
+                mode: material::CullMode::Back,
+            },
+            Self::UnsupportedAlphaMode {
+                mode: material::AlphaMode::Straight,
+            },
+            Self::UnsupportedDepthMode {
+                mode: material::DepthMode::ReadWrite,
+            },
+            Self::UnsupportedPathGradient {
+                object: "audit".into(),
+                paint: "fill".into(),
+            },
+            Self::VectorTessellationFailed {
+                object: "audit".into(),
+                detail: "audit".into(),
+            },
+            Self::UnknownOutputAdapter {
+                requested: "audit".into(),
+                offered: vec![],
+            },
+            Self::SceneMaterialUnknown {
+                material_id: "audit".into(),
+                object: "audit".into(),
+                element: "audit".into(),
+            },
+            Self::MeshMaterialUnassigned {
+                object: "audit".into(),
+                element: "audit".into(),
+            },
+            Self::MeshModelAssetWrongKind {
+                asset_id: "audit".into(),
+                object: "audit".into(),
+            },
+            Self::MeshModelInvalid {
+                hash: ContentHash("audit".into()),
+                detail: "audit".into(),
+            },
+            Self::MeshMaterialElementsMismatch {
+                object: "audit".into(),
+                declared: vec![],
+                imported: vec![],
+            },
+            Self::MeshMaterialRequiresLight {
+                object: "audit".into(),
+                material_id: "audit".into(),
+            },
+            Self::LightHasNoResponsiveMaterial {
+                light_id: "audit".into(),
+            },
+            Self::SceneActiveCameraUnknown {
+                camera_id: "audit".into(),
             },
             Self::AssetMissing {
                 hash: ContentHash("audit".into()),
@@ -1324,9 +1570,43 @@ impl Refusal {
                 trigger: "audit".into(),
                 matched: "audit".into(),
             },
+            Self::EditBatchEmpty,
+            Self::EditTargetsEmpty,
+            Self::CommandUnknownField { path: "audit".into() },
+            Self::SessionUnknown { session: command::SessionKey(1) },
+            Self::SessionHasUnsavedChanges { session: command::SessionKey(1), name: "audit".into() },
+            Self::SessionUnbound { session: command::SessionKey(1) },
+            Self::HistoryEmpty { session: command::SessionKey(1), direction: command::HistoryDirection::Undo },
+            Self::SceneAlreadyExists { project: "audit".into(), scene_id: "audit".into() },
+            Self::ProjectAlreadyExists {
+                project: "audit".into(),
+            },
+            Self::SceneNotStored { project: "audit".into(), scene_id: "audit".into() },
+            Self::SceneIdInvalid { id: "audit".into() },
+            Self::ProjectNameInvalid { project: "audit".into() },
+            Self::TakePageIdInvalid { page_id: "audit".into() },
+            Self::SceneIdBound { project: "audit".into(), scene_id: "audit".into() },
+            Self::SceneNameEmpty,
+            Self::ObjectFieldNotApplicable { field: "audit".into(), kinds: vec![] },
+            Self::ObjectFieldValueInvalid { field: "audit".into(), detail: "audit".into() },
+            Self::ObjectFieldUnchanged { field: "audit".into() },
+            Self::ObjectHiddenByParent { object: "audit".into(), parent: "audit".into() },
+            Self::ObjectLocked { object: "audit".into(), owner: "audit".into() },
+            Self::BindingPropertyUnsupported { object: "audit".into(), kind: "audit".into(), property: "audit".into() },
+            Self::BindingPathInvalid { path: "audit".into(), detail: "audit".into() },
+            Self::BindingTypeMismatch { object: "audit".into(), property: "audit".into(), path: "audit".into(), expected: "audit".into() },
+            Self::BindingNotBound { object: "audit".into(), property: "audit".into() },
+            Self::BindingValueOutOfRange { object: "audit".into(), property: "audit".into(), path: "audit".into(), constraint: "audit".into() },
+            Self::BindingAssetUnknown { object: "audit".into(), path: "audit".into(), asset: "audit".into() },
+            Self::BindingUnchanged { object: "audit".into(), property: "audit".into(), path: "audit".into() },
+            Self::DataContextUnchanged,
+            Self::MaterialInUse { material: "audit".into(), users: vec![] },
+            Self::MaterialRelinkSameMaterial { material: "audit".into() },
+            Self::MaterialRelinkNoUsers { material: "audit".into() },
+            Self::MaterialUnknown { material: "audit".into() },
+            Self::MotionPresetUnknown { preset: "audit".into() },
         ]
     }
-
     pub const fn code_name(&self) -> &'static str {
         match self {
             Self::RevisionMismatch { .. } => "revisionMismatch",
@@ -1429,6 +1709,39 @@ impl Refusal {
             Self::RundownEntryUnknown { .. } => "rundownEntryUnknown",
             Self::AutomationExecutionDeferred { .. } => "automationExecutionDeferred",
             Self::ProjectNotFound { .. } => "projectNotFound",
+            Self::EditBatchEmpty => "editBatchEmpty",
+            Self::EditTargetsEmpty => "editTargetsEmpty",
+            Self::CommandUnknownField { .. } => "commandUnknownField",
+            Self::SessionUnknown { .. } => "sessionUnknown",
+            Self::SessionHasUnsavedChanges { .. } => "sessionHasUnsavedChanges",
+            Self::SessionUnbound { .. } => "sessionUnbound",
+            Self::HistoryEmpty { .. } => "historyEmpty",
+            Self::SceneAlreadyExists { .. } => "sceneAlreadyExists",
+            Self::ProjectAlreadyExists { .. } => "projectAlreadyExists",
+            Self::SceneNotStored { .. } => "sceneNotStored",
+            Self::SceneIdInvalid { .. } => "sceneIdInvalid",
+            Self::ProjectNameInvalid { .. } => "projectNameInvalid",
+            Self::TakePageIdInvalid { .. } => "takePageIdInvalid",
+            Self::SceneIdBound { .. } => "sceneIdBound",
+            Self::SceneNameEmpty => "sceneNameEmpty",
+            Self::ObjectFieldNotApplicable { .. } => "objectFieldNotApplicable",
+            Self::ObjectFieldValueInvalid { .. } => "objectFieldValueInvalid",
+            Self::ObjectFieldUnchanged { .. } => "objectFieldUnchanged",
+            Self::ObjectHiddenByParent { .. } => "objectHiddenByParent",
+            Self::ObjectLocked { .. } => "objectLocked",
+            Self::BindingPropertyUnsupported { .. } => "bindingPropertyUnsupported",
+            Self::BindingPathInvalid { .. } => "bindingPathInvalid",
+            Self::BindingTypeMismatch { .. } => "bindingTypeMismatch",
+            Self::BindingNotBound { .. } => "bindingNotBound",
+            Self::BindingValueOutOfRange { .. } => "bindingValueOutOfRange",
+            Self::BindingAssetUnknown { .. } => "bindingAssetUnknown",
+            Self::BindingUnchanged { .. } => "bindingUnchanged",
+            Self::DataContextUnchanged => "dataContextUnchanged",
+            Self::MaterialInUse { .. } => "materialInUse",
+            Self::MaterialRelinkSameMaterial { .. } => "materialRelinkSameMaterial",
+            Self::MaterialRelinkNoUsers { .. } => "materialRelinkNoUsers",
+            Self::MaterialUnknown { .. } => "materialUnknown",
+            Self::MotionPresetUnknown { .. } => "motionPresetUnknown",
         }
     }
 }
@@ -1637,5 +1950,43 @@ mod tests {
         // B re-reads at 2 and retries: now it applies.
         current = current.check_write(learned).unwrap();
         assert_eq!(current, Revision(3));
+    }
+
+    #[test]
+    fn every_refusal_code_name_is_its_wire_tag_and_unique() {
+        // `code_name` is what the MCP capability surface and the conformance
+        // register publish; it must be the tag a client actually receives,
+        // and `all_variants` must name each variant exactly once.
+        let variants = Refusal::all_variants();
+        let mut seen = std::collections::BTreeSet::new();
+        for refusal in &variants {
+            let wire = serde_json::to_value(refusal).unwrap();
+            assert_eq!(wire["refusal"], refusal.code_name(), "{refusal:?}");
+            assert!(seen.insert(refusal.code_name()), "{} listed twice", refusal.code_name());
+            let back: Refusal = serde_json::from_value(wire).unwrap();
+            assert_eq!(&back, refusal);
+        }
+    }
+
+    #[test]
+    fn command_refusals_carry_camel_case_fields() {
+        let wire = serde_json::to_value(Refusal::SceneAlreadyExists {
+            project: "news".into(),
+            scene_id: "lower-third".into(),
+        })
+        .unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({"refusal": "sceneAlreadyExists", "project": "news", "sceneId": "lower-third"})
+        );
+        let wire = serde_json::to_value(Refusal::HistoryEmpty {
+            session: command::SessionKey(3),
+            direction: command::HistoryDirection::Redo,
+        })
+        .unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({"refusal": "historyEmpty", "session": 3, "direction": "redo"})
+        );
     }
 }

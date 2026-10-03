@@ -12,3 +12,8 @@ gx-asset-plane = { workspace = true }
 gx-media-plane = { workspace = true }
 ts-rs = { workspace = true }
 serde_json = { workspace = true }
+schemars = { workspace = true }
+
+[dev-dependencies]
+gx-contracts = { workspace = true, features = ["fixtures"] }
+jsonschema = { version = "0.30", default-features = false }

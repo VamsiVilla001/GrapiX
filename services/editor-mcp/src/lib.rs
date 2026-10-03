@@ -1,4 +1,4 @@
-//! The Editor's MCP tool bodies (build plan 8.3, 8.4, 8.8).
+//! The Editor's MCP tool bodies (build plan 8.3, 8.4, 8.8, 11.36).
 //!
 //! Each handler is a thin seam between a JSON argument and a function that
 //! already exists in `gx_editor` or `gx_contracts`. The value of that thinness
@@ -8,21 +8,31 @@
 //! is parsing — turning the untyped wire value into the typed call — and
 //! nothing more.
 //!
+//! **Every write is one generic handler.** [`CommandTool`] parses its tool's
+//! `EditorCommand` payload strictly and runs it through the same
+//! `Workspace::execute` the Tauri shell uses (11.36, invariant 60). No write
+//! here accepts a client-supplied scene document, and there is no second
+//! write path for one to reach.
+//!
 //! The scope gate is upstream. By the time any of these run, the transport has
-//! already established the caller holds `Scope::Author`; none of these check
-//! again, because a handler that could be reached unauthorised and a handler
-//! that re-checks are the same mistake at different depths.
+//! already established the caller holds the descriptor's scope; none of these
+//! check again, because a handler that could be reached unauthorised and a
+//! handler that re-checks are the same mistake at different depths.
 
 #![forbid(unsafe_code)]
 
-use gx_contracts::scene::{resolve_hierarchy, SceneDocument};
+use std::marker::PhantomData;
+
+use gx_contracts::command::{parse_strict, EditorCommand};
+use gx_contracts::scene::resolve_hierarchy;
 use gx_contracts::validate::preflight;
 use gx_contracts::Refusal;
-use gx_editor::Projects;
+use gx_editor::{CommandError, Projects, Workspace};
 use gx_mcp_server::ToolHandler;
-use serde::Deserialize;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
-/// Parse a tool argument into the type it names.
+/// Parse a read tool's argument into the type it names.
 ///
 /// The wire is untyped, so this is where a malformed argument becomes a named
 /// refusal rather than a transport error or a panic. A wrong-shaped argument
@@ -34,9 +44,59 @@ fn parse<T: for<'de> Deserialize<'de>>(args: serde_json::Value) -> Result<T, Ref
     })
 }
 
+fn to_value(value: impl Serialize) -> Result<serde_json::Value, Refusal> {
+    serde_json::to_value(value).map_err(|error| Refusal::TransportFailed {
+        detail: error.to_string(),
+    })
+}
+
 /// A `project` handle held by the handlers.
 pub struct EditorTools {
     pub projects: Projects,
+}
+
+// --- writes (11.36) ---------------------------------------------------------
+
+/// The one write handler: `project.create`, `scenes.create`, `scenes.delete`,
+/// `scenes.edit` and `designsystem.commit` are each this, over their own
+/// payload type `P`.
+///
+/// `P` is the tool's descriptor input, so the shape an agent reads off the
+/// capability surface is the shape parsed here (invariant 22). Parsing is
+/// strict: a key the payload does not have — a smuggled `scene` document, a
+/// hand-authored `keyframes` list on a preset — refuses by its path rather
+/// than being dropped while the caller believes it was honoured.
+///
+/// Each call runs on a fresh workspace over the store, so it addresses stored
+/// scenes only; a `Session` target refuses `SessionUnknown`.
+pub struct CommandTool<P> {
+    projects: Projects,
+    payload: PhantomData<fn() -> P>,
+}
+
+impl<P> CommandTool<P> {
+    pub fn new(projects: Projects) -> Self {
+        Self {
+            projects,
+            payload: PhantomData,
+        }
+    }
+}
+
+impl<P> ToolHandler for CommandTool<P>
+where
+    P: DeserializeOwned + Serialize + Into<EditorCommand>,
+{
+    fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
+        let command = parse_strict::<P>(args)?.into();
+        let outcome = Workspace::new(Some(self.projects.clone()))
+            .execute(command)
+            .map_err(|error| match error {
+                CommandError::Refused(refusal) => refusal,
+                CommandError::Store(error) => Refusal::from(error),
+            })?;
+        to_value(outcome)
+    }
 }
 
 // --- project (8.3) ---------------------------------------------------------
@@ -53,42 +113,7 @@ impl ToolHandler for ProjectList {
     }
 }
 
-/// `project.create`: bring a project into being.
-pub struct ProjectCreate(pub Projects);
-
-#[derive(Deserialize)]
-struct ProjectCreateArgs {
-    name: String,
-}
-
-impl ToolHandler for ProjectCreate {
-    fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
-        let args: ProjectCreateArgs = parse(args)?;
-        // Refusing an existing project rather than succeeding again is the
-        // same rule as 7.1's: a second create that "succeeded" would tell the
-        // caller nothing about the project that was already there.
-        if self.0.exists(&args.name) {
-            return Err(Refusal::NotImplemented {
-                what: format!("project {} already exists", args.name),
-            });
-        }
-        self.0
-            .create_project(&args.name)
-            .map_err(|error| Refusal::TransportFailed {
-                detail: error.to_string(),
-            })?;
-        Ok(serde_json::json!({ "project": args.name }))
-    }
-}
-
 // --- scenes (8.3) ----------------------------------------------------------
-
-/// `scenes.get`: one scene document, whole.
-///
-/// The whole document rather than a per-field API is how "full property
-/// surface reachable" is made true: a per-field getter covers whatever fields
-/// someone remembered, and a document covers all of them.
-pub struct SceneGet(pub Projects);
 
 #[derive(Deserialize)]
 struct SceneRef {
@@ -96,35 +121,18 @@ struct SceneRef {
     scene_id: String,
 }
 
+/// `scenes.get`: one scene document, whole.
+///
+/// The whole document rather than a per-field API is how "full property
+/// surface reachable" is made true: a per-field getter covers whatever fields
+/// someone remembered, and a document covers all of them. The document flows
+/// out only; no write accepts one back.
+pub struct SceneGet(pub Projects);
+
 impl ToolHandler for SceneGet {
     fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
         let args: SceneRef = parse(args)?;
-        let scene = self
-            .0
-            .read_scene(&args.project, &args.scene_id)
-            .map_err(Refusal::from)?;
-        serde_json::to_value(scene).map_err(|error| Refusal::TransportFailed {
-            detail: error.to_string(),
-        })
-    }
-}
-
-/// `scenes.create`: write a scene into a project.
-pub struct SceneCreate(pub Projects);
-
-#[derive(Deserialize)]
-struct SceneCreateArgs {
-    project: String,
-    scene: SceneDocument,
-}
-
-impl ToolHandler for SceneCreate {
-    fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
-        let args: SceneCreateArgs = parse(args)?;
-        self.0
-            .write_scene(&args.project, &args.scene)
-            .map_err(Refusal::from)?;
-        Ok(serde_json::json!({ "sceneId": args.scene.id }))
+        to_value(self.0.read_scene(&args.project, &args.scene_id).map_err(Refusal::from)?)
     }
 }
 
@@ -138,10 +146,7 @@ impl ToolHandler for SceneList {
             project: String,
         }
         let args: Args = parse(args)?;
-        let scenes = self
-            .0
-            .list_scenes(&args.project)
-            .map_err(Refusal::from)?;
+        let scenes = self.0.list_scenes(&args.project).map_err(Refusal::from)?;
         Ok(serde_json::json!({ "scenes": scenes }))
     }
 }
@@ -158,14 +163,8 @@ pub struct ObjectsHierarchy(pub Projects);
 impl ToolHandler for ObjectsHierarchy {
     fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
         let args: SceneRef = parse(args)?;
-        let scene = self
-            .0
-            .read_scene(&args.project, &args.scene_id)
-            .map_err(Refusal::from)?;
-        let resolved = resolve_hierarchy(&scene.objects);
-        serde_json::to_value(resolved).map_err(|error| Refusal::TransportFailed {
-            detail: error.to_string(),
-        })
+        let scene = self.0.read_scene(&args.project, &args.scene_id).map_err(Refusal::from)?;
+        to_value(resolve_hierarchy(&scene.objects))
     }
 }
 
@@ -182,10 +181,7 @@ pub struct ValidatePreflight(pub Projects);
 impl ToolHandler for ValidatePreflight {
     fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
         let args: SceneRef = parse(args)?;
-        let scene = self
-            .0
-            .read_scene(&args.project, &args.scene_id)
-            .map_err(Refusal::from)?;
+        let scene = self.0.read_scene(&args.project, &args.scene_id).map_err(Refusal::from)?;
         // At authoring time the assets have not necessarily shipped yet, so
         // presence is not checked — the engine will refuse those at take,
         // and demanding them here would train an author to ignore preflight.
@@ -195,9 +191,7 @@ impl ToolHandler for ValidatePreflight {
             &std::collections::HashSet::new(),
             false,
         );
-        serde_json::to_value(report.refusals).map_err(|error| Refusal::TransportFailed {
-            detail: error.to_string(),
-        })
+        to_value(report.refusals)
     }
 }
 
@@ -214,14 +208,10 @@ pub struct MaterialsUsage(pub Projects);
 impl ToolHandler for MaterialsUsage {
     fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
         let args: SceneRef = parse(args)?;
-        let scene = self
-            .0
-            .read_scene(&args.project, &args.scene_id)
-            .map_err(Refusal::from)?;
+        let scene = self.0.read_scene(&args.project, &args.scene_id).map_err(Refusal::from)?;
 
         // material id -> [{ object, slot }]
-        let mut usage: std::collections::BTreeMap<String, Vec<serde_json::Value>> =
-            Default::default();
+        let mut usage: std::collections::BTreeMap<String, Vec<serde_json::Value>> = Default::default();
         for object in &scene.objects {
             let base = object.base();
             let Some(slots) = &base.material_slots else {
@@ -241,104 +231,7 @@ impl ToolHandler for MaterialsUsage {
         for material in &scene.materials {
             usage.entry(material.material_id.clone()).or_default();
         }
-
-        serde_json::to_value(usage).map_err(|error| Refusal::TransportFailed {
-            detail: error.to_string(),
-        })
-    }
-}
-
-/// `assets.relink`: point a library entry at new bytes.
-///
-/// The done-when that matters is that bindings survive. An asset is addressed
-/// two ways — content hash and library path — and relinking replaces the hash
-/// while the id every object references stays put (invariant 31). Nothing in
-/// the object graph is touched, which is why this is a one-line change to the
-/// library entry and not a graph rewrite.
-pub struct AssetsRelink(pub Projects);
-
-#[derive(Deserialize)]
-struct RelinkArgs {
-    project: String,
-    scene_id: String,
-    asset_id: String,
-    new_hash: String,
-    #[serde(default)]
-    new_size: Option<u64>,
-}
-
-impl ToolHandler for AssetsRelink {
-    fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
-        let args: RelinkArgs = parse(args)?;
-        let mut scene = self
-            .0
-            .read_scene(&args.project, &args.scene_id)
-            .map_err(Refusal::from)?;
-
-        let replaced = scene.replace_asset_bytes(
-            &args.asset_id,
-            gx_contracts::ContentHash(args.new_hash.clone()),
-            args.new_size,
-        );
-        if !replaced {
-            // An unknown asset id is reported, never silently ignored: a
-            // relink that did nothing and said it worked is how an author
-            // ends up debugging the wrong file.
-            return Err(Refusal::SceneAssetUnknown {
-                asset_id: args.asset_id,
-                object: args.scene_id,
-            });
-        }
-
-        self.0
-            .write_scene(&args.project, &scene)
-            .map_err(Refusal::from)?;
-        Ok(serde_json::json!({ "assetId": args.asset_id, "hash": args.new_hash }))
-    }
-}
-
-// --- animation (8.5) -------------------------------------------------------
-
-/// `animation.apply_preset` arguments.
-///
-/// **This type is the done-when.** 8.5 requires that presets are
-/// "parameterised, never authored by the caller", and the way that is made
-/// true is that there is nowhere to put a keyframe. `deny_unknown_fields`
-/// turns an attempt into a parse failure rather than a silently ignored field
-/// — without it, a caller could send `keyframes` and reasonably believe it had
-/// been honoured.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ApplyPresetArgs {
-    pub project: String,
-    pub scene_id: String,
-    pub preset_id: String,
-    /// The preset's declared parameters, by name. Values only — the preset
-    /// decides what they mean.
-    #[serde(default)]
-    pub params: std::collections::BTreeMap<String, serde_json::Value>,
-}
-
-/// `animation.apply_preset`: instantiate a preset against a scene's rate.
-pub struct AnimationApplyPreset(pub Projects);
-
-impl ToolHandler for AnimationApplyPreset {
-    fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
-        let args: ApplyPresetArgs = parse(args)?;
-        let scene = self
-            .0
-            .read_scene(&args.project, &args.scene_id)
-            .map_err(Refusal::from)?;
-
-        // Frames are derived here, against this scene's rational rate, and
-        // never stored (G.6.2). A preset authored at 50p must behave
-        // identically at 59.94, and it will not if keys are kept in frames.
-        let rate = scene.canvas.frame_rate;
-        Ok(serde_json::json!({
-            "presetId": args.preset_id,
-            "resolvedAgainstRate": { "num": rate.num, "den": rate.den },
-            "params": args.params,
-        }))
+        to_value(usage)
     }
 }
 
@@ -354,17 +247,13 @@ pub struct BindingsSchema(pub Projects);
 impl ToolHandler for BindingsSchema {
     fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
         let args: SceneRef = parse(args)?;
-        let scene = self
-            .0
-            .read_scene(&args.project, &args.scene_id)
-            .map_err(Refusal::from)?;
+        let scene = self.0.read_scene(&args.project, &args.scene_id).map_err(Refusal::from)?;
 
         // Path -> every object/property that reads it. A list, because one
         // field commonly drives several properties, and an agent changing it
         // must learn all of them: keying the consumer by path alone kept only
         // the last one.
-        let mut fields: std::collections::BTreeMap<String, Vec<serde_json::Value>> =
-            Default::default();
+        let mut fields: std::collections::BTreeMap<String, Vec<serde_json::Value>> = Default::default();
         // A binding that is not a string path is named, never advertised as a
         // field — the old `unwrap_or_default` keyed it as "", a field no agent
         // can fill, and hid which object was wrong (invariant 17).
@@ -406,7 +295,8 @@ impl ToolHandler for BindingsSchema {
 /// This is the tool that carries the unexpressible report (10.3) to a
 /// reviewer. Without it the report exists and nobody can read it, which is the
 /// same as not having one: G.2's "report what could not be expressed" is a
-/// promise to a human, not to a test.
+/// promise to a human, not to a test. It writes nothing, so it is a read;
+/// committing the draft is `designsystem.commit`, a `CommandTool`.
 ///
 /// The argument is the generated contract type, so the shape an agent reads
 /// off the capability surface is the shape this parses (invariant 22).
@@ -428,52 +318,20 @@ impl ToolHandler for DesignSystemImportTool {
         let draft = match args.kind {
             DesignSystemSourceKind::W3c => gx_editor::ingest_w3c(&args.name, source),
             DesignSystemSourceKind::Figma => gx_editor::ingest_figma(&args.name, source),
-            DesignSystemSourceKind::ClaudeDesign => {
-                gx_editor::ingest_claude_design(&args.name, source)
-            }
+            DesignSystemSourceKind::ClaudeDesign => gx_editor::ingest_claude_design(&args.name, source),
         }?;
-
-        serde_json::to_value(draft).map_err(|error| Refusal::TransportFailed {
-            detail: error.to_string(),
-        })
+        to_value(draft)
     }
 }
-
-/// `designsystem.commit`: confirm a draft as the next immutable version.
-pub struct DesignSystemCommitTool(pub Projects);
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct DesignSystemCommitArgs {
-    project: String,
-    #[serde(flatten)]
-    commit: gx_contracts::design_system::DesignSystemCommit,
-}
-
-impl ToolHandler for DesignSystemCommitTool {
-    fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
-        let args: DesignSystemCommitArgs = parse(args)?;
-        let store = self.0.design_system(&args.project).map_err(Refusal::from)?;
-        // `confirmed_by` travels in the request and is passed straight
-        // through. Nothing here may supply it: a confirmation this handler
-        // invented would satisfy the store's check while defeating its point.
-        let system = store
-            .confirm(&args.commit.draft, &args.commit.confirmed_by)
-            .map_err(Refusal::from)?;
-        serde_json::to_value(system).map_err(|error| Refusal::TransportFailed {
-            detail: error.to_string(),
-        })
-    }
-}
-
-/// `designsystem.get`: the active system and its version.
-pub struct DesignSystemGet(pub Projects);
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ProjectRefArgs {
     project: String,
 }
+
+/// `designsystem.get`: the active system and its version.
+pub struct DesignSystemGet(pub Projects);
 
 impl ToolHandler for DesignSystemGet {
     fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
@@ -485,16 +343,10 @@ impl ToolHandler for DesignSystemGet {
             // would make a project with no brand pack look like one whose
             // palette permits nothing (invariant 17).
             return Err(Refusal::NotImplemented {
-                what: format!(
-                    "project {} has no confirmed design system version",
-                    args.project
-                ),
+                what: format!("project {} has no confirmed design system version", args.project),
             });
         };
-        let system = store.load(version).map_err(Refusal::from)?;
-        serde_json::to_value(system).map_err(|error| Refusal::TransportFailed {
-            detail: error.to_string(),
-        })
+        to_value(store.load(version).map_err(Refusal::from)?)
     }
 }
 
@@ -519,52 +371,68 @@ impl ToolHandler for DesignSystemListVersions {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use gx_contracts::scene::{ObjectBase, RectObject, SceneCanvas, SceneObject, SceneTimeline};
+    use gx_contracts::command::{CreateProject, CreateScene, DeleteScene, EditScene};
+    use gx_contracts::scene::{new_scene, ObjectBase, RectObject, SceneDocument, SceneObject};
     use gx_contracts::{RationalRate, Revision};
 
-    fn scratch(label: &str) -> std::path::PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system clock after epoch")
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!("gx-editor-mcp-{label}-{nanos}"));
-        std::fs::create_dir_all(&path).expect("scratch directory");
-        path
-    }
+    use super::*;
 
-    fn scene(id: &str) -> SceneDocument {
-        SceneDocument {
-            id: id.into(),
-            name: id.into(),
-            version: 1,
-            revision: Some(Revision(1)),
-            active_camera_id: None,
-            canvas: SceneCanvas {
-                width: 1920,
-                height: 1080,
-                frame_rate: RationalRate::P50,
-            },
-            timeline: SceneTimeline { duration_frames: 1, ..Default::default() },
-            data_context: Default::default(),
-            assets: Vec::new(),
-            fonts: Vec::new(),
-            materials: Vec::new(),
-            controls: Vec::new(),
-            text_styles: Vec::new(),
-            objects: Vec::new(),
+    struct Scratch(std::path::PathBuf);
+
+    impl Scratch {
+        fn new(label: &str) -> Self {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock after epoch")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!("gx-editor-mcp-{label}-{}-{nanos}", std::process::id()));
+            std::fs::create_dir_all(&path).expect("scratch directory");
+            Self(path)
+        }
+
+        /// A store holding the empty project `news`.
+        fn news(&self) -> Projects {
+            let projects = Projects::at_root(&self.0);
+            projects.create_project("news").unwrap();
+            projects
         }
     }
 
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn scene(id: &str) -> SceneDocument {
+        let mut scene = new_scene(id, id);
+        scene.revision = Some(Revision(1));
+        scene.timeline.duration_frames = 1;
+        scene
+    }
+
+    fn card_scene(id: &str, rate: RationalRate) -> SceneDocument {
+        let mut scene = new_scene(id, id);
+        scene.canvas.frame_rate = rate;
+        scene.timeline.duration_frames = 100;
+        scene.objects.push(SceneObject::Rect(RectObject { base: ObjectBase::new("card", "Card"), radius: 0.0 }));
+        scene
+    }
+
+    fn scenes_edit(projects: &Projects, scene_id: &str, edits: serde_json::Value) -> Result<serde_json::Value, Refusal> {
+        CommandTool::<EditScene>::new(projects.clone()).handle(serde_json::json!({
+            "target": { "target": "stored", "project": "news", "sceneId": scene_id },
+            "edits": edits,
+        }))
+    }
+
     #[test]
-    fn a_scene_create_then_get_round_trips_the_whole_document() {
+    fn a_stored_scene_reads_back_whole() {
         // 8.3's done-when: the full property surface is reachable. The test
         // is that the whole document comes back unchanged — not a sample of
         // fields, the document.
-        let root = scratch("round-trip");
-        let projects = Projects::at_root(&root);
-        projects.create_project("news").unwrap();
-
+        let scratch = Scratch::new("round-trip");
+        let projects = scratch.news();
         let mut authored = scene("lower-third");
         let mut base = ObjectBase::new("bar", "Bar");
         base.x = 18.5;
@@ -572,46 +440,171 @@ mod tests {
         base.opacity = 0.85;
         base.locked = true;
         authored.objects.push(SceneObject::Rect(RectObject { base, radius: 4.0 }));
+        projects.write_scene("news", &authored).unwrap();
 
-        SceneCreate(projects.clone())
-            .handle(serde_json::json!({
-                "project": "news",
-                "scene": serde_json::to_value(&authored).unwrap(),
-            }))
-            .expect("the scene writes");
         let read_back = SceneGet(projects)
             .handle(serde_json::json!({ "project": "news", "scene_id": "lower-third" }))
-            .expect("and reads back");
+            .expect("the scene reads back");
         let read_back: SceneDocument = serde_json::from_value(read_back).unwrap();
-
         assert_eq!(read_back, authored, "every authored field survives the round trip");
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn a_scene_create_into_a_missing_project_is_refused_by_name() {
-        // The MCP surface inherits 7.1's rule: no write conjures a project.
-        let root = scratch("missing-project");
-        let projects = Projects::at_root(&root);
+    fn project_and_scene_writes_run_as_commands_and_refuse_by_name() {
+        let scratch = Scratch::new("commands");
+        let projects = Projects::at_root(&scratch.0);
+        let create_project = CommandTool::<CreateProject>::new(projects.clone());
+        let created = create_project.handle(serde_json::json!({ "project": "news" })).unwrap();
+        assert_eq!(created["effects"][0], serde_json::json!({ "effect": "projectCreated", "project": "news" }));
+        assert!(matches!(
+            create_project.handle(serde_json::json!({ "project": "news" })),
+            Err(Refusal::ProjectAlreadyExists { .. })
+        ));
 
-        let refusal = SceneCreate(projects)
+        let create_scene = CommandTool::<CreateScene>::new(projects.clone());
+        create_scene
+            .handle(serde_json::json!({ "project": "news", "sceneId": "lower-third", "name": "Lower Third" }))
+            .unwrap();
+        assert_eq!(projects.read_scene("news", "lower-third").unwrap().name, "Lower Third");
+        // The MCP surface inherits 7.1's rule: no write conjures a project.
+        assert!(matches!(
+            create_scene.handle(serde_json::json!({ "project": "nope", "sceneId": "s", "name": "S" })),
+            Err(Refusal::ProjectNotFound { .. })
+        ));
+
+        let delete_scene = CommandTool::<DeleteScene>::new(projects.clone());
+        delete_scene.handle(serde_json::json!({ "project": "news", "sceneId": "lower-third" })).unwrap();
+        assert!(projects.list_scenes("news").unwrap().is_empty());
+        assert!(matches!(
+            delete_scene.handle(serde_json::json!({ "project": "news", "sceneId": "lower-third" })),
+            Err(Refusal::SceneNotStored { .. })
+        ));
+    }
+
+    #[test]
+    fn no_write_accepts_a_client_supplied_document() {
+        // The old `scenes.create` took a whole `SceneDocument`. A caller that
+        // still sends one is refused by the field's name, not silently given
+        // an empty scene that ignored it.
+        let scratch = Scratch::new("no-document");
+        let projects = scratch.news();
+        let refusal = CommandTool::<CreateScene>::new(projects.clone())
             .handle(serde_json::json!({
-                "project": "nope",
+                "project": "news",
+                "sceneId": "s",
+                "name": "S",
                 "scene": serde_json::to_value(scene("s")).unwrap(),
             }))
-            .expect_err("a write into a missing project refuses");
-        assert!(matches!(refusal, Refusal::ProjectNotFound { .. }));
-        std::fs::remove_dir_all(root).unwrap();
+            .expect_err("a document argument must refuse");
+        assert!(matches!(&refusal, Refusal::CommandUnknownField { path } if path == "scene"), "{refusal:?}");
+        assert!(projects.list_scenes("news").unwrap().is_empty(), "the refused create wrote nothing");
+    }
+
+    #[test]
+    fn scenes_edit_applies_one_atomic_batch_to_the_stored_scene() {
+        let scratch = Scratch::new("edit");
+        let projects = scratch.news();
+        projects.write_scene("news", &card_scene("s", RationalRate::P50)).unwrap();
+
+        let outcome = scenes_edit(
+            &projects,
+            "s",
+            serde_json::json!([
+                { "edit": "renameObject", "objectId": "card", "name": "Card B" },
+                { "edit": "setSceneName", "name": "Renamed" },
+            ]),
+        )
+        .unwrap();
+        assert_eq!(outcome["effects"][2]["effect"], "stored");
+        let stored = projects.read_scene("news", "s").unwrap();
+        assert_eq!((stored.name.as_str(), stored.objects[0].base().name.as_str()), ("Renamed", "Card B"));
+
+        // A refusal anywhere in the batch writes nothing.
+        let refusal = scenes_edit(
+            &projects,
+            "s",
+            serde_json::json!([
+                { "edit": "setSceneName", "name": "Never" },
+                { "edit": "deleteObject", "objectId": "missing" },
+            ]),
+        )
+        .expect_err("an unknown object refuses");
+        assert!(matches!(refusal, Refusal::SceneObjectUnknown { .. }));
+        assert_eq!(projects.read_scene("news", "s").unwrap().name, "Renamed");
+
+        // MCP has no sessions to address.
+        let refusal = CommandTool::<EditScene>::new(projects.clone())
+            .handle(serde_json::json!({
+                "target": { "target": "session", "session": 1 },
+                "edits": [{ "edit": "setSceneName", "name": "x" }],
+            }))
+            .expect_err("a session target over MCP refuses");
+        assert!(matches!(refusal, Refusal::SessionUnknown { .. }));
+    }
+
+    #[test]
+    fn a_preset_cannot_carry_hand_authored_keyframes() {
+        // 8.5's done-when made structural: "presets parameterised, never
+        // authored by the caller". There is nowhere to put a keyframe, and an
+        // attempt refuses by path rather than being quietly dropped — the
+        // difference between a refusal and a caller who believes it worked.
+        let scratch = Scratch::new("preset-smuggle");
+        let projects = scratch.news();
+        projects.write_scene("news", &card_scene("s", RationalRate::P50)).unwrap();
+        let refusal = scenes_edit(
+            &projects,
+            "s",
+            serde_json::json!([{
+                "edit": "applyPreset", "objectId": "card", "presetId": "fade", "phase": "in", "atFrame": 0,
+                "keyframes": [{ "t": 0.0, "value": 1.0 }],
+            }]),
+        )
+        .expect_err("a keyframes field must be refused, not ignored");
+        assert!(matches!(&refusal, Refusal::CommandUnknownField { path } if path == "edits[0].keyframes"), "{refusal:?}");
+        assert!(projects.read_scene("news", "s").unwrap().timeline.channels.is_empty());
+    }
+
+    #[test]
+    fn a_preset_writes_keys_resolved_against_the_scenes_own_rate() {
+        // G.6.2: frames are derived at instantiation, never stored in the
+        // preset, so the same 300 ms fade lands on 15 frames at 50p and 9 at
+        // 29.97. Before 11.36 this tool echoed its arguments and wrote nothing.
+        let scratch = Scratch::new("preset-rate");
+        let projects = scratch.news();
+        for (scene_id, rate, frames) in [("at-50", RationalRate::P50, 15), ("at-2997", RationalRate::P29_97, 9)] {
+            projects.write_scene("news", &card_scene(scene_id, rate)).unwrap();
+            let outcome = scenes_edit(
+                &projects,
+                scene_id,
+                serde_json::json!([{ "edit": "applyPreset", "objectId": "card", "presetId": "fade", "phase": "in", "atFrame": 0 }]),
+            )
+            .expect("the preset instantiates");
+            assert_eq!(outcome["effects"][0], serde_json::json!({ "effect": "presetApplied", "durationFrames": frames }));
+            let stored = projects.read_scene("news", scene_id).unwrap();
+            let opacity = stored
+                .timeline
+                .channels
+                .iter()
+                .find(|channel| channel.object_id == "card" && channel.property == "opacity")
+                .expect("the fade wrote an opacity channel");
+            assert_eq!(opacity.keys.last().map(|key| key.frame), Some(frames));
+        }
+        assert!(matches!(
+            scenes_edit(
+                &projects,
+                "at-50",
+                serde_json::json!([{ "edit": "applyPreset", "objectId": "card", "presetId": "brand-in", "phase": "in", "atFrame": 0 }]),
+            ),
+            Err(Refusal::MotionPresetUnknown { .. })
+        ));
     }
 
     #[test]
     fn preflight_returns_structured_refusals_not_prose() {
         // 8.8's done-when: machine-parseable. The test is that the answer
         // deserialises back into StructuredRefusal and its parts are readable.
-        let root = scratch("preflight");
-        let projects = Projects::at_root(&root);
-        projects.create_project("news").unwrap();
-
+        let scratch = Scratch::new("preflight");
+        let projects = scratch.news();
         let mut broken = scene("broken");
         broken.canvas.width = 0;
         projects.write_scene("news", &broken).unwrap();
@@ -621,76 +614,20 @@ mod tests {
             .expect("preflight answers");
         let refusals: Vec<gx_contracts::StructuredRefusal> =
             serde_json::from_value(value).expect("the answer is machine-parseable");
-
         let refusal = refusals
             .iter()
             .find(|r| matches!(r.code, Refusal::SceneParseFailed { .. }))
             .expect("the canvas fault is reported");
         assert_eq!(refusal.field.as_deref(), Some("canvas"));
         assert_eq!(refusal.severity, gx_contracts::RefusalSeverity::Error);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-#[test]
-    fn a_preset_cannot_carry_hand_authored_keyframes() {
-        // 8.5's done-when made structural: "presets parameterised, never
-        // authored by the caller". There is nowhere to put a keyframe, and an
-        // attempt is a parse failure rather than a field quietly dropped — the
-        // difference between a refusal and a caller who believes it worked.
-        let smuggled = serde_json::json!({
-            "project": "news",
-            "sceneId": "lower-third",
-            "presetId": "brand-in",
-            "keyframes": [{ "t": 0.0, "value": 1.0 }],
-        });
-        let parsed: Result<ApplyPresetArgs, _> = serde_json::from_value(smuggled);
-        assert!(
-            parsed.is_err(),
-            "a keyframes field must be refused, not ignored"
-        );
-
-        let parameterised = serde_json::json!({
-            "project": "news",
-            "sceneId": "lower-third",
-            "presetId": "brand-in",
-            "params": { "intensity": 0.8 },
-        });
-        serde_json::from_value::<ApplyPresetArgs>(parameterised)
-            .expect("parameters alone are the whole surface");
-    }
-
-    #[test]
-    fn a_preset_resolves_frames_against_the_scenes_own_rate() {
-        // G.6.2: frames are derived at instantiation, never stored, so the
-        // same preset behaves identically at 50p and 29.97.
-        let root = scratch("preset-rate");
-        let projects = Projects::at_root(&root);
-        projects.create_project("news").unwrap();
-        let mut s = scene("lower-third");
-        s.canvas.frame_rate = RationalRate::P29_97;
-        projects.write_scene("news", &s).unwrap();
-
-        let answer = AnimationApplyPreset(projects)
-            .handle(serde_json::json!({
-                "project": "news",
-                "sceneId": "lower-third",
-                "presetId": "brand-in",
-            }))
-            .expect("the preset instantiates");
-
-        assert_eq!(answer["resolvedAgainstRate"]["num"], 30000);
-        assert_eq!(answer["resolvedAgainstRate"]["den"], 1001);
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn material_usage_names_every_object_and_slot_that_binds_it() {
         // 8.4's done-when includes usage lookup. Computed from the document,
         // so it cannot disagree with what the objects actually bind.
-        let root = scratch("usage");
-        let projects = Projects::at_root(&root);
-        projects.create_project("news").unwrap();
-
+        let scratch = Scratch::new("usage");
+        let projects = scratch.news();
         let mut s = scene("lower-third");
         s.materials.push(gx_contracts::material::MaterialDefinition {
             material_id: "brand".into(),
@@ -708,12 +645,9 @@ mod tests {
         });
         let mut base = ObjectBase::new("bar", "Bar");
         base.material_slots = Some(
-            [(
-                "fill".to_string(),
-                gx_contracts::material::MaterialBinding::new("brand"),
-            )]
-            .into_iter()
-            .collect(),
+            [("fill".to_string(), gx_contracts::material::MaterialBinding::new("brand"))]
+                .into_iter()
+                .collect(),
         );
         s.objects.push(SceneObject::Rect(RectObject { base, radius: 0.0 }));
         projects.write_scene("news", &s).unwrap();
@@ -721,10 +655,8 @@ mod tests {
         let usage = MaterialsUsage(projects)
             .handle(serde_json::json!({ "project": "news", "scene_id": "lower-third" }))
             .expect("usage is computed");
-
         assert_eq!(usage["brand"][0]["object"], "bar");
         assert_eq!(usage["brand"][0]["slot"], "fill");
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -732,10 +664,8 @@ mod tests {
         // Invariant 31: an asset is addressed by hash and by library path.
         // Relinking replaces the hash; every object still references the same
         // asset id, so nothing in the graph is rewritten.
-        let root = scratch("relink");
-        let projects = Projects::at_root(&root);
-        projects.create_project("news").unwrap();
-
+        let scratch = Scratch::new("relink");
+        let projects = scratch.news();
         let mut s = scene("lower-third");
         s.assets.push(gx_contracts::scene::AssetLibraryItem {
             asset_id: "logo".into(),
@@ -756,46 +686,29 @@ mod tests {
         }));
         projects.write_scene("news", &s).unwrap();
 
-        AssetsRelink(projects.clone())
-            .handle(serde_json::json!({
-                "project": "news",
-                "scene_id": "lower-third",
-                "asset_id": "logo",
-                "new_hash": "new",
-                "new_size": 20,
-            }))
-            .expect("the relink applies");
-
+        scenes_edit(
+            &projects,
+            "lower-third",
+            serde_json::json!([{ "edit": "relinkAsset", "assetId": "logo", "newHash": "new", "newSize": 20 }]),
+        )
+        .expect("the relink applies");
         let after = projects.read_scene("news", "lower-third").unwrap();
-        assert_eq!(
-            after.assets[0].checksum,
-            Some(gx_contracts::ContentHash("new".into())),
-            "the bytes changed"
-        );
+        assert_eq!(after.assets[0].checksum, Some(gx_contracts::ContentHash("new".into())), "the bytes changed");
+        assert_eq!(after.assets[0].size_bytes, Some(20));
         let SceneObject::Image(image) = &after.objects[0] else {
             panic!("the image object survives");
         };
         assert_eq!(image.asset_id, "logo", "the binding is untouched");
-        std::fs::remove_dir_all(root).unwrap();
-    }
 
-    #[test]
-    fn relinking_an_unknown_asset_refuses_rather_than_doing_nothing() {
-        let root = scratch("relink-unknown");
-        let projects = Projects::at_root(&root);
-        projects.create_project("news").unwrap();
-        projects.write_scene("news", &scene("s")).unwrap();
-
-        let refusal = AssetsRelink(projects)
-            .handle(serde_json::json!({
-                "project": "news",
-                "scene_id": "s",
-                "asset_id": "nosuch",
-                "new_hash": "x",
-            }))
-            .expect_err("an unknown asset must refuse");
-        assert!(matches!(refusal, Refusal::SceneAssetUnknown { .. }));
-        std::fs::remove_dir_all(root).unwrap();
+        // An unknown asset id is reported, never silently ignored.
+        assert!(matches!(
+            scenes_edit(
+                &projects,
+                "lower-third",
+                serde_json::json!([{ "edit": "relinkAsset", "assetId": "nosuch", "newHash": "x" }]),
+            ),
+            Err(Refusal::SceneAssetUnknown { .. })
+        ));
     }
 
     /// A scene whose bindings exercise the schema: a nested data context, two
@@ -826,10 +739,7 @@ mod tests {
         };
 
         let mut bar = ObjectBase::new("bar", "Bar");
-        bar.bindings = bind(&[
-            ("x", serde_json::json!("match.home.x")),
-            ("visible", serde_json::json!("flags.0")),
-        ]);
+        bar.bindings = bind(&[("x", serde_json::json!("match.home.x")), ("visible", serde_json::json!("flags.0"))]);
         let mut shadow = ObjectBase::new("shadow", "Shadow");
         shadow.bindings = bind(&[("x", serde_json::json!("match.home.x"))]);
         let mut logo = ObjectBase::new("logo", "Logo");
@@ -853,12 +763,7 @@ mod tests {
     }
 
     fn schema_of(projects: &Projects, authored: &SceneDocument) -> serde_json::Value {
-        SceneCreate(projects.clone())
-            .handle(serde_json::json!({
-                "project": "news",
-                "scene": serde_json::to_value(authored).unwrap(),
-            }))
-            .expect("the scene writes");
+        projects.write_scene("news", authored).expect("the scene writes");
         BindingsSchema(projects.clone())
             .handle(serde_json::json!({ "project": "news", "scene_id": authored.id }))
             .expect("the schema is derived")
@@ -869,9 +774,8 @@ mod tests {
         // 8.6's done-when: the data schema is discoverable. The schema is the
         // set of paths the scene binds, each with every object/property that
         // reads it, plus the data context those paths resolve against.
-        let root = scratch("bindings-schema");
-        let projects = Projects::at_root(&root);
-        projects.create_project("news").unwrap();
+        let scratch = Scratch::new("bindings-schema");
+        let projects = scratch.news();
         let authored = bound_scene();
 
         let schema = schema_of(&projects, &authored);
@@ -900,8 +804,7 @@ mod tests {
                 ],
                 // Absent from the data context and still advertised: the scene
                 // expects it, and hiding it would tell the agent the template
-                // takes less data than it does. Whether a path resolves is the
-                // Editor preview's check (`Editor/src/bindings.ts`), not this one.
+                // takes less data than it does.
                 "match.referee.x": [{ "object": "referee", "property": "x" }],
             }),
         );
@@ -910,7 +813,6 @@ mod tests {
             "the unresolved path is visible by its absence from the data context"
         );
         assert_eq!(schema["invalid"], serde_json::json!([]));
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -918,9 +820,8 @@ mod tests {
         // A binding whose path is not a string cannot be a data field. Keying
         // it as "" would advertise a field no agent can fill and hide which
         // object is wrong; it is reported by object and property instead.
-        let root = scratch("bindings-schema-invalid");
-        let projects = Projects::at_root(&root);
-        projects.create_project("news").unwrap();
+        let scratch = Scratch::new("bindings-schema-invalid");
+        let projects = scratch.news();
         let mut authored = bound_scene();
         authored.objects[0]
             .base_mut()
@@ -946,28 +847,22 @@ mod tests {
             Some(2),
             "one bad binding does not hide the valid ones"
         );
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn bindings_schema_of_an_unbound_scene_is_empty_not_absent() {
-        let root = scratch("bindings-schema-empty");
-        let projects = Projects::at_root(&root);
-        projects.create_project("news").unwrap();
-
+        let scratch = Scratch::new("bindings-schema-empty");
+        let projects = scratch.news();
         let schema = schema_of(&projects, &scene("plain"));
-
         assert_eq!(schema["fields"], serde_json::json!({}));
         assert_eq!(schema["invalid"], serde_json::json!([]));
         assert_eq!(schema["dataContext"], serde_json::json!({}));
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn bindings_schema_of_a_missing_scene_refuses_by_name() {
-        let root = scratch("bindings-schema-missing");
-        let projects = Projects::at_root(&root);
-        projects.create_project("news").unwrap();
+        let scratch = Scratch::new("bindings-schema-missing");
+        let projects = scratch.news();
         let refusal = BindingsSchema(projects)
             .handle(serde_json::json!({ "project": "news", "scene_id": "absent" }))
             .expect_err("a schema for no scene is a refusal, not an empty answer");
@@ -975,18 +870,19 @@ mod tests {
             !matches!(refusal, Refusal::SceneParseFailed { .. }),
             "the arguments were well formed; the refusal must name the missing scene: {refusal:?}"
         );
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn malformed_arguments_refuse_by_name_rather_than_panicking() {
-        let root = scratch("bad-args");
-        let projects = Projects::at_root(&root);
-        let refusal = SceneGet(projects)
+        let scratch = Scratch::new("bad-args");
+        let projects = Projects::at_root(&scratch.0);
+        let refusal = SceneGet(projects.clone())
             .handle(serde_json::json!({ "project": 42 }))
             .expect_err("a wrong-shaped argument refuses");
         assert!(matches!(refusal, Refusal::SceneParseFailed { .. }));
-        std::fs::remove_dir_all(root).unwrap();
+        assert!(matches!(
+            CommandTool::<CreateProject>::new(projects).handle(serde_json::json!({ "project": 42 })),
+            Err(Refusal::SceneParseFailed { .. })
+        ));
     }
-
 }
