@@ -2,9 +2,10 @@
 //! here on ttf-parser — both read the same name/OS/2 tables).
 //!
 //! Inspection answers exactly what the manager needs to build a face
-//! definition: family, display name, weight, style. A file that cannot answer
-//! is refused by name, never guessed at — a guessed family is a silent
-//! substitution waiting to happen.
+//! definition: family, display name, weight, style, and the licence the font
+//! declares about itself. A file that cannot answer the first four is refused
+//! by name, never guessed at — a guessed family is a silent substitution
+//! waiting to happen. An absent licence stays absent: it is never inferred.
 
 use gx_contracts::font::FontStyle;
 use gx_contracts::Refusal;
@@ -17,11 +18,15 @@ pub struct InspectedFont {
     /// CSS weight scale, 1–1000, from OS/2.usWeightClass.
     pub weight: u16,
     pub style: FontStyle,
+    /// The licence the font records in its naming table: nameID 13 (licence
+    /// description) and nameID 14 (licence URL), joined when both exist.
+    /// `None` when the font states neither.
+    pub license: Option<String>,
 }
 
 /// Read the naming and OS/2 tables of an OTF/TTF file. WOFF/WOFF2 must be
-/// unwrapped by the caller first — ttf-parser reads raw sfnt, and the
-/// resolver knows the container from the URL or magic bytes.
+/// unwrapped first — ttf-parser reads raw sfnt; `container::verify_font_file`
+/// is the entry point that decodes any accepted container and calls this.
 pub fn inspect_font(bytes: &[u8]) -> Result<InspectedFont, Refusal> {
     let face = ttf_parser::Face::parse(bytes, 0).map_err(|e| Refusal::InvalidFontData {
         detail: format!("unparseable font: {e:?}"),
@@ -63,11 +68,29 @@ pub fn inspect_font(bytes: &[u8]) -> Result<InspectedFont, Refusal> {
         FontStyle::Normal
     };
 
+    let name_text = |id: u16| {
+        face.names()
+            .into_iter()
+            .find(|n| n.name_id == id && n.to_string().is_some())
+            .and_then(|n| n.to_string())
+            .map(|s| clean_licence(&s))
+            .filter(|s| !s.is_empty())
+    };
+    let license = match (
+        name_text(ttf_parser::name_id::LICENSE),
+        name_text(ttf_parser::name_id::LICENSE_URL),
+    ) {
+        (Some(text), Some(url)) if !text.contains(&url) => Some(format!("{text} ({url})")),
+        (Some(text), _) => Some(text),
+        (None, url) => url,
+    };
+
     Ok(InspectedFont {
         family,
         display_name,
         weight: normalize_weight(face.weight().to_number()),
         style,
+        license,
     })
 }
 
@@ -96,6 +119,18 @@ fn clean_name(value: &str) -> String {
         .trim()
         .chars()
         .take(128)
+        .collect()
+}
+
+/// Licence text is recorded verbatim apart from line breaks; it is bounded
+/// so a pathological naming table cannot bloat every scene that embeds it.
+fn clean_licence(value: &str) -> String {
+    value
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(2048)
         .collect()
 }
 

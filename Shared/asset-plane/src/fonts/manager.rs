@@ -1,10 +1,10 @@
 //! Definition construction and identity (1.x `fontManager.ts`).
 //!
 //! Identity is content-derived, as in 1.x: a file font's id is a prefix of
-//! its content hash, a linked font's is a hash of (source kind, URL, family,
-//! weight). Two imports of the same bytes or the same reference yield the
-//! same id — dedupe falls out of the identity scheme rather than a registry
-//! pass.
+//! its content hash. Two imports of the same bytes yield the same id — dedupe
+//! falls out of the identity scheme rather than a registry pass. A font link
+//! is no longer stored as a reference: `link` downloads its faces into the
+//! project, and this module only canonicalises the link it starts from.
 
 use gx_contracts::font::{
     EmbeddingPolicy, FontDefinition, FontFaceDefinition, FontFormat, FontLoadStatus, FontSource,
@@ -13,7 +13,7 @@ use gx_contracts::font::{
 use gx_contracts::Refusal;
 use sha2::{Digest, Sha256};
 
-/// Options for a packaged (file) font face.
+/// Options for a file font face (bytes held as a project asset).
 #[derive(Debug, Clone)]
 pub struct FileFontOptions {
     pub family: String,
@@ -21,8 +21,11 @@ pub struct FileFontOptions {
     pub weight: u16,
     pub style: FontStyle,
     pub fallback_families: Vec<String>,
-    /// The declared licence. `Package` policy without one is refused at
-    /// preflight (p2-licensing-positions §5); recording it here is how the
+    /// May the bytes travel inside a package? Chosen by whoever ingests the
+    /// file; a font file says nothing reliable about redistribution rights.
+    pub embedding_policy: EmbeddingPolicy,
+    /// The declared licence. `Package` policy without one is refused here and
+    /// again at preflight (p2-licensing-positions §5); recording it is how the
     /// package stays self-describing.
     pub license: Option<String>,
 }
@@ -35,13 +38,17 @@ impl Default for FileFontOptions {
             weight: 400,
             style: FontStyle::Normal,
             fallback_families: Vec::new(),
+            // Unstated licence ⇒ restricted (p2-licensing-positions §5): the
+            // safe default is the one that never lets bytes leave the machine.
+            embedding_policy: EmbeddingPolicy::Restricted,
             license: None,
         }
     }
 }
 
-/// Build a definition for a font whose bytes are a packaged asset.
-/// `content_hash` is the asset's SHA-256 hex — the identity source.
+/// Build a definition for a font whose bytes are a project asset.
+/// `content_hash` is the asset's SHA-256 hex — the identity source. Whether
+/// the bytes may be packaged is `options.embedding_policy`, never assumed.
 pub fn create_file_font_definition(
     asset_id: &str,
     content_hash: &str,
@@ -50,8 +57,29 @@ pub fn create_file_font_definition(
 ) -> Result<FontDefinition, Refusal> {
     let family = normalize_family(&options.family)?;
     let identity: String = content_hash.chars().take(16).collect();
+    let font_id = format!("font_{identity}");
+    let license = options
+        .license
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    match options.embedding_policy {
+        EmbeddingPolicy::Package if license.is_none() => {
+            return Err(Refusal::FontEmbeddingRefused { font_id });
+        }
+        EmbeddingPolicy::Reference => {
+            return Err(Refusal::InvalidFontData {
+                detail: format!(
+                    "{font_id}: a font file cannot use the reference policy — its bytes are local, \
+                     so no render node could resolve it; choose package or restricted"
+                ),
+            });
+        }
+        _ => {}
+    }
     Ok(FontDefinition {
-        font_id: format!("font_{identity}"),
+        font_id,
         family: family.clone(),
         display_name: options
             .display_name
@@ -77,8 +105,8 @@ pub fn create_file_font_definition(
             error_message: None,
         }],
         fallback_families: normalize_fallbacks(&options.fallback_families),
-        embedding_policy: EmbeddingPolicy::Package,
-        license: options.license.clone(),
+        embedding_policy: options.embedding_policy,
+        license,
         enabled: true,
         source_label: None,
         status: FontLoadStatus::Ready,
@@ -86,17 +114,7 @@ pub fn create_file_font_definition(
     })
 }
 
-/// A linked (non-packaged) source request.
-#[derive(Debug, Clone)]
-pub struct LinkedFontRequest {
-    pub family: String,
-    pub display_name: Option<String>,
-    pub weight: u16,
-    pub style: FontStyle,
-    pub source: LinkedSource,
-    pub license: Option<String>,
-}
-
+/// A font link as an author supplies it, before canonicalisation.
 #[derive(Debug, Clone)]
 pub enum LinkedSource {
     /// A CSS stylesheet on a trusted host.
@@ -108,58 +126,10 @@ pub enum LinkedSource {
     AdobeFonts { project_id: String },
 }
 
-/// Build a definition for a linked font. The source is validated at
-/// construction — an Adobe URL is canonicalised to `use.typekit.net`, a CSS
-/// URL must pass the trusted-host check — so a bad source cannot exist in a
-/// stored scene.
-pub fn create_linked_font_definition(
-    request: &LinkedFontRequest,
-) -> Result<FontDefinition, Refusal> {
-    let family = normalize_family(&request.family)?;
-    let source = linked_source(&request.source)?;
-    let (kind, url) = match &source {
-        FontSource::CssUrl { url, .. } => ("css-url", url.clone()),
-        FontSource::AdobeFonts { url, .. } => ("adobe-fonts", url.clone()),
-        _ => unreachable!("linked_source only builds css-url and adobe-fonts"),
-    };
-    let identity = short_hash(&format!(
-        "{kind}:{url}:{family}:{}",
-        normalize_weight(request.weight)?
-    ));
-    Ok(FontDefinition {
-        font_id: format!("font_{identity}"),
-        family: family.clone(),
-        display_name: request
-            .display_name
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .unwrap_or(&family)
-            .to_string(),
-        faces: vec![FontFaceDefinition {
-            face_id: format!("face_{identity}"),
-            family,
-            weight: normalize_weight(request.weight)?,
-            style: request.style,
-            stretch: None,
-            unicode_range: None,
-            source,
-            status: None,
-            error_message: None,
-        }],
-        fallback_families: normalize_fallbacks(&[]),
-        // Linked fonts resolve at the render node; bytes never travel in the
-        // package (p2-licensing-positions §5).
-        embedding_policy: EmbeddingPolicy::Reference,
-        license: request.license.clone(),
-        enabled: true,
-        source_label: None,
-        status: FontLoadStatus::Unverified,
-        error_message: None,
-    })
-}
-
-fn linked_source(source: &LinkedSource) -> Result<FontSource, Refusal> {
+/// Canonicalise and check a link. An Adobe id becomes its
+/// `use.typekit.net` kit URL; a CSS URL must pass the trusted-host check.
+/// The offence is named where it can be: a bad link never reaches a fetch.
+pub fn canonical_link_source(source: &LinkedSource) -> Result<FontSource, Refusal> {
     match source {
         LinkedSource::AdobeFonts { project_id } => {
             let id = project_id.trim();
@@ -201,7 +171,7 @@ fn linked_source(source: &LinkedSource) -> Result<FontSource, Refusal> {
     }
 }
 
-fn normalize_family(value: &str) -> Result<String, Refusal> {
+pub(crate) fn normalize_family(value: &str) -> Result<String, Refusal> {
     let family: String = value
         .replace(['\r', '\n', '\x0c'], "")
         .trim()
@@ -216,7 +186,7 @@ fn normalize_family(value: &str) -> Result<String, Refusal> {
     Ok(family)
 }
 
-fn normalize_weight(weight: u16) -> Result<u16, Refusal> {
+pub(crate) fn normalize_weight(weight: u16) -> Result<u16, Refusal> {
     if !(1..=1000).contains(&weight) {
         return Err(Refusal::InvalidFontData {
             detail: format!("font weight must be 1 to 1000, got {weight}"),
@@ -226,7 +196,7 @@ fn normalize_weight(weight: u16) -> Result<u16, Refusal> {
 }
 
 /// 1.x default: Arial, sans-serif. Deduped, capped at 8.
-fn normalize_fallbacks(values: &[String]) -> Vec<String> {
+pub(crate) fn normalize_fallbacks(values: &[String]) -> Vec<String> {
     let cleaned: Vec<String> = if values.is_empty() {
         vec!["Arial".into(), "sans-serif".into()]
     } else {
@@ -244,7 +214,7 @@ fn normalize_fallbacks(values: &[String]) -> Vec<String> {
         .collect()
 }
 
-fn short_hash(input: &str) -> String {
+pub(crate) fn short_hash(input: &str) -> String {
     let digest = Sha256::digest(input.as_bytes());
     digest[..8].iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -257,6 +227,8 @@ mod tests {
     fn file_font_identity_is_content_derived_and_stable() {
         let opts = FileFontOptions {
             family: "Inter".into(),
+            embedding_policy: EmbeddingPolicy::Package,
+            license: Some("OFL-1.1".into()),
             ..Default::default()
         };
         let a = create_file_font_definition(
@@ -277,66 +249,78 @@ mod tests {
         assert_eq!(a.font_id, b.font_id);
         assert_eq!(a.font_id, "font_0123456789abcdef");
         assert_eq!(a.embedding_policy, EmbeddingPolicy::Package);
+        assert_eq!(a.license.as_deref(), Some("OFL-1.1"));
         assert_eq!(a.status, FontLoadStatus::Ready);
     }
 
     #[test]
-    fn adobe_source_is_canonicalised_to_typekit() {
-        let req = LinkedFontRequest {
-            family: "Proxima Nova".into(),
-            display_name: None,
-            weight: 400,
-            style: FontStyle::Normal,
-            source: LinkedSource::AdobeFonts {
-                project_id: "abc123".into(),
-            },
-            license: None,
+    fn embedding_policy_is_explicit_and_never_assumed() {
+        let hash = "0123456789abcdef0123456789abcdef";
+        let base = FileFontOptions {
+            family: "Inter".into(),
+            ..Default::default()
         };
-        let font = create_linked_font_definition(&req).unwrap();
+        // Nothing stated: restricted, not packaged.
+        let font = create_file_font_definition("a", hash, FontFormat::Ttf, &base).unwrap();
+        assert_eq!(font.embedding_policy, EmbeddingPolicy::Restricted);
+        assert_eq!(font.license, None);
+        // Package without a licence (blank counts as none) is refused by font.
+        let package = FileFontOptions {
+            embedding_policy: EmbeddingPolicy::Package,
+            license: Some("   ".into()),
+            ..base.clone()
+        };
         assert_eq!(
-            font.faces[0].source,
+            create_file_font_definition("a", hash, FontFormat::Ttf, &package),
+            Err(Refusal::FontEmbeddingRefused {
+                font_id: "font_0123456789abcdef".into()
+            })
+        );
+        // A local file has nothing a render node could resolve by reference.
+        let reference = FileFontOptions {
+            embedding_policy: EmbeddingPolicy::Reference,
+            license: Some("OFL-1.1".into()),
+            ..base
+        };
+        assert!(matches!(
+            create_file_font_definition("a", hash, FontFormat::Ttf, &reference),
+            Err(Refusal::InvalidFontData { detail }) if detail.contains("reference policy")
+        ));
+    }
+
+    #[test]
+    fn adobe_link_is_canonicalised_to_its_typekit_kit() {
+        let source = canonical_link_source(&LinkedSource::AdobeFonts {
+            project_id: " abc123 ".into(),
+        })
+        .unwrap();
+        assert_eq!(
+            source,
             FontSource::AdobeFonts {
                 project_id: "abc123".into(),
                 url: "https://use.typekit.net/abc123.css".into()
             }
         );
-        assert_eq!(font.embedding_policy, EmbeddingPolicy::Reference);
-        assert_eq!(font.status, FontLoadStatus::Unverified);
     }
 
     #[test]
-    fn bad_sources_are_refused_by_name() {
-        let css_req = |url: &str| LinkedFontRequest {
-            family: "X".into(),
-            display_name: None,
-            weight: 400,
-            style: FontStyle::Normal,
-            source: LinkedSource::CssUrl {
-                url: url.into(),
-                integrity: None,
-            },
-            license: None,
+    fn bad_links_are_refused_by_name() {
+        let css = |url: &str| LinkedSource::CssUrl {
+            url: url.into(),
+            integrity: None,
         };
         assert!(matches!(
-            create_linked_font_definition(&css_req("http://fonts.googleapis.com/css")),
+            canonical_link_source(&css("http://fonts.googleapis.com/css")),
             Err(Refusal::FontUrlNotHttps { .. })
         ));
         assert!(matches!(
-            create_linked_font_definition(&css_req("https://fonts.example.com/css")),
+            canonical_link_source(&css("https://fonts.example.com/css")),
             Err(Refusal::InvalidFontUrl { .. })
         ));
-        let bad_adobe = LinkedFontRequest {
-            family: "X".into(),
-            display_name: None,
-            weight: 400,
-            style: FontStyle::Normal,
-            source: LinkedSource::AdobeFonts {
-                project_id: "has spaces!".into(),
-            },
-            license: None,
-        };
         assert!(matches!(
-            create_linked_font_definition(&bad_adobe),
+            canonical_link_source(&LinkedSource::AdobeFonts {
+                project_id: "has spaces!".into(),
+            }),
             Err(Refusal::InvalidFontUrl { .. })
         ));
     }

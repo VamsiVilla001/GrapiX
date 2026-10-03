@@ -89,7 +89,9 @@ fn find_imports(css: &str) -> Vec<String> {
 
 fn find_font_face_bodies(css: &str) -> Vec<String> {
     let mut out = Vec::new();
-    let lower = css.to_lowercase();
+    // ASCII lowering keeps byte offsets identical, so indices found in
+    // `lower` are valid in `css` even when the stylesheet holds non-ASCII.
+    let lower = css.to_ascii_lowercase();
     let mut search_from = 0;
     while let Some(i) = lower[search_from..].find("@font-face") {
         let after = search_from + i + "@font-face".len();
