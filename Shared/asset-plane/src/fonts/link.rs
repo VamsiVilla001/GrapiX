@@ -32,6 +32,7 @@ use std::time::Duration;
 use gx_contracts::font::{
     EmbeddingPolicy, FontDefinition, FontFaceDefinition, FontFormat, FontLoadStatus, FontSource,
 };
+use gx_contracts::provenance::{AssetOrigin, AssetProvenance, ProvenanceTool};
 use gx_contracts::scene::AssetLibraryItem;
 use gx_contracts::{ContentHash, Refusal};
 use sha2::{Digest, Sha256, Sha384, Sha512};
@@ -199,6 +200,39 @@ impl Provider {
             Self::Google | Self::Bunny => None,
         }
     }
+
+    /// The service named as each downloaded asset's provider (11.39).
+    fn display_name(self) -> &'static str {
+        match self {
+            Self::Google => "Google Fonts",
+            Self::Bunny => "Bunny Fonts",
+            Self::Adobe => "Adobe Fonts",
+        }
+    }
+}
+
+/// The tool a font link download records in each asset's provenance (11.39).
+pub const FONT_LINK_IMPORT_TOOL: &str = "GrapiX font link import";
+
+/// What a downloaded font file records: a person chose the link, the
+/// provider supplied the bytes, and the stylesheet and file URLs are where
+/// they came from. The licence class is left for a person to state; the
+/// font's licence text is on its definition.
+fn link_provenance(provider: Provider, stylesheet: &str, file_url: &str) -> AssetProvenance {
+    let mut sources = vec![stylesheet.to_string()];
+    if file_url != stylesheet {
+        sources.push(file_url.to_string());
+    }
+    AssetProvenance {
+        origin: Some(AssetOrigin::Human),
+        tool: Some(ProvenanceTool {
+            name: FONT_LINK_IMPORT_TOOL.into(),
+            version: Some(env!("CARGO_PKG_VERSION").into()),
+        }),
+        provider: Some(provider.display_name().into()),
+        sources,
+        ..AssetProvenance::default()
+    }
 }
 
 /// Download a font link into the project and define its families.
@@ -315,6 +349,7 @@ pub fn prepare_font_link(
             download.verified.format,
             &format!("{family} {weight} {}", style_name(face)),
             download.bytes.len(),
+            link_provenance(provider, &stylesheet, &source.url),
         );
         let definition = FontFaceDefinition {
             face_id: format!("face_{identity}"),
@@ -397,7 +432,7 @@ pub fn prepare_font_link(
 
     // 5. Only a fully verified link reaches the cache.
     let mut stored: HashSet<&ContentHash> = HashSet::new();
-    for download in downloads.values() {
+    for (url, download) in &downloads {
         if !stored.insert(&download.hash) {
             continue;
         }
@@ -406,6 +441,7 @@ pub fn prepare_font_link(
             download.verified.format,
             &download.verified.inspected.display_name,
             download.bytes.len(),
+            link_provenance(provider, &stylesheet, url),
         );
         store_font_asset(store, &asset, &download.bytes, &stylesheet)?;
     }

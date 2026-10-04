@@ -327,7 +327,7 @@ mod tests {
         SceneDocument {
             id: "scene".into(),
             name: "Scene".into(),
-            version: 1,
+            version: crate::scene::SCENE_SCHEMA_VERSION,
             revision: Some(Revision(1)),
             active_camera_id: None,
             canvas: SceneCanvas {
@@ -508,6 +508,7 @@ mod tests {
             mime_type: Some("image/png".into()),
             size_bytes: None,
             status: None,
+            provenance: crate::provenance::AssetProvenance::default(),
         });
 
         let authoring =
@@ -538,6 +539,7 @@ mod tests {
             mime_type: None,
             size_bytes: None,
             status: None,
+            provenance: crate::provenance::AssetProvenance::default(),
         });
 
         for check in [true, false] {

@@ -190,7 +190,7 @@ const catalogue: SceneObject[] = [
 const scene: SceneDocument = {
   id: "scene_1",
   name: "Lower Third",
-  version: 1,
+  version: 2,
   revision: 3n,
   canvas: { width: 1920, height: 1080, frameRate: { num: 50, den: 1 } },
   timeline: { durationFrames: 250n, channels: [], phases: [] },
@@ -205,6 +205,7 @@ const scene: SceneDocument = {
       mimeType: "image/png",
       sizeBytes: 1024n,
       status: "ready",
+      provenance: { origin: "human", sources: ["logo.png"] },
     },
   ],
   fonts: [],

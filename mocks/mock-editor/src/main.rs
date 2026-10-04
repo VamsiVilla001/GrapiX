@@ -116,7 +116,7 @@ fn new_scene(specification: &str) -> Result<SceneDocument, EditorError> {
     Ok(SceneDocument {
         id: id.into(),
         name: name.into(),
-        version: 1,
+        version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
         revision: None,
         active_camera_id: None,
         canvas: SceneCanvas {

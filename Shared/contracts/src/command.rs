@@ -22,7 +22,7 @@ use crate::phases::{self, TimelinePhase};
 use crate::font::FontDefinition;
 use crate::scene::{AssetLibraryItem, DataContext, SceneDocument};
 use crate::text_style::{self, TextStyle};
-use crate::{font_edit, material_edit, ContentHash, Refusal};
+use crate::{asset_edit, font_edit, material_edit, ContentHash, Refusal};
 
 /// Declares one wire enum together with its named payload structs.
 ///
@@ -313,6 +313,9 @@ commands! {
         /// Remove one font nothing names, with the font assets no other font
         /// uses. The only way a font leaves a scene.
         RemoveFont = "removeFont" { pub font_id: String },
+        /// Add imported assets with the provenance their import filled in
+        /// (11.39). The only way a non-font asset enters a scene.
+        AddAssets = "addAssets" { pub assets: Vec<AssetLibraryItem> },
     }
 }
 
@@ -568,6 +571,10 @@ fn apply_edit(
             asset_ids: font_edit::remove_font(scene, &p.font_id)?,
             font_id: p.font_id.clone(),
         },
+        SceneEdit::AddAssets(p) => {
+            asset_edit::add_assets(scene, &p.assets)?;
+            EditEffect::None
+        }
     })
 }
 
@@ -669,6 +676,7 @@ pub mod witness {
             SceneEdit::SetSceneId(_) => 26,
             SceneEdit::AddFonts(_) => 27,
             SceneEdit::RemoveFont(_) => 28,
+            SceneEdit::AddAssets(_) => 29,
         }
     }
 
@@ -775,6 +783,7 @@ pub mod witness {
             mime_type: None,
             size_bytes: Some(1),
             status: None,
+            provenance: crate::provenance::AssetProvenance::default(),
         });
         scene.materials = vec![material("m1"), material("m2")];
         let mut card = ObjectBase::new("card", "Card");
@@ -1045,10 +1054,41 @@ pub mod witness {
                     mime_type: Some("font/woff2".into()),
                     size_bytes: Some(1),
                     status: None,
+                    provenance: crate::provenance::AssetProvenance::default(),
                 }],
             }),
             SceneEdit::RemoveFont(RemoveFont {
                 font_id: "added-font".into(),
+            }),
+            // Every provenance field set, so the trace carries the whole
+            // record through the command surface (11.39).
+            SceneEdit::AddAssets(AddAssets {
+                assets: vec![AssetLibraryItem {
+                    asset_id: "added-image".into(),
+                    name: "Added image".into(),
+                    kind: AssetKind::Image,
+                    path: "assets/images/added.png".into(),
+                    checksum: Some(ContentHash("added-image".into())),
+                    mime_type: Some("image/png".into()),
+                    size_bytes: Some(1),
+                    status: None,
+                    provenance: crate::provenance::AssetProvenance {
+                        origin: Some(crate::provenance::AssetOrigin::Model),
+                        tool: Some(crate::provenance::ProvenanceTool {
+                            name: "witness-model".into(),
+                            version: Some("1".into()),
+                        }),
+                        provider: Some("witness-provider".into()),
+                        license_class: Some(crate::provenance::LicenseClass::Commercial),
+                        prompt_hash: Some(ContentHash("witness-prompt".into())),
+                        sources: vec!["witness-source".into()],
+                        approval: Some(crate::provenance::AssetApproval {
+                            user: "witness".into(),
+                            at: "2026-10-03T00:00:00Z".into(),
+                        }),
+                        c2pa_manifest: Some("assets/c2pa/added.c2pa".into()),
+                    },
+                }],
             }),
         ]
     }

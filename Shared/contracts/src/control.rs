@@ -416,7 +416,7 @@ mod tests {
         SceneDocument {
             id: "template".into(),
             name: "Template".into(),
-            version: 1,
+            version: crate::scene::SCENE_SCHEMA_VERSION,
             revision: None,
             active_camera_id: None,
             canvas: SceneCanvas { width: 1920, height: 1080, frame_rate: RationalRate::P50 },

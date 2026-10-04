@@ -282,6 +282,33 @@ fn drive_contract_refusals(report: &mut Report) {
         ),
     );
     report.record(PLANE, "SceneUnknownField is produced with the unknown JSON path", expect(matches!(parse_scene_document(br#"{"id":"audit","name":"audit","version":1,"canvas":{"width":1,"height":1,"frameRate":{"num":50,"den":1}},"timeline":{"durationFrames":1},"dataContext":{},"assets":[],"fonts":[],"materials":[],"objects":[],"unexpected":true}"#), Err(Refusal::SceneUnknownField { path }) if path == "unexpected"), "an unknown scene field was not refused with its JSON path"));
+    // A document from a newer build is refused by its version (11.39), never
+    // read with whatever that build added dropped.
+    let newer = parse_scene_document(br#"{"id":"audit","name":"audit","version":99,"canvas":{"width":1,"height":1,"frameRate":{"num":50,"den":1}}}"#);
+    report.record(
+        PLANE,
+        "SceneSchemaUnsupported is produced for a scene schema newer than this build",
+        expect(
+            matches!(&newer, Err(Refusal::SceneSchemaUnsupported { actual: 99, supported }) if *supported == gx_contracts::scene::SCENE_SCHEMA_VERSION),
+            format!("expected schema 99 refused by version, got {newer:?}"),
+        ),
+    );
+    let mut cache = gx_asset_plane::AssetStore::at_root(
+        std::env::temp_dir().join(format!("gx-conformance-asset-import-{}", std::process::id())),
+    );
+    let unrecognised = gx_asset_plane::import::prepare_asset_files(
+        &mut cache,
+        &[],
+        &[gx_asset_plane::import::AssetFileInput { file_name: "notes.png".into(), bytes: b"plain text, not an image" }],
+    );
+    report.record(
+        PLANE,
+        "AssetFormatUnrecognised is produced for an import whose bytes are no asset format",
+        expect(
+            matches!(&unrecognised, Err(refused) if refused.refusal == Refusal::AssetFormatUnrecognised { file: "notes.png".into() }),
+            format!("expected notes.png refused by its bytes, got {unrecognised:?}"),
+        ),
+    );
     report.record(
         PLANE,
         "UnsafePackagePath is produced for a traversal member",
@@ -410,7 +437,7 @@ fn drive_control_contract_refusals(report: &mut Report) {
     let scene = || SceneDocument {
         id: "audit".into(),
         name: "audit".into(),
-        version: 1,
+        version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
         revision: None,
         active_camera_id: None,
         canvas: SceneCanvas { width: 16, height: 16, frame_rate: RationalRate::P50 },
@@ -532,7 +559,7 @@ fn drive_editor_refusals(report: &mut Report) {
     let scene = gx_contracts::scene::SceneDocument {
         id: "audit".into(),
         name: "audit".into(),
-        version: 1,
+        version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
         revision: Some(Revision(1)),
         active_camera_id: None,
         canvas: gx_contracts::scene::SceneCanvas {
@@ -580,7 +607,7 @@ fn drive_animation_refusals(report: &mut Report) {
     let scene_with = |objects: Vec<SceneObject>| SceneDocument {
         id: "audit".into(),
         name: "audit".into(),
-        version: 1,
+        version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
         revision: Some(Revision(1)),
         active_camera_id: None,
         canvas: SceneCanvas {
@@ -924,7 +951,7 @@ fn drive_authoring_refusals(report: &mut Report) {
     let empty_scene = || SceneDocument {
         id: "audit".into(),
         name: "audit".into(),
-        version: 1,
+        version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
         revision: Some(Revision(1)),
         active_camera_id: None,
         canvas: SceneCanvas {
@@ -1398,6 +1425,10 @@ fn is_driven(variant: &str) -> bool {
             | "SceneNotStored"
             | "TakePageIdInvalid"
             | "SceneIdBound"
+            | "SceneSchemaUnsupported"
+            | "AssetBatchEmpty"
+            | "AssetKindNotAddable"
+            | "AssetFormatUnrecognised"
     )
 }
 

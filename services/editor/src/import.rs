@@ -166,7 +166,7 @@ pub fn import_svg(
     let scene = SceneDocument {
         id: scene_id.to_owned(),
         name: source_name.to_owned(),
-        version: 1,
+        version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
         revision: None,
         active_camera_id: None,
         canvas: SceneCanvas {

@@ -44,6 +44,7 @@ use ts_rs::TS;
 
 use crate::color::{ColorValue, Rgba};
 use crate::font::FontDefinition;
+use crate::provenance::AssetProvenance;
 use crate::material::{CullMode, FitMode, MaterialBinding};
 use crate::{ContentHash, RationalRate, Refusal, Revision};
 
@@ -110,6 +111,11 @@ pub struct AssetLibraryItem {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub status: Option<AssetAvailability>,
+    /// Where the bytes came from and under what terms (11.39). Every record
+    /// carries one, and it is always written: a human-made asset may leave
+    /// every field empty, but the schema is present in every saved project.
+    #[serde(default)]
+    pub provenance: AssetProvenance,
 }
 
 impl AssetLibraryItem {
@@ -1379,7 +1385,9 @@ fn apply(m: (f64, f64, f64, f64, f64, f64), x: f64, y: f64) -> (f64, f64) {
 pub struct SceneDocument {
     pub id: String,
     pub name: String,
-    /// Schema version. A reader refuses a version it does not know by name.
+    /// Schema version: [`SCENE_SCHEMA_VERSION`] when this build writes it.
+    /// The reader upgrades an older version it knows and refuses any other
+    /// by name (`SceneSchemaUnsupported`).
     pub version: u32,
     /// Monotonic authoring revision; the optimistic-concurrency token (0.8).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1424,6 +1432,11 @@ pub struct SceneDocument {
     pub objects: Vec<SceneObject>,
 }
 
+/// The scene document schema this build writes. Version 2 (11.39) added a
+/// provenance record to every asset; [`parse_scene_document`] upgrades a
+/// version 1 document as it reads it.
+pub const SCENE_SCHEMA_VERSION: u32 = 2;
+
 /// Construct the Editor's default empty authored document.
 ///
 /// This lives with the document contract so every command surface starts a
@@ -1432,7 +1445,7 @@ pub fn new_scene(id: &str, name: &str) -> SceneDocument {
     SceneDocument {
         id: id.to_owned(),
         name: name.to_owned(),
-        version: 1,
+        version: SCENE_SCHEMA_VERSION,
         revision: None,
         active_camera_id: None,
         canvas: SceneCanvas {
@@ -1560,12 +1573,15 @@ impl SceneDocument {
 ///
 /// This is the one implementation, called by the real engine and by every
 /// mock, because a mock that accepts what the engine refuses teaches a
-/// contract that does not exist (invariant 45).
+/// contract that does not exist (invariant 45). It is also the one place an
+/// older schema version is upgraded (`upgrade_scene_json`), so every reader
+/// sees the same current document and computes the same content hash (11.38).
 pub fn parse_scene_document(bytes: &[u8]) -> Result<SceneDocument, Refusal> {
-    let raw: serde_json::Value =
+    let mut raw: serde_json::Value =
         serde_json::from_slice(bytes).map_err(|error| Refusal::SceneParseFailed {
             detail: error.to_string(),
         })?;
+    upgrade_scene_json(&mut raw)?;
     let document: SceneDocument =
         serde_json::from_value(raw.clone()).map_err(|error| Refusal::SceneParseFailed {
             detail: error.to_string(),
@@ -1587,6 +1603,42 @@ pub fn parse_scene_document(bytes: &[u8]) -> Result<SceneDocument, Refusal> {
         Some(path) => Err(Refusal::SceneUnknownField { path: path.clone() }),
         None => Ok(document),
     }
+}
+
+/// Bring an authored document up to [`SCENE_SCHEMA_VERSION`] before it is
+/// read. An upgrade adds what the newer schema requires and changes nothing
+/// an older document said, so it is lossless.
+///
+/// - Version 1 (before 11.39): every asset gains an empty provenance record.
+///   Nothing is inferred for it; an empty record is the honest answer for an
+///   asset nobody recorded.
+///
+/// Any other version refuses `SceneSchemaUnsupported`: a newer document read
+/// by an older build is exactly the case that must not render with what it
+/// added silently dropped. A missing or non-numeric version is left to the
+/// typed parse, which refuses it as `SceneParseFailed`.
+fn upgrade_scene_json(raw: &mut serde_json::Value) -> Result<(), Refusal> {
+    let Some(version) = raw.get("version").and_then(serde_json::Value::as_u64) else {
+        return Ok(());
+    };
+    if version == u64::from(SCENE_SCHEMA_VERSION) {
+        return Ok(());
+    }
+    if version != 1 {
+        return Err(Refusal::SceneSchemaUnsupported {
+            actual: u32::try_from(version).unwrap_or(u32::MAX),
+            supported: SCENE_SCHEMA_VERSION,
+        });
+    }
+    if let Some(assets) = raw.get_mut("assets").and_then(serde_json::Value::as_array_mut) {
+        for asset in assets.iter_mut().filter_map(serde_json::Value::as_object_mut) {
+            asset
+                .entry("provenance")
+                .or_insert_with(|| serde_json::json!({ "sources": [] }));
+        }
+    }
+    raw["version"] = serde_json::Value::from(SCENE_SCHEMA_VERSION);
+    Ok(())
 }
 
 /// Walk the authored JSON beside the schema's own serialisation, collecting
@@ -1767,7 +1819,7 @@ mod parse_tests {
         let document = SceneDocument {
             id: "scene_1".into(),
             name: "Catalogue".into(),
-            version: 1,
+            version: SCENE_SCHEMA_VERSION,
             revision: Some(Revision(2)),
             active_camera_id: None,
             canvas: SceneCanvas {
@@ -2035,7 +2087,7 @@ mod tests {
         SceneDocument {
             id: "scene_1".into(),
             name: "Lower Third".into(),
-            version: 1,
+            version: SCENE_SCHEMA_VERSION,
             revision: Some(Revision(3)),
             active_camera_id: None,
             canvas: SceneCanvas {
@@ -2054,6 +2106,7 @@ mod tests {
                 mime_type: Some("image/png".into()),
                 size_bytes: Some(1024),
                 status: Some(AssetAvailability::Ready),
+                provenance: AssetProvenance::default(),
             }],
             fonts: vec![],
             materials: vec![],

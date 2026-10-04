@@ -286,7 +286,7 @@ mod tests {
         SceneDocument {
             id: "scene_1".into(),
             name: "Lower Third".into(),
-            version: 1,
+            version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
             revision: Some(Revision(1)),
             active_camera_id: None,
             canvas: SceneCanvas {
@@ -322,6 +322,7 @@ mod tests {
             mime_type: Some("image/png".into()),
             size_bytes: Some(64),
             status: Some(AssetAvailability::Ready),
+            provenance: Default::default(),
         }
     }
 

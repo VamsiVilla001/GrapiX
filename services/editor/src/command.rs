@@ -1545,6 +1545,7 @@ mod tests {
             mime_type: Some("image/png".into()),
             size_bytes: None,
             status: None,
+            provenance: Default::default(),
         });
         let mut bar = ObjectBase::new("bar", "Bar");
         bar.width = 640.0;

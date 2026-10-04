@@ -676,6 +676,7 @@ mod tests {
             mime_type: Some("image/png".into()),
             size_bytes: Some(10),
             status: None,
+            provenance: Default::default(),
         });
         let mut base = ObjectBase::new("logo_1", "Logo");
         base.width = 100.0;

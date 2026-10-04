@@ -10,6 +10,8 @@
 use std::path::{Path, PathBuf};
 
 use gx_asset_plane::fonts::ingest::{FontDisposition, PreparedFontBatch, PreparedFontSource};
+use gx_asset_plane::import::{AssetDisposition, AssetImportRefusal, PreparedAssetBatch, PreparedAssetSource};
+use gx_contracts::provenance::{AssetApproval, AssetOrigin, AssetProvenance, LicenseClass, ProvenanceTool};
 use gx_asset_plane::{AssetRef, PreflightRequest, PreflightResponse, TransferState};
 use gx_contracts::animation::{
     ease_at, easing_control_points, AnimationSurface, CubicBezier, KeyframeChannel, SceneEasing,
@@ -161,6 +163,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         AssetKind,
         AssetAvailability,
         AssetLibraryItem,
+        // asset provenance (11.39)
+        AssetProvenance,
+        AssetOrigin,
+        LicenseClass,
+        ProvenanceTool,
+        AssetApproval,
         SceneCanvas,
         SceneTimeline,
         // gx-contracts: editable scene animation (11.20)
@@ -320,6 +328,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         PreparedFontBatch,
         PreparedFontSource,
         FontDisposition,
+        // gx-asset-plane: asset manager import (11.39)
+        PreparedAssetBatch,
+        PreparedAssetSource,
+        AssetDisposition,
+        AssetImportRefusal,
         // gx-media-plane
         ConsumerRole,
         MediaProfile,

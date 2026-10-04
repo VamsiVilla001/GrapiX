@@ -476,6 +476,7 @@ mod tests {
                     mime_type: Some("font/ttf".into()),
                     size_bytes: None,
                     status: None,
+                    provenance: Default::default(),
                 }),
                 _ => None,
             })
@@ -483,7 +484,7 @@ mod tests {
         SceneDocument {
             id: "text-scene".into(),
             name: "Text scene".into(),
-            version: 1,
+            version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
             revision: Some(Revision(1)),
             active_camera_id: None,
             canvas: SceneCanvas {

@@ -11,6 +11,7 @@ pub mod object_edit;
 pub mod bindings;
 pub mod material_edit;
 pub mod font_edit;
+pub mod asset_edit;
 pub mod authoring;
 pub mod control;
 pub mod auth;
@@ -24,6 +25,7 @@ pub mod mcp;
 pub mod package;
 pub mod platform;
 pub mod phases;
+pub mod provenance;
 pub mod scene;
 pub mod text_style;
 pub mod validate;
@@ -803,6 +805,23 @@ pub enum Refusal {
         objects: Vec<String>,
         text_styles: Vec<String>,
     },
+    /// A scene document declares a schema version this build cannot read.
+    /// Older versions it knows are upgraded on read; any other is refused,
+    /// because reading a newer document would silently drop what it added.
+    SceneSchemaUnsupported { actual: u32, supported: u32 },
+    /// An `addAssets` edit carries no assets. An empty add would only make an
+    /// undo entry that changes nothing.
+    AssetBatchEmpty,
+    /// An asset of this kind does not enter a scene through `addAssets`.
+    /// Fonts enter only with their definitions, through `addFonts`.
+    AssetKindNotAddable {
+        asset_id: String,
+        kind: crate::scene::AssetKind,
+    },
+    /// An imported file's bytes match no asset format the asset manager
+    /// reads. The extension is never consulted, so a renamed file is
+    /// refused rather than stored as the wrong kind.
+    AssetFormatUnrecognised { file: String },
 }
 
 impl std::fmt::Display for Refusal {
@@ -1323,6 +1342,18 @@ impl std::fmt::Display for Refusal {
                 }
                 write!(f, "font {font_id} is still used by {}", users.join("; "))
             }
+            Refusal::SceneSchemaUnsupported { actual, supported } => write!(
+                f,
+                "scene schema version {actual} is not readable by this build (it reads up to {supported})"
+            ),
+            Refusal::AssetBatchEmpty => f.write_str("asset add carries no assets"),
+            Refusal::AssetKindNotAddable { asset_id, kind } => write!(
+                f,
+                "asset {asset_id} is a {kind:?} asset, which does not enter a scene through addAssets"
+            ),
+            Refusal::AssetFormatUnrecognised { file } => {
+                write!(f, "{file} is not an image, SVG, video or 3D model file the asset manager reads")
+            }
         }
     }
 }
@@ -1768,6 +1799,10 @@ impl Refusal {
             Self::SceneAssetDuplicate { asset_id: "audit".into() },
             Self::FontUnknown { font_id: "audit".into() },
             Self::FontInUse { font_id: "audit".into(), objects: vec![], text_styles: vec![] },
+            Self::SceneSchemaUnsupported { actual: 99, supported: 2 },
+            Self::AssetBatchEmpty,
+            Self::AssetKindNotAddable { asset_id: "audit".into(), kind: crate::scene::AssetKind::Font },
+            Self::AssetFormatUnrecognised { file: "audit".into() },
         ]
     }
     pub const fn code_name(&self) -> &'static str {
@@ -1914,6 +1949,10 @@ impl Refusal {
             Self::SceneAssetDuplicate { .. } => "sceneAssetDuplicate",
             Self::FontUnknown { .. } => "fontUnknown",
             Self::FontInUse { .. } => "fontInUse",
+            Self::SceneSchemaUnsupported { .. } => "sceneSchemaUnsupported",
+            Self::AssetBatchEmpty => "assetBatchEmpty",
+            Self::AssetKindNotAddable { .. } => "assetKindNotAddable",
+            Self::AssetFormatUnrecognised { .. } => "assetFormatUnrecognised",
         }
     }
 }

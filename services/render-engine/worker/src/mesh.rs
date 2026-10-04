@@ -672,7 +672,7 @@ mod tests {
 
     fn document(objects: Vec<SceneObject>, materials: Vec<MaterialDefinition>) -> SceneDocument {
         SceneDocument {
-            id: "scene".to_string(), name: "mesh".to_string(), version: 1,
+            id: "scene".to_string(), name: "mesh".to_string(), version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
             revision: Some(Revision(1)), active_camera_id: None,
             canvas: SceneCanvas { width: 1920, height: 1080, frame_rate: RationalRate::P50 },
             timeline: SceneTimeline { duration_frames: 1, ..Default::default() }, data_context: Default::default(),
@@ -732,7 +732,7 @@ mod tests {
         element_mesh.model_asset_id = Some("model".to_string());
         element_mesh.material_elements = Some(vec!["body".to_string(), "trim".to_string()]);
         let mut scene = document(vec![object_mesh, SceneObject::Mesh(face_mesh), SceneObject::Mesh(element_mesh)], vec![material("mat")]);
-        scene.assets.push(gx_contracts::scene::AssetLibraryItem { asset_id: "model".to_string(), name: "model".to_string(), kind: AssetKind::Model, path: "must-not-be-read.gltf".to_string(), checksum: Some(hash.clone()), mime_type: Some("model/gltf+json".to_string()), size_bytes: None, status: None });
+        scene.assets.push(gx_contracts::scene::AssetLibraryItem { asset_id: "model".to_string(), name: "model".to_string(), kind: AssetKind::Model, path: "must-not-be-read.gltf".to_string(), checksum: Some(hash.clone()), mime_type: Some("model/gltf+json".to_string()), size_bytes: None, status: None, provenance: Default::default() });
         let prepared = prepare_meshes(&scene, &HashSet::from([hash.clone()]), &AssetBytes::from([(hash, gltf_bytes)]), &MaterialSupport::fixed_function()).expect("all three explicit assignment levels prepare");
         assert_eq!(prepared.meshes[0].materials[0].scope, MaterialAssignmentScope::Object);
         assert_eq!(prepared.meshes[1].materials.len(), 6);

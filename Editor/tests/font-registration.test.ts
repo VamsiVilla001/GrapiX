@@ -133,6 +133,7 @@ const asset = (assetId: string): AssetLibraryItem => ({
   path: `assets/fonts/${assetId}.woff2`,
   checksum: assetId.padEnd(64, "0"),
   status: "ready",
+  provenance: { sources: [] },
 });
 
 function loaderFor(bytes: Record<string, ArrayBuffer>, calls: string[]) {

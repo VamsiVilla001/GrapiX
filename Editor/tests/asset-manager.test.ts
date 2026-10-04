@@ -53,6 +53,11 @@ const ready = {
   path: "branding/logo.png",
   checksum: "a".repeat(64),
   status: "ready",
+  provenance: {
+    origin: "human",
+    tool: { name: "GrapiX asset import", version: "0.1.0" },
+    sources: ["logo.png"],
+  },
 };
 
 const importing = {
@@ -61,6 +66,7 @@ const importing = {
   kind: "svg",
   path: "graphics/lower-third.svg",
   status: "importing",
+  provenance: { sources: [] },
 };
 
 describe("asset manager library addresses", () => {
@@ -91,6 +97,19 @@ describe("asset manager library addresses", () => {
     const panel = assetManagerPanel(scene([], [ready]));
 
     expect(findNode(panel, "asset/logo/usage")!.value).toBe("used by no objects");
+  });
+});
+
+describe("asset provenance (11.39)", () => {
+  it("shows what an import recorded and never guesses what nobody did", () => {
+    const panel = assetManagerPanel(scene([], [ready, importing]));
+
+    expect(findNode(panel, "asset/logo/provenance/origin")!.value).toBe("human");
+    expect(findNode(panel, "asset/logo/provenance/tool")!.value).toBe("GrapiX asset import 0.1.0");
+    expect(findNode(panel, "asset/logo/provenance/sources")!.value).toBe("logo.png");
+    expect(findNode(panel, "asset/logo/provenance/approval")!.value).toBe("not approved");
+    expect(findNode(panel, "asset/lower-third/provenance/origin")!.value).toBe("not recorded");
+    expect(findNode(panel, "asset/lower-third/provenance/license-class")!.value).toBe("not recorded");
   });
 });
 

@@ -39,10 +39,11 @@ const SHELL_READ = [
   "cmd_scene_list", "cmd_scene_read", "cmd_take_page_list", "cmd_take_page_read",
   "cmd_font_bytes",
 ];
-/** Font ingest (11.13): writes only the content-addressed asset cache and
- *  returns a batch that reaches a scene as one `addFonts` edit. Held to the
- *  read rule: no authoring document or command parameter. */
-const SHELL_PREPARE = ["cmd_font_prepare_files", "cmd_font_prepare_link"];
+/** Font ingest (11.13) and asset import (11.39): write only the
+ *  content-addressed asset cache and return a batch that reaches a scene as
+ *  one `addFonts` or `addAssets` edit. Held to the read rule: no authoring
+ *  document or command parameter. */
+const SHELL_PREPARE = ["cmd_font_prepare_files", "cmd_font_prepare_link", "cmd_asset_prepare_files"];
 const SHELL_SURFACE = new Set([...SHELL_MUTATE, ...SHELL_READ, ...SHELL_PREPARE]);
 const READ_SURFACE = new Set([...SHELL_READ, ...SHELL_PREPARE]);
 

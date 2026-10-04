@@ -8,7 +8,7 @@
 
 use gx_contracts::animation::{SceneEasing, SceneKeyframe};
 use gx_contracts::command::{
-    parse_command, witness, AddFonts, ApplyPreset, CloseScene, CreateKeyframe, CreateObject,
+    parse_command, witness, AddAssets, AddFonts, ApplyPreset, CloseScene, CreateKeyframe, CreateObject,
     CreateProject, CreateScene, DeleteMaterial, DeleteScene, EditScene, EditorCommand,
     EditorModule, HistoryDirection, OpenScene, PresetPhase, RelinkMaterial, RemoveFont,
     ReplaceDataContext, SaveScene, SaveTakePage, SaveTarget, SceneEdit, SceneSource, SceneTarget,
@@ -653,6 +653,31 @@ fn drive_material_and_scene_refusals(report: &mut Report, workspace: &mut Worksp
         expect(
             matches!(&refusal, Some(Refusal::SceneAssetDuplicate { asset_id }) if asset_id == "asset1") && unchanged,
             format!("expected asset1 duplicate, got {refusal:?} (unchanged: {unchanged})"),
+        ),
+    );
+
+    // Imported assets enter only through addAssets (11.39); fonts never do.
+    let (refusal, unchanged) = edit(workspace, session, SceneEdit::AddAssets(AddAssets { assets: Vec::new() }));
+    report.record(
+        PLANE,
+        "AssetBatchEmpty is produced for adding no assets",
+        expect(
+            matches!(&refusal, Some(Refusal::AssetBatchEmpty)) && unchanged,
+            format!("expected an empty asset add to refuse, got {refusal:?} (unchanged: {unchanged})"),
+        ),
+    );
+
+    let mut font_asset = witness::fixture_scene().assets[0].clone();
+    font_asset.asset_id = "font-bytes".into();
+    font_asset.kind = gx_contracts::scene::AssetKind::Font;
+    let (refusal, unchanged) = edit(workspace, session, SceneEdit::AddAssets(AddAssets { assets: vec![font_asset] }));
+    report.record(
+        PLANE,
+        "AssetKindNotAddable is produced for adding a font asset without its font",
+        expect(
+            matches!(&refusal, Some(Refusal::AssetKindNotAddable { asset_id, kind: gx_contracts::scene::AssetKind::Font }) if asset_id == "font-bytes")
+                && unchanged,
+            format!("expected a font asset to be refused, got {refusal:?} (unchanged: {unchanged})"),
         ),
     );
 

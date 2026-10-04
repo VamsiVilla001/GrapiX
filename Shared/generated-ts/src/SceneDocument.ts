@@ -17,7 +17,9 @@ import type { TextStyle } from "./TextStyle";
  */
 export type SceneDocument = { id: string, name: string, 
 /**
- * Schema version. A reader refuses a version it does not know by name.
+ * Schema version: [`SCENE_SCHEMA_VERSION`] when this build writes it.
+ * The reader upgrades an older version it knows and refuses any other
+ * by name (`SceneSchemaUnsupported`).
  */
 version: number, 
 /**

@@ -988,7 +988,7 @@ mod tests {
         SceneDocument {
             id: "motion".into(),
             name: "Motion".into(),
-            version: 1,
+            version: crate::scene::SCENE_SCHEMA_VERSION,
             revision: Some(Revision(1)),
             active_camera_id: None,
             canvas: SceneCanvas {

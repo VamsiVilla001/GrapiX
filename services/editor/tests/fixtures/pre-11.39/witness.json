@@ -1,0 +1,205 @@
+{
+  "id": "witness",
+  "name": "Witness",
+  "version": 1,
+  "canvas": {
+    "width": 1920,
+    "height": 1080,
+    "frameRate": {
+      "num": 50,
+      "den": 1
+    }
+  },
+  "timeline": {
+    "durationFrames": 100,
+    "channels": [],
+    "phases": []
+  },
+  "dataContext": {
+    "headline": 1.0
+  },
+  "assets": [
+    {
+      "assetId": "asset1",
+      "name": "Asset",
+      "kind": "image",
+      "path": "asset.png",
+      "checksum": "old",
+      "sizeBytes": 1
+    },
+    {
+      "assetId": "added-font-asset",
+      "name": "Added",
+      "kind": "font",
+      "path": "assets/fonts/added.woff2",
+      "checksum": "added",
+      "mimeType": "font/woff2",
+      "sizeBytes": 1
+    },
+    {
+      "assetId": "clip",
+      "name": "Clip",
+      "kind": "video",
+      "path": "assets/video/clip.mp4",
+      "checksum": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "mimeType": "video/mp4",
+      "sizeBytes": 4096,
+      "status": "ready"
+    }
+  ],
+  "fonts": [
+    {
+      "fontId": "font",
+      "family": "Witness",
+      "displayName": "Witness",
+      "faces": [],
+      "fallbackFamilies": [],
+      "embeddingPolicy": "package",
+      "license": "OFL",
+      "enabled": true,
+      "status": "Ready"
+    },
+    {
+      "fontId": "added-font",
+      "family": "Added",
+      "displayName": "Added",
+      "faces": [
+        {
+          "faceId": "added-face",
+          "family": "Added",
+          "weight": 400,
+          "style": "normal",
+          "source": {
+            "kind": "file",
+            "assetId": "added-font-asset",
+            "format": "woff2"
+          }
+        }
+      ],
+      "fallbackFamilies": [],
+      "embeddingPolicy": "package",
+      "license": "OFL",
+      "enabled": true,
+      "status": "Ready"
+    }
+  ],
+  "materials": [
+    {
+      "materialId": "m1",
+      "name": "m1",
+      "kind": "pbr",
+      "color": {
+        "type": "solid",
+        "color": {
+          "r": 1.0,
+          "g": 1.0,
+          "b": 1.0,
+          "a": 1.0,
+          "space": "srgb"
+        }
+      },
+      "opacity": 1.0,
+      "blendMode": "normal",
+      "alphaMode": "straight",
+      "cullMode": "back",
+      "depthMode": "read-write",
+      "doubleSided": false,
+      "textures": []
+    },
+    {
+      "materialId": "m2",
+      "name": "m2",
+      "kind": "pbr",
+      "color": {
+        "type": "solid",
+        "color": {
+          "r": 1.0,
+          "g": 1.0,
+          "b": 1.0,
+          "a": 1.0,
+          "space": "srgb"
+        }
+      },
+      "opacity": 1.0,
+      "blendMode": "normal",
+      "alphaMode": "straight",
+      "cullMode": "back",
+      "depthMode": "read-write",
+      "doubleSided": false,
+      "textures": []
+    }
+  ],
+  "controls": [],
+  "textStyles": [],
+  "objects": [
+    {
+      "type": "rect",
+      "id": "card",
+      "name": "Card",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "x": 0.0,
+      "y": 0.0,
+      "zDepth": 0.0,
+      "zIndex": 0,
+      "layerId": "",
+      "width": 0.0,
+      "height": 0.0,
+      "rotation": 0.0,
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "strokeWidth": 0.0,
+      "materialSlots": {
+        "fill": {
+          "materialId": "m1"
+        }
+      },
+      "radius": 0.0
+    },
+    {
+      "type": "text",
+      "id": "text",
+      "name": "Text",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "x": 0.0,
+      "y": 0.0,
+      "zDepth": 0.0,
+      "zIndex": 0,
+      "layerId": "",
+      "width": 0.0,
+      "height": 0.0,
+      "rotation": 0.0,
+      "rotationX": 0.0,
+      "rotationY": 0.0,
+      "scaleX": 1.0,
+      "scaleY": 1.0,
+      "scaleZ": 1.0,
+      "strokeWidth": 0.0,
+      "text": "Witness",
+      "fontId": "font",
+      "size": 24.0,
+      "layout": "point",
+      "autoFit": "none",
+      "writingMode": "horizontal-tb",
+      "verticalAlign": "top",
+      "direction": "auto",
+      "textCase": "original",
+      "decoration": {
+        "underline": false,
+        "strikethrough": false
+      },
+      "overflow": "visible",
+      "align": "left",
+      "letterSpacing": 0.0,
+      "wordSpacing": 0.0,
+      "paragraphSpacing": 0.0,
+      "textIndent": 0.0
+    }
+  ]
+}

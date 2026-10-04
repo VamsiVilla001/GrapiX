@@ -281,7 +281,7 @@ mod tests {
         SceneDocument {
             id: "scene".into(),
             name: "Style test".into(),
-            version: 1,
+            version: crate::scene::SCENE_SCHEMA_VERSION,
             revision: Some(Revision(1)),
             active_camera_id: None,
             canvas: SceneCanvas {

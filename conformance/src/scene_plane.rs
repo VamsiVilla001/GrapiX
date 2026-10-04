@@ -69,7 +69,7 @@ fn populated_scene(id: &str, asset: Option<ContentHash>) -> SceneDocument {
     SceneDocument {
         id: id.to_owned(),
         name: "Conformance scene".to_owned(),
-        version: 1,
+        version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
         revision: None,
         active_camera_id: None,
         canvas: SceneCanvas {
@@ -102,6 +102,7 @@ fn populated_scene(id: &str, asset: Option<ContentHash>) -> SceneDocument {
                 mime_type: Some("image/png".to_owned()),
                 size_bytes: Some(2048),
                 status: None,
+                provenance: Default::default(),
             })
             .into_iter()
             .collect(),

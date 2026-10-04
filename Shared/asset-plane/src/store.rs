@@ -473,6 +473,7 @@ mod tests {
             mime_type: Some("image/png".into()),
             size_bytes: None,
             status: Some(AssetAvailability::Importing),
+            provenance: Default::default(),
         }
     }
 

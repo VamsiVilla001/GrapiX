@@ -4,6 +4,21 @@
   "$id": "urn:grapix:schema:SceneEdit",
   "title": "SceneEdit",
   "$defs": {
+    "AddAssets": {
+      "description": "Add imported assets with the provenance their import filled in\n(11.39). The only way a non-font asset enters a scene.",
+      "properties": {
+        "assets": {
+          "items": {
+            "$ref": "#/$defs/AssetLibraryItem"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "assets"
+      ],
+      "type": "object"
+    },
     "AddFonts": {
       "description": "Add prepared fonts and the font assets their faces need (11.13).\nThe only way a font enters a scene.",
       "properties": {
@@ -64,6 +79,24 @@
       "required": [
         "objectId",
         "styleId"
+      ],
+      "type": "object"
+    },
+    "AssetApproval": {
+      "description": "A named person's approval of an asset for use.",
+      "properties": {
+        "at": {
+          "description": "When they approved, as an RFC 3339 UTC timestamp. Authoring metadata\nonly: nothing on the render path reads it (invariant 8).",
+          "type": "string"
+        },
+        "user": {
+          "description": "The approving user, as the authorization layer names them (2.9).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "user",
+        "at"
       ],
       "type": "object"
     },
@@ -132,6 +165,13 @@
           "description": "Project-relative path — the library address.",
           "type": "string"
         },
+        "provenance": {
+          "$ref": "#/$defs/AssetProvenance",
+          "default": {
+            "sources": []
+          },
+          "description": "Where the bytes came from and under what terms (11.39). Every record\ncarries one, and it is always written: a human-made asset may leave\nevery field empty, but the schema is present in every saved project."
+        },
         "sizeBytes": {
           "format": "uint64",
           "minimum": 0,
@@ -157,6 +197,105 @@
         "kind",
         "path"
       ],
+      "type": "object"
+    },
+    "AssetOrigin": {
+      "description": "Who or what produced an asset's content.",
+      "oneOf": [
+        {
+          "const": "human",
+          "description": "A person made it, including a file a person brought into the project.",
+          "type": "string"
+        },
+        {
+          "const": "tool",
+          "description": "A deterministic tool derived it from other inputs: a conversion, an\nexport or a render.",
+          "type": "string"
+        },
+        {
+          "const": "model",
+          "description": "A generative model produced it.",
+          "type": "string"
+        }
+      ]
+    },
+    "AssetProvenance": {
+      "description": "Where an asset's bytes came from and under what terms.",
+      "properties": {
+        "approval": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AssetApproval"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "c2paManifest": {
+          "description": "An attached C2PA manifest: a project-relative path or a URI.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "licenseClass": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LicenseClass"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AssetOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "promptHash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContentHash"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "SHA-256 of the prompt a model was given. The prompt text is not\nstored with the asset."
+        },
+        "provider": {
+          "description": "Who supplied the bytes: a font service, a stock library, a model\nvendor.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sources": {
+          "default": [],
+          "description": "What the asset was made or fetched from: file names, URLs, the content\nhashes of input assets. Always written, so the field is visible in a\nsaved project even when it is empty.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tool": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProvenanceTool"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
       "type": "object"
     },
     "ColorValue": {
@@ -912,6 +1051,46 @@
       ],
       "type": "object"
     },
+    "LicenseClass": {
+      "description": "The terms an asset may be used under, as a class a show profile can test\n(13.8) rather than free licence text.",
+      "oneOf": [
+        {
+          "const": "owned",
+          "description": "Made by or for the production, which holds the rights.",
+          "type": "string"
+        },
+        {
+          "const": "commercial",
+          "description": "Third-party, licensed for commercial broadcast.",
+          "type": "string"
+        },
+        {
+          "const": "permissive",
+          "description": "An open licence that permits commercial use: OFL, CC0, CC BY,\nApache-2.0, MIT.",
+          "type": "string"
+        },
+        {
+          "const": "copyleft",
+          "description": "GPL-class: obligations attach when it is redistributed.",
+          "type": "string"
+        },
+        {
+          "const": "nonCommercial",
+          "description": "Licensed for non-commercial use only, such as CC BY-NC.",
+          "type": "string"
+        },
+        {
+          "const": "editorial",
+          "description": "Licensed for editorial or news use only.",
+          "type": "string"
+        },
+        {
+          "const": "restricted",
+          "description": "Limited by territory, term or medium.",
+          "type": "string"
+        }
+      ]
+    },
     "MoveKeyframe": {
       "properties": {
         "fromFrame": {
@@ -1149,6 +1328,24 @@
         "out"
       ],
       "type": "string"
+    },
+    "ProvenanceTool": {
+      "description": "The tool, or for model origin the model, that made or imported the bytes.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
     },
     "RelinkAsset": {
       "description": "Point a library asset at new bytes, keeping its id and bindings.",
@@ -2049,6 +2246,19 @@
       "properties": {
         "edit": {
           "const": "removeFont",
+          "type": "string"
+        }
+      },
+      "required": [
+        "edit"
+      ],
+      "type": "object"
+    },
+    {
+      "$ref": "#/$defs/AddAssets",
+      "properties": {
+        "edit": {
+          "const": "addAssets",
           "type": "string"
         }
       },

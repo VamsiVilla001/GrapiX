@@ -273,7 +273,7 @@ mod tests {
         SceneDocument {
             id: "rasterise-test".into(),
             name: "Rasterise test".into(),
-            version: 1,
+            version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
             revision: None,
             active_camera_id: None,
             canvas: SceneCanvas {

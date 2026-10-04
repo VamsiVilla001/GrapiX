@@ -277,7 +277,11 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
     "fontDuplicate",
     "sceneAssetDuplicate",
     "fontUnknown",
-    "fontInUse"
+    "fontInUse",
+    "sceneSchemaUnsupported",
+    "assetBatchEmpty",
+    "assetKindNotAddable",
+    "assetFormatUnrecognised"
   ],
   "tools": [
     {

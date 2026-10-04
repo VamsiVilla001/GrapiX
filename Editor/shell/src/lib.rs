@@ -39,6 +39,7 @@ use gx_asset_plane::fonts::ingest::{
 };
 use gx_asset_plane::fonts::link::{prepare_font_link, UreqFontFetcher};
 use gx_asset_plane::fonts::manager::LinkedSource;
+use gx_asset_plane::import::{prepare_asset_files, AssetFileInput, PreparedAssetBatch};
 use gx_asset_plane::{content_hash, publish_scene, AssetStore, PublishClientError, PublishRefusal, PublishReply};
 use gx_contracts::animation::{animation_surface, validate_scene_animation, AnimationSurface};
 use gx_contracts::command::{
@@ -574,6 +575,49 @@ fn cmd_font_prepare_link(
     })
 }
 
+/// Import the image, SVG, video and 3D model files the author picked into
+/// the asset cache (11.39). Like font ingest it never touches the scene: the
+/// batch, each asset already carrying the provenance the import filled in,
+/// reaches the document as one `addAssets` edit through `cmd_execute`. All or
+/// nothing; a file whose bytes are no format the asset manager reads refuses
+/// the batch by that file's name.
+#[tauri::command]
+fn cmd_asset_prepare_files(
+    state: tauri::State<'_, ShellState>,
+    target: SceneTarget,
+    paths: Vec<String>,
+) -> Result<PreparedAssetBatch, EditorError> {
+    let scene = state
+        .workspace()
+        .document(&target)
+        .map_err(|error| command_error(error, None))?
+        .into_owned();
+    let mut files = Vec::with_capacity(paths.len());
+    for path in &paths {
+        let bytes = std::fs::read(path).map_err(|error| EditorError::ReadFile {
+            path: path.clone(),
+            detail: error.to_string(),
+        })?;
+        let name = std::path::Path::new(path)
+            .file_name()
+            .map_or_else(|| path.clone(), |name| name.to_string_lossy().into_owned());
+        files.push((name, bytes));
+    }
+    let inputs: Vec<AssetFileInput<'_>> = files
+        .iter()
+        .map(|(file_name, bytes)| AssetFileInput {
+            file_name: file_name.clone(),
+            bytes,
+        })
+        .collect();
+    state.with_asset_store(|store| {
+        prepare_asset_files(store, &scene.assets, &inputs).map_err(|refusal| EditorError::CommandRefused {
+            detail: refusal.to_string(),
+            cause: refusal.refusal,
+        })
+    })
+}
+
 /// What the author typed: an Adobe kit URL or bare kit id becomes an Adobe
 /// Fonts link, anything else a stylesheet URL. `canonical_link_source` then
 /// refuses whatever is not a trusted host or a valid kit id, by name.
@@ -640,6 +684,7 @@ pub fn run() {
             cmd_font_prepare_files,
             cmd_font_prepare_link,
             cmd_font_bytes,
+            cmd_asset_prepare_files,
         ])
         .run(tauri::generate_context!())
         .expect("the Editor shell failed to start");

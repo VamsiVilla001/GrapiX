@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use gx_contracts::font::{EmbeddingPolicy, FontDefinition, FontFormat};
+use gx_contracts::provenance::{AssetOrigin, AssetProvenance, ProvenanceTool};
 use gx_contracts::scene::{AssetAvailability, AssetKind, AssetLibraryItem};
 use gx_contracts::{ContentHash, Refusal};
 use serde::{Deserialize, Serialize};
@@ -29,6 +30,9 @@ use super::container::verify_font_file;
 use super::manager::{create_file_font_definition, FileFontOptions};
 use super::validate::validate_font_definition;
 use crate::store::{content_hash, AssetStore};
+
+/// The tool a font file import records in each asset's provenance (11.39).
+pub const FONT_FILE_IMPORT_TOOL: &str = "GrapiX font file import";
 
 /// One font file to ingest, with the licensing decision made for it.
 #[derive(Debug, Clone)]
@@ -133,6 +137,15 @@ pub fn prepare_font_files(
             verified.format,
             &file.file_name,
             file.bytes.len(),
+            AssetProvenance {
+                origin: Some(AssetOrigin::Human),
+                tool: Some(ProvenanceTool {
+                    name: FONT_FILE_IMPORT_TOOL.into(),
+                    version: Some(env!("CARGO_PKG_VERSION").into()),
+                }),
+                sources: vec![file.file_name.clone()],
+                ..AssetProvenance::default()
+            },
         );
         let declared = file
             .license
@@ -179,6 +192,7 @@ pub(crate) fn font_asset_item(
     format: FontFormat,
     name: &str,
     size_bytes: usize,
+    provenance: AssetProvenance,
 ) -> AssetLibraryItem {
     let identity: String = hash.0.chars().take(16).collect();
     let (extension, mime) = match format {
@@ -196,6 +210,7 @@ pub(crate) fn font_asset_item(
         mime_type: Some(mime.to_string()),
         size_bytes: Some(size_bytes as u64),
         status: Some(AssetAvailability::Ready),
+        provenance,
     }
 }
 
@@ -537,6 +552,7 @@ mod tests {
             FontFormat::Ttf,
             "Inter.ttf",
             TTF.len(),
+            AssetProvenance::default(),
         );
         impostor.checksum = Some(content_hash(b"other bytes"));
         let scene = SceneFontLibrary {

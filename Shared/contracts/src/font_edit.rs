@@ -142,6 +142,7 @@ mod tests {
             mime_type: Some("font/woff2".into()),
             size_bytes: Some(10),
             status: None,
+            provenance: crate::provenance::AssetProvenance::default(),
         }
     }
 

@@ -25,7 +25,7 @@ use gx_contracts::package::{
     package_path_components, PackageFileEntry, PackageManifest, MANIFEST_PATH,
     PACKAGE_FORMAT_VERSION, SCENE_PATH,
 };
-use gx_contracts::scene::SceneDocument;
+use gx_contracts::scene::{parse_scene_document, SceneDocument};
 use gx_contracts::{ContentHash, Refusal};
 use gx_fs::AtomicWriteError;
 #[cfg(test)]
@@ -237,11 +237,10 @@ pub fn read_package(path: &Path) -> Result<VerifiedPackage, PackageError> {
         .ok_or_else(|| Refusal::PackageEntryMissing {
             path: SCENE_PATH.into(),
         })?;
-    let scene: SceneDocument = serde_json::from_slice(scene_bytes).map_err(|error| {
-        PackageError::ManifestDeserialization {
-            detail: format!("{SCENE_PATH}: {error}"),
-        }
-    })?;
+    // The one scene reader (invariant 45): it refuses unknown fields by name
+    // and upgrades an older schema, so a package scene hashes the same here,
+    // in Playout's library and in the engine (11.38, 11.39).
+    let scene = parse_scene_document(scene_bytes)?;
     verify_scene_pin(&manifest, &scene)?;
 
     Ok(VerifiedPackage {
@@ -436,7 +435,7 @@ mod tests {
         SceneDocument {
             id: "scene-1".into(),
             name: "Package test".into(),
-            version: 1,
+            version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
             revision: Some(Revision(4)),
             active_camera_id: None,
             canvas: SceneCanvas {
@@ -455,6 +454,7 @@ mod tests {
                 mime_type: Some("application/octet-stream".into()),
                 size_bytes: Some(4),
                 status: Some(AssetAvailability::Ready),
+                provenance: Default::default(),
             }],
             fonts: Vec::new(),
             materials: Vec::new(),

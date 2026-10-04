@@ -53,7 +53,7 @@ fn scene(id: &str) -> gx_contracts::scene::SceneDocument {
     gx_contracts::scene::SceneDocument {
         id: id.into(),
         name: id.into(),
-        version: 1,
+        version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
         revision: Some(gx_contracts::Revision(1)),
         active_camera_id: None,
         canvas: gx_contracts::scene::SceneCanvas {

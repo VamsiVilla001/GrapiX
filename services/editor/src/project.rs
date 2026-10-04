@@ -307,7 +307,8 @@ fn require_component(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gx_contracts::scene::{SceneCanvas, SceneTimeline};
+    use gx_contracts::provenance::{AssetApproval, AssetOrigin, AssetProvenance, LicenseClass, ProvenanceTool};
+    use gx_contracts::scene::{AssetKind, AssetLibraryItem, SceneCanvas, SceneTimeline};
     use gx_contracts::{RationalRate, Revision};
 
     fn scratch(label: &str) -> PathBuf {
@@ -324,7 +325,7 @@ mod tests {
         SceneDocument {
             id: id.into(),
             name: id.into(),
-            version: 1,
+            version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
             revision: Some(Revision(1)),
             active_camera_id: None,
             canvas: SceneCanvas {
@@ -485,6 +486,106 @@ mod tests {
             Err(EditorError::Refused(Refusal::TakePageIdInvalid { .. }))
         ));
         assert!(!root.join("outside").join("scenes").join("escape.json").exists());
+
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    /// 11.39's migration. The fixture is a scene exactly as the Editor saved
+    /// it before provenance existed (written by the pre-11.39 build): it reads
+    /// at the current schema, every asset gains an empty provenance record,
+    /// nothing else changes, and once saved it reloads byte-for-byte.
+    #[test]
+    fn a_project_saved_before_provenance_upgrades_losslessly() {
+        const FIXTURE: &[u8] = include_bytes!("../tests/fixtures/pre-11.39/witness.json");
+        let root = scratch("pre-11.39");
+        let projects = Projects::at_root(&root);
+        projects.create_project("legacy").unwrap();
+        let path = root.join("legacy").join("scenes").join("witness.json");
+        std::fs::write(&path, FIXTURE).unwrap();
+
+        let upgraded = projects.read_scene("legacy", "witness").expect("a version 1 scene reads");
+        let original: serde_json::Value = serde_json::from_slice(FIXTURE).unwrap();
+        assert_eq!(original["version"], 1, "the fixture predates 11.39");
+        assert_eq!(upgraded.version, gx_contracts::scene::SCENE_SCHEMA_VERSION);
+        assert_eq!(upgraded.assets.len(), 3);
+        assert!(upgraded.assets.iter().all(|asset| asset.provenance == AssetProvenance::default()));
+
+        // Take away exactly what the upgrade adds; what remains is the
+        // original, value for value.
+        let mut after = serde_json::to_value(&upgraded).unwrap();
+        after["version"] = original["version"].clone();
+        for asset in after["assets"].as_array_mut().unwrap() {
+            asset.as_object_mut().unwrap().remove("provenance");
+        }
+        assert_eq!(after, original, "the upgrade changed something the document stated");
+
+        projects.write_scene("legacy", &upgraded).unwrap();
+        let saved = std::fs::read(&path).unwrap();
+        let reread = projects.read_scene("legacy", "witness").unwrap();
+        assert_eq!(reread, upgraded);
+        projects.write_scene("legacy", &reread).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
+
+        // A scene from a newer build is refused by name, never read with
+        // whatever it added dropped.
+        let mut newer = original;
+        newer["version"] = serde_json::json!(3);
+        std::fs::write(&path, serde_json::to_vec(&newer).unwrap()).unwrap();
+        assert!(matches!(
+            projects.read_scene("legacy", "witness"),
+            Err(EditorError::Refused(Refusal::SceneSchemaUnsupported { actual: 3, supported: 2 }))
+        ));
+
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn every_provenance_field_survives_save_and_reload_byte_for_byte() {
+        let provenance = AssetProvenance {
+            origin: Some(AssetOrigin::Model),
+            tool: Some(ProvenanceTool {
+                name: "Generator".into(),
+                version: Some("2.1".into()),
+            }),
+            provider: Some("Model vendor".into()),
+            license_class: Some(LicenseClass::NonCommercial),
+            prompt_hash: Some(gx_contracts::ContentHash("b".repeat(64))),
+            sources: vec!["https://example.com/reference.png".into(), "asset_images_0123".into()],
+            approval: Some(AssetApproval {
+                user: "producer@example.com".into(),
+                at: "2026-10-04T09:30:00Z".into(),
+            }),
+            c2pa_manifest: Some("assets/c2pa/backdrop.c2pa".into()),
+        };
+        let mut document = scene("generated");
+        document.assets.push(AssetLibraryItem {
+            asset_id: "backdrop".into(),
+            name: "Backdrop".into(),
+            kind: AssetKind::Image,
+            path: "assets/images/backdrop.png".into(),
+            checksum: Some(gx_contracts::ContentHash("c".repeat(64))),
+            mime_type: Some("image/png".into()),
+            size_bytes: Some(2048),
+            status: None,
+            provenance: provenance.clone(),
+        });
+        let root = scratch("provenance-round-trip");
+        let projects = Projects::at_root(&root);
+        projects.create_project("news").unwrap();
+        let path = root.join("news").join("scenes").join("generated.json");
+
+        projects.write_scene("news", &document).unwrap();
+        let saved = std::fs::read(&path).unwrap();
+        let reread = projects.read_scene("news", "generated").unwrap();
+        assert_eq!(reread.assets[0].provenance, provenance);
+        projects.write_scene("news", &reread).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
+
+        let written: serde_json::Value = serde_json::from_slice(&saved).unwrap();
+        let record = &written["assets"][0]["provenance"];
+        for field in ["origin", "tool", "provider", "licenseClass", "promptHash", "sources", "approval", "c2paManifest"] {
+            assert!(record.get(field).is_some(), "the saved record names {field}");
+        }
 
         std::fs::remove_dir_all(root).expect("clean up");
     }

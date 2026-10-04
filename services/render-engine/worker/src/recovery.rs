@@ -21,8 +21,11 @@ use gx_contracts::{ContentHash, Epoch, Refusal, Revision, TakeId};
 use gx_control_plane::status::ProgramState;
 use serde::{Deserialize, Serialize};
 
-/// The only journal schema this worker understands.
-pub const RECOVERY_SCHEMA_VERSION: u32 = 2;
+/// The only journal schema this worker understands. Version 3 carries scene
+/// schema 2 documents (11.39): the pinned hashes in a version 2 journal were
+/// taken over scene schema 1, so its prepared scenes would no longer match
+/// them, and it is refused by version rather than by hash.
+pub const RECOVERY_SCHEMA_VERSION: u32 = 3;
 
 /// The journal's standard location beneath the operating-system service root.
 pub const RECOVERY_JOURNAL_RELATIVE_PATH: &str = "render-engine/recovery.json";

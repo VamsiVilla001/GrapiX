@@ -29,6 +29,7 @@ import type {
   SceneEasing,
   SceneEdit,
   SceneKeyframe,
+  PreparedAssetBatch,
   PreparedFontBatch,
   SceneTarget,
   SessionView,
@@ -67,7 +68,7 @@ import {
   materialManagerPanel,
   usersOf,
 } from "../src/material-manager";
-import { assetManagerPanel, assetUsers } from "../src/asset-manager";
+import { ASSET_FILE_EXTENSIONS, assetManagerPanel, assetUsers } from "../src/asset-manager";
 import { textStylePanel, textStyleUsers } from "../src/text-style";
 import {
   sceneManagerPanel,
@@ -363,6 +364,9 @@ const fontRegistry = new FontRegistry(browserFontEnvironment(), async (asset) =>
 });
 let selectedMaterialId: string | undefined;
 let selectedAssetId: string | undefined;
+/// Asset import state (11.39), shown in the Assets panel.
+let assetImporting = false;
+let assetNotice: string | undefined;
 let takePageState: TakePageState = EMPTY_TAKE_PAGE_STATE;
 let takePagePreviewDocument: SceneDocument | null = null;
 let controlProperties: readonly ControlProperty[] | undefined;
@@ -1035,10 +1039,11 @@ function renderPanels(document_: SceneDocument): void {
   );
   ui.materialMount.replaceChildren(renderNode(document, materials) as unknown as Node);
   ui.assetEmpty.hidden = document_.assets.length > 0;
-  const assets = assetManagerPanel(
-    document_,
-    selectedAssetId === undefined ? {} : { selectedAssetId },
-  );
+  const assets = assetManagerPanel(document_, {
+    ...(selectedAssetId === undefined ? {} : { selectedAssetId }),
+    ...(assetImporting ? { importing: true } : {}),
+    ...(assetNotice === undefined ? {} : { notice: assetNotice }),
+  });
   ui.assetMount.replaceChildren(renderNode(document, assets) as unknown as Node);
   renderTakePagePanel(document_);
 
@@ -2760,6 +2765,11 @@ function onAssetManagerClick(event: MouseEvent): void {
   if (!scene) return;
   const target = event.target;
   if (!(target instanceof Element)) return;
+  const button = target.closest<HTMLButtonElement>("button[data-action][data-for]");
+  if (button?.dataset.for === "asset-manager") {
+    if (button.dataset.action === "importFiles" && !button.disabled) void importAssetFiles();
+    return;
+  }
   const row = target.closest<HTMLLIElement>('li[role="listitem"][id^="asset/"]');
   const asset = scene.assets.find((candidate) => `asset/${candidate.assetId}` === row?.id);
   if (!asset) return;
@@ -2773,6 +2783,58 @@ function onAssetManagerClick(event: MouseEvent): void {
       ? `Asset ${asset.name} is used by no objects.`
       : `Asset ${asset.name} is used by object(s): ${users.join(", ")}.`,
   );
+}
+
+/// Import image, SVG, video and 3D model files (11.39). The shell classifies
+/// each file by its bytes, caches it by content hash and fills in its
+/// provenance; the batch lands as one `addAssets` edit, so one import is one
+/// undo entry. The same file imported again is reported, not added twice.
+async function importAssetFiles(): Promise<void> {
+  const session = activeSession(workspace);
+  if (!session || assetImporting) return;
+  let paths: string[];
+  try {
+    const picked = await tauri?.dialog?.open({
+      multiple: true,
+      filters: [{ name: "Images, SVG, video and 3D models", extensions: ASSET_FILE_EXTENSIONS }],
+    });
+    paths = picked === null || picked === undefined ? [] : Array.isArray(picked) ? picked : [picked];
+  } catch (error) {
+    log(describe(error), "bad");
+    return;
+  }
+  if (paths.length === 0) return;
+  assetImporting = true;
+  assetNotice = `Importing ${paths.length} file(s)…`;
+  if (scene) renderPanels(scene);
+  try {
+    const batch = await shell().invoke<PreparedAssetBatch>("cmd_asset_prepare_files", {
+      target: { target: "session", session: session.key },
+      paths,
+    });
+    const skipped = batch.sources
+      .filter((source) => source.disposition.kind !== "added")
+      .map((source) =>
+        source.disposition.kind === "duplicateInBatch"
+          ? `${source.source} (same file as ${source.disposition.firstSource})`
+          : `${source.source} (already in this scene as ${source.assetId})`,
+      );
+    const skippedNote = skipped.length === 0 ? "" : `; skipped ${skipped.join(", ")}`;
+    if (batch.assets.length === 0) {
+      assetNotice = `Nothing added${skippedNote}`;
+      log(assetNotice);
+      return;
+    }
+    const added = `Imported ${batch.assets.length} asset(s): ${batch.assets.map((asset) => asset.name).join(", ")}`;
+    const outcome = await runEdits([{ edit: "addAssets", assets: batch.assets }], added, "assets");
+    assetNotice = outcome ? `${added}${skippedNote}` : undefined;
+  } catch (error) {
+    assetNotice = `Asset import refused: ${describe(error)}`;
+    log(assetNotice, "bad");
+  } finally {
+    assetImporting = false;
+    if (scene) renderPanels(scene);
+  }
 }
 
 function onBindingsClick(event: MouseEvent): void {
