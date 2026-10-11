@@ -28,7 +28,7 @@ import { basename, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const SKIPPED_DIRECTORIES = ["node_modules", "target", "dist", ".git", ".claude", "bindings"];
+const SKIPPED_DIRECTORIES = ["node_modules", "target", "dist", ".git", ".claude", "agent", "legacy", "bindings"];
 
 /** The one mutating Tauri command and the pure reads (spec 11.36 §4.4). */
 const SHELL_MUTATE = ["cmd_execute"];

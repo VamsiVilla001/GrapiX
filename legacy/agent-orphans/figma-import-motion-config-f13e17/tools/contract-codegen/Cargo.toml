@@ -1,0 +1,13 @@
+[package]
+name = "gx-contract-codegen"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+gx-contracts = { workspace = true }
+gx-control-plane = { workspace = true }
+gx-asset-plane = { workspace = true }
+gx-media-plane = { workspace = true }
+ts-rs = { workspace = true }

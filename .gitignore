@@ -25,8 +25,20 @@ Editor/web/main.js.map
 .DS_Store
 *.log
 
-# Agent worktrees
-.claude/worktrees/
+# One shared agent worktree; private settings and local preservation data.
+/agent/worktree/
+/agent/archive/
+/agent/tmp/
+/agent/reference/
+/agent/config/claude.local.json
+/agent/config/claude-launch.json
+
+# Prevent provider-generated workspaces and temporary captures returning.
+/.claude/
+/.codex/
+/.omp/
+.tmp*
+*.tmp
 
 # Third-party source checkouts kept for study (e.g. reference/effectcraft).
 # Anything taken from them is copied into the tree with attribution; the

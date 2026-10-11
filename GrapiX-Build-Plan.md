@@ -16,7 +16,7 @@ automatable before it is clickable.
 
 ---
 
-**236 steps across 19 phases.**
+**237 steps across 19 phases.**
 
 
 ## Phase P — Parallel tracks — start on day one
@@ -45,6 +45,7 @@ Blocks literally everything. Nothing else starts until this is green.
 | `0.8` | Stable ID and Revision types; if_revision semantics | CON | 0.1 | Conflict returns current revision |
 | `0.9` | Contracts package; Rust is source of truth, TS generated | CON | 0.6 | No hand-written TS type duplicates a Rust one |
 | `0.10` | Conformance harness scaffold and mock-peer pattern | CON | 0.9 | An empty conformance suite runs in CI |
+| `0.11` | Consolidate all project agents into one shared worktree and enforce LLM workspace governance | PLAT | 0.1 | All former worktree heads and pending source edits are preserved in `agent/shared`; only the primary checkout and `agent/worktree` are registered; obsolete agent folders and temp captures are removed from the live project; private settings and legacy source are preserved; workspace guard rejects alternate paths/branches and the product gate passes |
 
 ## Phase 1 — Domain contracts
 

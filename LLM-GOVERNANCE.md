@@ -5,11 +5,46 @@ repository — Codex, Claude, Kimi, Copilot, or any other, present or future. It
 is not advisory. If you are an AI assistant about to change code here, read
 this file and `AGENTS.md` first, and treat this file as the law of the repo.**
 
+## Mandatory shared agent worktree — no exceptions by provider
+
+**Every LLM MUST work only in
+`D:\Project KK\Personal projects\GrapiX\agent\worktree`, on branch
+`agent/shared`.** This is the one shared agent workspace for Claude, Codex,
+OMP, Kimi, Copilot, and all present or future agents and delegated workers.
+It is a hard rule, not a suggestion or a tool preference.
+
+Before any edit, test, generated output or commit, enter that existing
+worktree with `tools/enter-agent.ps1` and run
+`node tools/check-agent-worktree.mjs`. A failed check stops work in that
+location. The primary checkout may be inspected and fast-forwarded from
+the shared branch; agents must not use it as a second editing workspace.
+
+**No LLM may create its own worktree, isolated checkout, private branch,
+fork or alternate agent folder.** Never use `git worktree add` for an
+agent-specific workspace, automatic IDE isolation, `.claude/worktrees`,
+`.codex` worktrees or `.omp` worktrees. If the shared workspace is missing,
+busy or dirty, preserve it and report the condition; do not make a new one
+or reset/stash/clean another worker's changes. Only an explicit user
+instruction can authorize a different workspace or branch.
+
+All workers coordinate in the same tree and follow the same governance.
+Project settings belong under `agent/config/`, scratch files under
+`agent/tmp/`, and preservation copies under `agent/archive/`. These
+directories are shared metadata, never extra code worktrees. Global account
+settings and conversation stores are outside project cleanup. Third-party
+reference source is allowed under `agent/reference/`; it must not become
+an alternate GrapiX checkout. Source preserved under `legacy/` remains
+outside current production builds until explicitly ported.
+
+---
+
+## Authoritative planning documents
+
 There are exactly two planning documents, and they are the only ones:
 
 | File | Role |
 |---|---|
-| `GrapiX-Build-Plan.md` | **The single authoritative build plan.** 236 steps across 19 phases. No other plan, roadmap, or handoff may be planned or worked against. |
+| `GrapiX-Build-Plan.md` | **The single authoritative build plan.** 237 steps across 19 phases. No other plan, roadmap, or handoff may be planned or worked against. |
 | `progress.html` | **The single visual tracker.** Mirrors `progress.json`. The only place "done" is recorded. |
 
 The ADRs under `docs/adr/` are **reference and rationale**, not the plan. Where

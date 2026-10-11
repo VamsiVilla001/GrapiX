@@ -4080,3 +4080,51 @@ true dates for anyone who raises the retention setting first.
 | session store after the mtime fix | **27 imported + 8 pre-existing transcripts present**, none pruned |
 
 No GrapiX source, build or test surface was touched by this step.
+
+---
+
+## Shared agent worktree consolidation — 11 October 2026
+
+The user requested one shared agent worktree for all providers, including
+the unrelated legacy history. The sole agent checkout is
+`D:\Project KK\Personal projects\GrapiX\agent\worktree`, branch
+`agent/shared`. `AGENTS.md`, `CLAUDE.md`, `LLM-GOVERNANCE.md` and all three
+OMP profiles prohibit new private worktrees, checkouts or branches.
+
+Pending root edits were committed as `44ef494`; dirty preset, runtime,
+reference-review and OMP branches were snapshotted and merged. All seven
+former registered worktree heads are ancestors of the shared branch. The
+`middle-layer-arch` history and full tracked tree at `ca999044` are merged
+under `legacy/grapix-1x/`. The unregistered Figma partial checkout's 48
+source files are retained under `legacy/agent-orphans/`; historical source
+does not replace the current product workspace. The memory merge retains
+both the current rendering evidence and the OMP importer notes.
+
+Eight private Claude settings snapshots and old runtime data were retained
+under the primary checkout's ignored `agent/archive/consolidation-2026-10-11/`.
+Claude allow/deny settings were combined into ignored
+`agent/config/claude.local.json`; preview launch settings were preserved.
+Tracked Codex settings and OMP profiles moved to `agent/config/`.
+The EffectCraft reference clone moved to `agent/reference/effectcraft`.
+Global account settings and conversation stores were not modified.
+
+All seven old Git worktree registrations are removed. The remaining Claude
+folder was locked by Claude PID 35480 and PowerShell PID 30736 even after
+the user closed the session. After explicit authorization, both were
+stopped and the remaining folder was moved into the preservation archive.
+Ten tracked temporary PNG captures were removed; both root `.tmp` logs
+were deleted. Old caches/settings that need preservation are ignored
+archive data, not live worktrees. Root build dependencies remain available.
+
+The entry script validates the existing checkout without creating or
+discarding one. `npm run check:agent` verifies the real Git registration,
+branch and absence of extra worktrees. It is an agent preflight; CI and
+human product checks remain usable without an agent checkout. The boundary
+scanner excludes shared metadata, the nested checkout and historical
+source from current-product rules.
+
+Verification so far: 21 workspace/boundary tests passed; real workspace
+guard and entry script passed; `git diff --check` passed. Build-plan step
+`0.11` is active while the consolidated product gate is checked. The
+GPU compatibility spike `3.14` remains active; this cleanup does not
+establish a GPU production renderer or certify adoption.
