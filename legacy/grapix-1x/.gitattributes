@@ -1,0 +1,14 @@
+# Design fixtures and assets must survive checkout byte-for-byte. The PDF fixture is
+# largely ASCII, so git otherwise sniffs it as text and rewrites its line endings, which
+# breaks the xref byte offsets and the importer test with it.
+*.pdf binary
+*.psd binary
+*.psb binary
+*.ai binary
+*.riv binary
+*.png binary
+*.jpg binary
+*.woff binary
+*.woff2 binary
+*.otf binary
+*.ttf binary

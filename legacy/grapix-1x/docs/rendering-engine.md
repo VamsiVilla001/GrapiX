@@ -1,0 +1,58 @@
+# GrapiX Rendering Engine
+
+> **Status:** partially superseded by [middle-layer-arch.md](middle-layer-arch.md) section 8.
+> The swappable-renderer boundary argued for below is retained and remains correct. The
+> PixiJS feature roadmap is not: `GpuSceneRenderer` is now explicitly temporary scaffolding
+> for layout, hit-testing and selection only, and gets no new features. Pixel rendering
+> moves to the native renderer (Rive's GPU vector core) so that editor preview and air
+> output are the same code.
+
+## Current Direction
+
+GrapiX uses a web-based desktop architecture:
+
+```text
+Electron desktop shell
+  -> React editor UI
+  -> GPU render viewport
+  -> Shared scene model
+  -> Local API / package services
+```
+
+The editor viewport now separates rendering from editing:
+
+- PixiJS/WebGL renders scene pixels, images, SVG textures, video textures, text, and shapes.
+- A lightweight SVG overlay handles editor interactions such as hit testing, selection, and dragging.
+- The shared `SceneDocument` model remains the source of truth for both editor and renderer.
+
+## Why This Architecture
+
+- WebGL is the best immediate backend for a web-based Electron app because it is stable, GPU accelerated, widely supported, and compatible with heavy 2D broadcast graphics workloads.
+- PixiJS provides texture caching, batched drawing, accelerated sprites, SVG rasterization via browser image decode, text rendering, and video texture support.
+- Keeping interactions in an overlay prevents the renderer from being polluted with editor-only handles, hit zones, and selection UX.
+- The rendering boundary can later move to OffscreenCanvas, a Web Worker, WebGPU, or a native renderer process without replacing the editor UI.
+
+## Current Capabilities
+
+- GPU canvas renders the scene background.
+- Rectangles and ellipses render as GPU graphics.
+- Text renders through the GPU renderer.
+- Image objects render from images, SVG data URLs, and video sources.
+- Lines, layer frames, event markers and groups render as editor symbols. The mesh, light
+  and camera placeholder families were removed: no ingest source produces them.
+- Render order is explicit: objects sort by layer, z-depth, and z-index rather than accidental array order.
+- Image fit modes support stretch, contain, and cover-style sizing.
+- Video assets can be imported and converted into video materials.
+- The viewport reports GPU backend and max texture size in the stage toolbar.
+
+## Next Rendering Steps
+
+- Add renderer diagnostics panel: FPS, draw calls, texture count, VRAM estimate, dropped frames.
+- Add render-quality profile controls: preview, program, UHD, and low-latency.
+- Add staged asset preloading before opening/taking scenes.
+- Add texture eviction and media lifecycle policies.
+- Add shader/filter support for broadcast effects.
+- Replace mesh placeholders with a real Three.js/WebGPU scene layer for true 3D models, cameras, lights, and materials.
+- Move rendering to OffscreenCanvas where supported.
+- Add WebGPU backend exploration behind the same renderer interface.
+- Add native renderer/output bridge later for NDI/SDI/program output.
