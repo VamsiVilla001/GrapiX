@@ -14,6 +14,7 @@ use crate::capability::EngineCapability;
 use crate::intent::{
     ClearRequest, CueRequest, PhaseCommitted, PhaseRequest, TakeCommitted, TakeRequest,
 };
+use crate::render::{RenderRequest, RenderedFrame};
 use crate::sequence::{MessageId, Sequence};
 use crate::status::{EngineStatus, PerformanceSummary, ReferenceTransition};
 
@@ -55,6 +56,9 @@ pub enum ClientRequest {
     ConfigureOutput(OutputConfig),
     /// Request a point-in-time performance snapshot for the graph page.
     Performance,
+    /// Render a pinned revision at one of its frames to an image (11.41).
+    /// Never touches Program, so it is not a Program-affecting request.
+    Render(RenderRequest),
 }
 
 /// Everything the engine may answer. A refusal is a reply, not an exception:
@@ -80,6 +84,8 @@ pub enum EngineReply {
     },
     /// Bounded performance snapshot: frame samples, totals, budget ratio.
     Performance(PerformanceSummary),
+    /// A headless render's image, named by content hash (11.41).
+    Rendered(RenderedFrame),
     Refused(Refusal),
 }
 

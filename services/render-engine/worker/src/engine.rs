@@ -20,7 +20,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use gx_asset_plane::{AssetPublishPeer, PublishRefusal, PublishReply};
@@ -33,12 +33,14 @@ use gx_contracts::{
 use gx_control_plane::capability::{check_protocol, live_allowed, EngineCapability};
 use gx_control_plane::intent::{check_reference, HeldRevision, Lead, PhaseCommitted, TakeAt, TakeCommitted};
 use gx_control_plane::message::{ClientRequest, EngineEvent, EngineReply, OutputConfig};
-use gx_control_plane::peer::EnginePeer;
+use gx_control_plane::peer::{EnginePeer, Handled};
+use gx_control_plane::render::check_render;
 use gx_control_plane::status::{Degradation, EngineStatus, ProgramState};
 
 use crate::clock::ProgramClock;
 use crate::emission::{FrameEmitter, ProgramEmission};
 use crate::gpu::{self, Gpu};
+use crate::headless::{answer_render, RenderedImages};
 use crate::mesh::AssetBytes;
 use crate::metrics::{EnginePerformance, FrameMetrics, FrameSample};
 use crate::output_adapter::{OutputAdapterError, OutputAdapterRegistry};
@@ -67,8 +69,9 @@ pub struct Engine {
     published: HashMap<TakeId, HeldRevision>,
     /// The prepared scene each published revision pins (3.4). Keyed by the
     /// pinned identity, so an earlier revision keeps exactly the scene it was
-    /// published with (invariant 30).
-    prepared: HashMap<(TakeId, Revision), PreparedScene>,
+    /// published with (invariant 30). Shared, so a headless render can draw
+    /// it after the engine lock is released (11.41).
+    prepared: HashMap<(TakeId, Revision), Arc<PreparedScene>>,
     /// Content hashes the asset plane has verified into the store.
     assets: HashSet<ContentHash>,
     /// Verified asset bytes bound by content hash. Mesh and font preparation
@@ -80,6 +83,11 @@ pub struct Engine {
     preview_rasterizer: SoftwareRasterizer,
     emitter: FrameEmitter,
     metrics: FrameMetrics,
+    /// The clock frame Program was last emitted for, so frames the render
+    /// loop never reached are counted as missed rather than vanishing.
+    last_emitted: Option<u64>,
+    /// Headless renders' images, served on the asset plane by content hash.
+    rendered: Arc<Mutex<RenderedImages>>,
     outputs: OutputAdapterRegistry,
     selected_output: String,
     recovery: Option<RecoveryJournal>,
@@ -121,6 +129,8 @@ impl Engine {
             preview_rasterizer,
             emitter: FrameEmitter::new(),
             metrics: FrameMetrics::with_window(rate, 60),
+            last_emitted: None,
+            rendered: Arc::new(Mutex::new(RenderedImages::with_capacity(64))),
             outputs: OutputAdapterRegistry::standard(
                 std::env::temp_dir().join("grapix-render-output"),
             ),
@@ -217,7 +227,7 @@ impl Engine {
                     record.take_id, record.revision.0
                 ),
             })?;
-            prepared.insert((record.take_id, record.revision), scene);
+            prepared.insert((record.take_id, record.revision), Arc::new(scene));
         }
         self.clock = ProgramClock::free_running(
             next_epoch,
@@ -353,7 +363,7 @@ impl Engine {
                 return PublishReply::Refused(PublishRefusal::PreparationRefused { cause });
             }
         };
-        self.prepared.insert((take_id.clone(), revision), prepared);
+        self.prepared.insert((take_id.clone(), revision), Arc::new(prepared));
         self.published.insert(
             take_id.clone(),
             HeldRevision {
@@ -378,7 +388,7 @@ impl Engine {
 
     /// The prepared scene a published revision pins, if this engine holds it.
     pub fn prepared_scene(&self, take_id: &TakeId, revision: Revision) -> Option<&PreparedScene> {
-        self.prepared.get(&(take_id.clone(), revision))
+        self.prepared.get(&(take_id.clone(), revision)).map(Arc::as_ref)
     }
 
     /// Record that the asset plane has verified these bytes into the store.
@@ -425,12 +435,19 @@ impl Engine {
             .clock
             .offset_nanos(1)
             .min(u128::from(u64::MAX)) as u64;
+        // The clock may have passed frames while this loop was away; each is
+        // a Program frame that was never emitted, and is counted as missed.
+        let missed_before = self
+            .last_emitted
+            .map_or(0, |last| frame_number.saturating_sub(last).saturating_sub(1));
+        self.last_emitted = Some(frame_number);
         let sample = FrameSample {
             frame: frame_number,
             render_nanos,
             interval_nanos,
             late: render_nanos > interval_nanos,
             drops_so_far: self.emitter.total_drops(),
+            missed_before,
         };
         self.metrics.record(sample);
         if !self.output_inhibited {
@@ -481,6 +498,7 @@ impl Engine {
             total_rendered: self.metrics.total_rendered(),
             total_late: self.metrics.total_late(),
             total_dropped: self.metrics.total_dropped(),
+            total_missed: self.metrics.total_missed(),
             mean_budget_ratio: self.metrics.mean_budget_ratio(),
         }
     }
@@ -501,11 +519,13 @@ impl Engine {
                     interval_nanos: f.interval_nanos,
                     late: f.late,
                     drops_so_far: f.drops_so_far,
+                    missed_before: f.missed_before,
                 })
                 .collect(),
             total_rendered: perf.total_rendered,
             total_late: perf.total_late,
             total_dropped: perf.total_dropped,
+            total_missed: perf.total_missed,
             mean_budget_ratio: perf.mean_budget_ratio,
         }
     }
@@ -604,6 +624,13 @@ impl Engine {
 impl AssetPublishPeer for Engine {
     fn publish_scene(&mut self, scene: SceneDocument) -> PublishReply {
         self.publish(scene)
+    }
+
+    fn fetch(&self, hash: &ContentHash) -> Option<Arc<Vec<u8>>> {
+        self.rendered
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(hash)
     }
 }
 impl EnginePeer for Engine {
@@ -776,6 +803,9 @@ impl EnginePeer for Engine {
 
             ClientRequest::ConfigureOutput(config) => self.configure_output(&config),
             ClientRequest::Performance => EngineReply::Performance(self.performance_summary()),
+            // In-process callers render in place; the control transport goes
+            // through `handle_detached` and renders outside the lock.
+            ClientRequest::Render(req) => self.handle_detached(ClientRequest::Render(req)).finish(),
         };
         if persists && !matches!(reply, EngineReply::Refused(_)) {
             if let Err(error) = self.persist_recovery() {
@@ -788,6 +818,27 @@ impl EnginePeer for Engine {
             }
         }
         reply
+    }
+
+    /// A headless render is validated while the engine is held and drawn
+    /// after it is released: the prepared scene is shared, so Program's
+    /// render loop never waits on it (invariant 14). Every other request is
+    /// answered in place.
+    fn handle_detached(&mut self, request: ClientRequest) -> Handled {
+        let ClientRequest::Render(req) = request else {
+            return Handled::Reply(self.handle(request));
+        };
+        let held = self.published.get(&req.take_id).cloned();
+        let scene = self.prepared.get(&(req.take_id.clone(), req.revision)).cloned();
+        let duration = scene.as_ref().map(|scene| scene.document().timeline.duration_frames);
+        if let Err(refusal) = check_render(&req, held.as_ref(), duration) {
+            return Handled::Reply(EngineReply::Refused(refusal));
+        }
+        let (Some(held), Some(scene)) = (held, scene) else {
+            unreachable!("check_render refuses a render with no held revision or scene");
+        };
+        let images = Arc::clone(&self.rendered);
+        Handled::Detached(Box::new(move || answer_render(req, held.content_hash, &scene, &images)))
     }
 
     fn drain_events(&mut self) -> Vec<EngineEvent> {
@@ -1179,4 +1230,55 @@ mod tests {
         ));
     }
 
+    /// 11.41: one request renders a pinned revision at a frame. The same
+    /// request twice gives the same bytes, another frame of an animation
+    /// different ones, the image is served by its hash, and Program is not
+    /// touched.
+    #[test]
+    fn a_headless_render_is_byte_identical_served_by_hash_and_leaves_program_alone() {
+        use gx_control_plane::render::RenderRequest;
+        let mut e = engine();
+        let PublishReply::Published { take_id, revision, content_hash } = e.publish(animated_scene()) else {
+            panic!("the animated scene publishes");
+        };
+        let request = |frame, pin: Option<ContentHash>| {
+            ClientRequest::Render(RenderRequest {
+                take_id: take_id.clone(),
+                revision,
+                content_hash: pin,
+                frame,
+            })
+        };
+        let rendered = |reply| match reply {
+            EngineReply::Rendered(frame) => frame,
+            other => panic!("expected a rendered frame, got {other:?}"),
+        };
+        let first = rendered(e.handle(request(50, Some(content_hash.clone()))));
+        let again = rendered(e.handle(request(50, Some(content_hash.clone()))));
+        let start = rendered(e.handle(request(0, Some(content_hash.clone()))));
+        assert_eq!(first, again, "the same revision and frame render to the same bytes");
+        assert_ne!(first.image, start.image, "frame 50 of the animation differs from frame 0");
+        assert_eq!((first.width, first.height), (64, 32));
+        let png = e.fetch(&first.image).expect("the image is served by its hash");
+        assert_eq!(gx_asset_plane::content_hash(&png), first.image);
+        let pixels = crate::headless::decode_png(&png).expect("the image decodes");
+        assert_eq!(pixels, e.prepared_scene(&take_id, revision).unwrap().frame_at(50, OutputTransform::Srgb).unwrap());
+        assert!(e.program.is_none(), "a headless render never reaches Program");
+
+        assert!(matches!(
+            e.handle(request(101, Some(content_hash.clone()))),
+            EngineReply::Refused(Refusal::RenderFrameOutOfRange { frame: 101, duration_frames: 100, .. })
+        ));
+        assert!(matches!(e.handle(request(0, None)), EngineReply::Refused(Refusal::RevisionUnpinned { .. })));
+        let (identifier, identifier_revision) = published(&mut e);
+        assert!(matches!(
+            e.handle(ClientRequest::Render(RenderRequest {
+                take_id: identifier,
+                revision: identifier_revision,
+                content_hash: Some(pin()),
+                frame: 0,
+            })),
+            EngineReply::Refused(Refusal::RenderSceneUnavailable { .. })
+        ));
+    }
 }

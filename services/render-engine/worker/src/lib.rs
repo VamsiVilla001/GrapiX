@@ -25,6 +25,7 @@ pub mod colour_pipeline;
 pub mod emission;
 pub mod engine;
 pub mod gpu;
+pub mod headless;
 pub mod metrics;
 pub mod mesh;
 pub mod output_adapter;
@@ -41,6 +42,7 @@ pub use engine::Engine;
 pub use metrics::{EnginePerformance, FrameMetrics, FrameSample};
 pub use mesh::{ActiveCamera, AssetBytes, PreparedMesh, PreparedMeshes};
 pub use prepared::PreparedScene;
+pub use headless::{RenderedImage, RenderedImages};
 pub use rasterizer::{Frame, SoftwareRasterizer};
 pub use text::{PreparedGlyph, PreparedTextObject, PreparedTexts};
 

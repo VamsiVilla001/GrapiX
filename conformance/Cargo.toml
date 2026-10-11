@@ -19,6 +19,7 @@ gx-control-plane = { workspace = true }
 gx-asset-plane = { workspace = true }
 gx-media-plane = { workspace = true }
 gx-mock-engine = { path = "../mocks/mock-engine" }
+gx-render-worker = { path = "../services/render-engine/worker" }
 serde_json = { workspace = true }
 gx-control-transport = { workspace = true }
 gx-playout = { path = "../services/playout" }

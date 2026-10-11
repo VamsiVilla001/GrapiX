@@ -116,6 +116,9 @@ pub struct FrameSampleSummary {
     pub interval_nanos: u64,
     pub late: bool,
     pub drops_so_far: u64,
+    /// Clock frames that passed since the previous emission without Program
+    /// being emitted for them (11.41).
+    pub missed_before: u64,
 }
 
 /// A bounded performance snapshot, as the graph page consumes it.
@@ -127,7 +130,11 @@ pub struct PerformanceSummary {
     pub frames: Vec<FrameSampleSummary>,
     pub total_rendered: u64,
     pub total_late: u64,
+    /// Frames a media consumer had not taken before the next replaced them.
     pub total_dropped: u64,
+    /// Clock frames Program was never emitted for: the render loop reached
+    /// the next frame only after the clock had passed one or more (11.41).
+    pub total_missed: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub mean_budget_ratio: Option<f64>,

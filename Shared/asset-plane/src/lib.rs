@@ -13,8 +13,8 @@ pub mod publish;
 pub mod store;
 pub mod transfer;
 pub use publish::{
-    publish_scene, AssetPublishPeer, AssetPublishServer, PublishClientError, PublishRefusal,
-    PublishReply, PublishRequest, MAX_PUBLISH_FRAME_BYTES,
+    fetch_bytes, publish_scene, AssetPublishPeer, AssetPublishServer, FetchError, FetchReply,
+    PublishClientError, PublishRefusal, PublishReply, PublishRequest, MAX_PUBLISH_FRAME_BYTES,
 };
 pub use preflight::{
     publish_assets, AssetBytes, AssetPublishSummary, AssetTransferClient, AssetTransferClientError,

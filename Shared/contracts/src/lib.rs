@@ -33,9 +33,11 @@ pub mod validate;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-/// Wire protocol version 4 (11.38): cue and take carry the content hash they
-/// pin. A mismatch is an error code, never a negotiation.
-pub const PROTOCOL_VERSION: u32 = 4;
+/// Wire protocol version 5 (11.41): the headless `render` request and its
+/// `rendered` reply, and Program frames the render loop missed in the
+/// performance report. Version 4 (11.38) pinned cue and take to a content
+/// hash. A mismatch is an error code, never a negotiation.
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Stable identity of a published scene. Survives every republish.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
@@ -822,6 +824,17 @@ pub enum Refusal {
     /// reads. The extension is never consulted, so a renamed file is
     /// refused rather than stored as the wrong kind.
     AssetFormatUnrecognised { file: String },
+    /// A headless render names a revision the peer holds no scene for: it
+    /// was published by identifier only, so there is nothing to draw.
+    RenderSceneUnavailable { take_id: TakeId, revision: Revision },
+    /// A headless render asks for a frame past the end of the scene's
+    /// timeline. Program never shows that frame, so no image of it exists.
+    RenderFrameOutOfRange {
+        take_id: TakeId,
+        revision: Revision,
+        frame: u64,
+        duration_frames: u64,
+    },
 }
 
 impl std::fmt::Display for Refusal {
@@ -1354,6 +1367,21 @@ impl std::fmt::Display for Refusal {
             Refusal::AssetFormatUnrecognised { file } => {
                 write!(f, "{file} is not an image, SVG, video or 3D model file the asset manager reads")
             }
+            Refusal::RenderSceneUnavailable { take_id, revision } => write!(
+                f,
+                "{take_id} revision {} was published without a scene, so it cannot be rendered",
+                revision.0
+            ),
+            Refusal::RenderFrameOutOfRange {
+                take_id,
+                revision,
+                frame,
+                duration_frames,
+            } => write!(
+                f,
+                "frame {frame} is past the end of {take_id} revision {} (its timeline ends at frame {duration_frames})",
+                revision.0
+            ),
         }
     }
 }
@@ -1803,6 +1831,13 @@ impl Refusal {
             Self::AssetBatchEmpty,
             Self::AssetKindNotAddable { asset_id: "audit".into(), kind: crate::scene::AssetKind::Font },
             Self::AssetFormatUnrecognised { file: "audit".into() },
+            Self::RenderSceneUnavailable { take_id: TakeId("audit".into()), revision: Revision(1) },
+            Self::RenderFrameOutOfRange {
+                take_id: TakeId("audit".into()),
+                revision: Revision(1),
+                frame: 2,
+                duration_frames: 1,
+            },
         ]
     }
     pub const fn code_name(&self) -> &'static str {
@@ -1953,6 +1988,8 @@ impl Refusal {
             Self::AssetBatchEmpty => "assetBatchEmpty",
             Self::AssetKindNotAddable { .. } => "assetKindNotAddable",
             Self::AssetFormatUnrecognised { .. } => "assetFormatUnrecognised",
+            Self::RenderSceneUnavailable { .. } => "renderSceneUnavailable",
+            Self::RenderFrameOutOfRange { .. } => "renderFrameOutOfRange",
         }
     }
 }

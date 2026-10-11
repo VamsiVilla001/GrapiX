@@ -175,9 +175,14 @@ fn handle_connection<P: EnginePeer>(
             }
             request if authentication.is_none() => { let _ = request; (EngineReply::Refused(Refusal::Unauthenticated), Vec::new()) }
             request => {
+                // The engine is held only to validate and to drain events. A
+                // render's work runs after the lock is released, so Program's
+                // render loop is never queued behind it (invariant 14).
                 let mut engine = peer.lock().expect("engine mutex poisoned");
-                let reply = engine.handle(request);
-                (reply, engine.drain_events())
+                let handled = engine.handle_detached(request);
+                let events = engine.drain_events();
+                drop(engine);
+                (handled.finish(), events)
             }
         };
 

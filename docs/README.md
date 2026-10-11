@@ -28,6 +28,12 @@ that as a real cost.
 4. **Crate and package `README.md`** — ownership and boundary of one unit.
 5. **Code.**
 
+**Render-core evaluation:** [ADR-0003 — EffectCraft adoption](adr/0003-effectcraft-render-core.md)
+records the conditional compositor decision and compatibility gates. It
+refines 0001's technology selection without changing the clock, contract,
+colour or refusal invariants. Initial execution is build-plan step `3.14`;
+production adoption is still **Planned**.
+
 `/memory.md` at the repository root is the session log: what changed, when, and
 what was verified. It records history; it does not grant authority.
 

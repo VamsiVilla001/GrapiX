@@ -49,6 +49,10 @@ pub struct FrameSample {
     /// Frames dropped before this one because a consumer had not taken the
     /// previous one. Counted, never smoothed.
     pub drops_so_far: u64,
+    /// Clock frames that passed since the previous emission with no Program
+    /// emitted for them (11.41). A render loop held away from the engine
+    /// shows up here instead of disappearing.
+    pub missed_before: u64,
 }
 
 impl FrameSample {
@@ -81,6 +85,8 @@ pub struct FrameMetrics {
     total_late: u64,
     /// Total frames dropped because a consumer was behind.
     total_dropped: u64,
+    /// Total clock frames Program was never emitted for.
+    total_missed: u64,
 }
 
 impl FrameMetrics {
@@ -93,6 +99,7 @@ impl FrameMetrics {
             total_rendered: 0,
             total_late: 0,
             total_dropped: 0,
+            total_missed: 0,
         }
     }
 
@@ -103,6 +110,7 @@ impl FrameMetrics {
             self.total_late += 1;
         }
         self.total_dropped += sample.drops_so_far.saturating_sub(self.last_drops());
+        self.total_missed += sample.missed_before;
         if self.samples.len() == self.capacity {
             self.samples.remove(0);
         }
@@ -128,6 +136,10 @@ impl FrameMetrics {
 
     pub fn total_dropped(&self) -> u64 {
         self.total_dropped
+    }
+
+    pub fn total_missed(&self) -> u64 {
+        self.total_missed
     }
 
     /// The mean render time over the window, as a fraction of the interval.
@@ -176,6 +188,7 @@ pub struct EnginePerformance {
     pub total_rendered: u64,
     pub total_late: u64,
     pub total_dropped: u64,
+    pub total_missed: u64,
     /// Mean render time over the window as a fraction of the frame interval.
     /// Absent when nothing has rendered yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -200,6 +213,7 @@ mod tests {
             interval_nanos: interval(),
             late: true,
             drops_so_far: 0,
+            missed_before: 0,
         };
         assert!(sample.late);
         assert!((sample.budget_ratio() - 1.25).abs() < 1e-9);
@@ -215,6 +229,7 @@ mod tests {
             interval_nanos: interval(),
             late: false,
             drops_so_far: 0,
+            missed_before: 0,
         };
         assert!(!sample.late);
         assert!(sample.budget_ratio() < 1.0);
@@ -231,6 +246,7 @@ mod tests {
                 interval_nanos: interval(),
                 late: false,
                 drops_so_far: 0,
+                missed_before: 0,
             });
         }
         assert_eq!(metrics.samples().len(), 50, "the window holds its bound");
@@ -255,6 +271,7 @@ mod tests {
             interval_nanos: interval(),
             late: false,
             drops_so_far: 0,
+            missed_before: 0,
         });
         metrics.record(FrameSample {
             frame: 2,
@@ -262,8 +279,10 @@ mod tests {
             interval_nanos: interval(),
             late: false,
             drops_so_far: 3,
+            missed_before: 2,
         });
         assert_eq!(metrics.total_dropped(), 3, "a drop is a fact, not noise");
+        assert_eq!(metrics.total_missed(), 2, "a frame the loop never reached is counted");
     }
 
     #[test]
@@ -286,6 +305,7 @@ mod tests {
             interval_nanos: interval(),
             late: false,
             drops_so_far: 0,
+            missed_before: 0,
         });
         let snapshot = EnginePerformance {
             rate: RationalRate::P50,
@@ -294,6 +314,7 @@ mod tests {
             total_rendered: metrics.total_rendered(),
             total_late: metrics.total_late(),
             total_dropped: metrics.total_dropped(),
+            total_missed: metrics.total_missed(),
             mean_budget_ratio: metrics.mean_budget_ratio(),
         };
         let wire = serde_json::to_value(&snapshot).unwrap();

@@ -172,6 +172,38 @@ fn drive_control_refusals(report: &mut Report) {
             "an unpublished take was not refused as UnknownTake",
         ),
     );
+    // Headless render (11.41): an identifier-only revision has no scene to
+    // draw, and a scene's timeline bounds the frames that can be drawn.
+    let render = |take: &str, revision, content_hash: ContentHash, frame| {
+        ClientRequest::Render(gx_control_plane::render::RenderRequest {
+            take_id: TakeId(take.into()),
+            revision,
+            content_hash: Some(content_hash),
+            frame,
+        })
+    };
+    let unavailable = peer.handle(render("audit/published", Revision(2), ContentHash("a".repeat(64)), 0));
+    report.record(
+        PLANE,
+        "RenderSceneUnavailable is produced for rendering an identifier-only revision",
+        expect(
+            matches!(&unavailable, EngineReply::Refused(Refusal::RenderSceneUnavailable { revision: Revision(2), .. })),
+            format!("expected RenderSceneUnavailable, got {unavailable:?}"),
+        ),
+    );
+    let mut short = gx_contracts::scene::new_scene("audit-render", "Audit render");
+    short.timeline.duration_frames = 10;
+    let short_pin = short.content_hash();
+    let _ = peer.publish_scene(short);
+    let past_end = peer.handle(render("audit-render", Revision(1), short_pin, 11));
+    report.record(
+        PLANE,
+        "RenderFrameOutOfRange is produced for rendering past a scene's timeline",
+        expect(
+            matches!(&past_end, EngineReply::Refused(Refusal::RenderFrameOutOfRange { frame: 11, duration_frames: 10, .. })),
+            format!("expected RenderFrameOutOfRange, got {past_end:?}"),
+        ),
+    );
     peer.set_reference(ReferenceState::Unlocked);
     report.record(
         PLANE,
@@ -1429,6 +1461,8 @@ fn is_driven(variant: &str) -> bool {
             | "AssetBatchEmpty"
             | "AssetKindNotAddable"
             | "AssetFormatUnrecognised"
+            | "RenderSceneUnavailable"
+            | "RenderFrameOutOfRange"
     )
 }
 

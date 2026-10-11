@@ -1,4 +1,4 @@
-//! protocol v3, the control plane.
+//! protocol v5, the control plane.
 //!
 //! Small, ordered, acknowledged, sequenced. Zero loss tolerance.
 //!
@@ -15,6 +15,7 @@
 //! | [`intent`] | Cue, take and clear as intent; resolution to a committed frame |
 //! | [`message`] | The message surface and its envelope |
 //! | [`peer`] | What a valid peer does; the conformance target |
+//! | [`render`] | Headless render of a pinned revision at a frame |
 //! | [`sequence`] | Ordering, deduplication and reply identity |
 //! | [`status`] | Reported engine state, reference lock, operator summary |
 
@@ -26,6 +27,7 @@ pub mod framing;
 pub mod intent;
 pub mod message;
 pub mod peer;
+pub mod render;
 pub mod sequence;
 pub mod status;
 

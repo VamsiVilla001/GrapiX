@@ -11,6 +11,7 @@
 //! advances when a test says so, which is the whole point of a mock.
 
 use gx_asset_plane::{AssetPublishPeer, PublishReply};
+use gx_contracts::material::MaterialSupport;
 use gx_contracts::phases::PhaseKind;
 use gx_contracts::scene::SceneDocument;
 use gx_contracts::{
@@ -24,8 +25,12 @@ use gx_control_plane::intent::{
 };
 use gx_control_plane::message::{ClientRequest, EngineEvent, EngineReply, OutputConfig};
 use gx_control_plane::peer::{EnginePeer, FaultInjection};
+use gx_control_plane::render::{check_render, RenderRequest};
 use gx_control_plane::status::{Degradation, EngineStatus, ProgramState, ReferenceMonitor};
+use gx_render_worker::headless::{answer_render, RenderedImages};
+use gx_render_worker::{AssetBytes, PreparedScene};
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 
 /// A mock engine. Deterministic, in-process, no GPU and no transport.
 #[derive(Debug, Clone)]
@@ -46,6 +51,10 @@ pub struct MockEngine {
     documents: HashMap<(TakeId, Revision), SceneDocument>,
     /// Content hashes the asset plane says this engine has verified.
     assets: HashSet<ContentHash>,
+    /// Verified bytes held for headless renders, by content hash.
+    asset_bytes: AssetBytes,
+    /// Headless renders' images, served on the asset plane by content hash.
+    rendered: Arc<Mutex<RenderedImages>>,
     program: Option<ProgramState>,
     cued: Option<ProgramState>,
     events: Vec<EngineEvent>,
@@ -71,6 +80,8 @@ impl MockEngine {
             published: HashMap::new(),
             documents: HashMap::new(),
             assets: HashSet::new(),
+            asset_bytes: HashMap::new(),
+            rendered: Arc::new(Mutex::new(RenderedImages::with_capacity(64))),
             program: None,
             cued: None,
             events: Vec::new(),
@@ -118,6 +129,14 @@ impl MockEngine {
     /// still outstanding, and invariant 29 makes that a take blocker.
     pub fn hold_asset(&mut self, hash: ContentHash) {
         self.assets.insert(hash);
+    }
+
+    /// Hold verified bytes, as the engine holds them after the asset plane
+    /// verifies a transfer, so a headless render can draw what uses them.
+    pub fn hold_asset_bytes(&mut self, bytes: Vec<u8>) {
+        let hash = gx_asset_plane::content_hash(&bytes);
+        self.assets.insert(hash.clone());
+        self.asset_bytes.insert(hash, bytes);
     }
 
     /// Publish one complete document as a new immutable revision.
@@ -239,11 +258,45 @@ impl MockEngine {
             live: config.live,
         }
     }
+
+    /// A headless render (11.41). The request is checked by the rule the
+    /// engine uses (`check_render`); the scene is prepared from the document
+    /// and bytes this mock holds through the engine's own preparation, and
+    /// drawn through its one render function, so the mock refuses what the
+    /// engine refuses and renders the image the engine renders from the same
+    /// document and bytes (invariant 45).
+    fn render(&self, request: RenderRequest) -> EngineReply {
+        let document = self.documents.get(&(request.take_id.clone(), request.revision));
+        let held = self.published.get(&request.take_id);
+        let duration = document.map(|document| document.timeline.duration_frames);
+        if let Err(refusal) = check_render(&request, held, duration) {
+            return EngineReply::Refused(refusal);
+        }
+        let (Some(document), Some(held)) = (document, held) else {
+            unreachable!("check_render refuses a render with no held revision or document");
+        };
+        match PreparedScene::prepare(
+            document.clone(),
+            &self.assets,
+            &self.asset_bytes,
+            &MaterialSupport::fixed_function(),
+        ) {
+            Ok(scene) => answer_render(request, held.content_hash.clone(), &scene, &self.rendered),
+            Err(refusal) => EngineReply::Refused(refusal),
+        }
+    }
 }
 
 impl AssetPublishPeer for MockEngine {
     fn publish_scene(&mut self, scene: SceneDocument) -> PublishReply {
         MockEngine::publish_scene(self, scene)
+    }
+
+    fn fetch(&self, hash: &ContentHash) -> Option<Arc<Vec<u8>>> {
+        self.rendered
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(hash)
     }
 }
 
@@ -431,9 +484,11 @@ impl EnginePeer for MockEngine {
                     total_rendered: 0,
                     total_late: 0,
                     total_dropped: 0,
+                    total_missed: 0,
                     mean_budget_ratio: None,
                 },
             ),
+            ClientRequest::Render(request) => self.render(request),
         }
     }
 

@@ -24,6 +24,9 @@ lyon = "1"
 # MIT. 3.7 parses glTF/GLB directly from verified content-addressed asset
 # bytes; the loader never receives an authoring path.
 gltf = "1"
+# MIT/Zlib/Apache-2.0, already in the lockfile. 11.41 encodes headless renders
+# as PNG; a fixed compression level keeps the same pixels the same bytes.
+miniz_oxide = "0.8"
 
 [lib]
 path = "src/lib.rs"

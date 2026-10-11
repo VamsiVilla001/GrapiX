@@ -11,6 +11,27 @@ use crate::message::{ClientRequest, EngineEvent, EngineReply};
 use crate::status::EngineStatus;
 use gx_contracts::ReferenceState;
 
+/// A request's outcome when part of its work may run after the engine is
+/// released (11.41).
+pub enum Handled {
+    /// Answered entirely while the engine was held, as most requests are.
+    Reply(EngineReply),
+    /// Validated while the engine was held; the remaining work runs after it
+    /// is released, so a long render never holds the lock Program's cadence
+    /// needs (invariant 14).
+    Detached(Box<dyn FnOnce() -> EngineReply + Send>),
+}
+
+impl Handled {
+    /// Run any detached work and return the reply.
+    pub fn finish(self) -> EngineReply {
+        match self {
+            Self::Reply(reply) => reply,
+            Self::Detached(work) => work(),
+        }
+    }
+}
+
 /// A peer that answers control-plane requests.
 ///
 /// Deliberately narrow: request in, reply out, plus a way to collect events.
@@ -24,6 +45,13 @@ pub trait EnginePeer {
     /// Handle one request. A refusal is a reply, not an error return: it
     /// travels the same path a success does.
     fn handle(&mut self, request: ClientRequest) -> EngineReply;
+
+    /// Handle one request whose work may outlive the engine lock. The
+    /// control transport calls this, releases the engine, then finishes the
+    /// reply. A peer with no long-running work answers in place.
+    fn handle_detached(&mut self, request: ClientRequest) -> Handled {
+        Handled::Reply(self.handle(request))
+    }
 
     /// Collect events emitted since the last drain.
     fn drain_events(&mut self) -> Vec<EngineEvent>;

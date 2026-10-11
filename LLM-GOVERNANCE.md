@@ -9,7 +9,7 @@ There are exactly two planning documents, and they are the only ones:
 
 | File | Role |
 |---|---|
-| `GrapiX-Build-Plan.md` | **The single authoritative build plan.** 235 steps across 19 phases. No other plan, roadmap, or handoff may be planned or worked against. |
+| `GrapiX-Build-Plan.md` | **The single authoritative build plan.** 236 steps across 19 phases. No other plan, roadmap, or handoff may be planned or worked against. |
 | `progress.html` | **The single visual tracker.** Mirrors `progress.json`. The only place "done" is recorded. |
 
 The ADRs under `docs/adr/` are **reference and rationale**, not the plan. Where

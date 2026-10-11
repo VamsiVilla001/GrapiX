@@ -1,9 +1,12 @@
-//! Asset-plane publication messages shared by an Editor and an engine mock.
+//! Asset-plane publication and fetch messages shared by an Editor, Playout,
+//! an engine and its mock.
 //!
 //! A scene document is content, not a Program command: carrying it on the
 //! restartable asset plane prevents a large publish from delaying control-plane
 //! intent (ADR-001). The explicit refusal reply prevents malformed authoring
-//! data from being silently skipped.
+//! data from being silently skipped. The same holds in the other direction for
+//! a headless render's image (11.41): the control reply names it by content
+//! hash, and the bytes come back here, verified against that hash.
 
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -11,8 +14,10 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 use gx_contracts::scene::{parse_scene_document, SceneDocument};
-use gx_contracts::{ContentHash, Revision, TakeId};
+use gx_contracts::{ContentHash, Refusal, Revision, TakeId};
 use serde::{Deserialize, Serialize};
+
+use crate::store::content_hash;
 
 /// A complete, self-describing authored scene awaiting publication.
 ///
@@ -62,12 +67,28 @@ pub enum PublishRefusal {
     PreparationRefused { cause: gx_contracts::Refusal },
 }
 
-/// A peer that can atomically turn a strictly parsed scene into a revision.
+/// A peer that can atomically turn a strictly parsed scene into a revision,
+/// and serve the bytes of images it rendered.
 ///
 /// The listener owns framing and strict parsing so mock and real engines cannot
 /// accidentally teach different publication contracts.
 pub trait AssetPublishPeer: Send + 'static {
     fn publish_scene(&mut self, scene: SceneDocument) -> PublishReply;
+
+    /// The bytes this peer serves under a content hash: images its headless
+    /// renders produced (11.41). A peer that renders nothing serves nothing.
+    fn fetch(&self, _hash: &ContentHash) -> Option<Arc<Vec<u8>>> {
+        None
+    }
+}
+
+/// The asset-plane reply to one fetch. `Bytes` is followed on the stream by
+/// exactly `byteLen` raw bytes, so an image is never inflated into JSON.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "reply", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum FetchReply {
+    Bytes { hash: ContentHash, byte_len: u64 },
+    Refused { cause: Refusal },
 }
 
 /// A restartable, bounded asset-plane scene-publication listener.
@@ -168,10 +189,69 @@ pub fn publish_scene(
 ) -> Result<PublishReply, PublishClientError> {
     let request =
         serde_json::to_vec(&PublishRequest { scene }).map_err(PublishClientError::Malformed)?;
+    let (_, header) = exchange(engine, &request)?;
+    serde_json::from_slice(&header).map_err(PublishClientError::Malformed)
+}
+
+/// Why a fetch returned no bytes.
+#[derive(Debug)]
+pub enum FetchError {
+    /// No reply was obtained at all.
+    Client(PublishClientError),
+    /// The peer declined by name, or the bytes that arrived are not the bytes
+    /// the hash names (`AssetHashMismatch`).
+    Refused(Refusal),
+}
+
+impl std::fmt::Display for FetchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Client(error) => write!(f, "{error}"),
+            Self::Refused(refusal) => write!(f, "fetch refused: {refusal}"),
+        }
+    }
+}
+
+impl std::error::Error for FetchError {}
+
+/// Fetch the bytes a peer serves under `hash`, such as a headless render's
+/// image. The bytes are re-hashed on arrival: a reply that does not hash to
+/// what was asked for is refused, never returned (invariant 28).
+pub fn fetch_bytes(engine: SocketAddr, hash: &ContentHash) -> Result<Vec<u8>, FetchError> {
+    let request = serde_json::to_vec(&serde_json::json!({ "fetch": { "hash": hash } }))
+        .map_err(|error| FetchError::Client(PublishClientError::Malformed(error)))?;
+    let (mut stream, header) = exchange(engine, &request).map_err(FetchError::Client)?;
+    let byte_len = match serde_json::from_slice(&header)
+        .map_err(|error| FetchError::Client(PublishClientError::Malformed(error)))?
+    {
+        FetchReply::Bytes { byte_len, .. } => byte_len as usize,
+        FetchReply::Refused { cause } => return Err(FetchError::Refused(cause)),
+    };
+    if byte_len > MAX_PUBLISH_FRAME_BYTES {
+        return Err(FetchError::Client(PublishClientError::ReplyTooLarge { bytes: byte_len }));
+    }
+    let mut bytes = vec![0; byte_len];
+    stream
+        .read_exact(&mut bytes)
+        .map_err(|error| FetchError::Client(PublishClientError::Transport(error)))?;
+    let actual = content_hash(&bytes);
+    if actual != *hash {
+        return Err(FetchError::Refused(Refusal::AssetHashMismatch {
+            expected: hash.clone(),
+            actual,
+        }));
+    }
+    Ok(bytes)
+}
+
+/// Send one framed request and read one framed reply header, bounded before
+/// it is allocated: a peer cannot make this side reserve memory by claiming a
+/// large frame.
+fn exchange(engine: SocketAddr, request: &[u8]) -> Result<(TcpStream, Vec<u8>), PublishClientError> {
     let mut stream = TcpStream::connect(engine).map_err(PublishClientError::Connect)?;
     stream
         .write_all(&(request.len() as u32).to_be_bytes())
-        .and_then(|()| stream.write_all(&request))
+        .and_then(|()| stream.write_all(request))
         .and_then(|()| stream.flush())
         .map_err(PublishClientError::Transport)?;
 
@@ -180,16 +260,20 @@ pub fn publish_scene(
         .read_exact(&mut prefix)
         .map_err(PublishClientError::Transport)?;
     let length = u32::from_be_bytes(prefix) as usize;
-    // The bound is checked before allocating: a peer cannot make this side
-    // reserve memory by claiming a large frame.
     if length > MAX_PUBLISH_FRAME_BYTES {
         return Err(PublishClientError::ReplyTooLarge { bytes: length });
     }
-    let mut bytes = vec![0; length];
+    let mut header = vec![0; length];
     stream
-        .read_exact(&mut bytes)
+        .read_exact(&mut header)
         .map_err(PublishClientError::Transport)?;
-    serde_json::from_slice(&bytes).map_err(PublishClientError::Malformed)
+    Ok((stream, header))
+}
+
+/// One parsed asset-plane request.
+enum AssetRequest {
+    Publish(Result<SceneDocument, PublishRefusal>),
+    Fetch(ContentHash),
 }
 
 fn handle_publish<P: AssetPublishPeer>(
@@ -199,49 +283,91 @@ fn handle_publish<P: AssetPublishPeer>(
     let mut prefix = [0_u8; 4];
     stream.read_exact(&mut prefix)?;
     let length = u32::from_be_bytes(prefix) as usize;
-    let reply = if length > MAX_PUBLISH_FRAME_BYTES {
-        PublishReply::Refused(PublishRefusal::InvalidPublishRequest {
+    let request = if length > MAX_PUBLISH_FRAME_BYTES {
+        AssetRequest::Publish(Err(PublishRefusal::InvalidPublishRequest {
             detail: format!(
                 "publish frame is {length} bytes; maximum is {MAX_PUBLISH_FRAME_BYTES}"
             ),
-        })
+        }))
     } else {
         let mut bytes = vec![0; length];
         stream.read_exact(&mut bytes)?;
-        match parse_request(&bytes) {
-            Ok(scene) => peer
-                .lock()
-                .map_err(|_| io::Error::other("asset publish peer mutex poisoned"))?
-                .publish_scene(scene),
-            Err(refusal) => PublishReply::Refused(refusal),
-        }
+        parse_request(&bytes)
     };
-    let bytes = serde_json::to_vec(&reply).map_err(io::Error::other)?;
+    let locked = || peer.lock().map_err(|_| io::Error::other("asset publish peer mutex poisoned"));
+    match request {
+        AssetRequest::Publish(scene) => {
+            let reply = match scene {
+                Ok(scene) => locked()?.publish_scene(scene),
+                Err(refusal) => PublishReply::Refused(refusal),
+            };
+            write_header(&mut stream, &reply)
+        }
+        AssetRequest::Fetch(hash) => {
+            // The peer is held only long enough to share the bytes.
+            let served = locked()?.fetch(&hash);
+            match served {
+                Some(bytes) => {
+                    write_header(
+                        &mut stream,
+                        &FetchReply::Bytes {
+                            hash,
+                            byte_len: bytes.len() as u64,
+                        },
+                    )?;
+                    stream.write_all(&bytes)?;
+                    stream.flush()
+                }
+                None => write_header(
+                    &mut stream,
+                    &FetchReply::Refused {
+                        cause: Refusal::AssetMissing { hash },
+                    },
+                ),
+            }
+        }
+    }
+}
+
+fn write_header<T: Serialize>(stream: &mut TcpStream, header: &T) -> io::Result<()> {
+    let bytes = serde_json::to_vec(header).map_err(io::Error::other)?;
     stream.write_all(&(bytes.len() as u32).to_be_bytes())?;
     stream.write_all(&bytes)?;
     stream.flush()
 }
 
-fn parse_request(bytes: &[u8]) -> Result<SceneDocument, PublishRefusal> {
-    let mut request = serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(bytes)
-        .map_err(|error| PublishRefusal::InvalidPublishRequest {
-        detail: error.to_string(),
-    })?;
+fn parse_request(bytes: &[u8]) -> AssetRequest {
+    let invalid = |detail: String| AssetRequest::Publish(Err(PublishRefusal::InvalidPublishRequest { detail }));
+    let mut request = match serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(bytes) {
+        Ok(request) => request,
+        Err(error) => return invalid(error.to_string()),
+    };
     if request.len() != 1 {
-        return Err(PublishRefusal::InvalidPublishRequest {
-            detail: "publish request must contain exactly the `scene` field".to_string(),
-        });
+        return invalid("an asset-plane request must contain exactly one of `scene` or `fetch`".to_string());
     }
-    let scene = request
-        .remove("scene")
-        .ok_or_else(|| PublishRefusal::InvalidPublishRequest {
-            detail: "publish request has no scene".to_string(),
-        })?;
-    let scene =
-        serde_json::to_vec(&scene).map_err(|error| PublishRefusal::InvalidPublishRequest {
-            detail: error.to_string(),
-        })?;
-    parse_scene_document(&scene).map_err(|cause| PublishRefusal::SceneRefused { cause })
+    if let Some(fetch) = request.remove("fetch") {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fetch {
+            hash: ContentHash,
+        }
+        return match serde_json::from_value::<Fetch>(fetch) {
+            Ok(fetch) => AssetRequest::Fetch(fetch.hash),
+            Err(error) => invalid(format!("fetch request: {error}")),
+        };
+    }
+    let Some(scene) = request.remove("scene") else {
+        return invalid("an asset-plane request must contain exactly one of `scene` or `fetch`".to_string());
+    };
+    AssetRequest::Publish(
+        serde_json::to_vec(&scene)
+            .map_err(|error| PublishRefusal::InvalidPublishRequest {
+                detail: error.to_string(),
+            })
+            .and_then(|scene| {
+                parse_scene_document(&scene).map_err(|cause| PublishRefusal::SceneRefused { cause })
+            }),
+    )
 }
 
 #[cfg(test)]

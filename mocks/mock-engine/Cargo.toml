@@ -19,3 +19,7 @@ gx-control-plane = { workspace = true }
 gx-control-transport = { workspace = true }
 gx-asset-plane = { workspace = true }
 serde_json = { workspace = true }
+# The engine's own preparation and headless render function (11.41): the mock
+# draws through it, so it cannot render or refuse differently (invariant 45).
+# It uses no GPU device, clock or transport from the worker.
+gx-render-worker = { path = "../../services/render-engine/worker" }

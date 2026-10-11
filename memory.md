@@ -3906,3 +3906,132 @@ recorded above, followed by a green conformance run.
 the work began. 8.6 is done; 11.18 is not. The exact 11.19 done-when also
 requires binding preservation through save/reopen, which was not exercised.
 The implementation is therefore recorded **active**, not done.
+
+---
+
+## 2026-10-11 — EffectCraft architecture review and initial compatibility spike (3.14)
+
+The user authorized reviewing the adoption proposal, adding it to the
+architecture and beginning the spike, then clarified that the main rendering
+work must run on GPU. Added `docs/adr/0003-effectcraft-render-core.md`, linked
+it from ADR-0001 and the docs index, and added build-plan/tracker step `3.14`
+as **active**. Its prerequisites `3.1`, `3.4`, `4.4` were already done. The
+plan and tracker now contain 236 steps. No existing progress was downgraded.
+
+The review corrects production placeholder fallbacks, treating the incomplete
+CPU renderer as full pixel ground truth, injecting only current-frame values
+for temporal effects, automatically isolating every group as a precomp,
+assuming zero-copy live overrides, assuming one readback for every effect
+chain, and allowing only the first phase to halt adoption. It requires linear
+colour and separate Preview/Program transforms, real GPU drawing, packaged
+font isolation, large-stage tiles, explicit backend/fallback reporting and
+all acceptance evidence before cutover. Semantic preparation must be split
+from the existing CPU raster preparation. GPU-first takes precedence over
+the preferred EffectCraft candidate.
+
+### Reproducible setup
+
+- Upstream: `storytold/effectcraft` at
+  `9a7d3e76991d5372448033b473dc12c2480a6a04` (detached, no tracked-source patches).
+- Candidate versions: Rust `1.95.0`, wgpu `30.0.1`. Rust was installed as a
+  separate toolchain with rustfmt; GrapiX's default remains Rust `1.89.0`
+  and its product renderer still depends on wgpu 26.
+- Original upstream `Cargo.lock` SHA-256:
+  `AF849E59D19324BD46605563DEB739C0DEE594A30FBA60C01FBC8067291E828E`.
+- Hardware: Windows x64, NVIDIA GeForce RTX 3070 Ti; DX12 driver
+  `32.0.15.9159`, Vulkan driver `591.59`; granted 16384 texture dimension and
+  eight storage buffers per shader stage. This is not a certification matrix.
+- DXC: Windows SDK x64 `dxcompiler.dll`, version `1.8.2502.11`, SHA-256
+  `78B5E21A91707B4A567EF281A519C52A45B709561202F54C5AD79C5A315847ED`.
+- Added original `tools/effectcraft-spike/grapix_probe.rs` and `run.ps1`.
+  Probe SHA-256:
+  `7388EB63960A8CEAA85A9BA2205EFE19C41E1D1A6142D52F6FC208CEFB3F7EAB`.
+  The runner copies the probe into upstream's examples and uses its lockfile
+  in an external temporary checkout, rather than adding a product dependency
+  or another product-workspace lockfile. It restores process environment
+  overrides. Missing hardware/render/readback is a failing probe, not PASS.
+- Local scratch/evidence:
+  `C:/Users/CG/AppData/Local/Temp/grapix-effectcraft-spike-20261011-9a7d3e7/`.
+  Logs: `upstream-build.log`, `render-tests.log`, `probe-dx12.log`,
+  `acceptance-dx12.log`, `acceptance-vulkan.log`; dependency inventory:
+  `gpu-dependencies.txt`. These are local experiment artifacts, not vendored
+  dependencies or an alternative tracker.
+
+### Verified by execution
+
+| Command/check | Result |
+|---|---|
+| `cargo test --locked -p gx-render-worker -p gx-pixel-gate --lib --quiet` | 71 worker + four pixel-gate tests passed (working tree, including pre-existing uncommitted work) |
+| `cargo run --locked --quiet -p gx-pixel-gate -- check` | Existing checked-in CPU baselines pass, exit 0; does not prove fidelity of placeholder text/images |
+| In pinned scratch: `cargo +1.95.0 test --release --locked -p effectcraft-render -p effectcraft-gpu --no-run` | Release test binaries built; build alone is not execution evidence |
+| Release CPU render binary, `--test-threads=1` | 201 passed, 0 failed, 1 ignored |
+| `run.ps1 -Backend dx12` | FAIL: selected hardware and device, then Auto/FXC failed `classic3d` shader initialization (loop-unroll D3DCompile errors); no rendered-frame PASS |
+| `run.ps1 -Backend dx12 -DxcPath <SDK x64 dxcompiler.dll> -CoreTests` | Shared-device probe PASS; full GPU suite FAIL: 147 passed, 56 failed, 1 ignored, 127.81 seconds; runner exits nonzero |
+| `run.ps1 -Backend vulkan -CoreTests` | Shared-device probe PASS; GPU suite 203 passed, 0 failed, 1 ignored, 37.78 seconds; CPU suite 201 passed, 0 failed, 1 ignored; runner exits 0 |
+| Upstream GPU adapter/skip log review | DX12/Vulkan adapters explicitly reported for ordinary and deferred GPU tests; no no-adapter skip messages; the FXC reproduction test is explicitly ignored, not PASS |
+| CPU/GPU synthetic 97x61 parity | Maximum absolute channel delta approximately 0.00000006 on both backends, below 1e-3; non-finite pixels would fail |
+| Shared-device probe | Separate static projects/caches share one host-created device; interleaved Preview renders do not alter Program pixels |
+| `cargo +1.95.0 tree --locked -p effectcraft-gpu --edges normal --target x86_64-pc-windows-msvc --prefix none --format '{p} \| {l}'` | 134 distinct package/version entries, 14 EffectCraft crates, no UI/app crates in inspected normal closure |
+| `node tools/check-boundaries.mjs` | PASS |
+| PowerShell parser, candidate rustfmt check, `git diff --check` | PASS |
+| Plan/tracker inspection | 236 step entries; `INITIAL_STATE` exactly mirrors `progress.json`; `3.14` active; local new-document links resolve |
+
+DX12 failures include `tests::all_blend_modes_at_every_bit_depth`:
+`Darken Bpc32`, 5341/5917 pixels over tolerance, maximum infinity and NaN
+output; `tests_adjust::gpu_adjustment_chains_match_the_cpu` also produces NaNs.
+Other failures include transition/warp/VR effects; one Glass Wipe comparison
+had 200/1519 pixels over tolerance and maximum channel delta 0.741177. These
+are not small tolerance exceptions. Tests deliberately catching synthetic
+callback panics passed and are not classified as rendering failures.
+
+### Preliminary performance, not a show acceptance gate
+
+Final original probe: two static solids, premultiplied linear internal colour,
+display-texture mipmaps plus synchronous RGBA8 readback; one render instance
+at a time. Five warmups, 30 measured samples; nearest-rank p99 equals the
+sample maximum. No live field updates, animated vectors or actual NDI path.
+
+| Backend | Canvas | CPU layer-cache budget | Cold ms | Warm p50 / p99 ms | Uploads / readbacks over all 35 frames |
+|---|---|---|---|---|---|
+| DX12 + DXC | 1920x1080 | 1 GiB | 136.947 | 6.595 / 7.769 | 2 / 35 |
+| DX12 + DXC | 3840x2160 | 1 GiB | 142.809 | 32.130 / 35.545 | 2 / 35 |
+| DX12 + DXC | 3840x2160 | 256 MiB | 135.084 | 96.848 / 138.819 | 36 / 35 |
+| Vulkan | 1920x1080 | 1 GiB | 39.575 | 5.837 / 6.837 | 2 / 35 |
+| Vulkan | 3840x2160 | 1 GiB | 150.884 | 26.433 / 28.825 | 2 / 35 |
+| Vulkan | 3840x2160 | 256 MiB | 107.388 | 85.259 / 95.463 | 36 / 35 |
+
+Readbacks total 290304000 bytes at 1080p and 1161216000 bytes at 2160p for each
+35-frame run. The default 1 GiB cache retained 41472000/165888000 bytes at
+1080p/2160p, with 68 hits/two misses. The 256 MiB 4K run retained 33177600
+bytes, with 34 hits/36 misses: upstream refuses individual entries greater
+than `budget / 4`, so its full 4K float layer is not cached at that budget.
+This explains repeated uploads and justifies measuring both budgets.
+
+Even the cached 4K path exceeds the 20 ms 50p period on this display/readback
+API. Do not claim a passed show frame-budget/readback gate or general NDI
+failure: a Program-specific texture path, avoiding unnecessary mipmaps and
+using bounded asynchronous output, remains unimplemented/unmeasured.
+
+### Remaining gates and recommendation
+
+`3.14` remains active. No production adoption or cutover is verified. Do not
+vendor or replace Program with this pin yet. Vulkan's passing GPU oracle
+supports further investigation, but DX12 needs fidelity fixes or an explicit
+supported-backend decision. The main rendering path must be GPU-first; the
+current EffectCraft CPU layer/mask generation has not proved that requirement.
+
+Packaged-font isolation is a source-inspected gap: the text engine has a
+process-global database with bundled fonts; `resolve` can scan system fonts
+and substitutes Inter for an unknown family. In-memory font registration is
+not an isolated per-revision font API. Live overrides also copy project state;
+its latency/cost is unmeasured. The dependency inventory is not licence
+acceptance: `unicode-ident` has a `Unicode-3.0` conjunct absent from GrapiX's
+current allowed list; build/dev/platform dependencies and embedded assets
+still need review.
+
+SceneDocument adapter, GPU-first animated/live-data drawing, Indic text
+parity, exact group/material/mesh ordering, temporal sample semantics,
+Rec.709/alpha output, certified reference GPU/driver matrix, real shows and
+outputs, tiles/precision, loss/recovery and eight-hour soak are **not run**.
+Confirmed show targets, broader spike owner/time box and subsequent cutover
+plan updates remain open. No upstream messages or contributions were sent.

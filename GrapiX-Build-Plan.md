@@ -16,7 +16,7 @@ automatable before it is clickable.
 
 ---
 
-**235 steps across 19 phases.**
+**236 steps across 19 phases.**
 
 
 ## Phase P — Parallel tracks — start on day one
@@ -104,6 +104,23 @@ Headless. The engine must be complete and testable before anything draws a pixel
 | `3.11` | Preview and Program frame emission; bounded queue, counted drops | BE | 3.10 | Stall drops frames, never blocks the clock |
 | `3.12` | WAL recovery journal; restore starts output-inhibited | BE | 2.1 | Forced kill restores without an unrecovered output |
 | `3.13` | Refusal coverage audit — every unsupported case refuses by name | BE | 0.6 | No silent fallback anywhere; blend and fit modes included |
+| `3.14` | Pinned EffectCraft render/GPU compatibility spike on Windows (ADR-0003); no production cutover | BE | 3.1, 3.4, 4.4 | Pinned, reproducible evidence for every ADR-0003 gate, each reported PASS/FAIL/SKIP with limitations; adoption recommendation reviewed; no skipped GPU execution counted as PASS |
+
+**11 October 2026 — render-core evaluation authorized.**
+[ADR-0003](docs/adr/0003-effectcraft-render-core.md) records the preferred
+candidate and preserves GrapiX's ownership boundary. `3.14` begins with an
+isolated Windows release build and shared-device pixel probe, using an
+explicit candidate toolchain and external temporary checkout. Product
+dependencies and output routing do not change in this step. Preview and
+Program cutovers require subsequent plan updates and the ADR's acceptance
+evidence; existing `done` entries are not evidence that a GPU compositor
+already exists.
+
+**GPU-first is an acceptance requirement.** Main production drawing,
+transforms, masks, effects and composition must run primarily on the GPU.
+CPU scene logic and bounded preparation remain allowed; CPU full-frame
+rasterisation or silent fallback cannot qualify the candidate. `3.14` must
+report this gate even if a cached-composition benchmark passes.
 
 **Open defect — the engine-host test leg does not terminate (found 13 September 2026).**
 `cargo test -p gx-engine-host` hangs indefinitely in

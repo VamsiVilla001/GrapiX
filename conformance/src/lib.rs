@@ -9,9 +9,11 @@
 //! precisely the paths nobody ran.
 
 mod editor_commands;
+mod headless;
 mod refusal_audit;
 mod scene_plane;
 pub use editor_commands::editor_command_suite;
+pub use headless::headless_render_suite;
 pub use refusal_audit::refusal_audit_suite;
 pub use scene_plane::{mock_product_suite, scene_plane_suite};
 
@@ -284,6 +286,23 @@ pub fn control_plane_suite<P: EnginePeer>(peer: &mut P, report: &mut Report) {
         expect(
             matches!(cue, EngineReply::Refused(_)),
             format!("expected a refusal, got {cue:?}"),
+        ),
+    );
+
+    // A headless render of something never published refuses by name, as a
+    // take does (11.41).
+    let render = peer.handle(ClientRequest::Render(gx_control_plane::render::RenderRequest {
+        take_id: TakeId("conformance/definitely-not-published".into()),
+        revision: Revision(1),
+        content_hash: Some(gx_contracts::ContentHash("a".repeat(64))),
+        frame: 0,
+    }));
+    report.record(
+        PLANE,
+        "a headless render of an unpublished scene refuses like take",
+        expect(
+            matches!(render, EngineReply::Refused(Refusal::UnknownTake { .. })),
+            format!("expected UnknownTake, got {render:?}"),
         ),
     );
 

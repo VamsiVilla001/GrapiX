@@ -10,8 +10,9 @@
 
 use gx_conformance::{
     asset_plane_suite, control_plane_delivery_suite, control_plane_fault_suite,
-    control_plane_suite, editor_command_suite, media_plane_suite, mock_product_suite,
-    refusal_audit_suite, scene_plane_suite, timing_plane_suite, Outcome, Report,
+    control_plane_suite, editor_command_suite, headless_render_suite, media_plane_suite,
+    mock_product_suite, refusal_audit_suite, scene_plane_suite, timing_plane_suite, Outcome,
+    Report,
 };
 use gx_contracts::{DeviceTier, Locality, RationalRate};
 use gx_control_plane::peer::EnginePeer;
@@ -223,6 +224,8 @@ fn run_against_real_engine(report: &mut Report) {
     // journal of an engine this user runs (and cannot fail because of it).
     let port = free_port();
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+    let asset_port = free_port();
+    let asset_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), asset_port);
     let journal = std::env::temp_dir().join(format!(
         "gx-conformance-worker-{}-{port}/recovery.json",
         std::process::id()
@@ -231,6 +234,8 @@ fn run_against_real_engine(report: &mut Report) {
         .args([
             "--port",
             &port.to_string(),
+            "--asset-port",
+            &asset_port.to_string(),
             "--recovery-journal",
             &journal.display().to_string(),
             "--publish",
@@ -283,6 +288,8 @@ fn run_against_real_engine(report: &mut Report) {
     control_plane_suite(&mut client, report);
     // No fault suite: a real engine cannot be driven into a reference loss on
     // request, which is the entire reason `FaultInjection` is a separate trait.
+    // Headless render (11.41) runs last: its timed run puts a scene on Program.
+    headless_render_suite(&mut client, asset_addr, report);
 }
 
 /// The worker binary. Cargo places a binary run via `cargo run` directly in
