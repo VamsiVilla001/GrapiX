@@ -10,17 +10,17 @@ import type { MaterialTextureSlot } from "./MaterialTextureSlot";
 /**
  * A material as the library holds it.
  */
-export type MaterialDefinition = { materialId: string, name: string, kind: MaterialKind, 
+export type MaterialDefinition = { materialId: string, name: string, kind: MaterialKind,
 /**
  * The base paint. A gradient is a colour value rather than a separate
  * material kind, so a fill can become a gradient without the material
  * changing type underneath every object that uses it.
  */
-color: ColorValue, 
+color: ColorValue,
 /**
  * 0–1, multiplied with the object's own opacity.
  */
-opacity: number, blendMode: BlendMode, alphaMode: AlphaMode, cullMode: CullMode, depthMode: DepthMode, doubleSided: boolean, textures: Array<MaterialTextureSlot>, 
+opacity: number, blendMode: BlendMode, alphaMode: AlphaMode, cullMode: CullMode, depthMode: DepthMode, doubleSided: boolean, textures: Array<MaterialTextureSlot>,
 /**
  * Set only for `MaterialKind::Shader`.
  */

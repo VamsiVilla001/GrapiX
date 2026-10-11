@@ -7,15 +7,15 @@ import type { Stagger } from "./Stagger";
  * A designer-authored motion preset (G.6.4). The model selects and
  * parameterises these; it never authors one (G.6.7).
  */
-export type MotionPreset = { id: string, 
+export type MotionPreset = { id: string,
 /**
  * Object types the preset may be applied to.
  */
-appliesTo: Array<string>, phases: MotionPhases, 
+appliesTo: Array<string>, phases: MotionPhases,
 /**
  * Adjustable parameters, each with its declared range.
  */
-params: Array<PresetParam>, 
+params: Array<PresetParam>,
 /**
  * Required when the preset drives a data-bound repeater (G.6.5).
  */

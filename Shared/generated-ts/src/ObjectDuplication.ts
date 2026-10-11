@@ -3,15 +3,15 @@
 /**
  * What a duplicate created.
  */
-export type ObjectDuplication = { 
+export type ObjectDuplication = {
 /**
  * The copy of the object that was asked for; what the editor selects.
  */
-newObjectId: string, 
+newObjectId: string,
 /**
  * Every object created, in scene order.
  */
-createdObjectIds: Array<string>, 
+createdObjectIds: Array<string>,
 /**
  * Animation channels copied onto the new objects. A duplicate that
  * dropped the animation would look right and play wrong.

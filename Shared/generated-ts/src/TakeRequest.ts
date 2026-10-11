@@ -8,7 +8,7 @@ import type { TakeId } from "./TakeId";
  * Ask for a take. Revision is exact and its content hash is pinned: a
  * mismatch on either is refused, not coerced (invariant 61).
  */
-export type TakeRequest = { takeId: TakeId, revision: Revision, 
+export type TakeRequest = { takeId: TakeId, revision: Revision,
 /**
  * The content hash the caller pinned. Optional on the wire only so that
  * a missing pin is refused by name (`RevisionUnpinned`) rather than as a

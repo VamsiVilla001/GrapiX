@@ -3,11 +3,11 @@
 /**
  * One bevel of a slab, measured inward from its outline.
  */
-export type SlabBevel = { enabled: boolean, 
+export type SlabBevel = { enabled: boolean,
 /**
  * Width of the bevel, inward from the slab outline, in scene units.
  */
-size: number, 
+size: number,
 /**
  * Z depth the bevel occupies, in scene units.
  */

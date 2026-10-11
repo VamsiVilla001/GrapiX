@@ -7,23 +7,23 @@ import type { SlabBevel } from "./SlabBevel";
  * independent front and back bevels. Geometry only — face culling is a
  * material property and arrives with 1.3's material model.
  */
-export type SlabProperties = { 
+export type SlabProperties = {
 /**
  * Corner radius of the slab outline, in scene units.
  */
-cornerRadius: number, 
+cornerRadius: number,
 /**
  * Curved-corner tessellation quality.
  */
-cornerSegments: number, 
+cornerSegments: number,
 /**
  * Horizontal displacement between the slab's bottom and top edges.
  */
-skew: number, 
+skew: number,
 /**
  * Whether texture coordinates follow the skewed outline.
  */
-skewTexture: boolean, 
+skewTexture: boolean,
 /**
  * Object-level face culling, matching XPression's slab control (1.3).
  */

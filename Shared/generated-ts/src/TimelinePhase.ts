@@ -4,16 +4,16 @@ import type { PhaseKind } from "./PhaseKind";
 /**
  * One named span of the scene timeline.
  */
-export type TimelinePhase = { kind: PhaseKind, 
+export type TimelinePhase = { kind: PhaseKind,
 /**
  * Distinguishes several `continue` phases from each other. Absent means
  * the kind names it uniquely, which is true of every kind but `continue`.
  */
-name?: string, 
+name?: string,
 /**
  * First frame of the phase, inclusive.
  */
-startFrame: bigint, 
+startFrame: bigint,
 /**
  * One past the last frame. See the module note on why this is exclusive.
  */

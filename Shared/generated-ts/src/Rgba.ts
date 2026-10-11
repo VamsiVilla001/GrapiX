@@ -7,7 +7,7 @@ import type { SourceColorSpace } from "./SourceColorSpace";
  * Components are 0–1 floats rather than 8-bit bytes because the working
  * space is linear and 8 bits of linear has visible banding in the shadows.
  */
-export type Rgba = { r: number, g: number, b: number, 
+export type Rgba = { r: number, g: number, b: number,
 /**
  * Straight (non-premultiplied) alpha.
  */

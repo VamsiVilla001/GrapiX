@@ -10,11 +10,11 @@ import type { Vec2 } from "./Vec2";
  * An After-Effects-style shape layer: a bezier path with fill and stroke
  * (the base carries both) and AE's Trim Paths.
  */
-export type ShapeObject = { path: BezierPath, 
+export type ShapeObject = { path: BezierPath,
 /**
  * Additional subpaths for compound paths; `path` remains primary.
  */
-compoundPaths?: Array<BezierPath>, fillEnabled: boolean, strokeEnabled: boolean, fillRule: FillRule, 
+compoundPaths?: Array<BezierPath>, fillEnabled: boolean, strokeEnabled: boolean, fillRule: FillRule,
 /**
  * AE Trim Paths, as percentages of the path's total length: the stroke
  * draws from `trim_start` to `trim_end`, rotated by `trim_offset`.
@@ -22,54 +22,54 @@ compoundPaths?: Array<BezierPath>, fillEnabled: boolean, strokeEnabled: boolean,
  * stroke-only; the fill always covers the whole region, which is what
  * separates a wipe reveal from a scaling mask.
  */
-trimStart?: number, trimEnd?: number, trimOffset?: number, id: string, name: string, visible: boolean, locked: boolean, 
+trimStart?: number, trimEnd?: number, trimOffset?: number, id: string, name: string, visible: boolean, locked: boolean,
 /**
  * 0–1.
  */
-opacity: number, 
+opacity: number,
 /**
  * Translation in scene coordinates (top-left authoring origin).
  */
-x: number, y: number, 
+x: number, y: number,
 /**
  * Depth along the view axis; composes additively down the hierarchy.
  */
-zDepth: number, 
+zDepth: number,
 /**
  * Draw order within a layer.
  */
-zIndex: number, 
+zIndex: number,
 /**
  * The layer this object belongs to (a `Layer` object's id), or empty for
  * the implicit default layer.
  */
-layerId: string, 
+layerId: string,
 /**
  * The object's box, in scene units. Every kind has one: a rect and an
  * image fill it, an ellipse is inscribed in it, paragraph text wraps
  * inside it, and a binding can drive it — which is why it is on the base
  * and not repeated per kind.
  */
-width: number, height: number, 
+width: number, height: number,
 /**
  * Rotation in degrees. `rotation` is the Z axis; X and Y are 3D and
  * compose down the hierarchy only on meshes (`resolve_hierarchy`).
  */
-rotation: number, rotationX: number, rotationY: number, scaleX: number, scaleY: number, scaleZ: number, 
+rotation: number, rotationX: number, rotationY: number, scaleX: number, scaleY: number, scaleZ: number,
 /**
  * Object-local pivot in scene pixels; renderers apply T(x,y)·R·S·T(-anchor).
  */
-anchor?: Vec2, 
+anchor?: Vec2,
 /**
  * Primary fill and stroke. Tagged colour values as of 1.4 — a CSS
  * string carried no source space, and B.1 forbids inferring one.
  */
-fill?: ColorValue, stroke?: ColorValue, strokeWidth: number, 
+fill?: ColorValue, stroke?: ColorValue, strokeWidth: number,
 /**
  * Bound data paths (object property → data-context path). Opaque here;
  * the binding contract owns the grammar.
  */
-bindings?: { [key in string]?: JsonValue }, 
+bindings?: { [key in string]?: JsonValue },
 /**
  * Material slot assignments: slot name → the material bound to it
  * (1.3). A `BTreeMap` so the wire order is the slot order and two

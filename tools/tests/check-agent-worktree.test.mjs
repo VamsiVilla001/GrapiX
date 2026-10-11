@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { validateWorkspace } from "../check-agent-worktree.mjs";
+import { AUTHORIZED_PRIMARY, validateWorkspace } from "../check-agent-worktree.mjs";
 
-const primary = resolve("workspace-fixture");
+const primary = AUTHORIZED_PRIMARY;
 const canonical = join(primary, "agent", "worktree");
 const facts = { primary, top: canonical, branch: "agent/shared", registered: [primary, canonical] };
 
@@ -25,4 +25,9 @@ test("detached HEAD cannot pass", () => {
 test("an additional vendor or per-agent worktree is refused", () => {
   const registered = [...facts.registered, join(primary, ".claude", "worktrees", "private")];
   assert.match(validateWorkspace({ ...facts, registered }).violations.join("\n"), /Additional GrapiX worktree is forbidden/);
+});
+
+test("another clone cannot authorize its own agent/worktree layout", () => {
+  const clone = resolve("other-clone");
+  assert.match(validateWorkspace({ primary: clone, top: join(clone, "agent", "worktree"), branch: "agent/shared", registered: [clone, join(clone, "agent", "worktree")] }).violations.join("\n"), /authorized GrapiX repository/);
 });

@@ -4,7 +4,7 @@ import type { Rgba } from "./Rgba";
 /**
  * One stop of a gradient.
  */
-export type GradientStop = { 
+export type GradientStop = {
 /**
  * 0–1 along the gradient.
  */

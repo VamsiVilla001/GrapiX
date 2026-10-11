@@ -171,6 +171,8 @@ export * from "./RemoveFont.js";
 export * from "./RemoveKeyframe.js";
 export * from "./RemovePhase.js";
 export * from "./RenameObject.js";
+export * from "./RenderRequest.js";
+export * from "./RenderedFrame.js";
 export * from "./ReplaceControl.js";
 export * from "./ReplaceDataContext.js";
 export * from "./ResolvedObject.js";

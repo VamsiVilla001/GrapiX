@@ -7,24 +7,24 @@
  * reimplementing it: `resolve_hierarchy` is the single implementation of the
  * composition rules (invariant 22), and this is the shape it returns.
  */
-export type ResolvedObject = { id: string, 
+export type ResolvedObject = { id: string,
 /**
  * Effective position of the object's origin in scene coordinates, after
  * every ancestor's transform. The object's own rotation, scale and
  * anchor are reported separately and applied by the renderer around this
  * point, so the anchor is deliberately not folded in here.
  */
-x: number, y: number, zDepth: number, 
+x: number, y: number, zDepth: number,
 /**
  * Effective Z rotation, in degrees.
  */
-rotationZ: number, 
+rotationZ: number,
 /**
  * Effective X and Y rotation. These compose down the hierarchy only on
  * meshes; on every other kind they are the authored values. That is 1.x's
  * rule carried forward — a 2D object does not inherit a parent's 3D tilt.
  */
-rotationX: number, rotationY: number, scaleX: number, scaleY: number, scaleZ: number, visible: boolean, opacity: number, locked: boolean, 
+rotationX: number, rotationY: number, scaleX: number, scaleY: number, scaleZ: number, visible: boolean, opacity: number, locked: boolean,
 /**
  * True for layer and group. A container is never drawn; its transform
  * reaches a frame only through its descendants.

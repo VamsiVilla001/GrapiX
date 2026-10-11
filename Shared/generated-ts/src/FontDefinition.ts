@@ -8,7 +8,7 @@ import type { FontLoadStatus } from "./FontLoadStatus";
  * posture. Embedded verbatim in the scene document, so a package is
  * self-describing.
  */
-export type FontDefinition = { fontId: string, family: string, displayName: string, faces: Array<FontFaceDefinition>, fallbackFamilies: Array<string>, embeddingPolicy: EmbeddingPolicy, 
+export type FontDefinition = { fontId: string, family: string, displayName: string, faces: Array<FontFaceDefinition>, fallbackFamilies: Array<string>, embeddingPolicy: EmbeddingPolicy,
 /**
  * The declared licence. A `Package` font without one is a preflight
  * refusal (p2-licensing-positions §5: unstated licence ⇒ restricted).

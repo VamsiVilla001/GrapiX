@@ -16,11 +16,11 @@ import type { RefusalSeverity } from "./RefusalSeverity";
  * Serialises identically in Rust and TypeScript because it is generated from
  * this one definition (invariant 22); the test below pins the exact JSON.
  */
-export type StructuredRefusal = { 
+export type StructuredRefusal = {
 /**
  * The named refusal. The machine-parseable reason.
  */
-code: Refusal, 
+code: Refusal,
 /**
  * The JSON path to the offending value, e.g. `objects[2].text.size`.
  * Omitted on the wire when the refusal is not about one field.
@@ -29,12 +29,12 @@ code: Refusal,
  * `skip_serializing_if`: the key is absent, not `null`, so the TS field
  * is `field?: string`, and the two attributes must change together.
  */
-field?: string, 
+field?: string,
 /**
  * The value that was given, as JSON, so the caller can show or log it
  * verbatim. `Null` when there is no single given value.
  */
-given: JsonValue, 
+given: JsonValue,
 /**
  * The values that would have been accepted. Omitted on the wire when
  * there is no enumerable set — the fix is described by the code, not a

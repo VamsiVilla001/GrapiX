@@ -9,7 +9,7 @@ import type { VisualTokens } from "./VisualTokens";
  * built against makes brand-pack drift *listable* rather than invisible
  * (Part G's risk table), which is what 7.6 stamps onto every package.
  */
-export type DesignSystem = { name: string, 
+export type DesignSystem = { name: string,
 /**
  * Monotonic. A package records this, so "which templates predate v4"
  * is a query rather than an investigation.

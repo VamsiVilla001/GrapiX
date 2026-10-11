@@ -4,16 +4,22 @@ import { realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+// User-mandated workspace; a clone with the same directory layout cannot pass.
+export const AUTHORIZED_PRIMARY = resolve("D:/Project KK/Personal projects/GrapiX");
+
 const normalized = (path) => {
   const absolute = resolve(path);
   return process.platform === "win32" ? absolute.toLowerCase() : absolute;
 };
 
 export function validateWorkspace({ primary, top, branch, registered }) {
-  const canonical = join(primary, "agent", "worktree");
+  const canonical = join(AUTHORIZED_PRIMARY, "agent", "worktree");
   const expected = normalized(canonical);
-  const allowed = new Set([normalized(primary), expected]);
+  const allowed = new Set([normalized(AUTHORIZED_PRIMARY), expected]);
   const violations = [];
+  if (normalized(primary) !== normalized(AUTHORIZED_PRIMARY)) {
+    violations.push(`Agent work must use the authorized GrapiX repository: ${AUTHORIZED_PRIMARY}; current repository is ${primary}`);
+  }
   if (normalized(top) !== expected) {
     violations.push(`Agent edits/tests must run in ${canonical}; current worktree is ${top}`);
   }

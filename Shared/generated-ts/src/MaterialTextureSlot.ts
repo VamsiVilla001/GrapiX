@@ -7,16 +7,16 @@ import type { TextureWrapMode } from "./TextureWrapMode";
 /**
  * One texture input of a material.
  */
-export type MaterialTextureSlot = { 
+export type MaterialTextureSlot = {
 /**
  * The slot's name in the shader or the primitive: `baseColor`,
  * `normal`, `front`, and so on.
  */
-slot: string, 
+slot: string,
 /**
  * References `AssetLibraryItem::asset_id` in the scene's library.
  */
-assetId: string, fit: FitMode, wrap: TextureWrapMode, filtering: TextureFiltering, 
+assetId: string, fit: FitMode, wrap: TextureWrapMode, filtering: TextureFiltering,
 /**
  * The texture's source space. Required, because B.1 forbids inferring
  * it: an untagged texture is a defect, not an sRGB one.

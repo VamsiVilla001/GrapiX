@@ -11,7 +11,7 @@ import type { TakeId } from "./TakeId";
  * against the client's clock would prepare against the wrong frame and the
  * error would only show up as a late first frame on air.
  */
-export type CueRequest = { takeId: TakeId, revision: Revision, 
+export type CueRequest = { takeId: TakeId, revision: Revision,
 /**
  * As on [`TakeRequest`].
  */

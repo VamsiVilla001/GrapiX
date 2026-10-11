@@ -8,11 +8,11 @@ import type { FontFormat } from "./FontFormat";
  * what hit the wire: `rename_all` alone would leave `asset_id` snake_case
  * while every other contract is camelCase.
  */
-export type FontSource = { "kind": "file", assetId: string, format: FontFormat, 
+export type FontSource = { "kind": "file", assetId: string, format: FontFormat,
 /**
  * Original public URL when this face was resolved and cached from CSS.
  */
-originalUrl?: string, 
+originalUrl?: string,
 /**
  * Stylesheet that declared this cached face.
  */

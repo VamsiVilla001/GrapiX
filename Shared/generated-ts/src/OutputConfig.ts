@@ -4,16 +4,16 @@
  * Output configuration. Live output is gated by ADR-005, evaluated in
  * `crate::capability::live_allowed`.
  */
-export type OutputConfig = { 
+export type OutputConfig = {
 /**
  * Adapter name. Never used to decide whether the output is live
  * (invariant 20) - it names a device, nothing more.
  */
-adapter: string, 
+adapter: string,
 /**
  * Whether this output is intended to reach an audience.
  */
-live: boolean, 
+live: boolean,
 /**
  * Set only when an operator has been told the reference is not locked.
  */

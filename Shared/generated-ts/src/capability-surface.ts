@@ -8,8 +8,8 @@
 import type { CapabilitySurface } from "./CapabilitySurface.js";
 
 export const CAPABILITY_SURFACE: CapabilitySurface = {
-  "schemaVersion": 4,
-  "protocolVersion": 4,
+  "schemaVersion": 5,
+  "protocolVersion": 5,
   "enums": [
     {
       "name": "BlendMode",
@@ -281,7 +281,9 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
     "sceneSchemaUnsupported",
     "assetBatchEmpty",
     "assetKindNotAddable",
-    "assetFormatUnrecognised"
+    "assetFormatUnrecognised",
+    "renderSceneUnavailable",
+    "renderFrameOutOfRange"
   ],
   "tools": [
     {

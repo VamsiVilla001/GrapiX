@@ -113,7 +113,7 @@ mod tests {
         assert_eq!(
             err,
             Refusal::ProtocolMismatch {
-                expected: 4,
+                expected: gx_contracts::PROTOCOL_VERSION,
                 actual: 3
             }
         );

@@ -3,7 +3,7 @@
 /**
  * One published template and the design-system version it was stamped with.
  */
-export type StampedTemplate = { templateId: string, 
+export type StampedTemplate = { templateId: string,
 /**
  * Absent means the package predates stamping — a different statement from
  * "built against no system", and the reason this is an `Option`.

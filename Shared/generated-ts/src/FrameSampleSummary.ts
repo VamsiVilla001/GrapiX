@@ -3,4 +3,9 @@
 /**
  * One frame's measured cost, for the performance graph page.
  */
-export type FrameSampleSummary = { frame: bigint, renderNanos: bigint, intervalNanos: bigint, late: boolean, dropsSoFar: bigint, };
+export type FrameSampleSummary = { frame: bigint, renderNanos: bigint, intervalNanos: bigint, late: boolean, dropsSoFar: bigint,
+/**
+ * Clock frames that passed since the previous emission without Program
+ * being emitted for them (11.41).
+ */
+missedBefore: bigint, };

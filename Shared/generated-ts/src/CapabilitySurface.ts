@@ -9,12 +9,12 @@ import type { ToolDescriptor } from "./ToolDescriptor";
  * string to satisfy a trait no caller on this side uses would cost an
  * allocation per field for nothing.
  */
-export type CapabilitySurface = { schemaVersion: number, protocolVersion: number, 
+export type CapabilitySurface = { schemaVersion: number, protocolVersion: number,
 /**
  * Every enumerable the tool surface accepts, derived from the enums
  * themselves rather than restated.
  */
-enums: Array<EnumSurface>, 
+enums: Array<EnumSurface>,
 /**
  * Every refusal an agent may receive, by wire code. From
  * [`Refusal::code_name`], so a new refusal appears here without anyone

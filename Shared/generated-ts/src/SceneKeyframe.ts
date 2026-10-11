@@ -5,19 +5,19 @@ import type { SceneEasing } from "./SceneEasing";
 /**
  * One key on one numeric property channel.
  */
-export type SceneKeyframe = { 
+export type SceneKeyframe = {
 /**
  * Absolute frame at the scene canvas rate.
  */
-frame: bigint, 
+frame: bigint,
 /**
  * The property's value at that frame, in the property's own units.
  */
-value: number, 
+value: number,
 /**
  * Outgoing easing toward the next key.
  */
-easing: SceneEasing, 
+easing: SceneEasing,
 /**
  * Custom bezier control points, present exactly when easing is custom.
  */

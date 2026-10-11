@@ -26,9 +26,9 @@ test("the surface is read-only by construction", () => {
   assert.equal(status, "Partial");
 });
 
-test("the schema version travels with protocol v4", () => {
-  assert.equal(SCHEMA_VERSION, 4);
-  assert.equal(getCapabilitySurface().protocolVersion, 4);
+test("the schema version travels with headless-rendering protocol v5", () => {
+  assert.equal(SCHEMA_VERSION, 5);
+  assert.equal(getCapabilitySurface().protocolVersion, 5);
 });
 
 test("capability discovery enumerates the supported enums as data", () => {

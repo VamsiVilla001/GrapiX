@@ -19,79 +19,79 @@ import type { WritingMode } from "./WritingMode";
  * family, weight, style and stretch are on `FontDefinition` and not here.
  * The colour is the base's `fill`.
  */
-export type TextObject = { text: string, 
+export type TextObject = { text: string,
 /**
  * References `FontDefinition::font_id` in the scene's `fonts`.
  */
-fontId: string, 
+fontId: string,
 /**
  * Em size in scene units.
  */
-size: number, layout: TextLayout, autoFit: TextAutoFit, writingMode: WritingMode, verticalAlign: VerticalAlign, direction: TextDirection, textCase: TextCase, decoration: TextDecoration, overflow: TextOverflow, align: TextAlign, 
+size: number, layout: TextLayout, autoFit: TextAutoFit, writingMode: WritingMode, verticalAlign: VerticalAlign, direction: TextDirection, textCase: TextCase, decoration: TextDecoration, overflow: TextOverflow, align: TextAlign,
 /**
  * Line height as a multiple of `size`. Absent means the font's own
  * metrics, which is not the same as 1.0.
  */
-lineHeight?: number, 
+lineHeight?: number,
 /**
  * Tracking, in thousandths of an em — After Effects' unit.
  */
-letterSpacing: number, wordSpacing: number, 
+letterSpacing: number, wordSpacing: number,
 /**
  * Space between paragraphs, in scene units.
  */
-paragraphSpacing: number, 
+paragraphSpacing: number,
 /**
  * First-line indent, in scene units.
  */
-textIndent: number, id: string, name: string, visible: boolean, locked: boolean, 
+textIndent: number, id: string, name: string, visible: boolean, locked: boolean,
 /**
  * 0–1.
  */
-opacity: number, 
+opacity: number,
 /**
  * Translation in scene coordinates (top-left authoring origin).
  */
-x: number, y: number, 
+x: number, y: number,
 /**
  * Depth along the view axis; composes additively down the hierarchy.
  */
-zDepth: number, 
+zDepth: number,
 /**
  * Draw order within a layer.
  */
-zIndex: number, 
+zIndex: number,
 /**
  * The layer this object belongs to (a `Layer` object's id), or empty for
  * the implicit default layer.
  */
-layerId: string, 
+layerId: string,
 /**
  * The object's box, in scene units. Every kind has one: a rect and an
  * image fill it, an ellipse is inscribed in it, paragraph text wraps
  * inside it, and a binding can drive it — which is why it is on the base
  * and not repeated per kind.
  */
-width: number, height: number, 
+width: number, height: number,
 /**
  * Rotation in degrees. `rotation` is the Z axis; X and Y are 3D and
  * compose down the hierarchy only on meshes (`resolve_hierarchy`).
  */
-rotation: number, rotationX: number, rotationY: number, scaleX: number, scaleY: number, scaleZ: number, 
+rotation: number, rotationX: number, rotationY: number, scaleX: number, scaleY: number, scaleZ: number,
 /**
  * Object-local pivot in scene pixels; renderers apply T(x,y)·R·S·T(-anchor).
  */
-anchor?: Vec2, 
+anchor?: Vec2,
 /**
  * Primary fill and stroke. Tagged colour values as of 1.4 — a CSS
  * string carried no source space, and B.1 forbids inferring one.
  */
-fill?: ColorValue, stroke?: ColorValue, strokeWidth: number, 
+fill?: ColorValue, stroke?: ColorValue, strokeWidth: number,
 /**
  * Bound data paths (object property → data-context path). Opaque here;
  * the binding contract owns the grammar.
  */
-bindings?: { [key in string]?: JsonValue }, 
+bindings?: { [key in string]?: JsonValue },
 /**
  * Material slot assignments: slot name → the material bound to it
  * (1.3). A `BTreeMap` so the wire order is the slot order and two

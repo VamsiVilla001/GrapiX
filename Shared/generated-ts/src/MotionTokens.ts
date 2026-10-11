@@ -8,15 +8,15 @@ import type { NamedEasing } from "./NamedEasing";
  * Durations and staggers are milliseconds. Easings are cubic-bezier control
  * points, or the literal `hold` for a phase that must not interpolate.
  */
-export type MotionTokens = { 
+export type MotionTokens = {
 /**
  * Named durations in ms, e.g. `snap: 160`, `base: 400`.
  */
-duration: Array<Named<number>>, 
+duration: Array<Named<number>>,
 /**
  * Named easings.
  */
-easing: Array<NamedEasing>, 
+easing: Array<NamedEasing>,
 /**
  * Named stagger intervals in ms, e.g. `tight: 40`, `base: 70`.
  */

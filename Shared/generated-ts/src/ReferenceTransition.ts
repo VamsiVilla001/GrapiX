@@ -4,7 +4,7 @@ import type { ReferenceState } from "./ReferenceState";
 /**
  * A reference state change, reported as an event.
  */
-export type ReferenceTransition = { from: ReferenceState, to: ReferenceState, 
+export type ReferenceTransition = { from: ReferenceState, to: ReferenceState,
 /**
  * The frame at which the change was observed, in the engine's timebase.
  */

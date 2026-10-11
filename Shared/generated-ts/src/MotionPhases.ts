@@ -8,24 +8,24 @@ import type { MotionPhase } from "./MotionPhase";
  * system already has. A preset must describe each phase it uses, and `in`
  * plus `out` are required.
  */
-export type MotionPhases = { 
+export type MotionPhases = {
 /**
  * Build on. Triggered by Take. Required.
  */
-in: MotionPhase, 
+in: MotionPhase,
 /**
  * Build off. Triggered by Out. Required.
  */
-out: MotionPhase, 
+out: MotionPhase,
 /**
  * Idle loop after `in` completes. Must be safely interruptible at any
  * frame.
  */
-hold: MotionPhase | null, 
+hold: MotionPhase | null,
 /**
  * Staged builds, triggered by Continue. Zero or more.
  */
-continue: Array<MotionPhase>, 
+continue: Array<MotionPhase>,
 /**
  * How a bound value changes on air without a full re-take.
  */

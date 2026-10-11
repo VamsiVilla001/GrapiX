@@ -6,4 +6,13 @@ import type { RationalRate } from "./RationalRate";
 /**
  * A bounded performance snapshot, as the graph page consumes it.
  */
-export type PerformanceSummary = { rate: RationalRate, deviceTier: DeviceTier, frames: Array<FrameSampleSummary>, totalRendered: bigint, totalLate: bigint, totalDropped: bigint, meanBudgetRatio?: number, };
+export type PerformanceSummary = { rate: RationalRate, deviceTier: DeviceTier, frames: Array<FrameSampleSummary>, totalRendered: bigint, totalLate: bigint,
+/**
+ * Frames a media consumer had not taken before the next replaced them.
+ */
+totalDropped: bigint,
+/**
+ * Clock frames Program was never emitted for: the render loop reached
+ * the next frame only after the clock had passed one or more (11.41).
+ */
+totalMissed: bigint, meanBudgetRatio?: number, };

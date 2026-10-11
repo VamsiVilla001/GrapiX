@@ -7,11 +7,11 @@
  * string to satisfy a trait no caller on this side uses would cost an
  * allocation per field for nothing.
  */
-export type EnumSurface = { 
+export type EnumSurface = {
 /**
  * The contract type's name.
  */
-name: string, 
+name: string,
 /**
  * Its values, as they appear on the wire.
  */

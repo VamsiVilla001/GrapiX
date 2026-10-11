@@ -9,27 +9,27 @@ import type { ToolEffect } from "./ToolEffect";
  * string to satisfy a trait no caller on this side uses would cost an
  * allocation per field for nothing.
  */
-export type ToolDescriptor = { 
+export type ToolDescriptor = {
 /**
  * `group.verb`, as an agent calls it.
  */
-name: string, 
+name: string,
 /**
  * The D.2 group this belongs to.
  */
-group: string, effect: ToolEffect, 
+group: string, effect: ToolEffect,
 /**
  * The scope a caller must hold. `None` marks a tool available to any
  * authenticated caller — currently only the capability surface, which an
  * agent must be able to read before it knows what it may ask for.
  */
-requiredScope: Scope | null, 
+requiredScope: Scope | null,
 /**
  * The contract type carried in, by name. An agent resolves it against the
  * generated types, which are themselves generated from these contracts
  * (invariant 22), so the schema is never written twice.
  */
-input: string, 
+input: string,
 /**
  * The contract type carried out.
  */

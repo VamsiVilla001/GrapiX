@@ -377,8 +377,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     write_barrel(&out)?;
     write_transfer_reference(&workspace_root())?;
     write_easing_reference(&workspace_root())?;
+    normalize_typescript_whitespace(&out)?;
     check_advertised_types_resolve(&out)?;
     println!("generated {count} contract types into {}", out.display());
+    Ok(())
+}
+
+// ts-rs emits trailing spaces before inline field documentation. Keep the
+// generated files reproducible and suitable for the repository's diff check.
+fn normalize_typescript_whitespace(dir: &Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if entry.file_type()?.is_dir() {
+            normalize_typescript_whitespace(&path)?;
+        } else if path.extension().is_some_and(|ext| ext == "ts") {
+            let text = std::fs::read_to_string(&path)?;
+            let normalized = text
+                .lines()
+                .map(str::trim_end)
+                .collect::<Vec<_>>()
+                .join("\n") + "\n";
+            if text != normalized {
+                std::fs::write(&path, normalized)?;
+            }
+        }
+    }
     Ok(())
 }
 

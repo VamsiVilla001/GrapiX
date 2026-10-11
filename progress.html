@@ -159,7 +159,7 @@ const INITIAL_STATE = {
   "0.8": "done",   // Revision + if_revision: conflict returns the current revision; loser-recovery test passes
   "0.9": "done",   // contracts package; Rust source of truth, TS generated, drift gate
   "0.10": "done",  // conformance harness + mock-peer pattern, runs in gate
-  "0.11": "active", // shared agent consolidation; final cleanup and product gate in progress
+  "0.11": "done", // verified: all seven old heads merged, two registered checkouts, old provider folders and 12 temps removed, preservation hashes/settings checked, workspace guard rejects primary/clones/private branches; npm run check passed (379 JS/TS, 626 Rust; conformance 272 pass, 0 fail, 9 skip)
   // Phase 2 — platform primitives.
   "2.1": "done",   // atomic replacement (Shared/fs): unique temp + fsync + directory fsync + bounded retry on a Windows sharing violation; both rename races closed, one implementation, 7 tests
   "2.2": "done",   // filename sanitiser: hostile corpus (reserved names, illegal chars, NFC, length) passes; idempotent

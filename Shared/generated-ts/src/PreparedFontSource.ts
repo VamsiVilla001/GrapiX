@@ -2,11 +2,11 @@
 import type { ContentHash } from "./ContentHash";
 import type { FontDisposition } from "./FontDisposition";
 
-export type PreparedFontSource = { 
+export type PreparedFontSource = {
 /**
  * The file name, or the link a downloaded family came from.
  */
-source: string, fontId: string, displayName: string, 
+source: string, fontId: string, displayName: string,
 /**
  * Content addresses of the bytes behind the font's faces.
  */

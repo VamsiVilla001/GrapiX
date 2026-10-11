@@ -3,11 +3,11 @@
 /**
  * A named person's approval of an asset for use.
  */
-export type AssetApproval = { 
+export type AssetApproval = {
 /**
  * The approving user, as the authorization layer names them (2.9).
  */
-user: string, 
+user: string,
 /**
  * When they approved, as an RFC 3339 UTC timestamp. Authoring metadata
  * only: nothing on the render path reads it (invariant 8).

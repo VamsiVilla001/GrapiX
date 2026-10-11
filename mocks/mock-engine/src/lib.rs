@@ -579,7 +579,7 @@ mod tests {
     fn capability_declares_locality_and_clock() {
         let e = MockEngine::new();
         let cap = e.capability();
-        assert_eq!(cap.protocol, 4);
+        assert_eq!(cap.protocol, gx_contracts::PROTOCOL_VERSION);
         assert_eq!(cap.locality, Locality::CoLocated);
         assert_eq!(cap.clock, ClockSource::FreeRun);
         assert_eq!(cap.reference, ReferenceState::NotPresent);

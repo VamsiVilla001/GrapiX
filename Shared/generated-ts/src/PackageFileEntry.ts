@@ -4,7 +4,7 @@ import type { ContentHash } from "./ContentHash";
 /**
  * One verified payload file in a [`PackageManifest`].
  */
-export type PackageFileEntry = { 
+export type PackageFileEntry = {
 /**
  * Archive-relative path, expressed with `/` separators.
  */

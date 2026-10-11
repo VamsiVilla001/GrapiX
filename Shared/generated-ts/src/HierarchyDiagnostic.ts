@@ -5,7 +5,7 @@ import type { HierarchyDiagnosticCode } from "./HierarchyDiagnosticCode";
  * An edge the resolver refused, with the reason. The scene still resolves;
  * the diagnostic is how the editor surfaces what was dropped.
  */
-export type HierarchyDiagnostic = { code: HierarchyDiagnosticCode, parentId: string, childId: string, 
+export type HierarchyDiagnostic = { code: HierarchyDiagnosticCode, parentId: string, childId: string,
 /**
  * Set when a later parent loses to the first ordered parent.
  */

@@ -4123,8 +4123,46 @@ human product checks remain usable without an agent checkout. The boundary
 scanner excludes shared metadata, the nested checkout and historical
 source from current-product rules.
 
-Verification so far: 21 workspace/boundary tests passed; real workspace
-guard and entry script passed; `git diff --check` passed. Build-plan step
-`0.11` is active while the consolidated product gate is checked. The
-GPU compatibility spike `3.14` remains active; this cleanup does not
+The existing Rust build cache moved to `agent/tmp/rust-target`. Tauri's
+cached permission metadata contained absolute paths to the old cache;
+`cargo clean` for Tauri/plugin/shell packages removed 20.4 GiB of stale
+build artifacts and rebuilt the metadata at the new location. The shared
+checkout has its own lockfile-based npm install so imports resolve its
+generated contracts, rather than the primary checkout's earlier output.
+
+The first complete gate exposed pending-work integration gaps: protocol 5
+Rust contracts had stale TypeScript output, three capability tests still
+expected protocol 4, and the headless conformance timing loop called an
+unfinished helper. The official generator refreshed the contracts; its
+output now normalizes ts-rs trailing spaces. Version fixtures were aligned
+with the current protocol and the timed render loop restored. No generated
+contract was hand-edited. The preserved Codex MCP configuration still names
+an absent historical Node entry point, explicitly documented in
+`agent/config/README.md`; moving configuration does not activate an obsolete
+integration.
+
+Final verification, executed from the shared checkout:
+
+- `node tools/check-agent-worktree.mjs` and `tools/enter-agent.ps1`: PASS.
+  The actual primary checkout is rejected for agent work. Seven guard
+  tests cover canonical registration, primary/clone rejection, private
+  branch, detached HEAD and extra worktrees; all pass in the product gate.
+- All seven former branch heads are ancestors of the shared HEAD. The
+  legacy subtree's Git tree hash equals the original `middle-layer-arch`
+  tree. All 48 orphan files match their preserved originals by SHA-256.
+  Combined Claude allow/deny permissions exactly match eight snapshots.
+- `npm run check`: PASS. Boundaries pass; all 297 generated files are
+  current; TypeScript type checks pass; 40 Node tests and 339 Editor tests
+  pass; 626 Rust tests pass, one ignored. The existing default Rust gate
+  excludes `gx-engine-host`; it was not newly certified here.
+- Conformance: 272 passed, zero failed, nine skipped. The headless cadence
+  check skipped because Program alone had one late frame and 161 missed
+  frames in the unoptimized worker; hardware reference and other named
+  peer/transport limitations remain. These are not passes.
+- `git diff --check`: PASS; tracker snapshots match. Only the primary
+  checkout and `agent/worktree` remain registered; old provider folders
+  and root temporary captures/logs are absent from the live project.
+
+Build-plan step `0.11` is verified and marked done in both tracker files.
+The GPU compatibility spike `3.14` remains active; this cleanup does not
 establish a GPU production renderer or certify adoption.

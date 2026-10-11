@@ -1,6 +1,9 @@
 # Consolidated project agent configuration
 
 - `codex.toml`: preserved project Codex configuration, moved from `.codex`.
+  Its historical `Editor/services/editor-mcp/dist/index.js` entry is retained
+  as configuration data; that old Node entry point is absent from the current
+  application. Moving the file does not activate or repair that integration.
 - `omp/`: preserved OMP council profiles, moved from `.omp/agents`; every
   profile inherits the shared-worktree rule.
 - `claude.local.json` (primary checkout only, ignored): root Claude settings

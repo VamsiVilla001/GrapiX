@@ -10,12 +10,12 @@ import type { ReferenceState } from "./ReferenceState";
 /**
  * The engine's reported state. The single source for every operator display.
  */
-export type EngineStatus = { epoch: Epoch, currentFrame: bigint, timebase: RationalRate, clock: ClockSource, reference: ReferenceState, deviceTier: DeviceTier, 
+export type EngineStatus = { epoch: Epoch, currentFrame: bigint, timebase: RationalRate, clock: ClockSource, reference: ReferenceState, deviceTier: DeviceTier,
 /**
  * Derived from ADR-005 conditions. Never inferred from an adapter name
  * (invariant 20).
  */
-liveAllowed: boolean, program: ProgramState | null, 
+liveAllowed: boolean, program: ProgramState | null,
 /**
  * Empty means healthy. Order is not significant.
  */

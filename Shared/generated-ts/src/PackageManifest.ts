@@ -5,21 +5,21 @@ import type { Revision } from "./Revision";
 /**
  * A `.gpxpkg`'s signed-by-content inventory.
  */
-export type PackageManifest = { formatVersion: number, 
+export type PackageManifest = { formatVersion: number,
 /**
  * The immutable scene identity this archive contains.
  */
-sceneId: string, 
+sceneId: string,
 /**
  * The exact scene revision this archive contains.
  */
-sceneRevision: Revision, 
+sceneRevision: Revision,
 /**
  * Every payload member, including [`SCENE_PATH`] but excluding this
  * manifest itself: a manifest cannot hash itself without a circular
  * definition.
  */
-files: Array<PackageFileEntry>, 
+files: Array<PackageFileEntry>,
 /**
  * The design system this package was built against (Part G, 7.6).
  *

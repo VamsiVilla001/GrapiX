@@ -15,54 +15,54 @@ import type { TextStyle } from "./TextStyle";
  * the engine prepares. Self-describing — fonts, assets and objects travel
  * together so a published package never depends on outside state.
  */
-export type SceneDocument = { id: string, name: string, 
+export type SceneDocument = { id: string, name: string,
 /**
  * Schema version: [`SCENE_SCHEMA_VERSION`] when this build writes it.
  * The reader upgrades an older version it knows and refuses any other
  * by name (`SceneSchemaUnsupported`).
  */
-version: number, 
+version: number,
 /**
  * Monotonic authoring revision; the optimistic-concurrency token (0.8).
  */
-revision?: Revision, 
+revision?: Revision,
 /**
  * The camera Program renders through. Absent selects the documented
  * synthetic 2D orthographic camera; a present id must resolve to a
  * `CameraObject` in this scene.
  */
-activeCameraId?: string, canvas: SceneCanvas, timeline: SceneTimeline, 
+activeCameraId?: string, canvas: SceneCanvas, timeline: SceneTimeline,
 /**
  * Live data the scene's bindings resolve against.
  */
-dataContext: { [key in string]?: JsonValue }, 
+dataContext: { [key in string]?: JsonValue },
 /**
  * The asset library this scene references.
  */
-assets: Array<AssetLibraryItem>, 
+assets: Array<AssetLibraryItem>,
 /**
  * Fonts available to this scene, resolved package-first.
  */
-fonts: Array<FontDefinition>, 
+fonts: Array<FontDefinition>,
 /**
  * The materials this scene's objects bind by id. A scene is
  * self-describing (1.1), so a material slot resolves inside the
  * document or not at all — a library held anywhere else would make a
  * published package depend on outside state.
  */
-materials: Array<MaterialDefinition>, 
+materials: Array<MaterialDefinition>,
 /**
  * Operator-facing fields explicitly declared by the template author.
  * Omitted by pre-11.26 documents, which therefore retain an empty
  * operator contract when reopened.
  */
-controls: Array<ControlField>, 
+controls: Array<ControlField>,
 /**
  * Named text-style bundles are carried with a scene, while any token
  * reference they hold resolves against the active project design system.
  * Older documents omit this list and reopen with no saved styles.
  */
-textStyles: Array<TextStyle>, 
+textStyles: Array<TextStyle>,
 /**
  * The scene graph, in draw order.
  */

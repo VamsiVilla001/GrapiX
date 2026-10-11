@@ -9,7 +9,7 @@ import type { DesignSystemSourceKind } from "./DesignSystemSourceKind";
  * reads the wrong fields and produces a plausible token set, which is the
  * silent substitution invariant 18 forbids.
  */
-export type DesignSystemImport = { project: string, name: string, kind: DesignSystemSourceKind, 
+export type DesignSystemImport = { project: string, name: string, kind: DesignSystemSourceKind,
 /**
  * The source document as text, exactly as the file holds it.
  *

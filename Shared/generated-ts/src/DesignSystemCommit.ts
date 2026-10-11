@@ -10,7 +10,7 @@ import type { DesignSystemDraft } from "./DesignSystemDraft";
  * the auto-accept G.2 forbids. Keeping it in the request makes confirming an
  * act a caller performs rather than a property the draft already had.
  */
-export type DesignSystemCommit = { draft: DesignSystemDraft, 
+export type DesignSystemCommit = { draft: DesignSystemDraft,
 /**
  * Who accepted it. Recorded into provenance; never invented.
  */

@@ -6,15 +6,15 @@ import type { PreparedFontSource } from "./PreparedFontSource";
 /**
  * Fonts and assets to add in one scene edit, plus what happened to each input.
  */
-export type PreparedFontBatch = { 
+export type PreparedFontBatch = {
 /**
  * New to the scene, in input order. Empty when every input was a duplicate.
  */
-fonts: Array<FontDefinition>, 
+fonts: Array<FontDefinition>,
 /**
  * Library entries the new fonts' faces need that the scene lacks.
  */
-assets: Array<AssetLibraryItem>, 
+assets: Array<AssetLibraryItem>,
 /**
  * One entry per font the inputs produced, in input order.
  */

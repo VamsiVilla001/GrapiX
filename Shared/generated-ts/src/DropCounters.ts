@@ -6,15 +6,15 @@
  * Counted rather than buffered: a queue here would eventually push back on
  * the render clock, which invariant 14 forbids.
  */
-export type DropCounters = { 
+export type DropCounters = {
 /**
  * Consumer was still handling the previous frame.
  */
-consumerBusy: bigint, 
+consumerBusy: bigint,
 /**
  * Encoder had no capacity.
  */
-encoderSaturated: bigint, 
+encoderSaturated: bigint,
 /**
  * Transport backpressure.
  */

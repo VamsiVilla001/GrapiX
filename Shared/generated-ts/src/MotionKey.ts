@@ -5,7 +5,7 @@ import type { TokenRef } from "./TokenRef";
  * One keyframe. `t` is normalised 0–1; `v` may be a normalised offset (G.6.4:
  * `-1.0` is one object-width, so the preset is size-independent).
  */
-export type MotionKey = { t: number, v: number, 
+export type MotionKey = { t: number, v: number,
 /**
  * The outgoing easing, as a token reference. Absent means linear.
  */

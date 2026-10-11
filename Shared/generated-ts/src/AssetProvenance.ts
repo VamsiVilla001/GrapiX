@@ -8,23 +8,23 @@ import type { ProvenanceTool } from "./ProvenanceTool";
 /**
  * Where an asset's bytes came from and under what terms.
  */
-export type AssetProvenance = { origin?: AssetOrigin, tool?: ProvenanceTool, 
+export type AssetProvenance = { origin?: AssetOrigin, tool?: ProvenanceTool,
 /**
  * Who supplied the bytes: a font service, a stock library, a model
  * vendor.
  */
-provider?: string, licenseClass?: LicenseClass, 
+provider?: string, licenseClass?: LicenseClass,
 /**
  * SHA-256 of the prompt a model was given. The prompt text is not
  * stored with the asset.
  */
-promptHash?: ContentHash, 
+promptHash?: ContentHash,
 /**
  * What the asset was made or fetched from: file names, URLs, the content
  * hashes of input assets. Always written, so the field is visible in a
  * saved project even when it is empty.
  */
-sources: Array<string>, approval?: AssetApproval, 
+sources: Array<string>, approval?: AssetApproval,
 /**
  * An attached C2PA manifest: a project-relative path or a URI.
  */

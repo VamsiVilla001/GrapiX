@@ -11,18 +11,18 @@ import type { Rgba } from "./Rgba";
  * actually names as enforceable: the palette, the spacing scale, and the
  * smallest text that stays legible on a broadcast display.
  */
-export type VisualTokens = { 
+export type VisualTokens = {
 /**
  * The colours a scene may use. A fill outside this set is an `error`.
  */
-palette: Array<Named<Rgba>>, 
+palette: Array<Named<Rgba>>,
 /**
  * The spacing scale, in scene units. Off-scale spacing is a `warning`
  * rather than an error: it is usually a mistake and occasionally a
  * deliberate optical correction, and blocking it would be the
  * over-strictness G.4 warns about.
  */
-spacing: Array<number>, 
+spacing: Array<number>,
 /**
  * The smallest text size that stays legible at broadcast viewing
  * distance. Below it is an `error`, because it is unreadable on air

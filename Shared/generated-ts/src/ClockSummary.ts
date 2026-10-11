@@ -8,12 +8,12 @@ import type { Severity } from "./Severity";
  * Returned as a struct with a severity rather than a formatted string, so the
  * UI cannot accidentally present a `Critical` state with `Nominal` styling.
  */
-export type ClockSummary = { severity: Severity, 
+export type ClockSummary = { severity: Severity,
 /**
  * Short, unambiguous label. Never abbreviated to something an operator
  * has to decode mid-show.
  */
-label: string, timebase: RationalRate, 
+label: string, timebase: RationalRate,
 /**
  * True when Program cadence is not derived from an external reference.
  */

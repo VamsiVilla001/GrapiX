@@ -3,6 +3,7 @@ import type { ClearRequest } from "./ClearRequest";
 import type { CueRequest } from "./CueRequest";
 import type { OutputConfig } from "./OutputConfig";
 import type { PhaseRequest } from "./PhaseRequest";
+import type { RenderRequest } from "./RenderRequest";
 import type { TakeRequest } from "./TakeRequest";
 
 /**
@@ -11,4 +12,4 @@ import type { TakeRequest } from "./TakeRequest";
  * enforced by the command surfaces each product exposes rather than by a flag
  * on the message.
  */
-export type ClientRequest = { "request": "authenticate", token: string, } | { "request": "capability" } | { "request": "status" } | { "request": "cue" } & CueRequest | { "request": "take" } & TakeRequest | { "request": "clear" } & ClearRequest | { "request": "phase" } & PhaseRequest | { "request": "configureOutput" } & OutputConfig | { "request": "performance" };
+export type ClientRequest = { "request": "authenticate", token: string, } | { "request": "capability" } | { "request": "status" } | { "request": "cue" } & CueRequest | { "request": "take" } & TakeRequest | { "request": "clear" } & ClearRequest | { "request": "phase" } & PhaseRequest | { "request": "configureOutput" } & OutputConfig | { "request": "performance" } | { "request": "render" } & RenderRequest;

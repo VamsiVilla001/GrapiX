@@ -4,7 +4,7 @@ import type { MediaCodec } from "./MediaCodec";
 /**
  * The negotiated shape of one media stream.
  */
-export type MediaProfile = { codec: MediaCodec, 
+export type MediaProfile = { codec: MediaCodec,
 /**
  * Whether the stream may reduce resolution to hold latency.
  */

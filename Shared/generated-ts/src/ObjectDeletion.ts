@@ -4,23 +4,23 @@
  * What a delete removed. Returned rather than logged so the caller can tell
  * the author the whole consequence in one sentence.
  */
-export type ObjectDeletion = { 
+export type ObjectDeletion = {
 /**
  * Every object removed, in scene order: the target first, then the
  * descendants it claimed.
  */
-removedObjectIds: Array<string>, 
+removedObjectIds: Array<string>,
 /**
  * Animation channels removed with them. A channel for an object that no
  * longer exists is an orphan the timeline would draw forever.
  */
-removedChannelCount: number, 
+removedChannelCount: number,
 /**
  * Set when the scene's active camera was among the removed. The scene
  * falls back to the documented synthetic camera, which is a real change
  * to what Program renders and so is never left unsaid.
  */
-clearedActiveCamera: boolean, 
+clearedActiveCamera: boolean,
 /**
  * The container that claimed the deleted object, if one did.
  */

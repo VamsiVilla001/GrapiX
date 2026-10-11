@@ -10,25 +10,25 @@ import type { ReferenceState } from "./ReferenceState";
 /**
  * What the engine tells a connecting client about itself.
  */
-export type EngineCapability = { 
+export type EngineCapability = {
 /**
  * Fixed constant. A mismatch is an error code, not a negotiation.
  */
-protocol: number, 
+protocol: number,
 /**
  * Engine incarnation. A client that reconnects and sees a new epoch must
  * assume none of its previous state survived.
  */
-epoch: Epoch, locality: Locality, deviceTier: DeviceTier, clock: ClockSource, reference: ReferenceState, 
+epoch: Epoch, locality: Locality, deviceTier: DeviceTier, clock: ClockSource, reference: ReferenceState,
 /**
  * Derived from ADR-005. Never set by hand, never inferred from an adapter
  * name (invariant 20).
  */
-liveAllowed: boolean, 
+liveAllowed: boolean,
 /**
  * Offered, in preference order.
  */
-media: Array<MediaCodec>, 
+media: Array<MediaCodec>,
 /**
  * The blend and fit modes this engine can reproduce exactly (1.3).
  *

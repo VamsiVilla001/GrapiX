@@ -4,11 +4,11 @@ import type { MotionKey } from "./MotionKey";
 /**
  * One animated property within a phase.
  */
-export type MotionChannel = { 
+export type MotionChannel = {
 /**
  * The property path, e.g. `position.x`, `opacity`.
  */
-property: string, 
+property: string,
 /**
  * Keys on the 0–1 normalised timeline (G.6.2).
  */

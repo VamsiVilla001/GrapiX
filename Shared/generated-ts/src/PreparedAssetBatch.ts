@@ -5,12 +5,12 @@ import type { PreparedAssetSource } from "./PreparedAssetSource";
 /**
  * Assets to add in one scene edit, plus what happened to each input.
  */
-export type PreparedAssetBatch = { 
+export type PreparedAssetBatch = {
 /**
  * New to the scene, in input order. Empty when every input was already
  * there.
  */
-assets: Array<AssetLibraryItem>, 
+assets: Array<AssetLibraryItem>,
 /**
  * One entry per input file, in input order.
  */

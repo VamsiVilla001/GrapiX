@@ -6,7 +6,7 @@ import type { FontStyle } from "./FontStyle";
 /**
  * One face of a family: weight/style/stretch with a source.
  */
-export type FontFaceDefinition = { faceId: string, family: string, 
+export type FontFaceDefinition = { faceId: string, family: string,
 /**
  * CSS weight scale, 1–1000.
  */

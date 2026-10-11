@@ -5,7 +5,7 @@ import type { MotionChannel } from "./MotionChannel";
 /**
  * One phase: a duration and the channels it animates.
  */
-export type MotionPhase = { 
+export type MotionPhase = {
 /**
  * Duration, either a token reference or a literal millisecond count.
  */

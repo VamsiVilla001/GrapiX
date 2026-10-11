@@ -8,11 +8,11 @@ import type { RationalRate } from "./RationalRate";
  * This is the half of the exchange that makes intent-based control honest:
  * the operator sees a frame number the engine chose, not a request they made.
  */
-export type TakeCommitted = { 
+export type TakeCommitted = {
 /**
  * In the engine's timebase.
  */
-frame: bigint, 
+frame: bigint,
 /**
  * Rational, never a float (invariant 12).
  */

@@ -4,11 +4,11 @@ import type { Scope } from "./Scope";
 /**
  * Why a call was not authorised.
  */
-export type ScopeDenial = { tool: string, 
+export type ScopeDenial = { tool: string,
 /**
  * What the tool requires.
  */
-required: Scope, 
+required: Scope,
 /**
  * What the caller presented.
  */

@@ -11,23 +11,23 @@ import type { ContentHash } from "./ContentHash";
  * resolve against, so re-importing over the same path — a new render of the
  * same logo — updates the hash but never the binding.
  */
-export type AssetLibraryItem = { 
+export type AssetLibraryItem = {
 /**
  * Stable scene-facing id. Survives relink; distinct from any storage id.
  */
-assetId: string, 
+assetId: string,
 /**
  * Display name, separate from the on-disk name (ADR-0002 B.3).
  */
-name: string, kind: AssetKind, 
+name: string, kind: AssetKind,
 /**
  * Project-relative path — the library address.
  */
-path: string, 
+path: string,
 /**
  * Content hash — the store address. `None` only while importing.
  */
-checksum?: ContentHash, mimeType?: string, sizeBytes?: bigint, status?: AssetAvailability, 
+checksum?: ContentHash, mimeType?: string, sizeBytes?: bigint, status?: AssetAvailability,
 /**
  * Where the bytes came from and under what terms (11.39). Every record
  * carries one, and it is always written: a human-made asset may leave

@@ -12,7 +12,7 @@ import type { Rgba } from "./Rgba";
  * is how a transparent object becomes a black one on the other renderer.
  * Ported from 1.x `ColorValue`, with every colour now tagged.
  */
-export type ColorValue = { "type": "none" } | { "type": "solid", color: Rgba, } | { "type": "linear-gradient", 
+export type ColorValue = { "type": "none" } | { "type": "solid", color: Rgba, } | { "type": "linear-gradient",
 /**
  * Degrees, clockwise from the positive X axis.
  */

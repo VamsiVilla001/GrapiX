@@ -11,8 +11,9 @@ From the primary checkout:
 node tools/check-agent-worktree.mjs
 ```
 
-The checker verifies the actual registered Git worktree, branch, and absence
-of extra GrapiX worktrees; a similarly named ordinary folder does not pass.
+The checker verifies the exact mandated repository path, actual registered
+Git worktree, branch, and absence of extra GrapiX worktrees; a similarly
+named ordinary folder or a clone with the same layout does not pass.
 The entry script does not create a worktree or discard pending changes.
 When starting an IDE or agent session, open the shared worktree directly.
 

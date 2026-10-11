@@ -10,15 +10,15 @@ import type { TimelinePhase } from "./TimelinePhase";
  * scene authored before the field existed valid and equivalent to an empty
  * channel set.
  */
-export type SceneTimeline = { 
+export type SceneTimeline = {
 /**
  * Total duration in frames at the canvas rate.
  */
-durationFrames: bigint, 
+durationFrames: bigint,
 /**
  * Editable keyframe channels, one per object/property.
  */
-channels: Array<KeyframeChannel>, 
+channels: Array<KeyframeChannel>,
 /**
  * Named operator phases over those channels (11.25). `#[serde(default)]`
  * keeps a scene authored before phases existed valid and unphased.

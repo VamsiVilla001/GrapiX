@@ -7,21 +7,21 @@ import type { ResolvedObject } from "./ResolvedObject";
 /**
  * The result of resolving a scene's hierarchy.
  */
-export type HierarchyResolution = { 
+export type HierarchyResolution = {
 /**
  * Every object's effective state, in the document's source order.
  * Containers are included and marked, because the editor needs a group's
  * effective placement even though nothing draws it.
  */
-effective: Array<ResolvedObject>, 
+effective: Array<ResolvedObject>,
 /**
  * The accepted edges, in the order they were taken.
  */
-edges: Array<HierarchyEdge>, 
+edges: Array<HierarchyEdge>,
 /**
  * Each container's accepted, validated child order, in source order.
  */
-childrenByParent: Array<HierarchyChildren>, 
+childrenByParent: Array<HierarchyChildren>,
 /**
  * Every refused edge, in the order encountered. A refusal is reported and
  * never fatal: a scene being repaired in the editor still resolves.

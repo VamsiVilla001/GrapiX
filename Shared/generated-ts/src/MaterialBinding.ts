@@ -8,7 +8,7 @@
  * trial, and a shape that nearly matches the wrong arm is accepted silently,
  * so only the object form is carried.
  */
-export type MaterialBinding = { materialId: string, 
+export type MaterialBinding = { materialId: string,
 /**
  * An instance of the material carrying its own parameter overrides.
  */

@@ -215,7 +215,6 @@ fn timed_run(
     };
     std::thread::sleep(WINDOW);
     let alone = performance(engine);
-    let began = Instant::now();
     let Some(alone) = alone else {
         report.record(PLANE, NAME, Outcome::Fail("no performance report".into()));
         return;
@@ -243,7 +242,20 @@ fn timed_run(
         return;
     }
     let mut renders = 0u64;
-    while began_renders(&mut renders, engine, take_id, revision, pin, report) {}
+    let began = Instant::now();
+    while began.elapsed() < WINDOW {
+        let reply = engine.handle(ClientRequest::Render(RenderRequest {
+            take_id: take_id.clone(),
+            revision,
+            content_hash: Some(pin.clone()),
+            frame: renders % 101,
+        }));
+        if !matches!(reply, EngineReply::Rendered(_)) {
+            report.record(PLANE, NAME, Outcome::Fail(format!("headless render was {reply:?}")));
+            return;
+        }
+        renders += 1;
+    }
     let Some(during) = performance(engine) else {
         report.record(PLANE, NAME, Outcome::Fail("no performance report".into()));
         return;

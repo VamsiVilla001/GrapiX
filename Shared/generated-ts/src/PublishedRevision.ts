@@ -8,7 +8,7 @@ import type { TakeId } from "./TakeId";
  * One published revision as Playout lists and reviews it: the hash a cue or
  * take must pin (invariant 61) and where it stands in review.
  */
-export type PublishedRevision = { takeId: TakeId, revision: Revision, 
+export type PublishedRevision = { takeId: TakeId, revision: Revision,
 /**
  * Absent only for a revision recorded before pinning existed, which
  * cannot be taken (`RevisionUnpinned`).

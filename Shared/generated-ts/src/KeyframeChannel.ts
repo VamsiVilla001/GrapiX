@@ -4,16 +4,16 @@ import type { SceneKeyframe } from "./SceneKeyframe";
 /**
  * One animatable property on one object.
  */
-export type KeyframeChannel = { 
+export type KeyframeChannel = {
 /**
  * Stable object id the channel belongs to. The object lookup is by id,
  * so a duplicate object id is refused before any edit lands.
  */
-objectId: string, 
+objectId: string,
 /**
  * One of the contract's animatable property names.
  */
-property: string, 
+property: string,
 /**
  * Keys sorted by frame.
  */
