@@ -585,13 +585,58 @@ pub fn scene_property_for_preset_path(path: &str) -> Option<&'static str> {
         "opacity" => "opacity",
         "position.x" | "x" => "x",
         "position.y" | "y" => "y",
+        "position.z" | "zDepth" => "zDepth",
         "scale.x" | "scaleX" => "scaleX",
         "scale.y" | "scaleY" => "scaleY",
+        "scale.z" | "scaleZ" => "scaleZ",
         "rotation" => "rotation",
+        "rotation.x" | "rotationX" => "rotationX",
+        "rotation.y" | "rotationY" => "rotationY",
         "size.width" | "width" => "width",
         "size.height" | "height" => "height",
         _ => return None,
     })
+}
+
+/// The preset path a scene property is written under when motion is captured
+/// into a preset (11.15). The inverse of [`scene_property_for_preset_path`],
+/// kept beside it so the two directions change together (invariant 27); a
+/// test pins that every animatable property survives the round trip.
+pub fn preset_path_for_scene_property(property: &str) -> Option<&'static str> {
+    Some(match property {
+        "opacity" => "opacity",
+        "x" => "position.x",
+        "y" => "position.y",
+        "zDepth" => "position.z",
+        "scaleX" => "scale.x",
+        "scaleY" => "scale.y",
+        "scaleZ" => "scale.z",
+        "rotation" => "rotation",
+        "rotationX" => "rotation.x",
+        "rotationY" => "rotation.y",
+        "width" => "size.width",
+        "height" => "size.height",
+        _ => return None,
+    })
+}
+
+/// The easing token a scene easing is captured as (11.15), the inverse of
+/// [`scene_easing_for_token`]. Linear is the absence of a token, exactly as a
+/// preset key with no `out` reads back as linear.
+///
+/// `None` for custom-bezier: a preset key names an easing token and cannot
+/// carry control points, so capture refuses it by name rather than saving the
+/// curve as some other one (invariant 18).
+pub fn easing_token_for_scene_easing(easing: SceneEasing) -> Option<Option<TokenRef>> {
+    let name = match easing {
+        SceneEasing::Linear => return Some(None),
+        SceneEasing::EaseIn => "ease-in",
+        SceneEasing::EaseOut => "ease-out",
+        SceneEasing::EaseInOut => "ease-in-out",
+        SceneEasing::Hold => "hold",
+        SceneEasing::CustomBezier => return None,
+    };
+    Some(Some(TokenRef(format!("easing.{name}"))))
 }
 
 /// The scene easing an easing token names.
