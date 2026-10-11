@@ -28,6 +28,11 @@ Editor/web/main.js.map
 # Agent worktrees
 .claude/worktrees/
 
+# Third-party source checkouts kept for study (e.g. reference/effectcraft).
+# Anything taken from them is copied into the tree with attribution; the
+# checkouts themselves are never committed or built as part of GrapiX.
+reference/
+
 # ts-rs per-crate export dirs; the codegen binary is the only generator
 bindings/
 target/release/bundle/
