@@ -465,14 +465,14 @@ run, not after.
 
 | Technology | Verdict | Role |
 |---|---|---|
-| Rust + wgpu | **Keep; version migration gated** | Production currently uses wgpu 26. [ADR-0003](0003-effectcraft-render-core.md) evaluates a pinned EffectCraft render/GPU core on wgpu 30.0.1 and Rust 1.95 in an isolated spike before any product upgrade. |
+| Rust + wgpu | **Keep; version migration gated** | Production uses wgpu 26. A wgpu or Rust upgrade is a separate reviewed decision (for example if 3.17 selects Vello). [ADR-0003](0003-effectcraft-render-core.md) halted the EffectCraft core trial, which needed wgpu 30.0.1 and Rust 1.95. |
 | Tauri 2 | **Keep** | Both shells, Windows and macOS. Already native; no C++ rewrite justified. |
 | Three.js 0.185 | **Keep, sole browser renderer** | Interim 2D plus permanent overlay layer. |
 | PixiJS | **Remove** | Cannot do 3D; never a viable survivor. |
-| lyon | **Keep for the accurate CPU subset** | Historical pixel reference; [ADR-0003](0003-effectcraft-render-core.md) separates semantic preparation from backend-specific geometry. Placeholder pixels are not fidelity expectations. |
-| cosmic-text | **Keep pending shaping gate** | Packaged-font authority remains GrapiX's. EffectCraft text shaping or pre-shaped glyph integration needs parity evidence before replacing this source. |
-| EffectCraft `render` / `gpu` | **Preferred candidate; Planned** | Pinned Windows compatibility spike under [ADR-0003](0003-effectcraft-render-core.md). Production frame drawing, masks, effects and composition must run primarily on GPU; CPU layer rendering alone cannot satisfy adoption. SceneDocument, animation semantics and broadcast runtime remain GrapiX-owned. |
-| Vello / `vello_hybrid` | **Evaluate later** | Shares the wgpu device; also the natural T1 hybrid backend. Alpha; wants wgpu 29; panics on mask layers and some blend modes — must be pre-validated. |
+| lyon | **Keep; GPU drawing measured in 3.17** | Tessellation for the accurate CPU subset and a candidate GPU drawing path, benchmarked against Vello in 3.17 ([ADR-0003](0003-effectcraft-render-core.md)). Placeholder pixels are not fidelity expectations. |
+| cosmic-text | **Keep** | The single shaping source, over package-owned font bytes only. Glyph outlines are drawn on the GPU (3.18). EffectCraft's text engine is not used. |
+| EffectCraft | **Component source, not the core** (decided 12 October 2026) | Whole-core adoption halted after 3.14: CPU-drawn sources by design, DX12 failures, 4K over budget. Its kernels, algorithms and importers are ported into GrapiX-owned code with attribution under the owning steps ([ADR-0003](0003-effectcraft-render-core.md) reuse catalogue). The GPU-first compositor is GrapiX's own (3.15–3.22). |
+| Vello / `vello_hybrid` | **Evaluate in 3.17** | Shares the wgpu device; also the natural T1 hybrid backend. Alpha; wants a newer wgpu; panics on mask layers and some blend modes — must be pre-validated. Measured against lyon-on-GPU on the reference workloads. |
 | Rive Renderer | **Dropped** | Three device-bridge implementations across Vulkan, D3D12 and Metal for work that is not on the gap register. |
 | vgpu | **Tooling only** | Typed WGSL reflection; Dawn-backed headless CI. Not a renderer. |
 | WASM core on WebGPU | **Fallback** | If the engine-rendered viewport fails on latency. |

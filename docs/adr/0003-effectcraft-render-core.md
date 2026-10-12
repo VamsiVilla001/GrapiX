@@ -1,295 +1,233 @@
-# GrapiX Render Core: EffectCraft Adoption
+# GrapiX Render Core: GPU-first compositor, EffectCraft as component source
 
-Date: 11 October 2026. Status: **Planned**, conditional on compatibility
-evidence. This ADR records the architecture; `GrapiX-Build-Plan.md` remains the
-only implementation plan. Initial investigation is step `3.14`.
+Date: 11 October 2026; decided 12 October 2026. Status: **Accepted** as
+architecture. The compositor itself is **Planned** (build-plan steps
+`3.15`–`3.22`, `11.60`–`11.62`). This ADR records the architecture and its
+rationale; `GrapiX-Build-Plan.md` remains the only implementation plan.
 
-## Decision
+## Decision (user, 12 October 2026)
 
-EffectCraft's `render` and `gpu` crates are the preferred candidate for
-GrapiX's compositor. Begin a pinned Windows compatibility spike before
-vendoring or changing production rendering. Failure of a required gate can
-stop adoption at any stage, including after the initial spike.
+1. **GPU-first, GrapiX-owned compositor.** The main render path runs on the
+   GPU: frame drawing and rasterisation, transforms, masks, effects and final
+   composition. CPU work is limited to scene semantics, validation, asset
+   decoding, text shaping and bounded preparation and uploads. Full-scene CPU
+   rendering is a reference and test path, never the live backend and never a
+   silent fallback. Cold preparation completes before a revision is
+   take-ready, and nothing that can be built once is built per frame
+   (invariant 35).
+2. **Whole-core adoption of EffectCraft's `render` and `gpu` crates is
+   halted.** The `3.14` spike failed required gates by execution and by
+   design (below). The core is not vendored and is not a product dependency.
+3. **EffectCraft is the preferred component source.** Its algorithms, WGSL
+   kernels, importers and tests are ported into GrapiX-owned code, with
+   attribution, under the build-plan step that owns each piece (reuse
+   catalogue below). Its CPU renderer may serve as a dev-only test oracle
+   outside the product closure.
+4. **Colour follows the project.** Compositing happens in the project's
+   declared working colour space, not unconditionally in linear light. This
+   amends ADR-0002 B.1 (see "Colour" below; step `3.15`).
+5. **Ownership is unchanged from 11 October.** GrapiX owns SceneDocument,
+   semantic validation, packaged assets and fonts, revisioning, animation
+   semantics, publish/cue/take, the Program clock, Preview/Program delivery,
+   output policy and recovery. Protocol v3 and persisted SceneDocument never
+   depend on third-party renderer types.
 
-**GPU-first requirement (11 October 2026).** GrapiX's main production render
-path must run primarily on the GPU. GPU compositing of frames substantially
-rendered on the CPU does not by itself satisfy this requirement. The GPU
-must own frame drawing/rasterisation, transforms, masks, effects and final
-composition. CPU scene semantics, validation, asset decoding, text shaping
-and bounded preparation/uploads are allowed; full-scene CPU rendering and
-CPU fallback are reference/degraded paths, never the normal live backend.
-Cold preparation must occur before a revision becomes take-ready. Live
-updates must not reintroduce a CPU full-frame raster/rebuild loop.
+## Why whole-core adoption stopped
 
-Adoption depends on execution evidence for this ownership, not simply an
-adapter named GPU or a successful GPU composite pass. If the candidate's
-CPU source/mask paths remain a substantial part of per-frame production,
-use its GPU effects/resources only with a GrapiX-owned GPU drawing path, or
-choose another backend. Adoption of the entire render core is conditional;
-the GPU-first requirement takes precedence over the preferred candidate.
+EffectCraft (`storytold/effectcraft`, MIT OR Apache-2.0) is an alpha,
+clean-room After Effects reimplementation in Rust. Evidence is from the pinned
+commit `9a7d3e76991d5372448033b473dc12c2480a6a04` on this machine's
+RTX 3070 Ti (DX12 driver `32.0.15.9159`); logs are cited in `memory.md`.
 
-GrapiX retains SceneDocument, semantic validation, packaged assets and fonts,
-revisioning, animation semantics, publish/cue/take, the Program clock,
-Preview/Program delivery, output policy and recovery. An internal adapter
-owns all EffectCraft types. Protocol v3 and persisted SceneDocument never
-depend on those types.
-
-EffectCraft describes itself as an alpha, clean-room After Effects
-reimplementation, with a UI-independent engine and MIT OR Apache-2.0 code.
-These are upstream claims, not GrapiX execution evidence. The initial spike
-pins commit `9a7d3e76991d5372448033b473dc12c2480a6a04`; all source claims
-and measurements must identify their commit. No dependency follows `main`.
-
-## Current worker: what to retain
-
-The current working tree, including uncommitted headless-render work, has a
-CPU renderer and useful runtime infrastructure. On 11 October 2026,
-`cargo test --locked -p gx-render-worker -p gx-pixel-gate --lib --quiet`
-passed 71 worker tests and four pixel-gate tests; the checked-in baseline
-comparison also passed. This proves consistency of the existing CPU path,
-not complete visual fidelity or GPU rendering.
-
-| Area | Current implementation | Adoption boundary |
+| Required gate | Evidence | Result |
 |---|---|---|
-| Scene preparation | Validation, hierarchy resolution, verified asset binding, lyon tessellation, packaged-font shaping, mesh preparation | Retain semantic preparation; separate it from backend-specific preparation |
-| Runtime | Pinned revisions, animation evaluation, publish/cue/take, emission, recovery | Remains GrapiX-owned |
-| GPU | wgpu 26 device/queue creation and texture-limit negotiation; no draw pipelines or submission | Adopt rendering; GrapiX creates and owns the shared device |
-| CPU reference | Linear-light composition and output encoding; CPU tile planning | Keep for its accurately rendered subset and historical diagnostics |
-| Text | cosmic-text shaping; drawing uses advance rectangles | Retain packaged-font authority; replace placeholder drawing |
-| Images | Asset validation but no drawing path | Candidate core feature; requires mapping and pixel evidence |
-| Gradients | Refused by the current vector backend | Candidate core feature; requires mapping and pixel evidence |
-| Meshes | Basic CPU 2D projection | Advanced 3D compatibility is unproven; keep mesh-pass ownership open |
-| Scene order | Vectors, then text, then meshes | Adapter must preserve SceneDocument's effective order across types |
-| Animated vectors | Per-frame geometry rebuild | Core caching is a candidate optimisation, not a performance guarantee |
+| Windows DX12 execution | Default initialisation (FXC): `classic3d` fails D3DCompile loop unrolling (11 Oct). With DXC 1.8.2502.11 the upstream GPU suite gave 147 passed / 56 failed (11 Oct) and 153 passed / 50 failed (12 Oct rerun). The failing set differs between runs, and 32-bit blend modes emit NaN (Darken on 11 Oct, ClassicDifference on 12 Oct) | **FAIL**, and not deterministic |
+| Vulkan execution | Upstream GPU suite 203 passed / 0 failed / 1 ignored (11 Oct) | PASS for that suite |
+| Frame budget, 2160p50 | Two static solids through upstream's display texture and readback: p99 35.5 ms DX12 and 28.8 ms Vulkan (11 Oct); 57.5 ms DX12 (12 Oct), against a 20 ms period | **FAIL** |
+| GPU-first frame production | Upstream draws text, shape and mask sources on the CPU into its layer cache and uploads them; an unsupported GPU step reads back to the CPU, and an unsupported frame declines to the CPU path (`crates/gpu/src/lib.rs`, `crates/gpu/src/walk.rs`, `crates/render/src/lib.rs`) | **FAIL by design** |
+| Font isolation | Process-global font database, system-font scanning, an unknown family substituted with Inter (`crates/text/src/fonts.rs`) | FAIL (source) |
+| Refusal semantics | "Return `None`, let the CPU render"; unknown effect ids skipped; missing effect parameters read as 0, white or false | Conflicts with invariants 17 and 18 |
+| Bounded dependencies | 134 packages in the `gpu` normal closure, including ML segmentation and camera tracking through `effects`; requires Rust 1.95, edition 2024 and wgpu 30 workspace-wide | Not small |
+| Upstream stability | First commit 1 October 2026; 1,584 commits by 12 October, 279 of them in the two days after the pin | A pinned core would need every gate rerun on each update |
 
-`PreparedScene::prepare` currently invokes the CPU rasteriser and refuses
-unsupported gradients. It cannot be reused unchanged as the candidate
-backend's input. Split semantic validation/asset resolution from lyon,
-glyph and mesh backend preparation. New backend capability declarations
-must reflect measured support rather than the old fixed-function list.
+The shared host-device probe passed on both backends within its scope
+(CPU/GPU delta about `6e-8`), so upstream's GPU kernels are a sound source
+for porting. They are not a production core.
 
-## Ownership and adapter
+## Architecture
 
 ```mermaid
 flowchart TB
   S[SceneDocument and pinned revision] --> P[GrapiX semantic preparation]
-  P --> A[Internal GrapiX adapter]
-  R[GrapiX animation and live-data snapshots] --> A
-  A --> E[Pinned EffectCraft render and GPU core]
-  D[GrapiX-owned wgpu device] --> E
-  E --> O[GrapiX output transforms and frame delivery]
-  C[GrapiX clock and output policy] --> O
+  P --> G[GrapiX GPU preparation: pipelines, tessellation, glyph outlines, textures, once per revision]
+  R[GrapiX animation and live-data snapshots] --> C
+  G --> C[GrapiX GPU compositor: effective layer order, masks and mattes, effects, blend modes, project working space]
+  D[GrapiX-owned wgpu device] --> C
+  C --> O[Output transforms: sRGB Preview, Rec.709/BT.1886 Program]
+  K[GrapiX clock and output policy] --> O
+  O --> F[Frame delivery: bounded async readback or GPU handle]
 ```
 
-Compilation at publish produces an immutable backend project for each pinned
-revision. Each render instance holds its own immutable override snapshot
-and bounded cache; Preview and Program share a device but do not share
-mutable scene state. A take switches a pinned render instance, and recovery
-recompiles from the pinned document before outputs are explicitly re-armed.
+Rules for the compositor:
 
-Map vectors, text and images into one ordered stack. Groups do not
-automatically become isolated nested compositions: preserve hierarchy,
-effective opacity, transforms, clipping and cross-group order first. Use
-parenting or collapsed compositions only where semantic tests prove them
-equivalent. Mesh/2D interaction needs its own tested mapping.
+- **Ordering.** Vectors, text, images and meshes composite in SceneDocument's
+  effective order across object types. Groups preserve hierarchy, effective
+  opacity, transforms and clipping; isolating a group as a nested composition
+  is used only where semantic tests prove it equivalent.
+- **Working textures** are premultiplied, in the project working space. Their
+  precision is chosen and measured in `3.16` and `3.21`; upstream's 32-bit
+  float working textures (about 133 MB per 2160p frame) are a measured 4K
+  cost, not a default to copy.
+- **Refusals.** An unsupported object, property, effect, mode or combination
+  refuses by stable object id and document path, and a compile report lists
+  them. Authoring preview may show an explicit diagnostic; publish and take
+  readiness refuse. A placeholder is never a production fallback (invariants
+  17, 18 and 29). The backend in use and any refusal are reported per render
+  path.
+- **Text.** cosmic-text shapes package-owned font bytes only (`3.6`); glyph
+  outlines are drawn on the GPU (`3.18`). EffectCraft's text engine is not
+  used.
+- **Tiles.** Large stages obey invariants 37 and 38; tile-safe effects declare
+  their footprint.
+- **3D.** Shading is computed in linear light inside the 3D pass and enters
+  the composite in the project working space.
+- **Device and toolchain.** GrapiX creates and owns the device. The product
+  stays on its pinned wgpu and Rust until a separate reviewed upgrade (for
+  example if `3.17` selects Vello, which needs a newer wgpu). Ported code is
+  rewritten for the workspace's edition and toolchain.
+- **Live updates and temporal effects.** Effects that sample other times
+  (echo, motion blur, particles) receive GrapiX-evaluated values at every
+  sample time, or refuse by name. A live update reaches the first affected
+  Program frame without a per-frame rebuild.
+- **Failure.** Device loss, allocation failure, stale completions and readback
+  timeouts are defined explicitly. A degraded CPU path never inherits T0
+  readiness, and a blocked output consumer never stalls the Program clock.
 
-The compile report names unsupported objects, properties and material modes
-with stable object IDs and document paths. Authoring preview may show an
-explicit diagnostic. Publish/live readiness refuses an unsupported mapping
-unless an alternate implementation produces equivalent pixels. A visible
-placeholder is not a production fallback (invariants 17, 18 and 29).
+## Colour: the project working space
 
-### Animation and live data
+The project declares its working colour space, and every scene in it
+composites in that space: blending, alpha compositing, gradient
+interpolation, filtering and effects. Tagged sources convert into it once
+(never inferred); the sRGB Preview and Rec.709/BT.1886 Program transforms
+apply once on the way out. A scene whose declared space differs from its
+project's refuses by name.
 
-Compile keyframes only after property-specific parity tests establish
-equivalent interpolation, easing, rational time conversion, parenting and
-phase behaviour. Other properties remain GrapiX-evaluated.
+Figma, Photoshop and After Effects (by default) composite gamma-encoded
+values. Compositing those designs in linear light changes every
+semi-transparent overlap, anti-aliased edge, gradient and shadow, so `18.8`
+(Figma fidelity within the pixel gate) could not pass under ADR-0002's former
+"linear, always". A project that wants physically linear compositing declares
+linear sRGB. **New projects default to sRGB** so imported designs reproduce;
+the owner may change that default. The contract change (`WorkingColorSpace`
+gaining variants, and its "composite in linear, always" documentation) is
+made in `3.15`.
 
-Current-frame value injection is insufficient for Echo, motion blur,
-particles or another effect that samples other times. Those paths need
-GrapiX evaluation at every requested sample time, proven equivalent compiled
-curves, or a named unsupported refusal. Markers carry phase metadata;
-GrapiX still executes in/loop/out and continue semantics.
+## Plan mapping and acceptance gates
 
-Upstream Essential Properties are precomposition-instance overrides and
-currently render from a project copy. They are not assumed to be a generic
-zero-copy live-data interface. The spike must establish override isolation,
-copy/allocation cost, cache invalidation and text-update latency. No
-per-frame project rebuild or pipeline creation is accepted (invariant 35).
-
-### Device, colour and output
-
-The pinned candidate uses wgpu `30.0.1` and Rust `1.95`; GrapiX currently
-uses wgpu `26` and declares Rust `1.89`. `Gpu::new(adapter, device, queue)`
-supports a host-created device, but those versioned types are incompatible.
-The spike uses a separate temporary workspace and explicit toolchain; it
-does not upgrade the product workspace. Production adoption requires a
-reviewed workspace-wide version/lockfile change and re-verification.
-
-Render internally in premultiplied linear light. Preserve tagged source
-conversion and separate sRGB Preview from Rec.709/BT.1886 Program output.
-Upstream's sRGB display texture is not automatically suitable for Program.
-Verify alpha convention, quantisation, gamut and exactly one output encoding
-against GrapiX's colour contract.
-
-GPU frames cross the adapter as GrapiX-owned frame handles. CPU outputs may
-use bounded asynchronous readback; GPU-capable outputs may avoid readback.
-Frame pacing and drop handling remain GrapiX's. Measure actual CPU fallback
-transfers: unsupported GPU effects may introduce intermediate readbacks, so
-one final readback is a target, not an upstream guarantee. A blocked output
-consumer must never stall the Program clock.
-
-Disable timing-driven automatic CPU/GPU selection for live certification.
-Report the actual backend and fallback reason per render path. Define
-device-loss, allocation-failure, stale-completion and readback-timeout
-behaviour explicitly; degraded CPU operation does not inherit T0 readiness.
-
-Upstream currently renders text, shape sources and masks on the CPU into
-its layer cache, then uploads the buffers. Static cached source preparation
-can be acceptable outside the frame loop; continuously changing vector,
-mask, text or live-data content needs a GPU drawing path and measured CPU
-cost. The spike must expose every CPU render/fallback stage and its transfer
-cost; a fast cached-solid benchmark alone cannot pass the GPU-first gate.
-
-Large stages must obey GrapiX's tile/overscan and f64-origin invariants 37/38.
-The candidate can decline a frame over its texture limit. Existing CPU tile
-planning alone does not prove candidate GPU tiling or tile-safe effects.
-
-## Verification and compatibility gates
-
-The initial spike gathers evidence; it does not certify production. Confirm
-the show targets, reference GPU/driver matrix, owner and broader time box
-before performance acceptance. Initial investigation uses this machine's
-RTX 3070 Ti and Windows driver `32.0.15.9159`; it is one sample, not the
-certification matrix.
-
-Reference workloads are a lower third, a scorebug with approximately 20 live
-text fields and a full-screen stats page, at 1080p50 and 2160p50. Timing must
-include semantic evaluation, live updates, CPU layer rendering, upload,
-GPU completion and required output readback. Record cold and warm behaviour,
-Preview/Program concurrency, frame counts and percentile methodology.
-
-| Gate | Required evidence |
-|---|---|
-| Windows build/execution | Pinned release build and core tests on DX12 and Vulkan; adapter and driver recorded; skipped GPU tests are not passed |
-| GPU-first frame production | Trace scene preparation, rasterisation, masks, effects, composition and output with CPU timings, GPU timestamps and upload/readback counters; animated/live-update workloads use GPU drawing and never silently fall back to full-frame CPU rendering |
-| Device sharing | Two render instances on one host-created device, no upstream patches required for construction; measured limits and features recorded |
-| Frame budget | Proposed p99 end-to-end render time <=10 ms at 50p for each reference workload; show target still requires confirmation |
-| Live updates | Proposed first affected Program frame within one frame period after an accepted update; no cross-instance mutation or stale-cache output |
-| Output/readback | Actual output-format conversion and bounded readback fit the 20 ms period at both sizes; no consumer-induced clock stall |
-| Colour/alpha | Linear internal pipeline, tagged sources, sRGB Preview, Rec.709/BT.1886 Program and correct transparent edges |
-| Text/fonts | Only packaged font bytes; missing faces refuse; shaping parity including Telugu, Hindi, bidi and fallback; real glyph pixels checked |
-| Semantic mapping | Mixed object order, groups/opacity, transforms, clips, material modes, mesh interaction and unsupported-property refusals |
-| Temporal sampling | Compiled-curve parity and GrapiX evaluation at off-frame times; Echo/motion blur and phase transitions tested |
-| Accurate existing subset | Old baselines retained for regression where rendering is correct; known placeholder/omission bugs get reviewed replacement expectations |
-| Core CPU/GPU agreement | Pinned upstream oracle rerun; tolerances, relative/HDR rules and allowed boundary exceptions reported per test |
-| Tiles and precision | Above-limit stage, distant origin, tile seams and effect footprints; no whole-stage texture or silent CPU fallback |
-| Failure/lifecycle | Device loss, allocation/readback failure, revision swaps, cache bounds and output-inhibited recovery |
-| Soak | Eight hours with periodic takes/updates; bounded memory/cache growth and no drops attributable to the core |
-| Bounded dependency integration | Exact transitive closure, licence/SBOM review and a small documented patch set |
-
-There are three separate comparisons: GrapiX's accurate CPU subset against
-the adapter; upstream CPU against upstream GPU; and GrapiX animation against
-compiled curves. None is ground truth for every feature. Existing baselines
-cannot require the new renderer to keep rectangle text, omitted images or
-incorrect mixed ordering. Preserve those historical images and document
-each reviewed correction separately.
-
-Upstream's headline GPU tolerances are <=1/255 at 8 bpc and <=1e-3 at 32 bpc,
-but its tests also document quantisation-boundary and discontinuous-mode
-exceptions, with relative handling of over-range float values. GrapiX must
-record the actual assertion policy rather than adopting the headline alone.
-Compile-report expectations are versioned; a new unsupported mapping fails
-the gate. No-adapter or fallback-only execution is recorded as SKIP or a
-named limitation, never GPU PASS.
-
-## Vendoring and rollout conditions
-
-After passing the gates, vendor only the dependency closure of `render` and
-`gpu`, with the upstream commit, lockfile provenance, licences, NOTICE and
-required asset attributions. Review transitive dependencies as well as these
-two crate licences. UI, app, CLI, host/session and automation crates are
-outside the product closure unless separately justified. PhotoCraft PSD
-import remains an independent decision.
-
-Deliberate pinned updates rerun verification. Record every patch; upstream
-contributions require separate authorization to publish. Forks must respect
-the upstream brand restrictions. No upstream messaging or publishing is
-part of this spike.
-
-Preview cutover requires GPU-first, semantic/colour evidence and explicit backend
-status. Program cutover additionally requires confirmed performance targets,
-output testing, failure handling and the soak. Keep the current output path
-available until those pass. Any failed gate can halt or reverse a cutover.
-
-Open decisions: font shaping authority; vector backend; mesh ownership;
-certification GPUs/drivers; confirmed performance targets; spike owner and
-time box. These are evidence/acceptance questions, not reasons to stop the
-authorized initial isolated investigation.
-
-## Initial spike findings
-
-The pinned `render`/`gpu` Windows release build succeeded using the separate
-Rust 1.95 toolchain. Shared host-device rendering and separate static project
-pixels passed on Vulkan and on DX12 with explicit DXC `1.8.2502.11`, with
-CPU/GPU maximum channel delta approximately `6e-8`. No tracked upstream
-source was patched; the probe was compiled as an added example.
-
-| Executed gate subset | Result on this RTX 3070 Ti |
-|---|---|
-| Default DX12 initialization | **FAIL**: Auto fell back to FXC; `classic3d` failed D3DCompile loop unrolling |
-| DX12 with explicit DXC, static shared-device probe | **PASS** for the probe's scope |
-| DX12 with DXC, full GPU crate tests | **FAIL**: 147 passed, 56 failed, 1 ignored; includes Bpc32 NaNs and large effect mismatches |
-| Vulkan, full GPU crate tests | **PASS** for this suite: 203 passed, 0 failed, 1 ignored; real hardware adapter reported |
-| CPU render crate tests | **PASS**: 201 passed, 0 failed, 1 ignored |
-| GPU-first animated/live-update drawing | **Not verified**; upstream still draws base text/shapes/masks on CPU |
-| Font isolation and complete SceneDocument semantics | **Not verified**; named integration gaps remain |
-| Reference shows, actual outputs, tiles, failure recovery, eight-hour soak | **Not run** |
-
-At the default 1 GiB CPU layer-cache budget, a synthetic two-solid scene
-through the display-texture API and final RGBA8 readback measured:
-
-| Backend | 1080p p50 / p99 | 2160p p50 / p99 |
+| Step | Owns | Gates carried from the 11 October ADR |
 |---|---|---|
-| DX12 + DXC | 6.595 / 7.769 ms | 32.130 / 35.545 ms |
-| Vulkan | 5.837 / 6.837 ms | 26.433 / 28.825 ms |
+| `3.15` | Project working colour space | Colour and alpha; colour ramp on both platforms |
+| `3.16` | GPU compositor core | GPU-first trace; semantic mapping and order; tiles and precision; Preview and Program instances sharing one device |
+| `3.17` | GPU 2D drawing (lyon-on-GPU and Vello measured) | CPU/GPU agreement under a recorded assertion policy |
+| `3.18` | GPU text from packaged fonts | Packaged bytes only; missing glyph refuses; Telugu, Hindi and bidi pixels |
+| `3.19` | Masks, clips, mattes, trim paths | Silent trim omission removed |
+| `3.20` | Full blend-mode set | No NaN or infinity reaches output, in either working space |
+| `3.21` | Output, readback, frame budget | p99 ≤ 10 ms at 50p for the reference workloads at 1080p and 2160p; output and readback within the period; no consumer-induced clock stall |
+| `3.22` | Typed effect registry, broadcast set | DX12 and Vulkan agreement per effect |
+| `11.60`–`11.62` | Layer styles, text animators, effect and style controls | Photoshop reference renders; deterministic per-glyph animation |
 
-Each row uses five warmups and 30 samples; p99 is nearest-rank and therefore
-the maximum of this small sample. Timings include the upstream display
-texture's mipmap generation and synchronous readback, not an implemented
-Program/NDI path. Both 4K paths exceed a 50p frame's 20 ms period even on this
-simple workload. This is a named performance limitation of the probed path,
-not certification evidence or a claim that every possible GPU output fails.
+Reference workloads are a lower third, a scorebug with about 20 live text
+fields and a full-screen stats page, at 1080p50 and 2160p50, timed end to end
+(evaluation, live updates, drawing, GPU completion, output readback), cold
+and warm, with Preview and Program running concurrently. Failure and
+lifecycle behaviour and an eight-hour soak gate the Program cutover. No
+skipped or no-adapter GPU execution counts as PASS. Certification GPUs and
+drivers, and confirmed show targets, are still to be named.
 
-At 256 MiB, a full 4K float layer exceeds the cache's per-entry limit
-(`budget / 4`). The 35 rendered frames made 36 uploads rather than two and
-were much slower. Cache counters and the final probe source hash are in
-`memory.md`; the experiment includes both budgets so this remains visible.
+## Current worker: what to retain
 
-**Recommendation:** do not vendor or cut over production to this pin yet.
-Vulkan makes the GPU core worth investigating, but the full render-core
-adoption has not met the GPU-first requirement. Compare the cost of GPU
-layer drawing integration with a GrapiX-owned GPU drawing/composition path
-using selected upstream effects. Fix or explicitly scope the DX12 failures,
-prove packaged-font isolation and reduce Program output cost before further
-cutover work. Detailed execution evidence is in `memory.md`; step `3.14`
-remains active, with no adoption gate represented as complete.
+| Area | Today | Under this ADR |
+|---|---|---|
+| Scene preparation | Validation, hierarchy, verified asset binding, lyon tessellation, packaged-font shaping, mesh preparation | Split semantic preparation from GPU preparation; `PreparedScene::prepare` cannot feed the GPU path unchanged |
+| Runtime | Pinned revisions, animation evaluation, publish/cue/take, emission, recovery | Unchanged |
+| GPU | wgpu 26 device and texture-limit negotiation; no draw pipelines | `3.16`–`3.22` |
+| CPU reference | Linear composition, output encoding, tile planning | Kept for its accurately rendered subset and diagnostics; old baselines are not expectations for placeholder output |
+| Text | cosmic-text shaping; advance rectangles drawn | `3.18` |
+| Images and gradients | No drawing path; gradients refused | `3.17` |
+| Meshes | Basic CPU projection; glTF geometry empty (the `3.7` defect) | `11.48`, `16.6`–`16.8` |
 
-The Windows normal dependency tree has 134 distinct package/version entries,
-including 14 EffectCraft crates; the closure includes `segment` and `track`
-through `effects`. There are no UI/app crates in this inspected normal
-closure. This is an inventory, not a completed licence audit: in particular
-the `Unicode-3.0` conjunct needs reconciliation with GrapiX's current accepted
-licence list. Build/dev/platform closures and embedded assets still require
-review before vendoring.
+## EffectCraft reuse catalogue
 
-Font isolation is a concrete integration gap. The pinned text engine keeps
-a process-global database, starts with bundled fonts, registers in-memory
-fonts and can scan system fonts when resolution misses. Unknown families
-fall back to Inter. Registering packaged font bytes alone therefore does
-not satisfy GrapiX's no-substitution contract or per-revision font isolation.
-This needs an isolated-font API or GrapiX-owned glyph input, followed by
-execution evidence; it is not covered by a successful compositor probe.
+Reference clone: `agent/reference/effectcraft` at the pinned commit, never
+built into the product. Upstream has moved on (0.9.0 on 12 October); each
+port cites the commit it was taken from.
+
+**Obligations.** MIT OR Apache-2.0: keep "Copyright (c) 2026 ArtCraft Team and
+the EffectCraft contributors" and the licence text in GrapiX's third-party
+notices, and cite the source file in each ported file. Never take the ArtCraft
+name, wordmark, logos or app icons (`docs/brand/`), or the bundled OFL fonts.
+Every port strips silent fallbacks, guards slice indexing, removes float time
+and rate constructors and rewrites edition-2024 syntax.
+
+Verdicts: **COPY** near-verbatim; **PORT** the algorithm into GrapiX types;
+**LEARN** design only. Paths are under upstream `crates/` unless noted.
+
+| Upstream | Lines | Verdict | Step |
+|---|---|---|---|
+| `gpu/src/shaders/common.wgsl`: blend modes, `imod`, `asin_p`, `powz`, `round_away`, `hash_noise` | 541 | COPY | 3.16, 3.20, 4.5 |
+| `gpu/src/shaders/kernels.wgsl`: compositing, box and Gaussian blur passes, glow, drop shadow | 1,016 | PORT | 3.16, 3.22 |
+| `gpu/src/shaders/fx_*.wgsl`: 280 GPU effects in 20 families | 11,720 | PORT on demand, broadcast subset first | 3.22 |
+| `color/src/blend.rs`: 38 modes, CPU reference | 538 | PORT | 3.20 |
+| `render/src/styles.rs`, `project/src/styles.rs`, `render/src/tests_styles.rs`: layer styles (distance-field spread and choke, glows, bevel height field) | 765 + 485 + 477 | PORT to GPU | 11.60 |
+| `engine/src/psd_import.rs` blend and style tables (L25–89, L505–686) | ~250 | PORT; every silent drop becomes a named finding | 11.59, 11.60 |
+| `effects/src/util.rs`, `misc.rs`, `color_fx.rs`, `color2.rs`, `generate.rs`, `noise3.rs`, `transition.rs` | ~6,300 | PORT as CPU references for the ported kernels | 3.22 |
+| `effects/src/lib.rs` registry-wide tests (L1212–1406) | ~200 | LEARN; redo on the typed registry | 3.22 |
+| `script/src/matchnames.rs`: After Effects effect match names | 461 | COPY as data | 11.59 |
+| `render/src/three_d/adv/shade.rs`, `raster.rs`, parts of `scene.rs` | 410 + 492 + parts | PORT | 11.48, 11.50, 16.6–16.8 |
+| `model/src/extrude.rs`, `triangulate.rs` | 317 + 187 | COPY | 11.48 |
+| `model/src/prim.rs` (per-face parts) | 235 | PORT | 11.48 |
+| `gpu/src/tests.rs` diff and check harness (L193–252), `tests_adv3d.rs` | ~600 | PORT the pattern; a missing adapter fails | 3.16, 4.5, 13.6 |
+| `render/src/cache.rs`, `gpu/src/walk.rs`, `context.rs`, `readback.rs` | ~2,900 | LEARN | 3.16, 3.21, 15.11 |
+| `path/src/ops.rs`, `boolean.rs`, `offset.rs`, `fit.rs` and tests | 1,720 | COPY; needs kurbo and linesweeper (a dependency decision) | 3.19, 11.47, 18.4 |
+| `path/src/interp.rs` | 519 | PORT, adding tangent-length checks | 11.47 |
+| `text/src/selectors.rs` and tests | 396 | COPY | 11.61 |
+| `render/src/text.rs` animator application (L163–391) | ~230 | PORT | 11.61 |
+| `text/src/fonts.rs` glyph-coverage check (L709–754) | 46 | PORT | 11.42, 11.51 |
+| `svg/src/pathdata.rs`, `svg/src/color.rs` | ~500 | COPY | 7.2, 18.2, 18.4 |
+| `keyframe/src/lib.rs` ease solver (L166–226), spatial segments (L242–366) and After Effects-measured tests; `docs/fidelity/keyframe-ease.json` | ~300 | PORT; Rust authority first, then regenerated TS | 11.11, 11.23, 11.59 |
+| `time/src/lib.rs` drop-frame timecode (L160–474) and property tests | ~300 | PORT; not `Tick`, not the float constructors | Playout timecode, 11.59 |
+| `geom/src/lib.rs` 3D layer transform, inverse, `look_at`, `square_to_quad` | ~200 | PORT | 11.44, 11.48 |
+| `color/src/icc.rs` (`parse`, `Trc`, `is_srgb`; L22–230) | ~210 | PORT | 3.15, 11.52, 11.59, 18.2 |
+| `color/src/space.rs` `rgb_to_xyz` and `bradford` (L253–276), but not its pure-2.4 "Rec.709" | ~25 | PORT | 3.15 |
+| `psd/` (depends only on `miniz_oxide`, already in the lockfile) | 3,232 | COPY, then extend: `lmfx`, Blend If, shape fill and stroke, artboards, a separate mask accessor, a lower pixel cap | 11.59, 11.60, 7.3 |
+| `pdf/` (PDF-compatible `.ai` only; its font fallback becomes a refusal) | ~8,000 | PORT | 11.59 |
+| `lottie/` import (`import.rs` L315–465, `shapes.rs`, `anim.rs`) and its 4 test fixtures | ~1,000 | PORT; COPY the fixtures | 16.5 |
+| `expr/src/noise.rs` (wiggle, noise, random) | 109 | COPY as host functions | 16.4, 11.55 |
+| `expr/src/prelude.js` maths, easing and loops | ~600 of 1,037 | PORT to the rquickjs sandbox | 16.4, 11.56 |
+| `automation/` frame-to-PNG MCP image tool; `server.rs` and `tools.rs` conventions, `long_job.rs`, `guard.rs` | ~1,500 | COPY and PORT | 8.1 and 8.9 re-verification, 8.14, 11.41 |
+| `engine/src/history.rs` merge keys and dirty-follows-undo; save with read-back check | ~400 | LEARN | 11.37 follow-up, 11.43, 11.46 |
+| `media/src/convert.rs` (YUV to RGB, ranges, alpha) | 514 | PORT to GPU | 11.49, 16.1 |
+| `segment/src/lib.rs` model registry (licence, URL, size, SHA-256) | 272 | PORT, with `sha2` | 16.10, 16.11 |
+| `ui-egui` graph and timeline maths: speed curves, handle-drag ease, pixel-tolerance snapping, viewer `snap()` and handle maths, scrub fields | ~800 | PORT to TypeScript | 11.11, 11.22, 11.23, 11.44, 11.46 |
+| `xtask/src/main.rs` (repository root) `layers()` via `cargo metadata`, `assets()` attribution check | ~150 | PORT | 0.4, boundaries gate |
+| `packaging/windows/sign.ps1`, `test-msi.ps1` (repository root); macOS verify and staple steps | ~400 | COPY and PORT | 11.1 |
+| `docs/ui-parity.md` format (repository root) | 47 | COPY the format | 11.24 |
+
+**Skip:** the encoders (`vp9enc`, `av1enc`, `hevcenc`, `opusenc`, `export`),
+motion and camera tracking and ML inference, the egui UI, CLI, host and
+ExtendScript layers, EPS, the film-VFX effects, upstream's media pool, and the
+bundled fonts and brand assets. FilmCraft's pure-Rust decoders (ProRes, DNx)
+are a candidate for `16.1` only through a written P.2 position that excludes
+`filmcraft-codecs` (MPL-2.0 Symphonia) and every encoder.
+
+## Open decisions
+
+- The new-project default working space (recorded here as sRGB).
+- The 2D drawing backend, measured in `3.17` (Vello implies a wgpu upgrade).
+- kurbo and linesweeper for the path operators, under the dependency policy,
+  when `3.19` or `11.47` starts.
+- The certification GPU/driver matrix and confirmed show performance targets.
+- FilmCraft decoders for `16.1` (P.2).
 
 ## Sources
 
@@ -297,5 +235,6 @@ execution evidence; it is not covered by a successful compositor probe.
 - [Pinned workspace versions](https://github.com/storytold/effectcraft/blob/9a7d3e76991d5372448033b473dc12c2480a6a04/Cargo.toml)
 - [Pinned GPU API](https://github.com/storytold/effectcraft/blob/9a7d3e76991d5372448033b473dc12c2480a6a04/crates/gpu/src/lib.rs)
 - [Pinned GPU oracle and exceptions](https://github.com/storytold/effectcraft/blob/9a7d3e76991d5372448033b473dc12c2480a6a04/crates/gpu/src/tests.rs)
+- Spike runner `tools/effectcraft-spike/`; evidence and logs in `memory.md`
+  (11 and 12 October 2026).
 - [GrapiX invariants](../invariants.md), [colour/output contract](0002-platform-and-mcp-schema.md)
-- GrapiX worker: `prepared.rs`, `gpu.rs`, `text.rs`, `mesh.rs`, `rasterise/lyon.rs` in the working tree reviewed on 11 October 2026.

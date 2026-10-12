@@ -129,7 +129,16 @@ wrong thing.
 
 **Rules:**
 
-- **Render internally in linear.** Always.
+- **Composite in the project's working colour space.** *(Amended
+  12 October 2026 by the user; formerly "Render internally in linear.
+  Always.")* The project declares its working space — sRGB
+  (display-referred, the default for new projects) or linear sRGB — and
+  blending, alpha compositing, gradient interpolation, filtering and effects
+  happen in it. Figma, Photoshop and After Effects composite gamma-encoded
+  values by default, so linear-only compositing could never reproduce an
+  imported design (18.8). 3D shading still computes in linear light inside
+  its pass. Owned by build-plan step 3.15; rationale in
+  [ADR-0003](0003-effectcraft-render-core.md).
 - **Tag every texture with its source colour space** at import. Never
   infer it.
 - **Two output transforms:** sRGB for preview surfaces, Rec.709/BT.1886
@@ -349,7 +358,7 @@ Before feature work is called complete on a clean branch:
 
 1. [ ] Editor builds, signs and notarises on Windows and macOS; installers produced by CI on both
 2. [ ] WebGPU capability probe run on both target OS versions, result recorded
-3. [ ] Colour-managed pipeline: linear internal, tagged textures, sRGB and Rec.709 output transforms, colour ramp in the reference scene set
+3. [ ] Colour-managed pipeline: compositing in the project's declared working space (amended 12 October 2026; was "linear internal"), tagged textures, sRGB and Rec.709 output transforms, colour ramp in the reference scene set
 4. [ ] Pixel gate passes identically on both platforms — this is what proves item 3
 5. [ ] DPI: correct at 100%, 125%, 150%, 200%; survives a monitor move; survives a scale-factor change at runtime
 6. [ ] Filenames: sanitiser with a test corpus of hostile names — reserved words, illegal characters, trailing dots, accented characters, >260 char paths

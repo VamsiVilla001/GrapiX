@@ -28,11 +28,12 @@ that as a real cost.
 4. **Crate and package `README.md`** — ownership and boundary of one unit.
 5. **Code.**
 
-**Render-core evaluation:** [ADR-0003 — EffectCraft adoption](adr/0003-effectcraft-render-core.md)
-records the conditional compositor decision and compatibility gates. It
-refines 0001's technology selection without changing the clock, contract,
-colour or refusal invariants. Initial execution is build-plan step `3.14`;
-production adoption is still **Planned**.
+**Render core:** [ADR-0003 — GPU-first compositor, EffectCraft as component source](adr/0003-effectcraft-render-core.md)
+records the 12 October 2026 decision: GrapiX owns a GPU-first compositor
+(build-plan steps `3.15`–`3.22`), whole-core adoption of EffectCraft is
+halted after the `3.14` spike, and EffectCraft components are ported with
+attribution under the owning steps. It also amends ADR-0002 B.1: compositing
+follows the project's working colour space. The compositor is **Planned**.
 
 `/memory.md` at the repository root is the session log: what changed, when, and
 what was verified. It records history; it does not grant authority.

@@ -16,7 +16,7 @@ automatable before it is clickable.
 
 ---
 
-**237 steps across 19 phases.**
+**248 steps across 19 phases.**
 
 
 ## Phase P — Parallel tracks — start on day one
@@ -105,7 +105,15 @@ Headless. The engine must be complete and testable before anything draws a pixel
 | `3.11` | Preview and Program frame emission; bounded queue, counted drops | BE | 3.10 | Stall drops frames, never blocks the clock |
 | `3.12` | WAL recovery journal; restore starts output-inhibited | BE | 2.1 | Forced kill restores without an unrecovered output |
 | `3.13` | Refusal coverage audit — every unsupported case refuses by name | BE | 0.6 | No silent fallback anywhere; blend and fit modes included |
-| `3.14` | Pinned EffectCraft render/GPU compatibility spike on Windows (ADR-0003); no production cutover | BE | 3.1, 3.4, 4.4 | Pinned, reproducible evidence for every ADR-0003 gate, each reported PASS/FAIL/SKIP with limitations; adoption recommendation reviewed; no skipped GPU execution counted as PASS |
+| `3.14` | Pinned EffectCraft render/GPU compatibility spike on Windows (ADR-0003); no production cutover | BE | 3.1, 3.4, 4.4 | Pinned, reproducible evidence for each executed ADR-0003 gate, each reported PASS/FAIL/SKIP with limitations; no skipped GPU execution counted as PASS; a failed required gate halts the spike; the adoption decision is recorded in ADR-0003 |
+| `3.15` | Project working colour space: compositing follows the project's declared colour space | CON | 3.3, 7.1 | `WorkingColorSpace` offers at least sRGB (display-referred) and linear sRGB; the project declares one and every scene in it composites, blends, interpolates gradients and filters in that space, with tagged sources converted in once and the sRGB Preview and Rec.709/BT.1886 Program transforms applied out once. One fixture rendered in an sRGB project and in a linear project gives each space's reference values to ±1 code value for a 50% black-over-white overlap, an anti-aliased edge, a two-stop gradient and a blur; the colour ramp still renders identically on both platforms; a scene whose declared space differs from its project's refuses by name; ADR-0002 B.1 and the contract docs state the rule |
+| `3.16` | GrapiX-owned GPU compositor: layer stack, transforms, opacity and composition on the GPU | BE | 3.1, 3.4, 3.9, 3.13, 3.15 | Preview and Program frames for a fixture scene are composited on the GPU from SceneDocument's effective order across object types, in the 3.15 working space; pipelines and resources are built at prepare, never per frame (invariant 35); a trace of the reference lower third shows no CPU full-frame rasterisation on the frame path; an unsupported mapping refuses by object id and document path; a stage above the texture limit composites seam-free from tiles (invariants 37, 38) |
+| `3.17` | GPU 2D drawing: paths, strokes, gradients and images | BE | 3.5, 3.16 | Fills, strokes (joins, caps, dashes), linear and radial gradients and tagged image quads draw on the GPU with anti-aliasing and match their CPU reference within the 4.4 threshold; gradients are no longer refused; lyon-on-GPU and Vello are benchmarked on the reference workloads and the chosen drawing backend is recorded with its measurements |
+| `3.18` | GPU text: real glyph outlines from packaged fonts | BE | 3.6, 3.16, 3.17 | Text shaped by cosmic-text from package-owned font bytes only is drawn on the GPU as glyph outlines, replacing advance rectangles; Latin, Telugu, Hindi and mixed-bidi fixtures match reference glyph pixels within the 4.4 threshold; a missing glyph refuses (invariant 66); no installed system font is read |
+| `3.19` | GPU masks, clip groups, track mattes and trim paths | BE | 3.16, 3.17 | Masks (add, subtract, intersect, difference; feather; expansion), clip groups, alpha and luma mattes and trim start/end/offset render on the GPU and match CPU references; the scene contract's trim values are honoured (they are silently ignored today); an unsupported combination refuses by name |
+| `3.20` | Full blend-mode set on the GPU | BE | 3.15, 3.16 | The contract's blend modes cover the 27 Photoshop and the After Effects modes, ported from EffectCraft's formulas with attribution; each composites on the GPU in both working spaces and matches its CPU reference per mode; no declared mode is refused; NaN or infinity never reaches output, with EffectCraft's non-deterministic DX12 32-bit NaN failures (Darken on 11 October, ClassicDifference on 12 October) kept as regression tests |
+| `3.21` | GPU Program/Preview output: encode, quantise once, bounded asynchronous readback | BE | 3.11, 3.15, 3.16 | Frames leave the GPU through the 3.15 output transforms with exactly one quantisation, via a bounded asynchronous readback ring that never stalls the Program clock; a lower third, a scorebug with about 20 live text fields and a full-screen stats page each render at p99 ≤ 10 ms end to end at 1080p50 and 2160p50 on DX12 on the reference GPU (ADR-0003's proposed target, or the confirmed show target if set first), with the method recorded |
+| `3.22` | Typed effect registry and the broadcast effect set on the GPU | BE | 3.16, 3.20 | Effects are a contract enum with typed parameters, generated TS and JSON Schema, and no string-keyed parameters; an unknown effect refuses by name. First set: Gaussian, box and directional blur, glow, drop shadow, fill, tint, gradient ramp, levels, curves, hue/saturation, brightness/contrast, exposure, and linear, radial and iris wipes, as GPU kernels ported from EffectCraft with attribution; each matches a CPU reference within the 4.4 threshold on DX12 and Vulkan, and every parameter is keyframable |
 
 **11 October 2026 — render-core evaluation authorized.**
 [ADR-0003](docs/adr/0003-effectcraft-render-core.md) records the preferred
@@ -122,6 +130,40 @@ transforms, masks, effects and composition must run primarily on the GPU.
 CPU scene logic and bounded preparation remain allowed; CPU full-frame
 rasterisation or silent fallback cannot qualify the candidate. `3.14` must
 report this gate even if a cached-composition benchmark passes.
+
+**12 October 2026 — render-core decision (user).** The main render path is
+GPU-first and GrapiX-owned. Whole-core adoption of EffectCraft's `render` and
+`gpu` crates is halted: upstream rasterises text, shapes and masks on the CPU
+by design, its GPU suite fails on DX12, and 4K misses the 50p frame period
+even for two solid layers (ADR-0003). EffectCraft remains the preferred
+**component source** — WGSL kernels, blend formulas, layer-style and shading
+algorithms, path operators and importers — ported into GrapiX-owned code with
+attribution, each under the step that owns it (ADR-0003's reuse catalogue).
+Steps `3.15`–`3.22` own the GPU compositor. Until they are done, no `done`
+entry is evidence that GrapiX draws on the GPU.
+
+**Colour follows the project (user, 12 October 2026).** Compositing happens in
+the project's declared working colour space, not in linear light
+unconditionally. This amends ADR-0002 B.1's "render internally in linear,
+always" and is owned by `3.15`. `3.3` stays done for what it verified: tagged
+sources, the two output transforms and the colour ramp.
+
+**Open defects — done steps contradicted by the code (found 12 October 2026).**
+Recorded with evidence in `memory.md`. States are unchanged until each step's
+verification is re-run (LLM-GOVERNANCE hard rule 4).
+- `3.13` "No silent fallback anywhere": the engine never reads the scene's
+  `trim_start`/`trim_end`/`trim_offset`, so the full stroke draws; glTF meshes
+  are prepared with no vertices or triangles and draw nothing, without a
+  refusal (`services/render-engine/worker/src/mesh.rs`).
+- `8.9` "An agent can see its own output": `render.preview` ignores its
+  arguments and returns raw RGBA as a JSON number array, which no MCP client
+  can show as an image.
+- `8.12` "Retry after timeout does not duplicate": no service depends on
+  `gx-write-semantics`, and no MCP edit carries `if_revision` or an
+  idempotency key.
+- Met only to the letter: `3.7` (glTF geometry is empty; sphere and torus are
+  triangle fans over a latitude/longitude grid) and `8.1` (`tools/list` sends
+  type names rather than input schemas; `services/mcp-server` has no binary).
 
 **Open defect — the engine-host test leg does not terminate (found 13 September 2026).**
 `cargo test -p gx-engine-host` hangs indefinitely in
@@ -313,6 +355,9 @@ Deferred to here on purpose. Everything above is usable without it, and this is 
 | `11.57` | Engine-rendered preview monitor and hash publish to Playout | UI | 7.6, 8.10, 11.38, 11.41, 11.53 | A preview monitor rendered by the engine through 11.41, and publishing a hashed revision to Playout. Publishing creates a revision the Playout mock lists by hash; the preview frame and an 11.41 render of the same revision and frame match within its tolerance; a conformance test confirms the Editor cannot Cue, Take, Continue or Clear (invariant 4) |
 | `11.58` | Console and debugger | UI | 0.6, 11.36, 11.42 | Consoles in the Editor and Playout show every failure with its condition, cause and fix; consoles other than the render engine's run without popping up. Every named refusal code has a console entry with all three parts, and a test enumerates the codes; 11.42 lint findings appear in the console |
 | `11.59` | Importers on 2.0 objects: PSD/AI and After Effects | BE | 7.2, 11.39, 11.41, 11.47, 11.48, 11.50, 11.51, 11.53 | PSD/AI and After Effects importers rebuilt on the 2.0 objects (Figma is Phase 18). After Effects precomps import as live scenes, not flattened clips; every imported asset is stamped with an 11.39 provenance record. A fixture file per importer imports and renders with every asset exact in 11.41 golden-frame tests; any unsupported node type produces a named finding, never a silent drop |
+| `11.60` | Layer styles: every Photoshop style and its blending options, animatable, on the GPU | BE | 3.19, 3.22, 11.36 | Drop Shadow, Inner Shadow, Outer Glow, Inner Glow, Bevel and Emboss, Satin, Color, Gradient and Pattern Overlay and Stroke, plus fill opacity, knockout, Blend If and several instances of one style, are scene properties with every parameter keyframable, rendered on the GPU in Photoshop's stacking order. Fixture scenes match committed Photoshop reference renders within the 4.4 threshold; the PSD (`lfx2`/`lmfx`) and Figma effect mappings used by 11.59 and 18.4 are specified against them; any style option not yet implemented (for example contours) is a named finding, never dropped |
+| `11.61` | Text animators: per-glyph range selectors | BE | 3.18, 11.20, 11.36 | Animators with range selectors (characters, characters excluding spaces, words, lines; start, end and offset; shapes; ease high and low; randomise with a seed derived from the object id) animate per-glyph position, scale, rotation, opacity, fill and tracking through 11.20 channels and render on the GPU from per-glyph instance data without per-frame re-shaping; the selector maths is ported from EffectCraft with attribution; the existing stagger presets are expressed through them; two renders of one frame are byte-identical, and a selector the engine cannot evaluate refuses by name |
+| `11.62` | Effects and layer-style controls in the Editor | UI | 3.22, 11.46, 11.60 | Adding, removing, reordering, enabling and duplicating effects and layer styles on any object are 11.36 commands with one undo each; every parameter shows in the inspector with scrub fields and an animation stopwatch; a refused effect or style shows its refusal code and fix |
 
 ### Phase 11 UI requirements — Editor 2.0 parity and animation
 
@@ -423,6 +468,15 @@ understood gaps that depend on 11.26/11.27 landing first.
 - The proposal's data-source module was folded into Phase 19, whose Data
   Server owns sources. "Phase 7 done" in the command model's Needs was
   narrowed to 7.1, the only Phase 7 step it reads; 7.2 and 7.3 are import work.
+
+### Phase 11 additions — layer styles, effects and text animators (12 October 2026)
+
+**Status: Planned.** Added at the user's request. 11.60 gives Photoshop layer
+styles the owning step `memory.md` rule 24 said they lacked; 3.22 and 11.62
+own the effects library; 11.61 owns text animators. All three render on the
+GPU compositor of 3.16–3.22 and port EffectCraft algorithms with attribution
+(ADR-0003's reuse catalogue). None of them may silently drop an option it
+cannot render: a missing capability is a named finding.
 
 ## Phase 12 — Playout UI
 
