@@ -189,6 +189,17 @@ impl WorkingRgba {
         }
     }
 
+    /// Apply an opacity to a premultiplied pixel: every component scales, the
+    /// same in every working space.
+    pub fn scaled(self, opacity: f32) -> Self {
+        Self {
+            r: self.r * opacity,
+            g: self.g * opacity,
+            b: self.b * opacity,
+            a: self.a * opacity,
+        }
+    }
+
     /// Interpolate two premultiplied pixels in the working space: the one
     /// operation behind a gradient's stops and a blur's average (3.15). The
     /// space it runs in is the point: black and white mix to 50% grey in an

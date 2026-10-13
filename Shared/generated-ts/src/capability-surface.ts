@@ -281,6 +281,8 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
     "sceneSchemaUnsupported",
     "sceneWorkingSpaceMismatch",
     "projectSettingsInvalid",
+    "shapeTrimInvalid",
+    "meshModelGeometryUnsupported",
     "assetBatchEmpty",
     "assetKindNotAddable",
     "assetFormatUnrecognised",

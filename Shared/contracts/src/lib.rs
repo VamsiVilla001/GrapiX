@@ -821,6 +821,14 @@ pub enum Refusal {
         scene: crate::color::WorkingColorSpace,
         project_space: crate::color::WorkingColorSpace,
     },
+    /// A shape's Trim Paths value is outside its domain (3.13): start and end
+    /// are percentages in 0–100 and every value is finite. Clamping it would
+    /// draw a window nobody authored. `value` is the authored number as text.
+    ShapeTrimInvalid { object: String, field: String, value: String },
+    /// A glTF model mesh this engine cannot draw (3.13). The software path has
+    /// no model renderer yet (3.7 owns it); drawing nothing would put an empty
+    /// space on air where the model was authored.
+    MeshModelGeometryUnsupported { object: String },
     /// A project's settings file exists but is not a settings document this
     /// build reads. Reading it as if absent would compose every scene in the
     /// wrong space.
@@ -1382,6 +1390,14 @@ impl std::fmt::Display for Refusal {
             Refusal::ProjectSettingsInvalid { project, detail } => {
                 write!(f, "project {project} settings are unreadable: {detail}")
             }
+            Refusal::ShapeTrimInvalid { object, field, value } => write!(
+                f,
+                "shape {object} has {field} {value}, outside its domain (start and end 0-100, every value finite)"
+            ),
+            Refusal::MeshModelGeometryUnsupported { object } => write!(
+                f,
+                "mesh {object} is a glTF model, which this engine cannot draw yet"
+            ),
             Refusal::AssetBatchEmpty => f.write_str("asset add carries no assets"),
             Refusal::AssetKindNotAddable { asset_id, kind } => write!(
                 f,
@@ -1858,6 +1874,8 @@ impl Refusal {
                 project_space: crate::color::WorkingColorSpace::Srgb,
             },
             Self::ProjectSettingsInvalid { project: "audit".into(), detail: "audit".into() },
+            Self::ShapeTrimInvalid { object: "audit".into(), field: "trimStart".into(), value: "140".into() },
+            Self::MeshModelGeometryUnsupported { object: "audit".into() },
             Self::AssetBatchEmpty,
             Self::AssetKindNotAddable { asset_id: "audit".into(), kind: crate::scene::AssetKind::Font },
             Self::AssetFormatUnrecognised { file: "audit".into() },
@@ -2017,6 +2035,8 @@ impl Refusal {
             Self::SceneSchemaUnsupported { .. } => "sceneSchemaUnsupported",
             Self::SceneWorkingSpaceMismatch { .. } => "sceneWorkingSpaceMismatch",
             Self::ProjectSettingsInvalid { .. } => "projectSettingsInvalid",
+            Self::ShapeTrimInvalid { .. } => "shapeTrimInvalid",
+            Self::MeshModelGeometryUnsupported { .. } => "meshModelGeometryUnsupported",
             Self::AssetBatchEmpty => "assetBatchEmpty",
             Self::AssetKindNotAddable { .. } => "assetKindNotAddable",
             Self::AssetFormatUnrecognised { .. } => "assetFormatUnrecognised",

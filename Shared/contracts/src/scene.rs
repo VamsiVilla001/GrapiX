@@ -549,6 +549,15 @@ pub struct ShapeObject {
     /// Absent — or 0/100/0 — draws the whole stroke. The window is
     /// stroke-only; the fill always covers the whole region, which is what
     /// separates a wipe reveal from a scaling mask.
+    ///
+    /// Precisely (3.13): start and end lie in 0–100 and a start after the end
+    /// draws the same window as end to start; the offset is any finite
+    /// percentage, 100 being one full turn (After Effects' 360°), and a window
+    /// that passes the end of the path wraps to its beginning. Length is
+    /// measured in the shape's own coordinates, so a non-uniform scale does
+    /// not move the window, and each subpath of a compound shape is trimmed
+    /// with the same window (After Effects' "simultaneously"). A value outside
+    /// its domain refuses `ShapeTrimInvalid`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub trim_start: Option<f64>,

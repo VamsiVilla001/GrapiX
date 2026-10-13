@@ -118,7 +118,112 @@ not a euphemism for nearly done.
 
 ---
 
-## 2026-10-13 — 3.15 done: compositing follows the project's working colour space; resume here
+## 2026-10-13 — 3.13 re-close, batch A: vector opacity, Trim Paths, glTF model refusal; full silent-ignore inventory; resume here
+
+3.13 stays **active**. Its done-when is "no silent fallback anywhere", and a
+read-only sweep found far more than the three items it was reopened for
+(inventory below). This entry records the first batch.
+
+**Batch A, implemented:**
+- **Vector opacity, now rendered.** `PreparedPaths::prepare` scales each
+  object's path paints by its effective opacity (its own and its ancestors',
+  composed by the resolver). Uses the new `WorkingRgba::scaled`.
+- **Trim Paths, now rendered** (`rasterise/lyon.rs`) with lyon's
+  `PathMeasurements::split_range`; no new dependency.
+  - The window is measured in the shape's own coordinates, so a non-uniform
+    scale does not move it.
+  - Each subpath is trimmed with the same window (After Effects'
+    "simultaneously").
+  - A start after the end draws the end-to-start window.
+  - The offset is a percentage; 100 = one turn (After Effects' 360°). A
+    window past the end wraps.
+  - The fill is never trimmed.
+  - The contract field doc states all of this.
+  - `append_bezier` now takes a point-mapping function (scene transform or
+    identity).
+- **Two new refusals.**
+  - `ShapeTrimInvalid { object, field, value }`, from the shared validator,
+    so Editor preflight and the engine agree.
+  - `MeshModelGeometryUnsupported { object }`, from
+    `PreparedScene::prepare`. `prepare_meshes` still resolves element
+    assignment, so 3.7's own test is untouched; the engine refuses at
+    publish rather than drawing empty geometry.
+
+**Verified (13 October):**
+- `cargo test -p gx-render-worker --lib`: 77 passed, 1 failed (the
+  environmental `Os { code: 32 }` recovery-journal test).
+  - New `vector_paths_apply_effective_opacity`: own and parent opacity,
+    both working spaces, Preview 128/188 ±1.
+  - New `trim_paths_cut_the_stroke_to_the_authored_window`: 360×10 px
+    stroke; whole stroke 3,500–3,700 lit pixels; 0–50 and 25–75 each
+    1,700–1,900; 75–25 equals 25–75; 40–40 draws 0; a wrapped half of a
+    closed square is 0.5 ±0.05 of the whole; an L with equal local legs
+    scaled ×3 lights 2,800–3,200 (local measure; scene measure would give
+    about 2,000).
+  - New `a_gltf_model_refuses_at_publish_instead_of_drawing_nothing`.
+- `cargo test -p gx-contracts --lib`: the new
+  `a_trim_value_outside_its_domain_refuses_by_name` (start 140, end -1 and
+  a NaN offset refuse; offset 250 and start after end are valid).
+- Contracts + editor + editor-mcp + playout-mcp: 311 passed, 0 failed.
+- `npm run conformance`: 275 passed, 0 failed, 9 skipped. It drives
+  `ShapeTrimInvalid`; `MeshModelGeometryUnsupported` is registered as a
+  mesh limitation, driven by the worker test.
+- Codegen current (297); typecheck OK; Node 40/40; vitest 339/339;
+  boundaries OK.
+
+### The remaining inventory (read-only sweep, HEAD c86eef8)
+
+Each item must render correctly or refuse by name before 3.13 closes. The
+sweep's evidence (file:line) is in the session transcript; the claims marked
+✔ were re-checked by execution or reading this session.
+
+1. Bindings and `data_context` are never applied by the engine; the Editor
+   preview applies them (`Editor/web/main.ts` `resolveSceneBindings`).
+2. `ImageObject` is never drawn (`lyon.rs` `_ => Ok(())`), and image `fit`
+   is never validated.
+3. ✔ Vector opacity: fixed in batch A.
+4. Text ignores rotation, scale and anchor (`text.rs` uses `resolved.x/y`
+   only).
+5. Text draws advance-width rectangles, not glyphs (a 3.6 defect).
+6. Material blend Add, Multiply, Screen, Darken and Lighten are declared by
+   `fixed_function()` but drawn as source-over.
+7. Draw order is all vectors, then all text, then all meshes;
+   `z_index`/`layer_id`/`z_depth` are never read.
+8. Text `auto_fit`, `letter_spacing`, `overflow`, `decoration`,
+   `vertical_align`, `stroke`, SmallCaps, word and paragraph spacing,
+   `text_indent` and vertical writing are not read; `line_height: None`
+   becomes 1.2×size instead of the font's metrics.
+9. `material_slots` on non-mesh kinds are ignored.
+10. ✔ Trim Paths: fixed in batch A.
+11. Animated `width`/`height` on paragraph text and slab meshes reuse the
+    publish-time preparation.
+12. `rotation_x`, `rotation_y` and `scale_z` on 2D kinds are ignored.
+13. Material kinds Image, Video and Shader, textures and `shader_id` are
+    not drawn; a material colour gradient is not drawn, and the comment
+    claiming the validator refuses it is false.
+14. `cull_mode`/`double_sided`, `depth_mode` (no z-buffer) and
+    `alpha_mode` are not honoured.
+15. Mesh primitives ignore width/height/depth, anchor and 3D rotation
+    (a default cube is about 1 px).
+16. ✔ glTF model geometry: refused in batch A. Clip fields are never read.
+17. `active_camera_id` resolves but nothing reads the camera.
+18. Slab `back_bevel.size` reuses the front size; `skew_texture` is never
+    read.
+19. Paint stroke opacity, hardness, flow, spacing, smoothing, roundness,
+    angle and blend, `pressure` and `paint_blend_mode` are not read.
+20. Hierarchy diagnostics (multiple parents, cycle, missing child) are never
+    reported.
+21. ✔ `rasterizer.rs` `render()` adds the frame number into the red channel
+    of the first 8 Program pixels whenever `program_key` is set, which
+    `take_prepared` sets for every real scene. This changes on-air pixels.
+    Dependents (cadence checks) must be traced before it is removed.
+22. Also seen: parent non-uniform scale under child rotation loses shear; a
+    negative rect radius is made positive with `abs()`; the validator is
+    laxer than prepare for vector gradients and tangent-array mismatches.
+
+---
+
+## 2026-10-13 — 3.15 done: compositing follows the project's working colour space
 
 **What changed.**
 - **Contract** (`Shared/contracts`):

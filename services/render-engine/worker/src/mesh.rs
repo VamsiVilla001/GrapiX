@@ -740,6 +740,30 @@ mod tests {
         assert_eq!(prepared.meshes[2].materials.iter().map(|element| element.element.as_str()).collect::<Vec<_>>(), ["body", "trim"]);
     }
 
+    /// 3.13: the software path cannot draw a glTF model, so publish refuses
+    /// it by name instead of preparing geometry that draws nothing.
+    #[test]
+    fn a_gltf_model_refuses_at_publish_instead_of_drawing_nothing() {
+        let hash = ContentHash("model-content".to_string());
+        let mut model = mesh(MeshPrimitiveKind::Model, &[("body", "mat"), ("trim", "mat")]);
+        model.base.id = "model".to_string();
+        model.model_asset_id = Some("model".to_string());
+        model.material_elements = Some(vec!["body".to_string(), "trim".to_string()]);
+        let mut scene = document(vec![SceneObject::Mesh(model)], vec![material("mat")]);
+        scene.assets.push(gx_contracts::scene::AssetLibraryItem { asset_id: "model".to_string(), name: "model".to_string(), kind: AssetKind::Model, path: "must-not-be-read.gltf".to_string(), checksum: Some(hash.clone()), mime_type: Some("model/gltf+json".to_string()), size_bytes: None, status: None, provenance: Default::default() });
+        let refused = crate::prepared::PreparedScene::prepare(
+            scene,
+            &HashSet::from([hash.clone()]),
+            &AssetBytes::from([(hash, two_material_glb())]),
+            &MaterialSupport::fixed_function(),
+        );
+        assert!(
+            matches!(&refused, Err(Refusal::MeshModelGeometryUnsupported { object }) if object == "model"),
+            "{:?}",
+            refused.err()
+        );
+    }
+
     #[test]
     fn an_unassigned_face_refuses_by_name() {
         let slots = [("front", "mat"), ("back", "mat"), ("left", "mat"), ("right", "mat"), ("top", "mat")];

@@ -5,9 +5,9 @@
 //! rasterises those cached triangles. Keeping the implementation boundary here
 //! prevents a future tessellator from leaking into scene logic.
 
+use lyon::algorithms::measure::{PathMeasurements, SampleType};
 use lyon::math::{point, Point};
-use lyon::path::builder::PathBuilder;
-use lyon::path::Path;
+use lyon::path::{Event, Path};
 use lyon::tessellation::{
     BuffersBuilder, FillOptions, FillTessellator, FillVertex, StrokeOptions, StrokeTessellator,
     StrokeVertex, VertexBuffers,
@@ -205,45 +205,110 @@ fn prepare_shape(
     resolved: &ResolvedObject,
     output: &mut Vec<PreparedPath>,
 ) -> Result<(), Refusal> {
+    let object = shape.base.id.as_str();
+    let to_scene = |x: f64, y: f64| transform(&shape.base.anchor, resolved, x, y);
+    let subpaths: Vec<&BezierPath> = std::iter::once(&shape.path)
+        .chain(shape.compound_paths.iter().flatten())
+        .collect();
     let mut builder = Path::builder();
-    append_bezier(
-        &mut builder,
-        &shape.path,
-        &shape.base.anchor,
-        resolved,
-        &shape.base.id,
-    )?;
-    if let Some(compound_paths) = &shape.compound_paths {
-        for path in compound_paths {
-            append_bezier(
-                &mut builder,
-                path,
-                &shape.base.anchor,
-                resolved,
-                &shape.base.id,
-            )?;
-        }
+    for subpath in &subpaths {
+        append_bezier(&mut builder, subpath, object, &to_scene)?;
     }
     let path = builder.build();
     if shape.fill_enabled {
-        prepare_fill(
-            shape.base.id.as_str(),
-            &path,
-            &shape.base.fill,
-            shape.fill_rule,
-            output,
-        )?;
+        prepare_fill(object, &path, &shape.base.fill, shape.fill_rule, output)?;
     }
     if shape.stroke_enabled {
-        prepare_stroke(
-            shape.base.id.as_str(),
-            path,
-            &shape.base.stroke,
-            shape.base.stroke_width,
-            output,
-        )?;
+        // The fill always covers the whole region; trim is stroke-only.
+        let stroke = match trim_window(shape) {
+            None => path,
+            Some(window) => trimmed_stroke(&subpaths, window, object, &to_scene)?,
+        };
+        prepare_stroke(object, stroke, &shape.base.stroke, shape.base.stroke_width, output)?;
     }
     Ok(())
+}
+
+/// Flattening tolerance for measuring a path's length, in the shape's own
+/// units (authored pixels).
+const TRIM_TOLERANCE: f32 = 0.01;
+
+/// AE Trim Paths as a window on each subpath's normalised length (3.13).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TrimWindow {
+    /// Where the window starts, in 0..1, after the offset has turned it.
+    start: f32,
+    /// How much of the path it covers, in 0..1.
+    length: f32,
+}
+
+/// The window a shape's trim values describe, or `None` for the whole
+/// stroke. Static values outside their domain were refused by the validator
+/// at publish (`ShapeTrimInvalid`); an animated value evaluated past its
+/// range is held to it, as After Effects does.
+fn trim_window(shape: &ShapeObject) -> Option<TrimWindow> {
+    let start = shape.trim_start.unwrap_or(0.0).clamp(0.0, 100.0);
+    let end = shape.trim_end.unwrap_or(100.0).clamp(0.0, 100.0);
+    let offset = shape.trim_offset.unwrap_or(0.0);
+    let (low, high) = (start.min(end), start.max(end));
+    let length = (high - low) / 100.0;
+    if length >= 1.0 || !offset.is_finite() {
+        return None;
+    }
+    Some(TrimWindow {
+        start: ((low + offset) / 100.0).rem_euclid(1.0) as f32,
+        length: length as f32,
+    })
+}
+
+/// Cut each subpath to the window, measured in the shape's own coordinates
+/// so a non-uniform scale does not move it, then carry the pieces into the
+/// scene through the same transform the whole path uses. A window that runs
+/// past the end of a subpath wraps to its beginning.
+fn trimmed_stroke(
+    subpaths: &[&BezierPath],
+    window: TrimWindow,
+    object: &str,
+    to_scene: &dyn Fn(f64, f64) -> Result<Point, Refusal>,
+) -> Result<Path, Refusal> {
+    let local_point = |x: f64, y: f64| Ok(point(x as f32, y as f32));
+    let map = |at: Point| to_scene(f64::from(at.x), f64::from(at.y));
+    let mut scene = Path::builder();
+    for subpath in subpaths {
+        let mut local = Path::builder();
+        append_bezier(&mut local, subpath, object, &local_point)?;
+        let local = local.build();
+        let measurements = PathMeasurements::from_path(&local, TRIM_TOLERANCE);
+        let mut sampler = measurements.create_sampler(&local, SampleType::Normalized);
+        let mut pieces = Path::builder_with_attributes(0);
+        let end = window.start + window.length;
+        if end <= 1.0 {
+            sampler.split_range(window.start..end, &mut pieces);
+        } else {
+            sampler.split_range(window.start..1.0, &mut pieces);
+            sampler.split_range(0.0..end - 1.0, &mut pieces);
+        }
+        for event in pieces.build().iter() {
+            match event {
+                Event::Begin { at } => {
+                    scene.begin(map(at)?);
+                }
+                Event::Line { to, .. } => {
+                    scene.line_to(map(to)?);
+                }
+                Event::Quadratic { ctrl, to, .. } => {
+                    scene.quadratic_bezier_to(map(ctrl)?, map(to)?);
+                }
+                Event::Cubic { ctrl1, ctrl2, to, .. } => {
+                    scene.cubic_bezier_to(map(ctrl1)?, map(ctrl2)?, map(to)?);
+                }
+                Event::End { close, .. } => {
+                    scene.end(close);
+                }
+            }
+        }
+    }
+    Ok(scene.build())
 }
 
 fn prepare_paint(
@@ -295,12 +360,13 @@ fn prepare_paint_stroke(
     )
 }
 
+/// Append one authored bezier path, every point placed by `map`: the scene
+/// transform for drawing, or the identity for measuring trim locally.
 fn append_bezier(
     builder: &mut lyon::path::Builder,
     path: &BezierPath,
-    anchor: &Option<Vec2>,
-    resolved: &ResolvedObject,
     object: &str,
+    map: &dyn Fn(f64, f64) -> Result<Point, Refusal>,
 ) -> Result<(), Refusal> {
     if path.vertices.len() != path.in_tangents.len()
         || path.vertices.len() != path.out_tangents.len()
@@ -313,7 +379,7 @@ fn append_bezier(
     let Some(first) = path.vertices.first() else {
         return Ok(());
     };
-    builder.begin(transform(anchor, resolved, first.x, first.y)?);
+    builder.begin(map(first.x, first.y)?);
     let last = if path.closed {
         path.vertices.len()
     } else {
@@ -326,19 +392,15 @@ fn append_bezier(
         let out_tangent = path.out_tangents[index];
         let in_tangent = path.in_tangents[next];
         builder.cubic_bezier_to(
-            transform(
-                anchor,
-                resolved,
+            map(
                 current_vertex.x + out_tangent.x,
                 current_vertex.y + out_tangent.y,
             )?,
-            transform(
-                anchor,
-                resolved,
+            map(
                 next_vertex.x + in_tangent.x,
                 next_vertex.y + in_tangent.y,
             )?,
-            transform(anchor, resolved, next_vertex.x, next_vertex.y)?,
+            map(next_vertex.x, next_vertex.y)?,
         );
     }
     builder.end(path.closed);

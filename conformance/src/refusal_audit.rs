@@ -1309,6 +1309,28 @@ fn drive_material_refusals(report: &mut Report) {
     let draws_everything = MaterialSupport { depth_modes: DepthMode::ALL.to_vec(), ..support(true, true) };
     let found = gx_contracts::validate::validate_scene_document(&scene, &draws_everything, &Default::default(), false);
     report.record(PLANE, "UnsupportedPathGradient is produced for a gradient text fill", expect(found.iter().any(|refusal| matches!(&refusal.code, Refusal::UnsupportedPathGradient { object, .. } if object == "text")), format!("a gradient text fill was not refused as UnsupportedPathGradient: {found:?}")));
+
+    // 3.13: a Trim Paths value outside its domain refuses at validation rather
+    // than being clamped into a window nobody authored.
+    let mut trimmed = gx_contracts::command::witness::fixture_scene();
+    trimmed.objects.push(gx_contracts::scene::SceneObject::Shape(gx_contracts::scene::ShapeObject {
+        base: gx_contracts::scene::ObjectBase::new("trimmed", "trimmed"),
+        path: gx_contracts::scene::BezierPath {
+            closed: false,
+            vertices: vec![gx_contracts::scene::Vec2 { x: 0.0, y: 0.0 }, gx_contracts::scene::Vec2 { x: 10.0, y: 0.0 }],
+            in_tangents: vec![gx_contracts::scene::Vec2 { x: 0.0, y: 0.0 }; 2],
+            out_tangents: vec![gx_contracts::scene::Vec2 { x: 0.0, y: 0.0 }; 2],
+        },
+        compound_paths: None,
+        fill_enabled: false,
+        stroke_enabled: true,
+        fill_rule: Default::default(),
+        trim_start: Some(140.0),
+        trim_end: None,
+        trim_offset: None,
+    }));
+    let found = gx_contracts::validate::validate_scene_document(&trimmed, &draws_everything, &Default::default(), false);
+    report.record(PLANE, "ShapeTrimInvalid is produced for a trim value outside 0-100", expect(found.iter().any(|refusal| matches!(&refusal.code, Refusal::ShapeTrimInvalid { object, field, .. } if object == "trimmed" && field == "trimStart")), format!("an out-of-range trim was not refused as ShapeTrimInvalid: {found:?}")));
 }
 
 fn material_with_blend(blend_mode: BlendMode) -> MaterialDefinition {
@@ -1507,6 +1529,7 @@ fn is_driven(variant: &str) -> bool {
             | "SceneSchemaUnsupported"
             | "SceneWorkingSpaceMismatch"
             | "ProjectSettingsInvalid"
+            | "ShapeTrimInvalid"
             | "AssetBatchEmpty"
             | "AssetKindNotAddable"
             | "AssetFormatUnrecognised"
@@ -1668,6 +1691,10 @@ fn limitations() -> &'static [Limitation] {
         Limitation {
             variant: "MeshModelInvalid",
             reason: "mesh preparation runs only in the render worker; the mock engine does not prepare meshes",
+        },
+        Limitation {
+            variant: "MeshModelGeometryUnsupported",
+            reason: "mesh preparation runs only in the render worker; the mock engine does not prepare meshes (driven by the worker's own test, a_gltf_model_refuses_at_publish_instead_of_drawing_nothing)",
         },
         Limitation {
             variant: "MeshMaterialElementsMismatch",

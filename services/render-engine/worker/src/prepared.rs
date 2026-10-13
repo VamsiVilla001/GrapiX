@@ -106,6 +106,17 @@ impl PreparedScene {
         );
         let texts = prepare_texts(&document, asset_bytes)?;
         let meshes = prepare_meshes(&document, available, asset_bytes, support)?;
+        // 3.13: the software path has no model renderer (3.7 owns it). A model
+        // refuses here, at publish, instead of preparing to empty geometry
+        // and drawing nothing on air.
+        if let Some(object) = document.objects.iter().find_map(|object| match object {
+            SceneObject::Mesh(mesh) if mesh.mesh_kind == gx_contracts::scene::MeshPrimitiveKind::Model => {
+                Some(mesh.base.id.clone())
+            }
+            _ => None,
+        }) {
+            return Err(Refusal::MeshModelGeometryUnsupported { object });
+        }
         let by_id = resolution
             .effective
             .iter()
@@ -403,6 +414,125 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// 3.13: vector paths apply the object's effective opacity, its own and
+    /// its ancestors'. Black at 50% over white gives the 50%-alpha reference
+    /// values: Preview 128 in an sRGB scene, 188 in a linear one.
+    #[test]
+    fn vector_paths_apply_effective_opacity() {
+        use gx_contracts::color::{Rgba, WorkingColorSpace};
+        let rect_with = |id: &str, color: Rgba, opacity: f64| {
+            let mut base = ObjectBase::new(id, id);
+            base.width = 400.0;
+            base.height = 200.0;
+            base.opacity = opacity;
+            base.fill = Some(ColorValue::Solid { color });
+            SceneObject::Rect(RectObject { base, radius: 0.0 })
+        };
+        let white = || rect_with("white", Rgba::srgb(1.0, 1.0, 1.0, 1.0), 1.0);
+        let mut group = GroupObject { base: ObjectBase::new("g", "g"), child_ids: vec!["child".into()] };
+        group.base.opacity = 0.5;
+        for (space, expected) in [(WorkingColorSpace::Srgb, 128_u8), (WorkingColorSpace::LinearSrgb, 188)] {
+            for (case, objects) in [
+                ("own opacity", vec![white(), rect_with("black", Rgba::srgb(0.0, 0.0, 0.0, 1.0), 0.5)]),
+                (
+                    "parent opacity",
+                    vec![
+                        white(),
+                        SceneObject::Group(group.clone()),
+                        rect_with("child", Rgba::srgb(0.0, 0.0, 0.0, 1.0), 1.0),
+                    ],
+                ),
+            ] {
+                let mut scene = document(objects);
+                scene.working_color_space = space;
+                let prepared = PreparedScene::prepare(
+                    scene,
+                    &HashSet::new(),
+                    &AssetBytes::new(),
+                    &MaterialSupport::fixed_function(),
+                )
+                .expect("the rectangles prepare");
+                let frame = prepared.frame(OutputTransform::Srgb);
+                let covered: Vec<&[u8]> = frame.pixels.chunks(4).filter(|pixel| pixel[3] == 255).collect();
+                assert!(covered.len() >= 10_000, "{space:?} {case}: {} covered pixels", covered.len());
+                assert!(
+                    covered.iter().all(|pixel| pixel[..3].iter().all(|c| c.abs_diff(expected) <= 1)),
+                    "{space:?} {case}: expected {expected}, first covered pixel {:?}",
+                    covered[0]
+                );
+            }
+        }
+    }
+
+    /// 3.13: After Effects' Trim Paths on a shape's stroke, counted in lit
+    /// pixels of a 10 px white stroke over transparency.
+    #[test]
+    fn trim_paths_cut_the_stroke_to_the_authored_window() {
+        use gx_contracts::color::Rgba;
+        use gx_contracts::scene::{BezierPath, FillRule, ShapeObject, Vec2};
+        let v = |x: f64, y: f64| Vec2 { x, y };
+        let shape = |vertices: Vec<Vec2>, closed: bool, scale_x: f64, trim: Option<(f64, f64, f64)>| {
+            let mut base = ObjectBase::new("shape", "shape");
+            base.x = 100.0;
+            base.y = 100.0;
+            base.scale_x = scale_x;
+            base.stroke = Some(ColorValue::Solid { color: Rgba::srgb(1.0, 1.0, 1.0, 1.0) });
+            base.stroke_width = 10.0;
+            let count = vertices.len();
+            SceneObject::Shape(ShapeObject {
+                base,
+                path: BezierPath {
+                    closed,
+                    vertices,
+                    in_tangents: vec![v(0.0, 0.0); count],
+                    out_tangents: vec![v(0.0, 0.0); count],
+                },
+                compound_paths: None,
+                fill_enabled: false,
+                stroke_enabled: true,
+                fill_rule: FillRule::Nonzero,
+                trim_start: trim.map(|t| t.0),
+                trim_end: trim.map(|t| t.1),
+                trim_offset: trim.map(|t| t.2),
+            })
+        };
+        let lit = |object: SceneObject| -> usize {
+            let prepared = PreparedScene::prepare(
+                document(vec![object]),
+                &HashSet::new(),
+                &AssetBytes::new(),
+                &MaterialSupport::fixed_function(),
+            )
+            .expect("the shape prepares");
+            prepared.frame(OutputTransform::Srgb).pixels.chunks(4).filter(|pixel| pixel[3] >= 128).count()
+        };
+        let line = || vec![v(0.0, 0.0), v(360.0, 0.0)];
+        let whole = lit(shape(line(), false, 1.0, None));
+        assert!((3500..=3700).contains(&whole), "the whole stroke lit {whole}");
+        let half = lit(shape(line(), false, 1.0, Some((0.0, 50.0, 0.0))));
+        assert!((1700..=1900).contains(&half), "0-50 lit {half}");
+        let middle = lit(shape(line(), false, 1.0, Some((25.0, 75.0, 0.0))));
+        assert!((1700..=1900).contains(&middle), "25-75 lit {middle}");
+        let swapped = lit(shape(line(), false, 1.0, Some((75.0, 25.0, 0.0))));
+        assert_eq!(middle, swapped, "a start after the end draws the same window");
+        assert_eq!(lit(shape(line(), false, 1.0, Some((40.0, 40.0, 0.0)))), 0, "an empty window draws nothing");
+
+        // Turned past the end, the window wraps to the beginning.
+        let square = || vec![v(0.0, 0.0), v(200.0, 0.0), v(200.0, 200.0), v(0.0, 200.0)];
+        let full_square = lit(shape(square(), true, 1.0, None));
+        let wrapped = lit(shape(square(), true, 1.0, Some((0.0, 50.0, 75.0))));
+        let ratio = wrapped as f64 / full_square as f64;
+        assert!((ratio - 0.5).abs() < 0.05, "a wrapped half lit {wrapped} of {full_square}");
+
+        // Measured in the shape's own coordinates: an L whose legs are equal
+        // locally, scaled 3x horizontally. Half its local length is exactly
+        // the horizontal leg, 300 px in the scene; measuring in scene space
+        // would stop at 200 px.
+        let ell = || vec![v(0.0, 0.0), v(100.0, 0.0), v(100.0, 100.0)];
+        let local_half = lit(shape(ell(), false, 3.0, Some((0.0, 50.0, 0.0))));
+        assert!((2800..=3200).contains(&local_half), "half the local length lit {local_half}");
     }
 
     #[test]

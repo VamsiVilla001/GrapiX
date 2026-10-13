@@ -162,6 +162,27 @@ pub fn validate_scene_document(
                     );
                 }
             }
+            SceneObject::Shape(shape) => {
+                // 3.13: a trim value outside its domain refuses here, before
+                // publish, so the Editor and the engine give the same answer.
+                for (field, value, percentage) in [
+                    ("trimStart", shape.trim_start, true),
+                    ("trimEnd", shape.trim_end, true),
+                    ("trimOffset", shape.trim_offset, false),
+                ] {
+                    let Some(value) = value else { continue };
+                    if !value.is_finite() || (percentage && !(0.0..=100.0).contains(&value)) {
+                        found.push(
+                            StructuredRefusal::error(Refusal::ShapeTrimInvalid {
+                                object: shape.base.id.clone(),
+                                field: field.into(),
+                                value: value.to_string(),
+                            })
+                            .at(format!("objects[{index}].{field}"), serde_json::json!(value)),
+                        );
+                    }
+                }
+            }
             SceneObject::Mesh(mesh) => {
                 if let Some(model) = &mesh.model_asset_id {
                     if document.asset(model).is_none() {
@@ -385,6 +406,43 @@ mod tests {
             textures: Vec::new(),
             shader_id: None,
         }
+    }
+
+    /// 3.13: a trim value outside its domain refuses by name before publish.
+    #[test]
+    fn a_trim_value_outside_its_domain_refuses_by_name() {
+        use crate::scene::{BezierPath, FillRule, ObjectBase, ShapeObject, Vec2};
+        let zero = Vec2 { x: 0.0, y: 0.0 };
+        let shape = |start: Option<f64>, end: Option<f64>, offset: Option<f64>| {
+            SceneObject::Shape(ShapeObject {
+                base: ObjectBase::new("s", "s"),
+                path: BezierPath {
+                    closed: false,
+                    vertices: vec![zero, Vec2 { x: 10.0, y: 0.0 }],
+                    in_tangents: vec![zero; 2],
+                    out_tangents: vec![zero; 2],
+                },
+                compound_paths: None,
+                fill_enabled: false,
+                stroke_enabled: true,
+                fill_rule: FillRule::Nonzero,
+                trim_start: start,
+                trim_end: end,
+                trim_offset: offset,
+            })
+        };
+        let support = crate::material::MaterialSupport::fixed_function();
+        let codes = |object| {
+            validate_scene_document(&document(vec![object]), &support, &std::collections::HashSet::new(), false)
+                .into_iter()
+                .map(|refusal| refusal.code)
+                .collect::<Vec<_>>()
+        };
+        assert!(codes(shape(Some(0.0), Some(100.0), Some(250.0))).is_empty(), "any finite offset is valid");
+        assert!(codes(shape(Some(75.0), Some(25.0), None)).is_empty(), "a start after the end is valid");
+        assert!(matches!(codes(shape(Some(140.0), None, None)).as_slice(), [Refusal::ShapeTrimInvalid { field, .. }] if field == "trimStart"));
+        assert!(matches!(codes(shape(None, Some(-1.0), None)).as_slice(), [Refusal::ShapeTrimInvalid { field, .. }] if field == "trimEnd"));
+        assert!(matches!(codes(shape(None, None, Some(f64::NAN))).as_slice(), [Refusal::ShapeTrimInvalid { field, .. }] if field == "trimOffset"));
     }
 
     #[test]

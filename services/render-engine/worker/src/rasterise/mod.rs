@@ -55,7 +55,15 @@ impl PreparedPaths {
             if !resolved.visible || resolved.is_container {
                 continue;
             }
+            let first = paths.len();
             lyon::prepare_object(object, resolved, &mut paths)?;
+            // 3.13: the object's effective opacity, already composed through
+            // its ancestors, applies to every path it drew. Before this the
+            // vector path ignored opacity and drew a 50% rectangle opaque.
+            let opacity = resolved.opacity as f32;
+            for path in &mut paths[first..] {
+                path.paint = path.paint.scaled(opacity);
+            }
         }
         // Paints are prepared in linear light and expressed in the scene's
         // working space here, once per published scene, never per frame
