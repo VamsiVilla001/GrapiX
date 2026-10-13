@@ -118,7 +118,49 @@ not a euphemism for nearly done.
 
 ---
 
-## 2026-10-12 — Render core decided: GPU-first, GrapiX-owned; colour follows the project; resume here
+## 2026-10-13 — Five done steps reopened by execution: 3.7, 3.13, 8.1, 8.9, 8.12; resume here
+
+The user asked to reopen the five steps the 12 October review contradicted.
+Hard rule 4 requires re-running each step's verification first, so each one
+had its original evidence re-run plus a probe against its own done-when. The
+probes were temporary integration tests (`services/render-engine/worker/tests/`
+and `services/playout-mcp/tests/`, `reopen_probe_20261013.rs`), run against the
+public APIs and deleted afterwards. They were never committed.
+
+**Original evidence, re-run.**
+- `cargo test -q -p gx-write-semantics -p gx-mcp-server -p gx-playout-mcp
+  -p gx-render-worker --lib`: write-semantics 7/7, mcp-server 18/18, worker
+  70/71. The one worker failure is the recovery-journal test, with Windows
+  `Os { code: 32 }` (the environmental file lock logged on 12 October).
+- `node tools/codegen-check.mjs`: 297 files current.
+- Conformance was 248 passed / 0 failed / 8 skipped on the same tree on
+  12 October.
+
+The original checks were real. They did not exercise the part of each
+done-when that is missing.
+
+**Probes (executed 13 October).**
+
+| Step | Probe | Result |
+|---|---|---|
+| 3.13 | Prepare and render a 360×10 px white stroke with no trim and with `trim_end` 50% (`trim_start` 0, `trim_offset` 0) through `PreparedScene::prepare` and `headless::render_png` | Both prepare OK; both PNGs hash `ae7113fd…3037`; 3,600 lit pixels each time. Trim is silently ignored |
+| 3.7 | `prepare_meshes` on a GLB holding one real triangle (0,0,0), (1,0,0), (0,1,0) | 0 vertices, 0 triangles |
+| 3.7 | Sphere and torus primitives | 153 vertices, 151 triangles each, and every triangle contains vertex 0: a fan, not a surface |
+| 8.1 | `tools/list` through `gx_mcp_server::Server::handle` | 30 tools; 0 carry `inputSchema`; each names a type (`"input":"PreviewRequest"`) |
+| 8.9 | `tools/call render.preview` asking for frame 99, with a two-pixel source | `{"generation":7,"height":1,"pixels":[255,0,0,255,…],"width":2}`: the latest frame regardless of the argument, a JSON number array, no MCP `content` image block |
+| 8.12 | `cargo tree -q -i gx-write-semantics --workspace -e normal,dev` | Only the crate itself; nothing depends on it |
+
+**Tracker.** 3.7, 3.13, 8.1, 8.9 and 8.12 went from `done` to `active` in both
+`progress.html` (each comment now opens with "REOPENED 13 Oct 2026 (user)" and
+keeps the original note) and `progress.json`; the mirror check passes. The
+Phase 3 note in the plan now states what closes each step again. Done steps
+that need a reopened step keep their state, because their own done-when was
+not contradicted: 4.1 and 7.4 (need 3.13) and 11.20 (needs 8.12). 3.16 now
+waits on 3.13 as well as 3.15.
+
+---
+
+## 2026-10-12 — Render core decided: GPU-first, GrapiX-owned; colour follows the project
 
 **Decisions (user, 12 October 2026).** After a full read-only review of
 EffectCraft at the pinned commit `9a7d3e7` (eight parallel reviewers over all

@@ -148,22 +148,34 @@ unconditionally. This amends ADR-0002 B.1's "render internally in linear,
 always" and is owned by `3.15`. `3.3` stays done for what it verified: tagged
 sources, the two output transforms and the colour ramp.
 
-**Open defects — done steps contradicted by the code (found 12 October 2026).**
-Recorded with evidence in `memory.md`. States are unchanged until each step's
-verification is re-run (LLM-GOVERNANCE hard rule 4).
-- `3.13` "No silent fallback anywhere": the engine never reads the scene's
-  `trim_start`/`trim_end`/`trim_offset`, so the full stroke draws; glTF meshes
-  are prepared with no vertices or triangles and draw nothing, without a
-  refusal (`services/render-engine/worker/src/mesh.rs`).
-- `8.9` "An agent can see its own output": `render.preview` ignores its
-  arguments and returns raw RGBA as a JSON number array, which no MCP client
-  can show as an image.
-- `8.12` "Retry after timeout does not duplicate": no service depends on
-  `gx-write-semantics`, and no MCP edit carries `if_revision` or an
-  idempotency key.
-- Met only to the letter: `3.7` (glTF geometry is empty; sphere and torus are
-  triangle fans over a latitude/longitude grid) and `8.1` (`tools/list` sends
-  type names rather than input schemas; `services/mcp-server` has no binary).
+**Reopened 13 October 2026 (user) — done steps contradicted by execution.**
+Each step's original evidence was re-run and still passes; a probe against
+its done-when failed (`memory.md`, 13 October). They are `active` again.
+- `3.13` "No silent fallback anywhere": a stroke with `trim_end` 50% renders
+  byte-identically to the untrimmed stroke (3,600 lit pixels both times) and
+  prepares without a refusal; glTF geometry draws nothing without a refusal.
+  **Closes again when** non-default trim and unloadable glTF geometry either
+  render correctly or refuse by name, and the conformance refusal audit
+  covers both. Drawing trim on the GPU stays `3.19`'s work.
+- `3.7`: a glTF holding one real triangle prepares to 0 vertices and 0
+  triangles; sphere and torus are 151-triangle fans sharing vertex 0. **Closes
+  again when** glTF primitives load their real vertices and indices and the
+  sphere and torus are triangulated grids, tested by counts and a silhouette.
+- `8.1`: none of the 30 `tools/list` entries carries an `inputSchema`; each
+  names a type instead. **Closes again when** every listed tool carries its
+  generated JSON Schema as `inputSchema`, checked by a test over every tool.
+- `8.9`: `tools/call render.preview` returns a raw `pixels` number array and
+  ignores the requested frame. **Closes again when** it answers with an MCP
+  image content block (PNG) for the requested frame, or a named refusal,
+  checked over JSON-RPC.
+- `8.12`: `cargo tree -i gx-write-semantics` shows no dependent; no MCP edit
+  carries `if_revision` or an idempotency key. **Closes again when** the
+  editor MCP edit path takes both through `gx-write-semantics` and the
+  retry-after-timeout test runs against that path.
+
+Done steps that need a reopened step keep their state, because their own
+done-when was not contradicted: `4.1` and `7.4` (need `3.13`) and `11.20`
+(needs `8.12`). `3.16` now waits on `3.13`.
 
 **Open defect — the engine-host test leg does not terminate (found 13 September 2026).**
 `cargo test -p gx-engine-host` hangs indefinitely in
