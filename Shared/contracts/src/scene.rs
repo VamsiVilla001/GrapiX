@@ -19,10 +19,9 @@
 //! - Per-property keyframe channels, path morphing and trim animation are
 //!   the motion schema (**1.6**) and the timeline (**11.10**). The static
 //!   authored values they animate are here.
-//! - 1.x's layer masks, Photoshop layer styles, blending options and
-//!   `importedDesign` provenance are **outside 2.0's planned scope**: no
-//!   step in `GrapiX-Build-Plan.md` owns a design importer or a mask
-//!   compositor. They are not deferred to an unnamed step.
+//! - Layer masks are owned by **11.47**, Photoshop layer styles and blending
+//!   options by **11.60** (added 12 October 2026), and asset provenance by
+//!   **11.39**. None of them is carried here yet.
 //! - 1.x's `src` path on image and mesh is not ported. A scene addresses an
 //!   asset by id and content hash, never by a path (invariant 31).
 //!
@@ -42,7 +41,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::color::{ColorValue, Rgba};
+use crate::color::{ColorValue, Rgba, WorkingColorSpace};
 use crate::font::FontDefinition;
 use crate::provenance::AssetProvenance;
 use crate::material::{CullMode, FitMode, MaterialBinding};
@@ -1393,6 +1392,10 @@ pub struct SceneDocument {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub revision: Option<Revision>,
+    /// The space this scene composites in: its project's declared space
+    /// (3.15). Required from schema 3; an older document upgrades to
+    /// [`WorkingColorSpace::BEFORE_3_15`], the space it was authored in.
+    pub working_color_space: WorkingColorSpace,
     /// The camera Program renders through. Absent selects the documented
     /// synthetic 2D orthographic camera; a present id must resolve to a
     /// `CameraObject` in this scene.
@@ -1433,20 +1436,24 @@ pub struct SceneDocument {
 }
 
 /// The scene document schema this build writes. Version 2 (11.39) added a
-/// provenance record to every asset; [`parse_scene_document`] upgrades a
-/// version 1 document as it reads it.
-pub const SCENE_SCHEMA_VERSION: u32 = 2;
+/// provenance record to every asset; version 3 (3.15) added the working
+/// colour space. [`parse_scene_document`] upgrades version 1 and 2
+/// documents as it reads them.
+pub const SCENE_SCHEMA_VERSION: u32 = 3;
 
 /// Construct the Editor's default empty authored document.
 ///
 /// This lives with the document contract so every command surface starts a
 /// scene with the same canvas, rational rate and empty authoring collections.
-pub fn new_scene(id: &str, name: &str) -> SceneDocument {
+/// The working space has no default: the caller passes its project's
+/// (3.15), or [`WorkingColorSpace::NEW_PROJECT`] for a scene not yet in one.
+pub fn new_scene(id: &str, name: &str, working_color_space: WorkingColorSpace) -> SceneDocument {
     SceneDocument {
         id: id.to_owned(),
         name: name.to_owned(),
         version: SCENE_SCHEMA_VERSION,
         revision: None,
+        working_color_space,
         active_camera_id: None,
         canvas: SceneCanvas {
             width: 1920,
@@ -1612,6 +1619,10 @@ pub fn parse_scene_document(bytes: &[u8]) -> Result<SceneDocument, Refusal> {
 /// - Version 1 (before 11.39): every asset gains an empty provenance record.
 ///   Nothing is inferred for it; an empty record is the honest answer for an
 ///   asset nobody recorded.
+/// - Versions 1 and 2 (before 3.15): the document gains
+///   `workingColorSpace: "linear-srgb"`. Every scene then composited in
+///   linear light, so that is what the document meant, and it renders
+///   exactly as before.
 ///
 /// Any other version refuses `SceneSchemaUnsupported`: a newer document read
 /// by an older build is exactly the case that must not render with what it
@@ -1624,18 +1635,26 @@ fn upgrade_scene_json(raw: &mut serde_json::Value) -> Result<(), Refusal> {
     if version == u64::from(SCENE_SCHEMA_VERSION) {
         return Ok(());
     }
-    if version != 1 {
+    if !(1..u64::from(SCENE_SCHEMA_VERSION)).contains(&version) {
         return Err(Refusal::SceneSchemaUnsupported {
             actual: u32::try_from(version).unwrap_or(u32::MAX),
             supported: SCENE_SCHEMA_VERSION,
         });
     }
-    if let Some(assets) = raw.get_mut("assets").and_then(serde_json::Value::as_array_mut) {
-        for asset in assets.iter_mut().filter_map(serde_json::Value::as_object_mut) {
-            asset
-                .entry("provenance")
-                .or_insert_with(|| serde_json::json!({ "sources": [] }));
+    if version == 1 {
+        if let Some(assets) = raw.get_mut("assets").and_then(serde_json::Value::as_array_mut) {
+            for asset in assets.iter_mut().filter_map(serde_json::Value::as_object_mut) {
+                asset
+                    .entry("provenance")
+                    .or_insert_with(|| serde_json::json!({ "sources": [] }));
+            }
         }
+    }
+    if let Some(document) = raw.as_object_mut() {
+        document.entry("workingColorSpace").or_insert_with(|| {
+            serde_json::to_value(WorkingColorSpace::BEFORE_3_15)
+                .expect("a unit enum serialises")
+        });
     }
     raw["version"] = serde_json::Value::from(SCENE_SCHEMA_VERSION);
     Ok(())
@@ -1817,6 +1836,7 @@ mod parse_tests {
         // every field populated, serialised and read back through the strict
         // path. A false positive here would make publishing impossible.
         let document = SceneDocument {
+            working_color_space: crate::color::WorkingColorSpace::LinearSrgb,
             id: "scene_1".into(),
             name: "Catalogue".into(),
             version: SCENE_SCHEMA_VERSION,
@@ -1847,7 +1867,7 @@ mod tests {
 
     #[test]
     fn the_same_content_hashes_alike_and_one_changed_property_does_not() {
-        let scene = new_scene("lower-third", "Lower third");
+        let scene = new_scene("lower-third", "Lower third", crate::color::WorkingColorSpace::NEW_PROJECT);
         let as_json = |scene: &SceneDocument| serde_json::to_value(scene).expect("a scene serialises");
         let first = scene_content_hash(&as_json(&scene));
 
@@ -2085,6 +2105,7 @@ mod tests {
         logo.height = 120.0;
 
         SceneDocument {
+            working_color_space: crate::color::WorkingColorSpace::LinearSrgb,
             id: "scene_1".into(),
             name: "Lower Third".into(),
             version: SCENE_SCHEMA_VERSION,

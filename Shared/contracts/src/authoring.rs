@@ -518,6 +518,7 @@ mod tests {
 
     fn scene() -> SceneDocument {
         SceneDocument {
+            working_color_space: crate::color::WorkingColorSpace::LinearSrgb,
             id: "authoring".into(),
             name: "Authoring".into(),
             version: crate::scene::SCENE_SCHEMA_VERSION,

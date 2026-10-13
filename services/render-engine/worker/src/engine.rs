@@ -887,6 +887,7 @@ mod tests {
         shape.base.height = 8.0;
         shape.base.fill = Some(ColorValue::opaque_white());
         SceneDocument {
+            working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
             id: "animated".into(),
             name: "Animated".into(),
             version: gx_contracts::scene::SCENE_SCHEMA_VERSION,

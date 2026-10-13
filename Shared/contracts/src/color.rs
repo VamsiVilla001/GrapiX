@@ -8,8 +8,11 @@
 //! rules exist to stop that, and this module is the one place they are stated
 //! in a form both languages read:
 //!
-//! 1. **Composite in linear, always.** [`WorkingColorSpace`] has exactly one
-//!    variant, so "we composite in sRGB here" is not expressible.
+//! 1. **Composite in the project's working space** (build plan 3.15;
+//!    ADR-0002 B.1 as amended 12 October 2026). [`WorkingColorSpace`] names
+//!    it — display-referred sRGB or linear sRGB — and has no default, so a
+//!    document that does not say how it composites cannot be read as if it
+//!    had.
 //! 2. **Tag every source, never infer.** [`Rgba`] carries its
 //!    [`SourceColorSpace`]; there is no "unknown" variant, because an untagged
 //!    colour is a defect and defaulting it is the silent substitution
@@ -26,14 +29,58 @@ use ts_rs::TS;
 
 use crate::Refusal;
 
-/// The space every scene is composited in. One variant, deliberately: this
-/// type exists so that "render in linear" is a fact of the contract rather
-/// than a convention a renderer can quietly break.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+/// The space a project composites in (build plan 3.15; ADR-0002 B.1 as
+/// amended 12 October 2026). Blending, alpha compositing, gradient
+/// interpolation, filtering and effects all happen in it; tagged sources are
+/// converted in once and an [`OutputTransform`] converts out once.
+///
+/// There is no `Default`. A project declares its space and every scene in it
+/// carries the same one, because a guessed space changes every
+/// semi-transparent pixel without anyone having chosen it (invariant 18).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "kebab-case")]
 pub enum WorkingColorSpace {
-    #[default]
+    /// Display-referred sRGB: components stay sRGB-encoded while they
+    /// composite. Figma, Photoshop and After Effects composite this way by
+    /// default, so an imported design reproduces. A new project's space.
+    Srgb,
+    /// Linear-light sRGB primaries: physically linear compositing. The space
+    /// every scene composited in before 3.15.
     LinearSrgb,
+}
+
+impl WorkingColorSpace {
+    /// The space a newly created project declares.
+    pub const NEW_PROJECT: Self = Self::Srgb;
+
+    /// What a project or scene saved before 3.15 composited in. Everything
+    /// then was linear, so this is what such a document meant: an upgrade
+    /// states it, nothing guesses it.
+    pub const BEFORE_3_15: Self = Self::LinearSrgb;
+
+    /// The wire name, for messages.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Srgb => "srgb",
+            Self::LinearSrgb => "linear-srgb",
+        }
+    }
+
+    /// Express a linear-light component in this working space.
+    pub fn from_linear(self, linear: f64) -> f64 {
+        match self {
+            Self::Srgb => srgb_encode(linear),
+            Self::LinearSrgb => linear,
+        }
+    }
+
+    /// Recover the linear-light component a working-space value stands for.
+    pub fn to_linear(self, working: f64) -> f64 {
+        match self {
+            Self::Srgb => srgb_decode(working),
+            Self::LinearSrgb => working,
+        }
+    }
 }
 
 /// What a colour or a texture was authored in. There is no `Unknown`: an
@@ -554,5 +601,27 @@ mod tests {
         assert_eq!(wire["coordinateMode"], "scene");
         let back: ColorValue = serde_json::from_value(wire).unwrap();
         assert_eq!(back, value);
+    }
+
+    /// 3.15: both working spaces round-trip linear light, sRGB through the
+    /// IEC curve and linear unchanged, and the wire names are the kebab-case
+    /// ones a project file and a scene carry.
+    #[test]
+    fn working_spaces_convert_through_the_one_transfer_curve() {
+        for linear in [0.0, 0.001, 0.0031308, 0.0404, 0.214, 0.5, 0.9, 1.0] {
+            for space in [WorkingColorSpace::Srgb, WorkingColorSpace::LinearSrgb] {
+                let back = space.to_linear(space.from_linear(linear));
+                assert!((back - linear).abs() < 1e-12, "{space:?} round trip of {linear}");
+            }
+        }
+        assert_eq!(WorkingColorSpace::Srgb.from_linear(0.5), srgb_encode(0.5));
+        assert_eq!(WorkingColorSpace::LinearSrgb.from_linear(0.5), 0.5);
+        assert_eq!(serde_json::to_value(WorkingColorSpace::Srgb).unwrap(), "srgb");
+        assert_eq!(serde_json::to_value(WorkingColorSpace::LinearSrgb).unwrap(), "linear-srgb");
+        assert_eq!(WorkingColorSpace::NEW_PROJECT, WorkingColorSpace::Srgb);
+        assert_eq!(WorkingColorSpace::BEFORE_3_15, WorkingColorSpace::LinearSrgb);
+        for space in [WorkingColorSpace::Srgb, WorkingColorSpace::LinearSrgb] {
+            assert_eq!(serde_json::to_value(space).unwrap(), space.as_str());
+        }
     }
 }

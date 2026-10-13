@@ -60,7 +60,8 @@ fn scene() -> serde_json::Value {
     serde_json::json!({
         "id": "scorebug",
         "name": "Scorebug",
-        "version": 1,
+        "version": 3,
+        "workingColorSpace": "srgb",
         "canvas": { "width": 1920, "height": 1080, "frameRate": { "num": 50, "den": 1 } },
         "dataContext": {
             "match": { "home": { "name": "Rovers", "score": 2 }, "alpha": 0.18823529411764706 },

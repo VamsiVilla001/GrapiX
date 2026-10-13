@@ -34,7 +34,7 @@ const WINDOW: Duration = Duration::from_secs(3);
 
 /// A 1080p scene whose card moves across the frame over 100 frames.
 fn animated_scene() -> SceneDocument {
-    let mut scene = new_scene("conformance-headless", "Headless");
+    let mut scene = new_scene("conformance-headless", "Headless", gx_contracts::color::WorkingColorSpace::NEW_PROJECT);
     scene.timeline.duration_frames = 100;
     let mut card = ObjectBase::new("card", "Card");
     (card.x, card.y, card.width, card.height) = (100.0, 400.0, 320.0, 180.0);
@@ -56,7 +56,7 @@ fn animated_scene() -> SceneDocument {
 
 /// A static 1080p scene for Program to hold during the timed run.
 fn program_scene() -> SceneDocument {
-    let mut scene = new_scene("conformance-program", "Program");
+    let mut scene = new_scene("conformance-program", "Program", gx_contracts::color::WorkingColorSpace::NEW_PROJECT);
     let mut bar = ObjectBase::new("bar", "Bar");
     (bar.x, bar.y, bar.width, bar.height) = (0.0, 900.0, 1920.0, 180.0);
     bar.fill = Some(ColorValue::opaque_white());

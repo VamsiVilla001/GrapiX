@@ -186,7 +186,7 @@ pub fn editor_command_suite(report: &mut Report) {
         }
     };
 
-    let fixture = new_scene(ONAIR_TAKE, "Editor command conformance on-air fixture");
+    let fixture = new_scene(ONAIR_TAKE, "Editor command conformance on-air fixture", gx_contracts::color::WorkingColorSpace::NEW_PROJECT);
     let (take_id, revision, content_hash) = match publish_scene(asset_address, fixture.clone()) {
         Ok(PublishReply::Published { take_id, revision, content_hash })
             if take_id == TakeId(ONAIR_TAKE.to_owned()) && revision == Revision(1) =>

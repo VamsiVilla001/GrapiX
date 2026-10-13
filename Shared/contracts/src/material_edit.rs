@@ -113,7 +113,7 @@ mod tests {
 
     #[test]
     fn relink_requires_users_and_clears_instance_override() {
-        let mut scene = new_scene("scene", "Scene");
+        let mut scene = new_scene("scene", "Scene", crate::color::WorkingColorSpace::NEW_PROJECT);
         scene.materials = vec![material("from"), material("to")];
         let mut base = ObjectBase::new("card", "Card");
         base.material_slots = Some(BTreeMap::from([(
@@ -144,7 +144,7 @@ mod tests {
 
     #[test]
     fn delete_refuses_live_material_and_removes_unused_material() {
-        let mut scene = new_scene("scene", "Scene");
+        let mut scene = new_scene("scene", "Scene", crate::color::WorkingColorSpace::NEW_PROJECT);
         scene.materials = vec![material("used"), material("unused")];
         let mut base = ObjectBase::new("card", "Card");
         base.material_slots = Some(BTreeMap::from([(

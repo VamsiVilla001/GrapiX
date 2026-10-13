@@ -1031,6 +1031,7 @@ mod tests {
 
     fn scene_with(objects: Vec<SceneObject>) -> SceneDocument {
         SceneDocument {
+            working_color_space: crate::color::WorkingColorSpace::LinearSrgb,
             id: "motion".into(),
             name: "Motion".into(),
             version: crate::scene::SCENE_SCHEMA_VERSION,

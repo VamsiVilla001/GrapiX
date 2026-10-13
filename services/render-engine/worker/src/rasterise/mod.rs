@@ -9,11 +9,11 @@
 
 mod lyon;
 
-use gx_contracts::color::{ColorValue, OutputTransform};
+use gx_contracts::color::{ColorValue, OutputTransform, WorkingColorSpace};
 use gx_contracts::scene::{ResolvedObject, SceneDocument};
 use gx_contracts::Refusal;
 
-use crate::colour_pipeline::LinearRgba;
+use crate::colour_pipeline::WorkingRgba;
 use crate::rasterizer::Frame;
 
 pub use lyon::LyonPathRasteriser;
@@ -57,6 +57,13 @@ impl PreparedPaths {
             }
             lyon::prepare_object(object, resolved, &mut paths)?;
         }
+        // Paints are prepared in linear light and expressed in the scene's
+        // working space here, once per published scene, never per frame
+        // (3.15, invariant 35).
+        let space = document.working_color_space;
+        for path in &mut paths {
+            path.paint = path.paint.linear_to(space);
+        }
         Ok(Self { paths })
     }
 
@@ -70,7 +77,7 @@ impl PreparedPaths {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreparedPath {
     object_id: String,
-    paint: LinearRgba,
+    paint: WorkingRgba,
     vertices: Vec<PathVertex>,
     indices: Vec<u32>,
     bounds: RasterBounds,
@@ -79,7 +86,7 @@ pub struct PreparedPath {
 impl PreparedPath {
     pub(crate) fn new(
         object_id: String,
-        paint: LinearRgba,
+        paint: WorkingRgba,
         vertices: Vec<PathVertex>,
         indices: Vec<u32>,
     ) -> Self {
@@ -98,9 +105,10 @@ impl PreparedPath {
         &self.object_id
     }
 
-    /// Premultiplied linear-sRGB paint, converted by the colour pipeline at
-    /// preparation. Tagged authored colour never reaches a raster backend.
-    pub fn paint(&self) -> LinearRgba {
+    /// Premultiplied paint in the scene's working space, converted by the
+    /// colour pipeline at preparation. Tagged authored colour never reaches a
+    /// raster backend.
+    pub fn paint(&self) -> WorkingRgba {
         self.paint
     }
 
@@ -160,21 +168,23 @@ impl RasterBounds {
     }
 }
 
-/// A linear-premultiplied pixel surface produced by a [`PathRasteriser`].
+/// A premultiplied pixel surface in one working space, produced by a
+/// [`PathRasteriser`]. The space is the scene's; it is named again at
+/// [`RasterSurface::encode`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct RasterSurface {
     width: u32,
     height: u32,
-    pixels: Vec<LinearRgba>,
+    pixels: Vec<WorkingRgba>,
 }
 
 impl RasterSurface {
-    /// Create a transparent working-linear surface.
+    /// Create a transparent surface. Transparent is the same in every space.
     pub fn transparent(width: u32, height: u32) -> Self {
         Self {
             width,
             height,
-            pixels: vec![LinearRgba::transparent(); (width as usize) * (height as usize)],
+            pixels: vec![WorkingRgba::transparent(); (width as usize) * (height as usize)],
         }
     }
 
@@ -188,16 +198,17 @@ impl RasterSurface {
         self.height
     }
 
-    /// Pixels in row-major order, composited in linear light.
-    pub fn pixels(&self) -> &[LinearRgba] {
+    /// Pixels in row-major order, composited in the working space.
+    pub fn pixels(&self) -> &[WorkingRgba] {
         &self.pixels
     }
 
-    /// Encode this working-linear surface once at an output boundary.
-    pub fn encode(&self, output: OutputTransform) -> Frame {
+    /// Encode this surface once at an output boundary, from the working
+    /// space it was composited in.
+    pub fn encode(&self, output: OutputTransform, space: WorkingColorSpace) -> Frame {
         let mut pixels = Vec::with_capacity(self.pixels.len() * 4);
         for pixel in &self.pixels {
-            pixels.extend_from_slice(&pixel.encode(output));
+            pixels.extend_from_slice(&pixel.encode(output, space));
         }
         Frame {
             width: self.width,
@@ -206,7 +217,7 @@ impl RasterSurface {
         }
     }
 
-    pub(crate) fn composite(&mut self, x: u32, y: u32, source: LinearRgba) {
+    pub(crate) fn composite(&mut self, x: u32, y: u32, source: WorkingRgba) {
         let index = (y as usize) * (self.width as usize) + (x as usize);
         self.pixels[index] = source.over(self.pixels[index]);
     }
@@ -227,10 +238,14 @@ pub(crate) fn solid_paint(
     object: &str,
     paint_name: &str,
     color: Option<&ColorValue>,
-) -> Result<Option<LinearRgba>, Refusal> {
+) -> Result<Option<WorkingRgba>, Refusal> {
     match color {
         None | Some(ColorValue::None) => Ok(None),
-        Some(ColorValue::Solid { color }) => Ok(Some(LinearRgba::from_source(*color))),
+        // Linear here; `PreparedPaths::prepare` expresses every paint in the
+        // scene's working space once its paths are built.
+        Some(ColorValue::Solid { color }) => {
+            Ok(Some(WorkingRgba::from_source(*color, WorkingColorSpace::LinearSrgb)))
+        }
         Some(ColorValue::LinearGradient { .. } | ColorValue::RadialGradient { .. }) => {
             Err(Refusal::UnsupportedPathGradient {
                 object: object.into(),
@@ -271,6 +286,7 @@ mod tests {
 
     fn document(objects: Vec<SceneObject>) -> SceneDocument {
         SceneDocument {
+            working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
             id: "rasterise-test".into(),
             name: "Rasterise test".into(),
             version: gx_contracts::scene::SCENE_SCHEMA_VERSION,

@@ -106,7 +106,7 @@ Headless. The engine must be complete and testable before anything draws a pixel
 | `3.12` | WAL recovery journal; restore starts output-inhibited | BE | 2.1 | Forced kill restores without an unrecovered output |
 | `3.13` | Refusal coverage audit — every unsupported case refuses by name | BE | 0.6 | No silent fallback anywhere; blend and fit modes included |
 | `3.14` | Pinned EffectCraft render/GPU compatibility spike on Windows (ADR-0003); no production cutover | BE | 3.1, 3.4, 4.4 | Pinned, reproducible evidence for each executed ADR-0003 gate, each reported PASS/FAIL/SKIP with limitations; no skipped GPU execution counted as PASS; a failed required gate halts the spike; the adoption decision is recorded in ADR-0003 |
-| `3.15` | Project working colour space: compositing follows the project's declared colour space | CON | 3.3, 7.1 | `WorkingColorSpace` offers at least sRGB (display-referred) and linear sRGB; the project declares one and every scene in it composites, blends, interpolates gradients and filters in that space, with tagged sources converted in once and the sRGB Preview and Rec.709/BT.1886 Program transforms applied out once. One fixture rendered in an sRGB project and in a linear project gives each space's reference values to ±1 code value for a 50% black-over-white overlap, an anti-aliased edge, a two-stop gradient and a blur; the colour ramp still renders identically on both platforms; a scene whose declared space differs from its project's refuses by name; ADR-0002 B.1 and the contract docs state the rule |
+| `3.15` | Project working colour space: compositing follows the project's declared colour space | CON | 3.3, 7.1 | `WorkingColorSpace` offers sRGB (display-referred) and linear sRGB, with no default. A project declares one — new projects sRGB; a project created before 3.15, with no declaration, reads as linear sRGB, the space it was authored in — and an unreadable declaration refuses by name. Every scene carries its project's space (scene schema 3; a schema 1 or 2 scene upgrades losslessly to linear sRGB, proven against a witness saved by the schema-2 build), and reading or writing a scene whose space differs from its project's refuses by name. The engine converts tagged sources into the scene's space once, composites there, and applies the sRGB Preview or Rec.709/BT.1886 Program transform once: a rendered 50% black-over-white overlap gives each space's independently computed reference value to ±1 code value at both outputs, and the reference operations for anti-aliased coverage, gradient interpolation and blur averaging, which 3.16, 3.17 and 3.22 must match, are tested in both spaces. The pixel-gate baselines and the colour ramp are unchanged; ADR-0002 B.1 and the contract docs state the rule |
 | `3.16` | GrapiX-owned GPU compositor: layer stack, transforms, opacity and composition on the GPU | BE | 3.1, 3.4, 3.9, 3.13, 3.15 | Preview and Program frames for a fixture scene are composited on the GPU from SceneDocument's effective order across object types, in the 3.15 working space; pipelines and resources are built at prepare, never per frame (invariant 35); a trace of the reference lower third shows no CPU full-frame rasterisation on the frame path; an unsupported mapping refuses by object id and document path; a stage above the texture limit composites seam-free from tiles (invariants 37, 38) |
 | `3.17` | GPU 2D drawing: paths, strokes, gradients and images | BE | 3.5, 3.16 | Fills, strokes (joins, caps, dashes), linear and radial gradients and tagged image quads draw on the GPU with anti-aliasing and match their CPU reference within the 4.4 threshold; gradients are no longer refused; lyon-on-GPU and Vello are benchmarked on the reference workloads and the chosen drawing backend is recorded with its measurements |
 | `3.18` | GPU text: real glyph outlines from packaged fonts | BE | 3.6, 3.16, 3.17 | Text shaped by cosmic-text from package-owned font bytes only is drawn on the GPU as glyph outlines, replacing advance rectangles; Latin, Telugu, Hindi and mixed-bidi fixtures match reference glyph pixels within the 4.4 threshold; a missing glyph refuses (invariant 66); no installed system font is read |
@@ -148,14 +148,28 @@ unconditionally. This amends ADR-0002 B.1's "render internally in linear,
 always" and is owned by `3.15`. `3.3` stays done for what it verified: tagged
 sources, the two output transforms and the colour ramp.
 
+**3.15's done-when, corrected 13 October 2026.** As first written it asked
+for a rendered anti-aliased edge, gradient and blur, which the engine cannot
+draw until `3.17` and `3.22`; it could never have closed before its own
+successors. The overlap is checked as an engine render; coverage,
+interpolation and averaging are checked as working-space reference
+operations that the GPU steps must match. **Named gap:** the Editor's Three.js
+viewport (11.6) does not read the scene's declared space, and which space its
+blending matches is unmeasured (Three.js applies the output curve per
+fragment before hardware blending). The engine is the renderer of record;
+`13.5` (the engine renders the viewport) closes the gap, unless a measured
+browser fix lands first.
+
 **Reopened 13 October 2026 (user) — done steps contradicted by execution.**
 Each step's original evidence was re-run and still passes; a probe against
 its done-when failed (`memory.md`, 13 October). They are `active` again.
 - `3.13` "No silent fallback anywhere": a stroke with `trim_end` 50% renders
   byte-identically to the untrimmed stroke (3,600 lit pixels both times) and
-  prepares without a refusal; glTF geometry draws nothing without a refusal.
-  **Closes again when** non-default trim and unloadable glTF geometry either
-  render correctly or refuse by name, and the conformance refusal audit
+  prepares without a refusal; glTF geometry draws nothing without a refusal;
+  and vector objects ignore `opacity` — a rectangle at 50% opacity renders
+  fully opaque, without a refusal (found by 3.15's rendered test, 13 October).
+  **Closes again when** non-default trim, object opacity on vector paths and
+  unloadable glTF geometry each either render correctly or refuse by name, and the conformance refusal audit
   covers both. Drawing trim on the GPU stays `3.19`'s work.
 - `3.7`: a glTF holding one real triangle prepares to 0 vertices and 0
   triangles; sphere and torus are 151-triangle fans sharing vertex 0. **Closes

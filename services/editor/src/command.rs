@@ -327,7 +327,7 @@ impl Workspace {
     /// divergent histories and no answer to which wins on save.
     fn open(&mut self, source: SceneSource) -> Result<CommandOutcome, CommandError> {
         let (document, origin, path) = match source {
-            SceneSource::New { id, name } => (new_scene(&id, &name), None, None),
+            SceneSource::New { id, name } => (new_scene(&id, &name, gx_contracts::color::WorkingColorSpace::NEW_PROJECT), None, None),
             SceneSource::File { path } => (read_scene_file(&path)?, None, Some(path)),
             SceneSource::Project { project, scene_id } => {
                 let origin = SceneOrigin { project, scene_id };
@@ -568,7 +568,9 @@ impl Workspace {
 
     fn create_scene(&self, project: String, scene_id: String, name: String) -> Result<CommandOutcome, CommandError> {
         let projects = self.projects()?;
-        let document = new_scene(&scene_id, name.trim());
+        // 3.15: a scene composites in its project's declared space.
+        let space = projects.settings(&project)?.working_color_space;
+        let document = new_scene(&scene_id, name.trim(), space);
         require_scene_name(&document)?;
         if scene_exists(projects, &project, &scene_id)? {
             return Err(Refusal::SceneAlreadyExists { project, scene_id }.into());
@@ -885,7 +887,7 @@ mod tests {
     }
 
     fn card_scene(id: &str) -> SceneDocument {
-        let mut scene = new_scene(id, id);
+        let mut scene = new_scene(id, id, gx_contracts::color::WorkingColorSpace::NEW_PROJECT);
         scene.timeline.duration_frames = 100;
         scene.objects.push(SceneObject::Rect(RectObject {
             base: ObjectBase::new("card", "Card"),
@@ -1333,7 +1335,7 @@ mod tests {
     fn a_file_with_an_unknown_field_refuses_by_name_rather_than_opening() {
         let scratch = Scratch::new("unknown-field");
         let path = scratch.file("scene.json");
-        let mut document = serde_json::to_value(new_scene("demo", "Demo")).unwrap();
+        let mut document = serde_json::to_value(new_scene("demo", "Demo", gx_contracts::color::WorkingColorSpace::NEW_PROJECT)).unwrap();
         document["notAField"] = serde_json::json!(true);
         std::fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
 
@@ -1375,6 +1377,34 @@ mod tests {
     }
 
     // --- projects and scenes (shell project tests) --------------------------
+
+    /// 3.15: `CreateScene` gives the scene its project's declared space,
+    /// sRGB for a new project and linear for one created before 3.15.
+    #[test]
+    fn a_created_scene_composites_in_its_projects_space() {
+        let (scratch, mut workspace) = with_store("working-space");
+        let projects = scratch.projects();
+        assert_eq!(
+            projects.read_scene("news", "b").unwrap().working_color_space,
+            gx_contracts::color::WorkingColorSpace::Srgb
+        );
+        std::fs::remove_file(
+            projects.root().join("news").join(gx_contracts::project::PROJECT_SETTINGS_FILE),
+        )
+        .unwrap();
+        run(
+            &mut workspace,
+            EditorCommand::CreateScene(CreateScene {
+                project: "news".into(),
+                scene_id: "legacy".into(),
+                name: "Legacy".into(),
+            }),
+        );
+        assert_eq!(
+            projects.read_scene("news", "legacy").unwrap().working_color_space,
+            gx_contracts::color::WorkingColorSpace::LinearSrgb
+        );
+    }
 
     #[test]
     fn project_and_scene_commands_refuse_duplicates_and_paths_by_name() {
@@ -1521,7 +1551,7 @@ mod tests {
     }
 
     fn bound_scene() -> SceneDocument {
-        let mut scene = new_scene("scorebug", "Scorebug");
+        let mut scene = new_scene("scorebug", "Scorebug", gx_contracts::color::WorkingColorSpace::NEW_PROJECT);
         // A non-dyadic float: 48/255 has no exact binary representation, so a
         // reader that is merely ULP-accurate returns a different number.
         scene.data_context = serde_json::json!({

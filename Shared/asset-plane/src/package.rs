@@ -433,6 +433,7 @@ mod tests {
 
     fn scene() -> SceneDocument {
         SceneDocument {
+            working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
             id: "scene-1".into(),
             name: "Package test".into(),
             version: gx_contracts::scene::SCENE_SCHEMA_VERSION,

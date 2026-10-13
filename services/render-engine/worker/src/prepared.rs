@@ -180,7 +180,7 @@ impl PreparedScene {
             &mut surface,
         )
         .expect("mesh rasterisation refusal survived publish-time validation");
-        surface.encode(output)
+        surface.encode(output, self.document.working_color_space)
     }
     /// Whether Program must evaluate this scene for each output frame.
     pub fn has_animation(&self) -> bool {
@@ -250,7 +250,7 @@ impl PreparedScene {
             &resolution.effective,
             &mut surface,
         )?;
-        Ok(surface.encode(output))
+        Ok(surface.encode(output, self.document.working_color_space))
     }
 
     /// Glyph runs shaped from packaged fonts only.
@@ -284,6 +284,7 @@ mod tests {
 
     fn document(objects: Vec<SceneObject>) -> SceneDocument {
         SceneDocument {
+            working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
             id: "scene_1".into(),
             name: "Lower Third".into(),
             version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
@@ -354,6 +355,53 @@ mod tests {
             source_label: None,
             status: FontLoadStatus::Ready,
             error_message: None,
+        }
+    }
+
+    /// 3.15's done-when, rendered through the engine: a white rectangle
+    /// under the same rectangle filled with 50%-alpha black. (The 50% is in
+    /// the fill, not `opacity`: vector paths ignore object opacity today, a
+    /// reopened-3.13 defect recorded 13 October 2026.) Every fully covered
+    /// pixel gives the scene's working-space reference value to ±1 code
+    /// value: sRGB Preview 128 / Program 115, linear Preview 188 / Program
+    /// 180 (computed independently from the IEC 61966-2-1 and BT.709
+    /// formulas; memory.md, 13 October 2026).
+    #[test]
+    fn a_rendered_half_black_overlap_follows_the_scenes_working_space() {
+        use gx_contracts::color::{Rgba, WorkingColorSpace};
+        let filled = |id: &str, color: Rgba| {
+            let mut base = ObjectBase::new(id, id);
+            base.width = 400.0;
+            base.height = 200.0;
+            base.fill = Some(ColorValue::Solid { color });
+            SceneObject::Rect(RectObject { base, radius: 0.0 })
+        };
+        for (space, preview, program) in [
+            (WorkingColorSpace::Srgb, 128_u8, 115_u8),
+            (WorkingColorSpace::LinearSrgb, 188, 180),
+        ] {
+            let mut scene = document(vec![
+                filled("white", Rgba::srgb(1.0, 1.0, 1.0, 1.0)),
+                filled("black", Rgba::srgb(0.0, 0.0, 0.0, 0.5)),
+            ]);
+            scene.working_color_space = space;
+            let prepared = PreparedScene::prepare(
+                scene,
+                &HashSet::new(),
+                &AssetBytes::new(),
+                &MaterialSupport::fixed_function(),
+            )
+            .expect("two rectangles prepare");
+            for (output, expected) in [(OutputTransform::Srgb, preview), (OutputTransform::Rec709, program)] {
+                let frame = prepared.frame(output);
+                let covered: Vec<&[u8]> = frame.pixels.chunks(4).filter(|pixel| pixel[3] == 255).collect();
+                assert!(covered.len() >= 10_000, "{space:?}: only {} covered pixels", covered.len());
+                assert!(
+                    covered.iter().all(|pixel| pixel[..3].iter().all(|c| c.abs_diff(expected) <= 1)),
+                    "{space:?} {output:?}: expected {expected}, first covered pixel {:?}",
+                    covered[0]
+                );
+            }
         }
     }
 

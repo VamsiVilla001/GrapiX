@@ -24,6 +24,7 @@ pub mod material;
 pub mod mcp;
 pub mod package;
 pub mod platform;
+pub mod project;
 pub mod phases;
 pub mod provenance;
 pub mod scene;
@@ -811,6 +812,19 @@ pub enum Refusal {
     /// Older versions it knows are upgraded on read; any other is refused,
     /// because reading a newer document would silently drop what it added.
     SceneSchemaUnsupported { actual: u32, supported: u32 },
+    /// A scene's working colour space differs from its project's (3.15).
+    /// Saving or opening it would put one project's graphics on air
+    /// composited two different ways.
+    SceneWorkingSpaceMismatch {
+        project: String,
+        scene_id: String,
+        scene: crate::color::WorkingColorSpace,
+        project_space: crate::color::WorkingColorSpace,
+    },
+    /// A project's settings file exists but is not a settings document this
+    /// build reads. Reading it as if absent would compose every scene in the
+    /// wrong space.
+    ProjectSettingsInvalid { project: String, detail: String },
     /// An `addAssets` edit carries no assets. An empty add would only make an
     /// undo entry that changes nothing.
     AssetBatchEmpty,
@@ -1359,6 +1373,15 @@ impl std::fmt::Display for Refusal {
                 f,
                 "scene schema version {actual} is not readable by this build (it reads up to {supported})"
             ),
+            Refusal::SceneWorkingSpaceMismatch { project, scene_id, scene, project_space } => write!(
+                f,
+                "scene {scene_id} composites in {} but project {project} declares {}",
+                scene.as_str(),
+                project_space.as_str()
+            ),
+            Refusal::ProjectSettingsInvalid { project, detail } => {
+                write!(f, "project {project} settings are unreadable: {detail}")
+            }
             Refusal::AssetBatchEmpty => f.write_str("asset add carries no assets"),
             Refusal::AssetKindNotAddable { asset_id, kind } => write!(
                 f,
@@ -1828,6 +1851,13 @@ impl Refusal {
             Self::FontUnknown { font_id: "audit".into() },
             Self::FontInUse { font_id: "audit".into(), objects: vec![], text_styles: vec![] },
             Self::SceneSchemaUnsupported { actual: 99, supported: 2 },
+            Self::SceneWorkingSpaceMismatch {
+                project: "audit".into(),
+                scene_id: "audit".into(),
+                scene: crate::color::WorkingColorSpace::LinearSrgb,
+                project_space: crate::color::WorkingColorSpace::Srgb,
+            },
+            Self::ProjectSettingsInvalid { project: "audit".into(), detail: "audit".into() },
             Self::AssetBatchEmpty,
             Self::AssetKindNotAddable { asset_id: "audit".into(), kind: crate::scene::AssetKind::Font },
             Self::AssetFormatUnrecognised { file: "audit".into() },
@@ -1985,6 +2015,8 @@ impl Refusal {
             Self::FontUnknown { .. } => "fontUnknown",
             Self::FontInUse { .. } => "fontInUse",
             Self::SceneSchemaUnsupported { .. } => "sceneSchemaUnsupported",
+            Self::SceneWorkingSpaceMismatch { .. } => "sceneWorkingSpaceMismatch",
+            Self::ProjectSettingsInvalid { .. } => "projectSettingsInvalid",
             Self::AssetBatchEmpty => "assetBatchEmpty",
             Self::AssetKindNotAddable { .. } => "assetKindNotAddable",
             Self::AssetFormatUnrecognised { .. } => "assetFormatUnrecognised",

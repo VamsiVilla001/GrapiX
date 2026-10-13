@@ -15,7 +15,9 @@
 
 use std::path::{Path, PathBuf};
 
+use gx_contracts::color::WorkingColorSpace;
 use gx_contracts::control::TakePage;
+use gx_contracts::project::{ProjectSettings, PROJECT_SETTINGS_FILE};
 use gx_contracts::scene::{parse_scene_document, SceneDocument};
 use gx_contracts::Refusal;
 
@@ -98,6 +100,10 @@ impl Projects {
         self.project_directory(project).join("scenes")
     }
 
+    fn settings_path(&self, project: &str) -> PathBuf {
+        self.project_directory(project).join(PROJECT_SETTINGS_FILE)
+    }
+
     fn take_pages_directory(&self, project: &str) -> PathBuf {
         self.project_directory(project).join("take-pages")
     }
@@ -134,13 +140,82 @@ impl Projects {
     }
 
     /// Bring a project into being. The only thing that does.
+    ///
+    /// A new project declares [`ProjectSettings::new_project`]: it composites
+    /// in sRGB, like the design tools its scenes come from (3.15).
     pub fn create_project(&self, project: &str) -> Result<(), EditorError> {
+        self.create_project_with(project, ProjectSettings::new_project())
+    }
+
+    /// Bring a project into being with explicit settings.
+    ///
+    /// An existing project refuses rather than being created again: doing so
+    /// would rewrite what it declared, and a project that composited in one
+    /// space would silently start compositing in another.
+    pub fn create_project_with(
+        &self,
+        project: &str,
+        settings: ProjectSettings,
+    ) -> Result<(), EditorError> {
         require_component(project, |project| Refusal::ProjectNameInvalid { project })?;
+        if self.exists(project) {
+            return Err(Refusal::ProjectAlreadyExists {
+                project: project.to_owned(),
+            }
+            .into());
+        }
         let scenes = self.scenes_directory(project);
         std::fs::create_dir_all(&scenes).map_err(|source| EditorError::Io {
             path: scenes,
             source,
-        })
+        })?;
+        let bytes = serde_json::to_vec_pretty(&settings).map_err(EditorError::Serialize)?;
+        gx_fs::write_atomic(&self.settings_path(project), &bytes).map_err(EditorError::Write)
+    }
+
+    /// What a project declares (3.15).
+    ///
+    /// A project created before 3.15 has no settings file and reads as
+    /// [`ProjectSettings::before_3_15`]: its scenes were authored and rendered
+    /// in linear light, so that is what it meant. A file that is present but
+    /// unreadable refuses by name instead of reading as absent, because that
+    /// would compose every scene in it in the wrong space.
+    pub fn settings(&self, project: &str) -> Result<ProjectSettings, EditorError> {
+        self.require_project(project)?;
+        let path = self.settings_path(project);
+        match std::fs::read(&path) {
+            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|error| {
+                Refusal::ProjectSettingsInvalid {
+                    project: project.to_owned(),
+                    detail: error.to_string(),
+                }
+                .into()
+            }),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Ok(ProjectSettings::before_3_15())
+            }
+            Err(source) => Err(EditorError::Io { path, source }),
+        }
+    }
+
+    /// A scene composites in its project's space or not at all (3.15).
+    fn require_working_space(
+        &self,
+        project: &str,
+        scene: &SceneDocument,
+    ) -> Result<(), EditorError> {
+        let declared: WorkingColorSpace = self.settings(project)?.working_color_space;
+        if scene.working_color_space == declared {
+            Ok(())
+        } else {
+            Err(Refusal::SceneWorkingSpaceMismatch {
+                project: project.to_owned(),
+                scene_id: scene.id.clone(),
+                scene: scene.working_color_space,
+                project_space: declared,
+            }
+            .into())
+        }
     }
 
     /// Write a filled take-page instance into an existing project.
@@ -237,6 +312,7 @@ impl Projects {
     pub fn write_scene(&self, project: &str, scene: &SceneDocument) -> Result<(), EditorError> {
         self.require_project(project)?;
         require_component(&scene.id, |id| Refusal::SceneIdInvalid { id })?;
+        self.require_working_space(project, scene)?;
         let bytes = serde_json::to_vec_pretty(scene).map_err(EditorError::Serialize)?;
         gx_fs::write_atomic(&self.scene_path(project, &scene.id), &bytes)
             .map_err(EditorError::Write)
@@ -253,7 +329,9 @@ impl Projects {
         require_component(scene_id, |id| Refusal::SceneIdInvalid { id })?;
         let path = self.scene_path(project, scene_id);
         let bytes = std::fs::read(&path).map_err(|source| EditorError::Io { path, source })?;
-        parse_scene_document(&bytes).map_err(EditorError::Refused)
+        let scene = parse_scene_document(&bytes).map_err(EditorError::Refused)?;
+        self.require_working_space(project, &scene)?;
+        Ok(scene)
     }
 
     /// The scene ids in a project, sorted.
@@ -323,6 +401,7 @@ mod tests {
 
     fn scene(id: &str) -> SceneDocument {
         SceneDocument {
+            working_color_space: WorkingColorSpace::NEW_PROJECT,
             id: id.into(),
             name: id.into(),
             version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
@@ -500,6 +579,8 @@ mod tests {
         let root = scratch("pre-11.39");
         let projects = Projects::at_root(&root);
         projects.create_project("legacy").unwrap();
+        // A project from before 11.39 is also from before 3.15: no settings file.
+        std::fs::remove_file(root.join("legacy").join(PROJECT_SETTINGS_FILE)).unwrap();
         let path = root.join("legacy").join("scenes").join("witness.json");
         std::fs::write(&path, FIXTURE).unwrap();
 
@@ -517,6 +598,8 @@ mod tests {
         for asset in after["assets"].as_array_mut().unwrap() {
             asset.as_object_mut().unwrap().remove("provenance");
         }
+        assert_eq!(upgraded.working_color_space, WorkingColorSpace::BEFORE_3_15);
+        after.as_object_mut().unwrap().remove("workingColorSpace");
         assert_eq!(after, original, "the upgrade changed something the document stated");
 
         projects.write_scene("legacy", &upgraded).unwrap();
@@ -529,11 +612,118 @@ mod tests {
         // A scene from a newer build is refused by name, never read with
         // whatever it added dropped.
         let mut newer = original;
-        newer["version"] = serde_json::json!(3);
+        newer["version"] = serde_json::json!(4);
         std::fs::write(&path, serde_json::to_vec(&newer).unwrap()).unwrap();
         assert!(matches!(
             projects.read_scene("legacy", "witness"),
-            Err(EditorError::Refused(Refusal::SceneSchemaUnsupported { actual: 3, supported: 2 }))
+            Err(EditorError::Refused(Refusal::SceneSchemaUnsupported { actual: 4, supported: 3 }))
+        ));
+
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    /// 3.15's migration. The fixture is a scene exactly as the schema-2
+    /// Editor saved it: generated on 13 October 2026 by the build at
+    /// 44a8c3d, reading the pre-11.39 witness and saving it through
+    /// `Projects::write_scene`. In a project created before 3.15 (no
+    /// settings file) it reads at schema 3 composited in linear light,
+    /// nothing else changes, and once saved it reloads byte-for-byte. The
+    /// same scene refuses by name in a project that declares sRGB.
+    #[test]
+    fn a_scene_saved_before_working_spaces_upgrades_to_linear_losslessly() {
+        const FIXTURE: &[u8] = include_bytes!("../tests/fixtures/pre-3.15/witness.json");
+        let root = scratch("pre-3.15");
+        let projects = Projects::at_root(&root);
+        projects.create_project("legacy").unwrap();
+        std::fs::remove_file(root.join("legacy").join(PROJECT_SETTINGS_FILE)).unwrap();
+        assert_eq!(projects.settings("legacy").unwrap(), ProjectSettings::before_3_15());
+        let path = root.join("legacy").join("scenes").join("witness.json");
+        std::fs::write(&path, FIXTURE).unwrap();
+
+        let upgraded = projects.read_scene("legacy", "witness").expect("a version 2 scene reads");
+        let original: serde_json::Value = serde_json::from_slice(FIXTURE).unwrap();
+        assert_eq!(original["version"], 2, "the fixture predates 3.15");
+        assert!(original.get("workingColorSpace").is_none());
+        assert_eq!(upgraded.version, gx_contracts::scene::SCENE_SCHEMA_VERSION);
+        assert_eq!(upgraded.working_color_space, WorkingColorSpace::LinearSrgb);
+
+        let mut after = serde_json::to_value(&upgraded).unwrap();
+        after["version"] = original["version"].clone();
+        after.as_object_mut().unwrap().remove("workingColorSpace");
+        assert_eq!(after, original, "the upgrade changed something the document stated");
+
+        projects.write_scene("legacy", &upgraded).unwrap();
+        let saved = std::fs::read(&path).unwrap();
+        let reread = projects.read_scene("legacy", "witness").unwrap();
+        assert_eq!(reread, upgraded);
+        projects.write_scene("legacy", &reread).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
+
+        projects.create_project("design").unwrap();
+        std::fs::write(root.join("design").join("scenes").join("witness.json"), FIXTURE).unwrap();
+        assert!(matches!(
+            projects.read_scene("design", "witness"),
+            Err(EditorError::Refused(Refusal::SceneWorkingSpaceMismatch {
+                scene: WorkingColorSpace::LinearSrgb,
+                project_space: WorkingColorSpace::Srgb,
+                ..
+            }))
+        ));
+
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    /// 3.15: a project declares its working space once, every scene in it
+    /// carries the same one, and a scene that differs refuses by name and is
+    /// never written.
+    #[test]
+    fn a_project_declares_its_working_space_and_refuses_scenes_that_differ() {
+        let root = scratch("working-space");
+        let projects = Projects::at_root(&root);
+        projects.create_project("show").unwrap();
+        let file = std::fs::read(root.join("show").join(PROJECT_SETTINGS_FILE)).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&file).unwrap(),
+            serde_json::json!({ "workingColorSpace": "srgb" })
+        );
+        assert_eq!(projects.settings("show").unwrap().working_color_space, WorkingColorSpace::Srgb);
+
+        let mut linear = scene("linear");
+        linear.working_color_space = WorkingColorSpace::LinearSrgb;
+        assert!(matches!(
+            projects.write_scene("show", &linear),
+            Err(EditorError::Refused(Refusal::SceneWorkingSpaceMismatch { .. }))
+        ));
+        assert!(
+            !root.join("show").join("scenes").join("linear.json").exists(),
+            "a refused scene is not written"
+        );
+
+        projects
+            .create_project_with(
+                "physical",
+                ProjectSettings { working_color_space: WorkingColorSpace::LinearSrgb },
+            )
+            .unwrap();
+        projects.write_scene("physical", &linear).expect("a linear scene belongs in a linear project");
+        assert_eq!(projects.read_scene("physical", "linear").unwrap(), linear);
+
+        assert!(
+            matches!(
+                projects.create_project("show"),
+                Err(EditorError::Refused(Refusal::ProjectAlreadyExists { .. }))
+            ),
+            "creating a project again never rewrites what it declared"
+        );
+
+        std::fs::write(
+            root.join("show").join(PROJECT_SETTINGS_FILE),
+            br#"{"workingColorSpace":"hdr"}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            projects.settings("show"),
+            Err(EditorError::Refused(Refusal::ProjectSettingsInvalid { .. }))
         ));
 
         std::fs::remove_dir_all(root).expect("clean up");

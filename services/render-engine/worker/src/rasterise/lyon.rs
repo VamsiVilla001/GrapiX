@@ -427,7 +427,7 @@ fn prepare_fill(
 fn append_fill(
     object: &str,
     geometry: VertexBuffers<PathVertex, u32>,
-    paint: crate::colour_pipeline::LinearRgba,
+    paint: crate::colour_pipeline::WorkingRgba,
     output: &mut Vec<PreparedPath>,
 ) -> Result<(), Refusal> {
     if !geometry.indices.is_empty() {
@@ -500,7 +500,7 @@ fn rasterise_triangle(
     a: PathVertex,
     b: PathVertex,
     c: PathVertex,
-    paint: crate::colour_pipeline::LinearRgba,
+    paint: crate::colour_pipeline::WorkingRgba,
 ) {
     let min_x = a.x.min(b.x).min(c.x).floor().max(0.0) as u32;
     let min_y = a.y.min(b.y).min(c.y).floor().max(0.0) as u32;

@@ -279,6 +279,7 @@ mod tests {
 
     fn scene() -> SceneDocument {
         SceneDocument {
+            working_color_space: crate::color::WorkingColorSpace::LinearSrgb,
             id: "scene".into(),
             name: "Style test".into(),
             version: crate::scene::SCENE_SCHEMA_VERSION,

@@ -414,6 +414,7 @@ mod tests {
 
     fn scene() -> SceneDocument {
         SceneDocument {
+            working_color_space: crate::color::WorkingColorSpace::LinearSrgb,
             id: "template".into(),
             name: "Template".into(),
             version: crate::scene::SCENE_SCHEMA_VERSION,

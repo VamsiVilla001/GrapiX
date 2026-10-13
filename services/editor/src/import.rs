@@ -164,6 +164,11 @@ pub fn import_svg(
     }
 
     let scene = SceneDocument {
+        // SVG composites in sRGB (its default `color-interpolation`), so the
+        // imported scene declares the space its source was drawn in (3.15).
+        // Saving it into a linear project refuses by name rather than
+        // re-blending it silently.
+        working_color_space: gx_contracts::color::WorkingColorSpace::Srgb,
         id: scene_id.to_owned(),
         name: source_name.to_owned(),
         version: gx_contracts::scene::SCENE_SCHEMA_VERSION,

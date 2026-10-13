@@ -51,6 +51,7 @@ fn scratch(label: &str) -> std::path::PathBuf {
 
 fn scene(id: &str) -> gx_contracts::scene::SceneDocument {
     gx_contracts::scene::SceneDocument {
+        working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
         id: id.into(),
         name: id.into(),
         version: gx_contracts::scene::SCENE_SCHEMA_VERSION,

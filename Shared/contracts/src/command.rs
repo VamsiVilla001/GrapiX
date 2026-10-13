@@ -769,7 +769,7 @@ pub mod witness {
     /// [`scene_edits`] batch needs (a rect bound to material `m1`, a text
     /// object, a font, an image asset and numeric data).
     pub fn fixture_scene() -> SceneDocument {
-        let mut scene = scene::new_scene("witness", "Witness");
+        let mut scene = scene::new_scene("witness", "Witness", crate::color::WorkingColorSpace::NEW_PROJECT);
         scene.timeline.duration_frames = 100;
         scene
             .data_context
@@ -1118,7 +1118,7 @@ mod tests {
     };
 
     fn scene_with_card() -> SceneDocument {
-        let mut scene = new_scene("scene", "Scene");
+        let mut scene = new_scene("scene", "Scene", crate::color::WorkingColorSpace::NEW_PROJECT);
         scene.objects.push(SceneObject::Rect(RectObject {
             base: ObjectBase::new("card", "Card"),
             radius: 0.0,

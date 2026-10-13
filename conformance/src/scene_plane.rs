@@ -67,6 +67,7 @@ fn populated_scene(id: &str, asset: Option<ContentHash>) -> SceneDocument {
     data_context.insert("headline".into(), serde_json::json!("LIVE SCORE"));
 
     SceneDocument {
+        working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
         id: id.to_owned(),
         name: "Conformance scene".to_owned(),
         version: gx_contracts::scene::SCENE_SCHEMA_VERSION,

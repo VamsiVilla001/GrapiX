@@ -118,7 +118,116 @@ not a euphemism for nearly done.
 
 ---
 
-## 2026-10-13 — Five done steps reopened by execution: 3.7, 3.13, 8.1, 8.9, 8.12; resume here
+## 2026-10-13 — 3.15 done: compositing follows the project's working colour space; resume here
+
+**What changed.**
+- **Contract** (`Shared/contracts`):
+  - `WorkingColorSpace` is `Srgb` (display-referred) or `LinearSrgb`, with no
+    `Default`, plus `from_linear`/`to_linear` over the one sRGB curve and the
+    constants `NEW_PROJECT` (sRGB) and `BEFORE_3_15` (linear).
+  - `SceneDocument.working_color_space` is required from
+    `SCENE_SCHEMA_VERSION = 3`; `upgrade_scene_json` now chains: v1 gains
+    provenance, and v1 or v2 gains `workingColorSpace: "linear-srgb"`.
+  - `new_scene` takes the space explicitly.
+  - New `project` module: `ProjectSettings` with `deny_unknown_fields`,
+    stored as `project.json`.
+  - New refusals `SceneWorkingSpaceMismatch` and `ProjectSettingsInvalid`.
+  - The `color.rs` and `scene.rs` module docs state the rule; the stale
+    "masks and layer styles out of scope" note now names 11.47 and 11.60.
+- **Editor service:**
+  - `create_project` writes `project.json` (sRGB) and refuses an existing
+    project rather than rewriting its declaration; `create_project_with`
+    takes explicit settings.
+  - `settings()` reads a missing file as `before_3_15` and an unreadable one
+    as `ProjectSettingsInvalid`.
+  - `write_scene` and `read_scene` refuse a space mismatch by name.
+  - `CreateScene` takes the project's space; an unsaved new scene takes
+    `NEW_PROJECT`.
+  - SVG import declares sRGB, its source's space.
+- **Engine:**
+  - `LinearRgba` became `WorkingRgba` (premultiplied, working-space values);
+    `from_source` and `encode` take the space, and `mix` and `linear_to` are
+    new.
+  - `WorkingTexture` and `WorkingFrame` carry their space.
+  - Path paints are prepared in linear light and expressed in the scene's
+    space once, at the end of `PreparedPaths::prepare`; text and meshes
+    convert from the document's space; frames encode from it.
+- **Mechanics:** about 50 Rust literals and calls were updated by a
+  compiler-driven codemod (cargo JSON spans, E0063/E0061). Existing fixtures
+  stay `LinearSrgb`, so they render exactly as before; new-scene callers use
+  `NEW_PROJECT`. Eight TS fixtures gained `workingColorSpace: "srgb"`.
+  Generated TS was regenerated (`Refusal`, `SceneDocument`,
+  `WorkingColorSpace`, `capability-surface`).
+- **Plan:** 3.15's done-when was corrected. As first written it asked for a
+  rendered anti-aliased edge, gradient and blur that only 3.17 and 3.22 can
+  draw. The overlap is now rendered, and coverage, interpolation and
+  averaging are reference operations those steps must match.
+
+**Witness.** `services/editor/tests/fixtures/pre-3.15/witness.json` (4,419
+bytes, schema 2) was generated before any 3.15 code change, by the build at
+44a8c3d: it read the pre-11.39 witness and saved it through
+`Projects::write_scene`. The generator was a temporary test and was deleted.
+
+**Expected values**, computed independently with the IEC 61966-2-1 and BT.709
+formulas (node), not with the code under test:
+
+| Case | sRGB space, Preview / Program | Linear space, Preview / Program |
+|---|---|---|
+| 50% black over white; gradient midpoint; blur average | 128 / 115 | 188 / 180 |
+| 25% white coverage over black (AA edge) | 64 / 48 | 137 / 125 |
+
+### Verified by execution (13 October)
+
+| Check | Result |
+|---|---|
+| `cargo test -p gx-contracts -p gx-editor` | 203 + 66 passed. New: the working-space conversion test, the project-settings round trip and refusal, the pre-3.15 witness (upgrades to linear, equals the original once `workingColorSpace` and `version` are removed, reloads byte-for-byte, refuses in an sRGB project), and the project declaration, mismatch and corrupt-settings tests; `CreateScene` takes the project's space |
+| `cargo test -p gx-render-worker --lib` | 74 passed, 1 failed (the environmental recovery-journal test below). New: half-black-over-white and coverage/gradient/blur in both spaces at both outputs (±1); linear paint re-expression; the light-referred ramp is identical from both spaces; the **rendered** overlap through `PreparedScene::prepare` + `frame` matches every covered pixel in both spaces at both outputs |
+| `cargo test --workspace --exclude gx-engine-host --no-fail-fast` | 632 passed, 3 failed, 1 ignored. All three failures are `Os { code: 32 }` in unchanged atomic-write tests (autosave ring, kill-mid-write, recovery journal), the environmental lock first logged on 12 October |
+| `npm run conformance` | 274 passed, 0 failed, 9 skipped. The refusal audit now drives `SceneWorkingSpaceMismatch` and `ProjectSettingsInvalid` against the real `gx_editor::Projects` |
+| `cargo run -p gx-pixel-gate -- check` | exit 0. The six reference scenes (schema 1) upgrade to linear and match their baselines byte-for-byte |
+| `npm run check` up to its Rust leg | boundaries OK; codegen OK (297 current); typecheck OK; Node 40/40; Editor vitest 32 files, 339/339 |
+| `node tools/check-agent-worktree.mjs`, `git diff --check` | OK, OK |
+
+Two traps on the way, both found by the gate rather than guessed:
+- **A stale spawned worker binary.** Conformance first failed "a scene
+  publishes for headless rendering" with `SceneSchemaUnsupported { actual:
+  3, supported: 2 }`. `npm run conformance` rebuilds the mocks, not
+  `gx-render-worker`, so the spawned engine was the old build (rule 19).
+  `cargo build -p gx-render-worker` fixed it.
+- **A fixture read with plain serde.** `editor-mcp/tests/bindings_surface.rs`
+  read a "version 1" scene with `serde_json::from_value`, which skips the
+  upgrade path; it now states version 3 and sRGB.
+
+### Found, not fixed (recorded under reopened 3.13)
+
+**Vector paths ignore object opacity.** Nothing in `rasterise/lyon.rs` or
+`rasterise/mod.rs` reads `resolved.opacity`. A rectangle at `opacity` 0.5
+rendered fully opaque, `[0,0,0,255]`, through `PreparedScene::frame`, with
+no refusal. Text and meshes do apply it. 3.15's rendered test carries its 50%
+in the fill alpha instead. The plan's 3.13 note and its "closes again when"
+now include opacity.
+
+### Gaps
+
+- **The Editor's Three.js viewport** (11.6) does not read the declared space.
+  `Editor/src/color-policy.ts` now says so instead of claiming the type has
+  one member. Which space its blending matches is unmeasured: Three.js
+  applies the output curve per fragment, before hardware blending. 13.5 (the
+  engine renders the viewport) closes it, unless a measured browser fix
+  lands first.
+- No UI chooses a project's space yet: `CreateProject` declares sRGB and
+  `create_project_with` is service-level. A project settings command or
+  panel belongs to 11.43's scene manager.
+- `npm run check` is red on this machine because of the three error-32
+  tests. Code is unchanged; the cause is unconfirmed.
+
+**Next.** 3.16 needs 3.15 (done) and 3.13, which is reopened. The critical
+path is re-closing 3.13: trim, vector opacity and glTF geometry each either
+render or refuse by name.
+
+---
+
+## 2026-10-13 — Five done steps reopened by execution: 3.7, 3.13, 8.1, 8.9, 8.12
 
 The user asked to reopen the five steps the 12 October review contradicted.
 Hard rule 4 requires re-running each step's verification first, so each one

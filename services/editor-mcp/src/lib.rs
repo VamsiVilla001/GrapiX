@@ -405,14 +405,14 @@ mod tests {
     }
 
     fn scene(id: &str) -> SceneDocument {
-        let mut scene = new_scene(id, id);
+        let mut scene = new_scene(id, id, gx_contracts::color::WorkingColorSpace::NEW_PROJECT);
         scene.revision = Some(Revision(1));
         scene.timeline.duration_frames = 1;
         scene
     }
 
     fn card_scene(id: &str, rate: RationalRate) -> SceneDocument {
-        let mut scene = new_scene(id, id);
+        let mut scene = new_scene(id, id, gx_contracts::color::WorkingColorSpace::NEW_PROJECT);
         scene.canvas.frame_rate = rate;
         scene.timeline.duration_frames = 100;
         scene.objects.push(SceneObject::Rect(RectObject { base: ObjectBase::new("card", "Card"), radius: 0.0 }));

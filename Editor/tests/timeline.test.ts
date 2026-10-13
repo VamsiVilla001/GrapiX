@@ -89,6 +89,7 @@ function scene(tracks: number, perTrack: number, durationFrames = 100_000): Scen
     id: "s",
     name: "S",
     version: 1,
+    workingColorSpace: "srgb",
     canvas: { width: 1920, height: 1080, frameRate: { num: 50, den: 1 } },
     timeline: { durationFrames: durationFrames as unknown as bigint, channels, phases: [] },
     dataContext: {},

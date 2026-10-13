@@ -486,7 +486,7 @@ mod tests {
 
     #[test]
     fn binding_paths_and_numeric_ranges_are_strict() {
-        let mut scene = new_scene("scene", "Scene");
+        let mut scene = new_scene("scene", "Scene", crate::color::WorkingColorSpace::NEW_PROJECT);
         scene.objects.push(rect("card"));
         scene.data_context.insert("score".into(), Value::from(0));
         assert!(matches!(
@@ -503,7 +503,7 @@ mod tests {
 
     #[test]
     fn image_binding_rejects_wrong_asset_kind() {
-        let mut scene = new_scene("scene", "Scene");
+        let mut scene = new_scene("scene", "Scene", crate::color::WorkingColorSpace::NEW_PROJECT);
         scene.objects.push(SceneObject::Image(ImageObject {
             base: ObjectBase::new("logo", "Logo"),
             asset_id: "old".into(),
@@ -520,7 +520,7 @@ mod tests {
 
     #[test]
     fn replacing_data_reports_only_newly_invalid_bindings() {
-        let mut scene = new_scene("scene", "Scene");
+        let mut scene = new_scene("scene", "Scene", crate::color::WorkingColorSpace::NEW_PROJECT);
         scene.objects.push(rect("card"));
         scene.data_context.insert("score".into(), Value::from(1));
         set_binding(&mut scene, "card", "x", Some("score")).unwrap();

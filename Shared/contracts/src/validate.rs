@@ -325,6 +325,7 @@ mod tests {
 
     fn document(objects: Vec<SceneObject>) -> SceneDocument {
         SceneDocument {
+            working_color_space: crate::color::WorkingColorSpace::LinearSrgb,
             id: "scene".into(),
             name: "Scene".into(),
             version: crate::scene::SCENE_SCHEMA_VERSION,

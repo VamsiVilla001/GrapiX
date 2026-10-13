@@ -62,7 +62,7 @@ mod tests {
 
     #[test]
     fn a_batch_lands_whole_with_its_provenance_or_not_at_all() {
-        let mut scene = new_scene("s", "S");
+        let mut scene = new_scene("s", "S", crate::color::WorkingColorSpace::NEW_PROJECT);
         add_assets(&mut scene, &[asset("logo", AssetKind::Image)]).unwrap();
         assert_eq!(scene.assets[0].provenance.origin, Some(AssetOrigin::Human));
 

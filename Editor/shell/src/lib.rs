@@ -882,7 +882,7 @@ mod tests {
 
     #[test]
     fn an_unparseable_endpoint_is_refused_before_any_socket_opens() {
-        let error = publish("not-an-address", gx_contracts::scene::new_scene("demo", "Demo"))
+        let error = publish("not-an-address", gx_contracts::scene::new_scene("demo", "Demo", gx_contracts::color::WorkingColorSpace::NEW_PROJECT))
             .expect_err("a malformed endpoint cannot be dialled");
         assert!(matches!(error, EditorError::InvalidEndpoint { .. }));
     }

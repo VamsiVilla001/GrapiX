@@ -9,6 +9,7 @@ import type { SceneCanvas } from "./SceneCanvas";
 import type { SceneObject } from "./SceneObject";
 import type { SceneTimeline } from "./SceneTimeline";
 import type { TextStyle } from "./TextStyle";
+import type { WorkingColorSpace } from "./WorkingColorSpace";
 
 /**
  * The scene document: the unit the Editor authors, the package carries and
@@ -26,6 +27,12 @@ version: number,
  * Monotonic authoring revision; the optimistic-concurrency token (0.8).
  */
 revision?: Revision,
+/**
+ * The space this scene composites in: its project's declared space
+ * (3.15). Required from schema 3; an older document upgrades to
+ * [`WorkingColorSpace::BEFORE_3_15`], the space it was authored in.
+ */
+workingColorSpace: WorkingColorSpace,
 /**
  * The camera Program renders through. Absent selects the documented
  * synthetic 2D orthographic camera; a present id must resolve to a

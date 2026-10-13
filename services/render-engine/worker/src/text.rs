@@ -80,7 +80,7 @@ pub fn rasterise_texts(
 
         let fill = match &text.base.fill {
             Some(gx_contracts::color::ColorValue::Solid { color }) => {
-                crate::colour_pipeline::LinearRgba::from_source(*color)
+                crate::colour_pipeline::WorkingRgba::from_source(*color, document.working_color_space)
             }
             Some(gx_contracts::color::ColorValue::LinearGradient { .. })
             | Some(gx_contracts::color::ColorValue::RadialGradient { .. }) => {
@@ -90,7 +90,7 @@ pub fn rasterise_texts(
                 });
             }
             Some(gx_contracts::color::ColorValue::None) | None => {
-                crate::colour_pipeline::LinearRgba::transparent()
+                crate::colour_pipeline::WorkingRgba::transparent()
             }
         };
 
@@ -101,7 +101,7 @@ pub fn rasterise_texts(
 
         let offset_x = resolved.x as f32;
         let offset_y = resolved.y as f32;
-        let glyph_fill = crate::colour_pipeline::LinearRgba {
+        let glyph_fill = crate::colour_pipeline::WorkingRgba {
             r: fill.r * opacity,
             g: fill.g * opacity,
             b: fill.b * opacity,
@@ -482,6 +482,7 @@ mod tests {
             })
             .collect();
         SceneDocument {
+            working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
             id: "text-scene".into(),
             name: "Text scene".into(),
             version: gx_contracts::scene::SCENE_SCHEMA_VERSION,

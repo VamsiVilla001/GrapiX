@@ -308,7 +308,7 @@ mod tests {
 
     #[test]
     fn inspector_rejects_mixed_kind_and_accepts_opacity_bounds() {
-        let mut scene = new_scene("scene", "Scene");
+        let mut scene = new_scene("scene", "Scene", crate::color::WorkingColorSpace::NEW_PROJECT);
         scene.objects = vec![
             rect("card"),
             SceneObject::Group(GroupObject {
@@ -331,7 +331,7 @@ mod tests {
 
     #[test]
     fn inherited_visibility_and_lock_refuse_child_edits() {
-        let mut scene = new_scene("scene", "Scene");
+        let mut scene = new_scene("scene", "Scene", crate::color::WorkingColorSpace::NEW_PROJECT);
         let mut group = GroupObject {
             base: ObjectBase::new("group", "Group"),
             child_ids: vec!["card".into()],

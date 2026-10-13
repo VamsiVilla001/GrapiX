@@ -182,7 +182,7 @@ mod tests {
     }
 
     fn scene() -> SceneDocument {
-        crate::scene::new_scene("fonts", "Fonts")
+        crate::scene::new_scene("fonts", "Fonts", crate::color::WorkingColorSpace::NEW_PROJECT)
     }
 
     #[test]

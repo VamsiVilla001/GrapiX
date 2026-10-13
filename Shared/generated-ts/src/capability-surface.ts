@@ -279,6 +279,8 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
     "fontUnknown",
     "fontInUse",
     "sceneSchemaUnsupported",
+    "sceneWorkingSpaceMismatch",
+    "projectSettingsInvalid",
     "assetBatchEmpty",
     "assetKindNotAddable",
     "assetFormatUnrecognised",

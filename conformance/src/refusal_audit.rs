@@ -191,7 +191,7 @@ fn drive_control_refusals(report: &mut Report) {
             format!("expected RenderSceneUnavailable, got {unavailable:?}"),
         ),
     );
-    let mut short = gx_contracts::scene::new_scene("audit-render", "Audit render");
+    let mut short = gx_contracts::scene::new_scene("audit-render", "Audit render", gx_contracts::color::WorkingColorSpace::NEW_PROJECT);
     short.timeline.duration_frames = 10;
     let short_pin = short.content_hash();
     let _ = peer.publish_scene(short);
@@ -467,6 +467,7 @@ fn drive_control_contract_refusals(report: &mut Report) {
     use gx_contracts::scene::{ObjectBase, RectObject, SceneCanvas, SceneDocument, SceneObject, SceneTimeline};
 
     let scene = || SceneDocument {
+        working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
         id: "audit".into(),
         name: "audit".into(),
         version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
@@ -589,6 +590,7 @@ fn drive_editor_refusals(report: &mut Report) {
     ));
     let projects = gx_editor::Projects::at_root(&root);
     let scene = gx_contracts::scene::SceneDocument {
+        working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
         id: "audit".into(),
         name: "audit".into(),
         version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
@@ -622,6 +624,49 @@ fn drive_editor_refusals(report: &mut Report) {
         ),
     );
 
+    // 3.15: a project declares its working colour space. A new project
+    // declares sRGB, so the linear audit scene must refuse by name and leave
+    // nothing behind.
+    let created = projects.create_project("audit-space");
+    let mismatch = projects.write_scene("audit-space", &scene);
+    report.record(
+        PLANE,
+        "SceneWorkingSpaceMismatch is produced for a scene whose space differs from its project's",
+        expect(
+            created.is_ok()
+                && matches!(
+                    mismatch,
+                    Err(gx_editor::EditorError::Refused(Refusal::SceneWorkingSpaceMismatch {
+                        scene: gx_contracts::color::WorkingColorSpace::LinearSrgb,
+                        project_space: gx_contracts::color::WorkingColorSpace::Srgb,
+                        ..
+                    }))
+                )
+                && !root.join("audit-space").join("scenes").join("audit.json").exists(),
+            "a linear scene was written into an sRGB project, or refused under another name",
+        ),
+    );
+
+    // A settings file that is present but unreadable refuses rather than
+    // reading as absent, which would compose every scene in the wrong space.
+    let settings = root
+        .join("audit-space")
+        .join(gx_contracts::project::PROJECT_SETTINGS_FILE);
+    let corrupted = std::fs::write(&settings, br#"{"workingColorSpace":"hdr"}"#);
+    report.record(
+        PLANE,
+        "ProjectSettingsInvalid is produced for an unreadable project settings file",
+        expect(
+            corrupted.is_ok()
+                && matches!(
+                    projects.settings("audit-space"),
+                    Err(gx_editor::EditorError::Refused(Refusal::ProjectSettingsInvalid { .. }))
+                ),
+            "an unreadable project settings file was not refused by name",
+        ),
+    );
+    let _ = std::fs::remove_dir_all(&root);
+
     drive_animation_refusals(report);
 }
 
@@ -637,6 +682,7 @@ fn drive_animation_refusals(report: &mut Report) {
     use gx_contracts::scene::{ObjectBase, RectObject, SceneCanvas, SceneDocument, SceneObject, SceneTimeline};
 
     let scene_with = |objects: Vec<SceneObject>| SceneDocument {
+        working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
         id: "audit".into(),
         name: "audit".into(),
         version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
@@ -981,6 +1027,7 @@ fn drive_authoring_refusals(report: &mut Report) {
     use gx_contracts::scene::{SceneCanvas, SceneDocument, SceneTimeline};
 
     let empty_scene = || SceneDocument {
+        working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
         id: "audit".into(),
         name: "audit".into(),
         version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
@@ -1458,6 +1505,8 @@ fn is_driven(variant: &str) -> bool {
             | "TakePageIdInvalid"
             | "SceneIdBound"
             | "SceneSchemaUnsupported"
+            | "SceneWorkingSpaceMismatch"
+            | "ProjectSettingsInvalid"
             | "AssetBatchEmpty"
             | "AssetKindNotAddable"
             | "AssetFormatUnrecognised"

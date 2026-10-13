@@ -21,7 +21,7 @@ use gx_contracts::scene::{
 use gx_contracts::color::ColorValue;
 use gx_contracts::{ContentHash, Refusal};
 
-use crate::colour_pipeline::LinearRgba;
+use crate::colour_pipeline::WorkingRgba;
 use crate::rasterise::RasterSurface;
 
 /// Verified model payloads keyed only by their immutable content address.
@@ -557,7 +557,7 @@ pub fn rasterise_meshes(
         }
 
         // Build a material lookup for this mesh's parts.
-        let part_materials: HashMap<&str, LinearRgba> = mesh
+        let part_materials: HashMap<&str, WorkingRgba> = mesh
             .materials
             .iter()
             .filter_map(|assignment| {
@@ -566,12 +566,12 @@ pub fn rasterise_meshes(
                     MaterialKind::Unlit | MaterialKind::SolidColor => {
                         let color = match &material.color {
                             ColorValue::Solid { color } => {
-                                LinearRgba::from_source(*color)
+                                WorkingRgba::from_source(*color, document.working_color_space)
                             }
-                            ColorValue::None => LinearRgba::transparent(),
+                            ColorValue::None => WorkingRgba::transparent(),
                             _ => return None, // gradients refused at validate_material
                         };
-                        let scaled = LinearRgba {
+                        let scaled = WorkingRgba {
                             r: color.r * material.opacity as f32 * resolved.opacity as f32,
                             g: color.g * material.opacity as f32 * resolved.opacity as f32,
                             b: color.b * material.opacity as f32 * resolved.opacity as f32,
@@ -625,7 +625,7 @@ fn rasterise_mesh_triangle(
     vb: [f64; 3],
     vc: [f64; 3],
     resolved: &gx_contracts::scene::ResolvedObject,
-    fill: LinearRgba,
+    fill: WorkingRgba,
 ) {
     let cos = resolved.rotation_z.to_radians().cos();
     let sin = resolved.rotation_z.to_radians().sin();
@@ -672,6 +672,7 @@ mod tests {
 
     fn document(objects: Vec<SceneObject>, materials: Vec<MaterialDefinition>) -> SceneDocument {
         SceneDocument {
+            working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
             id: "scene".to_string(), name: "mesh".to_string(), version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
             revision: Some(Revision(1)), active_camera_id: None,
             canvas: SceneCanvas { width: 1920, height: 1080, frame_rate: RationalRate::P50 },

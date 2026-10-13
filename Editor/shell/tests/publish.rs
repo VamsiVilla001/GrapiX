@@ -100,7 +100,7 @@ fn an_authored_scene_publishes_to_a_real_engine_and_reports_its_revision() {
     };
     let endpoint = format!("127.0.0.1:{asset}");
 
-    let scene = new_scene("shell-demo", "Shell Demo");
+    let scene = new_scene("shell-demo", "Shell Demo", gx_contracts::color::WorkingColorSpace::NEW_PROJECT);
     let first = publish(&endpoint, scene.clone()).expect("a valid scene publishes");
     assert_eq!(first.take_id.0, "shell-demo");
     assert_eq!(first.revision.0, 1, "the first publication is revision 1");
@@ -118,7 +118,7 @@ fn an_unreachable_asset_plane_is_not_reported_as_a_refusal() {
     // engine decided, and an author must not be told their document was
     // rejected when it was never seen (invariant 17).
     let endpoint = format!("127.0.0.1:{}", free_port());
-    let error = publish(&endpoint, new_scene("demo", "Demo"))
+    let error = publish(&endpoint, new_scene("demo", "Demo", gx_contracts::color::WorkingColorSpace::NEW_PROJECT))
         .expect_err("an unreachable plane cannot publish");
     assert!(
         matches!(error, EditorError::Unreachable { .. }),

@@ -13,8 +13,15 @@
 
 import type { OutputTransform, SourceColorSpace, WorkingColorSpace } from "@grapix/contracts";
 
-/// The space every scene is composited in. The generated type has exactly one
-/// member, so "we composite in sRGB here" does not typecheck.
+/// The working space this browser viewport assumes: linear, for every scene.
+///
+/// Since 3.15 a project declares its own space (new projects sRGB) and the
+/// engine composites each scene in it. This viewport does not yet read the
+/// scene's declared space, and which space its blending actually matches is
+/// unmeasured: Three.js applies the output curve per fragment, before the
+/// hardware blends. That is a named gap (GrapiX-Build-Plan.md, 3.15 note),
+/// closed by 13.5 when the engine renders the viewport. The engine is the
+/// renderer of record.
 export const WORKING_COLOR_SPACE: WorkingColorSpace = "linear-srgb";
 
 /// The preview surface's transform (B.1: sRGB for preview). The broadcast

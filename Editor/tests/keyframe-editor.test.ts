@@ -52,6 +52,7 @@ function scene(objects: SceneObject[], channels: unknown[] = []): SceneDocument 
     id: "motion",
     name: "Motion",
     version: 1,
+    workingColorSpace: "srgb",
     canvas: { width: 1920, height: 1080, frameRate: { num: 50, den: 1 } },
     timeline: { durationFrames: 100 as unknown as bigint, channels, phases: [] },
     dataContext: {},
