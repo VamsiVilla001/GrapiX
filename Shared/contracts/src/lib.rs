@@ -825,10 +825,20 @@ pub enum Refusal {
     /// are percentages in 0–100 and every value is finite. Clamping it would
     /// draw a window nobody authored. `value` is the authored number as text.
     ShapeTrimInvalid { object: String, field: String, value: String },
-    /// A glTF model mesh this engine cannot draw (3.13). The software path has
-    /// no model renderer yet (3.7 owns it); drawing nothing would put an empty
-    /// space on air where the model was authored.
-    MeshModelGeometryUnsupported { object: String },
+    /// The scene's hierarchy needed repairing to resolve (3.13): a group
+    /// names a missing child or itself, a child is claimed by two parents, or
+    /// parents form a cycle. The resolver still resolves it deterministically
+    /// so the Editor can keep working, but publishing it would put on air a
+    /// parent choice nobody made.
+    SceneHierarchyInvalid { parent: String, child: String, problem: String },
+    /// An object kind the engine cannot draw yet (3.13). Drawing nothing, or
+    /// a wrong approximation, would put something other than the authored
+    /// graphic on air. `owner` is the build-plan step that will draw it.
+    ObjectKindNotDrawable { object: String, kind: String, owner: String },
+    /// An authored property, set to something other than its default, that
+    /// the engine cannot draw yet (3.13). Ignoring it would draw a different
+    /// graphic from the one authored. `owner` is the step that will draw it.
+    ScenePropertyNotDrawable { object: String, property: String, owner: String },
     /// A project's settings file exists but is not a settings document this
     /// build reads. Reading it as if absent would compose every scene in the
     /// wrong space.
@@ -1394,9 +1404,16 @@ impl std::fmt::Display for Refusal {
                 f,
                 "shape {object} has {field} {value}, outside its domain (start and end 0-100, every value finite)"
             ),
-            Refusal::MeshModelGeometryUnsupported { object } => write!(
+            Refusal::SceneHierarchyInvalid { parent, child, problem } => {
+                write!(f, "hierarchy {problem}: parent {parent}, child {child}")
+            }
+            Refusal::ObjectKindNotDrawable { object, kind, owner } => write!(
                 f,
-                "mesh {object} is a glTF model, which this engine cannot draw yet"
+                "{kind} object {object} cannot be drawn by this engine yet (build-plan step {owner} draws it)"
+            ),
+            Refusal::ScenePropertyNotDrawable { object, property, owner } => write!(
+                f,
+                "{object}: {property} cannot be drawn by this engine yet (build-plan step {owner} draws it)"
             ),
             Refusal::AssetBatchEmpty => f.write_str("asset add carries no assets"),
             Refusal::AssetKindNotAddable { asset_id, kind } => write!(
@@ -1875,7 +1892,9 @@ impl Refusal {
             },
             Self::ProjectSettingsInvalid { project: "audit".into(), detail: "audit".into() },
             Self::ShapeTrimInvalid { object: "audit".into(), field: "trimStart".into(), value: "140".into() },
-            Self::MeshModelGeometryUnsupported { object: "audit".into() },
+            Self::SceneHierarchyInvalid { parent: "audit".into(), child: "audit".into(), problem: "cycle".into() },
+            Self::ObjectKindNotDrawable { object: "audit".into(), kind: "image".into(), owner: "3.17".into() },
+            Self::ScenePropertyNotDrawable { object: "audit".into(), property: "decoration".into(), owner: "3.18".into() },
             Self::AssetBatchEmpty,
             Self::AssetKindNotAddable { asset_id: "audit".into(), kind: crate::scene::AssetKind::Font },
             Self::AssetFormatUnrecognised { file: "audit".into() },
@@ -2036,7 +2055,9 @@ impl Refusal {
             Self::SceneWorkingSpaceMismatch { .. } => "sceneWorkingSpaceMismatch",
             Self::ProjectSettingsInvalid { .. } => "projectSettingsInvalid",
             Self::ShapeTrimInvalid { .. } => "shapeTrimInvalid",
-            Self::MeshModelGeometryUnsupported { .. } => "meshModelGeometryUnsupported",
+            Self::SceneHierarchyInvalid { .. } => "sceneHierarchyInvalid",
+            Self::ObjectKindNotDrawable { .. } => "objectKindNotDrawable",
+            Self::ScenePropertyNotDrawable { .. } => "scenePropertyNotDrawable",
             Self::AssetBatchEmpty => "assetBatchEmpty",
             Self::AssetKindNotAddable { .. } => "assetKindNotAddable",
             Self::AssetFormatUnrecognised { .. } => "assetFormatUnrecognised",

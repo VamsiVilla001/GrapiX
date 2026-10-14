@@ -8,8 +8,10 @@
 //!
 //! Scene content is prepared and rasterised once at publish time. This stage
 //! owns the current encoded base frame, applies the device-derived tile plan,
-//! and stamps only the frame counter while Program runs. Identifier-only test
-//! fixtures still use a deterministic colour key.
+//! and renders it unchanged while Program runs. Identifier-only test fixtures
+//! use a deterministic colour key and a frame-counter stamp, so a test can see
+//! the clock advance; a published scene's pixels are never stamped (3.13,
+//! invariant 18).
 
 use crate::tiling::{Stage, StageOrigin, TileError, TilePlan};
 
@@ -54,7 +56,7 @@ impl Frame {
 ///
 /// The key is derived once per take, not per frame (invariant 35: nothing
 /// that can be built once may be built per Program frame). Per frame it only
-/// stamps the frame counter.
+/// copies the base, plus a counter stamp for identifier-only fixtures.
 #[derive(Debug)]
 pub struct SoftwareRasterizer {
     /// The committed Program take, as a colour key, or `None` for black.
@@ -66,6 +68,9 @@ pub struct SoftwareRasterizer {
     height: u32,
     /// The stage's current device-derived render-target plan.
     tiles: TilePlan,
+    /// Whether Program is an identifier-only fixture, whose frames carry the
+    /// frame counter. A published scene's frames carry exactly its pixels.
+    stamp_frame_counter: bool,
 }
 
 impl Default for SoftwareRasterizer {
@@ -98,6 +103,7 @@ impl SoftwareRasterizer {
             height: FRAME_HEIGHT,
             base: Vec::new(),
             tiles: TilePlan::new(stage, texture_limit)?,
+            stamp_frame_counter: false,
         })
     }
 
@@ -113,6 +119,7 @@ impl SoftwareRasterizer {
     /// frame — the property a pixel gate relies on.
     pub fn take(&mut self, take_key: [u8; 4]) {
         self.program_key = Some(take_key);
+        self.stamp_frame_counter = true;
         self.rebuild_base();
     }
 
@@ -130,6 +137,7 @@ impl SoftwareRasterizer {
         let stage = Stage::new(frame.width, frame.height, StageOrigin { x: 0.0, y: 0.0 })?;
         self.tiles = TilePlan::new(stage, texture_limit)?;
         self.program_key = Some(take_key);
+        self.stamp_frame_counter = false;
         self.width = frame.width;
         self.height = frame.height;
         self.base = frame.pixels;
@@ -139,6 +147,7 @@ impl SoftwareRasterizer {
     /// Clear Program to black.
     pub fn clear(&mut self) {
         self.program_key = None;
+        self.stamp_frame_counter = false;
         self.base.clear();
     }
 
@@ -161,14 +170,15 @@ impl SoftwareRasterizer {
 
     /// Render the current Program at a frame number.
     ///
-    /// Builds from the pre-computed base (built once per take) and stamps the
-    /// frame counter into the first row, so consecutive frames differ — which
-    /// is what lets a test confirm the clock is actually advancing the
-    /// output.
+    /// Builds from the pre-computed base (built once per take). For an
+    /// identifier-only fixture it stamps the frame counter into the first
+    /// row, so consecutive frames differ and a test can confirm the clock is
+    /// advancing the output. A published scene is never stamped: that would
+    /// change on-air pixels (3.13).
     pub fn render(&self, frame: u64) -> Frame {
         let mut rendered = self
             .tiles
-            .composite_filtered(|point| {
+            .composite(|point| {
                 let x = point.x as u32;
                 let y = point.y as u32;
                 let offset = ((y as usize * self.width as usize) + x as usize) * 4;
@@ -184,7 +194,7 @@ impl SoftwareRasterizer {
                 }
             })
             .expect("the validated fixed stage cannot overflow while rendering");
-        if self.program_key.is_some() {
+        if self.program_key.is_some() && self.stamp_frame_counter {
             // Frame counter, little-endian, into the first eight pixels' R
             // channel. Deterministic and visible to the checksum.
             let bytes = frame.to_le_bytes();
@@ -244,6 +254,19 @@ mod tests {
         let a = r.render(100);
         let b = r.render(101);
         assert_ne!(a.checksum(), b.checksum(), "the clock must advance Program");
+    }
+
+    /// 3.13: a published scene goes to air exactly as prepared, at every
+    /// frame. Before this, its first eight pixels carried the frame counter.
+    #[test]
+    fn a_prepared_scene_renders_its_pixels_unchanged_at_every_frame() {
+        let mut r = SoftwareRasterizer::new();
+        let pixels: Vec<u8> = (0..16 * 9 * 4).map(|i| (i % 251) as u8).collect();
+        let prepared = Frame { width: 16, height: 9, pixels: pixels.clone() };
+        r.take_prepared([1, 2, 3, 4], prepared).expect("a small prepared frame takes");
+        for frame in [0, 1, 100, 101, 1_000_000] {
+            assert_eq!(r.render(frame).pixels, pixels, "frame {frame} altered the prepared pixels");
+        }
     }
 
     #[test]

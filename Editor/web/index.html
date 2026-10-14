@@ -22,6 +22,26 @@
       </div>
     </div>
     <header class="bar">
+      <nav class="app-menubar" aria-label="Editor menu">
+        <details class="app-menu"><summary>File</summary><div class="menu-items">
+          <button data-invoke="project-create" type="button">New scene…</button>
+          <button data-invoke="new-scene" type="button">New graphic…</button>
+          <button data-invoke="open-scene" type="button">Open graphic file…</button>
+          <button data-invoke="save-scene" type="button">Save graphic file…</button>
+        </div></details>
+        <details class="app-menu"><summary>Edit</summary><div class="menu-items">
+          <button data-invoke="undo" type="button">Undo <kbd>Ctrl Z</kbd></button>
+          <button data-invoke="redo" type="button">Redo <kbd>Ctrl Shift Z</kbd></button>
+        </div></details>
+        <details class="app-menu"><summary>Layer</summary><div class="menu-items">
+          <button data-create-kind="rect" type="button">New rectangle</button>
+          <button data-create-kind="ellipse" type="button">New ellipse</button>
+          <button data-create-kind="text" type="button">New text</button>
+          <button data-invoke="object-duplicate" type="button">Duplicate selected</button>
+        </div></details>
+        <details class="app-menu"><summary>Window</summary><div id="window-panel-menu" class="menu-items"></div></details>
+        <span class="workspace-title">GrapiX · Authoring workspace</span>
+      </nav>
       <div class="brand">
         <span class="mark">GrapiX</span>
         <span class="product">Editor</span>
@@ -29,7 +49,7 @@
 
       <div class="scene-identity">
         <label class="field">
-          <span class="label">Scene id</span>
+          <span class="label">Graphic id</span>
           <input id="scene-id" type="text" spellcheck="false" autocomplete="off" />
         </label>
         <label class="field">
@@ -46,11 +66,18 @@
         <button id="redo" type="button" disabled>Redo</button>
         <button id="workspace-reset" type="button">Reset layout</button>
       </div>
+      <div class="creation-tools" role="toolbar" aria-label="Layer tools">
+        <button id="tool-selection" type="button" title="Selection tool" aria-label="Selection tool" data-icon="cursor" aria-pressed="true"></button>
+        <button type="button" title="Create rectangle layer" aria-label="Create rectangle layer" data-create-kind="rect" data-icon="rectangle"></button>
+        <button type="button" title="Create ellipse layer" aria-label="Create ellipse layer" data-create-kind="ellipse" data-icon="circle"></button>
+        <button type="button" title="Create text layer" aria-label="Create text layer" data-create-kind="text" data-icon="text-t"></button>
+        <span class="tool-description">Scene tools</span>
+      </div>
 
       <!-- The scene switcher (11.29). A broadcast carries many graphics; each
            open scene is its own session, and the panels below render whichever
            one is active. -->
-      <nav id="scene-tabs" class="scene-tabs" aria-label="Open scenes"></nav>
+      <nav id="scene-tabs" class="scene-tabs" aria-label="Open graphics"></nav>
     </header>
 
     <!-- Dockable workspace (11.5). Panels are addressed by `data-panel` and
@@ -70,7 +97,7 @@
       <section class="dock-region dock-centre" data-region="centre">
       <section class="viewport-pane" data-panel="viewport">
         <div class="pane-head">
-          <h2>Viewport</h2>
+          <h2>Composition <span id="composition-name">Untitled</span></h2>
           <span id="canvas-size" class="meta"></span>
         </div>
         <div class="viewport-stage">
@@ -86,10 +113,13 @@
             ></svg>
           </div>
         </div>
-        <p class="pane-note">
-          Preview only. The render engine is the sole rasteriser of production
-          pixels; this surface never becomes the output.
-        </p>
+        <div class="viewer-footer">
+          <span class="viewer-fit">Fit</span>
+          <button id="viewer-transparency" type="button" data-icon="squares-four" aria-label="Toggle transparency grid" aria-pressed="false" title="Transparency grid"></button>
+          <span id="viewer-timecode" class="timecode">0:00:00:00</span>
+          <span id="viewer-rate" class="meta"></span>
+          <span class="preview-only">Authoring preview</span>
+        </div>
       </section>
       </section>
 
@@ -102,24 +132,39 @@
         tabindex="0"
       ></div>
       <aside class="inspector dock-region" data-region="right">
+        <section data-panel="preview" class="panel preview-panel">
+          <h2>Preview</h2>
+          <div class="preview-transport" role="toolbar" aria-label="Preview transport">
+            <button id="preview-first" type="button" data-icon="skip-back" aria-label="First frame" title="First frame"></button>
+            <button id="preview-previous" type="button" data-icon="caret-left" aria-label="Previous frame" title="Previous frame"></button>
+            <button id="preview-play" type="button" data-icon="play" aria-pressed="false" aria-label="Play preview" title="Play / pause preview (Space)"></button>
+            <button id="preview-next" type="button" data-icon="caret-right" aria-label="Next frame" title="Next frame"></button>
+            <button id="preview-last" type="button" data-icon="skip-forward" aria-label="Last frame" title="Last frame"></button>
+          </div>
+          <dl class="preview-settings"><dt>Shortcut</dt><dd>Spacebar</dd><dt>Play from</dt><dd>Current time</dd><dt>Frame rate</dt><dd id="preview-rate"></dd></dl>
+          <span id="preview-status" class="meta" aria-live="polite">Paused at frame 0</span>
+        </section>
         <section data-panel="scene-manager" class="panel">
           <div class="panel-title-row">
-            <h2>Project scenes</h2>
+            <h2>Scene Manager</h2>
             <button id="project-refresh" type="button">Refresh</button>
           </div>
           <div class="project-tools">
             <label class="frame-control">
-              <span>Project</span>
-              <select id="project-select" aria-label="Current project"></select>
+              <span>Scene</span>
+              <select id="project-select" aria-label="Current scene container"></select>
             </label>
-            <button id="project-create" type="button">New project</button>
-            <button id="project-save-scene" type="button">Save here</button>
+            <button id="project-create" type="button">New scene</button>
+            <button id="graphic-create" type="button">Add graphic</button>
+            <button id="project-save-scene" type="button">Save graphic</button>
           </div>
+          <p class="scene-manager-summary">One scene · multiple graphics</p>
+          <input id="graphic-search" class="graphic-search" type="search" placeholder="Search graphics…" aria-label="Search graphics by name or id" />
           <!-- Scene/template CRUD (11.18), projected from scene-manager.ts so
                the human controls and agent snapshot have one description. -->
           <div id="scene-manager-mount" class="scene-manager-mount"></div>
           <p id="scene-manager-empty" class="empty">
-            No projects. Create one before saving a project scene.
+            Create a scene to keep your graphics together.
           </p>
         </section>
 
@@ -146,7 +191,7 @@
         </section>
 
         <section data-panel="inspector" class="panel">
-          <h2>Inspector</h2>
+          <h2>Properties</h2>
           <!-- Type-aware, and Mixed across a multi-selection (11.9). -->
           <div id="inspector-mount" class="panel-mount"></div>
         </section>
@@ -204,8 +249,6 @@
         <section data-panel="animation" class="panel" id="animation-panel">
           <div class="panel-title-row">
             <h2>Animation</h2>
-            <button id="preview-play" type="button" aria-pressed="false">Play</button>
-            <span id="preview-status" class="meta" aria-live="polite">Paused at frame 0</span>
             <label class="autokey-control">
               <input id="auto-key" type="checkbox" />
               <span>Auto-Key</span>
@@ -262,8 +305,8 @@
           <h2>Not drawn by this preview</h2>
           <ul id="unsupported-list" class="reason-list"></ul>
           <p class="panel-note">
-            These are reported rather than approximated. The engine refuses by
-            name for the same reason.
+            These objects need the engine-backed preview. Publishing validates
+            the scene separately.
           </p>
         </section>
 
@@ -298,6 +341,7 @@
       <section class="timeline-bar" data-panel="timeline" aria-label="Timeline">
       <div class="timeline-head">
         <h2>Timeline</h2>
+        <div class="timeline-clock"><span id="timeline-timecode" class="timecode">0:00:00:00</span><span id="timeline-frame-line"></span></div>
         <span id="timeline-meta" class="meta"></span>
         <button id="timeline-graph-close" type="button" hidden>Back to dope sheet</button>
         <label class="frame-control">
@@ -341,6 +385,7 @@
           />
         </label>
       </div>
+      <div class="timeline-ruler"><span class="layer-column-heading">Layers · visibility / lock</span><div id="timeline-ruler-ticks" aria-hidden="true"></div></div>
       <div id="timeline-mount" class="timeline-mount"></div>
     </section>
     </div>
@@ -358,6 +403,15 @@
       <ul id="log" class="log"></ul>
     </footer>
 
+    <dialog id="manager-create-dialog" aria-labelledby="manager-create-title" aria-describedby="manager-create-description">
+      <form id="manager-create-form">
+        <h2 id="manager-create-title">New scene</h2>
+        <p id="manager-create-description"></p>
+        <label class="field"><span id="manager-create-name-label">Scene name</span><input id="manager-create-name" type="text" required maxlength="120" autocomplete="off" /></label>
+        <p id="manager-create-error" role="alert"></p>
+        <div class="dialog-actions"><button id="manager-create-cancel" type="button">Cancel</button><button type="submit">Create</button></div>
+      </form>
+    </dialog>
     <script type="module" src="main.js"></script>
   </body>
 </html>

@@ -17,6 +17,7 @@ use crate::colour_pipeline::WorkingRgba;
 use crate::rasterizer::Frame;
 
 pub use lyon::LyonPathRasteriser;
+pub(crate) use lyon::{fill_union, transform};
 
 /// Cached triangle geometry for the vector content of one published scene.
 ///
@@ -237,9 +238,19 @@ impl RasterSurface {
 /// exchanged without reparsing a scene or changing its object dispatch; only
 /// the backend's coverage algorithm changes.
 pub trait PathRasteriser {
-    /// Render cached paths to a linear surface. Tessellation is deliberately
-    /// absent from this operation: it already happened in `PreparedPaths`.
-    fn rasterise(&self, paths: &PreparedPaths, width: u32, height: u32) -> RasterSurface;
+    /// Draw prepared paths onto an existing surface, in the order given, each
+    /// path's triangles as one union so overlapping triangles composite once
+    /// (3.13). Tessellation is deliberately absent from this operation: it
+    /// already happened in `PreparedPaths`.
+    fn rasterise_into(&self, paths: &[&PreparedPath], surface: &mut RasterSurface);
+
+    /// Render every cached path to a new transparent surface.
+    fn rasterise(&self, paths: &PreparedPaths, width: u32, height: u32) -> RasterSurface {
+        let mut surface = RasterSurface::transparent(width, height);
+        let all: Vec<&PreparedPath> = paths.paths().iter().collect();
+        self.rasterise_into(&all, &mut surface);
+        surface
+    }
 }
 
 pub(crate) fn solid_paint(
@@ -274,9 +285,9 @@ mod tests {
     struct BoundingBoxRasteriser;
 
     impl PathRasteriser for BoundingBoxRasteriser {
-        fn rasterise(&self, paths: &PreparedPaths, width: u32, height: u32) -> RasterSurface {
-            let mut surface = RasterSurface::transparent(width, height);
-            for path in paths.paths() {
+        fn rasterise_into(&self, paths: &[&PreparedPath], surface: &mut RasterSurface) {
+            let (width, height) = (surface.width(), surface.height());
+            for path in paths {
                 let bounds = path.bounds();
                 let min_x = bounds.min_x.floor().max(0.0) as u32;
                 let min_y = bounds.min_y.floor().max(0.0) as u32;
@@ -288,7 +299,6 @@ mod tests {
                     }
                 }
             }
-            surface
         }
     }
 

@@ -52,6 +52,7 @@ pub fn refusal_audit_suite(report: &mut Report) {
     drive_contract_refusals(report);
     drive_text_style_refusals(report);
     drive_material_refusals(report);
+    drive_software_pixel_refusals(report);
     drive_media_refusals(report);
     drive_asset_refusals(report);
     drive_playout_refusals(report);
@@ -1331,6 +1332,111 @@ fn drive_material_refusals(report: &mut Report) {
     }));
     let found = gx_contracts::validate::validate_scene_document(&trimmed, &draws_everything, &Default::default(), false);
     report.record(PLANE, "ShapeTrimInvalid is produced for a trim value outside 0-100", expect(found.iter().any(|refusal| matches!(&refusal.code, Refusal::ShapeTrimInvalid { object, field, .. } if object == "trimmed" && field == "trimStart")), format!("an out-of-range trim was not refused as ShapeTrimInvalid: {found:?}")));
+
+    // 3.13: a hierarchy the resolver had to repair refuses at validation.
+    let mut orphaned = gx_contracts::command::witness::fixture_scene();
+    orphaned.objects.push(gx_contracts::scene::SceneObject::Group(gx_contracts::scene::GroupObject {
+        base: gx_contracts::scene::ObjectBase::new("orphaning", "orphaning"),
+        child_ids: vec!["ghost".into()],
+    }));
+    let found = gx_contracts::validate::validate_scene_document(&orphaned, &draws_everything, &Default::default(), false);
+    report.record(PLANE, "SceneHierarchyInvalid is produced for a group naming a missing child", expect(found.iter().any(|refusal| matches!(&refusal.code, Refusal::SceneHierarchyInvalid { parent, child, .. } if parent == "orphaning" && child == "ghost")), format!("a missing child was not refused as SceneHierarchyInvalid: {found:?}")));
+
+    // 3.13: what the engine cannot draw refuses by name at publish, driven
+    // through the real engine's preparation in-process.
+    let prepare = |object: gx_contracts::scene::SceneObject| {
+        let mut scene = gx_contracts::scene::new_scene("audit", "Audit", gx_contracts::color::WorkingColorSpace::Srgb);
+        scene.objects.push(object);
+        gx_render_worker::PreparedScene::prepare(scene, &Default::default(), &Default::default(), &MaterialSupport::fixed_function()).err()
+    };
+    let paint = gx_contracts::scene::SceneObject::Paint(gx_contracts::scene::PaintObject {
+        base: gx_contracts::scene::ObjectBase::new("brush", "brush"),
+        strokes: Vec::new(),
+        paint_blend_mode: gx_contracts::scene::BrushBlendMode::Normal,
+    });
+    let kind = prepare(paint);
+    report.record(PLANE, "ObjectKindNotDrawable is produced for a kind the engine cannot draw", expect(matches!(&kind, Some(Refusal::ObjectKindNotDrawable { object, kind, .. }) if object == "brush" && kind == "paint"), format!("a paint object was not refused as ObjectKindNotDrawable: {kind:?}")));
+    let mut tilted = gx_contracts::scene::ObjectBase::new("tilted", "tilted");
+    tilted.rotation_x = 15.0;
+    let property = prepare(gx_contracts::scene::SceneObject::Rect(gx_contracts::scene::RectObject { base: tilted, radius: 0.0 }));
+    report.record(PLANE, "ScenePropertyNotDrawable is produced for a property the engine cannot draw", expect(matches!(&property, Some(Refusal::ScenePropertyNotDrawable { object, property, .. }) if object == "tilted" && property == "rotationX"), format!("a rotationX on a rect was not refused as ScenePropertyNotDrawable: {property:?}")));
+}
+
+/// Regression witnesses for the defects that reopened 3.13. These execute
+/// the renderer, rather than merely checking that refusal variants exist.
+fn drive_software_pixel_refusals(report: &mut Report) {
+    use gx_contracts::color::{OutputTransform, WorkingColorSpace};
+    use gx_contracts::scene::{new_scene, SceneObject};
+    use gx_render_worker::PreparedScene;
+
+    let prepare = |scene| PreparedScene::prepare(scene, &Default::default(), &Default::default(), &MaterialSupport::fixed_function());
+    let mut stroke = new_scene("trim-audit", "Trim audit", WorkingColorSpace::Srgb);
+    stroke.canvas.width = 160;
+    stroke.canvas.height = 80;
+    stroke.objects.push(serde_json::from_value::<SceneObject>(serde_json::json!({
+        "type": "shape", "id": "stroke", "name": "Stroke",
+        "stroke": { "type": "solid", "color": { "r": 1, "g": 1, "b": 1, "a": 1, "space": "srgb" } },
+        "strokeWidth": 10,
+        "path": { "closed": false, "vertices": [{ "x": 10, "y": 20 }, { "x": 110, "y": 20 }],
+            "inTangents": [{ "x": 0, "y": 0 }, { "x": 0, "y": 0 }],
+            "outTangents": [{ "x": 0, "y": 0 }, { "x": 0, "y": 0 }] },
+        "fillEnabled": false, "strokeEnabled": true, "fillRule": "nonzero"
+    })).expect("the trim witness parses"));
+    let full = prepare(stroke.clone());
+    if let SceneObject::Shape(shape) = &mut stroke.objects[0] { shape.trim_end = Some(50.0); }
+    let half = prepare(stroke);
+    let lit = |scene: &PreparedScene| scene.frame(OutputTransform::Srgb).pixels.chunks_exact(4).filter(|pixel| pixel[3] != 0).count();
+    report.record(PLANE, "Trim Paths 50% draws half the stroke instead of silently drawing it whole", expect(
+        matches!((&full, &half), (Ok(full), Ok(half)) if lit(full) == 1000 && lit(half) == 500),
+        format!("trim witnesses: full={:?}, half={:?}", full.as_ref().map(lit), half.as_ref().map(lit))));
+
+    for space in [WorkingColorSpace::Srgb, WorkingColorSpace::LinearSrgb] {
+        let mut scene = new_scene("opacity-audit", "Opacity audit", space);
+        scene.canvas.width = 32;
+        scene.canvas.height = 32;
+        for (id, value, opacity) in [("white", 1.0, 1.0), ("black", 0.0, 0.5)] {
+            scene.objects.push(serde_json::from_value(serde_json::json!({
+                "type": "rect", "id": id, "name": id, "width": 32, "height": 32, "opacity": opacity,
+                "fill": { "type": "solid", "color": { "r": value, "g": value, "b": value, "a": 1, "space": "srgb" } }
+            })).expect("the opacity witness parses"));
+        }
+        let prepared = prepare(scene);
+        for output in [OutputTransform::Srgb, OutputTransform::Rec709] {
+            // Independent reference formula: 50% black over white in the
+            // declared space, followed by the output's transfer function.
+            let linear: f64 = if space == WorkingColorSpace::Srgb { ((0.5_f64 + 0.055) / 1.055).powf(2.4) } else { 0.5 };
+            let encoded = match output {
+                OutputTransform::Srgb => 1.055 * linear.powf(1.0 / 2.4) - 0.055,
+                OutputTransform::Rec709 => if linear < 0.018 { 4.5 * linear } else { 1.099 * linear.powf(0.45) - 0.099 },
+            };
+            let expected = (encoded * 255.0).round() as u8;
+            let matches = prepared.as_ref().is_ok_and(|scene| scene.frame(output).pixels.chunks_exact(4)
+                .all(|pixel| pixel[3] == 255 && pixel[..3].iter().all(|channel| channel.abs_diff(expected) <= 1)));
+            let name = match (space, output) {
+                (WorkingColorSpace::Srgb, OutputTransform::Srgb) => "Vector opacity draws the independent sRGB/Preview reference",
+                (WorkingColorSpace::Srgb, OutputTransform::Rec709) => "Vector opacity draws the independent sRGB/Program reference",
+                (WorkingColorSpace::LinearSrgb, OutputTransform::Srgb) => "Vector opacity draws the independent linear/Preview reference",
+                (WorkingColorSpace::LinearSrgb, OutputTransform::Rec709) => "Vector opacity draws the independent linear/Program reference",
+            };
+            report.record(PLANE, name,
+                expect(matches, format!("expected {expected}, prepare error {:?}", prepared.as_ref().err())));
+        }
+    }
+
+    let mut scene = new_scene("mesh-audit", "Mesh audit", WorkingColorSpace::Srgb);
+    scene.objects.push(serde_json::from_value(serde_json::json!({
+        "type": "mesh", "id": "model", "name": "Model", "meshKind": "model", "depth": 20,
+        "modelAssetId": "model"
+    })).expect("the model witness parses"));
+    let hash = ContentHash("unloadable-model".into());
+    scene.assets.push(serde_json::from_value(serde_json::json!({
+        "assetId": "model", "name": "Model", "kind": "model", "path": "model.gltf", "checksum": hash
+    })).expect("the model asset parses"));
+    let model = PreparedScene::prepare(scene, &std::collections::HashSet::from([hash.clone()]),
+        &std::collections::HashMap::from([(hash, b"unloadable glTF".to_vec())]), &MaterialSupport::fixed_function());
+    report.record(PLANE, "An unloadable glTF refuses by object name at prepare instead of drawing nothing", expect(
+        matches!(&model, Err(Refusal::ObjectKindNotDrawable { object, kind, .. }) if object == "model" && kind == "mesh"),
+        format!("model prepare result: {:?}", model.err())));
 }
 
 fn material_with_blend(blend_mode: BlendMode) -> MaterialDefinition {
@@ -1530,6 +1636,9 @@ fn is_driven(variant: &str) -> bool {
             | "SceneWorkingSpaceMismatch"
             | "ProjectSettingsInvalid"
             | "ShapeTrimInvalid"
+            | "SceneHierarchyInvalid"
+            | "ObjectKindNotDrawable"
+            | "ScenePropertyNotDrawable"
             | "AssetBatchEmpty"
             | "AssetKindNotAddable"
             | "AssetFormatUnrecognised"
@@ -1691,10 +1800,6 @@ fn limitations() -> &'static [Limitation] {
         Limitation {
             variant: "MeshModelInvalid",
             reason: "mesh preparation runs only in the render worker; the mock engine does not prepare meshes",
-        },
-        Limitation {
-            variant: "MeshModelGeometryUnsupported",
-            reason: "mesh preparation runs only in the render worker; the mock engine does not prepare meshes (driven by the worker's own test, a_gltf_model_refuses_at_publish_instead_of_drawing_nothing)",
         },
         Limitation {
             variant: "MeshMaterialElementsMismatch",

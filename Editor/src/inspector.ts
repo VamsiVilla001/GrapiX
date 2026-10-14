@@ -183,6 +183,56 @@ export function inspectorPanel(
 }
 
 // ---------------------------------------------------------------------------
+// Properties sections (11.63). The Editor presents the inspector the way After
+// Effects' Properties panel does: a Layer section, a Transform section, then
+// the kind's own sections. Sections are presentation over the same field
+// nodes — the node tree, the agent view and the edit path are unchanged — and
+// a field no section claims is shown under "Other", never dropped.
+// ---------------------------------------------------------------------------
+
+export interface InspectorSection {
+  readonly id: string;
+  readonly title: string;
+  readonly fields: readonly UiNode[];
+}
+
+const SECTIONS: readonly { readonly id: string; readonly title: string; readonly keys: readonly string[] }[] = [
+  { id: "layer", title: "Layer", keys: ["name", "visible", "locked"] },
+  // After Effects' order: position, scale, rotation, opacity.
+  { id: "transform", title: "Transform", keys: ["x", "y", "scaleX", "scaleY", "rotation", "opacity"] },
+  { id: "text", title: "Text", keys: ["text", "fontId", "size"] },
+  { id: "shape", title: "Shape", keys: ["radius"] },
+];
+
+/// The field key an inspector node carries, from its id.
+export function inspectorFieldKey(node: UiNode): string | undefined {
+  return node.id.startsWith("inspector/") ? node.id.slice("inspector/".length) : undefined;
+}
+
+/// Group an inspector panel's fields into sections, in display order.
+export function inspectorSections(panel: UiNode): InspectorSection[] {
+  const fields = panel.children ?? [];
+  const byKey = new Map<string, UiNode>();
+  for (const field of fields) {
+    const key = inspectorFieldKey(field);
+    if (key !== undefined) byKey.set(key, field);
+  }
+  const placed = new Set<UiNode>();
+  const sections: InspectorSection[] = [];
+  for (const section of SECTIONS) {
+    const members = section.keys.flatMap((key) => {
+      const field = byKey.get(key);
+      return field ? [field] : [];
+    });
+    for (const member of members) placed.add(member);
+    if (members.length > 0) sections.push({ id: section.id, title: section.title, fields: members });
+  }
+  const rest = fields.filter((field) => !placed.has(field));
+  if (rest.length > 0) sections.push({ id: "other", title: "Other", fields: rest });
+  return sections;
+}
+
+// ---------------------------------------------------------------------------
 // Command construction. The inspector decides what the author asked for; the
 // Rust edit rules (`gx_contracts::object_edit`, `authoring`) decide whether it
 // may happen, and refuse by name if not. One gesture is one `SceneEdit` batch,

@@ -1469,7 +1469,10 @@ pub fn new_scene(id: &str, name: &str, working_color_space: WorkingColorSpace) -
             height: 1080,
             frame_rate: RationalRate::P50,
         },
-        timeline: SceneTimeline::default(),
+        // New authoring graphics start with a five-second timeline at P50.
+        // A zero-frame default prevented scrubbing, key creation and playback.
+        // Loaded documents retain their authored duration, including zero.
+        timeline: SceneTimeline { duration_frames: 250, ..SceneTimeline::default() },
         data_context: Default::default(),
         assets: Vec::new(),
         fonts: Vec::new(),
@@ -1873,6 +1876,16 @@ mod parse_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_graphics_have_time_to_author_but_loaded_durations_are_not_guessed() {
+        let mut graphic = new_scene("score", "Score", crate::color::WorkingColorSpace::NEW_PROJECT);
+        assert_eq!(graphic.canvas.frame_rate, RationalRate::P50);
+        assert_eq!(graphic.timeline.duration_frames, 250);
+        graphic.timeline.duration_frames = 0;
+        let loaded = parse_scene_document(&serde_json::to_vec(&graphic).unwrap()).unwrap();
+        assert_eq!(loaded.timeline.duration_frames, 0, "loading preserves an authored static duration");
+    }
 
     #[test]
     fn the_same_content_hashes_alike_and_one_changed_property_does_not() {

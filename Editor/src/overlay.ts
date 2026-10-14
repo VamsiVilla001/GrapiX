@@ -52,18 +52,30 @@ const HANDLE_POSITIONS: readonly HandlePosition[] = ["nw", "n", "ne", "e", "se",
 
 /** Axis-aligned screen bounds of an authored object after XY scale/rotation. */
 export function objectOverlayBounds(object: SceneObject): OverlayBounds {
-  const width = Math.abs(object.width * object.scaleX);
-  const height = Math.abs(object.height * object.scaleY);
   const radians = (object.rotation * Math.PI) / 180;
-  const cos = Math.abs(Math.cos(radians));
-  const sin = Math.abs(Math.sin(radians));
-  const projectedWidth = width * cos + height * sin;
-  const projectedHeight = width * sin + height * cos;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  // Planar content uses the engine's top-left origin and authored anchor;
+  // mesh geometry remains centred on its 3D origin.
+  const anchorX = object.type === "mesh" ? object.width / 2 : (object.anchor?.x ?? 0);
+  const anchorY = object.type === "mesh" ? object.height / 2 : (object.anchor?.y ?? 0);
+  const corners = [
+    [0, 0], [object.width, 0], [0, object.height], [object.width, object.height],
+  ].map(([x = 0, y = 0]) => {
+    const scaledX = (x - anchorX) * object.scaleX;
+    const scaledY = (y - anchorY) * object.scaleY;
+    return {
+      x: object.x + scaledX * cos - scaledY * sin,
+      y: object.y + scaledX * sin + scaledY * cos,
+    };
+  });
+  const left = Math.min(...corners.map((point) => point.x));
+  const top = Math.min(...corners.map((point) => point.y));
   return {
-    x: object.x - projectedWidth / 2,
-    y: object.y - projectedHeight / 2,
-    width: projectedWidth,
-    height: projectedHeight,
+    x: left,
+    y: top,
+    width: Math.max(...corners.map((point) => point.x)) - left,
+    height: Math.max(...corners.map((point) => point.y)) - top,
   };
 }
 

@@ -46,19 +46,23 @@ use crate::text::{prepare_texts, PreparedTexts};
 #[derive(Debug, Clone)]
 pub struct PreparedScene {
     document: SceneDocument,
+    /// The document with its bindings applied against its data context
+    /// (3.13). What renders, and what animation evaluates on; `document`
+    /// stays the authored one.
+    resolved: SceneDocument,
     /// Effective transforms and state, resolved once (1.2's resolver).
     effective: Vec<ResolvedObject>,
-    /// Refused hierarchy edges. Not fatal — a scene being repaired still
-    /// resolves — but carried so the engine can report them rather than
-    /// leaving an object mysteriously unparented.
+    /// Hierarchy diagnostics. Preparation refuses any repaired edge, so a
+    /// successfully prepared scene has none; retained for inspection callers.
     diagnostics: Vec<HierarchyDiagnostic>,
     /// Object index, so a lookup during rendering is not a linear scan of the
     /// draw list for every reference.
     by_id: HashMap<String, usize>,
     /// Tessellated vector draw commands, built once per publication.
     paths: PreparedPaths,
-    /// The current static vector surface, composited in linear light.
-    vector_surface: RasterSurface,
+    /// The whole static frame, composed once at publish in draw order and in
+    /// the scene's working space.
+    static_frame: RasterSurface,
     /// Shaped glyph runs, restricted to fonts carried by the scene.
     texts: PreparedTexts,
     /// Prepared primitive/glTF geometry, materials, lights and camera.
@@ -96,27 +100,17 @@ impl PreparedScene {
         {
             return Err(refusal.code);
         }
+        // 3.13: bindings apply, all or nothing, as the Editor's preview applies
+        // them; the bound document is what renders.
+        let resolved = gx_contracts::bindings::resolve_scene_bindings(&document)?;
+        // 3.13: what this engine cannot draw refuses by name, never drops.
+        crate::support::refuse_what_the_software_path_cannot_draw(&resolved)?;
 
-        let resolution = resolve_hierarchy(&document.objects);
-        let paths = PreparedPaths::prepare(&document, &resolution.effective)?;
-        let vector_surface = LyonPathRasteriser.rasterise(
-            &paths,
-            document.canvas.width,
-            document.canvas.height,
-        );
-        let texts = prepare_texts(&document, asset_bytes)?;
-        let meshes = prepare_meshes(&document, available, asset_bytes, support)?;
-        // 3.13: the software path has no model renderer (3.7 owns it). A model
-        // refuses here, at publish, instead of preparing to empty geometry
-        // and drawing nothing on air.
-        if let Some(object) = document.objects.iter().find_map(|object| match object {
-            SceneObject::Mesh(mesh) if mesh.mesh_kind == gx_contracts::scene::MeshPrimitiveKind::Model => {
-                Some(mesh.base.id.clone())
-            }
-            _ => None,
-        }) {
-            return Err(Refusal::MeshModelGeometryUnsupported { object });
-        }
+        let resolution = resolve_hierarchy(&resolved.objects);
+        let paths = PreparedPaths::prepare(&resolved, &resolution.effective)?;
+        let texts = prepare_texts(&resolved, asset_bytes)?;
+        let meshes = prepare_meshes(&resolved, available, asset_bytes, support)?;
+        let static_frame = compose(&resolved, &resolution.effective, &paths, &texts)?;
         let by_id = resolution
             .effective
             .iter()
@@ -126,11 +120,12 @@ impl PreparedScene {
 
         Ok(Self {
             document,
+            resolved,
             effective: resolution.effective,
             diagnostics: resolution.diagnostics,
             by_id,
             paths,
-            vector_surface,
+            static_frame,
             texts,
             meshes,
         })
@@ -168,30 +163,10 @@ impl PreparedScene {
         &self.paths
     }
 
-    /// Encode the prepared linear surface for one explicit output transform.
-    ///
-    /// Vector, text and mesh content are composited in scene draw order into
-    /// a single linear-light surface, then encoded once at the output boundary.
+    /// Encode the static frame for one explicit output transform. It was
+    /// composed once at publish, in draw order across object kinds.
     pub fn frame(&self, output: OutputTransform) -> Frame {
-        let mut surface = self.vector_surface.clone();
-        // Text and mesh rasterisation are overlays on the vector base. Every
-        // refusal they could produce was already validated at publish time;
-        // a refusal here is a bug, not a runtime condition.
-        crate::text::rasterise_texts(
-            &self.texts,
-            &self.document,
-            &self.effective,
-            &mut surface,
-        )
-        .expect("text rasterisation refusal survived publish-time validation");
-        crate::mesh::rasterise_meshes(
-            &self.meshes,
-            &self.document,
-            &self.effective,
-            &mut surface,
-        )
-        .expect("mesh rasterisation refusal survived publish-time validation");
-        surface.encode(output, self.document.working_color_space)
+        self.static_frame.encode(output, self.document.working_color_space)
     }
     /// Whether Program must evaluate this scene for each output frame.
     pub fn has_animation(&self) -> bool {
@@ -231,8 +206,8 @@ impl PreparedScene {
             return Ok(self.frame(output));
         }
 
-        let mut evaluated = self.document.clone();
-        for channel in &self.document.timeline.channels {
+        let mut evaluated = self.resolved.clone();
+        for channel in &self.resolved.timeline.channels {
             if let Some(value) = evaluate_channel(channel, scene_frame)? {
                 set_base_property(
                     &mut evaluated,
@@ -244,24 +219,17 @@ impl PreparedScene {
         }
         let resolution = resolve_hierarchy(&evaluated.objects);
         let paths = PreparedPaths::prepare(&evaluated, &resolution.effective)?;
-        let mut surface = LyonPathRasteriser.rasterise(
-            &paths,
-            evaluated.canvas.width,
-            evaluated.canvas.height,
-        );
-        crate::text::rasterise_texts(
-            &self.texts,
-            &evaluated,
-            &resolution.effective,
-            &mut surface,
-        )?;
-        crate::mesh::rasterise_meshes(
-            &self.meshes,
-            &evaluated,
-            &resolution.effective,
-            &mut surface,
-        )?;
+        let surface = compose(&evaluated, &resolution.effective, &paths, &self.texts)?;
         Ok(surface.encode(output, self.document.working_color_space))
+    }
+
+    /// The draw order composition uses: the document's order, stably sorted
+    /// by `z_index` ("draw order within a layer"), the order the Editor's
+    /// viewport also uses.
+    pub fn draw_order(document: &SceneDocument) -> Vec<usize> {
+        let mut order: Vec<usize> = (0..document.objects.len()).collect();
+        order.sort_by_key(|&index| document.objects[index].base().z_index);
+        order
     }
 
     /// Glyph runs shaped from packaged fonts only.
@@ -273,6 +241,33 @@ impl PreparedScene {
     pub fn meshes(&self) -> &PreparedMeshes {
         &self.meshes
     }
+}
+
+/// Compose a frame in draw order across object kinds (3.13). Before this,
+/// every vector was drawn first, then every text, whatever the scene said.
+/// Meshes are refused at publish (`support.rs`), so there are none to draw.
+fn compose(
+    document: &SceneDocument,
+    effective: &[ResolvedObject],
+    paths: &PreparedPaths,
+    texts: &PreparedTexts,
+) -> Result<RasterSurface, Refusal> {
+    let mut surface = RasterSurface::transparent(document.canvas.width, document.canvas.height);
+    let mut by_object: HashMap<&str, Vec<&crate::rasterise::PreparedPath>> = HashMap::new();
+    for path in paths.paths() {
+        by_object.entry(path.object_id()).or_default().push(path);
+    }
+    for index in PreparedScene::draw_order(document) {
+        let object = &document.objects[index];
+        let id = object.base().id.as_str();
+        if let Some(object_paths) = by_object.get(id) {
+            LyonPathRasteriser.rasterise_into(object_paths, &mut surface);
+        }
+        if matches!(object, SceneObject::Text(_)) {
+            crate::text::rasterise_text(texts, id, document, effective, &mut surface)?;
+        }
+    }
+    Ok(surface)
 }
 
 #[cfg(test)]
@@ -531,8 +526,161 @@ mod tests {
         // the horizontal leg, 300 px in the scene; measuring in scene space
         // would stop at 200 px.
         let ell = || vec![v(0.0, 0.0), v(100.0, 0.0), v(100.0, 100.0)];
-        let local_half = lit(shape(ell(), false, 3.0, Some((0.0, 50.0, 0.0))));
-        assert!((2800..=3200).contains(&local_half), "half the local length lit {local_half}");
+        let scaled = PreparedScene::prepare(
+            document(vec![shape(ell(), false, 3.0, Some((0.0, 50.0, 0.0)))]),
+            &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function(),
+        );
+        assert!(matches!(scaled, Err(Refusal::ScenePropertyNotDrawable { property, .. })
+            if property == "scaled strokeWidth"), "a scaled stroke must not keep its unscaled width");
+    }
+
+    /// 3.13: a binding applies on air. A rect bound to `pos.x` = 900 draws
+    /// at 900, not at its authored 0.
+    #[test]
+    fn a_bound_property_draws_its_data_value() {
+        use gx_contracts::color::Rgba;
+        let mut base = ObjectBase::new("bar", "bar");
+        base.width = 50.0;
+        base.height = 50.0;
+        base.fill = Some(ColorValue::Solid { color: Rgba::srgb(1.0, 1.0, 1.0, 1.0) });
+        base.bindings = Some(serde_json::Map::from_iter([("x".to_string(), serde_json::json!("pos.x"))]));
+        let mut scene = document(vec![SceneObject::Rect(RectObject { base, radius: 0.0 })]);
+        scene.data_context = serde_json::from_value(serde_json::json!({ "pos": { "x": 900 } })).unwrap();
+        let prepared = PreparedScene::prepare(scene, &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function())
+            .expect("the bound scene prepares");
+        let frame = prepared.frame(OutputTransform::Srgb);
+        let lit_at = |x: usize, y: usize| frame.pixels[(y * frame.width as usize + x) * 4 + 3] > 0;
+        assert!(lit_at(920, 20), "the rect draws at its bound x");
+        assert!(!lit_at(20, 20), "and not at its authored x");
+        assert_eq!(prepared.document().objects[0].base().x, 0.0, "the authored document is kept");
+    }
+
+    /// 3.13: objects compose in draw order across kinds. A rect after a text
+    /// covers it; the same rect with a lower `z_index` goes beneath it.
+    #[test]
+    fn objects_compose_in_draw_order_across_kinds() {
+        use gx_contracts::color::Rgba;
+        const INTER: &[u8] = include_bytes!("../tests/fixtures/Inter-Regular.ttf");
+        let hash = ContentHash("inter".into());
+        let mut scene = document(Vec::new());
+        scene.assets.push(AssetLibraryItem {
+            asset_id: "inter".into(),
+            name: "Inter".into(),
+            kind: AssetKind::Font,
+            path: "fonts/inter.ttf".into(),
+            checksum: Some(hash.clone()),
+            mime_type: Some("font/ttf".into()),
+            size_bytes: Some(INTER.len() as u64),
+            status: Some(AssetAvailability::Ready),
+            provenance: Default::default(),
+        });
+        let mut font = inter();
+        if let FontSource::File { asset_id, .. } = &mut font.faces[0].source {
+            *asset_id = "inter".into();
+        }
+        scene.fonts.push(font);
+        let mut text = ObjectBase::new("caption", "caption");
+        text.x = 100.0;
+        text.y = 100.0;
+        text.width = 600.0;
+        text.height = 300.0;
+        text.fill = Some(ColorValue::Solid { color: Rgba::srgb(1.0, 1.0, 1.0, 1.0) });
+        let caption = SceneObject::Text(TextObject {
+            base: text,
+            text: "I".into(),
+            font_id: "font_inter".into(),
+            size: 200.0,
+            layout: Default::default(),
+            auto_fit: Default::default(),
+            writing_mode: Default::default(),
+            vertical_align: Default::default(),
+            direction: Default::default(),
+            text_case: Default::default(),
+            decoration: Default::default(),
+            overflow: Default::default(),
+            align: Default::default(),
+            line_height: None,
+            letter_spacing: 0.0,
+            word_spacing: 0.0,
+            paragraph_spacing: 0.0,
+            text_indent: 0.0,
+        });
+        let cover = |z_index: i32| {
+            let mut base = ObjectBase::new("cover", "cover");
+            base.x = 0.0;
+            base.y = 0.0;
+            base.width = 1000.0;
+            base.height = 600.0;
+            base.z_index = z_index;
+            base.fill = Some(ColorValue::Solid { color: Rgba::srgb(1.0, 0.0, 0.0, 1.0) });
+            SceneObject::Rect(RectObject { base, radius: 0.0 })
+        };
+        let white_pixels = |objects: Vec<SceneObject>| {
+            let mut composed = scene.clone();
+            composed.objects = objects;
+            let prepared = PreparedScene::prepare(
+                composed,
+                &HashSet::from([hash.clone()]),
+                &AssetBytes::from([(hash.clone(), INTER.to_vec())]),
+                &MaterialSupport::fixed_function(),
+            )
+            .expect("the scene prepares");
+            prepared
+                .frame(OutputTransform::Srgb)
+                .pixels
+                .chunks(4)
+                .filter(|pixel| pixel[0] > 200 && pixel[1] > 200 && pixel[2] > 200)
+                .count()
+        };
+        assert!(white_pixels(vec![caption.clone()]) > 1000, "the caption draws on its own");
+        assert_eq!(white_pixels(vec![caption.clone(), cover(0)]), 0, "a rect after the text covers it");
+        assert!(white_pixels(vec![caption, cover(-1)]) > 1000, "a lower z-index draws beneath");
+    }
+
+    /// 3.13: a shape is the union of its triangles. A semi-transparent stroke
+    /// with a sharp corner composites every pixel once, so every lit pixel has
+    /// the same alpha; overlapping join triangles must not darken it.
+    #[test]
+    fn a_semi_transparent_stroke_composites_each_pixel_once() {
+        use gx_contracts::color::Rgba;
+        use gx_contracts::scene::{BezierPath, FillRule, ShapeObject, Vec2};
+        let v = |x: f64, y: f64| Vec2 { x, y };
+        let mut base = ObjectBase::new("zigzag", "zigzag");
+        base.x = 100.0;
+        base.y = 100.0;
+        base.stroke = Some(ColorValue::Solid { color: Rgba::srgb(1.0, 1.0, 1.0, 0.5) });
+        base.stroke_width = 24.0;
+        let zigzag = SceneObject::Shape(ShapeObject {
+            base,
+            path: BezierPath {
+                closed: false,
+                vertices: vec![v(0.0, 0.0), v(300.0, 0.0), v(0.0, 60.0), v(300.0, 120.0)],
+                in_tangents: vec![v(0.0, 0.0); 4],
+                out_tangents: vec![v(0.0, 0.0); 4],
+            },
+            compound_paths: None,
+            fill_enabled: false,
+            stroke_enabled: true,
+            fill_rule: FillRule::Nonzero,
+            trim_start: None,
+            trim_end: None,
+            trim_offset: None,
+        });
+        let prepared = PreparedScene::prepare(
+            document(vec![zigzag]),
+            &HashSet::new(),
+            &AssetBytes::new(),
+            &MaterialSupport::fixed_function(),
+        )
+        .expect("the stroke prepares");
+        let alphas: std::collections::BTreeSet<u8> = prepared
+            .frame(OutputTransform::Srgb)
+            .pixels
+            .chunks(4)
+            .map(|pixel| pixel[3])
+            .filter(|alpha| *alpha > 0)
+            .collect();
+        assert_eq!(alphas.len(), 1, "lit pixels carry several alphas: {alphas:?}");
     }
 
     #[test]
@@ -708,17 +856,19 @@ mod tests {
     }
 
     #[test]
-    fn a_refused_hierarchy_edge_is_carried_rather_than_lost() {
+    fn a_repaired_hierarchy_refuses_at_publish_by_name() {
+        // 3.13: the resolver still repairs the edge deterministically so an
+        // author can keep editing, but publishing it would put a parent
+        // choice nobody made on air, so the edge refuses by name.
         let group = SceneObject::Group(GroupObject {
             base: ObjectBase::new("g", "g"),
             child_ids: vec!["ghost".into()],
         });
-        let prepared = PreparedScene::prepare(document(vec![group, rect("r")]), &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function())
-        .expect("a scene being repaired still prepares");
-        assert_eq!(
-            prepared.diagnostics().len(),
-            1,
-            "the dropped edge must be reportable, not invisible"
+        let refused = PreparedScene::prepare(document(vec![group, rect("r")]), &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function());
+        assert!(
+            matches!(&refused, Err(Refusal::SceneHierarchyInvalid { parent, child, problem }) if parent == "g" && child == "ghost" && problem == "missingChild"),
+            "{:?}",
+            refused.err()
         );
     }
 

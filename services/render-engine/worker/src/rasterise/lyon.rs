@@ -19,31 +19,31 @@ use gx_contracts::scene::{
 };
 use gx_contracts::Refusal;
 
-use super::{solid_paint, PathRasteriser, PathVertex, PreparedPath, PreparedPaths, RasterSurface};
+use super::{solid_paint, PathRasteriser, PathVertex, PreparedPath, RasterSurface};
 
 /// The production path backend, with `lyon` confined behind [`PathRasteriser`].
 #[derive(Debug, Default, Clone, Copy)]
 pub struct LyonPathRasteriser;
 
 impl PathRasteriser for LyonPathRasteriser {
-    fn rasterise(&self, paths: &PreparedPaths, width: u32, height: u32) -> RasterSurface {
-        let mut surface = RasterSurface::transparent(width, height);
-        for path in paths.paths() {
-            for triangle in path.indices().chunks_exact(3) {
-                let (Some(a), Some(b), Some(c)) = (
-                    path.vertices().get(triangle[0] as usize),
-                    path.vertices().get(triangle[1] as usize),
-                    path.vertices().get(triangle[2] as usize),
-                ) else {
-                    // This is unreachable for geometry made by lyon. The
-                    // bounds check keeps a corrupted cache from becoming an
-                    // out-of-bounds write in the frame loop.
-                    continue;
-                };
-                rasterise_triangle(&mut surface, *a, *b, *c, path.paint());
-            }
+    fn rasterise_into(&self, paths: &[&PreparedPath], surface: &mut RasterSurface) {
+        for path in paths {
+            let triangles: Vec<[PathVertex; 3]> = path
+                .indices()
+                .chunks_exact(3)
+                .filter_map(|triangle| {
+                    // Unreachable for geometry made by lyon. The bounds check
+                    // keeps a corrupted cache from becoming an out-of-bounds
+                    // write in the frame loop.
+                    Some([
+                        *path.vertices().get(triangle[0] as usize)?,
+                        *path.vertices().get(triangle[1] as usize)?,
+                        *path.vertices().get(triangle[2] as usize)?,
+                    ])
+                })
+                .collect();
+            fill_union(surface, &triangles, path.paint());
         }
-        surface
     }
 }
 
@@ -534,7 +534,7 @@ fn prepare_stroke(
     append_fill(object, geometry, paint, output)
 }
 
-fn transform(
+pub(crate) fn transform(
     anchor: &Option<Vec2>,
     resolved: &ResolvedObject,
     x: f64,
@@ -548,43 +548,72 @@ fn transform(
     let sin = radians.sin();
     let scene_x = local_x * cos - local_y * sin + resolved.x;
     let scene_y = local_x * sin + local_y * cos + resolved.y;
-    if !scene_x.is_finite() || !scene_y.is_finite() {
+    if !(scene_x as f32).is_finite() || !(scene_y as f32).is_finite() {
         return Err(Refusal::VectorTessellationFailed {
             object: resolved.id.clone(),
-            detail: "a resolved path coordinate is not finite".into(),
+            detail: "a resolved path coordinate cannot be represented as a finite f32".into(),
         });
     }
     Ok(point(scene_x as f32, scene_y as f32))
 }
 
-fn rasterise_triangle(
+/// Fill a shape given as triangles with one paint, compositing every covered
+/// pixel exactly once (3.13). A shape is the union of its triangles:
+/// overlapping ones — a stroke's joins, kerned glyphs — must not darken a
+/// semi-transparent paint where they overlap. Coverage is point-sampled at
+/// pixel centres.
+pub(crate) fn fill_union(
     surface: &mut RasterSurface,
-    a: PathVertex,
-    b: PathVertex,
-    c: PathVertex,
+    triangles: &[[PathVertex; 3]],
     paint: crate::colour_pipeline::WorkingRgba,
 ) {
-    let min_x = a.x.min(b.x).min(c.x).floor().max(0.0) as u32;
-    let min_y = a.y.min(b.y).min(c.y).floor().max(0.0) as u32;
-    let max_x = a.x.max(b.x).max(c.x).ceil().min(surface.width() as f32) as u32;
-    let max_y = a.y.max(b.y).max(c.y).ceil().min(surface.height() as f32) as u32;
-    let area = edge(a, b, c.x, c.y);
-    if area == 0.0 {
+    if triangles.is_empty() || paint.a <= 0.0 {
         return;
     }
-    for y in min_y..max_y {
-        for x in min_x..max_x {
-            let sample_x = x as f32 + 0.5;
-            let sample_y = y as f32 + 0.5;
-            let ab = edge(a, b, sample_x, sample_y);
-            let bc = edge(b, c, sample_x, sample_y);
-            let ca = edge(c, a, sample_x, sample_y);
-            if (area > 0.0 && ab >= 0.0 && bc >= 0.0 && ca >= 0.0)
-                || (area < 0.0 && ab <= 0.0 && bc <= 0.0 && ca <= 0.0)
-            {
-                surface.composite(x, y, paint);
+    let (mut min_x, mut min_y, mut max_x, mut max_y) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    for corner in triangles.iter().flatten() {
+        min_x = min_x.min(corner.x);
+        min_y = min_y.min(corner.y);
+        max_x = max_x.max(corner.x);
+        max_y = max_y.max(corner.y);
+    }
+    let min_x = min_x.floor().max(0.0) as u32;
+    let min_y = min_y.floor().max(0.0) as u32;
+    let max_x = max_x.ceil().min(surface.width() as f32).max(0.0) as u32;
+    let max_y = max_y.ceil().min(surface.height() as f32).max(0.0) as u32;
+    if min_x >= max_x || min_y >= max_y {
+        return;
+    }
+    let width = (max_x - min_x) as usize;
+    let mut covered = vec![false; width * (max_y - min_y) as usize];
+    for &[a, b, c] in triangles {
+        let area = edge(a, b, c.x, c.y);
+        if area == 0.0 {
+            continue;
+        }
+        let x0 = a.x.min(b.x).min(c.x).floor().max(min_x as f32) as u32;
+        let y0 = a.y.min(b.y).min(c.y).floor().max(min_y as f32) as u32;
+        let x1 = a.x.max(b.x).max(c.x).ceil().min(max_x as f32) as u32;
+        let y1 = a.y.max(b.y).max(c.y).ceil().min(max_y as f32) as u32;
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let sample_x = x as f32 + 0.5;
+                let sample_y = y as f32 + 0.5;
+                let ab = edge(a, b, sample_x, sample_y);
+                let bc = edge(b, c, sample_x, sample_y);
+                let ca = edge(c, a, sample_x, sample_y);
+                if (area > 0.0 && ab >= 0.0 && bc >= 0.0 && ca >= 0.0)
+                    || (area < 0.0 && ab <= 0.0 && bc <= 0.0 && ca <= 0.0)
+                {
+                    covered[(y - min_y) as usize * width + (x - min_x) as usize] = true;
+                }
             }
         }
+    }
+    for (index, _) in covered.iter().enumerate().filter(|(_, covered)| **covered) {
+        let x = min_x + (index % width) as u32;
+        let y = min_y + (index / width) as u32;
+        surface.composite(x, y, paint);
     }
 }
 

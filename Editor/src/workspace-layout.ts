@@ -6,6 +6,13 @@
 // across the bottom. This is a recorded product decision, not a claim that the
 // participant study in 9.4 ran.
 //
+// **Revised for 11.63 (13 October 2026, at the user's request):** the same
+// grouping arranged the way EffectCraft's After Effects-style workspace is —
+// project scenes, objects and assets at left; Preview transport, then
+// Properties (the inspector), then the remaining authoring panels at right.
+// Layout version 2; a layout stored against version 1 is replaced by this
+// default, and the replacement is reported.
+//
 // The model owns the ordinary engineering around that arrangement: regions,
 // panel moves, collapse, resize, persistence, reconciliation and reset.
 // Authors may customise it without changing scene state.
@@ -49,7 +56,7 @@ export interface Layout {
   readonly regions: Readonly<Record<RegionId, RegionState>>;
 }
 
-export const LAYOUT_VERSION = 1;
+export const LAYOUT_VERSION = 2;
 
 /// Why a layout operation could not run. Free text, shown to the author and
 /// returned to an agent verbatim — the same shape `Editor/src/workspace.ts`
@@ -67,25 +74,26 @@ export function isRefused<T>(result: T | LayoutRefusal): result is LayoutRefusal
 export const CARD_SORT_LAYOUT: Layout = {
   version: LAYOUT_VERSION,
   regions: {
-    left: { panels: ["scene-manager", "object-manager"], size: 0.2, collapsed: false },
+    left: { panels: ["scene-manager", "object-manager", "assets"], size: 0.19, collapsed: false },
     centre: { panels: ["viewport"], size: 0.55, collapsed: false },
     right: {
       panels: [
+        "preview",
+        "unsupported",
         "inspector",
-        "control-contract",
-        "take-page",
-        "bindings",
+        "animation",
         "fonts",
         "text-styles",
         "materials",
-        "assets",
-        "animation",
+        "control-contract",
+        "take-page",
+        "bindings",
         "publish",
       ],
-      size: 0.25,
+      size: 0.21,
       collapsed: false,
     },
-    bottom: { panels: ["timeline"], size: 0.3, collapsed: false },
+    bottom: { panels: ["timeline"], size: 0.34, collapsed: false },
   },
 };
 
@@ -245,6 +253,19 @@ export function restoreLayout(
       layout: defaultLayout(),
       notes: [
         `the stored layout is version ${parsed.version}, newer than this build understands (${LAYOUT_VERSION}); the default has been used`,
+      ],
+    };
+  }
+
+  if (parsed.version < LAYOUT_VERSION) {
+    // Arranged against an earlier default. Reconciling it would keep the old
+    // arrangement and bolt the new panels on at the end, which is neither
+    // what the author built nor the new default; the default is used and the
+    // replacement is said out loud.
+    return {
+      layout: defaultLayout(),
+      notes: [
+        `the stored layout is version ${parsed.version}, arranged for an earlier default; the version ${LAYOUT_VERSION} default has been used`,
       ],
     };
   }

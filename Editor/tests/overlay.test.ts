@@ -64,8 +64,15 @@ describe("selection outlines and handles", () => {
     const bounds = objectOverlayBounds(rect("rotated", { width: 100, height: 40, rotation: 90 }));
     expect(bounds.width).toBeCloseTo(40, 10);
     expect(bounds.height).toBeCloseTo(100, 10);
-    expect(bounds.x + bounds.width / 2).toBeCloseTo(100, 10);
-    expect(bounds.y + bounds.height / 2).toBeCloseTo(100, 10);
+    expect(bounds.x).toBeCloseTo(60, 10);
+    expect(bounds.y).toBeCloseTo(100, 10);
+  });
+
+  it("includes authored anchors and mirrored scales in selection and hit bounds", () => {
+    const object = rect("anchored", { anchor: { x: 20, y: 10 }, scaleX: -2 });
+    expect(objectOverlayBounds(object)).toEqual({ x: -20, y: 90, width: 160, height: 40 });
+    expect(hitTestOverlay(scene([object]), { x: -10, y: 100 })).toBe("anchored");
+    expect(hitTestOverlay(scene([object]), { x: 150, y: 100 })).toBeUndefined();
   });
 
   it("emits one outline and eight handles for an editable selection", () => {

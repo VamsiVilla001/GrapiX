@@ -231,8 +231,31 @@ impl TilePlan {
         &self.tiles
     }
 
+    /// Composite the stage from its tiles, each tile contributing its core
+    /// unchanged. Program and Preview use this: authored pixels go to air as
+    /// authored (3.13). Before, every frame went through `composite_filtered`
+    /// and its 3x3 box filter, blurring all of Program.
+    pub fn composite(&self, source: impl Fn(StagePoint) -> [u8; 4]) -> Result<Frame, TileError> {
+        let mut pixels = vec![0; bytes_for(self.stage.width, self.stage.height)?];
+        for tile in &self.tiles {
+            for y in 0..tile.core.height {
+                for x in 0..tile.core.width {
+                    let point = StagePoint {
+                        x: self.stage.origin.x + f64::from(tile.core.x + x),
+                        y: self.stage.origin.y + f64::from(tile.core.y + y),
+                    };
+                    let destination = pixel_offset(self.stage.width, tile.core.x + x, tile.core.y + y);
+                    pixels[destination..destination + 4].copy_from_slice(&source(point));
+                }
+            }
+        }
+        Ok(Frame { width: self.stage.width, height: self.stage.height, pixels })
+    }
+
     /// Render a filtered stage by materializing every tile target and cropping
-    /// only its core into the composite.
+    /// only its core into the composite. This is 3.9's proof that overscan
+    /// keeps a filtered composite seam-free, for the effects that will need
+    /// it; Program does not filter.
     ///
     /// `source` represents the stage content before the filter. It receives
     /// absolute stage positions because it is CPU-side scene evaluation; a GPU

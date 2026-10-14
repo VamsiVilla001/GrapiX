@@ -70,6 +70,11 @@ export interface TimelineModelOptions {
   readonly selectedIds?: readonly string[];
   /// Objects whose tracks are collapsed away.
   readonly collapsedIds?: readonly string[];
+  /// List every object as a layer row, in document order, whether or not it
+  /// is animated (11.63). Tracks still follow the selection: a layer outside
+  /// it shows its row and no tracks. Off, the rows are 11.22's: only animated
+  /// objects, ordered by name.
+  readonly allObjects?: boolean;
 }
 
 export function timelineModel(
@@ -106,8 +111,10 @@ export function timelineModel(
       : left.objectName.localeCompare(right.objectName),
   );
 
-  const rows: TimelineRow[] = [];
-  let index = 0;
+  const rows: TimelineRow[] = options.allObjects
+    ? layerRows(document, tracks, collapsed)
+    : [];
+  let index = options.allObjects ? tracks.length : 0;
   while (index < tracks.length) {
     const objectId = tracks[index]!.objectId;
     const owned: number[] = [];
@@ -142,6 +149,56 @@ export function timelineModel(
     frameRate: document.canvas.frameRate,
     keyCount,
   };
+}
+
+/// Every object as a layer row, in document order, each followed by its tracks
+/// unless collapsed (11.63).
+///
+/// A channel whose object is not in the document still gets a row after the
+/// layers, named by its id — the same treatment the name-ordered rows give it
+/// — so a track is never dropped because its owner is missing.
+function layerRows(
+  document: SceneDocument,
+  tracks: readonly TimelineTrack[],
+  collapsed: readonly string[],
+): TimelineRow[] {
+  const owned = new Map<string, number[]>();
+  tracks.forEach((track, index) => {
+    const list = owned.get(track.objectId);
+    if (list) list.push(index);
+    else owned.set(track.objectId, [index]);
+  });
+
+  const rows: TimelineRow[] = [];
+  const emit = (objectId: string, label: string): void => {
+    const indices = owned.get(objectId) ?? [];
+    const isCollapsed = collapsed.includes(objectId);
+    rows.push({ kind: "object", objectId, label, collapsed: isCollapsed, trackCount: indices.length });
+    if (isCollapsed) return;
+    for (const track of indices) {
+      rows.push({
+        kind: "track",
+        objectId,
+        property: tracks[track]!.property,
+        label: tracks[track]!.label,
+        track,
+      });
+    }
+  };
+
+  const seen = new Set<string>();
+  for (const object of document.objects) {
+    // Duplicate ids keep the first object, as hierarchy resolution does.
+    if (seen.has(object.id)) continue;
+    seen.add(object.id);
+    emit(object.id, object.name);
+  }
+  for (const track of tracks) {
+    if (seen.has(track.objectId)) continue;
+    seen.add(track.objectId);
+    emit(track.objectId, track.objectName);
+  }
+  return rows;
 }
 
 /// The stable identity of one key: object, property and frame.

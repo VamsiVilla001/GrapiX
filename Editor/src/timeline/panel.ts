@@ -21,6 +21,7 @@ import type { TimelinePhase } from "@grapix/contracts";
 
 import type { DrawingContext } from "./drawing";
 import { visibleRange, type KeyIndex } from "./key-index";
+import type { LayerSwitch, TimelineLayer } from "./layers";
 import { buildSpeedGraph, paintSpeedGraph } from "./speed-graph";
 import { keyId, type TimelineModel } from "./model";
 import { TIMELINE_LAYERS, type DirtyRect, type TimelineLayerId } from "./repaint-plan";
@@ -43,14 +44,93 @@ export interface TimelinePanelParts {
   readonly window: { readonly first: number; readonly last: number };
 }
 
+/// One layer switch (visibility or lock). Its state is `aria-pressed`, its
+/// action is the object manager's, and a switch that cannot work is disabled
+/// with the reason on it, exactly as `renderNode` renders an unavailable
+/// action.
+function layerSwitch(
+  document: Document,
+  action: "toggleVisibility" | "toggleLock",
+  objectId: string,
+  on: boolean,
+  described: LayerSwitch,
+): HTMLElement {
+  const button = document.createElement("button");
+  button.setAttribute("type", "button");
+  button.className = "timeline-layer-switch";
+  button.dataset.layerAction = action;
+  button.dataset.action = action;
+  button.dataset.for = objectId;
+  button.dataset.objectId = objectId;
+  button.setAttribute("aria-pressed", String(on));
+  button.setAttribute("aria-label", described.label);
+  button.setAttribute("title", described.unavailable ?? described.label);
+  const icon = document.createElement("img");
+  icon.setAttribute("src", `icons/${action === "toggleVisibility" ? "eye" : "lock-simple"}.svg`);
+  icon.setAttribute("alt", "");
+  icon.setAttribute("aria-hidden", "true");
+  button.append(icon);
+  if (described.unavailable !== undefined) {
+    button.setAttribute("disabled", "");
+    button.setAttribute("aria-disabled", "true");
+    button.dataset.unavailable = described.unavailable;
+  }
+  return button;
+}
+
+/// An object's row as an After Effects-style layer (11.63): visibility and
+/// lock switches, the label swatch, the document index and the name. The
+/// caret appears only when the layer has tracks to fold.
+function layerHeader(
+  document: Document,
+  element: HTMLElement,
+  entry: { readonly objectId: string; readonly label: string; readonly collapsed: boolean; readonly trackCount: number },
+  layer: TimelineLayer,
+): void {
+  element.dataset.layer = "";
+  if (entry.trackCount > 0) element.setAttribute("aria-expanded", String(!entry.collapsed));
+  element.setAttribute(
+    "title",
+    entry.trackCount > 0
+      ? `${entry.label}: ${entry.trackCount} animated propert${entry.trackCount === 1 ? "y" : "ies"}`
+      : `${entry.label}: no animated properties shown`,
+  );
+
+  const swatch = document.createElement("span");
+  swatch.className = "timeline-layer-label";
+  swatch.setAttribute("aria-hidden", "true");
+  swatch.style.background = layer.labelColour;
+
+  const index = document.createElement("span");
+  index.className = "timeline-layer-index";
+  index.textContent = String(layer.index);
+
+  const name = document.createElement("span");
+  name.className = "timeline-layer-name";
+  const caret = entry.trackCount === 0 ? "" : entry.collapsed ? "▸ " : "▾ ";
+  name.textContent = `${caret}${entry.label}`;
+
+  element.append(
+    layerSwitch(document, "toggleVisibility", entry.objectId, layer.visible, layer.visibility),
+    layerSwitch(document, "toggleLock", entry.objectId, layer.locked, layer.lock),
+    swatch,
+    index,
+    name,
+  );
+}
+
 /// Build the panel's DOM for one viewport.
 ///
 /// Deterministic and side-effect free apart from the elements it creates, so
 /// the same model and viewport always produce the same node count.
+///
+/// `layers`, when given, draws each object row as a layer (11.63). Without it
+/// the rows are the plain group headers 11.10 and 11.22 specified.
 export function renderTimelinePanel(
   document: Document,
   model: TimelineModel,
   viewport: TimelineViewport,
+  layers?: ReadonlyMap<string, TimelineLayer>,
 ): TimelinePanelParts {
   const window_ = rowWindow(viewport, model.rows.length);
 
@@ -85,11 +165,16 @@ export function renderTimelinePanel(
 
     if (entry.kind === "object") {
       element.className = "timeline-group-header";
-      // Expanded state is the fact a screen reader needs, and the same fact
-      // the caret shows.
-      element.setAttribute("aria-expanded", String(!entry.collapsed));
       element.dataset.group = "";
-      element.textContent = `${entry.collapsed ? "▸" : "▾"} ${entry.label} (${entry.trackCount})`;
+      const layer = layers?.get(entry.objectId);
+      if (layer) {
+        layerHeader(document, element, entry, layer);
+      } else {
+        // Expanded state is the fact a screen reader needs, and the same fact
+        // the caret shows.
+        element.setAttribute("aria-expanded", String(!entry.collapsed));
+        element.textContent = `${entry.collapsed ? "▸" : "▾"} ${entry.label} (${entry.trackCount})`;
+      }
     } else {
       element.className = "timeline-row-header";
       element.dataset.property = entry.property;
@@ -147,14 +232,19 @@ export interface TimelineTheme {
   readonly marquee: string;
 }
 
+// Adapted from EffectCraft, MIT OR Apache-2.0, Copyright (c) 2026 ArtCraft Team
+// and the EffectCraft contributors: the timeline colours are the dark theme's
+// `tl_ruler_text`, `separator`, `keyframe`, `keyframe_selected` and `cti`
+// tokens (`crates/ui-egui/src/theme.rs`), so the canvas matches the 11.63
+// chrome around it.
 export const DEFAULT_THEME: TimelineTheme = {
-  ruler: "#8494a3",
-  gridline: "#29323b",
-  rowBand: "#171d23",
-  key: "#58b8ef",
-  keySelected: "#f5fbff",
-  playhead: "#df4dc4",
-  marquee: "#67c4f5",
+  ruler: "#9a9a9a",
+  gridline: "#2c2c2c",
+  rowBand: "#202020",
+  key: "#a8a8a8",
+  keySelected: "#3d8ff5",
+  playhead: "#2d8ceb",
+  marquee: "#4aa0f5",
 };
 
 /// The marker half-width in CSS pixels. Shared with `rowSpanDirtyRect` so a
@@ -185,6 +275,11 @@ export interface PaintState {
   readonly graphTrack?: number;
   /// Named phase spans, drawn with the ruler on the static layer (11.25).
   readonly phases?: readonly TimelinePhase[];
+  /// Layer bar colour per object id (11.63). An object row with a colour gets
+  /// a bar across the scene's duration on the content layer, beneath the keys
+  /// — content, not static, because hiding a layer dims its bar and a
+  /// document edit is what dirties content.
+  readonly layerBars?: ReadonlyMap<string, string>;
 }
 
 /// Paint one layer, optionally confined to a dirty rectangle.
@@ -267,6 +362,26 @@ export function paintLayer(
       );
       context.restore();
       return;
+    }
+    // Layer bars first, under the keys. Objects exist for the whole scene —
+    // the contract has no in or out point — so a bar spans frame 0 to the
+    // duration, and never claims a trim the document does not have.
+    const bars = state.layerBars;
+    if (bars && bars.size > 0) {
+      const left = Math.max(0, frameToX(viewport, 0));
+      const right = Math.min(viewport.width, frameToX(viewport, model.durationFrames));
+      for (let row = window_.first; row < window_.last && right > left; row += 1) {
+        const entry = model.rows[row];
+        const colour = entry?.kind === "object" ? bars.get(entry.objectId) : undefined;
+        if (colour === undefined) continue;
+        context.fillStyle = colour;
+        context.fillRect(
+          left,
+          rowTop(viewport, row) - viewport.scrollTop + 3,
+          right - left,
+          Math.max(1, viewport.rowHeight - 6),
+        );
+      }
     }
     // Only visible rows, and within each only the visible key run — two
     // binary searches, never a scan. Group rows carry no keys of their own.

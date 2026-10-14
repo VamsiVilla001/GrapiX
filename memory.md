@@ -118,6 +118,94 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-10-15 — EffectCraft/AE workspace, independent-graphic Scene Manager, and 3.13 continuation
+
+**User decisions:** continue the interrupted build; adopt an EffectCraft / After
+Effects style workspace; remove the design-system concept from current
+authoring. The user confirmed Scene Manager means one saved container holding
+multiple independent graphics, each with its own layers and timeline. New plan
+rows 11.63 and 11.64 record these authorized additions (250 total steps).
+Historical design-system implementation stays compatible but is no longer a
+current creation/navigation requirement. No existing saved metadata was deleted.
+
+**Implemented — 11.63 and 11.64:** charcoal menu/tool chrome, Composition viewer,
+right Preview transport and grouped Properties, left Scene Manager/layers/assets,
+and colored virtualized layer rows. Unanimated objects are visible; selection
+reveals their tracks. Visibility/lock/edit/undo commands still reach Rust. One
+integer playhead and rational-rate formatter supply both readouts; fractional
+rates explicitly say NDF. Properties metadata folds so all six transform
+controls fit above the fold. Local unmodified Phosphor icons and the EffectCraft
+label palette retain MIT notices. SDK file dialogs replace the nonexistent
+global `__TAURI__.dialog` access that previously silently did nothing.
+
+Scene Manager creates/selects containers, adds graphics through existing Rust
+create/open commands, saves and searches graphics, and exposes editing/open/
+saved/unsaved/unavailable/publication-revision states to human and agent views.
+Its catalog no longer reads design-system versions or shows drift/stamps.
+Switching graphics preserves unsaved sessions and independent selection,
+playhead, content and undo/redo. Startup opens a blank graphic without a modal.
+New graphics now have a five-second P50 timeline; loaded durations are unchanged.
+Storage remains the existing project-folder format; single-file `.gpx` packaging
+and broader scene settings are still 11.43, whose dependencies remain unmet.
+
+The authoring viewport's planar geometry and selection bounds now share the
+engine's top-left/anchor/signed-scale/rotation semantics. Missing text, vector
+path and image pixels are named as pending engine-backed viewport 13.5, and the
+grey image placeholder is removed. Mesh-origin behavior remains centered.
+
+**Partial — 3.13 continuation:** preserved the interrupted shared-tree edits
+and completed typed refusal/binding validation, renderer support guards and
+regenerated contracts. Non-finite/invalid numeric parameters, unsupported
+transform shear (including animation), scaled vector strokes and unsupported
+point-text alignment refuse by name. New conformance cases drive actual Trim
+Paths coverage, vector opacity in all four working/output-space combinations,
+and unloadable glTF refusal. Rec.709 expectations use BT.709 OETF. The original
+unsupported placeholder fixture is preserved in
+`tests/refusal-scenes/unsupported-mappings-50.json`; the pixel gate inventories
+both renderable and deliberately refused scenes. The previous 13 October
+silent-ignore inventory below remains the starting point for the exhaustive
+audit; this entry does not close 3.13 or claim hardware/import/GPU completeness.
+
+**Executed verification:** `npm run check` exits 0 after the final source changes
+(boundaries, generated-output staleness, TypeScript, 40 Node tests, 344 Editor
+tests, 661 Rust unit/integration tests, and conformance 284 passed / 0 failed /
+9 named skips). `npm run build:web` and the native shell build pass. The static
+timeline DOM stays flat from 100 to 100,000 keys. Real Tauri WebView2 Playwright
+checks create/save/search/switch two graphics, retain independent unsaved state
+and undo/redo, step/play/pause, operate visibility/lock with single-step undo,
+reopen panels, refuse duplicate containers by name, and reopen both graphics
+after a full process restart. Scrub paint counters: static 0, content 0,
+interaction 1; no page errors or horizontal overflow at desktop/compact sizes.
+
+Combined full-workspace and focused Preview/Properties visual comparisons pass
+after fixing overflow/light selects, wrong outlines and below-fold transforms.
+Evidence is under `agent/tmp/`: `design-qa.md`, `workspace-comparison.png`,
+`workspace-properties-comparison.png`, `ui-check-results.json`,
+`check-final-accepted.log`, and reproducible `ui-check/*.cjs`. Native density
+1.07 persisted despite CDP's requested 1; a 1541×964 raster was normalized to
+1440×900, with actual CSS 1440×901 recorded. IAB was unavailable and native
+capture timed out; the user expressly authorized Playwright. Prompt/chooser
+inputs are supplied deterministically, but SDK/Rust persistence and edits are
+real. Native file-chooser interaction itself remains unverified.
+
+**Remaining gates:** the existing pixel baselines were not regenerated.
+`cargo run -p gx-pixel-gate -- check` fails only `colour-ramp-50`: 39,065 differing
+pixels, worst channel delta 255, after corrected glyphs/removal of unsupported
+placeholders. 3.13 and 4.5 remain active. Debug cadence/hardware/reference skips
+and the pre-existing mock transport token-prefix skip are named; no live-output
+or certification claim is made. Linker-reported corrupt PDB caches were repaired
+only by their validated paths inside this worktree's target directory, after
+builds exited. Source and unrelated artifacts were preserved.
+
+**Shared state:** all editing/testing is in `agent/shared`'s authorized worktree;
+no other agents or worktrees were created. Existing untracked baseline history
+is preserved. The user's saved `material-demo/test` graphic was reopened after
+preview rebuilds. Separate temporary executable copies avoid locking subsequent
+builds; these are scratch artifacts, not source workspaces. Both UI tracker
+states are marked done only after execution and visual review, and tracker
+snapshots match. These changes, generated output, tracker and this log belong in
+one commit.
+
 ## 2026-10-13 — 3.13 re-close, batch A: vector opacity, Trim Paths, glTF model refusal; full silent-ignore inventory; resume here
 
 3.13 stays **active**. Its done-when is "no silent fallback anywhere", and a

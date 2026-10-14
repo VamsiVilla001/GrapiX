@@ -300,23 +300,20 @@ export function buildViewportObject(
       break;
     }
     case "image": {
-      // Texture resolution is the asset pipeline's concern; the viewport
-      // shows a placeholder plane the size the author gave it until the
-      // texture arrives.
-      const geometry = new THREE.PlaneGeometry(object.width, object.height);
-      const material = new THREE.MeshBasicMaterial({ color: 0x808080, depthTest: true, depthWrite: true });
-      mesh = new THREE.Mesh(geometry, material);
-      break;
+      unsupported.push(`${object.id}: image pixels await the engine-rendered viewport (13.5)`);
+      return null;
     }
     case "text":
       // Shaped through cosmic-text on the engine (3.6), not drawn as a quad
       // here — the 2D-in-3D case below is a rect, the load-bearing one.
+      unsupported.push(`${object.id}: text pixels await the engine-rendered viewport (13.5)`);
       return null;
     case "line":
     case "shape":
     case "paint":
       // Vector geometry goes through the path rasteriser (3.5); this layer
       // has no tessellator and will not fake one.
+      unsupported.push(`${object.id}: ${object.type} pixels await the engine-rendered viewport (13.5)`);
       return null;
     case "mesh": {
       // 3D primitives are real geometry here. An imported glTF model is the
@@ -358,6 +355,9 @@ export function buildViewportObject(
       return null;
   }
 
+  if (object.type === "rect" || object.type === "ellipse") {
+    positionPlanarGeometry(mesh.geometry, object);
+  }
   applyViewportObjectState(mesh, object, space);
   return mesh;
 }
@@ -372,7 +372,7 @@ function applyViewportObjectState(
   const position = scenePosition(space, object.x, object.y, object.zDepth);
   mesh.position.set(position.x, position.y, position.z);
   mesh.renderOrder = object.zIndex;
-  mesh.rotation.z = (object.rotation * Math.PI) / 180;
+  mesh.rotation.z = ((object.type === "mesh" ? object.rotation : -object.rotation) * Math.PI) / 180;
   // Meshes are the only objects whose X/Y rotations compose. The two fields
   // still exist on every base, so non-meshes explicitly remain in-plane.
   mesh.rotation.x = object.type === "mesh" ? (object.rotationX * Math.PI) / 180 : 0;
@@ -392,12 +392,20 @@ function applyViewportObjectState(
   }
 }
 
+/// Plane primitives are centred by Three; the scene and overlay use a
+/// top-left local origin. Move geometry around the authored anchor before
+/// applying scale and rotation, so the painted box matches its handles.
+function positionPlanarGeometry(geometry: THREE.BufferGeometry, object: SceneObject): THREE.BufferGeometry {
+  return geometry.translate(object.width / 2 - (object.anchor?.x ?? 0),
+    (object.anchor?.y ?? 0) - object.height / 2, 0);
+}
+
 function resizedViewportGeometry(object: SceneObject): THREE.BufferGeometry | undefined {
   switch (object.type) {
     case "rect":
-      return rectGeometry(object.width, object.height, object.radius);
+      return positionPlanarGeometry(rectGeometry(object.width, object.height, object.radius), object);
     case "ellipse":
-      return new THREE.CircleGeometry(1, 64).scale(object.width / 2, object.height / 2, 1);
+      return positionPlanarGeometry(new THREE.CircleGeometry(1, 64).scale(object.width / 2, object.height / 2, 1), object);
     case "image":
       return new THREE.PlaneGeometry(object.width, object.height);
     case "mesh": {

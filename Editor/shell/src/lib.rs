@@ -303,15 +303,11 @@ pub struct ListedScene {
     pub unavailable_reason: Option<String>,
 }
 
-/// One complete manager refresh. The design-system version and rows are read
-/// together so drift cannot be calculated against a version from an earlier
-/// refresh.
+/// One container's graphics. Catalog reads have no design-system dependency.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectSceneCatalog {
     pub project: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub current_design_system_version: Option<u32>,
     pub scenes: Vec<ListedScene>,
 }
 
@@ -361,13 +357,8 @@ pub fn scene_catalog(store: &Projects, project: &str) -> Result<ProjectSceneCata
             }),
         }
     }
-    let current_design_system_version = store
-        .design_system(project)
-        .and_then(|design_system| design_system.current_version())
-        .map_err(project_error)?;
     Ok(ProjectSceneCatalog {
         project: project.to_owned(),
-        current_design_system_version,
         scenes,
     })
 }
@@ -878,6 +869,22 @@ mod tests {
             scene_read(&store, "news", "../escape"),
             Err(EditorError::CommandRefused { cause: Refusal::SceneIdInvalid { .. }, .. })
         ));
+    }
+
+    #[test]
+    fn the_scene_manager_reads_graphics_without_a_design_system() {
+        let scratch = Scratch::new("catalog-no-design-system");
+        let store = Projects::at_root(&scratch.0);
+        store.create_project("broadcast").unwrap();
+        store.write_scene("broadcast", &gx_contracts::scene::new_scene("score", "Score", gx_contracts::color::WorkingColorSpace::NEW_PROJECT)).unwrap();
+        store.write_scene("broadcast", &gx_contracts::scene::new_scene("lower-third", "Lower third", gx_contracts::color::WorkingColorSpace::NEW_PROJECT)).unwrap();
+        // Legacy metadata must neither gate navigation nor be modified.
+        let legacy = scratch.0.join("broadcast/design-system");
+        std::fs::write(&legacy, b"legacy metadata, not a directory").unwrap();
+        let catalog = scene_catalog(&store, "broadcast").unwrap();
+        assert_eq!(catalog.scenes.len(), 2);
+        assert!(catalog.scenes.iter().all(|graphic| graphic.unavailable_reason.is_none()));
+        assert_eq!(std::fs::read(&legacy).unwrap(), b"legacy metadata, not a directory");
     }
 
     #[test]

@@ -99,6 +99,23 @@ pub fn validate_scene_document(
         }
     }
 
+    // 3.13: a hierarchy the resolver had to repair refuses by name. It still
+    // resolves deterministically so an author can keep editing, but on air
+    // it would show a parent choice nobody made.
+    for diagnostic in crate::scene::resolve_hierarchy(&document.objects).diagnostics {
+        let problem = match diagnostic.code {
+            crate::scene::HierarchyDiagnosticCode::MissingChild => "missingChild",
+            crate::scene::HierarchyDiagnosticCode::SelfReference => "selfReference",
+            crate::scene::HierarchyDiagnosticCode::MultipleParents => "multipleParents",
+            crate::scene::HierarchyDiagnosticCode::Cycle => "cycle",
+        };
+        found.push(StructuredRefusal::error(Refusal::SceneHierarchyInvalid {
+            parent: diagnostic.parent_id,
+            child: diagnostic.child_id,
+            problem: problem.into(),
+        }));
+    }
+
     // Every reference an object makes must resolve inside the document. The
     // document is self-describing (1.1), so an id that does not resolve here
     // will never resolve later — there is no ambient registry to consult.
@@ -406,6 +423,32 @@ mod tests {
             textures: Vec::new(),
             shader_id: None,
         }
+    }
+
+    /// 3.13: a hierarchy the resolver had to repair refuses by name.
+    #[test]
+    fn a_repaired_hierarchy_refuses_by_name() {
+        use crate::scene::{GroupObject, ObjectBase};
+        let group = |id: &str, children: &[&str]| {
+            SceneObject::Group(GroupObject {
+                base: ObjectBase::new(id, id),
+                child_ids: children.iter().map(|c| c.to_string()).collect(),
+            })
+        };
+        let support = crate::material::MaterialSupport::fixed_function();
+        let problems = |objects| {
+            validate_scene_document(&document(objects), &support, &std::collections::HashSet::new(), false)
+                .into_iter()
+                .filter_map(|refusal| match refusal.code {
+                    Refusal::SceneHierarchyInvalid { problem, .. } => Some(problem),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert!(problems(vec![group("a", &["b"]), group("b", &[])]).is_empty(), "a sound hierarchy passes");
+        assert_eq!(problems(vec![group("a", &["ghost"])]), ["missingChild"]);
+        assert_eq!(problems(vec![group("a", &["c"]), group("b", &["c"]), group("c", &[])]), ["multipleParents"]);
+        assert!(problems(vec![group("a", &["b"]), group("b", &["a"])]).contains(&"cycle".to_string()));
     }
 
     /// 3.13: a trim value outside its domain refuses by name before publish.

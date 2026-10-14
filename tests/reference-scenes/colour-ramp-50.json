@@ -2,41 +2,291 @@
   "id": "reference-colour-ramp-50",
   "name": "Colour ramp, safe areas, text, vector, and mesh",
   "version": 1,
-  "canvas": { "width": 320, "height": 180, "frameRate": { "num": 50, "den": 1 } },
-  "timeline": { "durationFrames": 50 },
+  "canvas": {
+    "width": 320,
+    "height": 180,
+    "frameRate": {
+      "num": 50,
+      "den": 1
+    }
+  },
+  "timeline": {
+    "durationFrames": 50
+  },
   "dataContext": {},
   "assets": [
-    { "assetId": "reference-pixel", "name": "Reference RGBA pixel", "kind": "image", "path": "tools/pixel-gate/testdata/reference-pixel.rgba", "checksum": "44bb653b69f11ee73b1b879227e4eddf4fd2b3f1c28fec475aac7d1f342624a6", "mimeType": "image/x-rgba" },
-    { "assetId": "inter-regular", "name": "Inter Regular", "kind": "font", "path": "services/render-engine/worker/tests/fixtures/Inter-Regular.ttf", "checksum": "3127f0b873387ee37e2040135a06e9e9c05030f509eb63689529becf28b50384", "mimeType": "font/ttf" }
+    {
+      "assetId": "inter-regular",
+      "name": "Inter Regular",
+      "kind": "font",
+      "path": "services/render-engine/worker/tests/fixtures/Inter-Regular.ttf",
+      "checksum": "3127f0b873387ee37e2040135a06e9e9c05030f509eb63689529becf28b50384",
+      "mimeType": "font/ttf"
+    }
   ],
   "fonts": [
-    { "fontId": "inter", "family": "Inter", "displayName": "Inter", "faces": [ { "faceId": "inter-regular", "family": "Inter", "weight": 400, "style": "normal", "source": { "kind": "file", "assetId": "inter-regular", "format": "ttf" } } ], "fallbackFamilies": [], "embeddingPolicy": "package", "enabled": true, "status": "Ready" }
+    {
+      "fontId": "inter",
+      "family": "Inter",
+      "displayName": "Inter",
+      "faces": [
+        {
+          "faceId": "inter-regular",
+          "family": "Inter",
+          "weight": 400,
+          "style": "normal",
+          "source": {
+            "kind": "file",
+            "assetId": "inter-regular",
+            "format": "ttf"
+          }
+        }
+      ],
+      "fallbackFamilies": [],
+      "embeddingPolicy": "package",
+      "enabled": true,
+      "status": "Ready"
+    }
   ],
-  "materials": [
-    { "materialId": "normal", "name": "Normal", "kind": "solid-color", "blendMode": "normal" },
-    { "materialId": "add", "name": "Add", "kind": "solid-color", "blendMode": "add" },
-    { "materialId": "multiply", "name": "Multiply", "kind": "solid-color", "blendMode": "multiply" },
-    { "materialId": "screen", "name": "Screen", "kind": "solid-color", "blendMode": "screen" },
-    { "materialId": "darken", "name": "Darken", "kind": "solid-color", "blendMode": "darken" },
-    { "materialId": "lighten", "name": "Lighten", "kind": "solid-color", "blendMode": "lighten" }
-  ],
+  "materials": [],
   "objects": [
-    { "type": "rect", "id": "ramp-red", "name": "colour ramp red", "x": 0, "y": 0, "width": 54, "height": 30, "fill": { "type": "solid", "color": { "r": 1, "g": 0, "b": 0, "a": 1, "space": "srgb" } } },
-    { "type": "rect", "id": "ramp-yellow", "name": "colour ramp yellow", "x": 54, "y": 0, "width": 54, "height": 30, "fill": { "type": "solid", "color": { "r": 1, "g": 1, "b": 0, "a": 1, "space": "srgb" } } },
-    { "type": "rect", "id": "ramp-green", "name": "colour ramp green", "x": 108, "y": 0, "width": 54, "height": 30, "fill": { "type": "solid", "color": { "r": 0, "g": 1, "b": 0, "a": 1, "space": "srgb" } } },
-    { "type": "rect", "id": "ramp-cyan", "name": "colour ramp cyan", "x": 162, "y": 0, "width": 54, "height": 30, "fill": { "type": "solid", "color": { "r": 0, "g": 1, "b": 1, "a": 1, "space": "srgb" } } },
-    { "type": "rect", "id": "ramp-blue", "name": "colour ramp blue", "x": 216, "y": 0, "width": 52, "height": 30, "fill": { "type": "solid", "color": { "r": 0, "g": 0, "b": 1, "a": 1, "space": "srgb" } } },
-    { "type": "rect", "id": "ramp-white", "name": "colour ramp white", "x": 268, "y": 0, "width": 52, "height": 30, "fill": { "type": "solid", "color": { "r": 1, "g": 1, "b": 1, "a": 1, "space": "srgb" } } },
-    { "type": "rect", "id": "safe-action", "name": "safe area action", "x": 32, "y": 18, "width": 256, "height": 144, "opacity": 0.2, "fill": { "type": "solid", "color": { "r": 1, "g": 1, "b": 1, "a": 1, "space": "srgb" } } },
-    { "type": "rect", "id": "safe-title", "name": "safe area title", "x": 24, "y": 14, "width": 272, "height": 152, "opacity": 0.1, "fill": { "type": "solid", "color": { "r": 1, "g": 0, "b": 0, "a": 1, "space": "srgb" } } },
-    { "type": "text", "id": "caption", "name": "reference caption", "x": 44, "y": 48, "width": 230, "height": 28, "fill": { "type": "solid", "color": { "r": 1, "g": 1, "b": 1, "a": 1, "space": "srgb" } }, "text": "GrapiX reference", "fontId": "inter", "size": 20 },
-    { "type": "shape", "id": "path", "name": "reference vector path", "x": 45, "y": 84, "fill": { "type": "solid", "color": { "r": 0.1, "g": 0.4, "b": 1, "a": 1, "space": "srgb" } }, "path": { "closed": true, "vertices": [ { "x": 0, "y": 0 }, { "x": 90, "y": 0 }, { "x": 45, "y": 45 } ], "inTangents": [ { "x": 0, "y": 0 }, { "x": 0, "y": 0 }, { "x": 0, "y": 0 } ], "outTangents": [ { "x": 0, "y": 0 }, { "x": 0, "y": 0 }, { "x": 0, "y": 0 } ] } },
-    { "type": "mesh", "id": "cube", "name": "reference 3D cube", "x": 230, "y": 108, "width": 42, "height": 42, "meshKind": "cube", "depth": 32, "materialSlots": { "front": { "materialId": "normal" }, "back": { "materialId": "normal" }, "left": { "materialId": "normal" }, "right": { "materialId": "normal" }, "top": { "materialId": "normal" }, "bottom": { "materialId": "normal" } } },
-    { "type": "image", "id": "fit-stretch", "name": "fit stretch", "x": 0, "y": 150, "width": 10, "height": 10, "assetId": "reference-pixel", "fit": "stretch" },
-    { "type": "image", "id": "fit-contain", "name": "fit contain", "x": 10, "y": 150, "width": 10, "height": 10, "assetId": "reference-pixel", "fit": "contain" },
-    { "type": "image", "id": "fit-cover", "name": "fit cover", "x": 20, "y": 150, "width": 10, "height": 10, "assetId": "reference-pixel", "fit": "cover" },
-    { "type": "image", "id": "fit-crop", "name": "fit crop", "x": 30, "y": 150, "width": 10, "height": 10, "assetId": "reference-pixel", "fit": "crop" },
-    { "type": "image", "id": "fit-tile", "name": "fit tile", "x": 40, "y": 150, "width": 10, "height": 10, "assetId": "reference-pixel", "fit": "tile" },
-    { "type": "image", "id": "fit-original", "name": "fit original", "x": 50, "y": 150, "width": 10, "height": 10, "assetId": "reference-pixel", "fit": "original" }
+    {
+      "type": "rect",
+      "id": "ramp-red",
+      "name": "colour ramp red",
+      "x": 0,
+      "y": 0,
+      "width": 54,
+      "height": 30,
+      "fill": {
+        "type": "solid",
+        "color": {
+          "r": 1,
+          "g": 0,
+          "b": 0,
+          "a": 1,
+          "space": "srgb"
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "id": "ramp-yellow",
+      "name": "colour ramp yellow",
+      "x": 54,
+      "y": 0,
+      "width": 54,
+      "height": 30,
+      "fill": {
+        "type": "solid",
+        "color": {
+          "r": 1,
+          "g": 1,
+          "b": 0,
+          "a": 1,
+          "space": "srgb"
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "id": "ramp-green",
+      "name": "colour ramp green",
+      "x": 108,
+      "y": 0,
+      "width": 54,
+      "height": 30,
+      "fill": {
+        "type": "solid",
+        "color": {
+          "r": 0,
+          "g": 1,
+          "b": 0,
+          "a": 1,
+          "space": "srgb"
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "id": "ramp-cyan",
+      "name": "colour ramp cyan",
+      "x": 162,
+      "y": 0,
+      "width": 54,
+      "height": 30,
+      "fill": {
+        "type": "solid",
+        "color": {
+          "r": 0,
+          "g": 1,
+          "b": 1,
+          "a": 1,
+          "space": "srgb"
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "id": "ramp-blue",
+      "name": "colour ramp blue",
+      "x": 216,
+      "y": 0,
+      "width": 52,
+      "height": 30,
+      "fill": {
+        "type": "solid",
+        "color": {
+          "r": 0,
+          "g": 0,
+          "b": 1,
+          "a": 1,
+          "space": "srgb"
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "id": "ramp-white",
+      "name": "colour ramp white",
+      "x": 268,
+      "y": 0,
+      "width": 52,
+      "height": 30,
+      "fill": {
+        "type": "solid",
+        "color": {
+          "r": 1,
+          "g": 1,
+          "b": 1,
+          "a": 1,
+          "space": "srgb"
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "id": "safe-action",
+      "name": "safe area action",
+      "x": 32,
+      "y": 18,
+      "width": 256,
+      "height": 144,
+      "opacity": 0.2,
+      "fill": {
+        "type": "solid",
+        "color": {
+          "r": 1,
+          "g": 1,
+          "b": 1,
+          "a": 1,
+          "space": "srgb"
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "id": "safe-title",
+      "name": "safe area title",
+      "x": 24,
+      "y": 14,
+      "width": 272,
+      "height": 152,
+      "opacity": 0.1,
+      "fill": {
+        "type": "solid",
+        "color": {
+          "r": 1,
+          "g": 0,
+          "b": 0,
+          "a": 1,
+          "space": "srgb"
+        }
+      }
+    },
+    {
+      "type": "text",
+      "id": "caption",
+      "name": "reference caption",
+      "x": 44,
+      "y": 48,
+      "width": 230,
+      "height": 28,
+      "fill": {
+        "type": "solid",
+        "color": {
+          "r": 1,
+          "g": 1,
+          "b": 1,
+          "a": 1,
+          "space": "srgb"
+        }
+      },
+      "text": "GrapiX reference",
+      "fontId": "inter",
+      "size": 20
+    },
+    {
+      "type": "shape",
+      "id": "path",
+      "name": "reference vector path",
+      "x": 45,
+      "y": 84,
+      "fill": {
+        "type": "solid",
+        "color": {
+          "r": 0.1,
+          "g": 0.4,
+          "b": 1,
+          "a": 1,
+          "space": "srgb"
+        }
+      },
+      "path": {
+        "closed": true,
+        "vertices": [
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": 90,
+            "y": 0
+          },
+          {
+            "x": 45,
+            "y": 45
+          }
+        ],
+        "inTangents": [
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": 0,
+            "y": 0
+          }
+        ],
+        "outTangents": [
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": 0,
+            "y": 0
+          }
+        ]
+      }
+    }
   ]
 }

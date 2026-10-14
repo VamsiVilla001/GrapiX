@@ -224,6 +224,53 @@ pub fn replace_data_context(
         .collect())
 }
 
+/// Apply every binding against the scene's data context (3.13), as the
+/// Editor's preview does (`Editor/src/bindings.ts` `resolveSceneBindings`):
+/// strict and all-or-nothing. The first binding that cannot apply refuses by
+/// name, rather than putting some bound values on air and leaving the rest at
+/// their authored values. Before this the engine applied no binding at all.
+pub fn resolve_scene_bindings(scene: &SceneDocument) -> Result<SceneDocument, Refusal> {
+    let mut resolved = scene.clone();
+    for object in &mut resolved.objects {
+        let Some(bindings) = object.base().bindings.clone() else {
+            continue;
+        };
+        if bindings.is_empty() {
+            continue;
+        }
+        let mut wire = serde_json::to_value(&*object).map_err(|error| Refusal::BindingPathInvalid {
+            path: object.base().id.clone(),
+            detail: error.to_string(),
+        })?;
+        for (property, raw_path) in &bindings {
+            let Some(path) = raw_path.as_str() else {
+                return Err(Refusal::BindingPathInvalid {
+                    path: raw_path.to_string(),
+                    detail: format!("{property} binding on {} must be a string path", object.base().id),
+                });
+            };
+            let Some(spec) = spec_for(object, property) else {
+                return Err(Refusal::BindingPropertyUnsupported {
+                    object: object.base().id.clone(),
+                    kind: object.kind().to_owned(),
+                    property: property.clone(),
+                });
+            };
+            let value = resolve_path(&scene.data_context, path)
+                .map_err(|detail| Refusal::BindingPathInvalid { path: path.to_owned(), detail })?;
+            validate_value(scene, object, spec, path, value)?;
+            if let Some(fields) = wire.as_object_mut() {
+                fields.insert(property.clone(), value.clone());
+            }
+        }
+        *object = serde_json::from_value(wire).map_err(|error| Refusal::BindingPathInvalid {
+            path: object.base().id.clone(),
+            detail: error.to_string(),
+        })?;
+    }
+    Ok(resolved)
+}
+
 fn binding_issues(scene: &SceneDocument) -> Vec<BindingIssue> {
     let mut issues = Vec::new();
     for object in &scene.objects {
@@ -482,6 +529,34 @@ mod tests {
             base: ObjectBase::new(id, id),
             radius: 0.0,
         })
+    }
+
+    /// 3.13: bound values apply exactly as the Editor's preview applies
+    /// them, and one binding that cannot apply refuses the whole scene.
+    #[test]
+    fn bindings_apply_all_or_nothing() {
+        let mut scene = crate::scene::new_scene("scene", "Scene", crate::color::WorkingColorSpace::Srgb);
+        scene.data_context = serde_json::from_value(serde_json::json!({
+            "pos": { "x": 500, "y": 40 },
+            "flags": [false],
+        }))
+        .unwrap();
+        let mut bar = rect("bar");
+        bar.base_mut().bindings = Some(serde_json::Map::from_iter([
+            ("x".to_string(), serde_json::json!("pos.x")),
+            ("visible".to_string(), serde_json::json!("flags.0")),
+        ]));
+        scene.objects.push(bar);
+        let resolved = resolve_scene_bindings(&scene).expect("both bindings apply");
+        assert_eq!(resolved.objects[0].base().x, 500.0);
+        assert!(!resolved.objects[0].base().visible);
+        assert_eq!(scene.objects[0].base().x, 0.0, "the authored document is untouched");
+
+        let mut broken = scene.clone();
+        broken.objects[0].base_mut().bindings.as_mut().unwrap().insert("y".into(), serde_json::json!("pos.missing"));
+        assert!(matches!(resolve_scene_bindings(&broken), Err(Refusal::BindingPathInvalid { .. })));
+        broken.objects[0].base_mut().bindings.as_mut().unwrap().insert("y".into(), serde_json::json!("flags.0"));
+        assert!(matches!(resolve_scene_bindings(&broken), Err(Refusal::BindingTypeMismatch { .. })));
     }
 
     #[test]

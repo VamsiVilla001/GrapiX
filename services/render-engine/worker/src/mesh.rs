@@ -740,8 +740,9 @@ mod tests {
         assert_eq!(prepared.meshes[2].materials.iter().map(|element| element.element.as_str()).collect::<Vec<_>>(), ["body", "trim"]);
     }
 
-    /// 3.13: the software path cannot draw a glTF model, so publish refuses
-    /// it by name instead of preparing geometry that draws nothing.
+    /// 3.13: the software path cannot draw meshes correctly (no sizing,
+    /// depth or camera; 11.48 owns them), so publish refuses a mesh by name
+    /// instead of preparing a glTF to empty geometry that draws nothing.
     #[test]
     fn a_gltf_model_refuses_at_publish_instead_of_drawing_nothing() {
         let hash = ContentHash("model-content".to_string());
@@ -758,7 +759,7 @@ mod tests {
             &MaterialSupport::fixed_function(),
         );
         assert!(
-            matches!(&refused, Err(Refusal::MeshModelGeometryUnsupported { object }) if object == "model"),
+            matches!(&refused, Err(Refusal::ObjectKindNotDrawable { object, kind, owner }) if object == "model" && kind == "mesh" && owner == "11.48"),
             "{:?}",
             refused.err()
         );

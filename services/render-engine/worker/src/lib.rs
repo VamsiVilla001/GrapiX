@@ -33,6 +33,7 @@ pub mod prepared;
 pub mod rasterise;
 pub mod rasterizer;
 pub mod recovery;
+pub mod support;
 pub mod tiling;
 pub mod text;
 

@@ -68,7 +68,9 @@ mod tests {
     fn reference_set_parses_and_covers_fixed_function_modes_and_subjects() {
         let (mut blends, mut fits, mut rates) = (HashSet::new(), HashSet::new(), HashSet::new());
         let (mut safe_areas, mut text, mut vector, mut mesh) = (false, false, false, false);
-        for path in reference_scene_paths(&reference_scenes_dir()).expect("reference scenes enumerate") {
+        let mut corpus = reference_scene_paths(&reference_scenes_dir()).expect("reference scenes enumerate");
+        corpus.extend(reference_scene_paths(&workspace_root().join("tests/refusal-scenes")).expect("refusal scenes enumerate"));
+        for path in corpus {
             let document = load_reference_scene(&path).expect("each reference scene parses through the production parser");
             rates.insert((document.canvas.frame_rate.num, document.canvas.frame_rate.den));
             blends.extend(document.materials.iter().map(|material| material.blend_mode));
@@ -88,6 +90,15 @@ mod tests {
         for mode in support.fit_modes { assert!(fits.contains(&mode), "fixed-function fit mode {mode:?} lacks a reference scene"); }
         assert_eq!(rates, HashSet::from([(50, 1), (30_000, 1001), (60_000, 1001), (25, 1), (30, 1), (60, 1)]));
         assert!(safe_areas && text && vector && mesh, "the reference set must retain every required subject");
+    }
+
+    #[test]
+    fn unsupported_reference_mappings_refuse_instead_of_becoming_baselines() {
+        for scene in reference_scene_paths(&workspace_root().join("tests/refusal-scenes")).expect("refusal scenes enumerate") {
+            let error = render_reference_scene(&scene).expect_err("unsupported authored mappings must not capture placeholder pixels");
+            assert!(matches!(error, PixelGateError::Refusal(Refusal::ObjectKindNotDrawable { ref object, ref kind, .. })
+                if !object.is_empty() && (kind == "image" || kind == "mesh")), "{error}");
+        }
     }
 
     #[test]

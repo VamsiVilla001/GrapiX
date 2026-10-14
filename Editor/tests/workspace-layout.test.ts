@@ -191,7 +191,7 @@ describe("the selected card-sort layout", () => {
   it("keeps scene navigation, authoring, viewport and timeline in their selected regions", () => {
     const source = CARD_SORT_LAYOUT;
     expect(source.version).toBe(LAYOUT_VERSION);
-    expect(source.regions.left.panels).toEqual(["scene-manager", "object-manager"]);
+    expect(source.regions.left.panels.slice(0, 2)).toEqual(["scene-manager", "object-manager"]);
     expect(source.regions.centre.panels).toEqual(["viewport"]);
     expect(source.regions.bottom.panels).toEqual(["timeline"]);
     expect(source.regions.right.panels).toContain("inspector");

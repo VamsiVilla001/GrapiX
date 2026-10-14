@@ -4,11 +4,21 @@
 //! system font database is never loaded, so a missing face cannot turn into a
 //! platform-dependent substitution. Shaping, bidi resolution, fallback and
 //! OpenType layout all happen once when a scene is published.
+//!
+//! Glyphs are drawn as their real outlines (3.13): each glyph's outline is
+//! taken from the packaged face at publish, tessellated once in the text's own
+//! coordinates, and placed every frame through the same transform as a vector
+//! shape, so rotation, scale and anchor apply to text too. Advance-width
+//! rectangles were a substitution and are gone.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cosmic_text::{fontdb, Align, Attrs, Buffer, Family, FontSystem, Metrics, Shaping};
+use cosmic_text::{fontdb, Align, Attrs, Buffer, Family, FontSystem, Metrics, Shaping, SwashCache};
+use lyon::math::point;
+use lyon::path::Path;
+use lyon::tessellation::{BuffersBuilder, FillOptions, FillTessellator, FillVertex, VertexBuffers};
+use swash::zeno::{Command, Point as OutlinePoint};
 use gx_contracts::font::{FontDefinition, FontLoadStatus, FontSource, FontStyle};
 use gx_contracts::scene::{AssetKind, SceneDocument, SceneObject, TextCase, TextDirection, TextLayout};
 use gx_contracts::{ContentHash, Refusal};
@@ -36,6 +46,11 @@ pub struct PreparedTextObject {
     pub glyphs: Vec<PreparedGlyph>,
     pub width: f32,
     pub height: f32,
+    /// Every glyph's outline, tessellated once at publish, in the text's own
+    /// coordinates (origin at the box's top-left, y down).
+    pub vertices: Vec<[f32; 2]>,
+    /// Triangle indices into [`Self::vertices`].
+    pub indices: Vec<u32>,
 }
 
 /// Text-side state built once for a published scene.
@@ -44,10 +59,9 @@ pub struct PreparedTexts {
     pub objects: Vec<PreparedTextObject>,
 }
 
-/// Rasterise prepared text objects onto a linear-light surface in scene draw
-/// order.  Every glyph was shaped and positioned at publication time; this
-/// function only needs to place the resulting advance rectangles into the
-/// correct pixels.
+/// Rasterise prepared text objects onto the working-space surface. Every
+/// glyph was shaped, outlined and tessellated at publication; this places its
+/// triangles through the object's transform and fills them.
 ///
 /// The fill colour is taken from the text object's base.  A gradient fill
 /// would require a fill rule we do not implement in the software path, so it
@@ -58,7 +72,32 @@ pub fn rasterise_texts(
     effective: &[gx_contracts::scene::ResolvedObject],
     surface: &mut crate::rasterise::RasterSurface,
 ) -> Result<(), Refusal> {
-    for text_object in &prepared.objects {
+    rasterise_selected(prepared, None, document, effective, surface)
+}
+
+/// Rasterise one prepared text object, for composing in draw order.
+pub fn rasterise_text(
+    prepared: &PreparedTexts,
+    object_id: &str,
+    document: &SceneDocument,
+    effective: &[gx_contracts::scene::ResolvedObject],
+    surface: &mut crate::rasterise::RasterSurface,
+) -> Result<(), Refusal> {
+    rasterise_selected(prepared, Some(object_id), document, effective, surface)
+}
+
+fn rasterise_selected(
+    prepared: &PreparedTexts,
+    only: Option<&str>,
+    document: &SceneDocument,
+    effective: &[gx_contracts::scene::ResolvedObject],
+    surface: &mut crate::rasterise::RasterSurface,
+) -> Result<(), Refusal> {
+    for text_object in prepared
+        .objects
+        .iter()
+        .filter(|text_object| only.is_none_or(|id| text_object.object_id == id))
+    {
         let Some(resolved) = effective
             .iter()
             .find(|r| r.id == text_object.object_id)
@@ -99,8 +138,6 @@ pub fn rasterise_texts(
             continue;
         }
 
-        let offset_x = resolved.x as f32;
-        let offset_y = resolved.y as f32;
         let glyph_fill = crate::colour_pipeline::WorkingRgba {
             r: fill.r * opacity,
             g: fill.g * opacity,
@@ -111,32 +148,23 @@ pub fn rasterise_texts(
             continue;
         }
 
-        // Approximate glyph height from the text object's line height.
-        let line_height = if text_object.glyphs.is_empty() {
-            0.0
-        } else {
-            text_object.height / text_object.glyphs.len() as f32
-        };
-        let h = (line_height.max(1.0)) as u32;
-
-        for glyph in &text_object.glyphs {
-            let x0 = (offset_x + glyph.x).max(0.0) as u32;
-            let y0 = (offset_y + glyph.y).max(0.0) as u32;
-            let w = (glyph.width.max(1.0)) as u32;
-            for dy in 0..h {
-                let py = y0 + dy;
-                if py >= surface.height() {
-                    break;
-                }
-                for dx in 0..w {
-                    let px = x0 + dx;
-                    if px >= surface.width() {
-                        break;
-                    }
-                    surface.composite(px, py, glyph_fill);
-                }
+        // One union per text object, so overlapping glyphs composite once.
+        let mut triangles = Vec::with_capacity(text_object.indices.len() / 3);
+        for triangle in text_object.indices.chunks_exact(3) {
+            let mut corners = [crate::rasterise::PathVertex { x: 0.0, y: 0.0 }; 3];
+            for (corner, &index) in corners.iter_mut().zip(triangle) {
+                let Some(&[x, y]) = text_object.vertices.get(index as usize) else {
+                    return Err(Refusal::VectorTessellationFailed {
+                        object: text_object.object_id.clone(),
+                        detail: "a glyph triangle indexes past its vertices".into(),
+                    });
+                };
+                let at = crate::rasterise::transform(&text.base.anchor, resolved, f64::from(x), f64::from(y))?;
+                *corner = crate::rasterise::PathVertex { x: at.x, y: at.y };
             }
+            triangles.push(corners);
         }
+        crate::rasterise::fill_union(surface, &triangles, glyph_fill);
     }
     Ok(())
 }
@@ -217,20 +245,32 @@ fn shape_object(
     })?;
     let mut font_system = FontSystem::new_with_locale_and_db("en-US".into(), database);
     let font_size = finite_positive(text.size, 1.0);
-    let line_height = finite_positive(text.line_height.unwrap_or(1.2) * text.size, font_size);
+    let line_height = match text.line_height {
+        Some(multiple) => finite_positive(multiple * text.size, font_size),
+        // Absent means the font's own metrics (the contract), not 1.2 × size.
+        None => font_line_height(&mut font_system, &primary_family, font_size).ok_or_else(|| {
+            Refusal::FontMissing {
+                font_id: text.font_id.clone(),
+            }
+        })?,
+    };
     let mut buffer = Buffer::new(&mut font_system, Metrics::new(font_size, line_height));
     let (width, height) = match text.layout {
         TextLayout::Point => (None, None),
-        TextLayout::Paragraph => (
-            Some(finite_non_negative(text.base.width)),
-            Some(finite_non_negative(text.base.height)),
-        ),
+        // Overflow is Visible here (Hidden and Clip refuse in `support.rs`), so
+        // every line draws: the box height must not cut lines off.
+        TextLayout::Paragraph => (Some(finite_non_negative(text.base.width)), None),
     };
     buffer.set_size(&mut font_system, width, height);
 
     let source = apply_case(&text.text, text.text_case);
     let shaped_source = apply_direction(&source, text.direction);
-    let attrs = Attrs::new().family(Family::Name(&primary_family));
+    let mut attrs = Attrs::new().family(Family::Name(&primary_family));
+    if text.letter_spacing != 0.0 {
+        // The contract's tracking is in thousandths of an em; cosmic-text's is
+        // in em.
+        attrs = attrs.letter_spacing((text.letter_spacing / 1000.0) as f32);
+    }
     let align = match text.align {
         gx_contracts::scene::TextAlign::Left => Some(Align::Left),
         gx_contracts::scene::TextAlign::Center => Some(Align::Center),
@@ -247,6 +287,9 @@ fn shape_object(
     let mut glyphs = Vec::new();
     let mut measured_width = 0.0_f32;
     let mut measured_height = 0.0_f32;
+    let mut outlines = SwashCache::new();
+    let mut geometry: VertexBuffers<[f32; 2], u32> = VertexBuffers::new();
+    let mut tessellator = FillTessellator::new();
     for run in buffer.layout_runs() {
         measured_width = measured_width.max(run.line_w);
         measured_height = measured_height.max(run.line_top + run.line_height);
@@ -271,6 +314,35 @@ fn shape_object(
                 width: glyph.w,
                 bidi_level: glyph.level.number(),
             });
+
+            // The glyph's pen position, as cosmic-text places it.
+            let pen_x = glyph.x + glyph.font_size * glyph.x_offset;
+            let pen_y = run.line_y + glyph.y - glyph.font_size * glyph.y_offset;
+            let key = glyph.physical((0.0, 0.0), 1.0).cache_key;
+            let Some(commands) = outlines.get_outline_commands(&mut font_system, key) else {
+                return Err(Refusal::ScenePropertyNotDrawable {
+                    object: text.base.id.clone(),
+                    property: format!("glyph {} has no outline", glyph.glyph_id),
+                    owner: "3.18".into(),
+                });
+            };
+            if commands.is_empty() {
+                continue; // whitespace
+            }
+            let path = outline_path(commands, pen_x, pen_y);
+            tessellator
+                .tessellate_path(
+                    &path,
+                    &FillOptions::non_zero().with_tolerance(0.02),
+                    &mut BuffersBuilder::new(&mut geometry, |vertex: FillVertex| {
+                        let at = vertex.position();
+                        [at.x, at.y]
+                    }),
+                )
+                .map_err(|error| Refusal::VectorTessellationFailed {
+                    object: text.base.id.clone(),
+                    detail: error.to_string(),
+                })?;
         }
     }
 
@@ -280,7 +352,60 @@ fn shape_object(
         glyphs,
         width: measured_width,
         height: measured_height,
+        vertices: geometry.vertices,
+        indices: geometry.indices,
     })
+}
+
+/// A glyph outline as a lyon path in the text's own coordinates. Outlines are
+/// y-up from the glyph's pen position; text space is y-down from the box's
+/// top-left.
+fn outline_path(commands: &[Command], pen_x: f32, pen_y: f32) -> Path {
+    let at = |p: OutlinePoint| point(pen_x + p.x, pen_y - p.y);
+    let mut builder = Path::builder();
+    let mut open = false;
+    for command in commands {
+        match *command {
+            Command::MoveTo(p) => {
+                if open {
+                    builder.end(false);
+                }
+                builder.begin(at(p));
+                open = true;
+            }
+            Command::LineTo(p) if open => {
+                builder.line_to(at(p));
+            }
+            Command::QuadTo(c, p) if open => {
+                builder.quadratic_bezier_to(at(c), at(p));
+            }
+            Command::CurveTo(c1, c2, p) if open => {
+                builder.cubic_bezier_to(at(c1), at(c2), at(p));
+            }
+            Command::Close if open => {
+                builder.end(true);
+                open = false;
+            }
+            _ => {}
+        }
+    }
+    if open {
+        builder.end(false);
+    }
+    builder.build()
+}
+
+/// The primary face's own line spacing in pixels at `size`: ascent plus
+/// descent plus line gap, which is what the contract means by an absent
+/// line height.
+fn font_line_height(font_system: &mut FontSystem, family: &str, size: f32) -> Option<f32> {
+    let families = [fontdb::Family::Name(family)];
+    let query = fontdb::Query { families: &families, ..fontdb::Query::default() };
+    let id = font_system.db().query(&query)?;
+    let font = font_system.get_font(id, fontdb::Weight::NORMAL)?;
+    let metrics = font.as_swash().metrics(&[]);
+    let units = f32::from(metrics.units_per_em);
+    (units > 0.0).then(|| (metrics.ascent + metrics.descent + metrics.leading) / units * size)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -529,6 +654,91 @@ mod tests {
         assert!(text.glyphs.iter().any(|glyph| glyph.source_end - glyph.source_start > 1), "OpenType ligature was not formed");
         assert!(text.glyphs.iter().any(|glyph| glyph.bidi_level % 2 == 1), "RTL run was not resolved");
         assert!(text.glyphs.iter().any(|glyph| glyph.face_id == "hebrew-regular"), "declared Hebrew fallback was not used");
+    }
+
+    fn lit_area(document: &SceneDocument, assets: &AssetBytes) -> (usize, [f32; 4]) {
+        let prepared = prepare_texts(document, assets).expect("the text shapes");
+        let resolution = gx_contracts::scene::resolve_hierarchy(&document.objects);
+        let mut surface =
+            crate::rasterise::RasterSurface::transparent(document.canvas.width, document.canvas.height);
+        rasterise_texts(&prepared, document, &resolution.effective, &mut surface).expect("the text draws");
+        let width = surface.width() as usize;
+        let mut bounds = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+        let mut count = 0;
+        for (index, pixel) in surface.pixels().iter().enumerate() {
+            if pixel.a > 0.5 {
+                count += 1;
+                let (x, y) = ((index % width) as f32, (index / width) as f32);
+                bounds = [bounds[0].min(x), bounds[1].min(y), bounds[2].max(x), bounds[3].max(y)];
+            }
+        }
+        (count, bounds)
+    }
+
+    fn white_text(value: &str, size: f64, edit: impl Fn(&mut TextObject)) -> (SceneDocument, AssetBytes) {
+        let mut document = scene(value, "inter", vec![font("inter", "Inter", "inter", Vec::new())]);
+        for object in &mut document.objects {
+            if let SceneObject::Text(text) = object {
+                text.size = size;
+                text.base.x = 600.0;
+                text.base.y = 400.0;
+                text.base.fill = Some(gx_contracts::color::ColorValue::Solid {
+                    color: gx_contracts::color::Rgba::srgb(1.0, 1.0, 1.0, 1.0),
+                });
+                edit(text);
+            }
+        }
+        (document, AssetBytes::from([(ContentHash("inter".into()), INTER.to_vec())]))
+    }
+
+    /// 3.13: text draws as real glyph outlines, not advance rectangles. An
+    /// Inter "I" at 200 px is a stem about 0.09 em wide and one cap height
+    /// tall, a few thousand pixels; its advance rectangle would be over
+    /// ten thousand.
+    #[test]
+    fn a_glyph_draws_its_outline_not_its_advance_rectangle() {
+        let (document, assets) = white_text("I", 200.0, |_| {});
+        let (count, [x0, y0, x1, y1]) = lit_area(&document, &assets);
+        assert!((1500..=4500).contains(&count), "an I lit {count} pixels");
+        assert!((10.0..=30.0).contains(&(x1 - x0)), "stem width {}", x1 - x0);
+        assert!((130.0..=160.0).contains(&(y1 - y0)), "cap height {}", y1 - y0);
+    }
+
+    /// 3.13: text takes the object's rotation like any shape; a quarter turn
+    /// swaps the glyph's width and height.
+    #[test]
+    fn text_rotates_with_its_object() {
+        let (document, assets) = white_text("I", 200.0, |text| text.base.rotation = 90.0);
+        let (count, [x0, y0, x1, y1]) = lit_area(&document, &assets);
+        assert!((1500..=4500).contains(&count), "a rotated I lit {count} pixels");
+        assert!((130.0..=160.0).contains(&(x1 - x0)), "rotated width {}", x1 - x0);
+        assert!((10.0..=30.0).contains(&(y1 - y0)), "rotated height {}", y1 - y0);
+    }
+
+    /// Letter spacing is drawn: 100 thousandths of an em at 100 px adds about
+    /// 10 px per glyph.
+    #[test]
+    fn letter_spacing_widens_the_run_by_the_tracking() {
+        let shaped = |tracking: f64| {
+            let (document, assets) = white_text("ABCD", 100.0, |text| text.letter_spacing = tracking);
+            prepare_texts(&document, &assets).expect("shapes").objects[0].width
+        };
+        let added = shaped(100.0) - shaped(0.0);
+        assert!((30.0..=45.0).contains(&added), "tracking added {added} px");
+    }
+
+    /// An absent line height is the font's own metrics, read here straight
+    /// from the font file rather than through the font system.
+    #[test]
+    fn an_absent_line_height_follows_the_fonts_metrics() {
+        let metrics = swash::FontRef::from_index(INTER, 0).expect("Inter parses").metrics(&[]);
+        let expected = (metrics.ascent + metrics.descent + metrics.leading) / f32::from(metrics.units_per_em) * 100.0;
+        let (document, assets) = white_text("A\nB", 100.0, |_| {});
+        let height = prepare_texts(&document, &assets).expect("shapes").objects[0].height;
+        assert!((height - 2.0 * expected).abs() <= 1.0, "two lines {height}, metrics line {expected}");
+        let (document, assets) = white_text("A\nB", 100.0, |text| text.line_height = Some(1.5));
+        let height = prepare_texts(&document, &assets).expect("shapes").objects[0].height;
+        assert!((height - 300.0).abs() <= 1.0, "two lines at 1.5 gave {height}");
     }
 
     #[test]

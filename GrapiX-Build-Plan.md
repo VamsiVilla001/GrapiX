@@ -16,7 +16,16 @@ automatable before it is clickable.
 
 ---
 
-**248 steps across 19 phases.**
+**250 steps across 19 phases.**
+
+**Product amendment — 15 October 2026:** the user removed the design-system
+concept from the current authoring workflow. Scene Manager is now one saved
+container holding multiple independent graphics, each with its own layers,
+timeline and undo history (11.64), analogous to compositions inside an `.aep`.
+Phase 10 and design-system-only portions of earlier rows are historical
+compatibility work, not requirements for creating, saving or browsing graphics.
+Do not introduce new token-ingest, brand-pack confirmation or drift workflows.
+Existing saved metadata remains readable and is not deleted by this change.
 
 
 ## Phase P — Parallel tracks — start on day one
@@ -384,6 +393,8 @@ Deferred to here on purpose. Everything above is usable without it, and this is 
 | `11.60` | Layer styles: every Photoshop style and its blending options, animatable, on the GPU | BE | 3.19, 3.22, 11.36 | Drop Shadow, Inner Shadow, Outer Glow, Inner Glow, Bevel and Emboss, Satin, Color, Gradient and Pattern Overlay and Stroke, plus fill opacity, knockout, Blend If and several instances of one style, are scene properties with every parameter keyframable, rendered on the GPU in Photoshop's stacking order. Fixture scenes match committed Photoshop reference renders within the 4.4 threshold; the PSD (`lfx2`/`lmfx`) and Figma effect mappings used by 11.59 and 18.4 are specified against them; any style option not yet implemented (for example contours) is a named finding, never dropped |
 | `11.61` | Text animators: per-glyph range selectors | BE | 3.18, 11.20, 11.36 | Animators with range selectors (characters, characters excluding spaces, words, lines; start, end and offset; shapes; ease high and low; randomise with a seed derived from the object id) animate per-glyph position, scale, rotation, opacity, fill and tracking through 11.20 channels and render on the GPU from per-glyph instance data without per-frame re-shaping; the selector maths is ported from EffectCraft with attribution; the existing stagger presets are expressed through them; two renders of one frame are byte-identical, and a selector the engine cannot evaluate refuses by name |
 | `11.62` | Effects and layer-style controls in the Editor | UI | 3.22, 11.46, 11.60 | Adding, removing, reordering, enabling and duplicating effects and layer styles on any object are 11.36 commands with one undo each; every parameter shows in the inspector with scrub fields and an animation stopwatch; a refused effect or style shows its refusal code and fix |
+| `11.63` | EffectCraft / After Effects workspace presentation | UI | 11.5, 11.20, 11.36 | The Editor presents a charcoal workspace with project/layers/assets at left, the composition viewer in the centre, Preview and grouped Properties at right, and a layer timeline below. Menus, creation tools, transport, visibility/lock switches and panel disclosure use the existing command and view-state paths. Both frame readouts use one integer playhead and the scene's rational rate, with fractional timecode labelled NDF. Unanimated objects appear as layer rows; selecting a layer reveals its tracks. Node count remains flat from 100 to 100,000 keys and scrub does not repaint the static layer. Captured Tauri screenshots are compared with the EffectCraft workspace reference, and live create/select/edit, switch, step/play, undo and panel-reopen interactions pass; screenshots or interactions that cannot run are recorded as unverified |
+| `11.64` | Scene Manager: one container, multiple independent graphics | UI | 11.5, 11.36, 11.37, 11.38 | A Scene Manager module creates and selects a saved container, adds and saves independent graphics, searches them by name or id, and opens each through the existing Rust command model. Graphic switching preserves separate content, selection, playhead and undo history, including unsaved graphics. The catalog and accessible/agent projections show editing, open, saved, unsaved, unavailable and published-revision status without design-system confirmation, stamps or drift. Existing container/graphic addresses remain compatible and legacy metadata is preserved. Execute a live create-container, add-two-graphics, edit/save/search/switch/undo, restart/reopen check and the complete check gate before marking done. Storage remains the existing project-folder format; single-file `.gpx` packaging remains 11.43 |
 
 ### Phase 11 UI requirements — Editor 2.0 parity and animation
 
@@ -391,7 +402,7 @@ Deferred to here on purpose. Everything above is usable without it, and this is 
 
 **Inspection baseline (12 September 2026):** `Editor/web/main.ts` mounts object-manager and inspector projections and the Three.js viewport. Reusable scene/template, font, material and motion-preset modules exist under `Editor/src`, but are not all integrated into the shell entry point. No interactive timeline module is present there. `Shared/contracts/src/scene.rs` currently stores scene timeline duration; `design_system.rs` already defines normalized motion channels, keys and outgoing easing token references. These are foundations to extend, not systems to replace. Verify current wiring again when implementation begins.
 
-- Visual direction: keep the UI clean, minimal and Figma-like; target roughly 70% Figma simplicity and 30% simplified After Effects animation control. Reveal advanced controls only when needed; do not copy After Effects complexity.
+- Visual direction, amended by the user on 15 October 2026: recreate the shared EffectCraft / After Effects workspace structure and presentation under 11.63. Keep advanced panels collapsible and reuse GrapiX's authoring commands and virtualised timeline.
 
 - Editor 1.x parity is required in Editor 2.0: restore the templates/scenes manager, object creation and object manager, object details and type-aware property inspector, data binding panel, font manager, asset browser and material manager as reachable, functional panels in the Tauri workspace.
 

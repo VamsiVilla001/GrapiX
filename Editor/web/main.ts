@@ -37,6 +37,7 @@ import type {
   TakePage,
   TimelinePhase,
 } from "@grapix/contracts";
+import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
 import { presetBlocker } from "../src/motion-preset-browser";
 import { SceneViewport } from "../src/viewport";
 import { renderNode } from "../src/agent-surface";
@@ -49,6 +50,7 @@ import {
   fieldEditStart,
   inspectorEdits,
   inspectorPanel,
+  inspectorSections,
   isRefused,
   parseFieldInput,
 } from "../src/inspector";
@@ -125,6 +127,7 @@ import {
   isRefused as isWorkspaceRefused,
   removeSession,
   sceneTabs,
+  sessionFor,
   type SceneSession,
 } from "../src/workspace";
 import { execute, shell, wireFrame } from "../src/command-client";
@@ -144,6 +147,8 @@ import {
 } from "../src/workspace-layout";
 import { phaseAddress } from "../src/timeline/phases";
 import { keyId, parseKeyId, timelineModel, type TimelineModel } from "../src/timeline/model";
+import { timelineLayers as describeTimelineLayers, layerSignature } from "../src/timeline/layers";
+import { formatTimecode, formatFrameLine, formatRate } from "../src/timeline/clock";
 import {
   isRefused as isKeyEditRefused,
   planCopy,
@@ -177,6 +182,7 @@ import {
 import {
   DEFAULT_PIXELS_PER_FRAME,
   DEFAULT_ROW_HEIGHT,
+  frameToX,
   rowWindow,
   xToFrame,
   type TimelineViewport,
@@ -211,7 +217,6 @@ interface ListedScene {
 
 interface ProjectSceneCatalog {
   readonly project: string;
-  readonly currentDesignSystemVersion?: number;
   readonly scenes: readonly ListedScene[];
 }
 
@@ -251,6 +256,12 @@ const ui = {
   projectCreate: need<HTMLButtonElement>("project-create"),
   projectRefresh: need<HTMLButtonElement>("project-refresh"),
   projectSaveScene: need<HTMLButtonElement>("project-save-scene"),
+  graphicCreate: need<HTMLButtonElement>("graphic-create"),
+  graphicSearch: need<HTMLInputElement>("graphic-search"),
+  managerDialog: need<HTMLDialogElement>("manager-create-dialog"),
+  managerForm: need<HTMLFormElement>("manager-create-form"),
+  managerName: need<HTMLInputElement>("manager-create-name"),
+  managerError: need<HTMLParagraphElement>("manager-create-error"),
   sceneManagerMount: need<HTMLDivElement>("scene-manager-mount"),
   sceneManagerEmpty: need<HTMLParagraphElement>("scene-manager-empty"),
   canvas: need<HTMLCanvasElement>("viewport"),
@@ -746,47 +757,47 @@ async function registerSceneFonts(document_: SceneDocument, key: string): Promis
  *  here would be a second description of the same panel, free to drift from
  *  the one the tests hold (invariant 27). */
 function managedProjectScenes(catalog: ProjectSceneCatalog): ManagedScene[] {
-  return catalog.scenes.map((listed) => ({
+  return catalog.scenes.map((listed) => {
+    const opened = sessionFor(workspace, { project: catalog.project, sceneId: listed.sceneId });
+    return {
     sceneId: listed.sceneId,
     name: listed.name,
     unsavedChanges:
-      projectChangesUnsaved() &&
-      projectSceneId === listed.sceneId &&
-      projectSceneProject === catalog.project,
-    // Scene documents predate design-system stamping. A revision proves
-    // publication, but not which token version was used; call that unknown
-    // rather than inventing a version from the publication revision.
-    ...(listed.publishedRevision === undefined ? {} : { publishedUnstamped: true }),
+      opened?.view.projectDirty === true || (opened?.key === workspace.activeKey && projectChangesUnsaved()),
+    open: opened !== undefined,
+    active: opened !== undefined && opened.key === workspace.activeKey,
+    ...(listed.publishedRevision === undefined ? {} : { publishedRevision: listed.publishedRevision }),
     ...(listed.unavailableReason === undefined
       ? {}
       : { unavailableReason: listed.unavailableReason }),
-  }));
+    };
+  });
 }
 
 function renderProjectManager(): void {
+  ui.graphicCreate.disabled = currentProject === undefined;
+  ui.projectSaveScene.disabled = currentProject === undefined;
   const catalog = projectCatalog;
   if (!catalog || catalog.project !== currentProject) {
     ui.sceneManagerMount.replaceChildren();
     ui.sceneManagerEmpty.hidden = false;
     ui.sceneManagerEmpty.textContent =
       projects.length === 0
-        ? "No projects. Create one before saving a project scene."
-        : "Select a project to list its scenes.";
+        ? "Create a scene to keep your graphics together."
+        : "Choose a scene to browse its graphics.";
     return;
   }
   const managed = managedProjectScenes(catalog);
-  ui.sceneManagerEmpty.hidden = managed.length > 0;
-  ui.sceneManagerEmpty.textContent = `No scenes in ${catalog.project}. Use New, then Save here.`;
+  const panel = sceneManagerPanel({ project: catalog.project, scenes: managed, query: ui.graphicSearch.value });
+  const matches = panel.children?.[0]?.children?.length ?? 0;
+  ui.sceneManagerEmpty.hidden = matches > 0;
+  ui.sceneManagerEmpty.textContent = managed.length === 0
+    ? `No graphics in ${catalog.project}. Add your first graphic.`
+    : "No graphics match your search.";
   ui.sceneManagerMount.replaceChildren(
     renderNode(
       document,
-      sceneManagerPanel({
-        project: catalog.project,
-        scenes: managed,
-        ...(catalog.currentDesignSystemVersion === undefined
-          ? {}
-          : { currentDesignSystemVersion: catalog.currentDesignSystemVersion }),
-      }),
+      panel,
     ) as unknown as Node,
   );
 }
@@ -1049,7 +1060,23 @@ function renderPanels(document_: SceneDocument): void {
 
 
   const inspector = inspectorPanel(document_, selection);
-  ui.inspector.replaceChildren(renderNode(document, inspector) as unknown as Node);
+  const sections = inspectorSections(inspector);
+  if (sections.length === 0) {
+    ui.inspector.replaceChildren(renderNode(document, inspector) as unknown as Node);
+  } else {
+    ui.inspector.replaceChildren(...sections.map((section) => {
+      // Keep identity/switch metadata reachable without pushing transform
+      // controls below the fold in the compact Properties dock.
+      const metadata = section.title === "Layer";
+      const group = document.createElement(metadata ? "details" : "section");
+      group.className = "property-section";
+      const heading = document.createElement(metadata ? "summary" : "h3");
+      heading.textContent = section.title;
+      group.append(heading, ...section.fields.map((field) => renderNode(document, field) as unknown as Node));
+      return group;
+    }));
+  }
+  updateTimeReadouts();
   const animation = keyframePanelModel(document_, selection, animationSurface, currentFrame);
   ui.animationFrame.value = String(animation.currentFrame);
   ui.animationFrame.max = String(animation.durationFrames);
@@ -1118,12 +1145,14 @@ function timelineSnapshot(model: TimelineModel): TimelineSnapshot {
 /// The DOM's shape: the rows present and the canvas sizes. A change to this
 /// needs new elements; anything else is a repaint.
 let timelineStructure = "";
+let layerPresentation = new Map<string, string>();
 
 /// The timeline's view of the document: driven by the object selection, with
 /// collapsed groups folded away.
 function currentTimelineModel(document_: SceneDocument): TimelineModel {
   return timelineModel(document_, {
     selectedIds: selection,
+    allObjects: true,
     collapsedIds: collapsedTimelineIds,
   });
 }
@@ -1137,6 +1166,8 @@ function currentTimelineModel(document_: SceneDocument): TimelineModel {
 function renderTimeline(document_: SceneDocument, structureChanged = true): void {
   if (structureChanged) contentRevision += 1;
   const model = currentTimelineModel(document_);
+  const layers = describeTimelineLayers(document_);
+  layerPresentation = new Map([...layers].map(([id, layer]) => [id, layer.barColour]));
   const bounds = ui.timelineMount.getBoundingClientRect();
   // The header column is 210px of the grid; the stage gets the rest.
   timelineViewport = viewportForBounds(
@@ -1151,10 +1182,10 @@ function renderTimeline(document_: SceneDocument, structureChanged = true): void
       ? "no animated properties"
       : `${model.tracks.length} track(s) · ${model.keyCount} key(s) · ${visibleKeyCount(model, timelineViewport)} drawn`;
 
-  if (model.tracks.length === 0) {
+  if (model.rows.length === 0) {
     const empty = document.createElement("p");
     empty.className = "timeline-empty";
-    empty.textContent = "Key a property to see its track here.";
+    empty.textContent = "Create a layer to begin. Select it to edit its properties and add keyframes.";
     ui.timelineMount.replaceChildren(empty);
     timelineLayers = null;
     lastSnapshot = null;
@@ -1174,10 +1205,15 @@ function renderTimeline(document_: SceneDocument, structureChanged = true): void
     window_.last,
     Math.round(timelineViewport.width),
     Math.round(timelineViewport.height),
+    layerSignature(layers),
+    selection.join(","),
   ].join("#");
 
   if (structure !== timelineStructure || !timelineLayers) {
-    const parts = renderTimelinePanel(document, model, timelineViewport);
+    const parts = renderTimelinePanel(document, model, timelineViewport, layers);
+    for (const header of parts.headers.querySelectorAll<HTMLElement>(".timeline-group-header")) {
+      header.setAttribute("aria-selected", String(selection.includes(header.dataset.objectId!)));
+    }
     ui.timelineMount.replaceChildren(parts.root);
     timelineLayers = parts.canvases;
     timelineStructure = structure;
@@ -1189,6 +1225,24 @@ function renderTimeline(document_: SceneDocument, structureChanged = true): void
   const headers = ui.timelineMount.querySelector<HTMLElement>(".timeline-headers");
   if (headers) headers.scrollTop = timelineViewport.scrollTop;
   paintTimeline(model);
+  renderTimelineRuler(model);
+}
+
+function renderTimelineRuler(model: TimelineModel): void {
+  const host = document.getElementById("timeline-ruler-ticks");
+  if (!host) return;
+  const framesPerSecond = Math.max(1, Math.round(model.frameRate.num / model.frameRate.den));
+  const step = framesPerSecond * Math.max(1, Math.ceil(70 / (framesPerSecond * timelineViewport.pixelsPerFrame)));
+  const start = Math.ceil(timelineViewport.startFrame / step) * step;
+  const end = Math.min(model.durationFrames, timelineViewport.startFrame + timelineViewport.width / timelineViewport.pixelsPerFrame);
+  const ticks: HTMLElement[] = [];
+  for (let frame = start; frame <= end; frame += step) {
+    const tick = document.createElement("span");
+    tick.style.left = `${frameToX(timelineViewport, frame)}px`;
+    tick.textContent = formatTimecode(frame, model.frameRate);
+    ticks.push(tick);
+  }
+  host.replaceChildren(...ticks);
 }
 
 /** Wheel over the timeline: rows vertically, frames with Shift or a
@@ -1226,6 +1280,7 @@ function paintTimeline(model: TimelineModel): void {
     currentFrame,
     selected: selectedKeys,
     phases: scene?.timeline.phases ?? [],
+    layerBars: layerPresentation,
     ...(graphTrack === undefined ? {} : { graphTrack }),
   };
   // Every layer gets a backing store in *device* pixels and a transform that
@@ -1312,8 +1367,14 @@ function onTimelineClick(event: MouseEvent): void {
   if (!(target instanceof Element)) return;
 
   const group = target.closest<HTMLElement>(".timeline-group-header");
+  if (target.closest("[data-layer-action]")) {
+    onObjectManagerClick(event);
+    return;
+  }
   if (group?.dataset.objectId) {
     const objectId = group.dataset.objectId;
+    setSelection(event.shiftKey || event.ctrlKey || event.metaKey ? additiveSelection([objectId]) : [objectId]);
+    if (!event.altKey && event.detail < 2) return;
     collapsedTimelineIds = collapsedTimelineIds.includes(objectId)
       ? collapsedTimelineIds.filter((id) => id !== objectId)
       : [...collapsedTimelineIds, objectId];
@@ -1639,6 +1700,7 @@ function setCurrentFrame(next: number): void {
 
   const animation = keyframePanelModel(scene, selection, animationSurface, currentFrame);
   ui.animationFrame.value = String(animation.currentFrame);
+  updateTimeReadouts();
   ui.animationMount.replaceChildren(renderKeyframePanel(document, animation, animationSurface));
   ui.previewStatus.textContent = `${playback === undefined ? "Paused" : "Playing"} at frame ${currentFrame}`;
   renderUnsupported([
@@ -1652,7 +1714,8 @@ function setCurrentFrame(next: number): void {
 
 function updatePlaybackControls(): void {
   const playing = playback !== undefined;
-  ui.previewPlay.textContent = playing ? "Pause" : "Play";
+  ui.previewPlay.replaceChildren(iconImage(playing ? "pause" : "play"));
+  ui.previewPlay.setAttribute("aria-label", playing ? "Pause preview" : "Play preview");
   ui.previewPlay.setAttribute("aria-pressed", String(playing));
   ui.previewStatus.textContent = `${playing ? "Playing" : "Paused"} at frame ${currentFrame}`;
 }
@@ -2520,7 +2583,7 @@ function onFontManagerClick(event: MouseEvent): void {
 async function ingestFontFiles(): Promise<void> {
   let paths: string[];
   try {
-    const picked = await tauri?.dialog?.open({
+    const picked = await openFileDialog({
       multiple: true,
       filters: [{ name: "Fonts", extensions: ["otf", "ttf", "woff", "woff2"] }],
     });
@@ -2794,7 +2857,7 @@ async function importAssetFiles(): Promise<void> {
   if (!session || assetImporting) return;
   let paths: string[];
   try {
-    const picked = await tauri?.dialog?.open({
+    const picked = await openFileDialog({
       multiple: true,
       filters: [{ name: "Images, SVG, video and 3D models", extensions: ASSET_FILE_EXTENSIONS }],
     });
@@ -2954,6 +3017,125 @@ function renderUnsupported(reasons: readonly string[]): void {
 // ---------------------------------------------------------------------------
 // Commands.
 // ---------------------------------------------------------------------------
+
+function iconImage(name: string): HTMLImageElement {
+  const image = document.createElement("img");
+  image.src = `icons/${name}.svg`;
+  image.alt = "";
+  image.setAttribute("aria-hidden", "true");
+  return image;
+}
+
+function updateTimeReadouts(): void {
+  if (!scene) return;
+  for (const id of ["viewer-timecode", "timeline-timecode"]) {
+    const label = document.getElementById(id);
+    if (label) label.textContent = formatTimecode(currentFrame, scene.canvas.frameRate);
+  }
+  const frame = document.getElementById("timeline-frame-line");
+  if (frame) frame.textContent = formatFrameLine(currentFrame, scene.canvas.frameRate);
+  for (const id of ["viewer-rate", "preview-rate"]) {
+    const label = document.getElementById(id);
+    if (label) label.textContent = formatRate(scene.canvas.frameRate);
+  }
+  const composition = document.getElementById("composition-name");
+  if (composition) composition.textContent = scene.name;
+}
+
+function focusWorkspacePanel(id: string): void {
+  const panel = document.querySelector<HTMLElement>(`[data-panel="${id}"]`);
+  if (!panel || panel.hidden) return;
+  panel.classList.remove("panel-section-collapsed");
+  panel.querySelector<HTMLButtonElement>(".panel-disclosure")?.setAttribute("aria-expanded", "true");
+  panel.scrollIntoView({ block: "nearest" });
+  panel.tabIndex = -1;
+  panel.focus({ preventScroll: true });
+}
+
+/** Workspace controls only invoke existing command and view-state paths. */
+function wireWorkspaceChrome(): void {
+  for (const button of document.querySelectorAll<HTMLElement>("[data-icon]")) {
+    button.prepend(iconImage(button.dataset.icon!));
+  }
+  for (const [id, icon] of [["open-scene", "folder-open"], ["save-scene", "floppy-disk"],
+    ["undo", "arrow-counter-clockwise"], ["redo", "arrow-clockwise"]]) {
+    document.getElementById(id!)?.prepend(iconImage(icon!));
+  }
+  document.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const invoke = target?.closest<HTMLElement>("[data-invoke]");
+    if (invoke?.dataset.invoke) {
+      const button = document.getElementById(invoke.dataset.invoke) as HTMLButtonElement | null;
+      if (button?.disabled) log(`${invoke.textContent?.trim()} is unavailable in the current scene`);
+      else button?.click();
+    }
+    const creation = target?.closest<HTMLElement>("[data-create-kind]");
+    if (creation?.dataset.createKind) {
+      ui.objectKind.value = creation.dataset.createKind;
+      if (!ui.objectKind.value) log(`Object kind ${creation.dataset.createKind} is unavailable`, "bad");
+      else void createObject();
+    }
+    const panel = target?.closest<HTMLElement>("[data-focus-panel]");
+    if (panel?.dataset.focusPanel) focusWorkspacePanel(panel.dataset.focusPanel);
+    if (invoke || creation || panel) {
+      document.querySelectorAll<HTMLDetailsElement>(".app-menu").forEach((menu) => { menu.open = false; });
+    } else if (!target?.closest(".app-menu")) {
+      document.querySelectorAll<HTMLDetailsElement>(".app-menu").forEach((menu) => { menu.open = false; });
+    }
+  });
+  document.querySelectorAll<HTMLDetailsElement>(".app-menu").forEach((menu) => {
+    menu.addEventListener("toggle", () => {
+      if (menu.open) document.querySelectorAll<HTMLDetailsElement>(".app-menu").forEach((other) => {
+        if (other !== menu) other.open = false;
+      });
+    });
+  });
+  document.getElementById("tool-selection")?.addEventListener("click", () => ui.overlay.focus());
+  document.getElementById("viewer-transparency")?.addEventListener("click", (event) => {
+    const button = event.currentTarget as HTMLButtonElement;
+    const on = button.getAttribute("aria-pressed") !== "true";
+    button.setAttribute("aria-pressed", String(on));
+    document.querySelector(".viewport-stage")?.classList.toggle("show-transparency", on);
+  });
+  for (const [id, next] of [
+    ["preview-first", () => 0], ["preview-previous", () => currentFrame - 1],
+    ["preview-next", () => currentFrame + 1], ["preview-last", () => Math.max(0, Number(scene?.timeline.durationFrames ?? 1) - 1)],
+  ] as const) {
+    document.getElementById(id)?.addEventListener("click", () => { pausePreview("manual step"); setCurrentFrame(next()); });
+  }
+  const defaults = new Set(["fonts", "text-styles", "materials", "assets", "animation", "bindings", "control-contract", "take-page", "publish"]);
+  for (const panel of document.querySelectorAll<HTMLElement>(".panel[data-panel]")) {
+    const heading = panel.querySelector<HTMLElement>(":scope > h2, :scope > .panel-title-row h2");
+    if (!heading) continue;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "panel-disclosure";
+    button.append(iconImage("caret-down"));
+    const folded = defaults.has(panel.dataset.panel!);
+    button.setAttribute("aria-expanded", String(!folded));
+    button.setAttribute("aria-label", `Expand or collapse ${heading.textContent}`);
+    panel.classList.toggle("panel-section-collapsed", folded);
+    const toggle = (): void => {
+      const collapsed = panel.classList.toggle("panel-section-collapsed");
+      button.setAttribute("aria-expanded", String(!collapsed));
+    };
+    button.addEventListener("click", toggle);
+    heading.addEventListener("dblclick", toggle);
+    heading.append(button);
+    const menu = document.createElement("button");
+    menu.type = "button";
+    menu.dataset.focusPanel = panel.dataset.panel!;
+    menu.textContent = heading.childNodes[0]?.textContent ?? panel.dataset.panel!;
+    document.getElementById("window-panel-menu")?.append(menu);
+  }
+  for (const [id, label] of [["viewport", "Composition"], ["timeline", "Timeline"]]) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.focusPanel = id!;
+    button.textContent = label!;
+    document.getElementById("window-panel-menu")?.append(button);
+  }
+}
 
 function setProjectOptions(next: readonly string[], preferred?: string): void {
   projects = [...next];
@@ -3151,31 +3333,70 @@ async function applyPendingIdentity(): Promise<boolean> {
 }
 
 async function createProject(): Promise<void> {
-  const proposed = window.prompt("Project name");
-  if (proposed === null) return;
-  const project = proposed.trim();
-  if (!project) {
-    log("project creation refused: project name is empty", "bad");
-    return;
-  }
+  showManagerCreate("container");
+}
+
+let managerCreateKind: "container" | "graphic" = "container";
+
+function showManagerCreate(kind: "container" | "graphic"): void {
+  managerCreateKind = kind;
+  ui.managerForm.reset();
+  ui.managerError.textContent = "";
+  document.getElementById("manager-create-title")!.textContent = kind === "container" ? "New scene" : "New graphic";
+  document.getElementById("manager-create-name-label")!.textContent = kind === "container" ? "Scene name" : "Graphic name";
+  document.getElementById("manager-create-description")!.textContent = kind === "container"
+    ? "Keep multiple graphics together. Each graphic has its own layers and timeline."
+    : currentProject === undefined ? "Create an independent graphic. Save it into a scene when ready."
+      : `Add an independent graphic to ${currentProject}.`;
+  ui.managerDialog.showModal();
+  ui.managerName.focus();
+}
+
+async function submitManagerCreate(): Promise<void> {
+  const name = ui.managerName.value.trim();
+  const submit = ui.managerForm.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+  if (!name || submit.disabled) return;
+  submit.disabled = true;
+  ui.managerError.textContent = "";
   try {
-    await execute({ command: "createProject", project });
+    if (managerCreateKind === "container") {
+      await execute({ command: "createProject", project: name });
+      ui.graphicSearch.value = "";
+      await loadProjects(name);
+      log(`Created scene ${name}`, "good");
+    } else {
+      // The display name is free text; the stable storage id is a safe slug.
+      const slug = name.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "graphic";
+      const ids = new Set([...(projectCatalog?.scenes.map((item) => item.sceneId) ?? []),
+        ...workspace.sessions.map((item) => item.view.document.id)]);
+      let id = slug;
+      for (let suffix = 2; ids.has(id); suffix += 1) id = `${slug}-${suffix}`;
+      if (currentProject === undefined) {
+        const opened = await runCommand({ command: "openScene", source: { source: "new", id, name } }, `Created graphic ${name}`);
+        if (!opened) throw new Error("The graphic could not be opened. See Activity for the refusal.");
+      } else {
+        const project = currentProject;
+        await execute({ command: "createScene", project, sceneId: id, name });
+        ui.graphicSearch.value = "";
+        await refreshProjectCatalog();
+        const opened = await runCommand({ command: "openScene", source: { source: "project", project, sceneId: id } }, `Created graphic ${name}`);
+        if (!opened) throw new Error("The graphic was saved but could not be opened. See Activity for the refusal.");
+      }
+    }
+    ui.managerDialog.close();
   } catch (error) {
-    log(describe(error), "bad");
-    return;
+    ui.managerError.textContent = describe(error);
+    log(ui.managerError.textContent, "bad");
+  } finally {
+    submit.disabled = false;
   }
-  log(`created project ${project}`, "good");
-  await loadProjects(project);
 }
 
 async function selectProject(): Promise<void> {
   const project = ui.projectSelect.value;
   if (!project || project === currentProject) return;
-  if (refusesDiscard("switch project")) {
-    if (currentProject !== undefined) ui.projectSelect.value = currentProject;
-    return;
-  }
   currentProject = project;
+  ui.graphicSearch.value = "";
   projectCatalog = undefined;
   renderProjectManager();
   try {
@@ -3220,7 +3441,6 @@ async function saveProjectScene(): Promise<void> {
 }
 
 async function openProjectScene(sceneId: string): Promise<void> {
-  if (refusesDiscard(`open ${sceneId}`)) return;
   const project = currentProject;
   if (project === undefined) return;
   // Rust reveals a scene that is already open rather than opening it twice,
@@ -3232,10 +3452,9 @@ async function openProjectScene(sceneId: string): Promise<void> {
 }
 
 async function duplicateProjectScene(sceneId: string): Promise<void> {
-  if (refusesDiscard(`duplicate ${sceneId}`)) return;
   const project = currentProject;
   if (project === undefined) return;
-  const proposedId = window.prompt("Duplicate scene id", `${sceneId}-copy`);
+  const proposedId = window.prompt("Duplicate graphic id", `${sceneId}-copy`);
   if (proposedId === null) return;
   const newId = proposedId.trim();
   if (!newId) {
@@ -3245,7 +3464,7 @@ async function duplicateProjectScene(sceneId: string): Promise<void> {
   const listed = projectCatalog?.project === project
     ? projectCatalog.scenes.find((candidate) => candidate.sceneId === sceneId)
     : undefined;
-  const proposedName = window.prompt("Duplicate scene name", `${listed?.name ?? sceneId} Copy`);
+  const proposedName = window.prompt("Duplicate graphic name", `${listed?.name ?? sceneId} Copy`);
   if (proposedName === null) return;
   const name = proposedName.trim();
   if (!name) {
@@ -3365,17 +3584,14 @@ function onSceneManagerClick(event: MouseEvent): void {
 }
 
 async function newScene(): Promise<void> {
-  if (refusesDiscard("new scene")) return;
-  const id = ui.sceneId.value.trim() || "untitled";
-  const name = ui.sceneName.value.trim() || "Untitled";
-  await runCommand({ command: "openScene", source: { source: "new", id, name } }, `new scene ${id}`);
+  showManagerCreate("graphic");
 }
 
 async function openScene(): Promise<void> {
   if (refusesDiscard("open file")) return;
   let path: string | undefined;
   try {
-    const picked = await tauri?.dialog?.open({
+    const picked = await openFileDialog({
       multiple: false,
       filters: [{ name: "Scene document", extensions: ["json"] }],
     });
@@ -3397,7 +3613,7 @@ async function saveScene(): Promise<void> {
   let path: string | null | undefined = scenePath;
   if (!path) {
     try {
-      path = await tauri?.dialog?.save({
+      path = await saveFileDialog({
         defaultPath: `${scene.id}.json`,
         filters: [{ name: "Scene document", extensions: ["json"] }],
       });
@@ -3463,6 +3679,7 @@ async function start(): Promise<void> {
   // shell bridge actually reaches Rust.
   if (!tauri) return;
   ui.curtain.hidden = true;
+  wireWorkspaceChrome();
 
   ui.newScene.addEventListener("click", () => void newScene());
   ui.openScene.addEventListener("click", () => void openScene());
@@ -3471,6 +3688,10 @@ async function start(): Promise<void> {
   ui.projectRefresh.addEventListener("click", () => void loadProjects(currentProject));
   ui.projectSaveScene.addEventListener("click", () => void saveProjectScene());
   ui.projectSelect.addEventListener("change", () => void selectProject());
+  ui.graphicCreate.addEventListener("click", () => showManagerCreate("graphic"));
+  ui.graphicSearch.addEventListener("input", renderProjectManager);
+  ui.managerForm.addEventListener("submit", (event) => { event.preventDefault(); void submitManagerCreate(); });
+  document.getElementById("manager-create-cancel")!.addEventListener("click", () => ui.managerDialog.close());
   ui.sceneManagerMount.addEventListener("click", onSceneManagerClick);
   ui.sceneName.addEventListener("input", () => {
     // A typed name is unsaved work in any scene, bound to a project or not
@@ -3643,7 +3864,9 @@ async function start(): Promise<void> {
 
   ui.sceneId.value = "untitled";
   ui.sceneName.value = "Untitled";
-  await newScene();
+  // Startup opens an editable blank session; creation dialogs are explicit
+  // author actions and must not block the initial workspace.
+  await runCommand({ command: "openScene", source: { source: "new", id: "untitled", name: "Untitled" } }, "Opened blank graphic");
 }
 
 // ---------------------------------------------------------------------------

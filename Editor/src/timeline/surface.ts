@@ -17,9 +17,10 @@
 import { rowWindow, clampViewport, type TimelineViewport } from "./viewport";
 import type { TimelineSnapshot } from "./repaint-plan";
 
-/// The header column's width in CSS pixels: `grid-template-columns: 210px 1fr`
-/// in `web/style.css`. The stage gets the rest of the container.
-export const TIMELINE_HEADER_WIDTH = 210;
+/// The header column's width in CSS pixels: `grid-template-columns: 240px 1fr`
+/// in `web/style.css`. The stage gets the rest of the container. Widened from
+/// 210 for the 11.63 layer switches, swatch and index.
+export const TIMELINE_HEADER_WIDTH = 240;
 
 export interface SurfaceSize {
   readonly width: number;
