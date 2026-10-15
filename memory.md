@@ -118,7 +118,104 @@ not a euphemism for nearly done.
 
 ---
 
-## 2026-10-15 — Inline property animation, graphic previews and bounded animation validation; resume here
+## 2026-10-16 — Shared refusal validation, honest capabilities and wire audit; resume here
+
+**Implemented — mission #2 refusal/capability work:** Claude's commit
+`189dd73` moves software drawability into `gx-contracts::drawability`.
+The shared validator collects structured faults; engine preparation uses the
+same checks again after binding resolution. Gradient, shear, text-property,
+opacity and scaled-stroke parity tests exercise the two entry points. The
+lyon path calls the shared tangent-array check. No refusal variant changed;
+all 297 generated files remain current without regeneration.
+
+The engine now declares `MaterialSupport::none()`: it has no material
+renderer. Its capability and publish validation share that declaration.
+The mock's headless render consumes its own declaration, and publication
+uses the shared validator before recording a revision. The mock retains its
+existing missing-asset-at-take behavior; document validation does not pretend
+to perform asset-byte/geometry preparation. Playout forwards the peer's
+support; `outputs.list` includes it. Editor MCP preflight requires an
+explicit `MaterialSupport` supplied from the capability exchange. It has no
+control-plane dependency. Hosts must refresh that supplied value on reconnect.
+
+MCP argument readers now reject unknown fields, including nested package
+sources and shared contract inputs. A misspelt `atFrame` cannot become an
+immediate take, cue or clear. JSON-RPC regressions prove refusal without
+changing Program, and that the valid `frame: 500` is still preserved.
+
+Conformance adds **71 checks**: eight validator/publication parity witnesses
+over real-engine and mock sockets, atomic refused-publication behavior,
+empty material declarations, every blend mode, all fit-mode refusals through
+MCP, sparse peer allowed lists, strict argument handling, and Program
+isolation. Fit tests explicitly allow earlier material checks so the fit
+refusal is not masked by a blend refusal. The old Editor command witness
+contains unsupported material bindings: the suite now asserts its refusal,
+then opens and authors a drawable session through commands to verify the
+successful-publication invariant. Unsupported content is never stripped to
+make that witness pass. New conformance dependencies are existing workspace
+crates and the already-used `parking_lot`; no external package was added.
+
+**Verified by execution in the shared worktree:**
+
+- Primary `tools/enter-agent.ps1` and worktree
+  `node tools/check-agent-worktree.mjs`: PASS on `agent/shared`.
+- `cargo test -p gx-render-worker -p gx-playout -p gx-editor-mcp
+  -p gx-playout-mcp -p gx-mock-engine -p gx-pixel-gate`: exit 0
+  (`agent/tmp/mission2-debt-b-tests-final.log`). Worker 90; Playout 11;
+  Editor MCP 15 + 6 integration; Playout MCP 18 + 3 integration; mock 14;
+  pixel gate 5. Engine capability tests declare none, and every drawable
+  reference frame is byte-identical under the previous fixed-function
+  declaration and the corrected declaration. Pixel-gate source is unchanged.
+- After strict argument parsing, `cargo test -p gx-editor-mcp
+  -p gx-playout-mcp`: exit 0 (`agent/tmp/mission2-mcp-strict-tests.log`).
+- Rebuilt worker, all three mocks and conformance. Direct conformance run:
+  **356 passed, 0 failed, 9 skipped**
+  (`agent/tmp/mission2-conformance-final.log`).
+- `npm run check`: **exit 0** (`agent/tmp/mission2-full-check.log`).
+  Boundaries, all 297 generated files, TypeScript checks, **40 Node tests,
+  348 Editor tests and 675 Rust tests** pass. One Rust test is ignored:
+  `a_running_engine_answers_the_operator_surface` needs an engine at the
+  default endpoint. The gate excludes `gx-engine-host`, as before. Claude's
+  plain workspace run found its two pre-existing host tests fail on the
+  user's schema-1 recovery journal; that file was not modified or certified.
+- The full gate repeats **356 conformance passes, 0 failures, 9 named skips**:
+  four T0 peers cannot exercise the sub-T0 refusal; reference loss needs a
+  locked peer; a co-located stream has no LAN encoder to adapt; the headless
+  cadence check skips because Program alone already misses cadence (7 late,
+  162 missed); asset transfer has no control-peer asset endpoint; hardware
+  reference observation needs a generator/card. Additionally, the protected
+  transport leg prints `transport pass skipped: unsupported token prefix
+  "conformance-token-0123456789abcd"`; it did not run and is not certified
+  by this gate. That diagnostic is outside the nine counted skips.
+- `cargo run -p gx-pixel-gate -- check`: **exit 1**, unchanged before and
+  after: `colour-ramp-50: 39065 differing pixels; worst channel delta 255`
+  (`agent/tmp/mission2-pixel-gate.log`). Accepted baselines and
+  `tests/baselines/history/` were not modified. Claude's scratch capture under
+  `agent/tmp/pixelgate-probe/out` finds the other five rate scenes identical
+  to their baselines. The colour-ramp difference comes from the old baseline
+  ignoring safe-title/safe-action vector opacity and using text/mesh
+  placeholders; current pixels match the compositing reference. Baseline
+  reconciliation remains a separate reviewed action under 4.5.
+
+**Partial — 3.13 stays active.** Claude's executed audit found a light-only
+scene accepted by the validator but refused by preparation as
+`LightHasNoResponsiveMaterial { light_id: "key" }`. Move that document-level
+rule into the shared validator or refuse unsupported lighting there, with a
+wire parity regression. Group/Layer fill/stroke properties can also be
+authored and ignored; they need explicit refusal or an explicit non-paint
+contract. The audit's MCP unknown-argument item is now fixed and wire-tested.
+Do not mark 3.13 done while the other items remain. **Partial — 4.5 stays
+active** for the unchanged baseline discrepancy and Windows/macOS execution.
+No new product row is marked done by this mission.
+
+Scratch and logs remain under `agent/tmp/`. The user's running Editor and
+documents were left alone. The final commit includes this entry and both
+tracker files after Claude's commit, with only the pre-existing
+`tests/baselines/history/` left untracked.
+
+---
+
+## 2026-10-15 — Inline property animation, graphic previews and bounded animation validation
 
 **Implemented — authoring follow-up (11.9/11.21/11.63/11.64):** inspected
 EffectCraft's local `ui-egui/panels/properties.rs` transform rows and

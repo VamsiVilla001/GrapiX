@@ -10,8 +10,8 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use gx_asset_plane::{publish_scene, AssetPublishPeer, AssetPublishServer, PublishReply};
-use gx_contracts::command::{witness, EditorCommand, SceneEdit, SceneTarget, SessionKey};
+use gx_asset_plane::{publish_scene, AssetPublishPeer, AssetPublishServer, PublishRefusal, PublishReply};
+use gx_contracts::command::{witness, CreateObject, EditScene, EditorCommand, OpenScene, SceneEdit, SceneSource, SceneTarget, SessionKey};
 use gx_contracts::scene::{new_scene, SceneDocument};
 use gx_contracts::{Revision, TakeId};
 use gx_control_plane::intent::{TakeAt, TakeRequest};
@@ -319,12 +319,28 @@ pub fn editor_command_suite(report: &mut Report) {
         ),
     );
 
-    // The one sanctioned path from an authoring session to the engine: publish
-    // the session's document by target as a new immutable revision. It must
-    // add exactly one revision and leave the on-air revision untouched.
-    let target = SceneTarget::Session {
+    // The authoring witness deliberately contains unsupported materials.
+    // A truthful mock must refuse it without changing the published state.
+    let witness_target = SceneTarget::Session {
         session: WITNESS_SESSION,
     };
+    let refused = publish_scene(asset_address, workspace.document(&witness_target).unwrap().into_owned());
+    report.record(PLANE, "unsupported authoring content refuses publication without changing Program", expect(
+        matches!(&refused, Ok(PublishReply::Refused(PublishRefusal::PreparationRefused {
+            cause: gx_contracts::Refusal::ScenePropertyNotDrawable { property, .. }
+        })) if property == "materialSlots") && observe(&peer).is_ok_and(|observed| observed == baseline),
+        format!("expected materialSlots refusal and unchanged engine, got {refused:?}")));
+
+    // The successful-publication witness is a drawable session, also authored
+    // through commands. Publishing adds one revision and leaves Program pinned.
+    let session = workspace.execute(EditorCommand::OpenScene(OpenScene {
+        source: SceneSource::New { id: "conformance/drawable-session".into(), name: "Drawable session".into() },
+    })).expect("drawable session opens").session.unwrap().session;
+    let target = SceneTarget::Session { session };
+    workspace.execute(EditorCommand::EditScene(EditScene {
+        target: target.clone(), module: None,
+        edits: vec![SceneEdit::CreateObject(CreateObject { kind: "rect".into(), name: "Card".into() })],
+    })).expect("drawable session authoring succeeds");
     let published = match workspace.document(&target) {
         Ok(document) => publish_scene(asset_address, document.into_owned())
             .map_err(|error| format!("could not publish the witness session: {error}")),

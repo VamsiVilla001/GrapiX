@@ -95,7 +95,7 @@
     </div>
     <div class="tally"><b id="pct">0%</b><span id="counts">0 of 0 steps</span></div>
   </div>
-  <p class="sub" id="latest-verification">15 Oct: inline Properties, visible key controls and graphic thumbnails verified in the desktop editor. Full gate passed: 348 Editor tests, 667 Rust tests, 285 conformance checks (9 named skips). Renderer audit 3.13 and pixel gate 4.5 remain active.</p>
+  <p class="sub" id="latest-verification">16 Oct: shared drawability checks, measured material declarations and MCP argument refusals verified. Full gate passed: 348 Editor tests, 675 Rust tests (1 ignored), 356 conformance checks (9 named skips). 3.13 remains active for light validation parity and ignored container paints; 4.5 retains the colour-ramp baseline discrepancy and macOS gate.</p>
   <div class="meter" id="meter"></div>
   <div class="meterkey"><span>Phase P</span><span>Phase 17</span></div>
 </header>
@@ -203,7 +203,7 @@ const INITIAL_STATE = {
   "3.10": "done",  // OutputAdapter trait; null/virtual/recording adapters; unknown adapter refused with sorted offered list; recording writes atomically via gx_fs
   "3.11": "done",  // Preview (sRGB) and Program (Rec.709) dual emission; bounded latest-frame slots; drop counters by cause; a stalled preview consumer never blocks program
   "3.12": "done",  // WAL recovery journal: atomic write, schema version, epoch advance on restore, output-inhibited until re-configured; runbook at docs/engine-recovery-runbook.md
-  "3.13": "active", // 15 Oct: bounded keys/Bezier extrema/base edits and atomic deletion verified. Remaining: shared refusal parity, material capabilities and reference-pixel reconciliation.
+  "3.13": "active", // 16 Oct: shared drawability, honest material support and strict MCP arguments verified. Remaining: light-only validator/engine parity and ignored Group/Layer paints (memory.md).
   "3.14": "done", // EffectCraft spike halted at failed required gates (DX12, 2160p budget), rerun 12 Oct; decision in ADR-0003
   "3.15": "done", // project working colour space: sRGB or linear declared per project (new = sRGB, pre-3.15 = linear), schema 3 with lossless upgrade, mismatch refuses by name, engine composites in the scene space; 50% overlap and coverage/gradient/blur references verified 13 Oct
   // Phase 4 — the pixel gate. The instrument, built before anything else
@@ -212,7 +212,7 @@ const INITIAL_STATE = {
   "4.2": "done",   // headless harness: prepares a scene and renders through PreparedScene::frame with no display and no GPU; dependency-free stored-DEFLATE PNG encoder with an own-output round-trip test
   "4.3": "done",   // baselines committed, and proven deterministic — two captures are byte-identical
   "4.4": "done",   // `check` reports scene, differing pixel count and worst channel delta, exit non-zero; verified against a real one-channel mutation: "colour-ramp-50: 1 differing pixels; worst channel delta 1". Wired into CI
-  "4.5": "active", // EXTERNAL: Windows-versus-macOS pixel equality needs a macOS host, which does not exist here. Nothing about it is claimed
+  "4.5": "active", // 16 Oct: colour-ramp-50 still differs at 39,065 pixels (old opacity/text/mesh placeholders in accepted baseline); baseline untouched. Cross-platform equality still needs macOS.
   // Phase 5 — transport, local.
   "5.1": "done",   // control plane over a named pipe (Windows) and a unix domain socket, behind one Endpoint abstraction; one SequenceTracker for every transport, so ordered/acknowledged/sequenced holds identically. Was previously marked done on loopback TCP alone, which the plan's own done-when did not support — corrected. The unix leg is code-complete and unverified: no macOS or Linux host here
   "5.2": "done",   // session/auth/epoch; Program survives a control disconnect

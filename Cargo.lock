@@ -1741,10 +1741,14 @@ dependencies = [
  "gx-control-plane",
  "gx-control-transport",
  "gx-editor",
+ "gx-editor-mcp",
+ "gx-mcp-server",
  "gx-media-plane",
  "gx-mock-engine",
  "gx-playout",
+ "gx-playout-mcp",
  "gx-render-worker",
+ "parking_lot",
  "serde_json",
 ]
 

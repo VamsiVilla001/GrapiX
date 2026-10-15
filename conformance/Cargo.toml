@@ -24,3 +24,7 @@ serde_json = { workspace = true }
 gx-control-transport = { workspace = true }
 gx-playout = { path = "../services/playout" }
 gx-editor = { path = "../services/editor" }
+gx-editor-mcp = { path = "../services/editor-mcp" }
+gx-playout-mcp = { path = "../services/playout-mcp" }
+gx-mcp-server = { path = "../services/mcp-server" }
+parking_lot = "0.12"

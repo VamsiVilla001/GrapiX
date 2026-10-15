@@ -181,6 +181,11 @@ where
         &mut self.peer
     }
 
+    /// Report the connected engine's measured material support unchanged.
+    pub fn material_support(&self) -> gx_contracts::material::MaterialSupport {
+        self.peer.capability().material
+    }
+
     /// Cue a pinned revision using engine-time intent.
     pub fn cue(&mut self, scene: &PublishedScene, at: TakeAt) -> Result<TakeCommitted, Refusal> {
         let content_hash = Some(pinned(scene)?);

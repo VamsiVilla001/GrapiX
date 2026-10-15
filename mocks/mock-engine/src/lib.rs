@@ -144,6 +144,15 @@ impl MockEngine {
     /// The document is inserted only after all publication metadata is known,
     /// so a refusal or interrupted request cannot expose a partial revision.
     pub fn publish_scene(&mut self, scene: SceneDocument) -> PublishReply {
+        // The mock retains missing assets so take can exercise the asset
+        // blocker, but authored mappings must match the real engine's refusals.
+        if let Some(refusal) = gx_contracts::validate::validate_scene_document(
+            &scene, &self.capability().material, &self.assets, false,
+        ).into_iter().next() {
+            return PublishReply::Refused(gx_asset_plane::PublishRefusal::PreparationRefused {
+                cause: refusal.code,
+            });
+        }
         let take_id = TakeId(scene.id.clone());
         let revision = self
             .published
@@ -279,7 +288,7 @@ impl MockEngine {
             document.clone(),
             &self.assets,
             &self.asset_bytes,
-            &MaterialSupport::fixed_function(),
+            &self.capability().material,
         ) {
             Ok(scene) => answer_render(request, held.content_hash.clone(), &scene, &self.rendered),
             Err(refusal) => EngineReply::Refused(refusal),
@@ -325,7 +334,7 @@ impl EnginePeer for MockEngine {
             // (invariant 45). The real engine has no rasteriser yet, so it
             // can reproduce no blend or fit mode at all, and declaring a set
             // here would teach callers a contract that does not exist.
-            material: gx_contracts::material::MaterialSupport::none(),
+            material: MaterialSupport::none(),
         }
     }
 

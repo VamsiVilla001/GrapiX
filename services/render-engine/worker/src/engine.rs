@@ -408,11 +408,10 @@ impl Engine {
         self.asset_bytes.insert(hash, bytes);
     }
 
-    /// What the current fixed-function path can reproduce exactly. The
-    /// capability and publish validator share this one declaration, so an
-    /// unsupported material is refused rather than approximated.
+    /// No material renderer is implemented: meshes and material bindings
+    /// refuse at publish. Capability and validation share this declaration.
     fn material_support(&self) -> MaterialSupport {
-        MaterialSupport::fixed_function()
+        MaterialSupport::none()
     }
 
     /// Render and emit one Preview/Program pair at the engine's current frame.
@@ -864,6 +863,43 @@ mod tests {
         // A clock that does not advance on its own: the test drives the frame
         // source, so timing is deterministic.
         Engine::new(Arc::new(AtomicU64::new(0)), Locality::CoLocated)
+    }
+
+    #[test]
+    fn an_engine_without_a_material_renderer_declares_no_material_support() {
+        let mut engine = engine();
+        assert_eq!(engine.material_support(), MaterialSupport::none());
+        assert_eq!(engine.capability().material, MaterialSupport::none());
+        let EngineReply::Capability(capability) = engine.handle(ClientRequest::Capability)
+            else { panic!("capability exchange must succeed") };
+        assert_eq!(capability.material, MaterialSupport::none());
+    }
+
+    #[test]
+    fn truthful_material_support_preserves_every_drawable_reference_pixel() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors().nth(3).unwrap();
+        let scenes = std::fs::read_dir(root.join("tests/reference-scenes")).unwrap();
+        let mut checked = 0;
+        for entry in scenes {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|ext| ext != "json") { continue; }
+            let document = gx_contracts::scene::parse_scene_document(&std::fs::read(&path).unwrap()).unwrap();
+            let mut available = HashSet::new();
+            let mut bytes = AssetBytes::new();
+            for asset in &document.assets {
+                let payload = std::fs::read(root.join(&asset.path)).unwrap();
+                let hash = gx_asset_plane::content_hash(&payload);
+                assert_eq!(Some(&hash), asset.checksum.as_ref());
+                available.insert(hash.clone());
+                bytes.insert(hash, payload);
+            }
+            let before = PreparedScene::prepare(document.clone(), &available, &bytes, &MaterialSupport::fixed_function()).unwrap();
+            let after = PreparedScene::prepare(document, &available, &bytes, &engine().material_support()).unwrap();
+            assert_eq!(before.frame(OutputTransform::Srgb), after.frame(OutputTransform::Srgb), "{}", path.display());
+            checked += 1;
+        }
+        assert!(checked > 0, "reference scenes must actually be exercised");
     }
 
     /// The content hash identifier publishes in these tests declare and pin.

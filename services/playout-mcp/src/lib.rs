@@ -33,8 +33,8 @@ use gx_playout::{OutputEnvironment, Playout, PublishedLibrary, PublishedScene};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
-fn parse<T: for<'de> Deserialize<'de>>(args: serde_json::Value) -> Result<T, Refusal> {
-    serde_json::from_value(args).map_err(|error| Refusal::SceneParseFailed {
+fn parse<T: serde::de::DeserializeOwned + Serialize>(args: serde_json::Value) -> Result<T, Refusal> {
+    gx_contracts::command::parse_strict(args).map_err(|error| Refusal::SceneParseFailed {
         detail: format!("arguments do not match the tool's input schema: {error}"),
     })
 }
@@ -153,8 +153,8 @@ fn package_refusal(error: gx_asset_plane::package::PackageError) -> Refusal {
 /// `packages.build`: build and verify a package, all-or-nothing.
 pub struct PackagesBuild;
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct BuildArgs {
     output: std::path::PathBuf,
     scene: gx_contracts::scene::SceneDocument,
@@ -164,8 +164,8 @@ struct BuildArgs {
     design_system_version: Option<u32>,
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct BuildSource {
     path: String,
     source: std::path::PathBuf,
@@ -197,8 +197,8 @@ impl ToolHandler for PackagesBuild {
     }
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PackageRef {
     package: std::path::PathBuf,
 }
@@ -271,8 +271,8 @@ pub struct ProgramTools<P: EnginePeer> {
 /// or an explicit frame, which is ADR-002's intent rule made structural
 /// (invariants 8 and 9). The hash is optional here only so that a missing pin
 /// is refused by name (`RevisionUnpinned`, invariant 61).
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ProgramArgs {
     take_id: String,
     revision: u64,
@@ -292,8 +292,8 @@ fn published_revision(scene: &PublishedScene) -> gx_contracts::PublishedRevision
     }
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ClearArgs {
     #[serde(default)]
     frame: Option<u64>,
@@ -419,6 +419,7 @@ impl<P: EnginePeer> ToolHandler for OutputsList<P> {
             "liveAllowed": capability.live_allowed,
             "platformCertified": self.0.environment.platform_certified,
             "media": capability.media,
+            "material": capability.material,
         }))
     }
 }
@@ -643,7 +644,7 @@ mod tests {
                 reference: gx_contracts::ReferenceState::NotPresent,
                 live_allowed: false,
                 media: Vec::new(),
-                material: gx_contracts::material::MaterialSupport::fixed_function(),
+                material: gx_contracts::material::MaterialSupport::none(),
             }
         }
 
@@ -820,6 +821,7 @@ mod tests {
         assert_eq!(answer["platformCertified"], true);
         assert_eq!(answer["liveAllowed"], false);
         assert_eq!(answer["deviceTier"], "T0");
+        assert_eq!(answer["material"], serde_json::json!(gx_contracts::material::MaterialSupport::none()));
     }
 
     #[test]

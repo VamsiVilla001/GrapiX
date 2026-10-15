@@ -38,8 +38,8 @@ use serde::{Deserialize, Serialize};
 /// refusal rather than a transport error or a panic. A wrong-shaped argument
 /// is `SceneParseFailed`-adjacent — it failed to be the thing it claimed to
 /// be — and the refusal carries the detail rather than a bare "invalid".
-fn parse<T: for<'de> Deserialize<'de>>(args: serde_json::Value) -> Result<T, Refusal> {
-    serde_json::from_value(args).map_err(|error| Refusal::SceneParseFailed {
+fn parse<T: DeserializeOwned + Serialize>(args: serde_json::Value) -> Result<T, Refusal> {
+    parse_strict(args).map_err(|error| Refusal::SceneParseFailed {
         detail: format!("arguments do not match the tool's input schema: {error}"),
     })
 }
@@ -115,7 +115,8 @@ impl ToolHandler for ProjectList {
 
 // --- scenes (8.3) ----------------------------------------------------------
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct SceneRef {
     project: String,
     scene_id: String,
@@ -141,7 +142,8 @@ pub struct SceneList(pub Projects);
 
 impl ToolHandler for SceneList {
     fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
-        #[derive(Deserialize)]
+        #[derive(Deserialize, Serialize)]
+        #[serde(deny_unknown_fields)]
         struct Args {
             project: String,
         }
@@ -176,18 +178,23 @@ impl ToolHandler for ObjectsHierarchy {
 /// would be a second contract for the same answer — the refusal envelope
 /// already carries code, field, given, allowed and severity, and an agent
 /// consuming it should not have to learn two shapes for one refusal.
-pub struct ValidatePreflight(pub Projects);
+pub struct ValidatePreflight {
+    pub projects: Projects,
+    /// Supplied by the host from the peer's capability exchange. The Editor
+    /// has no Program control client and never invents a support declaration.
+    pub material_support: gx_contracts::material::MaterialSupport,
+}
 
 impl ToolHandler for ValidatePreflight {
     fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
         let args: SceneRef = parse(args)?;
-        let scene = self.0.read_scene(&args.project, &args.scene_id).map_err(Refusal::from)?;
+        let scene = self.projects.read_scene(&args.project, &args.scene_id).map_err(Refusal::from)?;
         // At authoring time the assets have not necessarily shipped yet, so
         // presence is not checked — the engine will refuse those at take,
         // and demanding them here would train an author to ignore preflight.
         let report = preflight(
             &scene,
-            &gx_contracts::material::MaterialSupport::fixed_function(),
+            &self.material_support,
             &std::collections::HashSet::new(),
             false,
         );
@@ -324,8 +331,8 @@ impl ToolHandler for DesignSystemImportTool {
     }
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ProjectRefArgs {
     project: String,
 }
@@ -609,7 +616,7 @@ mod tests {
         broken.canvas.width = 0;
         projects.write_scene("news", &broken).unwrap();
 
-        let value = ValidatePreflight(projects)
+        let value = ValidatePreflight { projects, material_support: gx_contracts::material::MaterialSupport::none() }
             .handle(serde_json::json!({ "project": "news", "scene_id": "broken" }))
             .expect("preflight answers");
         let refusals: Vec<gx_contracts::StructuredRefusal> =
@@ -620,6 +627,28 @@ mod tests {
             .expect("the canvas fault is reported");
         assert_eq!(refusal.field.as_deref(), Some("canvas"));
         assert_eq!(refusal.severity, gx_contracts::RefusalSeverity::Error);
+    }
+
+    #[test]
+    fn preflight_uses_the_peers_empty_material_declaration() {
+        let scratch = Scratch::new("material-capability");
+        let projects = scratch.news();
+        let mut document = scene("material");
+        document.materials.push(gx_contracts::material::MaterialDefinition {
+            material_id: "brand".into(), name: "Brand".into(),
+            kind: gx_contracts::material::MaterialKind::Unlit,
+            color: gx_contracts::color::ColorValue::opaque_white(), opacity: 1.0,
+            blend_mode: Default::default(), alpha_mode: Default::default(),
+            cull_mode: Default::default(), depth_mode: Default::default(),
+            double_sided: false, textures: Vec::new(), shader_id: None,
+        });
+        projects.write_scene("news", &document).unwrap();
+        let result = ValidatePreflight { projects, material_support: gx_contracts::material::MaterialSupport::none() }
+            .handle(serde_json::json!({ "project": "news", "scene_id": "material" })).unwrap();
+        let refusals: Vec<gx_contracts::StructuredRefusal> = serde_json::from_value(result).unwrap();
+        assert!(refusals.iter().any(|refusal|
+            matches!(refusal.code, Refusal::UnsupportedBlendMode { mode: gx_contracts::material::BlendMode::Normal })
+                && refusal.allowed.as_ref().is_some_and(Vec::is_empty)));
     }
 
     #[test]

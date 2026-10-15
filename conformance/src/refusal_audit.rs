@@ -37,6 +37,7 @@ use gx_playout::{evaluate_automation, AutomationTrigger, Playout, PublishedScene
 use crate::{expect, Report};
 
 mod command;
+mod drawability;
 
 const PLANE: &str = "refusal audit";
 
@@ -58,6 +59,7 @@ pub fn refusal_audit_suite(report: &mut Report) {
     drive_playout_refusals(report);
     drive_editor_refusals(report);
     command::drive_command_refusals(report);
+    drawability::drive_wire_refusals(report);
     record_surface_limitations(report);
 }
 
@@ -1353,7 +1355,7 @@ fn drive_material_refusals(report: &mut Report) {
     let prepare = |object: gx_contracts::scene::SceneObject| {
         let mut scene = gx_contracts::scene::new_scene("audit", "Audit", gx_contracts::color::WorkingColorSpace::Srgb);
         scene.objects.push(object);
-        gx_render_worker::PreparedScene::prepare(scene, &Default::default(), &Default::default(), &MaterialSupport::fixed_function()).err()
+        gx_render_worker::PreparedScene::prepare(scene, &Default::default(), &Default::default(), &MaterialSupport::none()).err()
     };
     let paint = gx_contracts::scene::SceneObject::Paint(gx_contracts::scene::PaintObject {
         base: gx_contracts::scene::ObjectBase::new("brush", "brush"),
@@ -1375,7 +1377,7 @@ fn drive_software_pixel_refusals(report: &mut Report) {
     use gx_contracts::scene::{new_scene, SceneObject};
     use gx_render_worker::PreparedScene;
 
-    let prepare = |scene| PreparedScene::prepare(scene, &Default::default(), &Default::default(), &MaterialSupport::fixed_function());
+    let prepare = |scene| PreparedScene::prepare(scene, &Default::default(), &Default::default(), &MaterialSupport::none());
     let mut stroke = new_scene("trim-audit", "Trim audit", WorkingColorSpace::Srgb);
     stroke.canvas.width = 160;
     stroke.canvas.height = 80;
@@ -1439,7 +1441,7 @@ fn drive_software_pixel_refusals(report: &mut Report) {
         "assetId": "model", "name": "Model", "kind": "model", "path": "model.gltf", "checksum": hash
     })).expect("the model asset parses"));
     let model = PreparedScene::prepare(scene, &std::collections::HashSet::from([hash.clone()]),
-        &std::collections::HashMap::from([(hash, b"unloadable glTF".to_vec())]), &MaterialSupport::fixed_function());
+        &std::collections::HashMap::from([(hash, b"unloadable glTF".to_vec())]), &MaterialSupport::none());
     report.record(PLANE, "An unloadable glTF refuses by object name at prepare instead of drawing nothing", expect(
         matches!(&model, Err(Refusal::ObjectKindNotDrawable { object, kind, .. }) if object == "model" && kind == "mesh"),
         format!("model prepare result: {:?}", model.err())));
