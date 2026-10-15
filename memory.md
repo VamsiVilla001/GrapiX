@@ -206,6 +206,66 @@ and both trackers. Desktop applications and user documents were left alone;
 `tests/baselines/history/` remains untracked and untouched. A read-only
 cross-review and per-commit account follow this implementation commit.
 
+### Read-only cross-review and the per-commit account
+
+Implementation commit: `1e28f7a`. Codex reviewed Claude's shared contracts
+and worker changes against the agreed contract: no actionable findings.
+The light rule has one implementation, deterministic object/path reporting
+and preserved refusal ordering. Container defaults remain unpainted and
+positive controls protect valid shapes/containers. Claude reviewed Codex's
+three Editor/conformance paths (Panchayati topic 3, message 100): no blocking
+defects; exact structured refusals, nonzero object indexes and positive
+controls correctly protect the wire contract.
+
+**Low-priority follow-up:** Editor warning presentation currently repeats the
+contract's absent/none paint predicate. It agrees today, including transparent
+paints, gradients and strokeWidth 0, but a future rule change could make the
+panel drift. Track the existing 11.9/7.4 work needed to consume actual shared
+validator refusals instead. First establish a host bridge; do not assume an
+Editor shell preflight endpoint already exists. Preserve data and editing.
+This is a maintenance risk, not a demonstrated mismatch or a 3.13 blocker.
+It is recorded as Panchayati follow-up **#59**.
+
+An additional read-only Claude consultation (run 22, exit 0) found no commit
+blocker but identified a **medium workflow risk, follow-up #60**: the shared
+control vocabulary still offers Group/Layer fill/stroke. An empty container
+can declare such a control; applying its value later creates paint and
+preparation correctly refuses the filled document. The failure should be
+reported when the control is declared, before operation. Root source review
+confirmed `control.rs`'s `BASE_PROPERTIES`, `fillable_properties` and setter;
+this review did not execute a new take-path probe. `control-contract.ts`
+already projects the Rust vocabulary, so its property list is not a second
+independent mirror. The engine's named refusal remains intact: this is late
+workflow failure, not silently substituted pixels, and does not reopen the
+closed 3.13 inventory.
+
+**Low/informational follow-up #61:** before lifting the mesh refusal,
+lighting responsiveness must use effective required material assignments,
+not an unused extra PBR slot. Meshes are refused today, so that distinction
+is latent. Also align duplicate diagnostic semantics for a non-finite light
+and decouple light/container MCP witnesses from the empty-blend fixture
+condition so changes to an unrelated fixture cannot remove coverage.
+These findings are tracked against existing build-plan work. No source was
+edited by either cross-review; implementation follows in separate tasks.
+
+The following account is chronological. Verification for older commits is
+their recorded execution evidence, not a claim that historical desktop
+sessions were rerun today. Today's complete code gate is recorded above.
+
+| Commit | What changed and why | Verification record | Remaining risk/gate |
+|---|---|---|---|
+| `c86eef8` | Project-declared sRGB/linear compositing, lossless schema migration and project/scene space checks, for 3.15's declared-colour contract. | Contracts 203 + Editor service 66; independent overlap/coverage/gradient/blur tests; conformance 274/0/9; six reference scenes matched then. Original workspace run had three error-32 atomic-write failures, so the original full gate was not green. | Three.js viewport colour parity and project-space UI were separate gaps; later full gates pass the code tests. |
+| `5c6be30` | Effective vector opacity and authored Trim Paths render; invalid trim and unloaded glTF geometry refuse. Reopened 3.13 demonstrated visually different silent fallbacks (invariants 17/18). | Rendered opacity/trim and glTF refusal witnesses; contracts/services 311 pass; conformance 275/0/9. Worker 77 pass/1 environmental recovery-journal failure. | Real mesh geometry remains 3.7; the broader refusal inventory was still open. |
+| `c4b208c` | AE/EffectCraft-style workspace and independent-graphic Scene Manager; bindings, real packaged-font glyphs/transforms/draw order and named unsupported mappings. Serves 11.63/11.64 and the refusal inventory. | Full gate: Node 40, Editor 344, Rust 661, conformance 284/0/9; native author/save/search/switch/undo/restart and layout checks. | Authoring viewport is not Program parity; the colour-ramp baseline contains old opacity/text/mesh placeholders; no GPU or SDI readiness claim. |
+| `ca63a6a` | Inline numeric Properties, visible/evaluated key controls, authored graphic thumbnails, bounded animation domains and atomic multi-key deletion. Serves 11.9/11.21 and prevents invalid opacity/size animation under 3.13. | Full gate: Node 40, Editor 348, Rust 667, conformance 285/0/9; 33 animation contract tests; native key/edit/focus/save/restart checks. | Partial authoring previews remain named; engine-backed viewport and 4.5 stay open. |
+| `189dd73` | One shared drawability implementation and tangent check, used by validator and preparation. Fixes the laxer-validator defect under invariant 27 and 7.4/3.13. | Contracts 225, worker 90, workspace gate 675 pass; 297 generated files current. Plain workspace host tests retained the known recovery-journal failure. | Audit then found light parity/container-paint residue, now closed by `1e28f7a`. |
+| `4e0d547` | Honest material support, peer declarations forwarded, mock publication validation, strict MCP arguments and 71 wire checks. Fixes capability overclaims and misspelt scheduling arguments becoming immediate operations (invariants 18/21/27/45). | Full gate: Node 40, Editor 348, Rust 675, conformance 356/0/9. Every drawable reference pixel matches before/after the material declaration correction. | Protected-token leg skipped, host excluded, debug cadence/hardware limits and 4.5 remain explicit. |
+| `1e28f7a` | Shared light and container-paint refusals, preserved authored paint with visible Editor warnings, and 21 socket/MCP checks. Closes the two remaining inventory findings for 3.13. | Contracts 229, worker 90; full gate: Node 40, Editor 356, Rust 679/1 ignored, conformance 377/0/9; typecheck/boundaries/web build pass; pixel discrepancy unchanged at 39,065/max 255. | 4.5 needs reviewed reference/baseline reconciliation and Windows/macOS comparison. GPU/material/SDI features remain separate. Follow-ups #59–61 cover UI predicate drift, late container-control refusal and latent lighting/coverage edge cases. |
+
+Both reviews and this account were posted to Panchayati topic 3 for the
+user. This follow-up changes documentation only and does not alter source,
+baselines or verified tracker states.
+
 ---
 
 ## 2026-10-16 — Shared refusal validation, honest capabilities and wire audit
