@@ -17,6 +17,7 @@ pub mod control;
 pub mod auth;
 pub mod color;
 pub mod design_system;
+pub mod drawability;
 pub mod enforce;
 pub mod font;
 pub mod import;

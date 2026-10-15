@@ -29,7 +29,6 @@
 
 use std::collections::HashSet;
 
-use crate::color::ColorValue;
 use crate::material::{validate_material, MaterialKind, MaterialSupport};
 use crate::scene::{SceneDocument, SceneObject};
 use crate::{ContentHash, Refusal, RefusalSeverity, StructuredRefusal};
@@ -141,22 +140,6 @@ pub fn validate_scene_document(
                         ),
                     );
                 }
-                // The software path fills glyphs with a solid colour. A
-                // gradient needs a fill rule it does not implement, so it
-                // refuses here rather than being flattened to a stop at frame
-                // time (invariant 18).
-                if matches!(
-                    text.base.fill,
-                    Some(ColorValue::LinearGradient { .. } | ColorValue::RadialGradient { .. })
-                ) {
-                    found.push(
-                        StructuredRefusal::error(Refusal::UnsupportedPathGradient {
-                            object: text.base.id.clone(),
-                            paint: "text fill".into(),
-                        })
-                        .at(format!("objects[{index}].fill.type"), gradient_kind(&text.base.fill)),
-                    );
-                }
             }
             SceneObject::Image(image) => {
                 if document.asset(&image.asset_id).is_none() {
@@ -226,6 +209,11 @@ pub fn validate_scene_document(
             _ => {}
         }
     }
+
+    // 3.13: what the software path cannot draw, from the one implementation
+    // the engine also runs, so the Editor cannot accept a scene the engine
+    // will refuse at publish.
+    found.extend(crate::drawability::drawability_refusals(document));
 
     // Materials against what the peer declared it can draw, so an unsupported
     // blend or fit mode refuses with the allowed list attached rather than
@@ -301,14 +289,6 @@ fn pbr_without_a_shader_path(
     found
 }
 
-fn gradient_kind(fill: &Option<ColorValue>) -> serde_json::Value {
-    match fill {
-        Some(ColorValue::LinearGradient { .. }) => serde_json::json!("linear-gradient"),
-        Some(ColorValue::RadialGradient { .. }) => serde_json::json!("radial-gradient"),
-        _ => serde_json::Value::Null,
-    }
-}
-
 /// What preflight answers (7.7).
 ///
 /// `publishable` is derived rather than stored, and it is false only for
@@ -354,6 +334,7 @@ pub fn preflight(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::color::ColorValue;
     use crate::material::{BlendMode, MaterialBinding, MaterialDefinition};
     use crate::scene::{
         AssetKind, AssetLibraryItem, ImageObject, ObjectBase, SceneCanvas, SceneTimeline,
@@ -521,7 +502,11 @@ mod tests {
             true,
         );
 
-        assert_eq!(found.len(), 3, "expected all three faults, got {found:?}");
+        // The image is also a kind the software path cannot draw yet (3.17).
+        assert_eq!(found.len(), 4, "expected all four faults, got {found:?}");
+        assert!(found
+            .iter()
+            .any(|r| matches!(r.code, Refusal::ObjectKindNotDrawable { .. })));
         assert!(found
             .iter()
             .any(|r| matches!(r.code, Refusal::SceneParseFailed { .. })));

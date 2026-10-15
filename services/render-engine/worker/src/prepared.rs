@@ -789,6 +789,77 @@ mod tests {
         );
     }
 
+    /// 3.13: the drawability checks live in contracts, so a scene the engine
+    /// cannot draw is refused by the Editor's validator first, with the same
+    /// refusal. One case per family the engine used to refuse alone.
+    #[test]
+    fn the_validator_and_the_engine_refuse_undrawable_scenes_identically() {
+        let not_drawable = |object: &str, property: &str, owner: &str| Refusal::ScenePropertyNotDrawable {
+            object: object.into(),
+            property: property.into(),
+            owner: owner.into(),
+        };
+        let solid = || Some(ColorValue::Solid { color: gx_contracts::color::Rgba::srgb(1.0, 1.0, 1.0, 1.0) });
+
+        let mut gradient = rect("gradient");
+        gradient.base_mut().fill = Some(ColorValue::LinearGradient {
+            angle: 0.0,
+            start_x: 0.0,
+            start_y: 0.0,
+            end_x: 1.0,
+            end_y: 0.0,
+            stops: Vec::new(),
+            spread: Default::default(),
+            coordinate_mode: Default::default(),
+        });
+
+        let mut parent = GroupObject { base: ObjectBase::new("parent", "parent"), child_ids: vec!["sheared".into()] };
+        parent.base.scale_x = 2.0;
+        let mut sheared = rect("sheared");
+        sheared.base_mut().rotation = 30.0;
+
+        let mut underlined = TextObject {
+            base: ObjectBase::new("title", "title"),
+            text: "Hello".into(),
+            font_id: "font_inter".into(),
+            size: 40.0,
+            ..text_defaults()
+        };
+        underlined.decoration.underline = true;
+        let mut text_scene = document(vec![SceneObject::Text(underlined)]);
+        text_scene.fonts.push(inter());
+
+        let mut faded = rect("faded");
+        faded.base_mut().opacity = 1.5;
+
+        let mut stroked = rect("stroked");
+        stroked.base_mut().stroke = solid();
+        stroked.base_mut().stroke_width = 4.0;
+        stroked.base_mut().scale_x = 2.0;
+
+        let cases = [
+            (
+                document(vec![gradient]),
+                Refusal::UnsupportedPathGradient { object: "gradient".into(), paint: "fill".into() },
+            ),
+            (
+                document(vec![SceneObject::Group(parent), sheared]),
+                not_drawable("sheared", "rotation under a non-uniformly scaled parent", "3.16"),
+            ),
+            (text_scene, not_drawable("title", "decoration", "3.18")),
+            (document(vec![faded]), not_drawable("faded", "opacity", "3.13")),
+            (document(vec![stroked]), not_drawable("stroked", "scaled strokeWidth", "3.17")),
+        ];
+        let support = MaterialSupport::fixed_function();
+        for (scene, expected) in cases {
+            let editor = gx_contracts::validate::validate_scene_document(&scene, &support, &HashSet::new(), true);
+            let engine = PreparedScene::prepare(scene, &HashSet::new(), &AssetBytes::new(), &support)
+                .expect_err("the engine refuses what it cannot draw");
+            assert_eq!(editor.first().map(|refusal| &refusal.code), Some(&expected), "validator");
+            assert_eq!(engine, expected, "engine");
+        }
+    }
+
     #[test]
     fn an_image_referencing_an_asset_id_the_library_lacks_refuses() {
         let image = SceneObject::Image(ImageObject {

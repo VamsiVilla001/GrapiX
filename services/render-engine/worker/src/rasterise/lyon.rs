@@ -368,14 +368,7 @@ fn append_bezier(
     object: &str,
     map: &dyn Fn(f64, f64) -> Result<Point, Refusal>,
 ) -> Result<(), Refusal> {
-    if path.vertices.len() != path.in_tangents.len()
-        || path.vertices.len() != path.out_tangents.len()
-    {
-        return Err(Refusal::VectorTessellationFailed {
-            object: object.into(),
-            detail: "Bezier vertices and tangent arrays differ in length".into(),
-        });
-    }
+    gx_contracts::drawability::bezier_arrays_match(object, path)?;
     let Some(first) = path.vertices.first() else {
         return Ok(());
     };
