@@ -1,5 +1,5 @@
 {
-  "$comment": "Mirror of progress.html INITIAL_STATE. Every 'done' here was verified by execution against the step's 'Done when' criterion in GrapiX-Build-Plan.md, per LLM-GOVERNANCE.md. Keep this file and progress.html in sync in the same commit. 16 Oct: full gate passed (675 Rust, 356 conformance passes/0 failures/9 skips). 3.13 remains active for light validation parity and ignored container paints; 4.5 retains the unchanged colour-ramp baseline discrepancy and macOS gate. See memory.md for verification and exclusions.",
+  "$comment": "Mirror of progress.html INITIAL_STATE. Every 'done' here was verified by execution against the step's 'Done when' criterion in GrapiX-Build-Plan.md, per LLM-GOVERNANCE.md. Keep this file and progress.html in sync in the same commit. 16 Oct: 3.13 verified done after the 22-item inventory recheck and shared light/container-paint rules. Full gate passed: 356 Editor, 679 Rust, 377 conformance passes/0 failures/9 skips. 4.5 retains the unchanged colour-ramp baseline discrepancy and macOS gate. See memory.md for verification and exclusions.",
   "0.1": "done",
   "0.2": "done",
   "0.7": "done",
@@ -41,7 +41,7 @@
   "3.10": "done",
   "3.11": "done",
   "3.12": "done",
-  "3.13": "active",
+  "3.13": "done",
   "4.1": "done",
   "4.2": "done",
   "4.3": "done",

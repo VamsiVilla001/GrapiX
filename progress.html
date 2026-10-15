@@ -95,7 +95,7 @@
     </div>
     <div class="tally"><b id="pct">0%</b><span id="counts">0 of 0 steps</span></div>
   </div>
-  <p class="sub" id="latest-verification">16 Oct: shared drawability checks, measured material declarations and MCP argument refusals verified. Full gate passed: 348 Editor tests, 675 Rust tests (1 ignored), 356 conformance checks (9 named skips). 3.13 remains active for light validation parity and ignored container paints; 4.5 retains the colour-ramp baseline discrepancy and macOS gate.</p>
+  <p class="sub" id="latest-verification">16 Oct: refusal audit 3.13 verified done, including light parity and Group/Layer paints. Full gate passed: 356 Editor tests, 679 Rust tests (1 ignored), 377 conformance checks (9 named skips). 4.5 retains the unchanged colour-ramp baseline discrepancy and macOS comparison gate.</p>
   <div class="meter" id="meter"></div>
   <div class="meterkey"><span>Phase P</span><span>Phase 17</span></div>
 </header>
@@ -203,7 +203,7 @@ const INITIAL_STATE = {
   "3.10": "done",  // OutputAdapter trait; null/virtual/recording adapters; unknown adapter refused with sorted offered list; recording writes atomically via gx_fs
   "3.11": "done",  // Preview (sRGB) and Program (Rec.709) dual emission; bounded latest-frame slots; drop counters by cause; a stalled preview consumer never blocks program
   "3.12": "done",  // WAL recovery journal: atomic write, schema version, epoch advance on restore, output-inhibited until re-configured; runbook at docs/engine-recovery-runbook.md
-  "3.13": "active", // 16 Oct: shared drawability, honest material support and strict MCP arguments verified. Remaining: light-only validator/engine parity and ignored Group/Layer paints (memory.md).
+  "3.13": "done", // 16 Oct: 22-item inventory rechecked; shared light/container paint refusals, Editor warnings and real/mock/MCP wire parity verified. Full gate 679 Rust + 377 conformance passes; see memory.md.
   "3.14": "done", // EffectCraft spike halted at failed required gates (DX12, 2160p budget), rerun 12 Oct; decision in ADR-0003
   "3.15": "done", // project working colour space: sRGB or linear declared per project (new = sRGB, pre-3.15 = linear), schema 3 with lossless upgrade, mismatch refuses by name, engine composites in the scene space; 50% overlap and coverage/gradient/blur references verified 13 Oct
   // Phase 4 — the pixel gate. The instrument, built before anything else

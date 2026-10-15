@@ -110,7 +110,6 @@ pub fn prepare_meshes(
         .map(|material| (material.material_id.as_str(), material))
         .collect();
     let mut meshes = Vec::new();
-    let mut pbr_assignments = 0_usize;
 
     for object in &document.objects {
         let SceneObject::Mesh(mesh) = object else {
@@ -123,17 +122,15 @@ pub fn prepare_meshes(
 
         let assignments = resolve_materials(mesh, required, scope, &material_by_id)?;
         for assignment in &assignments {
-            if material_by_id
-                .get(assignment.material_id.as_str())
-                .is_some_and(|material| material.kind == MaterialKind::Pbr)
+            if light_ids.is_empty()
+                && material_by_id
+                    .get(assignment.material_id.as_str())
+                    .is_some_and(|material| material.kind == MaterialKind::Pbr)
             {
-                pbr_assignments += 1;
-                if light_ids.is_empty() {
-                    return Err(Refusal::MeshMaterialRequiresLight {
-                        object: mesh.base.id.clone(),
-                        material_id: assignment.material_id.clone(),
-                    });
-                }
+                return Err(Refusal::MeshMaterialRequiresLight {
+                    object: mesh.base.id.clone(),
+                    material_id: assignment.material_id.clone(),
+                });
             }
         }
         meshes.push(PreparedMesh {
@@ -143,13 +140,9 @@ pub fn prepare_meshes(
         });
     }
 
-    if pbr_assignments == 0 {
-        if let Some(light_id) = light_ids.first() {
-            return Err(Refusal::LightHasNoResponsiveMaterial {
-                light_id: light_id.clone(),
-            });
-        }
-    }
+    // A light with no PBR mesh to answer it is a document-level rule, shared
+    // with the validator so the Editor refuses it too (3.13).
+    gx_contracts::drawability::light_without_responsive_material(document)?;
 
     Ok(PreparedMeshes {
         meshes,

@@ -88,6 +88,45 @@ fn publication<P: EnginePeer + AssetPublishPeer>(report: &mut Report, name: &str
                 && matches!(next, Ok(PublishReply::Published { revision: Revision(1), .. })),
             format!("expected {expected:?}; validator {validation:?}; wire {reply:?}; next {next:?}")));
     }
+    for (label, scene, expected) in light_container_cases() {
+        let validation = gx_contracts::validate::validate_scene_document(
+            &scene,
+            &support,
+            &Default::default(),
+            true,
+        );
+        let reply = publish_scene(endpoint, scene.clone());
+        let next = publish_scene(endpoint, empty_scene(&scene.id));
+        report.record(PLANE, label, expect(
+            validation.first() == Some(&expected)
+                && matches!(&reply, Ok(PublishReply::Refused(PublishRefusal::PreparationRefused { cause })) if *cause == expected.code)
+                && matches!(&next, Ok(PublishReply::Published { revision: Revision(1), .. })),
+            format!("expected {expected:?}; validator {validation:?}; wire {reply:?}; after refusal {next:?}")));
+    }
+    for (label, scene) in unpainted_container_cases() {
+        let validation = gx_contracts::validate::validate_scene_document(
+            &scene,
+            &support,
+            &Default::default(),
+            true,
+        );
+        let reply = publish_scene(endpoint, scene);
+        report.record(
+            PLANE,
+            label,
+            expect(
+                validation.is_empty()
+                    && matches!(
+                        reply,
+                        Ok(PublishReply::Published {
+                            revision: Revision(1),
+                            ..
+                        })
+                    ),
+                format!("unpainted container validation {validation:?}; publication {reply:?}"),
+            ),
+        );
+    }
     for mode in BlendMode::ALL {
         let mut scene = empty_scene(&format!("blend-{mode:?}"));
         scene.materials.push(material_with_blend(mode));
@@ -104,6 +143,100 @@ fn empty_scene(id: &str) -> SceneDocument {
     scene.canvas.height = 32;
     scene.timeline.duration_frames = 10;
     scene
+}
+
+fn light_container_cases() -> Vec<(&'static str, SceneDocument, StructuredRefusal)> {
+    let mut light = empty_scene("wire-light-only");
+    light.objects.push(object(serde_json::json!({
+        "type": "light", "id": "key", "name": "Key", "lightKind": "directional", "intensity": 1,
+        "color": {"r":1,"g":1,"b":1,"a":1,"space":"srgb"},
+    })));
+    let mut cases = vec![(
+        "a light-only scene has the same named refusal and path everywhere",
+        light,
+        StructuredRefusal::error(Refusal::LightHasNoResponsiveMaterial {
+            light_id: "key".into(),
+        })
+        .at("objects[0].type", serde_json::json!("light")),
+    )];
+    for (kind, id, property, label) in [
+        (
+            "group",
+            "g",
+            "fill",
+            "Group fill refuses by object, path and stored value everywhere",
+        ),
+        (
+            "group",
+            "g",
+            "stroke",
+            "Group stroke refuses even at zero width everywhere",
+        ),
+        (
+            "layer",
+            "l",
+            "fill",
+            "Layer fill refuses by object, path and stored value everywhere",
+        ),
+        (
+            "layer",
+            "l",
+            "stroke",
+            "Layer stroke refuses even at zero width everywhere",
+        ),
+    ] {
+        let mut scene = empty_scene(&format!("wire-container-{kind}-{property}"));
+        // A preceding drawable object prevents an always-zero field path
+        // from passing, and verifies that shapes can still paint.
+        scene.objects.push(object(
+            serde_json::json!({"type":"rect", "id":"card", "name":"Card",
+            "fill":{"type":"solid", "color":{"r":0,"g":1,"b":0,"a":1,"space":"srgb"}}}),
+        ));
+        let paint = serde_json::json!({"type":"solid", "color":{"r":1.0,"g":0.0,"b":0.0,"a":1.0,"space":"srgb"}});
+        let mut value =
+            serde_json::json!({"type":kind, "id":id, "name":id, "childIds":[], "strokeWidth":0});
+        if kind == "layer" {
+            value["layerKind"] = serde_json::json!("object");
+        }
+        value[property] = paint.clone();
+        scene.objects.push(object(value));
+        cases.push((
+            label,
+            scene,
+            StructuredRefusal::error(Refusal::ScenePropertyNotDrawable {
+                object: id.into(),
+                property: property.into(),
+                owner: "3.13".into(),
+            })
+            .at(format!("objects[1].{property}"), paint),
+        ));
+    }
+    cases
+}
+
+fn unpainted_container_cases() -> Vec<(&'static str, SceneDocument)> {
+    [
+        (
+            "group",
+            "an unpainted Group with strokeWidth remains publishable",
+        ),
+        (
+            "layer",
+            "an unpainted Layer with strokeWidth remains publishable",
+        ),
+    ]
+    .into_iter()
+    .map(|(kind, label)| {
+        let mut scene = empty_scene(&format!("wire-unpainted-{kind}"));
+        let mut value = serde_json::json!({"type":kind, "id":kind, "name":kind, "childIds":[],
+                "fill":{"type":"none"}, "stroke":{"type":"none"}, "strokeWidth":12});
+        if kind == "layer" {
+            value["layerKind"] = serde_json::json!("object");
+        }
+        scene.objects.push(object(value));
+        (label, scene)
+    })
+    .collect()
 }
 
 fn object(value: serde_json::Value) -> SceneObject {
@@ -339,6 +472,41 @@ fn mcp_capabilities(report: &mut Report) {
 
         // Each blend is exercised over JSON-RPC with the peer's empty list.
         if support.blend_modes.is_empty() {
+            for (label, scene, expected) in light_container_cases() {
+                projects
+                    .write_scene("audit", &scene)
+                    .expect("A/B preflight witness writes");
+                let reply = rpc(
+                    &server,
+                    "validate.preflight",
+                    serde_json::json!({"project":"audit", "scene_id":scene.id}),
+                );
+                let found =
+                    serde_json::from_value::<Vec<StructuredRefusal>>(reply["result"].clone());
+                report.record(
+                    PLANE,
+                    label,
+                    expect(
+                        found.as_ref().is_ok_and(|r| r.first() == Some(&expected)),
+                        format!("expected {expected:?}; MCP JSON-RPC {reply}"),
+                    ),
+                );
+            }
+            for (label, scene) in unpainted_container_cases() {
+                projects
+                    .write_scene("audit", &scene)
+                    .expect("unpainted preflight witness writes");
+                let reply = rpc(
+                    &server,
+                    "validate.preflight",
+                    serde_json::json!({"project":"audit", "scene_id":scene.id}),
+                );
+                report.record(
+                    PLANE,
+                    label,
+                    expect(reply["result"] == serde_json::json!([]), format!("{reply}")),
+                );
+            }
             for mode in BlendMode::ALL {
                 let mut scene = empty_scene("blend");
                 scene.materials.push(material_with_blend(mode));

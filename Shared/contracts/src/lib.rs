@@ -16,6 +16,7 @@ pub mod authoring;
 pub mod control;
 pub mod auth;
 pub mod color;
+mod container_paint;
 pub mod design_system;
 pub mod drawability;
 pub mod enforce;

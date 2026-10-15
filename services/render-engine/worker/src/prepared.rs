@@ -791,7 +791,8 @@ mod tests {
 
     /// 3.13: the drawability checks live in contracts, so a scene the engine
     /// cannot draw is refused by the Editor's validator first, with the same
-    /// refusal. One case per family the engine used to refuse alone.
+    /// refusal. One case per family the engine used to refuse alone, plus a
+    /// light with nothing to light and a painted container.
     #[test]
     fn the_validator_and_the_engine_refuse_undrawable_scenes_identically() {
         let not_drawable = |object: &str, property: &str, owner: &str| Refusal::ScenePropertyNotDrawable {
@@ -837,6 +838,16 @@ mod tests {
         stroked.base_mut().stroke_width = 4.0;
         stroked.base_mut().scale_x = 2.0;
 
+        let light: SceneObject = serde_json::from_value(serde_json::json!({
+            "type": "light", "id": "key", "name": "key", "lightKind": "directional", "intensity": 1.0,
+            "color": { "r": 1, "g": 1, "b": 1, "a": 1, "space": "srgb" }, "castShadow": false
+        }))
+        .expect("a minimal light parses");
+
+        let mut painted_group = GroupObject { base: ObjectBase::new("painted", "painted"), child_ids: Vec::new() };
+        painted_group.base.fill = solid();
+        let painted_group = SceneObject::Group(painted_group);
+
         let cases = [
             (
                 document(vec![gradient]),
@@ -849,6 +860,8 @@ mod tests {
             (text_scene, not_drawable("title", "decoration", "3.18")),
             (document(vec![faded]), not_drawable("faded", "opacity", "3.13")),
             (document(vec![stroked]), not_drawable("stroked", "scaled strokeWidth", "3.17")),
+            (document(vec![rect("lit"), light]), Refusal::LightHasNoResponsiveMaterial { light_id: "key".into() }),
+            (document(vec![painted_group]), not_drawable("painted", "fill", "3.13")),
         ];
         let support = MaterialSupport::fixed_function();
         for (scene, expected) in cases {

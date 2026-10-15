@@ -183,8 +183,30 @@ export function inspectorPanel(
     description: only
       ? `${only.name} (${only.type})`
       : `${selected.length} objects selected (${kinds.join(", ")})`,
-    children: fields,
+    children: [...containerPaintNotices(document, selectedIds), ...fields],
   };
+}
+
+/// Containers carry no paint. This is presentation of the contract's
+/// ScenePropertyNotDrawable rule, not an edit: stored values stay intact.
+/// Paint controls remain absent, while invalid imported/older content is
+/// visible to the person and the agent inspecting the same panel.
+function containerPaintNotices(document: SceneDocument, selectedIds: readonly string[]): UiNode[] {
+  return document.objects.flatMap((object, index) => {
+    if (!selectedIds.includes(object.id) || (object.type !== "group" && object.type !== "layer")) return [];
+    return (["fill", "stroke"] as const).flatMap((property): UiNode[] => {
+      const paint = object[property];
+      if (paint === undefined || paint.type === "none") return [];
+      const path = `objects[${index}].${property}`;
+      return [{
+        id: `inspector/refused-paint/${object.id}/${property}`,
+        role: "alert",
+        label: `Unsupported ${property} on ${object.name}`,
+        value: `Refused [scenePropertyNotDrawable]: ${object.type} ${object.name} (${object.id}), ${path}. Containers do not paint; the stored value is preserved.`,
+        description: `Stored ${property}: ${JSON.stringify(paint)}`,
+      }];
+    });
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -224,6 +246,11 @@ export function inspectorSections(panel: UiNode): InspectorSection[] {
   }
   const placed = new Set<UiNode>();
   const sections: InspectorSection[] = [];
+  const paintNotices = fields.filter((field) => field.id.startsWith("inspector/refused-paint/"));
+  if (paintNotices.length > 0) {
+    sections.push({ id: "refused-paint", title: "Unsupported container paint", fields: paintNotices });
+    for (const notice of paintNotices) placed.add(notice);
+  }
   for (const section of SECTIONS) {
     const members = section.keys.flatMap((key) => {
       const field = byKey.get(key);

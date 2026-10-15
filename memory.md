@@ -118,7 +118,97 @@ not a euphemism for nearly done.
 
 ---
 
-## 2026-10-16 — Shared refusal validation, honest capabilities and wire audit; resume here
+## 2026-10-16 — 3.13 refusal inventory closed: lights and container paints; resume here
+
+**Implemented — 3.13:** the two residual gaps from mission #2 are closed.
+Claude moved the light-with-no-responsive-material rule into contracts.
+`light_without_responsive_material` and shared drawability use one private
+implementation; mesh preparation calls the public helper. The first light
+without a mesh bound to a declared PBR material refuses
+`LightHasNoResponsiveMaterial` at `objects[i].type`, with given `light`.
+An unsupported mesh still refuses first, preserving validator/engine order.
+
+New `container_paint.rs` rejects painted fill or stroke on Group and Layer
+objects using `ScenePropertyNotDrawable`, the object id, property path and
+stored paint. `none` and absent paints pass; strokeWidth alone is harmless.
+The rule reaches validator, engine, mock publication and MCP through shared
+drawability. No Refusal variant changed; no generated file was edited.
+
+The Editor's Properties panel already offered no fill/stroke controls.
+Codex added visible, read-only named refusals for existing container paints,
+including the object and path. Authored values stay intact, appear in the
+description, and remain available for recovery; transforms stay editable.
+The same node tree presents warnings to people and agents. Eight new typed
+Editor tests cover all four kind/property pairs, clean containers, mixed
+selections, transparent paints, empty gradients and hidden containers.
+
+Codex added 21 independent conformance checks. Real-engine and mock sockets
+refuse each new case identically; the validator and MCP also agree on the
+complete structured refusal (code, field, given and severity). After a refused
+publish, a valid document under the same id must publish as revision 1, proving
+atomicity. Group/Layer `none` paints with strokeWidth remain positive controls.
+
+**Inventory closure:** Claude rechecked all 22 entries of the 13 October
+inventory at `4e0d547` (Panchayati topic 3, message 90). Entries 1, 3–5, 7,
+8's font metrics/tracking, 10, 20 and 21 now render correctly or resolve
+deterministically with named diagnostics. Images/fit, materials/blends,
+material slots, unsupported text properties, animated paragraph metrics,
+3D properties, meshes/glTF/slabs, active cameras and paint objects refuse
+by name. Gradients, shear, tangent mismatch and invalid metrics are in the
+shared validator. Today's light/container checks close the two additional
+audit findings. The tests below execute the reopened criteria: Trim Paths
+coverage, vector opacity, unloadable model refusal, blend/fit coverage and
+validator/engine/mock/MCP parity. **3.13 is verified done** in both trackers.
+This does not implement the renderer features their refusals name; 3.7,
+3.16 onward, 8.9, 11.41 and engine-backed viewport gates retain their own
+states. Neither 3.16 nor 11.41 was started in this mission.
+
+**Verified by execution:**
+
+- Worktree entry and identity guard pass on `agent/shared` at `4e0d547`.
+- Claude: `cargo test -p gx-contracts` **229 passed**;
+  `cargo test -p gx-render-worker` **90 passed**. Shared and worker parity
+  tests include the new rules; PBR binding and clean paints are controls.
+- Codex: `npm --prefix Editor run test:unit` **356 passed**, all 35 files;
+  `npm run typecheck`, `npm run check:boundaries` and `npm run build:web`
+  all exit 0 (`agent/tmp/mission3-editor-tests.log`, `mission3-typecheck.log`).
+- After worker cleanup, rebuilt the worker, all three mocks and conformance:
+  `cargo build -p gx-render-worker -p gx-mock-engine -p gx-mock-editor
+  -p gx-mock-playout -p gx-conformance`, exit 0. Then conformance exits 0:
+  **377 passed, 0 failed, 9 skipped** (`agent/tmp/mission3-conformance.log`).
+- `npm run check`: **exit 0**, boundaries and 297 generated files current,
+  TypeScript checks, **40 Node / 356 Editor / 679 Rust tests passed**,
+  **377 conformance passes / 0 failures / 9 skips**
+  (`agent/tmp/mission3-full-check.log`). One Rust test remains ignored
+  because it needs an engine at the default endpoint. The unchanged gate
+  excludes `gx-engine-host`. The nine conformance skips remain four T0-peer
+  sub-T0 checks, unlocked reference loss, co-located LAN adaptation,
+  unoptimized baseline Program cadence, missing control-peer asset endpoint,
+  and external hardware reference observation. The protected transport leg
+  additionally declines its unsupported fixture-token prefix, outside those
+  nine counted skips; no authentication-leg certification is claimed.
+- `cargo run -p gx-pixel-gate -- check`: **exit 1** on colour-ramp-50 only,
+  unchanged **39,065 differing pixels, maximum delta 255**
+  (`agent/tmp/mission3-pixel-gate.log`). A read-only Pillow comparison of the
+  accepted PNG and prior scratch capture independently reproduces the delta
+  and bounding box `(24,14)–(295,165)`. Accepted red-only `[255,0,0,255]`
+  becomes `[255,0,0,26]` at opacity 0.1; overlapping veils produce
+  `[255,210,210,71]` at alpha 0.28. Old placeholder text/mesh pixels are
+  also gone. All five other rate PNGs in the scratch evidence equal their
+  accepted baselines byte-for-byte. No accepted PNG, threshold or baseline
+  history was changed. **4.5 remains Partial:** review and approve the
+  colour-ramp reference/baseline with Windows/macOS comparison, or fix a
+  demonstrated reference mismatch before accepting it.
+
+The user explicitly transferred mission #3's final gate/tracker/commit task
+from Claude to Codex. The combined commit contains both agents' agreed files
+and both trackers. Desktop applications and user documents were left alone;
+`tests/baselines/history/` remains untracked and untouched. A read-only
+cross-review and per-commit account follow this implementation commit.
+
+---
+
+## 2026-10-16 — Shared refusal validation, honest capabilities and wire audit
 
 **Implemented — mission #2 refusal/capability work:** Claude's commit
 `189dd73` moves software drawability into `gx-contracts::drawability`.

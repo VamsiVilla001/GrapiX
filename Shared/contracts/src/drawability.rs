@@ -17,9 +17,10 @@
 //! The list comes from the 13 October 2026 audit of every authored field
 //! (`memory.md`). When a step lands, its check here is deleted with it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::color::ColorValue;
+use crate::material::MaterialKind;
 use crate::scene::{
     BezierPath, SceneDocument, SceneObject, TextAlign, TextAutoFit, TextCase, TextLayout,
     TextObject, TextOverflow, VerticalAlign, WritingMode,
@@ -182,6 +183,7 @@ pub fn drawability_refusals(document: &SceneDocument) -> Vec<StructuredRefusal> 
             }
         }
         gradients(object, &at, &mut found);
+        crate::container_paint::container_paints(object, &at, &mut found);
         if let SceneObject::Shape(shape) = object {
             if let Err(refusal) = bezier_arrays_match(id, &shape.path) {
                 found.push(refusal, at("path"), serde_json::Value::Null);
@@ -192,6 +194,10 @@ pub fn drawability_refusals(document: &SceneDocument) -> Vec<StructuredRefusal> 
                 }
             }
         }
+    }
+
+    if let Some((index, refusal)) = unlit_light(document) {
+        found.push(refusal, format!("objects[{index}].type"), serde_json::json!("light"));
     }
 
     for (index, channel) in document.timeline.channels.iter().enumerate() {
@@ -227,16 +233,48 @@ pub fn bezier_arrays_match(object: &str, path: &BezierPath) -> Result<(), Refusa
     Ok(())
 }
 
+/// A light with nothing that responds to it lights nothing, so the scene
+/// would draw as if the light were absent. Only a mesh bound to a PBR
+/// material responds to light. The single check, shared by the validator and
+/// mesh preparation.
+pub fn light_without_responsive_material(document: &SceneDocument) -> Result<(), Refusal> {
+    match unlit_light(document) {
+        Some((_, refusal)) => Err(refusal),
+        None => Ok(()),
+    }
+}
+
+/// The first light, by document index, when no mesh binds a PBR material.
+fn unlit_light(document: &SceneDocument) -> Option<(usize, Refusal)> {
+    let (index, light) = document.objects.iter().enumerate().find_map(|(index, object)| match object {
+        SceneObject::Light(light) => Some((index, light)),
+        _ => None,
+    })?;
+    let pbr: HashSet<&str> = document
+        .materials
+        .iter()
+        .filter(|material| material.kind == MaterialKind::Pbr)
+        .map(|material| material.material_id.as_str())
+        .collect();
+    let responds = document.objects.iter().any(|object| {
+        matches!(object, SceneObject::Mesh(_))
+            && object.base().material_slots.as_ref().is_some_and(|slots| {
+                slots.values().any(|binding| pbr.contains(binding.material_id.as_str()))
+            })
+    });
+    (!responds).then(|| (index, Refusal::LightHasNoResponsiveMaterial { light_id: light.base.id.clone() }))
+}
+
 /// Collected refusals. Each check fires at most once per object, and a
 /// non-finite number or an undrawable kind ends that object's checks, so no
 /// fault is reported twice.
 #[derive(Default)]
-struct Found {
+pub(crate) struct Found {
     refusals: Vec<StructuredRefusal>,
 }
 
 impl Found {
-    fn push(&mut self, refusal: Refusal, field: impl Into<String>, given: serde_json::Value) {
+    pub(crate) fn push(&mut self, refusal: Refusal, field: impl Into<String>, given: serde_json::Value) {
         self.refusals.push(StructuredRefusal::error(refusal).at(field, given));
     }
 }
@@ -676,5 +714,48 @@ mod tests {
         let found = drawability_refusals(&document(vec![object]));
         assert_eq!(found.len(), 1, "{found:?}");
         assert_eq!(found[0].field.as_deref(), Some("objects[0].opacity"));
+    }
+
+    fn light(id: &str) -> SceneObject {
+        serde_json::from_value(serde_json::json!({
+            "type": "light", "id": id, "name": id, "lightKind": "directional", "intensity": 1.0,
+            "color": { "r": 1, "g": 1, "b": 1, "a": 1, "space": "srgb" }, "castShadow": false
+        }))
+        .expect("a minimal light parses")
+    }
+
+    #[test]
+    fn a_light_with_nothing_to_light_refuses_by_its_id() {
+        let scene = document(vec![rect("r"), light("key"), light("fill")]);
+        assert_eq!(
+            light_without_responsive_material(&scene),
+            Err(Refusal::LightHasNoResponsiveMaterial { light_id: "key".into() })
+        );
+        let found = drawability_refusals(&scene);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].field.as_deref(), Some("objects[1].type"));
+        assert!(light_without_responsive_material(&document(vec![rect("r")])).is_ok(), "no light, no rule");
+    }
+
+    #[test]
+    fn a_mesh_bound_to_pbr_answers_the_light() {
+        use crate::material::{MaterialBinding, MaterialDefinition, MaterialKind};
+        let mut scene = document(vec![light("key")]);
+        let mut mesh: SceneObject = serde_json::from_value(serde_json::json!({
+            "type": "mesh", "id": "m", "name": "m", "meshKind": "cube", "depth": 1.0
+        }))
+        .expect("a minimal mesh parses");
+        mesh.base_mut().material_slots =
+            Some(std::collections::BTreeMap::from([("object".to_string(), MaterialBinding::new("lit"))]));
+        scene.objects.push(mesh);
+        scene.materials.push(MaterialDefinition {
+            material_id: "lit".into(), name: "lit".into(), kind: MaterialKind::Pbr,
+            color: ColorValue::opaque_white(), opacity: 1.0, blend_mode: Default::default(),
+            alpha_mode: Default::default(), cull_mode: Default::default(), depth_mode: Default::default(),
+            double_sided: false, textures: Vec::new(), shader_id: None,
+        });
+        assert!(light_without_responsive_material(&scene).is_ok());
+        scene.materials[0].kind = MaterialKind::Unlit;
+        assert!(light_without_responsive_material(&scene).is_err(), "unlit material does not respond");
     }
 }
