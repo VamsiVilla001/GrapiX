@@ -5,7 +5,7 @@
   "title": "UpdateKeyframe",
   "$defs": {
     "CubicBezier": {
-      "description": "Cubic-bezier control points for a custom outgoing easing.\n\n`x1` and `x2` stay in 0–1 because they are time controls; y may overshoot,\nas CSS and standard animation tooling allow. The points are stored with the\nkey, not solved from neighbouring keys at display time, so a saved scene\nmeans the same curve when it is reopened.",
+      "description": "Cubic-bezier control points for a custom outgoing easing.\n\n`x1` and `x2` stay in 0–1 because they are time controls; y may overshoot\nprovided the resulting segment stays within the property's range (opacity\n0–1, width/height non-negative). Other properties permit overshoot.\nThe points are stored with the\nkey, not solved from neighbouring keys at display time, so a saved scene\nmeans the same curve when it is reopened.",
       "properties": {
         "x1": {
           "format": "double",

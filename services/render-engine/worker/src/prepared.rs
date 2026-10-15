@@ -959,6 +959,37 @@ mod tests {
     }
 
     #[test]
+    fn invalid_opacity_animation_refuses_at_prepare_and_valid_keys_render_in_both_spaces() {
+        use gx_contracts::animation::CubicBezier;
+        use gx_contracts::color::{Rgba, WorkingColorSpace};
+        let rectangle = |id: &str, shade| {
+            let mut base = ObjectBase::new(id, id);
+            base.width = 12.0;
+            base.height = 12.0;
+            base.fill = Some(ColorValue::Solid { color: Rgba::srgb(shade, shade, shade, 1.0) });
+            SceneObject::Rect(RectObject { base, radius: 0.0 })
+        };
+        for (space, expected) in [(WorkingColorSpace::Srgb, 128_u8), (WorkingColorSpace::LinearSrgb, 188)] {
+            let mut scene = document(vec![rectangle("white", 1.0), rectangle("black", 0.0)]);
+            scene.working_color_space = space;
+            scene.canvas.width = 16;
+            scene.canvas.height = 16;
+            scene.timeline.channels = vec![KeyframeChannel { object_id: "black".into(), property: "opacity".into(), keys: vec![
+                SceneKeyframe { frame: 0, value: 0.0, easing: SceneEasing::Linear, bezier: None },
+                SceneKeyframe { frame: 100, value: 1.0, easing: SceneEasing::Linear, bezier: None },
+            ] }];
+            let prepared = PreparedScene::prepare(scene.clone(), &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function()).unwrap();
+            let frame = prepared.frame_at(50, OutputTransform::Srgb).unwrap();
+            let pixel = &frame.pixels[(5 * 16 + 5) * 4..][..4];
+            assert!(pixel[..3].iter().all(|c| c.abs_diff(expected) <= 1), "{space:?}: {pixel:?}");
+            scene.timeline.channels[0].keys[0].easing = SceneEasing::CustomBezier;
+            scene.timeline.channels[0].keys[0].bezier = Some(CubicBezier { x1: 0.25, y1: 1.4, x2: 0.75, y2: 1.4 });
+            assert!(matches!(PreparedScene::prepare(scene, &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function()),
+                Err(Refusal::KeyframeValueOutOfDomain { object, property, frame: 0, .. }) if object == "black" && property == "opacity"));
+        }
+    }
+
+    #[test]
     fn animated_frames_are_evaluated_before_rasterisation() {
         let mut shape = RectObject {
             base: ObjectBase::new("card", "card"),

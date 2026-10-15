@@ -72,6 +72,17 @@ const xKeyAt20 = {
 };
 
 describe("keyframe panel model", () => {
+  it("shows the evaluated value and neighboring keys at the playhead", () => {
+    const document = scene([rect("card", { x: 999 })], [{ objectId: "card", property: "x", keys: [
+      { frame: 0, value: 20, easing: "linear" }, { frame: 100, value: 220, easing: "linear" },
+    ] }]);
+    const model = keyframePanelModel(document, ["card"], surface, 50);
+    expect(model.available).toBe(true);
+    if (!model.available) return;
+    expect(model.rows.find((row) => row.property === "x")).toMatchObject({
+      value: 120, keyState: "none", previousFrame: 0, nextFrame: 100,
+    });
+  });
   it("uses the Rust vocabulary and marks the diamond at the playhead", () => {
     const model = keyframePanelModel(scene([rect("card")], [xKeyAt20]), ["card"], surface, 20);
     expect(model.available).toBe(true);

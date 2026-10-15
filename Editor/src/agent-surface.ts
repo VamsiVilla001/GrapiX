@@ -92,6 +92,13 @@ export interface UiNode {
   readonly expanded?: boolean;
   /// The value a cell carries, already formatted for display.
   readonly value?: string;
+  /// An inline editor for the node's existing edit action.
+  readonly input?: {
+    readonly type: "text" | "number" | "checkbox";
+    readonly value: string;
+    readonly mixed?: boolean;
+  };
+  readonly image?: { readonly src: string; readonly alt: string };
   readonly actions?: readonly UiAction[];
   readonly children?: readonly UiNode[];
 }
@@ -251,8 +258,16 @@ export function renderNode(document: DocumentLike, node: UiNode): ElementLike {
   if (node.expanded !== undefined) {
     element.setAttribute("aria-expanded", String(node.expanded));
   }
-  if (node.value !== undefined) {
+  if (node.value !== undefined && node.input === undefined) {
     element.textContent = node.value;
+  }
+  if (node.image !== undefined) {
+    const image = document.createElement("img");
+    image.setAttribute("src", node.image.src);
+    image.setAttribute("alt", node.image.alt);
+    image.setAttribute("title", node.image.alt);
+    image.setAttribute("class", "graphic-thumbnail");
+    element.appendChild(image);
   }
   // A live region announces its own changes. Status is polite; an alert
   // interrupts, which is why only genuinely blocking conditions use it.
@@ -264,6 +279,23 @@ export function renderNode(document: DocumentLike, node: UiNode): ElementLike {
   }
 
   for (const action of node.actions ?? []) {
+    if (action.name === "edit" && node.input !== undefined) {
+      const input = document.createElement("input");
+      input.setAttribute("type", node.input.type);
+      input.setAttribute("class", "property-value");
+      input.setAttribute("aria-label", node.label);
+      input.setAttribute("data-inspector-field", node.id.slice("inspector/".length));
+      input.setAttribute("value", node.input.value);
+      input.setAttribute("step", "any");
+      if (node.input.mixed) input.setAttribute("placeholder", "Mixed");
+      if (node.input.type === "checkbox" && node.input.value === "true") input.setAttribute("checked", "");
+      if (action.unavailable !== undefined) {
+        input.setAttribute("disabled", "");
+        input.setAttribute("title", action.unavailable);
+      }
+      element.appendChild(input);
+      continue;
+    }
     const button = document.createElement("button");
     button.setAttribute("type", "button");
     button.setAttribute("data-action", action.name);

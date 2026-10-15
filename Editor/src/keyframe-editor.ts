@@ -18,6 +18,7 @@ import type {
 } from "@grapix/contracts";
 
 import { wireFrame } from "./command-client";
+import { evaluateChannel } from "./timeline/easing";
 
 /// Whether a keyframe exists at the playhead across the whole selection.
 export type KeyState = "none" | "all" | "partial";
@@ -32,6 +33,8 @@ export interface KeyframeRow {
   /// Of those, the ones with a key at the current playhead.
   readonly objectsWithKey: readonly string[];
   readonly keyState: KeyState;
+  readonly previousFrame?: number;
+  readonly nextFrame?: number;
   /// Single-selection extras, present only when exactly one object is selected.
   readonly channel?: KeyframeChannel;
   readonly currentKey?: SceneKeyframe;
@@ -102,6 +105,12 @@ function channelFor(
   );
 }
 
+/// The value visible at the playhead, used both by the field and a new key.
+export function propertyValueAt(document: SceneDocument, objectId: string, property: string, frame: number): number | undefined {
+  const channel = channelFor(document, objectId, property);
+  return (channel === undefined ? undefined : evaluateChannel(channel, frame)) ?? baseValueOf(document, objectId, property);
+}
+
 function keyAt(
   document: SceneDocument,
   objectId: string,
@@ -153,7 +162,7 @@ export function keyframePanelModel(
     );
     if (withProp.length === 0) return [];
     const objectIds = withProp.map((object) => object.id);
-    const values = objectIds.map((id) => baseValueOf(document, id, property)!);
+    const values = objectIds.map((id) => propertyValueAt(document, id, property, currentFrame)!);
     const allEqual = values.every((value) => Object.is(value, values[0]));
     const objectsWithKey = objectIds.filter(
       (id) => keyAt(document, id, property, currentFrame) !== undefined,
@@ -167,6 +176,9 @@ export function keyframePanelModel(
     const single = objectIds.length === 1;
     const channel = single ? channelFor(document, objectIds[0]!, property) : undefined;
     const currentKey = single ? keyAt(document, objectIds[0]!, property, currentFrame) : undefined;
+    const frames = objectIds.flatMap((id) => channelFor(document, id, property)?.keys.map((key) => asFrame(key.frame)) ?? []);
+    const before = frames.filter((frame) => frame < currentFrame);
+    const after = frames.filter((frame) => frame > currentFrame);
     return [
       {
         property,
@@ -175,6 +187,8 @@ export function keyframePanelModel(
         objectIds,
         objectsWithKey,
         keyState,
+        ...(before.length ? { previousFrame: Math.max(...before) } : {}),
+        ...(after.length ? { nextFrame: Math.min(...after) } : {}),
         ...(channel === undefined ? {} : { channel }),
         ...(currentKey === undefined ? {} : { currentKey }),
       },
@@ -268,6 +282,30 @@ function numberInput(document: Document, className: string, value: number | null
 }
 
 const DIAMOND: Record<KeyState, string> = { none: "◇", all: "◆", partial: "◈" };
+
+/// Compact property controls, beside the value in the main Properties dock.
+export function renderPropertyKeyControls(document: Document, row: KeyframeRow, frame: number): HTMLElement {
+  const controls = document.createElement("span");
+  controls.className = "property-key-controls";
+  for (const [label, destination, glyph] of [
+    ["Previous", row.previousFrame, "‹"], ["Next", row.nextFrame, "›"],
+  ] as const) {
+    const seek = button(document, glyph, "seek", row.property);
+    seek.setAttribute("aria-label", `${label} ${row.label} keyframe`);
+    seek.title = seek.getAttribute("aria-label")!;
+    seek.disabled = destination === undefined;
+    if (destination !== undefined) seek.dataset.frame = String(destination);
+    controls.append(seek);
+  }
+  const intent = toggleIntent(row);
+  const toggle = button(document, DIAMOND[row.keyState], intent.action, row.property);
+  toggle.className = `property-key-toggle ${row.keyState}`;
+  toggle.setAttribute("aria-label", `${intent.action === "create" ? "Add" : "Remove"} ${row.label} key at frame ${frame}`);
+  toggle.setAttribute("aria-pressed", String(row.keyState === "all"));
+  toggle.title = toggle.getAttribute("aria-label")!;
+  controls.insertBefore(toggle, controls.lastChild);
+  return controls;
+}
 
 /// Render the panel from the pure model. Every actionable element carries
 /// `data-animation-action`; the wiring dispatches those to Rust and never

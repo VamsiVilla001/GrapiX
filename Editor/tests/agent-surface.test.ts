@@ -89,6 +89,18 @@ function tree(): UiNode {
 }
 
 describe("one description, two consumers", () => {
+  it("renders an inline edit action with the same value and named disabled reason", () => {
+    const node: UiNode = { id: "inspector/x", role: "gridcell", label: "X", value: "Mixed",
+      input: { type: "number", value: "", mixed: true },
+      actions: [{ name: "edit", label: "Edit X", unavailable: "Selection is locked" }] };
+    const rendered = renderNode(fakeDocument, node) as FakeElement;
+    const input = rendered.children.find((child) => child.tag === "input")!;
+    expect(input.attributes.get("aria-label")).toBe("X");
+    expect(input.attributes.get("placeholder")).toBe("Mixed");
+    expect(input.attributes.get("title")).toBe("Selection is locked");
+    expect(input.attributes.has("disabled")).toBe(true);
+    expect(agentView(node).actions[0]!.available).toBe(false);
+  });
   it("the agent snapshot reports exactly the rows, levels and state the tree carries", () => {
     const view = agentView(tree());
 

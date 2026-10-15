@@ -403,6 +403,7 @@ pub fn apply_edits(
     for edit in edits {
         effects.push(apply_edit(&mut candidate, edit, ctx)?);
     }
+    animation::validate_scene_animation(&candidate)?;
     Ok((std::mem::replace(scene, candidate), effects))
 }
 
@@ -465,7 +466,7 @@ fn apply_edit(
             EditEffect::None
         }
         SceneEdit::RemoveKeyframe(p) => {
-            animation::remove_keyframe(scene, &p.object_id, &p.property, p.frame)?;
+            animation::remove_keyframe_in_batch(scene, &p.object_id, &p.property, p.frame)?;
             EditEffect::None
         }
         SceneEdit::ApplyPreset(p) => {
@@ -1158,6 +1159,27 @@ mod tests {
             Err(Refusal::EditBatchEmpty)
         );
         assert_eq!(scene, before);
+    }
+
+    #[test]
+    fn deleting_several_keys_checks_the_final_curve_not_an_intermediate_join() {
+        let mut scene = scene_with_card();
+        let key = |frame, value| animation::SceneKeyframe {
+            frame, value, easing: animation::SceneEasing::Linear, bezier: None,
+        };
+        let mut first = key(0, 0.0);
+        first.easing = animation::SceneEasing::CustomBezier;
+        first.bezier = Some(animation::CubicBezier { x1: 0.25, y1: 1.4, x2: 0.75, y2: 1.4 });
+        for key in [first, key(40, 0.5), key(80, 1.0), key(100, 0.5)] {
+            animation::set_keyframe(&mut scene, "card", "opacity", key).unwrap();
+        }
+        let delete = |frame| SceneEdit::RemoveKeyframe(RemoveKeyframe { object_id: "card".into(), property: "opacity".into(), frame });
+        let before = scene.clone();
+        assert!(matches!(apply_edits(&mut scene, &[delete(40)], &NO_CONTEXT), Err(Refusal::KeyframeValueOutOfDomain { .. })));
+        assert_eq!(scene, before);
+        apply_edits(&mut scene, &[delete(40), delete(80)], &NO_CONTEXT).unwrap();
+        assert_eq!(scene.timeline.channels[0].keys.iter().map(|key| key.frame).collect::<Vec<_>>(), [0, 100]);
+        animation::validate_scene_animation(&scene).unwrap();
     }
 
     #[test]

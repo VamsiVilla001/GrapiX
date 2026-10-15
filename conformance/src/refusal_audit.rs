@@ -771,6 +771,12 @@ fn drive_animation_refusals(report: &mut Report) {
         ),
     );
 
+    let mut bad_value = scene_with(vec![rect("card")]);
+    let refused = set_keyframe(&mut bad_value, "card", "opacity", key(0, 1.5));
+    report.record(PLANE, "KeyframeValueOutOfDomain is produced for opacity above one",
+        expect(matches!(refused, Err(Refusal::KeyframeValueOutOfDomain { object, property, frame: 0, .. })
+            if object == "card" && property == "opacity"), "an invalid opacity key was not refused by name"));
+
     let mut bad_easing = scene_with(vec![rect("card")]);
     report.record(
         PLANE,
@@ -1578,6 +1584,7 @@ fn is_driven(variant: &str) -> bool {
             | "TextStyleTokenUnresolved"
             | "AnimationPropertyUnsupported"
             | "KeyframeOutOfRange"
+            | "KeyframeValueOutOfDomain"
             | "InvalidKeyframeEasing"
             | "DuplicateKeyframeFrame"
             | "AnimationChannelUnknown"

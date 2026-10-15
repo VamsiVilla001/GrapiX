@@ -66,8 +66,16 @@ describe("one scene container, multiple graphics", () => {
 
   it("exposes the same per-graphic status to agents and accessibility", () => {
     const view = agentView(panelFor([graphic({ sceneId: "a", active: true, unsavedChanges: true })]));
-    const status = view.children[0]!.children[0]!.children[0]!;
+    const status = view.children[0]!.children[0]!.children.find((child) => child.id === "scene/a/status")!;
     expect(status.role).toBe("status");
     expect(status.value).toBe("Editing · Unsaved changes");
+  });
+
+  it("exposes each graphic's actual preview and its limitations", () => {
+    const panel = panelFor([graphic({ sceneId: "a", preview: { src: "data:image/png;base64,preview", note: "Partial authoring preview · text not drawn" } })]);
+    const preview = findNode(panel, "scene/a/preview")!;
+    expect(preview.image?.src).toBe("data:image/png;base64,preview");
+    expect(preview.image?.alt).toContain("text not drawn");
+    expect(findNode(panel, "scene/a/preview-note")!.value).toContain("Partial authoring preview");
   });
 });

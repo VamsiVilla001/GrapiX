@@ -18,6 +18,26 @@ automatable before it is clickable.
 
 **250 steps across 19 phases.**
 
+**Product direction — 15 October 2026 (user):** GrapiX combines After
+Effects-style composition authoring with Scene Manager and live broadcast
+playout like XPression/VizRT. Authoring covers layers, editable properties,
+keyframes, curves, effects and composition previews. Scene Manager groups
+multiple independent graphics in one saved container. Playout cues, takes,
+continues and clears published graphics; the Render Engine owns the frame
+clock and production pixels sent to outputs, including DeckLink SDI (Phase
+15). This is a functional product requirement as well as an interface
+reference. Editor, Playout and Render Engine keep their existing authority
+boundaries. SDI readiness requires the SDK, hardware and timing tests in
+Phase 15; discovering a card does not satisfy those gates.
+
+**Authoring follow-up — 15 October 2026 (user):** Properties must expose
+inline value edits and visible keyframe controls, with values evaluated at
+the playhead and edits to animated properties keyed there. Scene Manager
+must show a preview for each graphic. Current authoring thumbnails reuse the
+existing viewport and explicitly identify partial previews; engine-backed
+preview/Program parity remains 13.5/13.6. These follow-ups belong to 11.9,
+11.21, 11.63 and 11.64 and require desktop interaction verification.
+
 **Product amendment — 15 October 2026:** the user removed the design-system
 concept from the current authoring workflow. Scene Manager is now one saved
 container holding multiple independent graphics, each with its own layers,

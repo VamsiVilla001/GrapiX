@@ -40,6 +40,7 @@ import type {
 import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
 import { presetBlocker } from "../src/motion-preset-browser";
 import { SceneViewport } from "../src/viewport";
+import { GraphicPreviewRenderer } from "../src/graphic-preview";
 import { renderNode } from "../src/agent-surface";
 import {
   objectManagerPanel,
@@ -47,7 +48,6 @@ import {
 } from "../src/object-manager";
 import {
   fieldEditLabel,
-  fieldEditStart,
   inspectorEdits,
   inspectorPanel,
   inspectorSections,
@@ -106,11 +106,12 @@ import {
   type OverlayPoint,
 } from "../src/overlay";
 import {
-  baseValueOf,
   customBezierFromInputs,
   keyframeContextItems,
   keyframeForValue,
   keyframePanelModel,
+  propertyValueAt,
+  renderPropertyKeyControls,
   renderKeyframePanel,
   propertyLabel,
   toggleIntent,
@@ -351,6 +352,11 @@ let selection: string[] = [];
 let projects: string[] = [];
 let currentProject: string | undefined;
 let projectCatalog: ProjectSceneCatalog | undefined;
+const graphicPreviews = new Map<string, { document?: SceneDocument; src?: string; note: string }>();
+const graphicPreviewsPending = new Set<string>();
+let graphicPreviewRenderer: GraphicPreviewRenderer | undefined;
+let graphicPreviewQueue = Promise.resolve();
+let graphicPreviewGeneration = 0;
 let takePageCatalog: ProjectTakePageCatalog | undefined;
 /** The active session's project origin, mirrored from its `SessionView`. */
 let projectSceneId: string | undefined;
@@ -405,6 +411,7 @@ let playback:
 let gpuReport: GpuReport | undefined;
 let autoKey = false;
 let animationBusy = false;
+const pendingInspectorFields = new Set<string>();
 let overlayDrag:
   | {
       readonly pointerId: number;
@@ -632,6 +639,10 @@ async function closeScene(key: number): Promise<void> {
     return;
   }
   removeSession(workspace, key);
+  if (session.view.origin) {
+    graphicPreviews.delete(`${session.view.origin.project}/${session.view.origin.sceneId}`);
+    graphicPreviewGeneration += 1;
+  }
   const next = activeSession(workspace);
   if (next) {
     restoreSession(next);
@@ -649,6 +660,7 @@ async function closeScene(key: number): Promise<void> {
   }
   renderSceneTabs();
   log(force ? `Closed ${name}, discarding unsaved changes` : `Closed ${name}`, force ? "bad" : "good");
+  renderProjectManager();
 }
 
 function onSceneTabsClick(event: MouseEvent): void {
@@ -766,6 +778,8 @@ function managedProjectScenes(catalog: ProjectSceneCatalog): ManagedScene[] {
       opened?.view.projectDirty === true || (opened?.key === workspace.activeKey && projectChangesUnsaved()),
     open: opened !== undefined,
     active: opened !== undefined && opened.key === workspace.activeKey,
+    ...(graphicPreviews.has(`${catalog.project}/${listed.sceneId}`)
+      ? { preview: graphicPreviews.get(`${catalog.project}/${listed.sceneId}`)! } : {}),
     ...(listed.publishedRevision === undefined ? {} : { publishedRevision: listed.publishedRevision }),
     ...(listed.unavailableReason === undefined
       ? {}
@@ -800,6 +814,37 @@ function renderProjectManager(): void {
       panel,
     ) as unknown as Node,
   );
+  queueGraphicPreviews(catalog);
+}
+
+function queueGraphicPreviews(catalog: ProjectSceneCatalog): void {
+  for (const listed of catalog.scenes) {
+    const address = `${catalog.project}/${listed.sceneId}`;
+    const opened = sessionFor(workspace, { project: catalog.project, sceneId: listed.sceneId });
+    const cached = graphicPreviews.get(address);
+    if (graphicPreviewsPending.has(address) || (cached && (!opened || cached.document === opened.view.document))) continue;
+    graphicPreviewsPending.add(address);
+    const generation = graphicPreviewGeneration;
+    graphicPreviewQueue = graphicPreviewQueue.then(async () => {
+      try {
+        if (listed.unavailableReason) throw new Error(listed.unavailableReason);
+        const loaded = opened?.view.document ?? await shell().invoke<SceneDocument>("cmd_scene_read", { project: catalog.project, sceneId: listed.sceneId });
+        const latest = sessionFor(workspace, { project: catalog.project, sceneId: listed.sceneId })?.view.document ?? loaded;
+        // Yield between tiles; one renderer/context is reused for the list.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        graphicPreviewRenderer ??= new GraphicPreviewRenderer(document.createElement("canvas"));
+        const preview = graphicPreviewRenderer.capture(latest, animationSurface);
+        if (generation === graphicPreviewGeneration) graphicPreviews.set(address, { document: latest, ...preview });
+      } catch (error) {
+        if (generation === graphicPreviewGeneration) graphicPreviews.set(address, {
+          ...(opened ? { document: opened.view.document } : {}), note: `Preview unavailable: ${describe(error)}`,
+        });
+      } finally {
+        graphicPreviewsPending.delete(address);
+        if (projectCatalog?.project === catalog.project) renderProjectManager();
+      }
+    });
+  }
 }
 
 function hexForTakePageColor(value: ControlValue | undefined): string {
@@ -1059,23 +1104,7 @@ function renderPanels(document_: SceneDocument): void {
   renderTakePagePanel(document_);
 
 
-  const inspector = inspectorPanel(document_, selection);
-  const sections = inspectorSections(inspector);
-  if (sections.length === 0) {
-    ui.inspector.replaceChildren(renderNode(document, inspector) as unknown as Node);
-  } else {
-    ui.inspector.replaceChildren(...sections.map((section) => {
-      // Keep identity/switch metadata reachable without pushing transform
-      // controls below the fold in the compact Properties dock.
-      const metadata = section.title === "Layer";
-      const group = document.createElement(metadata ? "details" : "section");
-      group.className = "property-section";
-      const heading = document.createElement(metadata ? "summary" : "h3");
-      heading.textContent = section.title;
-      group.append(heading, ...section.fields.map((field) => renderNode(document, field) as unknown as Node));
-      return group;
-    }));
-  }
+  renderInspector(document_);
   updateTimeReadouts();
   const animation = keyframePanelModel(document_, selection, animationSurface, currentFrame);
   ui.animationFrame.value = String(animation.currentFrame);
@@ -1087,6 +1116,75 @@ function renderPanels(document_: SceneDocument): void {
   renderSampleData(document_);
   renderControlContract(document_);
   renderTimeline(document_);
+}
+
+function renderInspector(document_: SceneDocument): void {
+  const metadataOpen = ui.inspector.querySelector<HTMLDetailsElement>("details.property-section")?.open ?? false;
+  const focused = document.activeElement instanceof HTMLInputElement && ui.inspector.contains(document.activeElement)
+    ? { field: document.activeElement.dataset.inspectorField, value: document.activeElement.value,
+        start: document.activeElement.selectionStart, end: document.activeElement.selectionEnd } : undefined;
+  // Bindings and take-page previews must never become editable authored defaults.
+  const inspector = inspectorPanel(document_, selection);
+  const model = keyframePanelModel(document_, selection, animationSurface, currentFrame);
+  const sections = inspectorSections(inspector);
+  if (sections.length === 0) {
+    ui.inspector.replaceChildren(renderNode(document, inspector) as unknown as Node);
+  } else {
+    ui.inspector.replaceChildren(...sections.map((section) => {
+      // Keep identity/switch metadata reachable without pushing transform
+      // controls below the fold in the compact Properties dock.
+      const metadata = section.title === "Layer";
+      const group = document.createElement(metadata ? "details" : "section");
+      group.className = "property-section";
+      if (group instanceof HTMLDetailsElement) group.open = metadataOpen;
+      const heading = document.createElement(metadata ? "summary" : "h3");
+      heading.textContent = section.title;
+      group.append(heading, ...section.fields.map((field) => {
+        const element = renderNode(document, field) as unknown as HTMLElement;
+        const checkbox = element.querySelector<HTMLInputElement>('input[type="checkbox"]');
+        if (checkbox && field.input?.mixed) {
+          checkbox.indeterminate = true;
+          checkbox.setAttribute("aria-checked", "mixed");
+        }
+        return element;
+      }));
+      return group;
+    }));
+  }
+  refreshInspectorFrame(model);
+  if (focused?.field) {
+    const input = [...ui.inspector.querySelectorAll<HTMLInputElement>("[data-inspector-field]")]
+      .find((candidate) => candidate.dataset.inspectorField === focused.field);
+    if (input && !input.disabled) {
+      if (!pendingInspectorFields.has(focused.field)) input.value = focused.value;
+      input.focus({ preventScroll: true });
+      if (input.type === "text" && focused.start !== null && focused.end !== null) input.setSelectionRange(focused.start, focused.end);
+    }
+  }
+}
+
+function refreshInspectorFrame(model: KeyframePanelModel): void {
+  if (!model.available) return;
+  for (const row of model.rows) {
+    const element = document.getElementById(`inspector/${row.property}`);
+    if (!element) continue;
+    const input = element.querySelector<HTMLInputElement>("[data-inspector-field]");
+    if (input && document.activeElement !== input) {
+      input.value = row.value === null ? "" : row.property === "opacity" ? `${row.value * 100}%` : String(row.value);
+      input.placeholder = row.value === null ? "Mixed" : "";
+    }
+    const previousControls = element.querySelector(".property-key-controls");
+    const focusedControl = document.activeElement instanceof HTMLButtonElement && previousControls?.contains(document.activeElement)
+      ? document.activeElement.getAttribute("aria-label") : undefined;
+    previousControls?.remove();
+    const controls = renderPropertyKeyControls(document, row, model.currentFrame);
+    element.append(controls);
+    if (focusedControl) {
+      const buttons = [...controls.querySelectorAll<HTMLButtonElement>("button")];
+      (buttons.find((button) => button.getAttribute("aria-label") === focusedControl && !button.disabled)
+        ?? buttons.find((button) => !button.disabled))?.focus({ preventScroll: true });
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1702,6 +1800,7 @@ function setCurrentFrame(next: number): void {
   ui.animationFrame.value = String(animation.currentFrame);
   updateTimeReadouts();
   ui.animationMount.replaceChildren(renderKeyframePanel(document, animation, animationSurface));
+  refreshInspectorFrame(animation);
   ui.previewStatus.textContent = `${playback === undefined ? "Paused" : "Playing"} at frame ${currentFrame}`;
   renderUnsupported([
     ...(viewport?.unsupported ?? []),
@@ -2065,10 +2164,13 @@ async function editPropertyValue(property: string, value: number): Promise<void>
     property,
     value,
     frame: wireFrame(model.currentFrame),
-    autoKey,
+    // Existing animated properties key edits at the playhead, as EffectCraft
+    // does. Auto-Key additionally starts animation on unkeyed properties.
+    autoKey: autoKey || (scene?.timeline.channels.some((channel) => channel.objectId === objectId && channel.property === property && channel.keys.length > 0) ?? false),
   }));
   const scope = row.objectIds.length > 1 ? ` on ${row.objectIds.length} objects` : "";
-  const label = autoKey
+  const alreadyAnimated = scene?.timeline.channels.some((channel) => row.objectIds.includes(channel.objectId) && channel.property === property && channel.keys.length > 0);
+  const label = autoKey || alreadyAnimated
     ? `Keyed ${row.label} = ${value} at frame ${model.currentFrame}${scope}`
     : `Set ${row.label} = ${value}${scope}`;
   await runGesture(edits, label);
@@ -2114,7 +2216,7 @@ async function toggleKeyframe(property: string, requestedAction?: "create" | "re
     property,
     // Each object keys at its own current value, so a multi-select add does
     // not flatten differing values onto a shared one.
-    keyframe: keyframeForValue(baseValueOf(scene!, objectId, property) ?? 0, model.currentFrame, easing),
+    keyframe: keyframeForValue(propertyValueAt(scene!, objectId, property, model.currentFrame) ?? 0, model.currentFrame, easing),
   }));
   await runGesture(edits, `Added ${row.label} key at frame ${model.currentFrame}`);
 }
@@ -2187,12 +2289,14 @@ function onAnimationClick(event: MouseEvent): void {
     setCurrentFrame(Number(button.dataset.frame));
     return;
   }
+  if (action === "create" || action === "remove") {
+    void toggleKeyframe(property, action);
+    return;
+  }
   const rowElement = button.closest<HTMLElement>(".keyframe-row");
   const row = selectedAnimationRow(property);
   if (!rowElement || !row) return;
-  if (action === "create" || action === "remove") {
-    void toggleKeyframe(property, action);
-  } else if (action === "update") {
+  if (action === "update") {
     void updateKeyframe(rowElement, row);
   } else if (action === "move") {
     void moveKeyframe(rowElement, row);
@@ -2272,38 +2376,37 @@ function onInspectorContextMenu(event: MouseEvent): void {
   openKeyframeMenu(event, property);
 }
 
-/** An inspector "Edit X" across the whole selection (11.9): one gesture, one
+/** An inline inspector edit across the whole selection (11.9): one gesture, one
  *  atomic batch, one undo entry carrying every object's change. Rust applies
  *  it or refuses it whole, by name. */
-function onInspectorClick(event: MouseEvent): void {
+function onInspectorChange(event: Event): void {
   if (!scene) return;
   const target = event.target;
-  if (!(target instanceof Element)) return;
-  const button = target.closest<HTMLButtonElement>('button[data-action="edit"][data-for^="inspector/"]');
-  const field = button?.dataset.for?.slice("inspector/".length);
-  if (!button || !field) return;
-  if (button.dataset.unavailable !== undefined) {
-    log(`inspector edit refused: ${button.dataset.unavailable}`, "bad");
-    return;
-  }
-  const start = fieldEditStart(scene, selection, field);
-  if (!start) return;
-  const scope = selection.length > 1 ? ` on ${selection.length} objects` : "";
-  const raw = window.prompt(
-    start.mixed ? `${start.label}${scope} (currently Mixed)` : `${start.label}${scope}`,
-    start.initial,
-  );
-  if (raw === null) return;
+  if (!(target instanceof HTMLInputElement)) return;
+  const field = target.dataset.inspectorField;
+  if (!field) return;
+  const raw = target.type === "checkbox" ? String(target.checked) : target.value;
   const parsed = parseFieldInput(field, raw);
   if (isRefused(parsed)) {
     log(`inspector edit refused: ${parsed.refused}`, "bad");
+    renderInspector(scene);
+    return;
+  }
+  if (typeof parsed.value === "number" && animationSurface?.properties.includes(field) && selectedAnimationRow(field)) {
+    pendingInspectorFields.add(field);
+    void editPropertyValue(field, parsed.value).finally(() => {
+      if (scene) renderInspector(scene);
+      pendingInspectorFields.delete(field);
+    });
     return;
   }
   const edits = inspectorEdits(scene, selection, field, parsed.value);
   if (isRefused(edits)) {
     log(`inspector edit refused: ${edits.refused}`, "bad");
+    renderInspector(scene);
     return;
   }
+  pendingInspectorFields.add(field);
   void runEdits(edits, {
     // A field edit reports which objects actually changed; the count in the
     // undo label is that one, not the selection's size.
@@ -2312,6 +2415,10 @@ function onInspectorClick(event: MouseEvent): void {
       return fieldEditLabel(field, changed?.effect === "objectsChanged" ? changed.objectIds.length : edits.length);
     },
     refusal: "inspector edit refused",
+    onRefusal: () => { if (scene) renderInspector(scene); },
+  }).finally(() => {
+    if (scene) renderInspector(scene);
+    pendingInspectorFields.delete(field);
   });
 }
 
@@ -3168,6 +3275,8 @@ async function refreshProjectCatalog(): Promise<void> {
     shell().invoke<ProjectTakePageCatalog>("cmd_take_page_list", { project }),
   ]);
   projectCatalog = scenes;
+  graphicPreviewGeneration += 1;
+  graphicPreviews.clear();
   takePageCatalog = pages;
   renderProjectManager();
   if (scene) renderTakePagePanel(scene);
@@ -3793,7 +3902,23 @@ async function start(): Promise<void> {
     if (property) openKeyframeMenu(event, property);
   });
   ui.inspector.addEventListener("contextmenu", onInspectorContextMenu);
-  ui.inspector.addEventListener("click", onInspectorClick);
+  ui.inspector.addEventListener("click", onAnimationClick);
+  ui.inspector.addEventListener("change", onInspectorChange);
+  ui.inspector.addEventListener("focusin", () => { if (playback) pausePreview("editing a property"); });
+  ui.inspector.addEventListener("keydown", (event) => {
+    if (!(event.target instanceof HTMLInputElement)) return;
+    if (event.key === "Enter") event.target.blur();
+    if (event.key === "Escape" && scene) {
+      event.preventDefault();
+      const field = event.target.dataset.inspectorField;
+      if (field) {
+        const wasPending = pendingInspectorFields.has(field);
+        pendingInspectorFields.add(field);
+        renderInspector(scene);
+        if (!wasPending) pendingInspectorFields.delete(field);
+      }
+    }
+  });
   ui.overlay.addEventListener("contextmenu", (event) => openKeyframeMenu(event));
   ui.keyframeMenu.addEventListener("click", onKeyframeMenuClick);
   document.addEventListener("pointerdown", (event) => {

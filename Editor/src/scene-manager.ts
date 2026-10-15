@@ -11,6 +11,7 @@ export interface ManagedScene {
   readonly active?: boolean;
   readonly publishedRevision?: number;
   readonly unavailableReason?: string;
+  readonly preview?: { readonly src?: string; readonly note: string };
 }
 
 export interface SceneManagerInput {
@@ -53,7 +54,14 @@ export function sceneManagerPanel(input: SceneManagerInput): UiNode {
       children: matching.map((scene) => ({
         id: `scene/${scene.sceneId}`, role: "listitem", label: scene.name,
         description: graphicStatus(scene), actions: sceneActions(scene),
-        children: [{ id: `scene/${scene.sceneId}/status`, role: "status", label: `${scene.name} status`, value: graphicStatus(scene) }],
+        children: [
+          { id: `scene/${scene.sceneId}/preview`, role: "group", label: `${scene.name} preview`,
+            description: scene.preview?.note ?? "Loading authoring preview…",
+            ...(scene.preview?.src === undefined ? {} : { image: { src: scene.preview.src, alt: `${scene.name}: ${scene.preview.note}` } }),
+            children: [{ id: `scene/${scene.sceneId}/preview-note`, role: "status", label: `${scene.name} preview status`, value: scene.preview?.note ?? "Loading authoring preview…" }],
+          },
+          { id: `scene/${scene.sceneId}/status`, role: "status", label: `${scene.name} status`, value: graphicStatus(scene) },
+        ],
       })),
     }],
   };

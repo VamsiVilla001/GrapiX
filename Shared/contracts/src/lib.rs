@@ -639,6 +639,14 @@ pub enum Refusal {
         frame: u64,
         duration_frames: u64,
     },
+    /// A key, or its outgoing segment, leaves the property's authored range.
+    KeyframeValueOutOfDomain {
+        object: String,
+        property: String,
+        frame: u64,
+        value: String,
+        allowed: String,
+    },
     /// Two keys on one channel claim the same frame.
     DuplicateKeyframeFrame {
         object: String,
@@ -1219,6 +1227,10 @@ impl std::fmt::Display for Refusal {
                 f,
                 "keyframe for {object}.{property} is at frame {frame}, outside the {duration_frames}-frame timeline"
             ),
+            Refusal::KeyframeValueOutOfDomain { object, property, frame, value, allowed } => write!(
+                f,
+                "animation for {object}.{property} at key/segment frame {frame} reaches {value}; allowed: {allowed}"
+            ),
             Refusal::DuplicateKeyframeFrame {
                 object,
                 property,
@@ -1727,6 +1739,10 @@ impl Refusal {
                 frame: 2,
                 duration_frames: 1,
             },
+            Self::KeyframeValueOutOfDomain {
+                object: "audit".into(), property: "opacity".into(), frame: 0,
+                value: "1.5".into(), allowed: "0..=1".into(),
+            },
             Self::DuplicateKeyframeFrame {
                 object: "audit".into(),
                 property: "audit".into(),
@@ -1983,6 +1999,7 @@ impl Refusal {
             Self::TimelinePhaseInvalidSpan { .. } => "timelinePhaseInvalidSpan",
             Self::TimelinePhaseUnknown { .. } => "timelinePhaseUnknown",
             Self::KeyframeOutOfRange { .. } => "keyframeOutOfRange",
+            Self::KeyframeValueOutOfDomain { .. } => "keyframeValueOutOfDomain",
             Self::DuplicateKeyframeFrame { .. } => "duplicateKeyframeFrame",
             Self::DuplicateAnimationChannel { .. } => "duplicateAnimationChannel",
             Self::AnimationKeyOrderInvalid { .. } => "animationKeyOrderInvalid",

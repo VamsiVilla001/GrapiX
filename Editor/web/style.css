@@ -1240,12 +1240,27 @@ kbd { color: var(--dim); font-family: var(--font); margin-left: 20px; }
 .preview-settings dt { color: var(--dim); }
 .preview-settings dd { color: var(--text); }
 .preview-panel .meta { display: block; font-family: var(--font); font-size: 11px; }
+.preview-options { margin: 4px 0 6px; color: var(--dim); font-size: 10px; }
+.preview-options summary { cursor: pointer; }
+.preview-options[open] summary { margin-bottom: 5px; }
 .property-section { padding: 2px 0 6px; border-bottom: 1px solid var(--rule); }
 .property-section h3, .property-section summary { font-size: 11px; font-weight: 600; color: #c4c4c4; margin: 6px 0; }
 .property-section summary { cursor: pointer; }
 .property-section [role="gridcell"] { display: grid; grid-template-columns: minmax(75px,1fr) auto auto; align-items: center; gap: 5px; min-height: 22px; color: var(--accent); font-size: 12px; }
 .property-section [role="gridcell"]::before { content: attr(aria-label); color: var(--dim); font-size: 11px; }
 .property-section button { background: transparent; font-size: 10px; padding: 1px 4px; min-height: 21px; }
+.property-section [role="gridcell"] { grid-template-columns: minmax(58px,1fr) minmax(42px,75px) 51px; gap: 4px; }
+.property-value { min-width: 0; width: 100%; padding: 2px 3px; min-height: 22px; text-align: right; color: var(--accent); background: transparent; border: 1px solid transparent; border-radius: 2px; font: inherit; }
+.property-value:hover { border-color: var(--rule); }
+.property-value:focus { background: #171717; border-color: var(--accent); outline: none; }
+.property-value[type="checkbox"] { width: 14px; min-height: 14px; justify-self: end; }
+.property-key-controls { display: flex; align-items: center; gap: 1px; }
+.property-key-controls button { min-width: 16px; width: 16px; padding: 0; border: 0; font-size: 16px; line-height: 1; }
+.property-key-controls button:disabled { opacity: .25; }
+.property-key-toggle.all, .property-key-toggle.partial { color: #eeb35c; }
+.scene-manager-mount [id$="/preview"] { flex: 1 0 100%; width: 100%; order: -1; }
+.graphic-thumbnail { display: block; width: 100%; max-height: 130px; object-fit: contain; border: 1px solid #414141; border-radius: 2px; background-color: #191919; background-image: conic-gradient(#272727 25%, transparent 0 50%, #272727 0 75%, transparent 0); background-size: 12px 12px; }
+.scene-manager-mount [id$="/preview-note"] { margin: 3px 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; line-height: 1.35; color: var(--dim); }
 select { min-width: 0; max-width: 100%; color: var(--text); background: #191919; border: 1px solid var(--rule); border-radius: 3px; padding: 3px 5px; }
 .project-tools .frame-control { display: grid; grid-template-columns: 45px minmax(0,1fr); flex: 1 1 100%; min-width: 0; }
 .project-tools select { min-width: 0; width: 100%; }

@@ -28,6 +28,7 @@ export class SceneViewport {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene: THREE.Scene;
   readonly camera: THREE.OrthographicCamera;
+  private readonly ownsRenderer: boolean;
   private readonly meshes: THREE.Mesh[] = [];
   private readonly rendered = new Map<
     string,
@@ -44,10 +45,11 @@ export class SceneViewport {
   /// missing object is explained rather than merely absent.
   readonly unsupported: string[] = [];
 
-  constructor(canvas: HTMLCanvasElement, document: SceneDocument) {
+  constructor(canvas: HTMLCanvasElement, document: SceneDocument, renderer?: THREE.WebGLRenderer) {
     const space = { width: document.canvas.width, height: document.canvas.height };
 
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    this.ownsRenderer = renderer === undefined;
+    this.renderer = renderer ?? new THREE.WebGLRenderer({ canvas, antialias: true });
     // Colour policy (B.1): working space linear, output transform explicit.
     // The adapter selects the transform, never the platform — the preview
     // surface is sRGB; broadcast output is a different adapter, not a flag here.
@@ -142,7 +144,7 @@ export class SceneViewport {
       const material = mesh.material;
       (Array.isArray(material) ? material : [material]).forEach((m) => m.dispose());
     }
-    this.renderer.dispose();
+    if (this.ownsRenderer) this.renderer.dispose();
   }
 }
 

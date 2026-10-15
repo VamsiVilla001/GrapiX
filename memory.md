@@ -118,6 +118,93 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-10-15 — Inline property animation, graphic previews and bounded animation validation; resume here
+
+**Implemented — authoring follow-up (11.9/11.21/11.63/11.64):** inspected
+EffectCraft's local `ui-egui/panels/properties.rs` transform rows and
+`engine/commands/prop.rs`. GrapiX Properties now has inline typed values and
+visible previous/diamond/next controls. It shows numeric values at the
+playhead; a diamond inserts the evaluated value, and editing an existing
+animated property keys at the playhead even when Auto-Key for new channels
+is off. Other values remain authored defaults, never sample-data or take-page
+substitutions. Async command responses preserve focus and the next field's
+draft; Escape cancels. Playback pauses on property focus and scrubs refresh
+numeric fields/key controls in place. Playback settings fold to keep all six
+Transform fields above the desktop fold.
+
+Scene Manager renders actual thumbnails for open/unsaved and unopened saved
+graphics, via the existing binding/animation preview and one shared WebGL
+renderer. Caches refresh on edits, save, Refresh and session close. A hold/build
+or middle frame avoids empty entrance thumbnails. Missing content is named
+in a **Partial authoring preview** caption; read failures and lost WebGL
+contexts say preview unavailable. These are authoring previews: text, images
+and vector rendering parity is still 13.5/13.6, and no Program preview claim
+is made. Added EffectCraft interaction reference attribution.
+
+**Partial — 3.13:** keys now refuse opacity outside 0–1 and negative size;
+exact custom-Bezier segment extrema must stay in the property's domain.
+Controls outside 0–1 remain legal when the resulting segment stays in range;
+unrestricted motion properties keep overshoot. `KeyframeValueOutOfDomain`
+names the object, property, key/segment frame, value and allowed domain. Base
+numeric property edits apply the same range check. Edits preserve atomicity,
+including Auto-Key and multi-key deletion: a delete batch checks its final
+joined curve, not an invalid intermediate join. Rust-generated TS and schemas
+were regenerated. One old collision fixture used invalid opacity 1.2; it now
+uses 0.8 so the collision remains the fault tested. A read-only scan of 16
+JSON scene documents (reference/Editor fixtures and saved projects, including
+`material-demo/test`) found no invalid opacity/size keys. User documents were
+not modified.
+
+**Verified by execution:**
+- `npm run check` exited 0 (`agent/tmp/check-keyframe-workflow-accepted.log`):
+  boundaries, codegen staleness, all typechecks, 40 Node tests, **348 Editor
+  tests**, **667 Rust tests**, **285 conformance passes / 0 failures / 9 named
+  skips**. The existing default gate excludes `gx-engine-host`.
+- Targeted animation contracts: **33 passed**. Worker prepare/render test
+  rejects an overshooting opacity curve before rendering and confirms valid
+  50% animated black-over-white in both working spaces (128/188 ±1).
+- `npm run build:web` and `cargo build -p gx-editor-shell --bin gx-editor`
+  passed. Live Tauri/WebView2 Playwright checks added keys at frames 0/25/50,
+  checked evaluated insertion, editing, previous/next navigation, undo/redo,
+  explicit save, two distinct thumbnails, Refresh, and a full app restart.
+  The real native command bridge refused invalid base opacity and a custom
+  overshoot atomically. Bound Y=888 left authored Y editable at 480/600;
+  bindings stayed intact. Focus/draft retention and Escape passed. Saved
+  unopened graphics got thumbnails; an unsupported vector line produced the
+  named partial preview. No page errors; all Transform fields fit with Preview
+  expanded and settings folded at 1440×900; no document overflow at 1024×768.
+  Evidence: `agent/tmp/keyframe-ui-results-final.json`,
+  `agent/tmp/keyframes-desktop-final.png`, `agent/tmp/keyframes-compact-final.png`.
+- `cargo run -p gx-pixel-gate -- check` still exits 1, unchanged:
+  `colour-ramp-50`, **39,065 differing pixels; max channel delta 255**.
+  `git diff c4b208c^ c4b208c -- tests/reference-scenes/colour-ramp-50.json`
+  confirms the fixture changed when unsupported image/mesh/material mappings
+  moved to refusal coverage and glyph/opacity rendering was corrected. Accepted
+  baselines and the existing untracked `tests/baselines/history/` are preserved.
+
+**Resume:** 3.13 remains active. Next debt: shared validator/engine refusal
+parity (gradient/tangent/software-property checks) and truthful material
+capability declarations, with re-verification of affected earlier criteria.
+3.16 stays dependency-blocked. 4.5 stays active; reconcile the reference scene
+and accepted pixels through review, never regenerate baselines to hide a
+failure. 11.43, 13.5/13.6 and Phase 15 SDI hardware gates remain pending.
+The build plan now states the user's AE-style authoring + Scene Manager +
+XPression/VizRT-style broadcast/DeckLink SDI direction explicitly.
+
+**Coordination/workspace:** current Panchayati council is Codex and Claude
+only. Codex implemented; Claude supplied read-only audits/review. OMP's prior
+tool-less report supplied no evidence. The workspace guard initially failed
+because an extra clean Claude worktree existed at
+`.claude/worktrees/bgmi-squad-eliminated-graphic-14d5ee`. The user explicitly
+authorized its removal. `git worktree remove` removed its files and Git
+registration; commit `104ab24` is already in `agent/shared` and its branch is
+preserved. An empty locked directory remained; automatic approval review
+rejected the cleanup deletion as blocked by policy. The shared guard passes.
+No alternate workspace was created. The existing user's `test` tab in editor
+PID 3324 has unsaved changes, so that application is preserved; desktop checks
+used separate executable copies/profiles under `agent/tmp`. Save that graphic
+and restart the editor to load this build.
+
 ## 2026-10-15 — EffectCraft/AE workspace, independent-graphic Scene Manager, and 3.13 continuation
 
 **User decisions:** continue the interrupted build; adopt an EffectCraft / After

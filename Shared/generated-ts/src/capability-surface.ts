@@ -210,6 +210,7 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
     "timelinePhaseInvalidSpan",
     "timelinePhaseUnknown",
     "keyframeOutOfRange",
+    "keyframeValueOutOfDomain",
     "duplicateKeyframeFrame",
     "duplicateAnimationChannel",
     "animationKeyOrderInvalid",

@@ -3,8 +3,10 @@
 /**
  * Cubic-bezier control points for a custom outgoing easing.
  *
- * `x1` and `x2` stay in 0–1 because they are time controls; y may overshoot,
- * as CSS and standard animation tooling allow. The points are stored with the
+ * `x1` and `x2` stay in 0–1 because they are time controls; y may overshoot
+ * provided the resulting segment stays within the property's range (opacity
+ * 0–1, width/height non-negative). Other properties permit overshoot.
+ * The points are stored with the
  * key, not solved from neighbouring keys at display time, so a saved scene
  * means the same curve when it is reopened.
  */

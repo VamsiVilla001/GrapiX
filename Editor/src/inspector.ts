@@ -150,6 +150,11 @@ export function inspectorPanel(
       role: "gridcell",
       label: spec.label,
       value: displayValue(value, spec),
+      input: {
+        type: spec.input === "number" ? "number" : spec.input === "boolean" ? "checkbox" : "text",
+        value: value === undefined || isMixed(value) ? "" : spec.input === "unit" ? displayValue(value, spec) : String(value),
+        ...(isMixed(value) ? { mixed: true } : {}),
+      },
       ...(missing.length === 0
         ? {}
         : {

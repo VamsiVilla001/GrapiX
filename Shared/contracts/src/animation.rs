@@ -48,8 +48,10 @@ impl SceneEasing {
 
 /// Cubic-bezier control points for a custom outgoing easing.
 ///
-/// `x1` and `x2` stay in 0–1 because they are time controls; y may overshoot,
-/// as CSS and standard animation tooling allow. The points are stored with the
+/// `x1` and `x2` stay in 0–1 because they are time controls; y may overshoot
+/// provided the resulting segment stays within the property's range (opacity
+/// 0–1, width/height non-negative). Other properties permit overshoot.
+/// The points are stored with the
 /// key, not solved from neighbouring keys at display time, so a saved scene
 /// means the same curve when it is reopened.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
@@ -222,6 +224,7 @@ fn validate_key(
             detail: "keyframe value must be finite".to_owned(),
         });
     }
+    validate_property_domain(object_id, property, key.frame, key.value)?;
     match (key.easing, key.bezier) {
         (SceneEasing::CustomBezier, None) => {
             return Err(Refusal::InvalidKeyframeEasing {
@@ -250,6 +253,52 @@ fn validate_key(
                 property: property.to_owned(),
                 detail: "bezier controls are only valid with custom-bezier".to_owned(),
             });
+        }
+    }
+    Ok(())
+}
+
+fn validate_property_domain(object: &str, property: &str, frame: u64, value: f64) -> Result<(), Refusal> {
+    let allowed = match property {
+        "opacity" if !value.is_finite() || !(0.0..=1.0).contains(&value) => "0..=1",
+        "width" | "height" if !value.is_finite() || value < 0.0 => "finite and >= 0",
+        _ => return Ok(()),
+    };
+    Err(Refusal::KeyframeValueOutOfDomain {
+        object: object.into(), property: property.into(), frame,
+        value: value.to_string(), allowed: allowed.into(),
+    })
+}
+
+/// Exact extrema of the outgoing value curve, checked at edit/prepare time.
+/// Time controls are monotone, so its y extrema cover every sampled frame.
+fn validate_segments(object: &str, property: &str, keys: &[SceneKeyframe]) -> Result<(), Refusal> {
+    if !matches!(property, "opacity" | "width" | "height") { return Ok(()); }
+    for pair in keys.windows(2) {
+        let (from, to) = (&pair[0], &pair[1]);
+        if from.easing != SceneEasing::CustomBezier || from.value == to.value { continue; }
+        let Some(points) = from.bezier else { continue; }; // validate_key names missing controls.
+        // Normalize before forming derivative coefficients to keep even very
+        // large finite y controls from overflowing the quadratic solve.
+        let scale = points.y1.abs().max(points.y2.abs()).max(1.0);
+        let (y1, y2, end) = (points.y1 / scale, points.y2 / scale, 1.0 / scale);
+        let a = 3.0 * y1 - 3.0 * y2 + end;
+        let b = 2.0 * (y2 - 2.0 * y1);
+        let c = y1;
+        let mut roots = Vec::with_capacity(2);
+        if a == 0.0 {
+            if b != 0.0 { roots.push(-c / b); }
+        } else {
+            let discriminant = b * b - 4.0 * a * c;
+            if discriminant >= 0.0 {
+                let q = -0.5 * (b + discriminant.sqrt().copysign(b));
+                if q == 0.0 { roots.push(-b / (2.0 * a)); }
+                else { roots.extend([q / a, c / q]); }
+            }
+        }
+        for u in roots.into_iter().filter(|u| *u > 0.0 && *u < 1.0) {
+            let value = from.value + (to.value - from.value) * bezier_axis(points.y1, points.y2, u);
+            validate_property_domain(object, property, from.frame, value)?;
         }
     }
     Ok(())
@@ -296,6 +345,7 @@ pub fn validate_scene_animation(scene: &SceneDocument) -> Result<(), Refusal> {
                 });
             }
         }
+        validate_segments(&channel.object_id, &channel.property, &channel.keys)?;
     }
     Ok(())
 }
@@ -318,6 +368,7 @@ pub fn set_base_property(
             detail: "property value must be finite".to_owned(),
         });
     }
+    validate_property_domain(object_id, property, 0, value)?;
     refuse_duplicate_object_ids(scene)?;
     let index = object_index(scene, object_id)?;
     let kind = scene.objects[index].kind();
@@ -392,8 +443,10 @@ pub fn apply_property_edit(
         };
         validate_key(scene, object_id, property, &key)?;
         channel_index(scene, object_id, property)?;
-        set_base_property(scene, object_id, property, value)?;
         set_keyframe(scene, object_id, property, key)?;
+        // set_keyframe has checked the address and finite value, so the base
+        // write cannot refuse after the keys have committed.
+        set_base_property(scene, object_id, property, value)?;
     } else {
         set_base_property(scene, object_id, property, value)?;
     }
@@ -509,13 +562,15 @@ pub fn set_keyframe(
     let index = channel_index(scene, object_id, property)?;
     match index {
         Some(index) => {
-            let channel = &mut scene.timeline.channels[index];
-            if let Some(existing) = channel.keys.iter_mut().find(|existing| existing.frame == key.frame) {
+            let mut keys = scene.timeline.channels[index].keys.clone();
+            if let Some(existing) = keys.iter_mut().find(|existing| existing.frame == key.frame) {
                 *existing = key;
             } else {
-                channel.keys.push(key);
-                channel.keys.sort_by_key(|key| key.frame);
+                keys.push(key);
+                keys.sort_by_key(|key| key.frame);
             }
+            validate_segments(object_id, property, &keys)?;
+            scene.timeline.channels[index].keys = keys;
         }
         None => scene.timeline.channels.push(KeyframeChannel {
             object_id: object_id.to_owned(),
@@ -567,8 +622,11 @@ pub fn move_keyframe(
             duration_frames: scene.timeline.duration_frames,
         });
     }
-    channel.keys[key_index].frame = to_frame;
-    channel.keys.sort_by_key(|key| key.frame);
+    let mut keys = channel.keys.clone();
+    keys[key_index].frame = to_frame;
+    keys.sort_by_key(|key| key.frame);
+    validate_segments(object_id, property, &keys)?;
+    channel.keys = keys;
     Ok(())
 }
 
@@ -579,6 +637,21 @@ pub fn remove_keyframe(
     object_id: &str,
     property: &str,
     frame: u64,
+) -> Result<SceneKeyframe, Refusal> {
+    remove_keyframe_inner(scene, object_id, property, frame, true)
+}
+
+/// Only the atomic command batch may defer the joined-segment check until
+/// its candidate is complete. Removing several keys must not depend on order.
+pub(crate) fn remove_keyframe_in_batch(
+    scene: &mut SceneDocument, object_id: &str, property: &str, frame: u64,
+) -> Result<SceneKeyframe, Refusal> {
+    remove_keyframe_inner(scene, object_id, property, frame, false)
+}
+
+fn remove_keyframe_inner(
+    scene: &mut SceneDocument, object_id: &str, property: &str, frame: u64,
+    validate_join: bool,
 ) -> Result<SceneKeyframe, Refusal> {
     let Some(index) = channel_index(scene, object_id, property)? else {
         return Err(Refusal::AnimationChannelUnknown {
@@ -596,7 +669,11 @@ pub fn remove_keyframe(
             property: property.to_owned(),
             frame,
         })?;
-    let removed = channel.keys.remove(key_index);
+    let mut keys = channel.keys.clone();
+    let removed = keys.remove(key_index);
+    // Removing a middle key joins two formerly separate segments.
+    if validate_join { validate_segments(object_id, property, &keys)?; }
+    channel.keys = keys;
     if channel.keys.is_empty() {
         scene.timeline.channels.remove(index);
     }
@@ -1072,6 +1149,76 @@ mod tests {
         }
     }
 
+    fn overshoot_key(frame: u64, value: f64) -> SceneKeyframe {
+        SceneKeyframe { easing: SceneEasing::CustomBezier,
+            bezier: Some(CubicBezier { x1: 0.25, y1: 1.4, x2: 0.75, y2: 1.4 }),
+            ..key(frame, value) }
+    }
+
+    #[test]
+    fn bounded_keyframe_values_refuse_without_mutation() {
+        for (property, value) in [("opacity", -0.1), ("opacity", 1.5), ("width", -1.0), ("height", -1.0)] {
+            let mut scene = scene_with(vec![rect("card")]);
+            let before = scene_bytes(&scene);
+            assert!(matches!(set_keyframe(&mut scene, "card", property, key(10, value)),
+                Err(Refusal::KeyframeValueOutOfDomain { object, property: refused, frame: 10, .. })
+                if object == "card" && refused == property));
+            assert_eq!(scene_bytes(&scene), before);
+            assert!(apply_property_edit(&mut scene, "card", property, value, 0, AutoKey::Off).is_err());
+            assert_eq!(scene_bytes(&scene), before);
+        }
+        let mut scene = scene_with(vec![rect("card")]);
+        for (property, value) in [("opacity", 0.0), ("opacity", 1.0), ("width", 0.0), ("scaleX", -1.0)] {
+            set_keyframe(&mut scene, "card", property, key(0, value)).unwrap();
+        }
+    }
+
+    #[test]
+    fn custom_bezier_checks_actual_segment_extrema_not_control_bounds() {
+        let mut scene = scene_with(vec![rect("card")]);
+        set_keyframe(&mut scene, "card", "opacity", overshoot_key(0, 0.0)).unwrap();
+        set_keyframe(&mut scene, "card", "opacity", key(100, 0.5)).unwrap();
+        let before = scene_bytes(&scene);
+        assert!(matches!(set_keyframe(&mut scene, "card", "opacity", key(100, 1.0)),
+            Err(Refusal::KeyframeValueOutOfDomain { frame: 0, .. })));
+        assert_eq!(scene_bytes(&scene), before);
+        set_keyframe(&mut scene, "card", "x", overshoot_key(0, 0.0)).unwrap();
+        set_keyframe(&mut scene, "card", "x", key(100, 1.0)).unwrap();
+        validate_scene_animation(&scene).unwrap();
+        // A descending curve can undershoot a non-negative size.
+        set_keyframe(&mut scene, "card", "width", overshoot_key(0, 10.0)).unwrap();
+        assert!(set_keyframe(&mut scene, "card", "width", key(100, 0.0)).is_err());
+    }
+
+    #[test]
+    fn refused_segment_edits_preserve_keys_and_autokey_base() {
+        let mut scene = scene_with(vec![rect("card")]);
+        set_keyframe(&mut scene, "card", "opacity", overshoot_key(0, 0.0)).unwrap();
+        set_keyframe(&mut scene, "card", "opacity", key(40, 0.5)).unwrap();
+        set_keyframe(&mut scene, "card", "opacity", key(80, 1.0)).unwrap();
+        let before = scene_bytes(&scene);
+        assert!(create_keyframe(&mut scene, "card", "opacity", key(20, 1.0)).is_err());
+        assert_eq!(scene_bytes(&scene), before);
+        assert!(update_keyframe(&mut scene, "card", "opacity", key(40, 1.0)).is_err());
+        assert_eq!(scene_bytes(&scene), before);
+        assert!(move_keyframe(&mut scene, "card", "opacity", 40, 90).is_err());
+        assert_eq!(scene_bytes(&scene), before);
+        assert!(remove_keyframe(&mut scene, "card", "opacity", 40).is_err());
+        assert_eq!(scene_bytes(&scene), before);
+        assert!(apply_property_edit(&mut scene, "card", "opacity", 1.0, 40, AutoKey::On).is_err());
+        assert_eq!(scene_bytes(&scene), before);
+    }
+
+    #[test]
+    fn loaded_animation_rechecks_key_values_and_segment_extrema() {
+        let mut scene = scene_with(vec![rect("card")]);
+        scene.timeline.channels.push(KeyframeChannel { object_id: "card".into(), property: "opacity".into(),
+            keys: vec![overshoot_key(0, 0.0), key(100, 1.0)] });
+        assert!(matches!(validate_scene_animation(&scene), Err(Refusal::KeyframeValueOutOfDomain { frame: 0, .. })));
+        scene.timeline.channels[0].keys = vec![key(10, 1.5)];
+        assert!(matches!(validate_scene_animation(&scene), Err(Refusal::KeyframeValueOutOfDomain { frame: 10, .. })));
+    }
+
     #[test]
     fn set_replace_move_and_remove_keep_channels_sorted() {
         let mut scene = scene_with(vec![rect("card")]);
@@ -1245,7 +1392,7 @@ mod tests {
                 property: "opacity".into(),
                 keys: vec![
                     crate::design_system::MotionKey { t: 0.0, v: 0.0, out: None },
-                    crate::design_system::MotionKey { t: 0.5, v: 1.2, out: None },
+                    crate::design_system::MotionKey { t: 0.5, v: 0.8, out: None },
                     crate::design_system::MotionKey { t: 0.52, v: 0.9, out: None },
                     crate::design_system::MotionKey { t: 1.0, v: 1.0, out: None },
                 ],
