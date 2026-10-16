@@ -136,6 +136,8 @@ No product code changed. Step 0: the CubicBezier/graphic-preview/keyframe UI dif
 
 11.15 (Needs 1.6 done) is now `done`: new `SaveMotionPreset` command (contracts `animation::capture_motion_phase`, `EditContext.presets`, service `save_motion_preset`, project-store `motion-presets/<id>.json`, shell `cmd_motion_presets`, UI Save-as/Apply out/browser card). Refusals added: MotionPresetIdInvalid, MotionPresetSelectionEmpty, MotionPresetSpanZero (audit cases in conformance/src/refusal_audit/command.rs, is_driven list in refusal_audit.rs, witness in command.rs). Live check: `preset-save-check.cjs` (and `PRESET_PHASE=reopen` after a restart). A preset saved with only an in phase is shown unusable and refuses to apply by name until its out phase is saved under the same id.
 
+11.23 (Needs 11.11, 11.15, 11.22 done) is now `done`. New: `ApplyPreset.durationMs` (optional, held to the preset's declared duration range by `MotionPreset::phase_with_duration`; refusal `MotionPresetParamInvalid`), duration field in the timeline toolbar. Live check `easing-presets-check.cjs`: five easings evaluate and persist, four starter presets apply and undo, duration range enforced, speed graph on demand.
+
 Live-check recipe: `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9223 npm run editor`; the scratch scripts match page URL 127.0.0.1:1430 (dev), not tauri.localhost.
 
 ---

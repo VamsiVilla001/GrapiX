@@ -308,6 +308,7 @@ const ui = {
   timelinePreset: need<HTMLSelectElement>("timeline-preset"),
   timelinePresetApply: need<HTMLButtonElement>("timeline-preset-apply"),
   timelinePresetApplyOut: need<HTMLButtonElement>("timeline-preset-apply-out"),
+  timelinePresetDuration: need<HTMLInputElement>("timeline-preset-duration"),
   timelinePresetSave: need<HTMLButtonElement>("timeline-preset-save"),
   timelinePresetSavePhase: need<HTMLSelectElement>("timeline-preset-save-phase"),
   presetBrowserMount: need<HTMLDivElement>("preset-browser-mount"),
@@ -1691,7 +1692,25 @@ async function refreshPresetLibrary(preferred?: string): Promise<void> {
     ui.timelinePreset.append(option);
   }
   ui.timelinePreset.value = motionPresets.some((preset) => preset.id === wanted) ? wanted : "";
+  syncPresetDuration();
   if (scene) renderPresetBrowser(scene);
+}
+
+/** Show the chosen preset's declared duration range on the duration field, so
+ *  the limit the caller is held to is visible before Rust enforces it. */
+function syncPresetDuration(): void {
+  const preset = motionPresets.find((candidate) => candidate.id === ui.timelinePreset.value);
+  const param = preset?.params.find((candidate) => candidate.type === "duration");
+  if (param?.type === "duration") {
+    ui.timelinePresetDuration.title = `${preset?.id} allows ${param.min}–${param.max} ms`;
+    ui.timelinePresetDuration.placeholder = typeof param.default === "number" ? `${param.default} ms` : "preset default";
+    ui.timelinePresetDuration.disabled = false;
+  } else {
+    ui.timelinePresetDuration.title = preset ? `${preset.id} declares no duration parameter` : "choose a preset";
+    ui.timelinePresetDuration.placeholder = "preset default";
+    ui.timelinePresetDuration.disabled = preset !== undefined;
+    ui.timelinePresetDuration.value = "";
+  }
 }
 
 /** Why the current key selection cannot be saved as a preset, if it cannot. */
@@ -1797,6 +1816,9 @@ async function applyStarterPreset(phase: "in" | "out" = "in"): Promise<void> {
       presetId,
       phase,
       atFrame: wireFrame(currentFrame),
+      ...(ui.timelinePresetDuration.value.trim() === ""
+        ? {}
+        : { durationMs: Number(ui.timelinePresetDuration.value) }),
     })),
     selection.length === 1
       ? `Apply ${presetId} ${phase} at frame ${currentFrame}`
@@ -3956,7 +3978,10 @@ async function start(): Promise<void> {
   ui.timelinePresetApplyOut.addEventListener("click", () => void applyStarterPreset("out"));
   ui.timelinePresetSave.addEventListener("click", () => void saveSelectionAsPreset());
   ui.presetBrowserMount.addEventListener("click", onPresetBrowserClick);
-  ui.timelinePreset.addEventListener("change", () => scene && renderPresetBrowser(scene));
+  ui.timelinePreset.addEventListener("change", () => {
+    syncPresetDuration();
+    if (scene) renderPresetBrowser(scene);
+  });
   ui.phaseSet.addEventListener("click", () => void setPhaseFromSelection());
   ui.phaseRemove.addEventListener("click", () => void removePhaseAtPlayhead());
   ui.phasePlay.addEventListener("click", () => playPhaseAtPlayhead());

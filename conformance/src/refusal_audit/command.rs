@@ -583,6 +583,7 @@ fn drive_material_and_scene_refusals(report: &mut Report, workspace: &mut Worksp
             preset_id: "no-such-preset".into(),
             phase: PresetPhase::In,
             at_frame: 0,
+            duration_ms: None,
         }),
     );
     report.record(
@@ -591,6 +592,26 @@ fn drive_material_and_scene_refusals(report: &mut Report, workspace: &mut Worksp
         expect(
             matches!(&refusal, Some(Refusal::MotionPresetUnknown { preset }) if preset == "no-such-preset") && unchanged,
             format!("expected no-such-preset unknown, got {refusal:?} (unchanged: {unchanged})"),
+        ),
+    );
+
+    let (refusal, unchanged) = edit(
+        workspace,
+        session,
+        SceneEdit::ApplyPreset(ApplyPreset {
+            object_id: "card".into(),
+            preset_id: "fade".into(),
+            phase: PresetPhase::In,
+            at_frame: 0,
+            duration_ms: Some(10.0),
+        }),
+    );
+    report.record(
+        PLANE,
+        "MotionPresetParamInvalid is produced for a duration outside the preset's declared range",
+        expect(
+            matches!(&refusal, Some(Refusal::MotionPresetParamInvalid { preset, param, .. }) if preset == "fade" && param == "duration") && unchanged,
+            format!("expected fade duration 10 ms refused, got {refusal:?} (unchanged: {unchanged})"),
         ),
     );
 

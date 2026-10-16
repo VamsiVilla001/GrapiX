@@ -277,6 +277,7 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
     "motionPresetIdInvalid",
     "motionPresetSelectionEmpty",
     "motionPresetSpanZero",
+    "motionPresetParamInvalid",
     "fontBatchEmpty",
     "fontDuplicate",
     "sceneAssetDuplicate",

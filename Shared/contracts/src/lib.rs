@@ -809,6 +809,10 @@ pub enum Refusal {
     /// Every selected key sits on one frame, so the capture has no duration
     /// to normalise against.
     MotionPresetSpanZero { object: String, frame: u64 },
+    /// A preset parameter the caller set is not one the preset declares, or
+    /// is outside its declared range (G.6.4): the preset is never retimed past
+    /// what its designer allowed.
+    MotionPresetParamInvalid { preset: String, param: String, detail: String },
     /// An `addFonts` edit carries no fonts. An empty add would only make an
     /// undo entry that changes nothing.
     FontBatchEmpty,
@@ -1397,6 +1401,9 @@ impl std::fmt::Display for Refusal {
             Refusal::MotionPresetSelectionEmpty { object } => {
                 write!(f, "no keys selected on {object} to save as a motion preset")
             }
+            Refusal::MotionPresetParamInvalid { preset, param, detail } => {
+                write!(f, "motion preset {preset} parameter {param}: {detail}")
+            }
             Refusal::MotionPresetSpanZero { object, frame } => write!(
                 f,
                 "every selected key on {object} is on frame {frame}: a preset needs a duration"
@@ -1919,6 +1926,7 @@ impl Refusal {
             Self::MotionPresetIdInvalid { preset_id: "audit".into() },
             Self::MotionPresetSelectionEmpty { object: "audit".into() },
             Self::MotionPresetSpanZero { object: "audit".into(), frame: 0 },
+            Self::MotionPresetParamInvalid { preset: "audit".into(), param: "audit".into(), detail: "audit".into() },
             Self::FontBatchEmpty,
             Self::FontDuplicate { font_id: "audit".into() },
             Self::SceneAssetDuplicate { asset_id: "audit".into() },
@@ -2091,6 +2099,7 @@ impl Refusal {
             Self::MotionPresetIdInvalid { .. } => "motionPresetIdInvalid",
             Self::MotionPresetSelectionEmpty { .. } => "motionPresetSelectionEmpty",
             Self::MotionPresetSpanZero { .. } => "motionPresetSpanZero",
+            Self::MotionPresetParamInvalid { .. } => "motionPresetParamInvalid",
             Self::FontBatchEmpty => "fontBatchEmpty",
             Self::FontDuplicate { .. } => "fontDuplicate",
             Self::SceneAssetDuplicate { .. } => "sceneAssetDuplicate",

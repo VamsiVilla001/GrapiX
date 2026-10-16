@@ -1809,6 +1809,7 @@ mod tests {
                 preset_id: preset.into(),
                 phase,
                 at_frame,
+                duration_ms: None,
             })
         };
         run(

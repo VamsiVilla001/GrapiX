@@ -257,6 +257,36 @@ impl std::fmt::Display for PresetError {
 impl std::error::Error for PresetError {}
 
 impl MotionPreset {
+    /// A phase retimed to a caller-chosen duration, held to the preset's
+    /// declared `duration` parameter (G.6.4). A preset that declares no
+    /// duration parameter, a value outside its range and a non-finite value
+    /// each refuse by name: the range is the constraint the caller is held to.
+    pub fn phase_with_duration(
+        &self,
+        phase: &MotionPhase,
+        milliseconds: f64,
+    ) -> Result<MotionPhase, crate::Refusal> {
+        let invalid = |detail: String| crate::Refusal::MotionPresetParamInvalid {
+            preset: self.id.clone(),
+            param: "duration".to_owned(),
+            detail,
+        };
+        let range = self.params.iter().find_map(|param| match param {
+            PresetParam::Duration { name, min, max, .. } if name == "duration" => Some((*min, *max)),
+            _ => None,
+        });
+        let Some((min, max)) = range else {
+            return Err(invalid("the preset declares no duration parameter".to_owned()));
+        };
+        if !milliseconds.is_finite() || milliseconds < min || milliseconds > max {
+            return Err(invalid(format!("{milliseconds} ms is outside the declared range {min}-{max} ms")));
+        }
+        Ok(MotionPhase {
+            duration: DurationSpec::Ms(milliseconds),
+            channels: phase.channels.clone(),
+        })
+    }
+
     /// The structural checks that do not need the renderer's capability set.
     ///
     /// The capability-dependent rules (a preset referencing a property the

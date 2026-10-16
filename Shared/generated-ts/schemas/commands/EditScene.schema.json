@@ -49,6 +49,14 @@
           "minimum": 0,
           "type": "integer"
         },
+        "durationMs": {
+          "description": "The preset's declared `duration` parameter, in milliseconds.\nAbsent applies the phase at its own length.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "objectId": {
           "type": "string"
         },

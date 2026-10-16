@@ -4,4 +4,9 @@ import type { PresetPhase } from "./PresetPhase";
 /**
  * Instantiate one phase of a starter motion preset at `atFrame`.
  */
-export type ApplyPreset = { objectId: string, presetId: string, phase: PresetPhase, atFrame: bigint, };
+export type ApplyPreset = { objectId: string, presetId: string, phase: PresetPhase, atFrame: bigint,
+/**
+ * The preset's declared `duration` parameter, in milliseconds.
+ * Absent applies the phase at its own length.
+ */
+durationMs?: number, };

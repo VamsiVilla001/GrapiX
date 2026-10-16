@@ -283,6 +283,11 @@ commands! {
             pub preset_id: String,
             pub phase: PresetPhase,
             pub at_frame: u64,
+            /// The preset's declared `duration` parameter, in milliseconds.
+            /// Absent applies the phase at its own length.
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub duration_ms: Option<f64>,
         },
         SetPhase = "setPhase" { pub phase: TimelinePhase },
         RemovePhase = "removePhase" { pub address: String },
@@ -498,11 +503,15 @@ fn apply_edit(
                 PresetPhase::In => &preset.phases.r#in,
                 PresetPhase::Out => &preset.phases.out,
             };
+            let retimed = match p.duration_ms {
+                Some(milliseconds) => Some(preset.phase_with_duration(phase, milliseconds)?),
+                None => None,
+            };
             EditEffect::PresetApplied {
                 duration_frames: animation::apply_preset_phase(
                     scene,
                     &p.object_id,
-                    phase,
+                    retimed.as_ref().unwrap_or(phase),
                     p.at_frame,
                 )?,
             }
@@ -974,6 +983,7 @@ pub mod witness {
                 preset_id: "fade".into(),
                 phase: PresetPhase::In,
                 at_frame: 10,
+                            duration_ms: None,
             }),
             SceneEdit::SetPhase(SetPhase {
                 phase: TimelinePhase {
@@ -1506,6 +1516,7 @@ mod tests {
             preset_id: "teleport".into(),
             phase: PresetPhase::In,
             at_frame: 0,
+                    duration_ms: None,
         }
         .into();
         assert_eq!(
@@ -1525,6 +1536,7 @@ mod tests {
             preset_id: "fade".into(),
             phase: PresetPhase::In,
             at_frame: 10,
+                    duration_ms: None,
         }
         .into();
         let (_, effects) = apply_edits(&mut scene, &[edit], &NO_CONTEXT).unwrap();
@@ -1540,6 +1552,7 @@ mod tests {
             preset_id: "slide".into(),
             phase: PresetPhase::In,
             at_frame,
+            duration_ms: None,
         }
         .into();
         apply_edits(scene, &[edit], &NO_CONTEXT).unwrap();
@@ -1609,6 +1622,7 @@ mod tests {
             preset_id: "mine".into(),
             phase: PresetPhase::In,
             at_frame: 100,
+                    duration_ms: None,
         }
         .into();
         apply_edits(&mut scene, &[edit], &context).unwrap();
@@ -1623,6 +1637,7 @@ mod tests {
             preset_id: "mine".into(),
             phase: PresetPhase::In,
             at_frame: 0,
+                    duration_ms: None,
         }
         .into();
         assert_eq!(
@@ -1656,5 +1671,38 @@ mod tests {
         );
         // The scene is only read: nothing above wrote a channel.
         assert_eq!(x_keys(&scene, "card").len(), 2);
+    }
+
+    #[test]
+    fn a_preset_duration_is_held_to_its_declared_range() {
+        let apply = |duration_ms: Option<f64>, preset: &str| -> SceneEdit {
+            ApplyPreset {
+                object_id: "card".into(),
+                preset_id: preset.into(),
+                phase: PresetPhase::In,
+                at_frame: 10,
+                duration_ms,
+            }
+            .into()
+        };
+        // Fade declares 80-2000 ms: 600 ms at 50p is 30 frames, not its own 15.
+        let mut scene = scene_with_card();
+        scene.timeline.duration_frames = 200;
+        let (_, effects) = apply_edits(&mut scene, &[apply(Some(600.0), "fade")], &NO_CONTEXT).unwrap();
+        assert!(matches!(effects[0], EditEffect::PresetApplied { duration_frames: 30 }));
+        let frames: Vec<u64> = scene.timeline.channels[0].keys.iter().map(|key| key.frame).collect();
+        assert_eq!(frames, vec![10, 40]);
+
+        // Outside the range, or not finite: refused by name, scene untouched.
+        for bad in [10.0, 5000.0, f64::NAN] {
+            let mut scene = scene_with_card();
+            scene.timeline.duration_frames = 200;
+            let refusal = apply_edits(&mut scene, &[apply(Some(bad), "fade")], &NO_CONTEXT).unwrap_err();
+            assert!(
+                matches!(&refusal, Refusal::MotionPresetParamInvalid { preset, param, .. } if preset == "fade" && param == "duration"),
+                "{bad}: {refusal:?}"
+            );
+            assert!(scene.timeline.channels.is_empty());
+        }
     }
 }

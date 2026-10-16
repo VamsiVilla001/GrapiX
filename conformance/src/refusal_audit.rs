@@ -1629,6 +1629,7 @@ fn is_driven(variant: &str) -> bool {
             | "MotionPresetIdInvalid"
             | "MotionPresetSelectionEmpty"
             | "MotionPresetSpanZero"
+            | "MotionPresetParamInvalid"
             | "FontBatchEmpty"
             | "FontDuplicate"
             | "SceneAssetDuplicate"
