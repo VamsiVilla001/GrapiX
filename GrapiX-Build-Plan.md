@@ -1,14 +1,15 @@
 # GrapiX — Sequenced Build Plan
 
-Built from scratch, in dependency order. Backend, contracts and platform
-work come first because everything else reads them. Interface work is
-deferred to Phases 11 and 12 — the application is fully operable and
-automatable before it is clickable.
+Built from scratch, in dependency order. GrapiX is After Effects-style
+composition authoring with a Scene Manager, plus XPression/Viz-style live
+playout; the Render Engine owns time and Program pixels. Backend, contracts
+and platform work come first because everything else reads them, and the
+application is operable and automatable before it is clickable.
 
 | | |
 |---|---|
-| **Status** | Proposed |
-| **Date** | 9 September 2026 |
+| **Status** | In execution |
+| **Date** | 9 September 2026; direction amended 15 October 2026; decisions recorded 16 October 2026 |
 | **Tracker** | `progress.html` — keep it in the repo, commit `progress.json` |
 | **Rule** | A phase does not start until every dependency listed in it is done. |
 
@@ -16,7 +17,7 @@ automatable before it is clickable.
 
 ---
 
-**250 steps across 19 phases.**
+**254 steps across 19 phases.**
 
 **Product direction — 15 October 2026 (user):** GrapiX combines After
 Effects-style composition authoring with Scene Manager and live broadcast
@@ -46,6 +47,20 @@ Phase 10 and design-system-only portions of earlier rows are historical
 compatibility work, not requirements for creating, saving or browsing graphics.
 Do not introduce new token-ingest, brand-pack confirmation or drift workflows.
 Existing saved metadata remains readable and is not deleted by this change.
+
+**Decisions — 16 October 2026 (user).** From the Editor UX/direction and
+Playout workflow reviews (`docs/proposals/GrapiX-Editor-UX-Direction-Review.md`,
+Decisions Q1–Q8; `docs/proposals/GrapiX-Broadcast-Playout-Workflow-Review.md`):
+Phase 9 validates rather than gates (Q1); the engine preview comes before
+further Editor polish, so 11.41 is next and 11.65 follows it (Q2); explicit
+save is the only project writer, with crash-recovery snapshots kept apart
+(Q3); on-air Update touches only fields marked `liveUpdate` (default false)
+and Continue advances a stop point (Q4); operator pages live in Playout, with
+the Editor keeping a Test fill (Q5); the glossary is Project → Graphic →
+Layer with a "Composition" viewer, and Take, Page and Playout library on the
+operator side (Q6); 17.2 uses project variables (Q7); the first release
+targets sports/esports with one Program channel (Q8). No existing step
+changed state because of these decisions.
 
 
 ## Phase P — Parallel tracks — start on day one
@@ -87,7 +102,7 @@ Defined before any implementation reads them. This is what makes three products 
 | `1.3` | Material model; fit and blend enums as the single source of truth | CON | 1.1 | One enum, consumed by validator, engine and UI |
 | `1.4` | Colour types: linear working space, tagged sources, output transforms | CON | 1.1 | sRGB and Rec.709 transforms named and testable |
 | `1.5` | Design system token schema | CON | 1.1 | W3C Design Tokens JSON maps in cleanly |
-| `1.6` | Motion token and preset schema: phases, 0–1 time, stagger modes | CON | 1.5 | A preset resolves to frames at any rate |
+| `1.6` | Motion token and preset schema: phases, 0–1 time, stagger modes | CON | 1.1 | A preset resolves to frames at any rate |
 | `1.7` | Asset addressing: content hash plus project-relative path | CON | 1.1 | Replacing a file in place keeps bindings |
 | `1.8` | .gpxpkg format and manifest | CON | 1.7 | Per-file SHA-256, verified after write |
 | `1.9` | Protocol v3 message set — intent-based take, committed frame returned | CON | 0.7 | No message carries wall-clock time |
@@ -290,8 +305,8 @@ Also headless. Import, validation and publish must work before a designer sees a
 | `7.2` | Import pipeline: four tiers, compatibility report, source retained | BE | 1.1 | Every substitution named in the report |
 | `7.3` | Import fidelity gate: source reference render versus imported render | BE | 4.3 | Diff stored with the template |
 | `7.4` | Scene validator: every unsupported case refused by name | BE | 3.13 | Shares one enum with the engine |
-| `7.5` | Design system enforcement: three severities plus override log | BE | 1.5 | Overrides recorded with a reason |
-| `7.6` | Package build, verify, publish; design-system version stamped | BE | 1.8 | Publishing is all-or-nothing |
+| `7.5` | Design system enforcement: three severities plus override log (historical compatibility; not required for authoring or publish) | BE | 1.5 | Overrides recorded with a reason |
+| `7.6` | Package build, verify, publish; design-system version stamped when present (optional, historical) | BE | 1.8 | Publishing is all-or-nothing |
 | `7.7` | Preflight | BE | 7.4 | Returns structured refusals with allowed values |
 
 ## Phase 8 — MCP automation surface
@@ -306,7 +321,7 @@ Deliberately before the UI. The application becomes fully operable and automatab
 | `8.4` | materials, assets, fonts | BE | 7.1 | Including relink and usage lookup |
 | `8.5` | animation, including apply_preset | BE | 1.6 | Presets parameterised, never authored by the caller |
 | `8.6` | bindings | BE | 1.1 | Data schema discoverable |
-| `8.7` | designsystem.* and motion.* | BE | 1.6 | Import and commit are admin-scoped |
+| `8.7` | designsystem.* (historical compatibility) and motion.* | BE | 1.6 | Import and commit are admin-scoped |
 | `8.8` | validate.* | BE | 7.7 | Refusals machine-parseable |
 | `8.9` | render.preview returning a real frame | BE | 3.11 | An agent can see its own output |
 | `8.10` | packages.* | BE | 7.6 | Publish returns Take ID and revision |
@@ -320,17 +335,15 @@ Deliberately before the UI. The application becomes fully operable and automatab
 
 ## Phase 9 — UI research
 
-Started on day one in parallel. Must land before Phase 11 begins — it produces the constraints Phase 11 builds against.
+**Validation, not a gate (user decision Q1, 16 October 2026).** Phase 11 proceeded on the After Effects and XPression/Viz references (11.63, 15 October direction); these steps check that work with designers and operators. No Phase 11 step needs a Phase 9 step. The card sort (old 9.4) and three-direction concept test (old 9.6) were dropped.
 
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
 | `9.1` | Artifact teardown of comparable professional tools | RES | P.3 | Vocabulary of density, chrome and controls |
 | `9.2` | Recruit designers, operators, producers | RES | P.3 | Segments filled, including macOS-primary designers |
 | `9.3` | Contextual interviews in the suite and the control room | RES | 9.2 | Not remote. Lighting and viewing distance observed |
-| `9.4` | Card sort for panel and function grouping | RES | 9.3 | Information architecture proposal |
-| `9.5` | Usability baseline against the previous build | RES | 9.2 | Timed tasks including the disconnected-engine task |
-| `9.6` | Concept reaction across three divergent directions | RES | 9.1 | Tested on calibrated and uncalibrated displays |
-| `9.7` | Synthesis: design constraints document and anti-pattern list | RES | 9.6 | Density scale, chrome range, type at viewing distance |
+| `9.5` | Usability baseline against the previous build | RES | 9.2 | Timed tasks on the 11.63 workspace, including the disconnected-engine task; the results validate 11.5's layout |
+| `9.7` | Synthesis: validation report and anti-pattern list | RES | 9.3, 9.5 | Density, chrome and type-at-viewing-distance findings against the 11.63 workspace, each with a proposed amendment or a recorded no-change |
 
 ## Phase 10 — Design system implementation
 
@@ -354,7 +367,7 @@ Deferred to here on purpose. Everything above is usable without it, and this is 
 | `11.2` | WebGPU capability probe on both target OS versions | PLAT | 11.1 | Result recorded; decides the WASM fallback |
 | `11.3` | DPI: fractional scaling, scale change, monitor move | UI | 11.1 | Correct at 100, 125, 150 and 200 per cent |
 | `11.4` | Colour management in the browser layer, matching the engine | UI | 3.3 | Colour ramp matches the engine render |
-| `11.5` | Dockable workspace | UI | 9.7 | Layout follows the card sort |
+| `11.5` | Dockable workspace | UI | — | Layout follows the 11.63 EffectCraft/After Effects reference (criterion amended 16 Oct 2026, decision Q1; it formerly read "follows the card sort", which Phase 9 no longer gates); 9.5's timed tasks validate it afterwards |
 | `11.6` | Three.js viewport: 2D on an orthographic camera plus 3D | UI | 11.4 | A 2D object renders between two 3D objects |
 | `11.7` | Overlay layer: handles, guides, selection, marquee | UI | 11.6 | Structured so the engine can take over the raster |
 | `11.8` | Object manager treegrid | UI | 11.5 | Hierarchy, visibility, lock, alpha, transforms |
@@ -363,9 +376,9 @@ Deferred to here on purpose. Everything above is usable without it, and this is 
 | `11.11` | Speed graph and curve editing | UI | 11.10 | Scrub causes no static-layer repaint |
 | `11.12` | Material manager | UI | 11.9 | Shared instances, relink, usage lookup |
 | `11.13` | Font manager panel | UI | 2.8 | Ported from the 1.x panel (archive branch), not redesigned, and proven by one strict scripted case: several font files (OTF, TTF, WOFF, WOFF2) ingested in a single action into the running Editor, each content-hashed and deduplicated, registered before any text is measured and usable at once; a font leaves the scene only through an explicit Remove action, never implicitly; removing a font still in use is refused naming the objects that use it; ingest and removal each form one undo entry and survive save/reopen; an unresolved font still blocks the take by name |
-| `11.14` | Design system panel; tokens as editor defaults | UI | 10.4 | Palette and type scale are the path of least resistance |
+| `11.14` | Design system panel; tokens as editor defaults (historical compatibility; not part of the 15 Oct authoring workflow) | UI | 10.4 | Palette and type scale are the path of least resistance |
 | `11.15` | Motion preset browser; save selection as preset | UI | 1.6 | Library grows from real designer work |
-| `11.16` | Live conformance indicator | UI | 7.5 | Drift visible as it happens, not at publish |
+| `11.16` | Live conformance indicator (historical compatibility) | UI | 7.5 | Drift visible as it happens, not at publish |
 | `11.17` | Import UI with tier and substitution report | UI | 7.2 | Nothing substituted without being named |
 
 | `11.18` | Editor 1.x panel parity in the Editor 2.0 workspace | UI | 11.5, 11.8, 11.9, 11.12, 11.13, 11.16, 7.1 | Templates/scenes CRUD, object creation and management, object details/properties, fonts, assets and materials are reachable and functional in Tauri; reuse existing modules, preserve selection, validate writes, undo and save/reopen |
@@ -377,12 +390,12 @@ Deferred to here on purpose. Everything above is usable without it, and this is 
 | `11.24` | Spacebar preview and integrated Editor parity verification | UI | 11.6, 11.19, 11.23 | Spacebar smoothly plays/pauses local animation without stealing typing/control shortcuts; verify panel-to-animation workflows, frame-consistent scrubbing, undo/redo and save/reopen in Tauri on Windows/macOS, measure playback on target hardware and confirm no Program/output side effects |
 | `11.25` | Named animation phases on the scene timeline | CON | 11.20, 11.22 | The scene timeline carries named `in`, `hold`, `out`, `continue` and `update` phases as frame spans over the existing channels, matching the `MOTION_PHASES` vocabulary presets already use; phases round-trip Rust/TS, are authored and previewed independently in the Editor, refuse overlap and out-of-range spans by name, and a scene authored before phases existed still parses unchanged |
 | `11.26` | Template control contract: declared operator fields | CON | 11.18, 11.19 | A scene declares which object properties an operator may fill, as a typed, named field list carried on the document; each field names its target object/property, its type and its default, refuses an unknown or non-fillable target by name, round-trips Rust/TS, and is authored in the Editor without widening the preset-only MCP authoring surface |
-| `11.27` | Take-page authoring: fill and save a template instance | UI | 11.26 | The Editor renders the operator form generated from 11.26's declared fields, fills values against a template, reports a value the field's type refuses rather than coercing it, previews the filled result in the viewport, and saves and reopens named instances without mutating the template they were filled from |
-| `11.28` | Named text style presets | UI | 11.13, 11.14 | Font, size, tracking, line height, case and fill/stroke are saved as one named, reusable style; applying a style to a text object sets exactly those properties as one undo entry; a style whose font the scene does not carry refuses by name; styles resolve design-system tokens rather than duplicating their values, and survive save/reopen |
+| `11.27` | Test fill in the Editor: fill a template instance (operator pages are 12.8) | UI | 11.26 | The Editor renders the operator form generated from 11.26's declared fields, fills values against a template, reports a value the field's type refuses rather than coercing it, previews the filled result in the viewport, and saves and reopens named instances without mutating the template they were filled from. Amended 16 Oct 2026 (decision Q5): the panel is renamed Test fill; operator pages and their storage are 12.8's work in Playout. The criteria above were verified earlier and stand for the Editor's test fill |
+| `11.28` | Named text style presets | UI | 11.13 | Font, size, tracking, line height, case and fill/stroke are saved as one named, reusable style; applying a style to a text object sets exactly those properties as one undo entry; a style whose font the scene does not carry refuses by name; styles survive save/reopen |
 | `11.29` | Multi-scene workspace: scenes as first-class entities | UI | 11.18 | A broadcast carries many graphics, so each open scene is a distinct session owning its own document, selection, playhead, collapse state and undo history; one workspace module lists every open scene and switches the active one; viewport, object manager, inspector, timeline, animation and binding panels are children of the active scene and render it alone; switching preserves each scene's own state, an edit or undo in one scene cannot alter another, and closing a scene with unsaved changes refuses by name |
-| `11.30` | Save model: Ctrl+S saves in place, Ctrl+Shift+S saves a new version | UI | 11.29, 11.15 | Ctrl+S (Cmd+S on macOS) writes the active scene to its own file or project entry in place, and a saved preset into the project's preset library in place; it never creates a version. Ctrl+Shift+S (Cmd+Shift+S) is the only way to create a new version: the next free numbered copy (`<name>_v002`, `_v003`, …) is written beside the current one, the previous version is left byte-identical, and the session continues in the new version. Neither shortcut fires while a text field has focus; a failed save keeps the unsaved mark and names its reason; a published design-system version (10.4) is still never edited in place |
+| `11.30` | Save model: Ctrl+S saves in place, Ctrl+Shift+S saves a new version | UI | 11.29, 11.15 | Ctrl+S (Cmd+S on macOS) writes the active scene to its own file or project entry in place, and a saved preset into the project's preset library in place; it never creates a version. Ctrl+Shift+S (Cmd+Shift+S) is the only way to create a new version: the next free numbered copy (`<name>_v002`, `_v003`, …) is written beside the current one, the previous version is left byte-identical, and the session continues in the new version. Neither shortcut fires while a text field has focus; a failed save keeps the unsaved mark and names its reason |
 | `11.31` | One command registry behind every menu, toolbar, shortcut and agent action | UI | 11.30, 11.36 | Every user action is one named command with a label, shortcut, enabled state and refusal reason; the menu bar, toolbar, keyboard shortcuts and the agent surface all dispatch the same command, so a disabled menu item and a refused shortcut give the same named reason; every registry command that changes the document dispatches an 11.36 command; no action is reachable by a shortcut alone; shortcuts never fire while a text field has focus |
-| `11.32` | Menu bar and toolbar, XPression style | UI | 11.31 | A classic in-app menu bar — **File**: New Project, Open Project, Open Recent, Save (Ctrl+S), Save New Version (Ctrl+Shift+S), Save As…, Export package (7.6), Close Scene, Exit; **Edit**: Undo, Redo, Cut, Copy, Paste, Duplicate, Delete (Delete key), Select All; **View**; **Window**; **Help** — plus a slim toolbar of the common commands, identical on Windows and macOS. Exit and Close with unsaved scenes refuse by name until each is saved or explicitly discarded; Delete removes the selection as one undo entry |
+| `11.32` | Menu bar and toolbar (After Effects conventions) | UI | 11.31 | A classic in-app menu bar — **File**: New Project, Open Project, Open Recent, Save (Ctrl+S), Save New Version (Ctrl+Shift+S), Save As…, Export package (7.6), Close Scene, Exit; **Edit**: Undo, Redo, Cut, Copy, Paste, Duplicate, Delete (Delete key), Select All; **Composition**; **Layer**; **View**; **Window**; **Help** — plus a slim toolbar of the common commands, identical on Windows and macOS. Exit and Close with unsaved scenes refuse by name until each is saved or explicitly discarded; Delete removes the selection as one undo entry |
 | `11.33` | Window menu: every module reachable; tabbed docks and saved layouts | UI | 11.5, 11.32 | The Window menu lists every Editor module and shows, focuses or hides it; a hidden panel is never lost and reopens where it was; panels stack as tabs inside any dock and drag between docks and tab groups; the user can save named layouts, switch between them and reset to the card-sort default; layouts survive restart |
 | `11.34` | Floating panel windows | UI | 11.33 | Any panel tears off into its own OS window (e.g. a second monitor) and docks back; the main window stays the only owner of the document, and a floating panel is a projection of the active scene that sends commands through 11.31 — never a second copy of the document; floating windows restore to their monitor and bounds on restart, and fall back on screen when that monitor is gone; closing the main window closes them |
 | `11.35` | Workspace modes | UI | 11.33 | Named workspace modes — at least Design, Animate and Data binding — each a saved layout of panels and docks, switched from the Window menu and toolbar without touching the document, selection or undo history; a mode the user rearranges can be saved over or saved as a new mode, and reset to its default |
@@ -390,10 +403,10 @@ Deferred to here on purpose. Everything above is usable without it, and this is 
 | `11.37` | Undo/redo on the command log | BE | 11.36 | Project-level and per-module undo (Ctrl+Z) and redo (Ctrl+Shift+Z) are built on the 11.36 command log, not on per-module state snapshots. Applying N commands to a fixture scene then undoing all N gives a content hash equal to the original; redoing all N gives the post-edit hash exactly; per-module undo affects only commands tagged with that module, shown by a test with interleaved commands from two modules. 11.29's per-scene isolation and 11.9's one-transaction multi-select still hold |
 | `11.38` | Immutable, content-hashed scene revisions with review state | CON | 11.36, 6.3, 7.6 | Publishing creates an immutable revision identified by a content hash, carrying a state of `draft`, `proposed` or `approved` that only a human sets. Publishing the same content twice gives the same hash; changing one property changes it. Playout loads revisions by pinned hash only (invariant 61): the Playout mock refuses an unknown or unpinned hash by name (`RevisionMismatch` or a new named code), the real Playout service refuses identically, and the conformance suite confirms both. Invariant 30's additive, all-or-nothing publish still holds |
 | `11.39` | Asset provenance and licence fields | CON | 11.36, 2.7 | Every asset record in a `.gpx` project carries origin (`human`, `tool` or `model`), tool or model name and version, provider, licence class, optional prompt hash, source references, approving user and timestamp, and an optional C2PA manifest reference; the fields may be empty for human-made assets, but the schema exists. The `.gpx` schema version is bumped and a migration test upgrades a pre-11.39 project losslessly; save and reload preserve every provenance field byte-for-byte; importing through the asset manager fills `origin` and the tool name automatically |
-| `11.40` | Token bindings and component registry | CON | 11.36, 10.4, 11.14, 11.41 | Named project tokens (colour, font, spacing, motion duration and easing) are referenced by name from objects instead of copied; a registry holds reusable components (scorebug, lower third, player card, bracket, …) with typed slots. Changing a token updates every bound object, shown by 11.41 headless renders of a fixture scene before and after; deleting a token still referenced is refused by name; components and tokens round-trip through `.gpx` save/load. 11.28 styles keep resolving tokens rather than copying them |
+| `11.40` | Component registry and project variables | CON | 11.36, 11.41 | Named project variables (colour, font, spacing, motion duration and easing) are referenced by name from objects instead of copied; a registry holds reusable components (scorebug, lower third, player card, bracket, …) with typed slots. Changing a variable updates every bound object, shown by 11.41 headless renders of a fixture scene before and after; deleting a variable still referenced is refused by name; components and variables round-trip through `.gpx` save/load. Design-system tokens are not required (15 Oct amendment) |
 | `11.41` | Headless render entry point in the Render Engine | BE | 11.38, 3.13, 5.6 | One control request renders revision X at frame N to an image; thumbnails, golden-frame tests, approval previews, 8.9's `render.preview` and Phase 13 parity all use it. The same revision and frame rendered twice on one machine and driver is byte-identical; the cross-machine tolerance is defined in this step's verification record and tested; a headless render issued while Program runs causes no dropped or late Program frame, shown by the engine's frame-timing report over a timed run (invariant 14); the engine mock refuses exactly what the engine refuses, e.g. an unknown revision (invariant 45) |
 | `11.42` | Lint framework and first rules | BE | 11.36, 11.41 | A lint command returns structured findings: severity, rule, object and fix hint. First rules: title/action-safe violation; missing glyph for any bound field or target language; text overflow against a worst-case string fixture (longest player names, CJK, Arabic RTL); required template field left unbound. Each rule has one failing and one passing fixture, run as tests. A missing glyph is a refusal-class finding, never resolved by a silent font fallback (invariant 66). Refusal-class findings block publish (7.6) and preflight (7.7); the rest warn. Findings use the 0.6 refusal structure (condition, cause, fix), so 11.58 renders them unchanged |
-| `11.43` | Scene manager on the command model; explicit save only | UI | 11.18, 11.29, 11.30, 11.36, 11.37, 11.38 | Work is saved as a `.gpx` project first. Scene create, rename, duplicate and delete are 11.36 commands, undoable through 11.37; scene settings cover resolution (1080p first), rational frame rate, duration, alpha on/off and background. Unsaved work cannot be published (named refusal); a non-rational frame rate cannot be entered and the attempt is refused. **No autosave:** 2.6's autosave ring is removed, so the project and its backups are written only on an explicit save; 2.6's kill -9 mid-write test still passes, and 2.6's row text is updated when this lands |
+| `11.43` | Project settings, explicit save and single-file `.gpx` packaging | UI | 11.18, 11.29, 11.30, 11.36, 11.37, 11.38 | Work is saved as a `.gpx` project first. Scene create, rename, duplicate and delete are 11.36 commands, undoable through 11.37; scene settings cover resolution (1080p first), rational frame rate, duration, alpha on/off and background. Unsaved work cannot be published (named refusal); a non-rational frame rate cannot be entered and the attempt is refused. **Explicit save is the only project writer** (decision Q3, 16 Oct 2026): 2.6's autosave ring writes crash-recovery snapshots to a separate recovery folder, never into the project, and they are offered at next launch; 2.6's kill -9 mid-write test still passes |
 | `11.44` | Viewport: gizmos, rulers, margins and safe guides | UI | 11.7, 11.36, 11.41, 11.43 | Extends 11.6/11.7. Scene cameras plus an editor camera; move, rotate-XYZ and scale gizmos; single and multi selection; After Effects/Photoshop-style rulers and margins configured in the project tab; title/action-safe guides; an empty scene shows nothing. Every gizmo interaction produces 11.36 commands, never direct state writes; Z position and XYZ rotation visibly change the render, shown by 11.41 headless renders of a fixture scene before and after; guide and margin settings round-trip through save/load |
 | `11.45` | Object manager on the command model: parenting, groups, order, unique names | UI | 11.8, 11.36, 11.37, 11.44 | Extends 11.8. The object manager is the authoritative hierarchy driving the viewport, inspector and every scene view; parenting, groups, reordering, show/hide and lock are 11.36 commands and all undoable. A test shows the viewport and inspector reflect hierarchy changes made only through the object manager. A duplicate name is refused by name with a suggested free name (`object1`, `object2`, …) |
 | `11.46` | Inspector: per-type property sets, scrub fields, animation stopwatch | UI | 11.9, 11.21, 11.36, 11.37, 11.45 | Extends 11.9/11.21. Each object type in 11.47–11.49 shows exactly its defined property set; numeric fields scrub by dragging and accept negative values, and one scrub is committed as one command, not one per mouse move. Each animatable property carries an After Effects-style stopwatch beside 11.21's current-frame diamond, with no separate Animation tab; toggling it creates a keyframe at the current frame and undo removes it |
@@ -403,11 +416,11 @@ Deferred to here on purpose. Everything above is usable without it, and this is 
 | `11.50` | One physically lit material type and a material library | CON | 1.3, 11.12, 11.41, 11.48 | Supersedes 1.3's split of `MaterialKind` into solid colour, image, PBR and unlit: one physically lit material type replaces them in Rust, generated TS, validator, engine and UI, still consumed by all three from one Rust definition (the custom `shader` kind is unchanged). Scenes authored with the old kinds migrate losslessly; an unlit lower-third fill renders with no pixel change across the migration (invariant 18). One type covers every fixture in the material test set; an XPression-style library assigns materials to objects and faces and round-trips through `.gpx`; Editor viewport and engine golden frames match within 11.41's tolerance, a forward check for 13.6 |
 | `11.51` | Text engine depth: auto-fit, complex scripts, font links | BE | 3.6, 11.13, 11.28, 11.42, 11.47 | Extends 11.13/3.6. OTF, TTF and WOFF files, Adobe font links and CSS embed links resolve through the font manager; tracking, leading and auto-fit/shrink-to-box; complex-script shaping for at least Latin, CJK and Arabic RTL through a HarfBuzz-class shaper. The 11.42 worst-case string fixture renders without overflow or raises an overflow finding; a missing glyph raises a refusal-class finding; Arabic RTL renders correctly in a golden-frame test |
 | `11.52` | Asset manager: versioned replace and provenance shown | UI | 2.7, 11.18, 11.39 | Extends 2.7 and 11.18's asset panel. A browser for images, video, 3D and fonts; every asset is a hashed, versioned file on the Asset plane, shown with its 11.39 provenance. Importing the same file twice gives one asset; replacing an asset creates a new version and leaves earlier revisions pinned to the old hash. Resuming an interrupted transfer is 14.3's done-when and is not duplicated here |
-| `11.53` | Timeline: named stop points and a looping hold | CON | 11.22, 11.25, 11.36, 11.38 | Extends 11.25's phases, which already give In (`in`), Out (`out`) and the held state (`hold`). A hold phase may be marked looping, and named stop points tell Playout's Continue where to pause. Moving or retiming a key is one 11.36 command; values evaluated at sampled frames match the expected curve exactly in rational time; stop points and the loop flag are carried in the published revision and the Playout mock reads them |
-| `11.54` | Template field constraints | CON | 11.26, 11.27, 11.38 | Extends 11.26's declared fields with a range, enum, max length and fallback rule per field; Playout forms, data binding (19.7, 19.8) and the template factory (17.4) fill them. The field schema is part of the published revision; a value outside a field's type, range, enum or length is refused by name by both the Playout mock and real Playout; a fallback rule never produces different pixels without a declared state (invariant 18) |
+| `11.53` | Timeline: named stop points and a looping hold | CON | 11.22, 11.25, 11.36, 11.38 | Extends 11.25's phases, which already give In (`in`), Out (`out`) and the held state (`hold`). A hold phase may be marked looping, and named stop points tell Playout's Continue where to pause. Moving or retiming a key is one 11.36 command; values evaluated at sampled frames match the expected curve exactly in rational time; stop points and the loop flag are carried in the published revision and the Playout mock reads them; Continue on the on-air revision advances to the next named stop point exactly once and never loads a new revision (decision Q4) |
+| `11.54` | Template field constraints | CON | 11.26, 11.27, 11.38 | Extends 11.26's declared fields with a range, enum, max length and fallback rule per field; Playout forms, data binding (19.7, 19.8) and the template factory (17.4) fill them. The field schema is part of the published revision; a value outside a field's type, range, enum or length is refused by name by both the Playout mock and real Playout; a fallback rule never produces different pixels without a declared state (invariant 18). Each field also carries `liveUpdate`, default false: Update on air accepts only eligible fields and refuses an ineligible one by name with pixels unchanged; eligibility grants no authority, which stays with operator scope and engine-time intent (decision Q4) |
 | `11.55` | Logic: conditional triggers, scene transitions, per-scene JS modules | BE | 6.6, 11.53, 11.54, 16.3, 16.4 | Conditional triggers, transitions between scenes and per-scene JS modules, all running inside 16.4's deterministic sandbox. A fixture trigger fires on the expected frame across two runs; a transition between two scenes renders identically across two runs; any banned API inside a module is refused by name |
 | `11.56` | Widgets: clock, countdown, counter, round timer | BE | 11.55, 16.4 | Time is derived from the engine frame count and rational rate, never from the wall clock (invariant 62). At 60000/1001 a countdown shows exactly the rationally computed value after N frames; a long-run test shows zero drift; pause and resume are commands |
-| `11.57` | Engine-rendered preview monitor and hash publish to Playout | UI | 7.6, 8.10, 11.38, 11.41, 11.53 | A preview monitor rendered by the engine through 11.41, and publishing a hashed revision to Playout. Publishing creates a revision the Playout mock lists by hash; the preview frame and an 11.41 render of the same revision and frame match within its tolerance; a conformance test confirms the Editor cannot Cue, Take, Continue or Clear (invariant 4) |
+| `11.57` | Hash publish to Playout from the engine-rendered preview | UI | 7.6, 8.10, 11.38, 11.53, 11.65 | Builds on 11.65's engine preview monitor (split 16 Oct 2026, decision Q2) and publishes a hashed revision to Playout. Publishing creates a revision the Playout mock lists by hash; the preview frame and an 11.41 render of the same revision and frame match within its tolerance; a conformance test confirms the Editor cannot Cue, Take, Continue or Clear (invariant 4) |
 | `11.58` | Console and debugger | UI | 0.6, 11.36, 11.42 | Consoles in the Editor and Playout show every failure with its condition, cause and fix; consoles other than the render engine's run without popping up. Every named refusal code has a console entry with all three parts, and a test enumerates the codes; 11.42 lint findings appear in the console |
 | `11.59` | Importers on 2.0 objects: PSD/AI and After Effects | BE | 7.2, 11.39, 11.41, 11.47, 11.48, 11.50, 11.51, 11.53 | PSD/AI and After Effects importers rebuilt on the 2.0 objects (Figma is Phase 18). After Effects precomps import as live scenes, not flattened clips; every imported asset is stamped with an 11.39 provenance record. A fixture file per importer imports and renders with every asset exact in 11.41 golden-frame tests; any unsupported node type produces a named finding, never a silent drop |
 | `11.60` | Layer styles: every Photoshop style and its blending options, animatable, on the GPU | BE | 3.19, 3.22, 11.36 | Drop Shadow, Inner Shadow, Outer Glow, Inner Glow, Bevel and Emboss, Satin, Color, Gradient and Pattern Overlay and Stroke, plus fill opacity, knockout, Blend If and several instances of one style, are scene properties with every parameter keyframable, rendered on the GPU in Photoshop's stacking order. Fixture scenes match committed Photoshop reference renders within the 4.4 threshold; the PSD (`lfx2`/`lmfx`) and Figma effect mappings used by 11.59 and 18.4 are specified against them; any style option not yet implemented (for example contours) is a named finding, never dropped |
@@ -415,6 +428,8 @@ Deferred to here on purpose. Everything above is usable without it, and this is 
 | `11.62` | Effects and layer-style controls in the Editor | UI | 3.22, 11.46, 11.60 | Adding, removing, reordering, enabling and duplicating effects and layer styles on any object are 11.36 commands with one undo each; every parameter shows in the inspector with scrub fields and an animation stopwatch; a refused effect or style shows its refusal code and fix |
 | `11.63` | EffectCraft / After Effects workspace presentation | UI | 11.5, 11.20, 11.36 | The Editor presents a charcoal workspace with project/layers/assets at left, the composition viewer in the centre, Preview and grouped Properties at right, and a layer timeline below. Menus, creation tools, transport, visibility/lock switches and panel disclosure use the existing command and view-state paths. Both frame readouts use one integer playhead and the scene's rational rate, with fractional timecode labelled NDF. Unanimated objects appear as layer rows; selecting a layer reveals its tracks. Node count remains flat from 100 to 100,000 keys and scrub does not repaint the static layer. Captured Tauri screenshots are compared with the EffectCraft workspace reference, and live create/select/edit, switch, step/play, undo and panel-reopen interactions pass; screenshots or interactions that cannot run are recorded as unverified |
 | `11.64` | Scene Manager: one container, multiple independent graphics | UI | 11.5, 11.36, 11.37, 11.38 | A Scene Manager module creates and selects a saved container, adds and saves independent graphics, searches them by name or id, and opens each through the existing Rust command model. Graphic switching preserves separate content, selection, playhead and undo history, including unsaved graphics. The catalog and accessible/agent projections show editing, open, saved, unsaved, unavailable and published-revision status without design-system confirmation, stamps or drift. Existing container/graphic addresses remain compatible and legacy metadata is preserved. Execute a live create-container, add-two-graphics, edit/save/search/switch/undo, restart/reopen check and the complete check gate before marking done. Storage remains the existing project-folder format; single-file `.gpx` packaging remains 11.43 |
+| `11.65` | Engine preview monitor in the Editor | UI | 11.41 | The Preview panel shows an engine-rendered frame (11.41) of the active graphic at the playhead, labelled "Engine", within 250 ms of an edit on the reference machine (method recorded); the Three.js viewport is labelled "Draft"; a disconnected or refusing engine shows a named unavailable state, never a stale frame presented as current; parity with Program is not claimed until 13.6. Verified in the running Tauri Editor. Scheduled ahead of 11.31–11.35 (decision Q2) |
+| `11.66` | Glossary label lint | UI | 11.63, 11.64 | Every visible Editor label, agent-surface node and MCP tool description uses only the glossary in `docs/README.md` (Project → Graphic → Layer, viewer "Composition"; Take, Page, Playout library; output channel/layer); a test fails on "New scene", "Publish scene" or any term outside the glossary (decision Q6) |
 
 ### Phase 11 UI requirements — Editor 2.0 parity and animation
 
@@ -537,17 +552,23 @@ cannot render: a missing capability is a named finding.
 
 ## Phase 12 — Playout UI
 
-Second because the control surface is smaller and the service beneath it is already proven.
+Second because the control surface is smaller and the service beneath it is already proven. XPression/Viz conventions govern this surface; After Effects conventions govern the Editor.
+
+**First-release scope (user decision Q8, 16 October 2026):** sports/esports first. In scope: overlay layers with channel/layer targeting on one Program channel (12.10) and an as-run record (12.11). **Named out of scope, no rows yet:** MOS/NRCS newsroom integration, mirrored-engine failover, multiple output channels, programmable control panels, XPN/AMCP protocol adapters, switcher automation, GPI/GPO and tally.
 
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
 | `12.1` | Tauri 2 shell | UI | 0.3 | Signed on both platforms |
-| `12.2` | Scene manager with Take IDs | UI | 6.1 | Search, import, fetch, direct recall |
+| `12.2` | Playout library: published graphics by Take ID | UI | 6.1 | Search, import, fetch, direct recall |
 | `12.3` | Take list and rundown | UI | 6.4 | Persisted cursor, continue behaviour |
 | `12.4` | Transport controls: cue, take, continue, out, clear | UI | 6.2 | Committed frame number shown |
 | `12.5` | Confidence monitors, fill and key | UI | 5.4 | Native-resolution tier available |
 | `12.6` | Status surface: tier, reference lock, free-run, clock source | UI | 6.5 | Free-run is unmissable |
 | `12.7` | Output configuration with refusal reasons shown | UI | 6.5 | A refused live adapter names the failing condition |
+| `12.8` | Playout operator fill form and pages | UI | 11.26, 11.54, 12.3 | Publish a graphic with text, colour and required fields; open it in Playout without the Editor project; the form is built from the published package alone; fill valid values, get a named refusal for an invalid or missing required value, save and reopen the rundown and reproduce the same page and revision. A page lives in the rundown, pinned to the published revision, hash and field-schema version (decision Q5) |
+| `12.9` | Lower-third operator workflow acceptance (end to end) | UI | 11.25, 11.54, 11.57, 12.1, 12.2, 12.3, 12.4, 12.5, 12.8, 12.10 | In the running Editor, create a lower third with named In/Hold/Continue/Update/Out phases and typed required fields and publish it. In the running Playout, find it in the library, add it to a persisted rundown page, fill it, pass readiness and show it in Preview with its pinned revision and hash; cue, take to Program, update one live-updatable field, continue through a stop point, run Out and clear its layer, recording each engine-committed frame and comparing Preview to Program under the declared tolerance. Repeated requests and a disconnect/restart before send, after send and after reply cause no duplicate take or clear, and reconnect reconciles from engine status. Removing and restoring a font or asset gives a named readiness refusal. `npm run check` passes. Native-resolution monitor claims name the media transport and hardware; hardware tests wait on 15.1 |
+| `12.10` | Overlay layers with channel/layer targeting on one Program channel | BE | 1.9, 6.2 | Cue, Take, Update, Continue, Out and Clear carry a `channel` and `layer` target; only the Program channel is accepted and any other channel refuses by name; a bug, a lower third and a ticker on separate layers are cued, taken, updated and cleared independently on one output with deterministic z-order and a named refusal on conflict; a targeted clear removes only its layer when the expected page still matches (decision Q8) |
+| `12.11` | As-run record | BE | 2.9, 2.10, 6.2 | Every accepted or refused Cue, Take, Update, Continue, Out and Clear writes one as-run record to the 2.10 JSON Lines audit sink: monotonic sequence, intent id, operator identity and scope (2.9), page, revision, hash, channel/layer target, result and engine-committed frame; replaying a fixture show's records matches the engine's committed events exactly. UI and export follow later (decision Q8) |
 
 ## Phase 13 — Parity — the engine renders the viewport
 
@@ -632,7 +653,7 @@ Depends only on Phases 1–8 plus the design system. Independent of the certific
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
 | `17.1` | Reproduction test on an already-shipped esports pack | AI | 8.13 | Blind comparison; designer states faster or slower |
-| `17.2` | Design system as constraints inside the loop | AI | 10.4 | Agent works in the brand-and-renderer overlap |
+| `17.2` | Brand constraints from project variables inside the loop | AI | 11.40 | Agent works in the brand-and-renderer overlap, using 11.40 project variables (decision Q7) |
 | `17.3` | Motion preset library authored by a designer | AI | 11.15 | 10–15 presets covering the common builds |
 | `17.4` | Scene assembly agent over MCP: constrained generation | AI | 8.9, 11.40, 11.54 | Batch edits arrive as one undo entry. The agent picks registry components (11.40), fills typed slots (11.54), binds data and adjusts tokens only within allowed ranges; it never invents free-form geometry |
 | `17.5` | Correction capture from the very first draft | AI | 7.6 | Every generated-versus-shipped diff stored |
@@ -663,7 +684,7 @@ animatable.
 | `18.4` | Node and property coverage matrix | BE | 18.3, 1.2, 1.3 | Every Figma node type (frame, group, section, rectangle, ellipse, polygon, star, line, vector, boolean operation, text, component, instance, image fill) and property (per-corner radius, strokes with align/dash/cap/join, solid, linear, radial, angular and diamond gradients, image fill modes and crop, drop and inner shadow, layer and background blur, blend modes, opacity, masks, auto-layout resolved to absolute positions, constraints recorded) has a row in a committed coverage table marked **mapped**, **substituted (named)** or **refused (named)**, and each row has a test. Import never stops on an unsupported node: it becomes a named finding and the walk continues |
 | `18.5` | Text fidelity | BE | 18.4, 11.13, 3.6 | Per-character style runs, line height, letter spacing, paragraph spacing, alignment, auto-resize modes and text case survive import. Every Figma font is resolved through 11.13 ingest; a font that cannot be resolved blocks the import by name instead of falling back |
 | `18.6` | Components, instances and variants | BE | 18.4 | Components import once and instances reference them with their overrides applied. Variants are kept as named alternatives, not flattened copies. An instance's override that the engine cannot express is named in the report |
-| `18.7` | Variables and styles to design tokens | BE | 10.2, 18.2 | Figma colour, number and string variables and published styles land as 10.x tokens, and imported objects reference the tokens instead of copying their values, so a brand change flows through |
+| `18.7` | Variables and styles to project variables | BE | 11.40, 18.2 | Figma colour, number and string variables and published styles land as 11.40 project variables with provenance, and imported objects reference them instead of copying their values, so a brand change flows through |
 | `18.8` | Fidelity gate on the corpus | BE | 18.1, 18.4, 7.3, 4.4 | Every corpus frame's engine render is diffed against Figma's PNG under the 4.4 threshold and the diff is stored with the template (7.3). A regression fails CI. The target is 100% of corpus frames passing with zero unnamed substitutions |
 | `18.9` | Re-import updates in place | BE | 18.3, 11.20, 11.19 | Re-importing the same file updates the existing scenes in place, keyed by the Figma node id. Animation channels, phases, bindings and control fields on unchanged nodes are preserved. A deleted node that still carried animation or bindings is reported by name, not dropped silently |
 | `18.10` | Import UI for Figma | UI | 18.3, 11.17 | Paste a Figma file or frame link, pick frames from thumbnails, see the coverage and substitution report before confirming, and land in one scene tab per frame |
@@ -684,7 +705,7 @@ by that ADR:
 
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
-| `19.1` | ADR-0003: Data Server boundaries | CON | 1.9, 5.1 | Accepted ADR fixing: process model (desktop app plus headless service mode), transport (reuses the 5.x control plane and gx1 tokens, 2.9), who resolves a binding at take time (Playout, never the engine), how values reach the engine (as data carried with the take intent), revision pinning of data, and failure policy per field (refuse, hold last good, or warn) |
+| `19.1` | ADR-0004: Data Server boundaries | CON | 1.9, 5.1 | Accepted ADR fixing: process model (desktop app plus headless service mode), transport (reuses the 5.x control plane and gx1 tokens, 2.9), who resolves a binding at take time (Playout, never the engine), how values reach the engine (as data carried with the take intent), revision pinning of data, and failure policy per field (refuse, hold last good, or warn) |
 | `19.2` | Data contract | CON | 19.1 | `DataSource`, `DataTable`, `DataRecord` and typed `DataField` values, plus a source revision and timestamp and a staleness state, defined in Rust (`gx-contracts`) with TS generated; round-trips both ways; a schema change is a named event, never silent |
 | `19.3` | Standalone Data Server app | UI | 19.2, 11.1 | Its own Tauri 2 executable, installable separately from Editor and Playout. It lists sources, their status, last update, error and sample rows, and also runs headless as a service on a playout machine |
 | `19.4` | Connectors: files and web | BE | 19.2 | CSV, Excel (xlsx), JSON and XML from a file, HTTP (with a poll interval) or WebSocket, RSS/Atom, and manually edited tables. Each connector detects schema drift and names it, and a file watch uses 2.5 |
@@ -710,8 +731,10 @@ baseline first or the reference is gone permanently.
 headlessly, it is the automation story, and it means the interface gets
 built against an API that is already proven.
 
-**Research before the interface, not after.** Phase 11 builds against the
-constraints Phase 9 produces. Starting Phase 11 first means rebuilding it.
+**Research validates the interface (amended 16 October 2026).** Phase 9
+was planned as a gate before Phase 11. The user superseded that (decision
+Q1): Phase 11 builds against the After Effects and XPression/Viz references,
+and Phase 9 checks the result with designers and operators.
 
 **External gates started on day one.** Hardware, SDKs, lab time and
 licensing have the longest lead time in the plan and no amount of

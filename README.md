@@ -3,10 +3,16 @@
 Broadcast graphics: authoring, playout and rendering. Three applications, one
 set of contracts.
 
-> **Status: foundations.** The four planes' contracts and semantics are
-> implemented and tested, and the control plane runs over a real L0 transport.
-> There is no renderer, no application shell and no output. **Nothing in this
-> repository has produced a frame.** Status words are used exactly as
+> **Status: in execution (16 October 2026).** The four planes' contracts and
+> semantics are implemented and tested, and the control plane runs over a real
+> L0 transport. The software reference renderer produces Program frames and is
+> measured by the pixel gate (`tools/pixel-gate`); the Tauri Editor (After
+> Effects-style workspace, Scene Manager, keyframes) and the Playout shell
+> (manual transport, Program status) run. The GPU-first compositor (`3.16`–`3.22`),
+> the engine-rendered Editor preview (`11.41`, `11.65`) and the operator
+> library, rundown and fill form (`12.2`, `12.3`, `12.8`) are **Planned**; SDI
+> output is an **External gate** (Phase 15). [`progress.html`](progress.html)
+> is the tracker. Status words are used exactly as
 > [`docs/README.md`](docs/README.md) defines them.
 
 ## The three applications
@@ -86,7 +92,7 @@ cargo run -p gx-conformance
 
 A mock engine can also be run as a real server, which is how an Editor or
 Playout developer works against a peer that refuses where the real engine will
-(ADR-003):
+(ADR-0001 §3):
 
 ```bash
 cargo run -p gx-mock-engine -- --genlocked --publish lower-third:4

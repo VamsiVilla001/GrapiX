@@ -118,6 +118,67 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-10-16 — Editor UX / direction review, Playout workflow review, and the user's eight decisions applied to the plan
+
+**Plan and documentation only; no code, and no step changed state.** Two proposal
+documents compare the build plan with real-time broadcast CG workflows
+(After Effects for authoring; XPression, Viz Artist/Trio and CasparCG for
+playout): `docs/proposals/GrapiX-Editor-UX-Direction-Review.md` (Claude:
+Direction D1–D10, Authoring A0–A7, Decisions Q1–Q8) and
+`docs/proposals/GrapiX-Broadcast-Playout-Workflow-Review.md` (Codex: operator
+workflow, integration scope, proposed rows 12.8 operator fill form and 12.9
+E2E lower-third acceptance). Each agent cross-reviewed the other's document
+on Panchayati topics #5 and #7, and every dispute was fixed or rebutted in
+the owner's file. UI claims are source-inspected; no Tauri session was run
+for either review.
+
+The Decisions table (Q1 Phase 9 gate · Q2 engine preview first, 11.41 is
+ready now · Q3 save model · Q4 Update/Continue with liveUpdate default false ·
+Q5 pages in Playout · Q6 glossary · Q7 17.2 → project variables · Q8
+first-release scope) carried joint recommendations. **The user approved all
+eight as recommended** (16 October 2026, in the Claude session). Applied in
+the same commit:
+
+- `GrapiX-Build-Plan.md`: header "In execution" with the product sentence and
+  a dated Decisions paragraph; Phase 9 becomes validation (9.4 and 9.6
+  dropped, 9.5/9.7 re-scoped; 11.5's criterion amended to the 11.63
+  reference with no Needs); 11.57 split, new **11.65** engine preview monitor
+  (Needs 11.41) and **11.66** glossary label lint; 11.43 renamed with
+  recovery snapshots kept out of the project; 11.30's design-system clause
+  removed; 11.53 defines Continue; 11.54 adds `liveUpdate` (default false,
+  eligibility only); 11.27 renamed Test fill, with pages moving to new
+  **12.8**; new **12.9** E2E lower-third acceptance, **12.10** overlay
+  layers with channel/layer targets on one Program channel, and **12.11**
+  as-run record; Phase 12 names the deferred integrations; 12.2 renamed
+  Playout library; 17.2 and 18.7 re-pointed to 11.40 project variables;
+  11.40 renamed with Needs 10.4/11.14 cut; 11.28 and 1.6 Needs trimmed;
+  7.5, 7.6, 8.7, 11.14 and 11.16 marked historical; 11.32 follows After
+  Effects; 19.1 becomes ADR-0004; the "Why the order" research paragraph
+  amended. **254 steps** (250 − 2 + 6).
+- `progress.html`: its embedded `PLAN` mirror carries exactly those rows
+  and the Phase 9 and 12 notes. Untouched rows keep their existing mirror
+  text. 37 rows already differed from the plan in wording; that drift is
+  pre-existing and was not changed. `progress.json` is unchanged: no state
+  moved, and new rows are pending.
+- `docs/README.md`: glossary (Q6) and the ADR numbering rule; `README.md`:
+  status block rewritten from current evidence (D9) and ADR-0001 §3
+  reference (D6).
+
+**Checked by script:** 254 plan rows equal 254 mirror rows with identical
+Needs and tracks; no Needs references a removed row. The same check lists
+seven pre-existing `done` rows whose Needs are not all done (3.6→2.8,
+11.20→8.12, 11.21→11.9, 11.25→11.22, 11.26→11.18/11.19, 11.28→11.13). They
+predate this change, are recorded here for a later reconciliation and were
+not altered. The 11.5→9.7 case is resolved by Q1. D10 (light not creatable)
+is a code change and lands separately.
+
+**Gate:** `node tools/check-agent-worktree.mjs` OK; `npm run check` **exit 0**:
+boundaries OK, codegen 297 files current, 40 Node, 356 Editor, 679 Rust
+passed / 0 failed, conformance 377 passed / 0 failed / 9 skipped (same counts
+as `1e28f7a`; no code changed).
+
+---
+
 ## 2026-10-16 — 3.13 refusal inventory closed: lights and container paints; resume here
 
 **Implemented — 3.13:** the two residual gaps from mission #2 are closed.

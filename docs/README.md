@@ -4,7 +4,7 @@
 
 When two documents disagree, the one higher in this list wins. Fix the lower
 one; do not leave the disagreement in place. The previous tree had two
-documents disputing how many contract packages existed, and ADR-003 records
+documents disputing how many contract packages existed, and ADR-0001 §3 records
 that as a real cost.
 
 1. **`adr/0001-distributed-architecture.md`** — the ADRs and system design.
@@ -35,12 +35,36 @@ halted after the `3.14` spike, and EffectCraft components are ported with
 attribution under the owning steps. It also amends ADR-0002 B.1: compositing
 follows the project's working colour space. The compositor is **Planned**.
 
+**ADR numbering.** ADR files are numbered `0001`, `0002`, `0003`, and the
+Data Server ADR planned by step `19.1` will be `0004`. ADR-0001 contains its
+own sections headed ADR-001 to ADR-005; cite those as "ADR-0001 §3" and so
+on, never as a bare "ADR-003", so a section is never mistaken for a file.
+
 `/memory.md` at the repository root is the session log: what changed, when, and
 what was verified. It records history; it does not grant authority.
 
 `proposals/` holds merge proposals after they have been merged into
 `/GrapiX-Build-Plan.md`. They are records only and grant no authority; the
 build plan's rows are what count.
+
+## Glossary
+
+Decided by the user on 16 October 2026 (decision Q6 in
+`proposals/GrapiX-Editor-UX-Direction-Review.md`). UI labels, MCP tool
+descriptions and documentation use these words; step `11.66` adds a lint.
+
+| Term | Meaning |
+|---|---|
+| **Scene Manager** | The Editor module that holds one Project and its Graphics (`11.64`). Used for nothing else. |
+| **Project** | The saved container of independent Graphics, like an After Effects `.aep`. |
+| **Graphic** | One independent piece of authored content: a `SceneDocument` with its own layers, timeline and undo history. |
+| **Composition** | The Editor's viewer panel that shows the active Graphic. |
+| **Layer** | An object row in a Graphic's timeline. Not an output layer. |
+| **Take** | A published, immutable, hash-pinned revision of a Graphic, addressed by Take ID. |
+| **Playout library** | Playout's searchable catalogue of published Graphics by Take ID (`12.2`). |
+| **Page** | An operator-filled instance of a Take, saved in the Playout rundown and pinned to its revision, hash and field-schema version (`12.8`). |
+| **Test fill** | The Editor's preview of declared fields with sample values (`11.27`). It is not a Page. |
+| **Output channel / output layer** | Where Playout targets a Take on air (`12.10`). Never called a "Layer" alone. |
 
 ## Status vocabulary
 
