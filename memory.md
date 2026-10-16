@@ -169,8 +169,17 @@ Needs and tracks; no Needs references a removed row. The same check lists
 seven pre-existing `done` rows whose Needs are not all done (3.6→2.8,
 11.20→8.12, 11.21→11.9, 11.25→11.22, 11.26→11.18/11.19, 11.28→11.13). They
 predate this change, are recorded here for a later reconciliation and were
-not altered. The 11.5→9.7 case is resolved by Q1. D10 (light not creatable)
-is a code change and lands separately.
+not altered. The 11.5→9.7 case is resolved by Q1.
+
+**D10, landed in the following commit:** `light` is no longer in
+`CREATABLE_KINDS` (`Shared/contracts/src/authoring.rs`). Creating one refuses
+`SceneObjectKindNotCreatable` naming its prerequisite (a mesh bound to a PBR
+material, drawn by 11.48), because every lone light refuses at publish since
+`1e28f7a`. Camera stays creatable: an inactive camera is inert. Verified:
+`cargo test -p gx-contracts -p gx-editor-shell -p gx-editor -p gx-editor-mcp`
+all pass (contracts 229, including the extended
+`kinds_that_cannot_be_completed_refuse_with_what_they_need`; the shell's
+menu-equals-create test passes); codegen 297 current; boundaries OK.
 
 **Gate:** `node tools/check-agent-worktree.mjs` OK; `npm run check` **exit 0**:
 boundaries OK, codegen 297 files current, 40 Node, 356 Editor, 679 Rust

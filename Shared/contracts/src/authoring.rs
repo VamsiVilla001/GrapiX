@@ -27,8 +27,8 @@ use ts_rs::TS;
 
 use crate::color::{ColorValue, Rgba, SourceColorSpace};
 use crate::scene::{
-    CameraKind, CameraObject, EllipseObject, GroupObject, LayerKind, LayerObject, LightKind,
-    LightObject, LineObject, ObjectBase, RectObject, SceneDocument, SceneObject, TextObject, Vec2,
+    CameraKind, CameraObject, EllipseObject, GroupObject, LayerKind, LayerObject, LineObject,
+    ObjectBase, RectObject, SceneDocument, SceneObject, TextObject, Vec2,
 };
 use crate::Refusal;
 
@@ -38,11 +38,13 @@ use crate::Refusal;
 /// The catalogue (1.2) is larger than this on purpose. `image`, `mesh`,
 /// `shape` and `paint` each need something only the caller has — an asset, a
 /// path, brush points — and `marker` belongs to the timeline, not the object
-/// list. Creating one of those blank would produce an object that refuses the
-/// moment it is rendered, so they are refused here instead, by name and with
-/// what they need.
+/// list. A `light` needs a mesh bound to a PBR material to light, and meshes
+/// are not drawn until 11.48 (a lone light refuses at publish as
+/// `LightHasNoResponsiveMaterial`). Creating any of those blank would produce
+/// an object that refuses the moment it is published, so they are refused
+/// here instead, by name and with what they need.
 pub const CREATABLE_KINDS: &[&str] = &[
-    "rect", "ellipse", "text", "line", "group", "layer", "camera", "light",
+    "rect", "ellipse", "text", "line", "group", "layer", "camera",
 ];
 
 /// What a kind needs before it can be created, for the kinds that cannot be
@@ -54,6 +56,7 @@ fn missing_prerequisite(kind: &str) -> Option<&'static str> {
         "shape" => Some("a bezier path"),
         "paint" => Some("brush points"),
         "marker" => Some("a timeline frame; markers are created on the timeline"),
+        "light" => Some("a mesh bound to a PBR material for it to light, which step 11.48 draws"),
         _ => None,
     }
 }
@@ -67,7 +70,7 @@ fn default_size(kind: &str) -> (f64, f64) {
         "line" => (240.0, 0.0),
         // Containers have no box of their own; they take their extent from
         // their children, and a non-zero size would be a lie about that.
-        "group" | "layer" | "camera" | "light" => (0.0, 0.0),
+        "group" | "layer" | "camera" => (0.0, 0.0),
         _ => (200.0, 120.0),
     }
 }
@@ -164,18 +167,6 @@ fn build_object(scene: &SceneDocument, kind: &str, id: String, name: String) -> 
             far: None,
             target: None,
             up: None,
-        }),
-        "light" => SceneObject::Light(LightObject {
-            base,
-            light_kind: LightKind::Directional,
-            intensity: 1.0,
-            color: Rgba::new(1.0, 1.0, 1.0, 1.0, SourceColorSpace::Srgb),
-            range: None,
-            decay: None,
-            cone_angle_deg: None,
-            penumbra: None,
-            target: None,
-            cast_shadow: false,
         }),
         // `CREATABLE_KINDS` gates the set, so an unmatched name here is a
         // catalogue that grew without a constructor — a bug, not input.
@@ -606,6 +597,14 @@ mod tests {
             Err(Refusal::SceneObjectKindNotCreatable { ref needs, .. })
                 if needs.contains("font")
         ));
+        // A light has nothing to light until meshes draw (11.48); offered
+        // now, every light would refuse at publish.
+        assert!(matches!(
+            create_object(&mut s, "light", "Key"),
+            Err(Refusal::SceneObjectKindNotCreatable { ref kind, ref needs })
+                if kind == "light" && needs.contains("PBR")
+        ));
+        assert!(!CREATABLE_KINDS.contains(&"light"));
         assert!(matches!(
             create_object(&mut s, "sprite", "?"),
             Err(Refusal::SceneObjectKindNotCreatable { .. })
