@@ -128,6 +128,8 @@ No product code changed. Step 0: the CubicBezier/graphic-preview/keyframe UI dif
 
 11.10 (Needs 11.5 done) is now `done`: `timeline-scale-check.cjs` live — 70 timeline DOM nodes at both 100 and 100,000 keys; scrubbing drew only the interaction canvas (10 draws; static 0, content 0).
 
+11.11 (Needs 11.10 done) is now `done`: `speed-graph-check.cjs` live with the graph open — eight scrubs, static 0, content 0, interaction 32.
+
 Live-check recipe: `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9223 npm run editor`; the scratch scripts match page URL 127.0.0.1:1430 (dev), not tauri.localhost.
 
 ---
