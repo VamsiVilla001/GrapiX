@@ -124,6 +124,8 @@ No product code changed. Step 0: the CubicBezier/graphic-preview/keyframe UI dif
 
 11.8 (Needs 11.5 is done) is now `done`: `agent/tmp/ui-check/object-manager-check.cjs` on a scene with nested groups proved aria-level 1/2/2/3, collapse/expand, descendants "hidden by parent", visibility and lock toggle with one undo each, and alpha/transform cells following inspector edits and undo. There is still no UI to parent objects (11.45), so hierarchy is only checkable on a scene file.
 
+11.9 (Needs 11.8 done) is now `done`: `inspector-multi-check.cjs` live — two objects with different x show Mixed, one opacity edit changed both, one undo restored both, redo reapplied.
+
 Live-check recipe: `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9223 npm run editor`; the scratch scripts match page URL 127.0.0.1:1430 (dev), not tauri.localhost.
 
 ---
