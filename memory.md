@@ -118,6 +118,16 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-10-16 — 11.8 done (Claude, Panchayati mission 1); Step 0 re-verified
+
+No product code changed. Step 0: the CubicBezier/graphic-preview/keyframe UI diff was already committed in ca63a6a; `npm run check` exit 0, `build:web` ok, and live Tauri/WebView2 (dev, CDP 9223) re-checks of 11.9/11.21/11.63/11.64 passed: keyframe-workflow-check, scene-manager-check (two graphics, undo across switches, search) and, after restarting the app, keyframe-reopen-check.
+
+11.8 (Needs 11.5 is done) is now `done`: `agent/tmp/ui-check/object-manager-check.cjs` on a scene with nested groups proved aria-level 1/2/2/3, collapse/expand, descendants "hidden by parent", visibility and lock toggle with one undo each, and alpha/transform cells following inspector edits and undo. There is still no UI to parent objects (11.45), so hierarchy is only checkable on a scene file.
+
+Live-check recipe: `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9223 npm run editor`; the scratch scripts match page URL 127.0.0.1:1430 (dev), not tauri.localhost.
+
+---
+
 ## 2026-10-16 — progress.html stopped showing new commits in a browser that had saved
 
 **Found.** The user saw progress.html stuck at 34% "from long ago" while the
