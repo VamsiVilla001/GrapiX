@@ -126,6 +126,8 @@ No product code changed. Step 0: the CubicBezier/graphic-preview/keyframe UI dif
 
 11.9 (Needs 11.8 done) is now `done`: `inspector-multi-check.cjs` live — two objects with different x show Mixed, one opacity edit changed both, one undo restored both, redo reapplied.
 
+11.10 (Needs 11.5 done) is now `done`: `timeline-scale-check.cjs` live — 70 timeline DOM nodes at both 100 and 100,000 keys; scrubbing drew only the interaction canvas (10 draws; static 0, content 0).
+
 Live-check recipe: `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9223 npm run editor`; the scratch scripts match page URL 127.0.0.1:1430 (dev), not tauri.localhost.
 
 ---
