@@ -1947,7 +1947,6 @@ dependencies = [
  "gx-contracts",
  "gx-control-plane",
  "gx-mcp-server",
- "gx-media-plane",
  "gx-playout",
  "parking_lot",
  "serde",

@@ -2,8 +2,8 @@
 
 use std::{collections::{HashMap, HashSet}, fmt, fs, path::{Path, PathBuf}};
 use gx_contracts::{ContentHash, Refusal};
-use gx_contracts::{color::OutputTransform, material::MaterialSupport, scene::{parse_scene_document, SceneDocument}};
-use gx_render_worker::{mesh::AssetBytes, prepared::PreparedScene, rasterizer::Frame};
+use gx_contracts::{material::MaterialSupport, scene::{parse_scene_document, SceneDocument}};
+use gx_render_worker::{headless::{decode_png as decode_headless_png, render_png}, mesh::AssetBytes, prepared::PreparedScene, rasterizer::Frame};
 use sha2::{Digest, Sha256};
 
 const PNG_SIGNATURE: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
@@ -21,7 +21,11 @@ pub fn reference_scenes_dir() -> PathBuf { workspace_root().join("tests/referenc
 pub fn baselines_dir() -> PathBuf { workspace_root().join("tests/baselines") }
 pub fn reference_scene_paths(directory: &Path) -> Result<Vec<PathBuf>, PixelGateError> { let mut paths = fs::read_dir(directory)?.map(|e| e.map(|v| v.path())).collect::<Result<Vec<_>, _>>()?; paths.retain(|p| p.extension().is_some_and(|e| e == "json")); paths.sort(); if paths.is_empty() { return Err(PixelGateError::InvalidPng(format!("no reference scenes in {}", directory.display()))); } Ok(paths) }
 pub fn load_reference_scene(path: &Path) -> Result<SceneDocument, PixelGateError> { Ok(parse_scene_document(&fs::read(path)?)?) }
-pub fn render_reference_scene(path: &Path) -> Result<Frame, PixelGateError> { let document = load_reference_scene(path)?; let (available, bytes) = reference_assets(&document)?; Ok(PreparedScene::prepare(document, &available, &bytes, &MaterialSupport::fixed_function())?.frame(OutputTransform::Srgb)) }
+/// A golden frame is frame 0 of the scene's own timeline, drawn through the
+/// engine's one headless entry point (11.41) and read back from the PNG it
+/// produces, so the gate measures exactly what thumbnails, previews and
+/// `render.preview` are given.
+pub fn render_reference_scene(path: &Path) -> Result<Frame, PixelGateError> { let document = load_reference_scene(path)?; let (available, bytes) = reference_assets(&document)?; let prepared = PreparedScene::prepare(document, &available, &bytes, &MaterialSupport::fixed_function())?; Ok(decode_headless_png(&render_png(&prepared, 0)?.png)?) }
 fn reference_assets(document: &SceneDocument) -> Result<(HashSet<ContentHash>, AssetBytes), PixelGateError> { let mut available = HashSet::new(); let mut bytes = HashMap::new(); for asset in &document.assets { let expected = asset.checksum.clone().ok_or_else(|| Refusal::AssetMissing { hash: ContentHash(format!("{} (no content hash yet)", asset.asset_id)) })?; let payload = fs::read(workspace_root().join(&asset.path))?; let actual = ContentHash(format!("{:x}", Sha256::digest(&payload))); if actual != expected { return Err(Refusal::AssetHashMismatch { expected, actual }.into()); } available.insert(expected.clone()); bytes.insert(expected, payload); } Ok((available, bytes)) }
 pub fn capture() -> Result<(), PixelGateError> { capture_to(&reference_scenes_dir(), &baselines_dir()) }
 pub fn check() -> Result<(), PixelGateError> { check_at(&reference_scenes_dir(), &baselines_dir()) }

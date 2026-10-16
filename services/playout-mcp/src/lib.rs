@@ -16,11 +16,12 @@
 //! is ADR-0002 D.1's fifth principle and the differentiator over any design
 //! tool's API. It is also where the architecture is easiest to get wrong: the
 //! tempting shortcut is to import the renderer and rasterise here, which
-//! invariants 2 and 3 forbid. The correct path already exists — the engine
-//! publishes Preview onto the **media plane**, which exists precisely to carry
-//! confidence frames back to the surfaces (ADR-001). So this module holds a
-//! media-plane consumer and takes the freshest frame. No renderer internals,
-//! and no frame invented locally.
+//! invariants 2 and 3 forbid. The tool asks the engine instead, over the
+//! control plane, for the pinned revision at the requested frame. The engine
+//! draws it through its one headless entry point (11.41) and serves the PNG on
+//! the asset plane by content hash, where this module fetches it. No renderer
+//! internals, no frame invented locally, and never "whatever Preview showed
+//! last": the agent sees the frame it asked for (8.9).
 
 #![forbid(unsafe_code)]
 
@@ -47,82 +48,98 @@ fn transport_failed(error: impl std::fmt::Display) -> Refusal {
 
 // --- render (8.9) ----------------------------------------------------------
 
-/// One RGBA8 frame handed back to an agent.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PreviewFrame {
-    pub width: u32,
-    pub height: u32,
-    /// The publication generation the frame came from, so an agent can tell a
-    /// fresh frame from the one it already saw without comparing pixels.
-    pub generation: u64,
-    /// Row-major RGBA8. Carried as bytes rather than a path because the point
-    /// is that the agent can *see* it without a second round trip to a file it
-    /// may not be able to read.
-    pub pixels: Vec<u8>,
-}
-
-/// Where a preview frame comes from.
+/// Where `render.preview` fetches the PNG the engine drew.
 ///
-/// A trait rather than a concrete consumer so the tool can be driven in a test
-/// without a running engine — and, more importantly, so this crate never needs
-/// to know how a frame was produced. It is handed one; it does not make one.
-pub trait PreviewSource: Send + Sync {
-    /// The freshest published frame, or `None` if nothing has been published.
-    fn latest(&self) -> Option<PreviewFrame>;
+/// A trait so the tool can be driven in a test without an asset-plane socket.
+/// The engine serves headless images by content hash (11.41); this is the
+/// fetch, nothing more.
+pub trait ImageSource: Send + Sync {
+    fn fetch(&self, hash: &gx_contracts::ContentHash) -> Result<Vec<u8>, Refusal>;
 }
 
-/// A preview source over the L0 shared-memory media slot (5.4).
+/// The engine's asset plane, where headless renders are served by hash.
+pub struct AssetPlaneImages(pub std::net::SocketAddr);
+
+impl ImageSource for AssetPlaneImages {
+    fn fetch(&self, hash: &gx_contracts::ContentHash) -> Result<Vec<u8>, Refusal> {
+        gx_asset_plane::publish::fetch_bytes(self.0, hash).map_err(transport_failed)
+    }
+}
+
+/// `render.preview`: the frame of a pinned revision an agent asked for, drawn
+/// by the engine.
 ///
-/// The engine publishes into the slot and this reads the freshest frame out of
-/// it. Dimensions are supplied at construction because the slot carries bytes
-/// and a generation, not geometry: the alternative is a header inside every
-/// frame, which would cost a parse per read to carry a value that changes only
-/// when the output format does.
-pub struct SharedMediaPreview {
-    consumer: gx_media_plane::LocalMediaConsumer,
-    width: u32,
-    height: u32,
+/// The answer is an MCP image content block holding the PNG, plus the
+/// structured `PreviewFrame` (revision, frame, size and the image's content
+/// hash). The PNG is checked against that hash before it is handed over, so a
+/// corrupted or substituted image is refused by name rather than shown.
+pub struct RenderPreview<P: EnginePeer, I: ImageSource> {
+    pub tools: std::sync::Arc<ProgramTools<P>>,
+    pub images: I,
 }
 
-impl SharedMediaPreview {
-    pub fn new(consumer: gx_media_plane::LocalMediaConsumer, width: u32, height: u32) -> Self {
-        Self {
-            consumer,
-            width,
-            height,
+impl<P: EnginePeer, I: ImageSource> ToolHandler for RenderPreview<P, I> {
+    fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
+        let args: gx_contracts::mcp::PreviewRequest = parse(args)?;
+        let reply = self.tools.playout.lock().peer_mut().handle(
+            gx_control_plane::message::ClientRequest::Render(gx_control_plane::render::RenderRequest {
+                take_id: args.take_id,
+                revision: args.revision,
+                content_hash: args.content_hash,
+                frame: args.frame,
+            }),
+        );
+        let rendered = match reply {
+            gx_control_plane::message::EngineReply::Rendered(rendered) => rendered,
+            // The engine's refusal is the answer: unknown take, unpinned or
+            // mismatched revision, a frame past the timeline, a revision with
+            // no scene to draw.
+            gx_control_plane::message::EngineReply::Refused(refusal) => return Err(refusal),
+            other => {
+                return Err(Refusal::TransportFailed {
+                    detail: format!("render.preview expected a rendered frame, got {other:?}"),
+                })
+            }
+        };
+        let png = self.images.fetch(&rendered.image)?;
+        let actual = gx_asset_plane::content_hash(&png);
+        if actual != rendered.image {
+            return Err(Refusal::AssetHashMismatch { expected: rendered.image, actual });
+        }
+        let frame = gx_contracts::mcp::PreviewFrame {
+            take_id: rendered.take_id,
+            revision: rendered.revision,
+            content_hash: rendered.content_hash,
+            frame: rendered.frame,
+            width: rendered.width,
+            height: rendered.height,
+            image: rendered.image,
+            image_bytes: png.len() as u64,
+        };
+        Ok(serde_json::json!({
+            "content": [{ "type": "image", "data": base64(&png), "mimeType": "image/png" }],
+            "structuredContent": serde_json::to_value(frame).map_err(transport_failed)?,
+        }))
+    }
+}
+
+/// Standard base64 with padding (RFC 4648 §4), which MCP image content uses.
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = (u32::from(chunk[0]) << 16)
+            | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*chunk.get(2).unwrap_or(&0));
+        for (i, shift) in [18, 12, 6, 0].into_iter().enumerate() {
+            if i <= chunk.len() {
+                out.push(ALPHABET[((n >> shift) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
         }
     }
-}
-
-impl PreviewSource for SharedMediaPreview {
-    fn latest(&self) -> Option<PreviewFrame> {
-        // `with_latest` re-checks the publication generation around the read,
-        // so a frame torn by a concurrent publish is never observed (5.4).
-        self.consumer.with_latest(|frame| PreviewFrame {
-            width: self.width,
-            height: self.height,
-            generation: frame.generation(),
-            pixels: frame.bytes().to_vec(),
-        })
-    }
-}
-
-/// `render.preview`: hand an agent the frame the engine actually produced.
-pub struct RenderPreview<S: PreviewSource>(pub S);
-
-impl<S: PreviewSource> ToolHandler for RenderPreview<S> {
-    fn handle(&self, _args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
-        // Nothing published yet is a refusal rather than an empty frame. A
-        // black image returned as "the preview" is indistinguishable from a
-        // scene that renders black, which is the silent substitution invariant
-        // 18 forbids.
-        let frame = self.0.latest().ok_or(Refusal::FrameNotReachable {
-            requested: 0,
-            earliest: 0,
-        })?;
-        serde_json::to_value(frame).map_err(transport_failed)
-    }
+    out
 }
 
 // --- packages (8.10) -------------------------------------------------------
@@ -501,39 +518,74 @@ mod tests {
 
     // --- render.preview (8.9) -----------------------------------------------
 
-    #[test]
-    fn an_agent_sees_the_frame_the_engine_published_to_the_media_plane() {
-        // 8.9's done-when, over the real path: the engine publishes Preview
-        // onto the media plane and the tool reads it. Nothing here rasterises,
-        // which is what keeps invariants 2 and 3 intact.
-        let transport =
-            gx_media_plane::LocalMediaTransport::establish(64).expect("a shared slot establishes");
-        let producer = transport.producer();
-        producer.publish_with(8, |buffer| {
-            buffer.copy_from_slice(&[1, 2, 3, 255, 4, 5, 6, 255]);
-        });
+    /// A one-pixel PNG standing in for what the engine served.
+    const PNG: &[u8] = b"\x89PNG fixture";
 
-        let tool = RenderPreview(SharedMediaPreview::new(transport.consumer(), 2, 1));
-        let answer = tool
-            .handle(serde_json::Value::Null)
-            .expect("a published frame is returned");
-        let frame: PreviewFrame = serde_json::from_value(answer).unwrap();
+    struct FixedImages(Vec<u8>);
 
-        assert_eq!(frame.width, 2);
-        assert_eq!(frame.pixels, vec![1, 2, 3, 255, 4, 5, 6, 255]);
-        assert!(frame.generation > 0, "the generation identifies the frame");
+    impl ImageSource for FixedImages {
+        fn fetch(&self, _hash: &gx_contracts::ContentHash) -> Result<Vec<u8>, Refusal> {
+            Ok(self.0.clone())
+        }
+    }
+
+    fn preview_args(published: &PublishedScene, frame: u64) -> serde_json::Value {
+        serde_json::json!({
+            "takeId": published.take_id.0,
+            "revision": published.revision.0,
+            "contentHash": published.content_hash,
+            "frame": frame,
+        })
     }
 
     #[test]
-    fn a_preview_with_nothing_published_refuses_rather_than_returning_black() {
-        // A black frame returned as "the preview" is indistinguishable from a
-        // scene that renders black (invariant 18).
-        let transport = gx_media_plane::LocalMediaTransport::establish(64).unwrap();
-        let tool = RenderPreview(SharedMediaPreview::new(transport.consumer(), 2, 1));
+    fn render_preview_answers_with_the_requested_frame_as_an_image_block() {
+        let (tools, published) = program_tools();
+        let answer = RenderPreview { tools, images: FixedImages(PNG.to_vec()) }
+            .handle(preview_args(&published, 7))
+            .expect("a rendered frame is returned");
+        assert_eq!(answer["content"][0]["type"], "image");
+        assert_eq!(answer["content"][0]["mimeType"], "image/png");
+        assert_eq!(answer["content"][0]["data"], base64(PNG));
+        let frame: gx_contracts::mcp::PreviewFrame =
+            serde_json::from_value(answer["structuredContent"].clone()).unwrap();
+        assert_eq!(frame.frame, 7, "the frame asked for, not whatever Preview showed");
+        assert_eq!(frame.image, gx_asset_plane::content_hash(PNG));
+        assert_eq!(frame.image_bytes, PNG.len() as u64);
+    }
+
+    #[test]
+    fn render_preview_passes_the_engines_refusal_through_by_name() {
+        let (tools, published) = program_tools();
+        let tool = RenderPreview { tools, images: FixedImages(PNG.to_vec()) };
         assert!(matches!(
-            tool.handle(serde_json::Value::Null),
-            Err(Refusal::FrameNotReachable { .. })
+            tool.handle(preview_args(&published, 11)),
+            Err(Refusal::RenderFrameOutOfRange { frame: 11, .. })
         ));
+        assert!(matches!(
+            tool.handle(serde_json::json!({ "takeId": "x", "revision": 1, "frame": 0, "atFrame": 3 })),
+            Err(Refusal::SceneParseFailed { .. })
+        ), "an unknown argument is refused, never ignored");
+    }
+
+    #[test]
+    fn render_preview_refuses_an_image_that_does_not_match_its_hash() {
+        let (tools, published) = program_tools();
+        let tool = RenderPreview { tools, images: FixedImages(b"substituted".to_vec()) };
+        assert!(matches!(
+            tool.handle(preview_args(&published, 0)),
+            Err(Refusal::AssetHashMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn base64_matches_rfc_4648_test_vectors() {
+        for (input, expected) in [
+            ("", ""), ("f", "Zg=="), ("fo", "Zm8="), ("foo", "Zm9v"),
+            ("foob", "Zm9vYg=="), ("fooba", "Zm9vYmE="), ("foobar", "Zm9vYmFy"),
+        ] {
+            assert_eq!(base64(input.as_bytes()), expected);
+        }
     }
 
     // --- packages (8.10) ----------------------------------------------------
@@ -662,6 +714,24 @@ mod tests {
                     adapter: config.adapter,
                     live: config.live,
                 },
+                ClientRequest::Render(request) if request.frame > 10 => {
+                    EngineReply::Refused(Refusal::RenderFrameOutOfRange {
+                        take_id: request.take_id,
+                        revision: request.revision,
+                        frame: request.frame,
+                        duration_frames: 10,
+                    })
+                }
+                ClientRequest::Render(request) => EngineReply::Rendered(gx_control_plane::render::RenderedFrame {
+                    take_id: request.take_id,
+                    revision: request.revision,
+                    content_hash: request.content_hash.unwrap_or_else(|| gx_contracts::ContentHash("a".repeat(64))),
+                    frame: request.frame,
+                    width: 1,
+                    height: 1,
+                    image: gx_asset_plane::content_hash(PNG),
+                    image_bytes: PNG.len() as u64,
+                }),
                 other => EngineReply::Refused(Refusal::NotImplemented {
                     what: format!("{other:?}"),
                 }),

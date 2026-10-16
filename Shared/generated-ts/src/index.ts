@@ -153,6 +153,8 @@ export * from "./PreparedFontBatch.js";
 export * from "./PreparedFontSource.js";
 export * from "./PresetParam.js";
 export * from "./PresetPhase.js";
+export * from "./PreviewFrame.js";
+export * from "./PreviewRequest.js";
 export * from "./ProgramState.js";
 export * from "./Provenance.js";
 export * from "./ProvenanceTool.js";

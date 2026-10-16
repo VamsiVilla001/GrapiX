@@ -91,6 +91,39 @@ pub struct ScopeDenial {
     pub held: Vec<Scope>,
 }
 
+/// `render.preview`'s input (8.9): which published revision to draw, the
+/// content hash the caller pins, and the frame of the revision's own
+/// timeline. The engine draws it through its one headless entry point (11.41),
+/// so the agent sees the frame it asked for, never whatever happened to be on
+/// Preview. The hash is optional only so that a missing pin is refused by name
+/// (`RevisionUnpinned`, invariant 61).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewRequest {
+    pub take_id: crate::TakeId,
+    pub revision: crate::Revision,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub content_hash: Option<crate::ContentHash>,
+    pub frame: u64,
+}
+
+/// `render.preview`'s structured result. The PNG itself travels beside it as
+/// an MCP image content block; `image` is its content hash, so an agent can
+/// check that the bytes it holds are the bytes the engine drew.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewFrame {
+    pub take_id: crate::TakeId,
+    pub revision: crate::Revision,
+    pub content_hash: crate::ContentHash,
+    pub frame: u64,
+    pub width: u32,
+    pub height: u32,
+    pub image: crate::ContentHash,
+    pub image_bytes: u64,
+}
+
 /// The tool surface, as data.
 ///
 /// D.2's table, one entry per tool. The `input` and `output` names are

@@ -38,7 +38,9 @@ use gx_contracts::material::{
     AlphaMode, BlendMode, CullMode, DepthMode, FitMode, MaterialBinding, MaterialDefinition,
     MaterialKind, MaterialSupport, MaterialTextureSlot, TextureFiltering, TextureWrapMode,
 };
-use gx_contracts::mcp::{CapabilitySurface, EnumSurface, ScopeDenial, ToolDescriptor, ToolEffect};
+use gx_contracts::mcp::{
+    CapabilitySurface, EnumSurface, PreviewFrame, PreviewRequest, ScopeDenial, ToolDescriptor, ToolEffect,
+};
 use gx_contracts::package::{PackageFileEntry, PackageManifest};
 use gx_contracts::authoring::{ObjectDeletion, ObjectDuplication};
 use gx_contracts::text_style::{StyleColor, StyleNumber, TextStyle};
@@ -296,6 +298,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         EnumSurface,
         CapabilitySurface,
         ScopeDenial,
+        PreviewRequest,
+        PreviewFrame,
         // gx-control-plane: intent
         TakeAt,
         TakeRequest,
@@ -621,8 +625,6 @@ fn check_advertised_types_resolve(dir: &std::path::Path) -> Result<(), Box<dyn s
         "PackagePublish",
         "PackageRef",
         "PreflightReport",
-        "PreviewFrame",
-        "PreviewRequest",
         "ProjectList",
         "ProjectRef",
         "PublishResult",

@@ -13,7 +13,7 @@ mod headless;
 mod refusal_audit;
 mod scene_plane;
 pub use editor_commands::editor_command_suite;
-pub use headless::headless_render_suite;
+pub use headless::{headless_render_suite, render_preview_suite};
 pub use refusal_audit::refusal_audit_suite;
 pub use scene_plane::{mock_product_suite, scene_plane_suite};
 

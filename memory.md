@@ -118,6 +118,71 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-10-16 — 8.9 done: render.preview draws the requested frame; 11.41 active, blocked by Program cadence; resume here
+
+**Context.** Decision Q2 put 11.41 (headless render) next. Its machinery
+already existed: `ClientRequest::Render`, `services/render-engine/worker/src/headless.rs`,
+engine and mock wiring, and conformance checks. But the tracker had it
+pending and its done-when had never been checked.
+
+**11.41 — audit against its done-when (Partial, now `active`):**
+- *One control request renders revision X at frame N to an image:*
+  **met**. Engine unit test plus 8 engine-vs-mock wire cases in
+  `conformance/src/headless.rs`.
+- *Byte-identical repeat on one machine:* **met** (unit and wire).
+- *Cross-machine tolerance defined and tested:* **met** as definition plus
+  test of the rule (`CROSS_MACHINE_TOLERANCE`, ≤1 code value on ≤0.1% of
+  pixels). No second machine was run.
+- *Engine mock refuses exactly what the engine refuses:* **met** (unknown
+  take, unpinned, wrong pin, out of range, identifier-only).
+- *Consumers use it:* the golden-frame gate now does. `tools/pixel-gate`
+  `render_reference_scene` draws frame 0 through `headless::render_png`
+  and decodes that PNG. All six reference scenes are static, so the pixels
+  are identical: `cargo run -p gx-pixel-gate -- check` is still exit 1 on
+  colour-ramp-50 alone with 39,065 / max 255, and the five rate scenes
+  pass. `render.preview` (8.9, below) now uses it too. Editor thumbnails
+  (11.65), approval previews (13.7) and Phase 13 parity are later steps.
+- *A headless render while Program runs causes no late or missed Program
+  frame:* **NOT MET, cannot be shown yet.** The conformance timed run skips
+  because Program alone misses cadence. It skips even with a **release**
+  worker (`cargo build --release` of the worker and mocks, then
+  `target/release/gx-conformance`, `agent/tmp/11.41-release-conformance*.log`):
+  136 frames, 13 late, 14 missed, then on a rerun 138 frames, 6 late, 12
+  missed, over 3 s at 1080p50 on the software Program path. Holding
+  cadence is the GPU output work (3.16–3.21; 3.21's p99 ≤ 10 ms). **Open
+  question for the user:** move this timing clause to 3.21 (and close
+  11.41, unblocking 11.65), or keep 11.41 open until GPU Program output
+  lands.
+
+**8.9 — re-verified done.** `render.preview` previously returned the latest
+media-plane frame as a raw `pixels` array and ignored the requested frame.
+It now takes `PreviewRequest {takeId, revision, contentHash?, frame}`, sends
+`ClientRequest::Render` to the engine through Playout's peer, fetches the
+PNG from the asset plane by hash, refuses `AssetHashMismatch` if the bytes
+do not hash to what the engine reported, and answers with an MCP image
+content block (`type: image`, base64 PNG, `image/png`) plus a structured
+`PreviewFrame`. Engine refusals pass through by name; unknown arguments
+refuse. `PreviewRequest` and `PreviewFrame` are now `gx-contracts` types
+(`mcp.rs`), exported by codegen and removed from codegen's
+`KNOWN_UNBACKED` ratchet (299 generated files). `gx-playout-mcp` no longer
+depends on `gx-media-plane`. **Verified:** `cargo test -p gx-playout-mcp`
+20 passed: the 2 media-plane tests were replaced by 4 covering the image
+block and requested frame, refusal pass-through and unknown-argument
+refusal, a substituted image refused, and RFC 4648 base64 vectors. New
+conformance `render_preview_suite` runs over JSON-RPC against the real
+worker on a second control connection: frame 50 decodes to a 1920×1080 PNG
+byte-equal to the asset-plane image under its hash; frame 0 is a different
+image; frame 101 refuses `RenderFrameOutOfRange` in the error's
+`StructuredRefusal`. The witness decodes base64 independently of the
+encoder.
+
+**Gate:** `npm run check` **exit 0**: boundaries OK, codegen 299 current,
+40 Node, 356 Editor, 681 Rust passed / 0 failed, conformance **380 passed /
+0 failed / 9 skipped** (+3). Tracker: 8.9 `done`, 11.41 `active`; both
+files updated together.
+
+---
+
 ## 2026-10-16 — Editor UX / direction review, Playout workflow review, and the user's eight decisions applied to the plan
 
 **Plan and documentation only; no code, and no step changed state.** Two proposal

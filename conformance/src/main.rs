@@ -10,7 +10,7 @@
 
 use gx_conformance::{
     asset_plane_suite, control_plane_delivery_suite, control_plane_fault_suite,
-    control_plane_suite, editor_command_suite, headless_render_suite, media_plane_suite,
+    control_plane_suite, editor_command_suite, headless_render_suite, media_plane_suite, render_preview_suite,
     mock_product_suite, refusal_audit_suite, scene_plane_suite, timing_plane_suite, Outcome,
     Report,
 };
@@ -288,6 +288,9 @@ fn run_against_real_engine(report: &mut Report) {
     control_plane_suite(&mut client, report);
     // No fault suite: a real engine cannot be driven into a reference loss on
     // request, which is the entire reason `FaultInjection` is a separate trait.
+    // render.preview over JSON-RPC (8.9), drawn through the headless entry
+    // point on a second control connection.
+    render_preview_suite(addr, asset_addr, report);
     // Headless render (11.41) runs last: its timed run puts a scene on Program.
     headless_render_suite(&mut client, asset_addr, report);
 }

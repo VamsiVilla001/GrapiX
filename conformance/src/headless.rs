@@ -277,3 +277,123 @@ fn timed_run(
          with {renders} headless 1080p renders {frames} frames ({late} late, {missed} missed)"
     );
 }
+
+/// `render.preview` over JSON-RPC against the real engine (8.9, through
+/// 11.41). The MCP tool asks the engine for the pinned revision at the frame
+/// the caller names and answers with a PNG image content block; the decoded
+/// bytes must be the image the engine serves under that hash, and the frame
+/// asked for must be the frame drawn.
+pub fn render_preview_suite(control: SocketAddr, asset_plane: SocketAddr, report: &mut Report) {
+    let mut scene = animated_scene();
+    scene.id = "conformance-preview".into();
+    let (take_id, revision, pin) = match publish_scene(asset_plane, scene) {
+        Ok(PublishReply::Published { take_id, revision, content_hash }) => (take_id, revision, content_hash),
+        other => {
+            report.record(PLANE, "a scene publishes for render.preview", Outcome::Fail(format!("{other:?}")));
+            return;
+        }
+    };
+    let Ok(peer) = gx_control_transport::Client::connect(control) else {
+        report.record(PLANE, "render.preview connects to the engine", Outcome::Fail("no control connection".into()));
+        return;
+    };
+    let tools = std::sync::Arc::new(gx_playout_mcp::ProgramTools {
+        playout: parking_lot::Mutex::new(gx_playout::Playout::new(peer)),
+        library: parking_lot::Mutex::new(gx_playout::PublishedLibrary::default()),
+        environment: gx_playout::OutputEnvironment { platform_certified: false },
+    });
+    let mut server = gx_mcp_server::Server::new(vec![gx_contracts::auth::Scope::Author]);
+    server.register(
+        "render.preview",
+        Box::new(gx_playout_mcp::RenderPreview { tools, images: gx_playout_mcp::AssetPlaneImages(asset_plane) }),
+    );
+    let call = |frame: u64| {
+        let line = format!(
+            "{}\n",
+            serde_json::json!({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": { "name": "render.preview", "arguments": {
+                    "takeId": take_id.0, "revision": revision.0, "contentHash": pin.0, "frame": frame,
+                }},
+            })
+        );
+        let mut output = Vec::new();
+        server.serve(std::io::Cursor::new(line), &mut output).expect("JSON-RPC round trip");
+        serde_json::from_slice::<serde_json::Value>(&output).expect("JSON-RPC response parses")
+    };
+    let image = |reply: &serde_json::Value| -> Option<(u64, ContentHash, Vec<u8>)> {
+        let block = &reply["result"]["content"][0];
+        if block["type"] != "image" || block["mimeType"] != "image/png" {
+            return None;
+        }
+        let png = base64_decode(block["data"].as_str()?)?;
+        let structured = &reply["result"]["structuredContent"];
+        Some((structured["frame"].as_u64()?, ContentHash(structured["image"].as_str()?.into()), png))
+    };
+
+    let at_50 = call(50);
+    let first = image(&at_50);
+    let served = first.as_ref().map(|(_, hash, _)| fetch_bytes(asset_plane, hash));
+    report.record(
+        PLANE,
+        "render.preview answers over JSON-RPC with the requested frame as a PNG image block",
+        expect(
+            matches!((&first, &served), (Some((50, hash, png)), Some(Ok(bytes)))
+                if *png == *bytes && gx_asset_plane::content_hash(png) == *hash
+                    && gx_render_worker::headless::decode_png(png).is_ok_and(|frame| (frame.width, frame.height) == (1920, 1080))),
+            format!("reply {at_50}"),
+        ),
+    );
+    let start = image(&call(0));
+    report.record(
+        PLANE,
+        "render.preview draws the frame asked for, not the latest Preview",
+        expect(
+            matches!((&first, &start), (Some((50, a, _)), Some((0, b, _))) if a != b),
+            format!("frame 50 {:?}, frame 0 {:?}", first.as_ref().map(|f| &f.1), start.as_ref().map(|f| &f.1)),
+        ),
+    );
+    let past = call(101);
+    report.record(
+        PLANE,
+        "render.preview refuses a frame past the timeline by name over JSON-RPC",
+        expect(
+            matches!(
+                serde_json::from_value::<gx_contracts::StructuredRefusal>(past["error"]["data"].clone()),
+                Ok(refusal) if matches!(refusal.code, Refusal::RenderFrameOutOfRange { frame: 101, .. })
+            ),
+            format!("reply {past}"),
+        ),
+    );
+}
+
+/// Standard base64 (RFC 4648 §4) decode, written here rather than shared with
+/// the tool so the witness does not trust the encoder it is checking.
+fn base64_decode(text: &str) -> Option<Vec<u8>> {
+    let value = |byte: u8| -> Option<u32> {
+        Some(match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        } as u32)
+    };
+    let bytes = text.as_bytes();
+    if bytes.len() % 4 != 0 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
+    for chunk in bytes.chunks(4) {
+        let pad = chunk.iter().rev().take_while(|&&b| b == b'=').count();
+        let mut n = 0u32;
+        for &b in &chunk[..4 - pad] {
+            n = (n << 6) | value(b)?;
+        }
+        n <<= 6 * pad as u32;
+        let decoded = [(n >> 16) as u8, (n >> 8) as u8, n as u8];
+        out.extend_from_slice(&decoded[..3 - pad]);
+    }
+    Some(out)
+}
