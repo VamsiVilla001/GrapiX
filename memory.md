@@ -118,7 +118,7 @@ not a euphemism for nearly done.
 
 ---
 
-## 2026-10-16 — 8.9 done: render.preview draws the requested frame; 11.41 active, blocked by Program cadence; resume here
+## 2026-10-16 — 8.9 and 11.41 done: render.preview draws the requested frame through the headless entry point; resume here
 
 **Context.** Decision Q2 put 11.41 (headless render) next. Its machinery
 already existed: `ClientRequest::Render`, `services/render-engine/worker/src/headless.rs`,
@@ -150,9 +150,14 @@ pending and its done-when had never been checked.
   136 frames, 13 late, 14 missed, then on a rerun 138 frames, 6 late, 12
   missed, over 3 s at 1080p50 on the software Program path. Holding
   cadence is the GPU output work (3.16–3.21; 3.21's p99 ≤ 10 ms). **Open
-  question for the user:** move this timing clause to 3.21 (and close
-  11.41, unblocking 11.65), or keep 11.41 open until GPU Program output
-  lands.
+  question, answered:** the user chose to move this timing clause to
+  **3.21** (GPU Program output, which owns Program frame timing) and close
+  11.41. 11.41's row now says so, and its consumer clause names what uses
+  it today (golden-frame gate, 8.9) and the later consumers (11.65, 13.7,
+  Phase 13). 3.21's done-when gains the clause. The conformance timed run
+  is unchanged and starts passing when Program holds cadence. **11.41 is
+  `done`** (separate commit after `eb13551`), and **11.65's Needs are now
+  met**: it is the next ready step under decision Q2.
 
 **8.9 — re-verified done.** `render.preview` previously returned the latest
 media-plane frame as a raw `pixels` array and ignored the requested frame.
