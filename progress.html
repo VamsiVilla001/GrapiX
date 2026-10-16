@@ -123,8 +123,10 @@ const TRACKS = {CON:"Contracts",PLAT:"Platform",BE:"Backend",UI:"Interface",RES:
 const KEY = "grapix-build-progress-v1";
 
 // INITIAL_STATE is the committed snapshot of verified completions, mirrored
-// from progress.json. It is the source of truth on first load; a saved
-// localStorage value or an imported progress.json overrides it. Every entry
+// from progress.json. It is the source of truth on load. A browser save or an
+// imported progress.json overrides it only until the committed snapshot
+// changes: a save records the snapshot it was made against, and a save made
+// against an older snapshot is ignored, so every commit shows. Every entry
 // here was marked done only after the work was verified by execution against
 // the build plan's "Done when" criterion — see the governance rule in
 // AGENTS.md and LLM-GOVERNANCE.md.
@@ -285,13 +287,30 @@ const INITIAL_STATE = {
 let state = Object.assign({}, INITIAL_STATE);
 let filter = null;
 let collapsed = {};
+let notice = "";
+
+// Fingerprint of the committed snapshot (FNV-1a over INITIAL_STATE). A save
+// carries it; a save made against another snapshot is stale. Before this, a
+// browser that had ever saved kept showing that save after every later
+// commit (it showed 34% from early October while the commit said 40%).
+const SNAPSHOT = (() => {
+  const text = JSON.stringify(INITIAL_STATE);
+  let h = 0x811c9dc5;
+  for(let i = 0; i < text.length; i++){ h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return (h >>> 0).toString(16);
+})();
 
 function load(){
-  try { const r = localStorage.getItem(KEY); if(r) state = JSON.parse(r); }
+  try {
+    const r = localStorage.getItem(KEY); if(!r) return;
+    const saved = JSON.parse(r);
+    if(saved && saved.snapshot === SNAPSHOT && saved.state){ state = saved.state; return; }
+    notice = "This browser's saved copy was made against an older commit, so the committed snapshot is shown instead. ";
+  }
   catch(e){ /* file:// or private mode - stay in memory */ }
 }
 function save(){
-  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch(e){}
+  try { localStorage.setItem(KEY, JSON.stringify({snapshot: SNAPSHOT, state})); } catch(e){}
 }
 function st(id){ return state[id] || "pending"; }
 
@@ -402,8 +421,8 @@ function render(){
   });
 
   const readyCount = PLAN.flatMap(p=>p.steps).filter(s => st(s.id)==="pending" && depDone(s.dep)).length;
-  document.getElementById("foot").textContent =
-    `${readyCount} steps are ready to start now — their dependencies are met. Progress is stored in this browser; use Save progress file to commit it alongside the repo.`;
+  document.getElementById("foot").textContent = notice +
+    `${readyCount} steps are ready to start now — their dependencies are met. Changes made here are stored in this browser until the next commit changes the snapshot; use Save progress file to commit them alongside the repo.`;
 }
 
 const filtersEl = document.getElementById("filters");

@@ -118,6 +118,32 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-10-16 — progress.html stopped showing new commits in a browser that had saved
+
+**Found.** The user saw progress.html stuck at 34% "from long ago" while the
+committed snapshot said 40% (102 of 254). `load()` replaced
+`INITIAL_STATE` wholesale with any `localStorage` save under
+`grapix-build-progress-v1`, so a browser that had once clicked a status chip
+or loaded a file showed that save forever. All `file://` pages share one
+origin in Chrome, so every checkout's copy showed the same stale save. The
+committed files were never wrong: `INITIAL_STATE` equals `progress.json`
+exactly (evaluated, not regex-matched; a regex also counts ids in comments).
+
+**Fixed.** A save now records `SNAPSHOT`, an FNV-1a fingerprint of
+`INITIAL_STATE`. `load()` uses a save only when its snapshot equals the
+committed one. An old-format save, or one made against another commit, is
+ignored and the footer says so. Local chip changes still persist until the
+next commit changes the snapshot. No tracker state changed.
+
+**Verified by execution** (page served from `127.0.0.1`, in-app browser):
+an old-format save with 86 done shows 40%, 102 of 254, with the notice; a
+chip click survives a reload with snapshot `571a2cc3`; the same save with
+its snapshot altered is ignored on reload. The inline script parses
+(`vm.Script`). The main checkout's copy (`GrapiX-2.0`) keeps the old
+`load()` until `agent/shared` reaches it.
+
+---
+
 ## 2026-10-16 — 8.9 and 11.41 done: render.preview draws the requested frame through the headless entry point; resume here
 
 **Context.** Decision Q2 put 11.41 (headless render) next. Its machinery
