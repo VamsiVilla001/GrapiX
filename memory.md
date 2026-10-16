@@ -132,6 +132,8 @@ No product code changed. Step 0: the CubicBezier/graphic-preview/keyframe UI dif
 
 11.22 (Needs 11.10, 11.21 done) is now `done`: `key-editing-check.cjs` and `caret.cjs` live with real pointer/keyboard input — selection reveals only that object's tracks, double-click collapses/expands a layer row, shift-click multi-select, Delete of two keys + one undo, drag move + one undo, collision refused by name, copy/paste at the playhead. Playwright note: `page.mouse.click` ignores `modifiers`; hold Shift with `keyboard.down`.
 
+11.12 (Needs 11.9 done) is now `done`: `material-manager-check.cjs` live — shared-by count and usage lookup, delete-in-use refused, relink with blast-radius prompt and one undo, save keeps bindings. Material "Edit" remains explicitly unavailable.
+
 Live-check recipe: `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9223 npm run editor`; the scratch scripts match page URL 127.0.0.1:1430 (dev), not tauri.localhost.
 
 ---
