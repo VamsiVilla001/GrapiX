@@ -118,6 +118,71 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-10-16 — 3.7 real mesh geometry verified; local colour baseline corrected (Codex, mission 1)
+
+**Implemented — 3.7's reopened geometry criteria.** GLB primitives now load
+their real float positions and unsigned 8/16/32-bit indices from the supplied
+content-addressed bytes. Strided positions, nonindexed triangles and multiple
+primitives are covered; each primitive rebases its indices and retains its
+material element. Bounds, finite coordinates and complete/in-range triangle
+indices are checked before byte access. Unsupported external/sparse buffers,
+non-triangle modes, morphs, animation, skins, node transforms/instances and
+ambiguous scene ownership refuse with the model object and property in the
+detail rather than returning empty geometry or silently losing semantics.
+
+Sphere and torus use triangulated grids: 153 vertices each, 224 nondegenerate
+sphere triangles (pole degeneracies omitted), 256 torus triangles. Rendered
+silhouette tests prove the sphere's filled centre and torus's open hole;
+separate glTF triangles prove red/blue material assignment stays isolated.
+The existing per-object/per-face/per-element assignment and publication
+refusal tests also pass. **This does not enable production 3D drawing:**
+the shared drawability rule still refuses meshes at publication by object
+name, with owner 11.48; cameras/lights/depth remain that renderer's work.
+3.13 was already done, with its hunks committed in ca63a6a and final inventory
+in 1e28f7a; no prior work was recreated.
+
+**Partial — 4.5's local baseline failure.** The pixel gate initially reproduced
+39,065 differing pixels / maximum delta 255 for colour-ramp-50. Authored-value
+integration checks independently prove red at opacity .1 yields alpha 26,
+white .2 then red .1 yields RGBA [255,210,210,71] in the fixture's legacy linear
+working space, the vector retains its authored colour and untouched areas
+remain transparent. Visual review confirms real Inter glyph outlines replace
+the old placeholder caption. Regenerated only colour-ramp-50.png; all five
+rate PNGs remain byte-identical. The pre-existing untracked history directory
+matches all six old references byte-for-byte and is now committed for recovery.
+The reason and sample values are in tests/baselines/README.md. No threshold
+changed; unsupported image/material/mesh content stays in refusal fixtures.
+4.5 remains active: no macOS or cross-machine equality was run.
+
+**Verified by execution on stable a5a31eb plus this change:**
+
+- `cargo test -p gx-render-worker`: **95 unit + 1 colour-reference integration
+  tests passed**, 0 failed. First sandbox run hit the recovery journal's
+  application-data write permission; the approved-account rerun passed.
+- `cargo run -p gx-pixel-gate -- check`: **exit 0** after documented capture;
+  prior failure is in agent/tmp/mission1-pixel-before.log and the passing run
+  in mission1-pixel-after.log.
+- `npm run check`: **exit 0**, boundaries OK, **302 generated files current**,
+  type checks OK, **40 Node / 357 Editor / 691 Rust tests passed**,
+  **385 conformance passed / 0 failed / 9 skipped**. The full run was repeated
+  after concurrent contract edits were committed and Claude acknowledged a
+  source/gate pause; agent/tmp/mission1-full-check.log is the stable run.
+  Engine-host remains excluded by the existing default gate; the protected
+  transport fixture-token rejection and nine named skips are not passes.
+- `git diff --check` passes for the changed renderer, baselines and refusal
+  documentation. Both tracker snapshots move only 3.7 from active to done.
+
+**Inputs / remaining gates.** The user supplied
+`C:/Users/CG/Downloads/link.txt`, pointing at Figma design
+`N8W7SjKPdQH9sDXXHIq6Br`, Rising Star Invitational, Broadcast page `0:1`.
+Connector metadata access succeeded and is retained in
+agent/tmp/mission1-import-corpus/figma-metadata.xml. Import/fidelity work is
+not yet verified. The user explicitly chose to keep the Adobe live-kit and
+macOS font checks as external gates; 2.8 stays active. Its local DirectUrl
+resolution gap is the next renderer/font subtask; no 11.13 unblock is claimed.
+
+---
+
 ## 2026-10-16 — 11.8 done (Claude, Panchayati mission 1); Step 0 re-verified
 
 No product code changed. Step 0: the CubicBezier/graphic-preview/keyframe UI diff was already committed in ca63a6a; `npm run check` exit 0, `build:web` ok, and live Tauri/WebView2 (dev, CDP 9223) re-checks of 11.9/11.21/11.63/11.64 passed: keyframe-workflow-check, scene-manager-check (two graphics, undo across switches, search) and, after restarting the app, keyframe-reopen-check.

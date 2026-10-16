@@ -13,12 +13,12 @@
 
 use std::collections::{HashMap, HashSet};
 
+use gx_contracts::color::ColorValue;
 use gx_contracts::material::{MaterialDefinition, MaterialKind, MaterialSupport};
 use gx_contracts::scene::{
     AssetKind, CameraKind, MeshObject, MeshPrimitiveKind, SceneDocument, SceneObject,
     SlabProperties,
 };
-use gx_contracts::color::ColorValue;
 use gx_contracts::{ContentHash, Refusal};
 
 use crate::colour_pipeline::WorkingRgba;
@@ -182,12 +182,12 @@ fn resolve_materials(
     required
         .into_iter()
         .map(|element| {
-            let binding = slots
-                .and_then(|slots| slots.get(&element))
-                .ok_or_else(|| Refusal::MeshMaterialUnassigned {
+            let binding = slots.and_then(|slots| slots.get(&element)).ok_or_else(|| {
+                Refusal::MeshMaterialUnassigned {
                     object: mesh.base.id.clone(),
                     element: element.clone(),
-                })?;
+                }
+            })?;
             if !material_by_id.contains_key(binding.material_id.as_str()) {
                 return Err(Refusal::SceneMaterialUnknown {
                     material_id: binding.material_id.clone(),
@@ -229,26 +229,31 @@ fn model_geometry(
             object: mesh.base.id.clone(),
         });
     }
-    let hash = asset.checksum.as_ref().ok_or_else(|| Refusal::AssetMissing {
-        hash: ContentHash(format!("{} (no content hash yet)", asset.asset_id)),
-    })?;
+    let hash = asset
+        .checksum
+        .as_ref()
+        .ok_or_else(|| Refusal::AssetMissing {
+            hash: ContentHash(format!("{} (no content hash yet)", asset.asset_id)),
+        })?;
     if !available.contains(hash) {
         return Err(Refusal::AssetMissing { hash: hash.clone() });
     }
     let bytes = asset_bytes
         .get(hash)
         .ok_or_else(|| Refusal::AssetMissing { hash: hash.clone() })?;
-    let gltf = gltf::Gltf::from_slice(bytes).map_err(|error| Refusal::MeshModelInvalid {
+    let invalid = |property: &str, detail: &str| Refusal::MeshModelInvalid {
         hash: hash.clone(),
-        detail: error.to_string(),
-    })?;
+        detail: format!("object {}: {property}: {detail}", mesh.base.id),
+    };
+    let gltf = gltf::Gltf::from_slice(bytes)
+        .map_err(|error| invalid("modelAssetId/glTF", &error.to_string()))?;
 
     for buffer in gltf.document.buffers() {
         if matches!(buffer.source(), gltf::buffer::Source::Uri(_)) {
-            return Err(Refusal::MeshModelInvalid {
-                hash: hash.clone(),
-                detail: "external glTF buffers are not content-addressed scene assets".to_string(),
-            });
+            return Err(invalid(
+                "buffers.uri",
+                "external glTF buffers are not content-addressed scene assets",
+            ));
         }
     }
 
@@ -257,18 +262,18 @@ fn model_geometry(
         .materials()
         .map(|material| {
             material.name().map(str::to_owned).ok_or_else(|| {
-                Refusal::MeshModelInvalid {
-                    hash: hash.clone(),
-                    detail: "a glTF material has no name for element assignment".to_string(),
-                }
+                invalid(
+                    "materials.name",
+                    "a glTF material has no name for element assignment",
+                )
             })
         })
         .collect::<Result<_, _>>()?;
     if imported.len() != imported.iter().collect::<HashSet<_>>().len() {
-        return Err(Refusal::MeshModelInvalid {
-            hash: hash.clone(),
-            detail: "glTF material element names must be unique".to_string(),
-        });
+        return Err(invalid(
+            "materials.name",
+            "glTF material element names must be unique",
+        ));
     }
     let declared = mesh.material_elements.clone().unwrap_or_default();
     if declared != imported {
@@ -279,10 +284,225 @@ fn model_geometry(
         });
     }
 
+    let blob = gltf
+        .blob
+        .as_deref()
+        .ok_or_else(|| invalid("buffers", "GLB binary payload is missing"))?;
+    for buffer in gltf.document.buffers() {
+        if buffer.length() > blob.len() {
+            return Err(invalid("buffers.byteLength", "binary payload is truncated"));
+        }
+    }
+    // Accessor readers assume valid byte ranges. Check the exact view,
+    // stride and count before reading so malformed assets refuse, not panic.
+    let read_accessor =
+        |accessor: gltf::Accessor<'_>, size: usize| -> Result<Vec<&[u8]>, Refusal> {
+            if accessor.sparse().is_some() {
+                return Err(invalid(
+                    "accessors.sparse",
+                    "sparse accessors are not supported",
+                ));
+            }
+            let view = accessor
+                .view()
+                .ok_or_else(|| invalid("accessors.bufferView", "a buffer view is required"))?;
+            let stride = view.stride().unwrap_or(size);
+            if stride < size || accessor.count() == 0 {
+                return Err(invalid(
+                    "accessors.count/byteStride",
+                    "empty or overlapping accessor",
+                ));
+            }
+            let view_end = view
+                .offset()
+                .checked_add(view.length())
+                .filter(|end| *end <= view.buffer().length() && *end <= blob.len())
+                .ok_or_else(|| invalid("bufferViews.byteLength", "view exceeds its buffer"))?;
+            let start = view
+                .offset()
+                .checked_add(accessor.offset())
+                .ok_or_else(|| invalid("accessors.byteOffset", "offset overflows"))?;
+            let end = (accessor.count() - 1)
+                .checked_mul(stride)
+                .and_then(|offset| start.checked_add(offset))
+                .and_then(|offset| offset.checked_add(size))
+                .filter(|end| *end <= view_end)
+                .ok_or_else(|| invalid("accessors.count", "accessor exceeds its buffer view"))?;
+            Ok(blob[start..end]
+                .chunks(stride)
+                .map(|chunk| &chunk[..size])
+                .collect())
+        };
+    // Until the 3D renderer consumes a glTF scene graph, refuse authored
+    // transforms/instances rather than silently merging different geometry.
+    if gltf.document.animations().next().is_some() || gltf.document.skins().next().is_some() {
+        return Err(invalid(
+            "animations/skins",
+            "animated and skinned models are not supported",
+        ));
+    }
+    let identity = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ];
+    let mut node_meshes = HashSet::new();
+    for node in gltf.document.nodes() {
+        if node.transform().matrix() != identity || node.weights().is_some() {
+            return Err(invalid(
+                &format!("nodes[{}].transform/weights", node.index()),
+                "node transforms and morph weights are not supported",
+            ));
+        }
+        if let Some(node_mesh) = node.mesh() {
+            if !node_meshes.insert(node_mesh.index()) {
+                return Err(invalid(
+                    "nodes.mesh",
+                    "repeated mesh instances are not supported",
+                ));
+            }
+        }
+    }
+    // Loading mesh payloads without a scene is useful for asset inspection.
+    // With nodes present, require every mesh to have exactly one owner.
+    if gltf.document.nodes().next().is_some() && node_meshes.len() != gltf.document.meshes().len() {
+        return Err(invalid(
+            "nodes.mesh",
+            "unreferenced meshes are not supported",
+        ));
+    }
+    if gltf.document.scenes().len() > 1 {
+        return Err(invalid(
+            "scenes",
+            "multiple scene selections are not supported",
+        ));
+    }
+    if let Some(scene) = gltf.document.scenes().next() {
+        let mut pending: Vec<_> = scene.nodes().collect();
+        let mut visited = HashSet::new();
+        let mut reachable_meshes = HashSet::new();
+        while let Some(node) = pending.pop() {
+            if !visited.insert(node.index()) {
+                return Err(invalid(
+                    "nodes.children",
+                    "cycles or repeated nodes are not supported",
+                ));
+            }
+            if let Some(node_mesh) = node.mesh() {
+                reachable_meshes.insert(node_mesh.index());
+            }
+            pending.extend(node.children());
+        }
+        if reachable_meshes != node_meshes {
+            return Err(invalid(
+                "scenes.nodes",
+                "mesh nodes outside the selected scene are not supported",
+            ));
+        }
+    }
+    let mut vertices = Vec::new();
     let mut parts = Vec::new();
     let mut required = Vec::new();
     for imported_mesh in gltf.document.meshes() {
         for primitive in imported_mesh.primitives() {
+            let property = format!(
+                "meshes[{}].primitives[{}]",
+                imported_mesh.index(),
+                primitive.index()
+            );
+            if primitive.mode() != gltf::mesh::Mode::Triangles
+                || primitive.morph_targets().next().is_some()
+            {
+                return Err(invalid(
+                    &property,
+                    "only static TRIANGLES primitives are supported",
+                ));
+            }
+            let positions = primitive.get(&gltf::Semantic::Positions).ok_or_else(|| {
+                invalid(
+                    &format!("{property}.attributes.POSITION"),
+                    "positions are required",
+                )
+            })?;
+            if positions.data_type() != gltf::accessor::DataType::F32
+                || positions.dimensions() != gltf::accessor::Dimensions::Vec3
+                || positions.normalized()
+            {
+                return Err(invalid(
+                    &format!("{property}.attributes.POSITION"),
+                    "positions must be unnormalized float VEC3",
+                ));
+            }
+            let local_vertices: Vec<[f64; 3]> = read_accessor(positions, 12)?
+                .into_iter()
+                .map(|bytes| {
+                    std::array::from_fn(|axis| {
+                        f32::from_le_bytes(bytes[axis * 4..axis * 4 + 4].try_into().unwrap()) as f64
+                    })
+                })
+                .collect();
+            if local_vertices
+                .iter()
+                .flatten()
+                .any(|value| !value.is_finite())
+            {
+                return Err(invalid(
+                    &format!("{property}.attributes.POSITION"),
+                    "positions must be finite",
+                ));
+            }
+            let indices: Vec<u32> = if let Some(accessor) = primitive.indices() {
+                if accessor.dimensions() != gltf::accessor::Dimensions::Scalar
+                    || accessor.normalized()
+                {
+                    return Err(invalid(
+                        &format!("{property}.indices"),
+                        "indices must be unsigned scalar integers",
+                    ));
+                }
+                let size = match accessor.data_type() {
+                    gltf::accessor::DataType::U8 => 1,
+                    gltf::accessor::DataType::U16 => 2,
+                    gltf::accessor::DataType::U32 => 4,
+                    _ => {
+                        return Err(invalid(
+                            &format!("{property}.indices"),
+                            "indices must be unsigned integers",
+                        ))
+                    }
+                };
+                read_accessor(accessor, size)?
+                    .into_iter()
+                    .map(|bytes| match size {
+                        1 => u32::from(bytes[0]),
+                        2 => u32::from(u16::from_le_bytes(bytes.try_into().unwrap())),
+                        _ => u32::from_le_bytes(bytes.try_into().unwrap()),
+                    })
+                    .collect()
+            } else {
+                (0..u32::try_from(local_vertices.len())
+                    .map_err(|_| invalid(&property, "too many vertices"))?)
+                    .collect()
+            };
+            if indices.is_empty()
+                || indices.len() % 3 != 0
+                || indices.iter().any(|i| *i as usize >= local_vertices.len())
+            {
+                return Err(invalid(
+                    &format!("{property}.indices"),
+                    "triangle indices must be complete and in range",
+                ));
+            }
+            let offset = u32::try_from(vertices.len())
+                .map_err(|_| invalid(&property, "too many vertices"))?;
+            offset
+                .checked_add(
+                    u32::try_from(local_vertices.len())
+                        .map_err(|_| invalid(&property, "too many vertices"))?,
+                )
+                .ok_or_else(|| invalid(&property, "vertex indices overflow"))?;
+            vertices.extend(local_vertices);
             let Some(index) = primitive.material().index() else {
                 return Err(Refusal::MeshMaterialUnassigned {
                     object: mesh.base.id.clone(),
@@ -301,21 +521,24 @@ fn model_geometry(
             }
             parts.push(GeometryPart {
                 element,
-                triangles: Vec::new(),
+                triangles: indices
+                    .chunks_exact(3)
+                    .map(|triangle| {
+                        [
+                            triangle[0] + offset,
+                            triangle[1] + offset,
+                            triangle[2] + offset,
+                        ]
+                    })
+                    .collect(),
             });
         }
     }
     if parts.is_empty() {
-        return Err(Refusal::MeshModelInvalid {
-            hash: hash.clone(),
-            detail: "glTF model has no primitives".to_string(),
-        });
+        return Err(invalid("meshes.primitives", "glTF model has no primitives"));
     }
     Ok((
-        PreparedGeometry {
-            vertices: Vec::new(),
-            parts,
-        },
+        PreparedGeometry { vertices, parts },
         required,
         MaterialAssignmentScope::Element,
     ))
@@ -326,9 +549,9 @@ fn primitive_geometry(
 ) -> Result<(PreparedGeometry, Vec<String>, MaterialAssignmentScope), Refusal> {
     match mesh.mesh_kind {
         MeshPrimitiveKind::Cube => Ok(cube_geometry()),
-        MeshPrimitiveKind::Sphere => Ok(surface_geometry(sphere_geometry())),
+        MeshPrimitiveKind::Sphere => Ok(surface_geometry(sphere_geometry(), 8, 16, true)),
         MeshPrimitiveKind::Cylinder => Ok(cylinder_geometry()),
-        MeshPrimitiveKind::Torus => Ok(surface_geometry(torus_geometry())),
+        MeshPrimitiveKind::Torus => Ok(surface_geometry(torus_geometry(), 16, 8, false)),
         MeshPrimitiveKind::Slab => Ok(slab_geometry(mesh, mesh.slab.unwrap_or_default())),
         MeshPrimitiveKind::Model => unreachable!("models are prepared by model_geometry"),
     }
@@ -336,13 +559,22 @@ fn primitive_geometry(
 
 fn cube_geometry() -> (PreparedGeometry, Vec<String>, MaterialAssignmentScope) {
     let vertices = vec![
-        [-0.5, -0.5, -0.5], [0.5, -0.5, -0.5], [0.5, 0.5, -0.5], [-0.5, 0.5, -0.5],
-        [-0.5, -0.5, 0.5], [0.5, -0.5, 0.5], [0.5, 0.5, 0.5], [-0.5, 0.5, 0.5],
+        [-0.5, -0.5, -0.5],
+        [0.5, -0.5, -0.5],
+        [0.5, 0.5, -0.5],
+        [-0.5, 0.5, -0.5],
+        [-0.5, -0.5, 0.5],
+        [0.5, -0.5, 0.5],
+        [0.5, 0.5, 0.5],
+        [-0.5, 0.5, 0.5],
     ];
     let faces = [
-        ("front", [4, 5, 6, 7]), ("back", [1, 0, 3, 2]),
-        ("left", [0, 4, 7, 3]), ("right", [5, 1, 2, 6]),
-        ("top", [3, 7, 6, 2]), ("bottom", [0, 1, 5, 4]),
+        ("front", [4, 5, 6, 7]),
+        ("back", [1, 0, 3, 2]),
+        ("left", [0, 4, 7, 3]),
+        ("right", [5, 1, 2, 6]),
+        ("top", [3, 7, 6, 2]),
+        ("bottom", [0, 1, 5, 4]),
     ];
     let parts = faces
         .iter()
@@ -358,14 +590,34 @@ fn cube_geometry() -> (PreparedGeometry, Vec<String>, MaterialAssignmentScope) {
     )
 }
 
-fn surface_geometry(vertices: Vec<[f64; 3]>) -> (PreparedGeometry, Vec<String>, MaterialAssignmentScope) {
-    let triangles = (1..vertices.len().saturating_sub(1))
-        .map(|index| [0, index as u32, (index + 1) as u32])
-        .collect();
+fn surface_geometry(
+    vertices: Vec<[f64; 3]>,
+    rows: u32,
+    columns: u32,
+    sphere: bool,
+) -> (PreparedGeometry, Vec<String>, MaterialAssignmentScope) {
+    let mut triangles = Vec::new();
+    for row in 0..rows {
+        for column in 0..columns {
+            let a = row * (columns + 1) + column;
+            let b = a + columns + 1;
+            // At sphere poles one triangle in each quad would have zero
+            // area. Keep only the triangle with two vertices on the ring.
+            if !sphere || row != 0 {
+                triangles.push([a, a + 1, b]);
+            }
+            if !sphere || row != rows - 1 {
+                triangles.push([a + 1, b + 1, b]);
+            }
+        }
+    }
     (
         PreparedGeometry {
             vertices,
-            parts: vec![GeometryPart { element: "object".to_string(), triangles }],
+            parts: vec![GeometryPart {
+                element: "object".to_string(),
+                triangles,
+            }],
         },
         vec!["object".to_string()],
         MaterialAssignmentScope::Object,
@@ -380,7 +632,11 @@ fn sphere_geometry() -> Vec<[f64; 3]> {
             let theta = std::f64::consts::PI * ring as f64 / rings as f64;
             (0..=segments).map(move |segment| {
                 let phi = std::f64::consts::TAU * segment as f64 / segments as f64;
-                [theta.sin() * phi.cos() * 0.5, theta.cos() * 0.5, theta.sin() * phi.sin() * 0.5]
+                [
+                    theta.sin() * phi.cos() * 0.5,
+                    theta.cos() * 0.5,
+                    theta.sin() * phi.sin() * 0.5,
+                ]
             })
         })
         .collect()
@@ -411,7 +667,13 @@ fn cylinder_geometry() -> (PreparedGeometry, Vec<String>, MaterialAssignmentScop
         }
     }
     let top = (0..segments)
-        .map(|segment| [0, 2 + segments + segment, 2 + segments + (segment + 1) % segments])
+        .map(|segment| {
+            [
+                0,
+                2 + segments + segment,
+                2 + segments + (segment + 1) % segments,
+            ]
+        })
         .collect();
     let bottom = (0..segments)
         .map(|segment| [1, 2 + (segment + 1) % segments, 2 + segment])
@@ -419,7 +681,10 @@ fn cylinder_geometry() -> (PreparedGeometry, Vec<String>, MaterialAssignmentScop
     let side = (0..segments)
         .flat_map(|segment| {
             let next = (segment + 1) % segments;
-            [[2 + segment, 2 + next, 2 + segments + next], [2 + segment, 2 + segments + next, 2 + segments + segment]]
+            [
+                [2 + segment, 2 + next, 2 + segments + next],
+                [2 + segment, 2 + segments + next, 2 + segments + segment],
+            ]
         })
         .collect();
     let names = ["top", "bottom", "side"];
@@ -427,9 +692,18 @@ fn cylinder_geometry() -> (PreparedGeometry, Vec<String>, MaterialAssignmentScop
         PreparedGeometry {
             vertices,
             parts: vec![
-                GeometryPart { element: "top".to_string(), triangles: top },
-                GeometryPart { element: "bottom".to_string(), triangles: bottom },
-                GeometryPart { element: "side".to_string(), triangles: side },
+                GeometryPart {
+                    element: "top".to_string(),
+                    triangles: top,
+                },
+                GeometryPart {
+                    element: "bottom".to_string(),
+                    triangles: bottom,
+                },
+                GeometryPart {
+                    element: "side".to_string(),
+                    triangles: side,
+                },
             ],
         },
         names.iter().map(|name| (*name).to_string()).collect(),
@@ -444,7 +718,13 @@ fn slab_geometry(
     let width = mesh.base.width;
     let height = mesh.base.height;
     let half_depth = mesh.depth / 2.0;
-    let outer = rounded_outline(width, height, slab.corner_radius, slab.corner_segments, slab.skew);
+    let outer = rounded_outline(
+        width,
+        height,
+        slab.corner_radius,
+        slab.corner_segments,
+        slab.skew,
+    );
     let inset = rounded_outline(
         width - 2.0 * slab.front_bevel.size,
         height - 2.0 * slab.front_bevel.size,
@@ -460,17 +740,32 @@ fn slab_geometry(
     let front_center = push_vertex(&mut vertices, [slab.skew, 0.0, half_depth]);
     let back_center = push_vertex(&mut vertices, [0.0, 0.0, -half_depth]);
     let mut parts = vec![
-        GeometryPart { element: "front".to_string(), triangles: fan(front_center, &front_inner) },
-        GeometryPart { element: "back".to_string(), triangles: fan(back_center, &back_inner) },
-        GeometryPart { element: "side".to_string(), triangles: bridge(&front_outer, &back_outer) },
+        GeometryPart {
+            element: "front".to_string(),
+            triangles: fan(front_center, &front_inner),
+        },
+        GeometryPart {
+            element: "back".to_string(),
+            triangles: fan(back_center, &back_inner),
+        },
+        GeometryPart {
+            element: "side".to_string(),
+            triangles: bridge(&front_outer, &back_outer),
+        },
     ];
     let mut required = vec!["front".to_string(), "back".to_string(), "side".to_string()];
     if slab.front_bevel.enabled {
-        parts.push(GeometryPart { element: "frontBevel".to_string(), triangles: bridge(&front_outer, &front_inner) });
+        parts.push(GeometryPart {
+            element: "frontBevel".to_string(),
+            triangles: bridge(&front_outer, &front_inner),
+        });
         required.push("frontBevel".to_string());
     }
     if slab.back_bevel.enabled {
-        parts.push(GeometryPart { element: "backBevel".to_string(), triangles: bridge(&back_inner, &back_outer) });
+        parts.push(GeometryPart {
+            element: "backBevel".to_string(),
+            triangles: bridge(&back_inner, &back_outer),
+        });
         required.push("backBevel".to_string());
     }
     (
@@ -480,14 +775,35 @@ fn slab_geometry(
     )
 }
 
-fn rounded_outline(width: f64, height: f64, radius: f64, segments: u32, skew: f64) -> Vec<[f64; 2]> {
-    let radius = radius.min(width.abs() / 2.0).min(height.abs() / 2.0).max(0.0);
+fn rounded_outline(
+    width: f64,
+    height: f64,
+    radius: f64,
+    segments: u32,
+    skew: f64,
+) -> Vec<[f64; 2]> {
+    let radius = radius
+        .min(width.abs() / 2.0)
+        .min(height.abs() / 2.0)
+        .max(0.0);
     let segments = segments.max(1);
     let centers = [
         (width / 2.0 - radius, height / 2.0 - radius, 0.0),
-        (-width / 2.0 + radius, height / 2.0 - radius, std::f64::consts::FRAC_PI_2),
-        (-width / 2.0 + radius, -height / 2.0 + radius, std::f64::consts::PI),
-        (width / 2.0 - radius, -height / 2.0 + radius, std::f64::consts::FRAC_PI_2 * 3.0),
+        (
+            -width / 2.0 + radius,
+            height / 2.0 - radius,
+            std::f64::consts::FRAC_PI_2,
+        ),
+        (
+            -width / 2.0 + radius,
+            -height / 2.0 + radius,
+            std::f64::consts::PI,
+        ),
+        (
+            width / 2.0 - radius,
+            -height / 2.0 + radius,
+            std::f64::consts::FRAC_PI_2 * 3.0,
+        ),
     ];
     centers
         .into_iter()
@@ -495,14 +811,20 @@ fn rounded_outline(width: f64, height: f64, radius: f64, segments: u32, skew: f6
             (0..segments).map(move |segment| {
                 let angle = start + std::f64::consts::FRAC_PI_2 * segment as f64 / segments as f64;
                 let y = cy + radius * angle.sin();
-                [cx + radius * angle.cos() + skew * ((y + height / 2.0) / height), y]
+                [
+                    cx + radius * angle.cos() + skew * ((y + height / 2.0) / height),
+                    y,
+                ]
             })
         })
         .collect()
 }
 
 fn push_outline(vertices: &mut Vec<[f64; 3]>, outline: &[[f64; 2]], z: f64) -> Vec<u32> {
-    outline.iter().map(|point| push_vertex(vertices, [point[0], point[1], z])).collect()
+    outline
+        .iter()
+        .map(|point| push_vertex(vertices, [point[0], point[1], z]))
+        .collect()
 }
 
 fn push_vertex(vertices: &mut Vec<[f64; 3]>, vertex: [f64; 3]) -> u32 {
@@ -512,14 +834,24 @@ fn push_vertex(vertices: &mut Vec<[f64; 3]>, vertex: [f64; 3]) -> u32 {
 }
 
 fn fan(center: u32, ring: &[u32]) -> Vec<[u32; 3]> {
-    ring.iter().enumerate().map(|(index, current)| [center, *current, ring[(index + 1) % ring.len()]]).collect()
+    ring.iter()
+        .enumerate()
+        .map(|(index, current)| [center, *current, ring[(index + 1) % ring.len()]])
+        .collect()
 }
 
 fn bridge(first: &[u32], second: &[u32]) -> Vec<[u32; 3]> {
-    first.iter().enumerate().flat_map(|(index, current)| {
-        let next = (index + 1) % first.len();
-        [[*current, first[next], second[next]], [*current, second[next], second[index]]]
-    }).collect()
+    first
+        .iter()
+        .enumerate()
+        .flat_map(|(index, current)| {
+            let next = (index + 1) % first.len();
+            [
+                [*current, first[next], second[next]],
+                [*current, second[next], second[index]],
+            ]
+        })
+        .collect()
 }
 
 /// Rasterise prepared meshes onto the linear surface using the scene's
@@ -595,12 +927,7 @@ pub fn rasterise_meshes(
                 ) else {
                     continue;
                 };
-                rasterise_mesh_triangle(
-                    surface,
-                    *va, *vb, *vc,
-                    resolved,
-                    fill,
-                );
+                rasterise_mesh_triangle(surface, *va, *vb, *vc, resolved, fill);
             }
         }
     }
@@ -625,7 +952,10 @@ fn rasterise_mesh_triangle(
     let transform = |v: [f64; 3]| -> (f64, f64) {
         let lx = v[0] * resolved.scale_x;
         let ly = v[1] * resolved.scale_y;
-        (lx * cos - ly * sin + resolved.x, lx * sin + ly * cos + resolved.y)
+        (
+            lx * cos - ly * sin + resolved.x,
+            lx * sin + ly * cos + resolved.y,
+        )
     };
     let (ax, ay) = transform(va);
     let (bx, by) = transform(vb);
@@ -666,12 +996,27 @@ mod tests {
     fn document(objects: Vec<SceneObject>, materials: Vec<MaterialDefinition>) -> SceneDocument {
         SceneDocument {
             working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
-            id: "scene".to_string(), name: "mesh".to_string(), version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
-            revision: Some(Revision(1)), active_camera_id: None,
-            canvas: SceneCanvas { width: 1920, height: 1080, frame_rate: RationalRate::P50 },
-            timeline: SceneTimeline { duration_frames: 1, ..Default::default() }, data_context: Default::default(),
-            assets: Vec::new(), fonts: Vec::new(), materials,
-            controls: Vec::new(), text_styles: Vec::new(), objects,
+            id: "scene".to_string(),
+            name: "mesh".to_string(),
+            version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
+            revision: Some(Revision(1)),
+            active_camera_id: None,
+            canvas: SceneCanvas {
+                width: 1920,
+                height: 1080,
+                frame_rate: RationalRate::P50,
+            },
+            timeline: SceneTimeline {
+                duration_frames: 1,
+                ..Default::default()
+            },
+            data_context: Default::default(),
+            assets: Vec::new(),
+            fonts: Vec::new(),
+            materials,
+            controls: Vec::new(),
+            text_styles: Vec::new(),
+            objects,
         }
     }
 
@@ -697,10 +1042,18 @@ mod tests {
 
     fn material(id: &str) -> MaterialDefinition {
         MaterialDefinition {
-            material_id: id.to_string(), name: id.to_string(), kind: MaterialKind::Unlit,
-            color: ColorValue::opaque_white(), opacity: 1.0, blend_mode: Default::default(),
-            alpha_mode: Default::default(), cull_mode: Default::default(), depth_mode: Default::default(),
-            double_sided: false, textures: Vec::new(), shader_id: None,
+            material_id: id.to_string(),
+            name: id.to_string(),
+            kind: MaterialKind::Unlit,
+            color: ColorValue::opaque_white(),
+            opacity: 1.0,
+            blend_mode: Default::default(),
+            alpha_mode: Default::default(),
+            cull_mode: Default::default(),
+            depth_mode: Default::default(),
+            double_sided: false,
+            textures: Vec::new(),
+            shader_id: None,
         }
     }
 
@@ -708,29 +1061,90 @@ mod tests {
         let mut base = ObjectBase::new("mesh", "mesh");
         base.width = 100.0;
         base.height = 80.0;
-        base.material_slots = Some(slots.iter().map(|(slot, id)| ((*slot).to_string(), MaterialBinding::new(*id))).collect::<BTreeMap<_, _>>());
-        MeshObject { base, mesh_kind: kind, depth: 20.0, slab: None, model_asset_id: None, material_elements: None, anchor_3d: None, clip_name: None, clip_index: None, time_scale: None, frame_offset: None, animation_loop: false }
+        base.material_slots = Some(
+            slots
+                .iter()
+                .map(|(slot, id)| ((*slot).to_string(), MaterialBinding::new(*id)))
+                .collect::<BTreeMap<_, _>>(),
+        );
+        MeshObject {
+            base,
+            mesh_kind: kind,
+            depth: 20.0,
+            slab: None,
+            model_asset_id: None,
+            material_elements: None,
+            anchor_3d: None,
+            clip_name: None,
+            clip_index: None,
+            time_scale: None,
+            frame_offset: None,
+            animation_loop: false,
+        }
     }
 
     #[test]
     fn object_face_and_element_assignments_resolve_once_per_publish() {
-        let object_mesh = SceneObject::Mesh(mesh(MeshPrimitiveKind::Sphere, &[("object", "mat")])) ;
-        let cube_slots = [("front", "mat"), ("back", "mat"), ("left", "mat"), ("right", "mat"), ("top", "mat"), ("bottom", "mat")];
+        let object_mesh = SceneObject::Mesh(mesh(MeshPrimitiveKind::Sphere, &[("object", "mat")]));
+        let cube_slots = [
+            ("front", "mat"),
+            ("back", "mat"),
+            ("left", "mat"),
+            ("right", "mat"),
+            ("top", "mat"),
+            ("bottom", "mat"),
+        ];
         let mut face_mesh = mesh(MeshPrimitiveKind::Cube, &cube_slots);
         face_mesh.base.id = "cube".to_string();
 
         let gltf_bytes = two_material_glb();
         let hash = ContentHash("model-content".to_string());
-        let mut element_mesh = mesh(MeshPrimitiveKind::Model, &[("body", "mat"), ("trim", "mat")]);
+        let mut element_mesh = mesh(
+            MeshPrimitiveKind::Model,
+            &[("body", "mat"), ("trim", "mat")],
+        );
         element_mesh.base.id = "model".to_string();
         element_mesh.model_asset_id = Some("model".to_string());
         element_mesh.material_elements = Some(vec!["body".to_string(), "trim".to_string()]);
-        let mut scene = document(vec![object_mesh, SceneObject::Mesh(face_mesh), SceneObject::Mesh(element_mesh)], vec![material("mat")]);
-        scene.assets.push(gx_contracts::scene::AssetLibraryItem { asset_id: "model".to_string(), name: "model".to_string(), kind: AssetKind::Model, path: "must-not-be-read.gltf".to_string(), checksum: Some(hash.clone()), mime_type: Some("model/gltf+json".to_string()), size_bytes: None, status: None, provenance: Default::default() });
-        let prepared = prepare_meshes(&scene, &HashSet::from([hash.clone()]), &AssetBytes::from([(hash, gltf_bytes)]), &MaterialSupport::fixed_function()).expect("all three explicit assignment levels prepare");
-        assert_eq!(prepared.meshes[0].materials[0].scope, MaterialAssignmentScope::Object);
+        let mut scene = document(
+            vec![
+                object_mesh,
+                SceneObject::Mesh(face_mesh),
+                SceneObject::Mesh(element_mesh),
+            ],
+            vec![material("mat")],
+        );
+        scene.assets.push(gx_contracts::scene::AssetLibraryItem {
+            asset_id: "model".to_string(),
+            name: "model".to_string(),
+            kind: AssetKind::Model,
+            path: "must-not-be-read.gltf".to_string(),
+            checksum: Some(hash.clone()),
+            mime_type: Some("model/gltf+json".to_string()),
+            size_bytes: None,
+            status: None,
+            provenance: Default::default(),
+        });
+        let prepared = prepare_meshes(
+            &scene,
+            &HashSet::from([hash.clone()]),
+            &AssetBytes::from([(hash, gltf_bytes)]),
+            &MaterialSupport::fixed_function(),
+        )
+        .expect("all three explicit assignment levels prepare");
+        assert_eq!(
+            prepared.meshes[0].materials[0].scope,
+            MaterialAssignmentScope::Object
+        );
         assert_eq!(prepared.meshes[1].materials.len(), 6);
-        assert_eq!(prepared.meshes[2].materials.iter().map(|element| element.element.as_str()).collect::<Vec<_>>(), ["body", "trim"]);
+        assert_eq!(
+            prepared.meshes[2]
+                .materials
+                .iter()
+                .map(|element| element.element.as_str())
+                .collect::<Vec<_>>(),
+            ["body", "trim"]
+        );
     }
 
     /// 3.13: the software path cannot draw meshes correctly (no sizing,
@@ -739,12 +1153,25 @@ mod tests {
     #[test]
     fn a_gltf_model_refuses_at_publish_instead_of_drawing_nothing() {
         let hash = ContentHash("model-content".to_string());
-        let mut model = mesh(MeshPrimitiveKind::Model, &[("body", "mat"), ("trim", "mat")]);
+        let mut model = mesh(
+            MeshPrimitiveKind::Model,
+            &[("body", "mat"), ("trim", "mat")],
+        );
         model.base.id = "model".to_string();
         model.model_asset_id = Some("model".to_string());
         model.material_elements = Some(vec!["body".to_string(), "trim".to_string()]);
         let mut scene = document(vec![SceneObject::Mesh(model)], vec![material("mat")]);
-        scene.assets.push(gx_contracts::scene::AssetLibraryItem { asset_id: "model".to_string(), name: "model".to_string(), kind: AssetKind::Model, path: "must-not-be-read.gltf".to_string(), checksum: Some(hash.clone()), mime_type: Some("model/gltf+json".to_string()), size_bytes: None, status: None, provenance: Default::default() });
+        scene.assets.push(gx_contracts::scene::AssetLibraryItem {
+            asset_id: "model".to_string(),
+            name: "model".to_string(),
+            kind: AssetKind::Model,
+            path: "must-not-be-read.gltf".to_string(),
+            checksum: Some(hash.clone()),
+            mime_type: Some("model/gltf+json".to_string()),
+            size_bytes: None,
+            status: None,
+            provenance: Default::default(),
+        });
         let refused = crate::prepared::PreparedScene::prepare(
             scene,
             &HashSet::from([hash.clone()]),
@@ -760,8 +1187,346 @@ mod tests {
 
     #[test]
     fn an_unassigned_face_refuses_by_name() {
-        let slots = [("front", "mat"), ("back", "mat"), ("left", "mat"), ("right", "mat"), ("top", "mat")];
-        let scene = document(vec![SceneObject::Mesh(mesh(MeshPrimitiveKind::Cube, &slots))], vec![material("mat")]);
-        assert!(matches!(prepare_meshes(&scene, &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function()), Err(Refusal::MeshMaterialUnassigned { element, .. }) if element == "bottom"));
+        let slots = [
+            ("front", "mat"),
+            ("back", "mat"),
+            ("left", "mat"),
+            ("right", "mat"),
+            ("top", "mat"),
+        ];
+        let scene = document(
+            vec![SceneObject::Mesh(mesh(MeshPrimitiveKind::Cube, &slots))],
+            vec![material("mat")],
+        );
+        assert!(
+            matches!(prepare_meshes(&scene, &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function()), Err(Refusal::MeshMaterialUnassigned { element, .. }) if element == "bottom")
+        );
+    }
+
+    fn glb(json: &serde_json::Value, mut binary: Vec<u8>) -> Vec<u8> {
+        let mut json = serde_json::to_vec(json).unwrap();
+        while json.len() % 4 != 0 {
+            json.push(b' ');
+        }
+        while binary.len() % 4 != 0 {
+            binary.push(0);
+        }
+        let mut out = Vec::new();
+        for value in [
+            0x4654_6c67_u32,
+            2,
+            (28 + json.len() + binary.len()) as u32,
+            json.len() as u32,
+            0x4e4f_534a,
+        ] {
+            out.extend_from_slice(&value.to_le_bytes());
+        }
+        out.extend(json);
+        out.extend_from_slice(&(binary.len() as u32).to_le_bytes());
+        out.extend_from_slice(&0x004e_4942_u32.to_le_bytes());
+        out.extend(binary);
+        out
+    }
+
+    fn triangle_asset(index_type: u32, strided: bool) -> (serde_json::Value, Vec<u8>) {
+        let mut binary = Vec::new();
+        for vertex in [[0.0_f32, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]] {
+            for value in vertex {
+                binary.extend_from_slice(&value.to_le_bytes());
+            }
+            if strided {
+                binary.extend_from_slice(&[0xFF; 4]);
+            }
+        }
+        let position_bytes = binary.len();
+        for index in [2_u32, 0, 1] {
+            let bytes = index.to_le_bytes();
+            binary.extend_from_slice(
+                &bytes[..match index_type {
+                    5121 => 1,
+                    5123 => 2,
+                    _ => 4,
+                }],
+            );
+        }
+        let mut json = serde_json::json!({
+            "asset": {"version":"2.0"}, "buffers":[{"byteLength":binary.len()}],
+            "bufferViews":[{"buffer":0,"byteLength":position_bytes}, {"buffer":0,"byteOffset":position_bytes,"byteLength":binary.len()-position_bytes}],
+            "accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]}, {"bufferView":1,"componentType":index_type,"count":3,"type":"SCALAR"}],
+            "materials":[{"name":"body"}],
+            "meshes":[{"primitives":[{"attributes":{"POSITION":0},"indices":1,"material":0}]}]
+        });
+        if strided {
+            json["bufferViews"][0]["byteStride"] = 16.into();
+        }
+        (json, binary)
+    }
+
+    fn prepare_model(bytes: Vec<u8>) -> Result<PreparedMeshes, Refusal> {
+        let hash = ContentHash("verified-model".into());
+        let mut model = mesh(MeshPrimitiveKind::Model, &[("body", "mat")]);
+        model.model_asset_id = Some("asset".into());
+        model.material_elements = Some(vec!["body".into()]);
+        let mut scene = document(vec![SceneObject::Mesh(model)], vec![material("mat")]);
+        scene.assets.push(gx_contracts::scene::AssetLibraryItem {
+            asset_id: "asset".into(),
+            name: "asset".into(),
+            kind: AssetKind::Model,
+            path: "never-read.glb".into(),
+            checksum: Some(hash.clone()),
+            mime_type: None,
+            size_bytes: None,
+            status: None,
+            provenance: Default::default(),
+        });
+        prepare_meshes(
+            &scene,
+            &HashSet::from([hash.clone()]),
+            &AssetBytes::from([(hash, bytes)]),
+            &MaterialSupport::fixed_function(),
+        )
+    }
+
+    #[test]
+    fn real_gltf_triangle_loads_strided_positions_and_all_index_widths() {
+        for index_type in [5121, 5123, 5125] {
+            for strided in [false, true] {
+                let (json, binary) = triangle_asset(index_type, strided);
+                let prepared = prepare_model(glb(&json, binary)).unwrap();
+                let geometry = &prepared.meshes[0].geometry;
+                assert_eq!(
+                    geometry.vertices,
+                    [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+                );
+                assert_eq!(geometry.parts[0].triangles, [[2, 0, 1]]);
+                assert_eq!(prepared.meshes[0].materials[0].element, "body");
+                assert_eq!(silhouette(geometry, false).pixels()[120 * 128 + 120].a, 0.0);
+                assert!(silhouette(geometry, false)
+                    .pixels()
+                    .iter()
+                    .any(|p| p.a > 0.0));
+            }
+        }
+    }
+
+    #[test]
+    fn gltf_nonindexed_and_multiple_primitives_rebase_indices() {
+        let (mut json, binary) = triangle_asset(5123, false);
+        json["meshes"][0]["primitives"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("indices");
+        let primitive = json["meshes"][0]["primitives"][0].clone();
+        json["meshes"][0]["primitives"]
+            .as_array_mut()
+            .unwrap()
+            .push(primitive);
+        let prepared = prepare_model(glb(&json, binary)).unwrap();
+        assert_eq!(prepared.meshes[0].geometry.vertices.len(), 6);
+        assert_eq!(prepared.meshes[0].geometry.parts[0].triangles, [[0, 1, 2]]);
+        assert_eq!(prepared.meshes[0].geometry.parts[1].triangles, [[3, 4, 5]]);
+    }
+
+    #[test]
+    fn gltf_material_elements_colour_only_their_own_triangles() {
+        let (mut json, _) = triangle_asset(5123, false);
+        let mut binary = Vec::new();
+        for point in [
+            [0.0_f32, 0.0, 0.0],
+            [0.4, 0.0, 0.0],
+            [0.0, 0.4, 0.0],
+            [0.6, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.6, 0.4, 0.0],
+        ] {
+            for value in point {
+                binary.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+        json["buffers"][0]["byteLength"] = binary.len().into();
+        json["bufferViews"] = serde_json::json!([{"buffer":0,"byteLength":binary.len()}]);
+        json["accessors"] = serde_json::json!([
+            {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[0.4,0.4,0]},
+            {"bufferView":0,"byteOffset":36,"componentType":5126,"count":3,"type":"VEC3","min":[0.6,0,0],"max":[1,0.4,0]}
+        ]);
+        json["materials"] = serde_json::json!([{"name":"body"},{"name":"trim"}]);
+        json["meshes"][0]["primitives"] = serde_json::json!([
+            {"attributes":{"POSITION":0},"material":0}, {"attributes":{"POSITION":1},"material":1}
+        ]);
+        let hash = ContentHash("two-colour-model".into());
+        let mut model = mesh(
+            MeshPrimitiveKind::Model,
+            &[("body", "red"), ("trim", "blue")],
+        );
+        model.model_asset_id = Some("asset".into());
+        model.material_elements = Some(vec!["body".into(), "trim".into()]);
+        model.base.x = 20.0;
+        model.base.y = 20.0;
+        model.base.scale_x = 100.0;
+        model.base.scale_y = 100.0;
+        let mut red = material("red");
+        red.color = ColorValue::Solid {
+            color: gx_contracts::color::Rgba::srgb(1.0, 0.0, 0.0, 1.0),
+        };
+        let mut blue = material("blue");
+        blue.color = ColorValue::Solid {
+            color: gx_contracts::color::Rgba::srgb(0.0, 0.0, 1.0, 1.0),
+        };
+        let mut scene = document(vec![SceneObject::Mesh(model)], vec![red, blue]);
+        scene.assets.push(gx_contracts::scene::AssetLibraryItem {
+            asset_id: "asset".into(),
+            name: "asset".into(),
+            kind: AssetKind::Model,
+            path: "never-read.glb".into(),
+            checksum: Some(hash.clone()),
+            mime_type: None,
+            size_bytes: None,
+            status: None,
+            provenance: Default::default(),
+        });
+        let prepared = prepare_meshes(
+            &scene,
+            &HashSet::from([hash.clone()]),
+            &AssetBytes::from([(hash, glb(&json, binary))]),
+            &MaterialSupport::fixed_function(),
+        )
+        .unwrap();
+        let mut surface = RasterSurface::transparent(128, 128);
+        rasterise_meshes(
+            &prepared,
+            &scene,
+            &gx_contracts::scene::resolve_hierarchy(&scene.objects).effective,
+            &mut surface,
+        )
+        .unwrap();
+        assert_eq!(
+            [
+                surface.pixels()[25 * 128 + 25].r,
+                surface.pixels()[25 * 128 + 25].b
+            ],
+            [1.0, 0.0]
+        );
+        assert_eq!(
+            [
+                surface.pixels()[25 * 128 + 85].r,
+                surface.pixels()[25 * 128 + 85].b
+            ],
+            [0.0, 1.0]
+        );
+        assert_eq!(surface.pixels()[25 * 128 + 70].a, 0.0);
+    }
+
+    #[test]
+    fn malformed_gltf_refuses_with_object_and_property() {
+        for case in 0..6 {
+            let (mut json, mut binary) = triangle_asset(5123, false);
+            let property = match case {
+                0 => {
+                    binary[36..38].copy_from_slice(&9_u16.to_le_bytes());
+                    "indices"
+                }
+                1 => {
+                    json["bufferViews"][0]["byteLength"] = 12.into();
+                    "accessors.count"
+                }
+                2 => {
+                    binary[..4].copy_from_slice(&f32::NAN.to_le_bytes());
+                    "POSITION"
+                }
+                3 => {
+                    json["meshes"][0]["primitives"][0]["mode"] = 1.into();
+                    "primitives[0]"
+                }
+                4 => {
+                    json["nodes"] = serde_json::json!([{"mesh":0,"translation":[1,0,0]}]);
+                    "transform"
+                }
+                _ => {
+                    binary.truncate(32);
+                    "byteLength"
+                }
+            };
+            let refused = prepare_model(glb(&json, binary)).unwrap_err();
+            assert!(
+                matches!(refused, Refusal::MeshModelInvalid { ref detail, .. } if detail.contains("object mesh") && detail.contains(property)),
+                "{refused:?}"
+            );
+        }
+    }
+
+    fn silhouette(geometry: &PreparedGeometry, face_on: bool) -> RasterSurface {
+        let scene = document(
+            vec![SceneObject::Mesh(mesh(
+                MeshPrimitiveKind::Sphere,
+                &[("object", "mat")],
+            ))],
+            vec![material("mat")],
+        );
+        let mut resolved = gx_contracts::scene::resolve_hierarchy(&scene.objects)
+            .effective
+            .remove(0);
+        resolved.x = 64.0;
+        resolved.y = 64.0;
+        resolved.scale_x = 100.0;
+        resolved.scale_y = 100.0;
+        let mut surface = RasterSurface::transparent(128, 128);
+        let white = WorkingRgba::from_source(
+            gx_contracts::color::Rgba::srgb(1.0, 1.0, 1.0, 1.0),
+            scene.working_color_space,
+        );
+        let vertex = |index: u32| {
+            let [x, y, z] = geometry.vertices[index as usize];
+            if face_on {
+                [x, z, y]
+            } else {
+                [x, y, z]
+            }
+        };
+        for part in &geometry.parts {
+            for [a, b, c] in &part.triangles {
+                rasterise_mesh_triangle(
+                    &mut surface,
+                    vertex(*a),
+                    vertex(*b),
+                    vertex(*c),
+                    &resolved,
+                    white,
+                );
+            }
+        }
+        surface
+    }
+
+    #[test]
+    fn sphere_and_torus_are_nondegenerate_grids_with_distinct_silhouettes() {
+        for (kind, triangle_count, face_on) in [
+            (MeshPrimitiveKind::Sphere, 224, false),
+            (MeshPrimitiveKind::Torus, 256, true),
+        ] {
+            let (geometry, _, _) = primitive_geometry(&mesh(kind, &[("object", "mat")])).unwrap();
+            assert_eq!(geometry.vertices.len(), 153);
+            assert_eq!(geometry.parts[0].triangles.len(), triangle_count);
+            for triangle in &geometry.parts[0].triangles {
+                let [a, b, c] = triangle.map(|i| geometry.vertices[i as usize]);
+                let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+                let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+                let cross = [
+                    ab[1] * ac[2] - ab[2] * ac[1],
+                    ab[2] * ac[0] - ab[0] * ac[2],
+                    ab[0] * ac[1] - ab[1] * ac[0],
+                ];
+                assert!(cross.iter().map(|v| v * v).sum::<f64>() > 1e-12);
+            }
+            let image = silhouette(&geometry, face_on);
+            let lit = image.pixels().iter().filter(|p| p.a > 0.0).count();
+            assert!((5500..8000).contains(&lit), "{kind:?}: {lit}");
+            assert_eq!(
+                image.pixels()[64 * 128 + 64].a > 0.0,
+                !face_on,
+                "torus must retain its hole"
+            );
+            assert!(image.pixels()[64 * 128 + 105].a > 0.0);
+            assert_eq!(image.pixels()[15 * 128 + 15].a, 0.0);
+        }
     }
 }

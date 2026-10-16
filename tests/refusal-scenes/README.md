@@ -7,7 +7,8 @@ pixels or no pixels. Step 3.13 now refuses them by object name.
 
 The pixel-gate tests retain this scene in the coverage inventory and execute
 its named refusal. It is outside the renderable capture directory so an
-unsupported mapping cannot be turned into a new golden image. Existing PNG
-baselines stay unchanged; `gx-pixel-gate check` still reports pixel differences
-from corrected glyph drawing. GPU image/material/mesh work must supply actual
+unsupported mapping cannot be turned into a new golden image. The corrected
+colour-ramp baseline and its authored-value checks are documented in
+`tests/baselines/README.md`; the old PNGs are retained in baseline history.
+GPU image/material/mesh work must supply actual
 rendered coverage before the reference set can establish fidelity for them.
