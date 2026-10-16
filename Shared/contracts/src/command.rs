@@ -12,11 +12,11 @@
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::animation::{self, AutoKey, SceneKeyframe};
+use crate::animation::{self, AutoKey, KeyRef, SceneKeyframe};
 use crate::authoring::{self, ObjectDeletion, ObjectDuplication};
 use crate::bindings::{self, BindingIssue};
 use crate::control::{self, ControlField, TakePage};
-use crate::design_system::{self, DesignSystem, DesignSystemCommit};
+use crate::design_system::{self, DesignSystem, DesignSystemCommit, MotionPreset};
 use crate::object_edit::{self, ObjectField};
 use crate::phases::{self, TimelinePhase};
 use crate::font::FontDefinition;
@@ -233,6 +233,17 @@ commands! {
         SaveTakePage = "saveTakePage" { pub project: String, pub page: TakePage },
         /// Confirm a design-system draft as the project's next version.
         ConfirmDesignSystem = "confirmDesignSystem" { pub project: String, pub commit: DesignSystemCommit },
+        /// Save the selected keys of one object as one phase of a motion
+        /// preset in the project's library (11.15). The document is read, never
+        /// written: saving a preset is not a scene edit and is not undoable.
+        SaveMotionPreset = "saveMotionPreset" {
+            pub project: String,
+            pub target: SceneTarget,
+            pub object_id: String,
+            pub preset_id: String,
+            pub phase: PresetPhase,
+            pub keys: Vec<KeyRef>,
+        },
     }
 }
 
@@ -326,6 +337,9 @@ pub struct EditContext<'a> {
     pub design_system: Option<&'a DesignSystem>,
     /// The stored scene the document is bound to, if any.
     pub origin: Option<&'a SceneOrigin>,
+    /// The project's saved motion presets, when the edits name one (11.15).
+    /// Starter presets are always available and are looked up first.
+    pub presets: Option<&'a [MotionPreset]>,
 }
 
 /// What one applied edit or command changed. An output only: TS type, no
@@ -343,6 +357,7 @@ pub enum EditEffect {
     ObjectDuplicated(ObjectDuplication),
     ObjectsChanged { object_ids: Vec<String> },
     PresetApplied { duration_frames: u64 },
+    MotionPresetSaved { project: String, preset_id: String, phase: PresetPhase },
     MaterialsRelinked { changed: Vec<String> },
     DataContextReplaced { newly_invalid: Vec<BindingIssue> },
     SessionOpened { session: SessionKey },
@@ -470,11 +485,15 @@ fn apply_edit(
             EditEffect::None
         }
         SceneEdit::ApplyPreset(p) => {
-            let preset = design_system::starter_preset(&p.preset_id).ok_or_else(|| {
-                Refusal::MotionPresetUnknown {
+            let preset = design_system::starter_preset(&p.preset_id)
+                .or_else(|| {
+                    ctx
+                        .presets
+                        .and_then(|saved| saved.iter().find(|preset| preset.id == p.preset_id).cloned())
+                })
+                .ok_or_else(|| Refusal::MotionPresetUnknown {
                     preset: p.preset_id.clone(),
-                }
-            })?;
+                })?;
             let phase = match p.phase {
                 PresetPhase::In => &preset.phases.r#in,
                 PresetPhase::Out => &preset.phases.out,
@@ -643,6 +662,7 @@ pub mod witness {
             EditorCommand::DeleteScene(_) => 9,
             EditorCommand::SaveTakePage(_) => 10,
             EditorCommand::ConfirmDesignSystem(_) => 11,
+            EditorCommand::SaveMotionPreset(_) => 12,
         }
     }
 
@@ -762,6 +782,19 @@ pub mod witness {
             EditorCommand::ConfirmDesignSystem(ConfirmDesignSystem {
                 project: "witness-project".into(),
                 commit: design_system_commit(),
+            }),
+            // The witness card carries the fade the batch above applied at
+            // frame 10, so these two opacity keys exist when this runs.
+            EditorCommand::SaveMotionPreset(SaveMotionPreset {
+                project: "witness-project".into(),
+                target: SceneTarget::Session { session },
+                object_id: "card".into(),
+                preset_id: "witness-fade".into(),
+                phase: PresetPhase::In,
+                keys: vec![
+                    KeyRef { property: "opacity".into(), frame: 10 },
+                    KeyRef { property: "opacity".into(), frame: 25 },
+                ],
             }),
         ]
     }
@@ -1116,6 +1149,7 @@ mod tests {
     const NO_CONTEXT: EditContext<'static> = EditContext {
         design_system: None,
         origin: None,
+        presets: None,
     };
 
     fn scene_with_card() -> SceneDocument {
@@ -1414,6 +1448,7 @@ mod tests {
         let bound = EditContext {
             design_system: None,
             origin: Some(&origin),
+            presets: None,
         };
         let edit: SceneEdit = SetSceneId { id: "other".into() }.into();
         assert_eq!(
@@ -1497,5 +1532,129 @@ mod tests {
             matches!(effects[0], EditEffect::PresetApplied { duration_frames } if duration_frames > 0)
         );
         assert!(!scene.timeline.channels.is_empty());
+    }
+
+    fn slide_in_at(scene: &mut SceneDocument, at_frame: u64) {
+        let edit: SceneEdit = ApplyPreset {
+            object_id: "card".into(),
+            preset_id: "slide".into(),
+            phase: PresetPhase::In,
+            at_frame,
+        }
+        .into();
+        apply_edits(scene, &[edit], &NO_CONTEXT).unwrap();
+    }
+
+    fn x_keys(scene: &SceneDocument, object: &str) -> Vec<(u64, f64)> {
+        scene
+            .timeline
+            .channels
+            .iter()
+            .find(|channel| channel.object_id == object && channel.property == "x")
+            .map(|channel| channel.keys.iter().map(|key| (key.frame, key.value)).collect())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn captured_keys_save_as_a_phase_that_applies_to_a_differently_sized_object() {
+        use crate::animation::{capture_motion_phase, KeyRef};
+        use crate::design_system::{DurationSpec, MotionPhase, MotionPhases, MotionPreset};
+
+        let mut scene = scene_with_card();
+        scene.objects.push(SceneObject::Rect(RectObject {
+            base: {
+                let mut base = ObjectBase::new("wide", "Wide");
+                base.x = 100.0;
+                base.width = 400.0;
+                base
+            },
+            radius: 0.0,
+        }));
+        if let Some(SceneObject::Rect(card)) = scene.objects.first_mut() {
+            card.base.x = 50.0;
+            card.base.width = 100.0;
+        }
+        slide_in_at(&mut scene, 10);
+        let authored = x_keys(&scene, "card");
+        assert_eq!(authored.len(), 2, "{authored:?}");
+        let refs: Vec<KeyRef> = authored
+            .iter()
+            .map(|(frame, _)| KeyRef { property: "x".into(), frame: *frame })
+            .collect();
+
+        let phase = capture_motion_phase(&scene, "card", &refs).unwrap();
+        // 20 frames at 50p is 400 ms, and the offsets are in object-widths.
+        assert_eq!(phase.duration, DurationSpec::Ms(400.0));
+        assert_eq!(phase.channels.len(), 1);
+        assert_eq!(phase.channels[0].property, "position.x");
+        assert_eq!(phase.channels[0].keys[0].t, 0.0);
+        assert_eq!(phase.channels[0].keys[1].t, 1.0);
+        assert_eq!(phase.channels[0].keys[0].v, -1.0);
+        assert_eq!(phase.channels[0].keys[1].v, 0.0);
+
+        let empty = || MotionPhase { duration: DurationSpec::Ms(0.0), channels: Vec::new() };
+        let saved = MotionPreset {
+            id: "mine".into(),
+            applies_to: vec!["rect".into()],
+            phases: MotionPhases { r#in: phase, out: empty(), hold: None, r#continue: Vec::new(), update: None },
+            params: Vec::new(),
+            stagger: None,
+        };
+        // A saved preset with no out phase is the unusable one G.6.6 names.
+        assert!(saved.validate().is_err());
+        let library = [saved];
+        let context = EditContext { presets: Some(&library), ..NO_CONTEXT };
+        let edit: SceneEdit = ApplyPreset {
+            object_id: "wide".into(),
+            preset_id: "mine".into(),
+            phase: PresetPhase::In,
+            at_frame: 100,
+        }
+        .into();
+        apply_edits(&mut scene, &[edit], &context).unwrap();
+        // One width of 400 to the left of x=100, arriving on it: the same
+        // motion, scaled to the object it landed on.
+        assert_eq!(x_keys(&scene, "wide"), vec![(100, -300.0), (120, 100.0)]);
+
+        // Without the library the same id is unknown, not silently a starter.
+        let mut other = scene_with_card();
+        let edit: SceneEdit = ApplyPreset {
+            object_id: "card".into(),
+            preset_id: "mine".into(),
+            phase: PresetPhase::In,
+            at_frame: 0,
+        }
+        .into();
+        assert_eq!(
+            apply_edits(&mut other, &[edit], &NO_CONTEXT),
+            Err(Refusal::MotionPresetUnknown { preset: "mine".into() })
+        );
+    }
+
+    #[test]
+    fn capture_refuses_by_name_and_names_what_it_did_not_save() {
+        use crate::animation::{capture_motion_phase, KeyRef};
+
+        let mut scene = scene_with_card();
+        slide_in_at(&mut scene, 10);
+        let key = |frame: u64| KeyRef { property: "x".into(), frame };
+        assert_eq!(
+            capture_motion_phase(&scene, "card", &[]),
+            Err(Refusal::MotionPresetSelectionEmpty { object: "card".into() })
+        );
+        assert_eq!(
+            capture_motion_phase(&scene, "card", &[key(10)]),
+            Err(Refusal::MotionPresetSpanZero { object: "card".into(), frame: 10 })
+        );
+        assert_eq!(
+            capture_motion_phase(&scene, "card", &[key(10), key(11)]),
+            Err(Refusal::KeyframeUnknown { object: "card".into(), property: "x".into(), frame: 11 })
+        );
+        assert_eq!(
+            capture_motion_phase(&scene, "card", &[KeyRef { property: "fill".into(), frame: 10 }]),
+            Err(Refusal::AnimationPropertyUnsupported { object: "card".into(), property: "fill".into() })
+        );
+        // The scene is only read: nothing above wrote a channel.
+        assert_eq!(x_keys(&scene, "card").len(), 2);
     }
 }

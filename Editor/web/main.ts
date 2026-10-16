@@ -38,7 +38,7 @@ import type {
   TimelinePhase,
 } from "@grapix/contracts";
 import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
-import { presetBlocker } from "../src/motion-preset-browser";
+import { presetBlocker, presetBrowserPanel } from "../src/motion-preset-browser";
 import { SceneViewport } from "../src/viewport";
 import { GraphicPreviewRenderer } from "../src/graphic-preview";
 import { renderNode } from "../src/agent-surface";
@@ -307,6 +307,10 @@ const ui = {
   timelineEasing: need<HTMLSelectElement>("timeline-easing"),
   timelinePreset: need<HTMLSelectElement>("timeline-preset"),
   timelinePresetApply: need<HTMLButtonElement>("timeline-preset-apply"),
+  timelinePresetApplyOut: need<HTMLButtonElement>("timeline-preset-apply-out"),
+  timelinePresetSave: need<HTMLButtonElement>("timeline-preset-save"),
+  timelinePresetSavePhase: need<HTMLSelectElement>("timeline-preset-save-phase"),
+  presetBrowserMount: need<HTMLDivElement>("preset-browser-mount"),
   phaseKind: need<HTMLSelectElement>("phase-kind"),
   phaseSet: need<HTMLButtonElement>("phase-set"),
   phasePlay: need<HTMLButtonElement>("phase-play"),
@@ -521,6 +525,7 @@ function adoptView(view: SessionView): void {
   projectSceneId = view.origin?.sceneId;
   projectSceneProject = view.origin?.project;
   if (view.origin) currentProject = view.origin.project;
+  if ((projectSceneProject ?? currentProject) !== presetLibraryProject) void refreshPresetLibrary();
   ui.sceneId.readOnly = view.origin !== undefined;
   ui.sceneId.title =
     view.origin === undefined
@@ -1105,6 +1110,7 @@ function renderPanels(document_: SceneDocument): void {
 
 
   renderInspector(document_);
+  renderPresetBrowser(document_);
   updateTimeReadouts();
   const animation = keyframePanelModel(document_, selection, animationSurface, currentFrame);
   ui.animationFrame.value = String(animation.currentFrame);
@@ -1632,7 +1638,13 @@ function onTimelineKeyDown(event: KeyboardEvent): void {
 // Easing and starter presets (11.23)
 // ---------------------------------------------------------------------------
 
-let starterPresets: readonly MotionPreset[] = [];
+/** The starter presets and the open project's saved ones, exactly what
+ *  `ApplyPreset` resolves (11.15). Loaded from Rust, never from a local list. */
+let motionPresets: readonly MotionPreset[] = [];
+let starterPresetIds: ReadonlySet<string> = new Set();
+/** The project the library was last loaded for; the sentinel means never. */
+const PRESETS_UNLOADED = "unloaded:no-project-asked-yet";
+let presetLibraryProject: string | undefined = PRESETS_UNLOADED;
 
 /** Populate the easing and preset pickers from Rust, never from a local list. */
 async function loadMotionLibrary(): Promise<void> {
@@ -1643,16 +1655,73 @@ async function loadMotionLibrary(): Promise<void> {
     ui.timelineEasing.append(option);
   }
   try {
-    starterPresets = await shell().invoke<MotionPreset[]>("cmd_starter_presets");
-    for (const preset of starterPresets) {
-      const option = document.createElement("option");
-      option.value = preset.id;
-      option.textContent = preset.id;
-      ui.timelinePreset.append(option);
-    }
+    starterPresetIds = new Set(
+      (await shell().invoke<MotionPreset[]>("cmd_starter_presets")).map((preset) => preset.id),
+    );
   } catch (error) {
     log(`motion library unavailable: ${describe(error)}`, "bad");
   }
+  await refreshPresetLibrary();
+}
+
+/** Reload the picker and the browser from the project's library. A project
+ *  that cannot be read leaves the starters and says so, never a quietly
+ *  shorter list. */
+async function refreshPresetLibrary(preferred?: string): Promise<void> {
+  const project = projectSceneProject ?? currentProject;
+  presetLibraryProject = project;
+  const wanted = preferred ?? ui.timelinePreset.value;
+  try {
+    motionPresets = await shell().invoke<MotionPreset[]>("cmd_motion_presets", {
+      project: project ?? null,
+    });
+  } catch (error) {
+    log(`saved presets unavailable: ${describe(error)}`, "bad");
+  }
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "—";
+  ui.timelinePreset.replaceChildren(placeholder);
+  for (const preset of motionPresets) {
+    const option = document.createElement("option");
+    option.value = preset.id;
+    const unusable = presetBlocker(preset, {});
+    option.textContent =
+      preset.id + (starterPresetIds.has(preset.id) ? "" : " (saved)") + (unusable ? " — unusable" : "");
+    ui.timelinePreset.append(option);
+  }
+  ui.timelinePreset.value = motionPresets.some((preset) => preset.id === wanted) ? wanted : "";
+  if (scene) renderPresetBrowser(scene);
+}
+
+/** Why the current key selection cannot be saved as a preset, if it cannot. */
+function presetSaveBlocker(): string | undefined {
+  if (projectSceneProject === undefined) {
+    return "save this graphic into a scene first: presets live in the project library";
+  }
+  const objects = new Set(
+    [...selectedKeys].map((id) => parseKeyId(id)?.objectId).filter((id): id is string => id !== undefined),
+  );
+  if (objects.size === 0) return "select the keys to save in the timeline";
+  if (objects.size > 1) return "select keys of one object: a preset is one object's motion";
+  return undefined;
+}
+
+function renderPresetBrowser(document_: SceneDocument): void {
+  const kinds = [
+    ...new Set(document_.objects.filter((object) => selection.includes(object.id)).map((object) => object.type)),
+  ];
+  const saveBlocker = presetSaveBlocker();
+  ui.presetBrowserMount.replaceChildren(
+    renderNode(
+      document,
+      presetBrowserPanel(motionPresets, document_.canvas.frameRate, {
+        selectionKinds: kinds,
+        ...(ui.timelinePreset.value === "" ? {} : { selectedPresetId: ui.timelinePreset.value }),
+        ...(saveBlocker === undefined ? {} : { saveBlocker }),
+      }),
+    ) as unknown as Node,
+  );
 }
 
 /** Populate the object menu from Rust, so it can only offer kinds
@@ -1697,7 +1766,7 @@ function onEasingChosen(): void {
  *  The preset is selected and parameterised, never authored (G.6.7): this
  *  sends an id and a frame, and Rust resolves the phase's duration against the
  *  scene's own rate. */
-async function applyStarterPreset(): Promise<void> {
+async function applyStarterPreset(phase: "in" | "out" = "in"): Promise<void> {
   if (!scene) return;
   const presetId = ui.timelinePreset.value;
   if (presetId === "") {
@@ -1708,7 +1777,7 @@ async function applyStarterPreset(): Promise<void> {
     log("select an object to apply a preset to", "bad");
     return;
   }
-  const preset = starterPresets.find((candidate) => candidate.id === presetId);
+  const preset = motionPresets.find((candidate) => candidate.id === presetId);
   const kinds = new Set(
     scene.objects.filter((object) => selection.includes(object.id)).map((object) => object.type),
   );
@@ -1726,15 +1795,77 @@ async function applyStarterPreset(): Promise<void> {
       edit: "applyPreset",
       objectId,
       presetId,
-      phase: "in",
+      phase,
       atFrame: wireFrame(currentFrame),
     })),
     selection.length === 1
-      ? `Apply ${presetId} at frame ${currentFrame}`
-      : `Apply ${presetId} to ${selection.length} objects at frame ${currentFrame}`,
+      ? `Apply ${presetId} ${phase} at frame ${currentFrame}`
+      : `Apply ${presetId} ${phase} to ${selection.length} objects at frame ${currentFrame}`,
   );
 }
 
+
+/** Save the selected keys of one object as one phase of a project preset
+ *  (11.15). Rust captures from the document it holds, not from what the
+ *  browser believes, so the preset is exactly the keys that exist. */
+async function saveSelectionAsPreset(suggestedId?: string): Promise<void> {
+  const session = activeSession(workspace);
+  const project = projectSceneProject;
+  if (!scene || !session) return;
+  const blocker = presetSaveBlocker();
+  if (blocker !== undefined || project === undefined) {
+    log(`preset save refused: ${blocker ?? "save this graphic into a scene first"}`, "bad");
+    return;
+  }
+  const refs = [...selectedKeys].flatMap((id) => {
+    const parsed = parseKeyId(id);
+    return parsed ? [parsed] : [];
+  });
+  const objectId = refs[0]!.objectId;
+  const phase = ui.timelinePresetSavePhase.value === "out" ? "out" : "in";
+  const entered = window.prompt(
+    `Preset id for the ${phase} phase (letters, digits, - or _). Saving the other phase under the same id completes it.`,
+    suggestedId ?? ui.timelinePreset.value,
+  );
+  if (entered === null) return;
+  const presetId = entered.trim();
+  if (presetId === "") {
+    log("preset save refused: a preset needs an id", "bad");
+    return;
+  }
+  const outcome = await runCommand(
+    {
+      command: "saveMotionPreset",
+      project,
+      target: { target: "session", session: session.key },
+      objectId,
+      presetId,
+      phase,
+      keys: refs.map((ref) => ({ property: ref.property, frame: wireFrame(ref.frame) })),
+    },
+    {
+      label: `Saved ${refs.length} key(s) as the ${phase} phase of ${presetId}`,
+      refusal: "preset save refused",
+    },
+  );
+  if (outcome) await refreshPresetLibrary(presetId);
+}
+
+/** Clicks inside the preset browser: apply a card's phase or save into it. */
+function onPresetBrowserClick(event: MouseEvent): void {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  const button = target.closest<HTMLButtonElement>("button[data-action][data-for]");
+  if (!button) return;
+  const presetId = button.dataset.for?.replace(/^preset\//, "");
+  if (presetId === undefined) return;
+  if (button.dataset.action === "apply") {
+    ui.timelinePreset.value = presetId;
+    void applyStarterPreset("in");
+  } else if (button.dataset.action === "saveAsPreset") {
+    void saveSelectionAsPreset(presetId);
+  }
+}
 
 function closeSpeedGraph(): void {
   if (!scene) return;
@@ -3821,7 +3952,11 @@ async function start(): Promise<void> {
     takePageState = { ...withoutTakePageRefusal(takePageState), name: ui.takePageName.value };
   });
   ui.timelineEasing.addEventListener("change", onEasingChosen);
-  ui.timelinePresetApply.addEventListener("click", () => void applyStarterPreset());
+  ui.timelinePresetApply.addEventListener("click", () => void applyStarterPreset("in"));
+  ui.timelinePresetApplyOut.addEventListener("click", () => void applyStarterPreset("out"));
+  ui.timelinePresetSave.addEventListener("click", () => void saveSelectionAsPreset());
+  ui.presetBrowserMount.addEventListener("click", onPresetBrowserClick);
+  ui.timelinePreset.addEventListener("change", () => scene && renderPresetBrowser(scene));
   ui.phaseSet.addEventListener("click", () => void setPhaseFromSelection());
   ui.phaseRemove.addEventListener("click", () => void removePhaseAtPlayhead());
   ui.phasePlay.addEventListener("click", () => playPhaseAtPlayhead());

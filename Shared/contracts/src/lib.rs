@@ -798,8 +798,17 @@ pub enum Refusal {
     MaterialRelinkNoUsers { material: String },
     /// A library edit names a material the scene does not carry.
     MaterialUnknown { material: String },
-    /// A preset id names no starter motion preset.
+    /// A preset id names no starter or saved motion preset.
     MotionPresetUnknown { preset: String },
+    /// A saved preset's id is not one canonical filename, or it collides with
+    /// a starter preset, which a project library cannot shadow.
+    MotionPresetIdInvalid { preset_id: String },
+    /// "Save selection as preset" named no keys on the object, or a named key
+    /// does not exist: the capture would be empty and claim to be a preset.
+    MotionPresetSelectionEmpty { object: String },
+    /// Every selected key sits on one frame, so the capture has no duration
+    /// to normalise against.
+    MotionPresetSpanZero { object: String, frame: u64 },
     /// An `addFonts` edit carries no fonts. An empty add would only make an
     /// undo entry that changes nothing.
     FontBatchEmpty,
@@ -1381,6 +1390,17 @@ impl std::fmt::Display for Refusal {
                 write!(f, "project {project} already exists")
             }
             Refusal::MotionPresetUnknown { preset } => write!(f, "unknown motion preset {preset}"),
+            Refusal::MotionPresetIdInvalid { preset_id } => write!(
+                f,
+                "motion preset id {preset_id:?} is not one canonical filename, or is a starter preset id"
+            ),
+            Refusal::MotionPresetSelectionEmpty { object } => {
+                write!(f, "no keys selected on {object} to save as a motion preset")
+            }
+            Refusal::MotionPresetSpanZero { object, frame } => write!(
+                f,
+                "every selected key on {object} is on frame {frame}: a preset needs a duration"
+            ),
             Refusal::FontBatchEmpty => f.write_str("font add carries no fonts"),
             Refusal::FontDuplicate { font_id } => write!(f, "font {font_id} is already in the scene"),
             Refusal::SceneAssetDuplicate { asset_id } => {
@@ -1896,6 +1916,9 @@ impl Refusal {
             Self::MaterialRelinkNoUsers { material: "audit".into() },
             Self::MaterialUnknown { material: "audit".into() },
             Self::MotionPresetUnknown { preset: "audit".into() },
+            Self::MotionPresetIdInvalid { preset_id: "audit".into() },
+            Self::MotionPresetSelectionEmpty { object: "audit".into() },
+            Self::MotionPresetSpanZero { object: "audit".into(), frame: 0 },
             Self::FontBatchEmpty,
             Self::FontDuplicate { font_id: "audit".into() },
             Self::SceneAssetDuplicate { asset_id: "audit".into() },
@@ -2065,6 +2088,9 @@ impl Refusal {
             Self::MaterialRelinkNoUsers { .. } => "materialRelinkNoUsers",
             Self::MaterialUnknown { .. } => "materialUnknown",
             Self::MotionPresetUnknown { .. } => "motionPresetUnknown",
+            Self::MotionPresetIdInvalid { .. } => "motionPresetIdInvalid",
+            Self::MotionPresetSelectionEmpty { .. } => "motionPresetSelectionEmpty",
+            Self::MotionPresetSpanZero { .. } => "motionPresetSpanZero",
             Self::FontBatchEmpty => "fontBatchEmpty",
             Self::FontDuplicate { .. } => "fontDuplicate",
             Self::SceneAssetDuplicate { .. } => "sceneAssetDuplicate",

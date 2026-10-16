@@ -26,6 +26,11 @@ export interface PresetBrowserState {
   /// The kinds the current selection matches, used to filter what applies.
   readonly selectionKinds?: readonly string[];
   readonly selectedPresetId?: string;
+  /// Why saving the current key selection as a preset is not possible, when it
+  /// is not. Absent means it is. The browser only states it; the shell that
+  /// owns the selection decides it, so the button and the refusal cannot
+  /// disagree.
+  readonly saveBlocker?: string;
 }
 
 /// Milliseconds to whole frames at a rational rate.
@@ -89,6 +94,7 @@ function presetActions(preset: MotionPreset, state: PresetBrowserState): UiActio
       // because the gesture is "make something like this from what I have".
       name: "saveAsPreset",
       label: "Save selection as preset",
+      ...(state.saveBlocker === undefined ? {} : { unavailable: state.saveBlocker }),
     },
   ];
 }

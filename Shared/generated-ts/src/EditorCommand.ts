@@ -8,6 +8,7 @@ import type { DuplicateScene } from "./DuplicateScene";
 import type { EditScene } from "./EditScene";
 import type { OpenScene } from "./OpenScene";
 import type { Redo } from "./Redo";
+import type { SaveMotionPreset } from "./SaveMotionPreset";
 import type { SaveScene } from "./SaveScene";
 import type { SaveTakePage } from "./SaveTakePage";
 import type { Undo } from "./Undo";
@@ -16,4 +17,4 @@ import type { Undo } from "./Undo";
  * The one editor command type. Every authoring mutation, from every
  * surface (Tauri, MCP), is a value of this type.
  */
-export type EditorCommand = { "command": "openScene" } & OpenScene | { "command": "closeScene" } & CloseScene | { "command": "editScene" } & EditScene | { "command": "undo" } & Undo | { "command": "redo" } & Redo | { "command": "saveScene" } & SaveScene | { "command": "createProject" } & CreateProject | { "command": "createScene" } & CreateScene | { "command": "duplicateScene" } & DuplicateScene | { "command": "deleteScene" } & DeleteScene | { "command": "saveTakePage" } & SaveTakePage | { "command": "confirmDesignSystem" } & ConfirmDesignSystem;
+export type EditorCommand = { "command": "openScene" } & OpenScene | { "command": "closeScene" } & CloseScene | { "command": "editScene" } & EditScene | { "command": "undo" } & Undo | { "command": "redo" } & Redo | { "command": "saveScene" } & SaveScene | { "command": "createProject" } & CreateProject | { "command": "createScene" } & CreateScene | { "command": "duplicateScene" } & DuplicateScene | { "command": "deleteScene" } & DeleteScene | { "command": "saveTakePage" } & SaveTakePage | { "command": "confirmDesignSystem" } & ConfirmDesignSystem | { "command": "saveMotionPreset" } & SaveMotionPreset;

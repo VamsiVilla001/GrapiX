@@ -38,11 +38,15 @@ use std::path::PathBuf;
 use gx_contracts::animation::validate_scene_animation;
 use gx_contracts::command::{
     apply_edits, CommandOutcome, EditContext, EditEffect, EditorCommand, EditorModule,
-    HistoryDirection, SaveTarget, SceneEdit, SceneOrigin, SceneSource, SceneTarget, SessionKey,
+    HistoryDirection, PresetPhase, SaveTarget, SceneEdit, SceneOrigin, SceneSource, SceneTarget, SessionKey,
     SessionView,
 };
 use gx_contracts::control::TakePage;
-use gx_contracts::design_system::{DesignSystem, DesignSystemCommit};
+use gx_contracts::animation::{capture_motion_phase, KeyRef};
+use gx_contracts::design_system::{
+    starter_preset, DesignSystem, DesignSystemCommit, DurationSpec, MotionPhase, MotionPhases, MotionPreset,
+    PresetParam,
+};
 use gx_contracts::scene::{new_scene, parse_scene_document, SceneDocument};
 use gx_contracts::Refusal;
 
@@ -103,6 +107,9 @@ struct LogEntry {
     module: EditorModule,
     origin: Option<SceneOrigin>,
     design_system: Option<DesignSystem>,
+    /// The project's saved presets, snapshotted like the design system so a
+    /// replay applies the preset the gesture applied.
+    presets: Option<Vec<MotionPreset>>,
     /// False once undone. An inactive entry is replayed again only by redo.
     active: bool,
 }
@@ -174,7 +181,13 @@ impl Session {
 
     /// Record a batch that has just been applied to `document`. A new batch
     /// forks history: whatever could have been redone is gone.
-    fn record(&mut self, edits: &[SceneEdit], module: EditorModule, design_system: Option<DesignSystem>) {
+    fn record(
+        &mut self,
+        edits: &[SceneEdit],
+        module: EditorModule,
+        design_system: Option<DesignSystem>,
+        presets: Option<Vec<MotionPreset>>,
+    ) {
         self.log.retain(|entry| entry.active);
         self.redo.clear();
         self.log.push(LogEntry {
@@ -183,6 +196,7 @@ impl Session {
             module,
             origin: self.origin.clone(),
             design_system,
+            presets,
             active: true,
         });
         self.next_seq += 1;
@@ -234,6 +248,7 @@ fn apply_entry(document: &mut SceneDocument, entry: &LogEntry) -> Result<(), Ref
     let context = EditContext {
         design_system: entry.design_system.as_ref(),
         origin: entry.origin.as_ref(),
+        presets: entry.presets.as_deref(),
     };
     apply_edits(document, &entry.edits, &context).map(|_| ())
 }
@@ -278,6 +293,9 @@ impl Workspace {
             EditorCommand::DeleteScene(p) => self.delete_scene(p.project, p.scene_id),
             EditorCommand::SaveTakePage(p) => self.save_take_page(p.project, p.page),
             EditorCommand::ConfirmDesignSystem(p) => self.confirm_design_system(p.project, p.commit),
+            EditorCommand::SaveMotionPreset(p) => {
+                self.save_motion_preset(p.project, p.target, p.object_id, p.preset_id, p.phase, p.keys)
+            }
         }
     }
 
@@ -389,16 +407,18 @@ impl Workspace {
                 let index = self.index(key)?;
                 let origin = self.sessions[index].origin.clone();
                 let design_system = self.design_system_for(origin.as_ref(), edits)?;
+                let presets = self.presets_for(origin.as_ref(), edits)?;
                 let context = EditContext {
                     design_system: design_system.as_ref(),
                     origin: origin.as_ref(),
+                    presets: presets.as_deref(),
                 };
                 let session = &mut self.sessions[index];
                 let (before, effects) = apply_edits(&mut session.document, edits, &context)?;
                 // A batch that changed nothing is not a gesture: no history
                 // entry, no unsaved mark.
                 if session.document != before {
-                    session.record(edits, module, design_system);
+                    session.record(edits, module, design_system, presets);
                 }
                 Ok(CommandOutcome {
                     session: Some(session.view()),
@@ -409,9 +429,11 @@ impl Workspace {
                 let origin = SceneOrigin { project, scene_id };
                 let mut document = self.projects()?.read_scene(&origin.project, &origin.scene_id)?;
                 let design_system = self.design_system_for(Some(&origin), edits)?;
+                let presets = self.presets_for(Some(&origin), edits)?;
                 let context = EditContext {
                     design_system: design_system.as_ref(),
                     origin: Some(&origin),
+                    presets: presets.as_deref(),
                 };
                 let (before, mut effects) = apply_edits(&mut document, edits, &context)?;
                 if document != before {
@@ -444,6 +466,23 @@ impl Workspace {
             Some(version) => Ok(Some(store.load(version)?)),
             None => Ok(None),
         }
+    }
+
+    /// The project's saved motion presets, loaded only when an edit applies a
+    /// preset: a scene with no origin has no project library to consult, and
+    /// an edit that applies none never reads the disk.
+    fn presets_for(
+        &self,
+        origin: Option<&SceneOrigin>,
+        edits: &[SceneEdit],
+    ) -> Result<Option<Vec<MotionPreset>>, CommandError> {
+        let Some(origin) = origin else {
+            return Ok(None);
+        };
+        if !edits.iter().any(|edit| matches!(edit, SceneEdit::ApplyPreset(_))) {
+            return Ok(None);
+        }
+        Ok(Some(self.projects()?.motion_presets(&origin.project)?))
     }
 
     fn step_history(
@@ -684,6 +723,70 @@ impl Workspace {
         })
     }
 
+    /// Capture selected keys as one phase of a saved preset (11.15).
+    ///
+    /// The document is read and never changed. A starter id is refused rather
+    /// than shadowed, so "fade" always means the starter's fade. Saving the
+    /// other phase of an existing id keeps what the library already holds; a
+    /// first save leaves the other phase empty, which `presetBlocker` and
+    /// `MotionPreset::validate` name as unusable until it is saved too.
+    fn save_motion_preset(
+        &self,
+        project: String,
+        target: SceneTarget,
+        object_id: String,
+        preset_id: String,
+        phase: PresetPhase,
+        keys: Vec<KeyRef>,
+    ) -> Result<CommandOutcome, CommandError> {
+        let projects = self.projects()?;
+        if starter_preset(&preset_id).is_some() || !gx_contracts::platform::is_canonical_filename(&preset_id) {
+            return Err(Refusal::MotionPresetIdInvalid { preset_id }.into());
+        }
+        let document = self.document(&target)?;
+        let captured = capture_motion_phase(&document, &object_id, &keys)?;
+        let kind = document
+            .objects
+            .iter()
+            .find(|object| object.base().id == object_id)
+            .map(|object| object.kind().to_owned())
+            .ok_or_else(|| Refusal::SceneObjectUnknown { object_id: object_id.clone() })?;
+
+        let empty = || MotionPhase { duration: DurationSpec::Ms(0.0), channels: Vec::new() };
+        let mut preset = projects.read_motion_preset(&project, &preset_id)?.unwrap_or_else(|| MotionPreset {
+            id: preset_id.clone(),
+            applies_to: Vec::new(),
+            phases: MotionPhases { r#in: empty(), out: empty(), hold: None, r#continue: Vec::new(), update: None },
+            params: Vec::new(),
+            stagger: None,
+        });
+        match phase {
+            PresetPhase::In => preset.phases.r#in = captured,
+            PresetPhase::Out => preset.phases.out = captured,
+        }
+        if !preset.applies_to.contains(&kind) {
+            preset.applies_to.push(kind);
+        }
+        // The `in` phase's own length is the default once it exists, and the
+        // declared range is a quarter to four times it, so a retime stays
+        // recognisably the motion that was saved.
+        if let DurationSpec::Ms(default) = preset.phases.r#in.duration {
+            if default > 0.0 {
+                preset.params = vec![PresetParam::Duration {
+                    name: "duration".into(),
+                    min: (default / 4.0).max(1.0).floor(),
+                    max: (default * 4.0).ceil(),
+                    default: DurationSpec::Ms(default),
+                }];
+            }
+        }
+        projects.write_motion_preset(&project, &preset)?;
+        Ok(CommandOutcome {
+            session: None,
+            effects: vec![EditEffect::MotionPresetSaved { project, preset_id, phase }],
+        })
+    }
+
     /// Confirm a draft as the next immutable version. `confirmed_by` is
     /// passed straight through: a confirmation invented here would satisfy
     /// the store's check while defeating its point.
@@ -753,7 +856,7 @@ mod tests {
     use gx_contracts::command::{
         CloseScene, ConfirmDesignSystem, CreateKeyframe, CreateObject, CreateProject, CreateScene,
         DeclareControl, DeleteScene, DuplicateScene, EditScene, OpenScene, Redo, RenameObject,
-        SaveScene, SaveTakePage, SetBinding, SetObjectField, SetObjectLocked, SetObjectVisible,
+        SaveMotionPreset, SaveScene, SaveTakePage, SetBinding, SetObjectField, SetObjectLocked, SetObjectVisible,
         SetSceneId, SetSceneName, Undo,
     };
     use gx_contracts::object_edit::ObjectField;
@@ -1691,6 +1794,108 @@ mod tests {
         );
         assert_eq!(scratch.projects().read_take_page("news", "headlines-at-six").unwrap(), page("b"));
         assert_eq!(stored_scene(&workspace, "b"), template, "saving a page must not overwrite its template");
+    }
+
+    // --- motion presets (11.15) ---------------------------------------------
+
+    #[test]
+    fn saving_selected_keys_grows_the_project_library_and_the_preset_applies_and_undoes() {
+        use gx_contracts::animation::KeyRef;
+
+        let (scratch, mut workspace) = with_store("motion-preset");
+        let apply = |object: &str, preset: &str, phase: PresetPhase, at_frame: u64| {
+            SceneEdit::ApplyPreset(gx_contracts::command::ApplyPreset {
+                object_id: object.into(),
+                preset_id: preset.into(),
+                phase,
+                at_frame,
+            })
+        };
+        run(
+            &mut workspace,
+            stored_edit(
+                "b",
+                vec![
+                    SceneEdit::CreateObject(CreateObject { kind: "rect".into(), name: "One".into() }),
+                    SceneEdit::CreateObject(CreateObject { kind: "rect".into(), name: "Two".into() }),
+                    apply("rect-1", "slide", PresetPhase::In, 10),
+                    apply("rect-1", "slide", PresetPhase::Out, 80),
+                ],
+            ),
+        );
+        let keys = |frames: [u64; 2]| -> Vec<KeyRef> {
+            frames.iter().map(|frame| KeyRef { property: "x".into(), frame: *frame }).collect()
+        };
+        let save = |phase: PresetPhase, frames: [u64; 2], id: &str| {
+            EditorCommand::SaveMotionPreset(SaveMotionPreset {
+                project: "news".into(),
+                target: SceneTarget::Stored { project: "news".into(), scene_id: "b".into() },
+                object_id: "rect-1".into(),
+                preset_id: id.into(),
+                phase,
+                keys: keys(frames),
+            })
+        };
+        let before = stored_scene(&workspace, "b");
+
+        // A starter id is refused, never shadowed.
+        assert_eq!(
+            refusal(&mut workspace, save(PresetPhase::In, [10, 30], "slide")),
+            Refusal::MotionPresetIdInvalid { preset_id: "slide".into() }
+        );
+        assert!(matches!(
+            refusal(&mut workspace, save(PresetPhase::In, [10, 30], "../escape")),
+            Refusal::MotionPresetIdInvalid { .. }
+        ));
+        assert!(scratch.projects().motion_presets("news").unwrap().is_empty());
+
+        // The first phase saved leaves the preset unusable by name; saving the
+        // out phase completes it.
+        let outcome = run(&mut workspace, save(PresetPhase::In, [10, 30], "my-slide"));
+        assert_eq!(
+            outcome.effects,
+            vec![EditEffect::MotionPresetSaved {
+                project: "news".into(),
+                preset_id: "my-slide".into(),
+                phase: PresetPhase::In,
+            }]
+        );
+        let first = scratch.projects().read_motion_preset("news", "my-slide").unwrap().unwrap();
+        assert!(first.validate().is_err(), "no out phase yet");
+        assert_eq!(first.applies_to, vec!["rect".to_owned()]);
+        run(&mut workspace, save(PresetPhase::Out, [80, 96], "my-slide"));
+        let saved = scratch.projects().read_motion_preset("news", "my-slide").unwrap().unwrap();
+        assert!(saved.validate().is_ok());
+        assert_eq!(saved.phases.out.channels.len(), 1);
+        assert_eq!(stored_scene(&workspace, "b"), before, "saving a preset only reads the scene");
+
+        // The saved preset applies from a session bound to the project, as
+        // one undoable gesture, and survives redo (the replay keeps its library).
+        let session = open(&mut workspace, SceneSource::Project { project: "news".into(), scene_id: "b".into() });
+        let applied = run(&mut workspace, edit(session, vec![apply("rect-2", "my-slide", PresetPhase::In, 0)]));
+        assert!(matches!(applied.effects[0], EditEffect::PresetApplied { duration_frames } if duration_frames > 0));
+        let keyed = |workspace: &Workspace| {
+            workspace
+                .document(&SceneTarget::Session { session })
+                .unwrap()
+                .timeline
+                .channels
+                .iter()
+                .filter(|channel| channel.object_id == "rect-2")
+                .map(|channel| channel.keys.len())
+                .sum::<usize>()
+        };
+        assert_eq!(keyed(&workspace), 2);
+        run(&mut workspace, undo(session));
+        assert_eq!(keyed(&workspace), 0);
+        run(&mut workspace, redo(session));
+        assert_eq!(keyed(&workspace), 2);
+
+        // An unsaved project id is still unknown.
+        assert!(matches!(
+            refusal(&mut workspace, edit(session, vec![apply("rect-2", "nobody-saved-this", PresetPhase::In, 0)])),
+            Refusal::MotionPresetUnknown { .. }
+        ));
     }
 
     #[test]

@@ -35,7 +35,7 @@ const SHELL_MUTATE = ["cmd_execute"];
 const SHELL_READ = [
   "cmd_session_view", "cmd_publish", "cmd_take_page_preview",
   "cmd_object_kinds", "cmd_animation_surface", "cmd_control_properties",
-  "cmd_starter_presets", "cmd_default_endpoint", "cmd_project_list",
+  "cmd_starter_presets", "cmd_motion_presets", "cmd_default_endpoint", "cmd_project_list",
   "cmd_scene_list", "cmd_scene_read", "cmd_take_page_list", "cmd_take_page_read",
   "cmd_font_bytes",
 ];

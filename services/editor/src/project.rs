@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 
 use gx_contracts::color::WorkingColorSpace;
 use gx_contracts::control::TakePage;
+use gx_contracts::design_system::MotionPreset;
 use gx_contracts::project::{ProjectSettings, PROJECT_SETTINGS_FILE};
 use gx_contracts::scene::{parse_scene_document, SceneDocument};
 use gx_contracts::Refusal;
@@ -110,6 +111,14 @@ impl Projects {
 
     fn take_page_path(&self, project: &str, page_id: &str) -> PathBuf {
         self.take_pages_directory(project).join(format!("{page_id}.json"))
+    }
+
+    fn motion_presets_directory(&self, project: &str) -> PathBuf {
+        self.project_directory(project).join("motion-presets")
+    }
+
+    fn motion_preset_path(&self, project: &str, preset_id: &str) -> PathBuf {
+        self.motion_presets_directory(project).join(format!("{preset_id}.json"))
     }
 
     fn scene_path(&self, project: &str, scene_id: &str) -> PathBuf {
@@ -263,6 +272,62 @@ impl Projects {
         };
         ids.sort();
         Ok(ids)
+    }
+
+    /// Save one motion preset into the project's library, replacing the file
+    /// of the same id (11.15). Saved in place, never versioned: a design-system
+    /// version stays immutable and this is the working library beside it.
+    pub fn write_motion_preset(&self, project: &str, preset: &MotionPreset) -> Result<(), EditorError> {
+        self.require_project(project)?;
+        require_component(&preset.id, |preset_id| Refusal::MotionPresetIdInvalid { preset_id })?;
+        let directory = self.motion_presets_directory(project);
+        std::fs::create_dir_all(&directory).map_err(|source| EditorError::Io {
+            path: directory,
+            source,
+        })?;
+        let bytes = serde_json::to_vec_pretty(preset).map_err(EditorError::Serialize)?;
+        gx_fs::write_atomic(&self.motion_preset_path(project, &preset.id), &bytes)
+            .map_err(EditorError::Write)
+    }
+
+    /// One saved preset, or `None` when the library has no such id.
+    pub fn read_motion_preset(&self, project: &str, preset_id: &str) -> Result<Option<MotionPreset>, EditorError> {
+        self.require_project(project)?;
+        require_component(preset_id, |preset_id| Refusal::MotionPresetIdInvalid { preset_id })?;
+        let path = self.motion_preset_path(project, preset_id);
+        match std::fs::read(&path) {
+            Ok(bytes) => serde_json::from_slice(&bytes).map(Some).map_err(EditorError::Serialize),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(source) => Err(EditorError::Io { path, source }),
+        }
+    }
+
+    /// Every saved preset in a project, sorted by id. A file that does not
+    /// parse is an error naming it, never a preset silently left out.
+    pub fn motion_presets(&self, project: &str) -> Result<Vec<MotionPreset>, EditorError> {
+        self.require_project(project)?;
+        let directory = self.motion_presets_directory(project);
+        let entries = match std::fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(source) => return Err(EditorError::Io { path: directory, source }),
+        };
+        let mut paths = entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().and_then(|extension| extension.to_str()) == Some("json"))
+            .collect::<Vec<_>>();
+        paths.sort();
+        paths
+            .into_iter()
+            .map(|path| {
+                let bytes = std::fs::read(&path).map_err(|source| EditorError::Io {
+                    path: path.clone(),
+                    source,
+                })?;
+                serde_json::from_slice(&bytes).map_err(EditorError::Serialize)
+            })
+            .collect()
     }
 
     /// The projects that exist, in directory order.

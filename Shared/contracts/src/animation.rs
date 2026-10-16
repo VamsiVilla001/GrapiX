@@ -17,7 +17,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::design_system::{MotionPhase, TokenRef};
+use crate::design_system::{DurationSpec, MotionChannel, MotionKey, MotionPhase, TokenRef};
 use crate::scene::SceneDocument;
 use crate::{RationalRate, Refusal};
 
@@ -866,6 +866,136 @@ pub fn instantiate_phase_channels(
         }
     }
     Ok(())
+}
+
+/// One authored key a capture names: a property and the frame it sits on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyRef {
+    pub property: String,
+    pub frame: u64,
+}
+
+/// Capture selected keys of one object as a motion-preset phase (11.15), the
+/// inverse of [`instantiate_phase_channels`].
+///
+/// Three conversions run backwards, once, so a saved preset applies to a
+/// different object exactly as a starter does:
+///
+/// - **Time.** Frames become `t` in 0–1 across the selection's own span, and the
+///   span becomes the phase's duration in milliseconds at the scene's rational
+///   rate (never frames, G.6.2).
+/// - **Property.** The scene property becomes its preset path.
+/// - **Value.** A position channel is divided back into object-widths relative
+///   to the object's own position and size (G.6.4), so the saved motion is
+///   size-independent. Everything else is absolute.
+///
+/// Nothing is approximated: a custom-bezier key (a preset key names an easing
+/// token and cannot carry control points), an unknown key, an empty selection
+/// and a zero-length span each refuse by name and write nothing.
+pub fn capture_motion_phase(
+    scene: &SceneDocument,
+    object_id: &str,
+    keys: &[KeyRef],
+) -> Result<MotionPhase, Refusal> {
+    refuse_duplicate_object_ids(scene)?;
+    let index = object_index(scene, object_id)?;
+    if keys.is_empty() {
+        return Err(Refusal::MotionPresetSelectionEmpty {
+            object: object_id.to_owned(),
+        });
+    }
+    let base = scene.objects[index].base();
+    let (origin_x, origin_y, width, height) = (base.x, base.y, base.width, base.height);
+
+    // Resolve every selected key against the document first; a capture that
+    // fails on its last key must not have half-built anything worth keeping.
+    let mut found: Vec<(String, SceneKeyframe)> = Vec::new();
+    for reference in keys {
+        if preset_path_for_scene_property(&reference.property).is_none() {
+            return Err(Refusal::AnimationPropertyUnsupported {
+                object: object_id.to_owned(),
+                property: reference.property.clone(),
+            });
+        }
+        let key = scene
+            .timeline
+            .channels
+            .iter()
+            .find(|channel| channel.object_id == object_id && channel.property == reference.property)
+            .and_then(|channel| channel.keys.iter().find(|key| key.frame == reference.frame))
+            .ok_or_else(|| Refusal::KeyframeUnknown {
+                object: object_id.to_owned(),
+                property: reference.property.clone(),
+                frame: reference.frame,
+            })?;
+        found.push((reference.property.clone(), key.clone()));
+    }
+
+    let first = found.iter().map(|(_, key)| key.frame).min().unwrap_or(0);
+    let last = found.iter().map(|(_, key)| key.frame).max().unwrap_or(0);
+    if last == first {
+        return Err(Refusal::MotionPresetSpanZero {
+            object: object_id.to_owned(),
+            frame: first,
+        });
+    }
+    let span = (last - first) as f64;
+
+    let mut channels: Vec<MotionChannel> = Vec::new();
+    for (property, key) in found {
+        let path = preset_path_for_scene_property(&property).ok_or_else(|| {
+            Refusal::AnimationPropertyUnsupported {
+                object: object_id.to_owned(),
+                property: property.clone(),
+            }
+        })?;
+        let out = easing_token_for_scene_easing(key.easing).ok_or_else(|| {
+            Refusal::InvalidKeyframeEasing {
+                object: object_id.to_owned(),
+                property: property.to_owned(),
+                detail: "a custom bezier cannot be saved in a preset: a preset key names an easing token"
+                    .to_owned(),
+            }
+        })?;
+        let v = match property.as_str() {
+            "x" | "y" => {
+                let (origin, extent) = if property == "x" { (origin_x, width) } else { (origin_y, height) };
+                if extent == 0.0 {
+                    return Err(Refusal::AnimationPropertyUnsupported {
+                        object: object_id.to_owned(),
+                        property: property.to_owned(),
+                    });
+                }
+                (key.value - origin) / extent
+            }
+            _ => key.value,
+        };
+        let motion_key = MotionKey {
+            t: (key.frame - first) as f64 / span,
+            v,
+            out,
+        };
+        match channels.iter_mut().find(|channel| channel.property == path) {
+            Some(channel) => channel.keys.push(motion_key),
+            None => channels.push(MotionChannel {
+                property: path.to_owned(),
+                keys: vec![motion_key],
+            }),
+        }
+    }
+    for channel in &mut channels {
+        channel
+            .keys
+            .sort_by(|a, b| a.t.partial_cmp(&b.t).unwrap_or(std::cmp::Ordering::Equal));
+    }
+
+    let rate = scene.canvas.frame_rate;
+    let milliseconds = span * 1000.0 * f64::from(rate.den) / f64::from(rate.num);
+    Ok(MotionPhase {
+        duration: DurationSpec::Ms(milliseconds.round()),
+        channels,
+    })
 }
 
 /// Apply one phase of a preset to an object at a frame.

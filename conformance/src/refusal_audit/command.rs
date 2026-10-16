@@ -6,12 +6,12 @@
 //! a surface might not reach. A check also asserts that the refused command
 //! left the document, history and store as they were.
 
-use gx_contracts::animation::{SceneEasing, SceneKeyframe};
+use gx_contracts::animation::{KeyRef, SceneEasing, SceneKeyframe};
 use gx_contracts::command::{
     parse_command, witness, AddAssets, AddFonts, ApplyPreset, CloseScene, CreateKeyframe, CreateObject,
     CreateProject, CreateScene, DeleteMaterial, DeleteScene, EditScene, EditorCommand,
     EditorModule, HistoryDirection, OpenScene, PresetPhase, RelinkMaterial, RemoveFont,
-    ReplaceDataContext, SaveScene, SaveTakePage, SaveTarget, SceneEdit, SceneSource, SceneTarget,
+    ReplaceDataContext, SaveMotionPreset, SaveScene, SaveTakePage, SaveTarget, SceneEdit, SceneSource, SceneTarget,
     SessionKey, SetBinding, SetObjectField, SetObjectLocked, SetObjectVisible, SetSceneId,
     SetSceneName, Undo,
 };
@@ -591,6 +591,66 @@ fn drive_material_and_scene_refusals(report: &mut Report, workspace: &mut Worksp
         expect(
             matches!(&refusal, Some(Refusal::MotionPresetUnknown { preset }) if preset == "no-such-preset") && unchanged,
             format!("expected no-such-preset unknown, got {refusal:?} (unchanged: {unchanged})"),
+        ),
+    );
+
+    // Saving a selection as a preset only reads the document (11.15); each
+    // refusal names what it did not save, and nothing is written.
+    let save_preset = |preset_id: &str, keys: Vec<KeyRef>| {
+        EditorCommand::SaveMotionPreset(SaveMotionPreset {
+            project: PROJECT.into(),
+            target: SceneTarget::Session { session },
+            object_id: "card".into(),
+            preset_id: preset_id.into(),
+            phase: PresetPhase::In,
+            keys,
+        })
+    };
+    let result = workspace.execute(save_preset("../escape", Vec::new()));
+    report.record(
+        PLANE,
+        "MotionPresetIdInvalid is produced for a preset id that leaves the library or shadows a starter",
+        expect(
+            matches!(refused(&result), Some(Refusal::MotionPresetIdInvalid { preset_id }) if preset_id == "../escape")
+                && matches!(
+                    refused(&workspace.execute(save_preset("fade", Vec::new()))),
+                    Some(Refusal::MotionPresetIdInvalid { preset_id }) if preset_id == "fade"
+                ),
+            format!("expected ../escape and the starter id fade refused, got {result:?}"),
+        ),
+    );
+    let result = workspace.execute(save_preset("mine", Vec::new()));
+    report.record(
+        PLANE,
+        "MotionPresetSelectionEmpty is produced for saving a preset from no keys",
+        expect(
+            matches!(refused(&result), Some(Refusal::MotionPresetSelectionEmpty { object }) if object == "card"),
+            format!("expected an empty selection refused, got {result:?}"),
+        ),
+    );
+    // Two keys on different channels but one frame: a capture with no duration.
+    let key_at_five = |property: &str| {
+        SceneEdit::CreateKeyframe(CreateKeyframe {
+            object_id: "card".into(),
+            property: property.into(),
+            keyframe: SceneKeyframe { frame: 5, value: 10.0, easing: SceneEasing::Linear, bezier: None },
+        })
+    };
+    let (built, _) = refuse_edit(workspace, session, vec![key_at_five("x"), key_at_five("y")]);
+    let result = workspace.execute(save_preset(
+        "mine",
+        vec![
+            KeyRef { property: "x".into(), frame: 5 },
+            KeyRef { property: "y".into(), frame: 5 },
+        ],
+    ));
+    report.record(
+        PLANE,
+        "MotionPresetSpanZero is produced for keys that all sit on one frame",
+        expect(
+            built.is_none()
+                && matches!(refused(&result), Some(Refusal::MotionPresetSpanZero { object, frame }) if object == "card" && *frame == 5),
+            format!("expected a zero-length capture refused (setup refusal: {built:?}), got {result:?}"),
         ),
     );
 

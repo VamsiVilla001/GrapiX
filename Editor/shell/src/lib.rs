@@ -464,6 +464,18 @@ fn cmd_starter_presets() -> Vec<MotionPreset> {
     starter_presets()
 }
 
+/// The starter presets followed by the project's saved ones (11.15), so the
+/// picker lists exactly what `ApplyPreset` will resolve. A project that
+/// cannot be read is an error, never a quietly shorter library.
+#[tauri::command]
+fn cmd_motion_presets(project: Option<String>) -> Result<Vec<MotionPreset>, EditorError> {
+    let mut presets = starter_presets();
+    if let Some(project) = project {
+        presets.extend(projects()?.motion_presets(&project).map_err(project_error)?);
+    }
+    Ok(presets)
+}
+
 #[tauri::command]
 fn cmd_default_endpoint() -> &'static str {
     DEFAULT_ASSET_ENDPOINT
@@ -666,6 +678,7 @@ pub fn run() {
             cmd_animation_surface,
             cmd_control_properties,
             cmd_starter_presets,
+            cmd_motion_presets,
             cmd_default_endpoint,
             cmd_project_list,
             cmd_scene_list,

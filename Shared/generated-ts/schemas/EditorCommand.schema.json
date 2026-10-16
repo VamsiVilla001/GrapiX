@@ -1321,6 +1321,24 @@
       ],
       "type": "object"
     },
+    "KeyRef": {
+      "description": "One authored key a capture names: a property and the frame it sits on.",
+      "properties": {
+        "frame": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "property": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "property",
+        "frame"
+      ],
+      "type": "object"
+    },
     "LicenseClass": {
       "description": "The terms an asset may be used under, as a class a show profile can test\n(13.8) rather than free licence text.",
       "oneOf": [
@@ -1929,6 +1947,41 @@
         "b",
         "a",
         "space"
+      ],
+      "type": "object"
+    },
+    "SaveMotionPreset": {
+      "description": "Save the selected keys of one object as one phase of a motion\npreset in the project's library (11.15). The document is read, never\nwritten: saving a preset is not a scene edit and is not undoable.",
+      "properties": {
+        "keys": {
+          "items": {
+            "$ref": "#/$defs/KeyRef"
+          },
+          "type": "array"
+        },
+        "objectId": {
+          "type": "string"
+        },
+        "phase": {
+          "$ref": "#/$defs/PresetPhase"
+        },
+        "presetId": {
+          "type": "string"
+        },
+        "project": {
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/SceneTarget"
+        }
+      },
+      "required": [
+        "project",
+        "target",
+        "objectId",
+        "presetId",
+        "phase",
+        "keys"
       ],
       "type": "object"
     },
@@ -3120,6 +3173,19 @@
       "properties": {
         "command": {
           "const": "confirmDesignSystem",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "type": "object"
+    },
+    {
+      "$ref": "#/$defs/SaveMotionPreset",
+      "properties": {
+        "command": {
+          "const": "saveMotionPreset",
           "type": "string"
         }
       },

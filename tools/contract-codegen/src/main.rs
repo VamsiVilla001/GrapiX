@@ -14,7 +14,7 @@ use gx_asset_plane::import::{AssetDisposition, AssetImportRefusal, PreparedAsset
 use gx_contracts::provenance::{AssetApproval, AssetOrigin, AssetProvenance, LicenseClass, ProvenanceTool};
 use gx_asset_plane::{AssetRef, PreflightRequest, PreflightResponse, TransferState};
 use gx_contracts::animation::{
-    ease_at, easing_control_points, AnimationSurface, CubicBezier, KeyframeChannel, SceneEasing,
+    ease_at, easing_control_points, AnimationSurface, CubicBezier, KeyRef, KeyframeChannel, SceneEasing,
     SceneKeyframe,
 };
 use gx_contracts::auth::{Role, Scope};
@@ -61,7 +61,7 @@ use gx_contracts::command::{
     DeleteScene, DuplicateObject, DuplicateScene, EditEffect, EditProperty, EditScene,
     EditorCommand, HistoryDirection, MoveKeyframe, OpenScene, PresetPhase, Redo, RemoveControl, RemoveKeyframe, RemovePhase,
     ReplaceControl, ReplaceDataContext, RelinkAsset, RelinkMaterial, RenameObject, SaveScene,
-    SaveTakePage, SaveTarget, SaveTextStyle, SceneEdit, SceneOrigin, SceneSource, SceneTarget, SessionKey,
+    SaveMotionPreset, SaveTakePage, SaveTarget, SaveTextStyle, SceneEdit, SceneOrigin, SceneSource, SceneTarget, SessionKey,
     SessionView, SetBinding, SetObjectField, SetObjectLocked, SetObjectVisible, SetPhase,
     SetSceneId, SetSceneName, Undo, UpdateKeyframe,
 };
@@ -244,6 +244,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         DeleteScene,
         SaveTakePage,
         ConfirmDesignSystem,
+        SaveMotionPreset,
+        KeyRef,
         CreateObject,
         DeleteObject,
         DuplicateObject,

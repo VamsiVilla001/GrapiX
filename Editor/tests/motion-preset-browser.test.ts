@@ -103,6 +103,15 @@ describe("the library grows from designer work", () => {
     expect(card.actions!.map((a) => a.name)).toEqual(["apply", "saveAsPreset"]);
   });
 
+  it('save is unavailable by name when the shell says the selection cannot be saved', () => {
+    const blocked = presetBrowserPanel([preset()], P50, { saveBlocker: 'select the keys to save in the timeline' });
+    const action = findNode(blocked, 'preset/lower-third/wipe-on')!.actions!.find((a) => a.name === 'saveAsPreset')!;
+    expect(action.unavailable).toBe('select the keys to save in the timeline');
+    const open = presetBrowserPanel([preset()], P50, {});
+    const free = findNode(open, 'preset/lower-third/wipe-on')!.actions!.find((a) => a.name === 'saveAsPreset')!;
+    expect(free.unavailable).toBeUndefined();
+  });
+
   it("an empty library says how it fills, not that it is broken", () => {
     // "The library is empty" is a different statement from "there are no
     // presets", and the first is the actionable one.
