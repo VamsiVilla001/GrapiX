@@ -117,6 +117,11 @@ pub fn create_file_font_definition(
 /// A font link as an author supplies it, before canonicalisation.
 #[derive(Debug, Clone)]
 pub enum LinkedSource {
+    /// A font file on a supported provider CDN, verified and cached locally.
+    DirectUrl {
+        url: String,
+        format: Option<FontFormat>,
+    },
     /// A CSS stylesheet on a trusted host.
     CssUrl {
         url: String,
@@ -131,6 +136,14 @@ pub enum LinkedSource {
 /// The offence is named where it can be: a bad link never reaches a fetch.
 pub fn canonical_link_source(source: &LinkedSource) -> Result<FontSource, Refusal> {
     match source {
+        LinkedSource::DirectUrl { url, format } => {
+            let source = FontSource::DirectUrl {
+                url: url.trim().to_string(),
+                format: *format,
+            };
+            gx_contracts::font::check_font_face_url(&source)?;
+            Ok(source)
+        }
         LinkedSource::AdobeFonts { project_id } => {
             let id = project_id.trim();
             let valid = !id.is_empty()
@@ -168,6 +181,59 @@ pub fn canonical_link_source(source: &LinkedSource) -> Result<FontSource, Refusa
                     .filter(|s| !s.is_empty()),
             })
         }
+    }
+}
+
+/// Classify the shell's existing link input in one place. URL suffixes only
+/// select the requested source kind; downloaded bytes still determine format.
+pub fn linked_source_from_input(input: &str) -> LinkedSource {
+    let input = input.trim();
+    if !input.contains("://") {
+        return LinkedSource::AdobeFonts {
+            project_id: input.into(),
+        };
+    }
+    if let Ok(url) = url::Url::parse(input) {
+        if url.scheme() == "https"
+            && url.host_str() == Some("use.typekit.net")
+            && url.username().is_empty()
+            && url.password().is_none()
+            && url.port().is_none()
+        {
+            if let Some(id) = url
+                .path()
+                .strip_prefix('/')
+                .and_then(|path| path.strip_suffix(".css"))
+            {
+                if !id.contains('/') && url.query().is_none() && url.fragment().is_none() {
+                    return LinkedSource::AdobeFonts {
+                        project_id: id.into(),
+                    };
+                }
+            }
+        }
+        let path = url.path().to_ascii_lowercase();
+        let format = if path.ends_with(".woff2") {
+            Some(FontFormat::Woff2)
+        } else if path.ends_with(".woff") {
+            Some(FontFormat::Woff)
+        } else if path.ends_with(".otf") {
+            Some(FontFormat::Otf)
+        } else if path.ends_with(".ttf") {
+            Some(FontFormat::Ttf)
+        } else {
+            None
+        };
+        if format.is_some() {
+            return LinkedSource::DirectUrl {
+                url: input.into(),
+                format,
+            };
+        }
+    }
+    LinkedSource::CssUrl {
+        url: input.into(),
+        integrity: None,
     }
 }
 
@@ -344,5 +410,39 @@ mod tests {
             create_file_font_definition("a", "0123456789abcdef", FontFormat::Ttf, &opts),
             Err(Refusal::InvalidFontData { .. })
         ));
+    }
+
+    #[test]
+    fn shell_links_classify_font_files_without_losing_css_or_kit_inputs() {
+        assert!(
+            matches!(linked_source_from_input(" abc123 "), LinkedSource::AdobeFonts { project_id } if project_id == "abc123")
+        );
+        assert!(
+            matches!(linked_source_from_input("https://use.typekit.net/abc123.css"), LinkedSource::AdobeFonts { project_id } if project_id == "abc123")
+        );
+        assert!(matches!(
+            linked_source_from_input("https://fonts.googleapis.com/css2?family=Inter"),
+            LinkedSource::CssUrl { .. }
+        ));
+        for (suffix, expected) in [
+            ("OTF", FontFormat::Otf),
+            ("ttf", FontFormat::Ttf),
+            ("woff", FontFormat::Woff),
+            ("woff2", FontFormat::Woff2),
+        ] {
+            let url = format!("https://fonts.gstatic.com/font.{suffix}?v=1");
+            assert!(
+                matches!(linked_source_from_input(&url), LinkedSource::DirectUrl { url: actual, format: Some(format) } if actual == url && format == expected)
+            );
+        }
+        // Classification must not erase URL fields before policy sees them.
+        for url in [
+            "https://user:password@use.typekit.net/abc123.css",
+            "https://use.typekit.net:8443/abc123.css",
+        ] {
+            assert!(
+                matches!(linked_source_from_input(url), LinkedSource::CssUrl { url: actual, .. } if actual == url)
+            );
+        }
     }
 }

@@ -1,4 +1,4 @@
-//! Font link ingest: a Google Fonts, Bunny Fonts or Adobe Fonts link is
+//! Font link ingest: a Google Fonts, Bunny Fonts, Adobe Fonts or direct CDN link is
 //! downloaded into the project (11.13; user decision of 2026-10-03).
 //!
 //! The stylesheet is fetched from its trusted host, parsed inertly by
@@ -24,7 +24,10 @@
 //! recorded position, not a guess about Adobe's terms.
 //!
 //! The network sits behind `FontFetcher` so policy is tested offline;
-//! `UreqFontFetcher` is the real transport.
+//! `UreqFontFetcher` is the real transport. Direct URLs use the same provider
+//! CDN allowlist and redirect policy, then file ingest's hash/metadata/licence
+//! rules. URL suffixes classify shell input; actual bytes determine format,
+//! and an explicit format mismatch refuses rather than relabelling a file.
 
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -40,8 +43,8 @@ use sha2::{Digest, Sha256, Sha384, Sha512};
 use super::container::{verify_font_file, VerifiedFontFile};
 use super::css::{parse_font_stylesheet, ParsedFontFace, ParsedFontSource};
 use super::ingest::{
-    font_asset_item, store_font_asset, BatchBuilder, FontIngestRefusal, PreparedFontBatch,
-    SceneFontLibrary,
+    font_asset_item, prepare_font_files, store_font_asset, BatchBuilder, FontFileInput,
+    FontIngestRefusal, PreparedFontBatch, SceneFontLibrary,
 };
 use super::manager::{
     canonical_link_source, normalize_fallbacks, normalize_family, normalize_weight, short_hash,
@@ -158,8 +161,17 @@ enum Provider {
 }
 
 impl Provider {
+    fn of_font(url: &str) -> Option<Self> {
+        let host = url::Url::parse(url).ok()?.host_str()?.to_ascii_lowercase();
+        [Self::Google, Self::Bunny, Self::Adobe]
+            .into_iter()
+            .find(|provider| provider.font_hosts().contains(&host.as_str()))
+    }
     fn of(stylesheet: &str) -> Option<Self> {
-        let host = url::Url::parse(stylesheet).ok()?.host_str()?.to_ascii_lowercase();
+        let host = url::Url::parse(stylesheet)
+            .ok()?
+            .host_str()?
+            .to_ascii_lowercase();
         match host.as_str() {
             "fonts.googleapis.com" => Some(Self::Google),
             "fonts.bunny.net" => Some(Self::Bunny),
@@ -245,7 +257,11 @@ pub fn prepare_font_link(
     scene: SceneFontLibrary<'_>,
     link: &LinkedSource,
 ) -> Result<PreparedFontBatch, FontIngestRefusal> {
+    if let LinkedSource::DirectUrl { .. } = link {
+        return prepare_direct_font(store, fetcher, scene, link);
+    }
     let requested = match link {
+        LinkedSource::DirectUrl { .. } => unreachable!("handled above"),
         LinkedSource::CssUrl { url, .. } => url.trim().to_string(),
         LinkedSource::AdobeFonts { project_id } => project_id.trim().to_string(),
     };
@@ -448,6 +464,65 @@ pub fn prepare_font_link(
     Ok(builder.finish())
 }
 
+/// A direct source follows the same CDN and redirect policy as CSS sources,
+/// then uses file ingest's metadata, licence, hash and deduplication rules.
+fn prepare_direct_font(
+    store: &mut AssetStore,
+    fetcher: &dyn FontFetcher,
+    scene: SceneFontLibrary<'_>,
+    source: &LinkedSource,
+) -> Result<PreparedFontBatch, FontIngestRefusal> {
+    let LinkedSource::DirectUrl { url, .. } = source else {
+        unreachable!("direct source only")
+    };
+    let refuse = |refusal| FontIngestRefusal {
+        source: url.clone(),
+        refusal,
+    };
+    let FontSource::DirectUrl { url, format } = canonical_link_source(source).map_err(&refuse)?
+    else {
+        unreachable!("canonical direct source")
+    };
+    let provider = Provider::of_font(&url)
+        .ok_or_else(|| refuse(Refusal::FontFetchHostNotTrusted { url: url.clone() }))?;
+    let bytes =
+        fetch(fetcher, &url, provider.font_hosts(), MAX_FONT_FILE_BYTES).map_err(&refuse)?;
+    let verified = verify_font_file(&bytes).map_err(&refuse)?;
+    if format.is_some_and(|expected| expected != verified.format) {
+        return Err(refuse(Refusal::InvalidFontData {
+            detail: format!(
+                "{url}: declared {format:?}, downloaded {:?}",
+                verified.format
+            ),
+        }));
+    }
+    let mut batch = prepare_font_files(
+        store,
+        scene,
+        &[FontFileInput {
+            file_name: url.clone(),
+            bytes: &bytes,
+            embedding_policy: EmbeddingPolicy::Package,
+            license: verified
+                .inspected
+                .license
+                .or_else(|| provider.fallback_licence().map(str::to_string)),
+        }],
+    )?;
+    for font in &mut batch.fonts {
+        font.source_label = Some(url.clone());
+        for face in &mut font.faces {
+            if let FontSource::File { original_url, .. } = &mut face.source {
+                *original_url = Some(url.clone());
+            }
+        }
+    }
+    for asset in &mut batch.assets {
+        asset.provenance = link_provenance(provider, &url, &url);
+    }
+    Ok(batch)
+}
+
 struct CollectedFace {
     face: ParsedFontFace,
     stylesheet_url: String,
@@ -480,7 +555,12 @@ fn collect_stylesheet(
 ) -> Result<(), Refusal> {
     stack.push(url.to_string());
     seen.insert(url.to_string());
-    let bytes = fetch(fetcher, url, provider.stylesheet_hosts(), MAX_STYLESHEET_BYTES)?;
+    let bytes = fetch(
+        fetcher,
+        url,
+        provider.stylesheet_hosts(),
+        MAX_STYLESHEET_BYTES,
+    )?;
     if let Some(integrity) = integrity {
         verify_integrity(url, &bytes, integrity)?;
     }
@@ -509,7 +589,16 @@ fn collect_stylesheet(
                 max_depth: MAX_STYLESHEET_IMPORT_DEPTH,
             });
         }
-        collect_stylesheet(fetcher, provider, &import, None, depth + 1, stack, seen, out)?;
+        collect_stylesheet(
+            fetcher,
+            provider,
+            &import,
+            None,
+            depth + 1,
+            stack,
+            seen,
+            out,
+        )?;
     }
     stack.pop();
     Ok(())
@@ -627,7 +716,11 @@ fn base64(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
         let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
         for i in 0..4 {
             if i <= chunk.len() {
@@ -735,6 +828,171 @@ mod tests {
         assets: &[],
     };
 
+    fn direct(url: &str, format: Option<FontFormat>) -> LinkedSource {
+        LinkedSource::DirectUrl {
+            url: url.into(),
+            format,
+        }
+    }
+
+    #[test]
+    fn direct_files_verify_all_formats_cache_and_deduplicate() {
+        let formats: &[(FontFormat, &[u8])] = &[
+            (FontFormat::Ttf, TTF),
+            (FontFormat::Woff2, WOFF2),
+            (
+                FontFormat::Otf,
+                include_bytes!("../../tests/fixtures/fonts/inter-latin.otf"),
+            ),
+            (
+                FontFormat::Woff,
+                include_bytes!("../../tests/fixtures/fonts/inter-latin.woff"),
+            ),
+        ];
+        for &(format, bytes) in formats {
+            let (mut store, root) = store();
+            let url = "https://fonts.gstatic.com/direct/font";
+            let fetcher = FakeFetcher::default().body(url, bytes);
+            let batch =
+                prepare_font_link(&mut store, &fetcher, EMPTY, &direct(url, Some(format))).unwrap();
+            assert_eq!(batch.fonts.len(), 1);
+            assert_eq!(batch.assets.len(), 1);
+            assert!(store.contains(&content_hash(bytes)).unwrap());
+            let font = &batch.fonts[0];
+            assert!(
+                matches!(&font.faces[0].source, FontSource::File { format: actual, original_url: Some(original), stylesheet_url: None, .. } if *actual == format && original == url)
+            );
+            assert_eq!(font.source_label.as_deref(), Some(url));
+            assert_eq!(batch.assets[0].provenance.sources, [url]);
+            assert_eq!(
+                batch.assets[0].provenance.provider.as_deref(),
+                Some("Google Fonts")
+            );
+            let scene = SceneFontLibrary {
+                fonts: &batch.fonts,
+                assets: &batch.assets,
+            };
+            let again = prepare_font_link(&mut store, &fetcher, scene, &direct(url, None)).unwrap();
+            assert!(again.fonts.is_empty() && again.assets.is_empty());
+            assert_eq!(
+                again.sources[0].disposition,
+                FontDisposition::AlreadyInScene
+            );
+            std::fs::remove_dir_all(root).ok();
+        }
+    }
+
+    /// Manual Windows/macOS source check. Network failure is a failure,
+    /// never a successful skip. Ordinary offline gates do not require a CDN.
+    #[test]
+    #[ignore = "manual live Google Fonts/direct-CDN check; needs HTTPS access"]
+    fn live_google_direct_download_matches_the_css_asset() {
+        let (mut store, root) = store();
+        let fetcher = UreqFontFetcher::new();
+        let css = prepare_font_link(
+            &mut store,
+            &fetcher,
+            EMPTY,
+            &css_link("https://fonts.googleapis.com/css2?family=Inter:wght@400"),
+        )
+        .expect("live Google Fonts source must resolve");
+        let face = &css.fonts[0].faces[0];
+        let FontSource::File {
+            asset_id,
+            format,
+            original_url: Some(url),
+            ..
+        } = &face.source
+        else {
+            panic!("CSS source did not produce cached font bytes")
+        };
+        let expected = css
+            .assets
+            .iter()
+            .find(|asset| asset.asset_id == *asset_id)
+            .unwrap()
+            .checksum
+            .as_ref()
+            .unwrap();
+        let batch = prepare_font_link(&mut store, &fetcher, EMPTY, &direct(url, Some(*format)))
+            .expect("live direct-CDN source must resolve");
+        assert_eq!(batch.assets[0].checksum.as_ref(), Some(expected));
+        assert!(store.contains(expected).unwrap());
+        println!(
+            "live direct font verified: family={}, format={format:?}, sha256={}",
+            batch.fonts[0].family, expected.0
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn direct_url_policy_refuses_before_any_request() {
+        for (url, code) in [
+            ("http://fonts.gstatic.com/a.ttf", "fontUrlNotHttps"),
+            (
+                "https://user:password@fonts.gstatic.com/a.ttf",
+                "fontUrlHasCredentials",
+            ),
+            ("https://127.0.0.1/a.ttf", "fontFetchHostNotTrusted"),
+            ("https://untrusted.invalid/a.ttf", "fontFetchHostNotTrusted"),
+            (
+                "https://fonts.gstatic.com:8443/a.ttf",
+                "fontFetchHostNotTrusted",
+            ),
+        ] {
+            let (mut store, root) = store();
+            let fetcher = FakeFetcher::default();
+            let error =
+                prepare_font_link(&mut store, &fetcher, EMPTY, &direct(url, None)).unwrap_err();
+            assert_eq!(error.refusal.code_name(), code);
+            assert_eq!(error.source, url);
+            assert!(fetcher.requested().is_empty());
+            assert!(!root.exists());
+        }
+    }
+
+    #[test]
+    fn direct_redirects_recheck_the_provider_and_allow_relative_paths() {
+        let (mut store, root) = store();
+        let url = "https://fonts.gstatic.com/direct.ttf";
+        let next = "https://fonts.gstatic.com/actual.ttf";
+        let fetcher = FakeFetcher::default()
+            .redirect(url, "/actual.ttf")
+            .body(next, TTF);
+        prepare_font_link(&mut store, &fetcher, EMPTY, &direct(url, None)).unwrap();
+        assert_eq!(fetcher.requested(), [url, next]);
+        std::fs::remove_dir_all(&root).ok();
+        for location in [
+            "http://fonts.gstatic.com/actual.ttf",
+            "https://127.0.0.1/actual.ttf",
+            "https://fonts.bunny.net/actual.ttf",
+        ] {
+            let fetcher = FakeFetcher::default().redirect(url, location);
+            prepare_font_link(&mut store, &fetcher, EMPTY, &direct(url, None)).unwrap_err();
+            assert_eq!(fetcher.requested(), [url]);
+            assert!(!root.exists());
+        }
+    }
+
+    #[test]
+    fn direct_invalid_unlicensed_oversized_and_mislabelled_fonts_never_cache() {
+        let (mut store, root) = store();
+        let url = "https://fonts.gstatic.com/font.ttf";
+        for (bytes, format) in [
+            (b"<html>not a font</html>".as_slice(), None),
+            (UNLICENSED, None),
+            (TTF, Some(FontFormat::Woff2)),
+        ] {
+            let fetcher = FakeFetcher::default().body(url, bytes);
+            prepare_font_link(&mut store, &fetcher, EMPTY, &direct(url, format)).unwrap_err();
+            assert!(!root.exists());
+        }
+        let fetcher = FakeFetcher::default().body(url, &vec![0; MAX_FONT_FILE_BYTES + 1]);
+        let error = prepare_font_link(&mut store, &fetcher, EMPTY, &direct(url, None)).unwrap_err();
+        assert!(matches!(error.refusal, Refusal::FontFetchTooLarge { .. }));
+        assert!(!root.exists());
+    }
+
     #[test]
     fn a_google_link_downloads_verified_faces_into_the_project() {
         let (mut store, root) = store();
@@ -786,7 +1044,10 @@ mod tests {
         let again = prepare_font_link(&mut store, &fetcher, scene, &css_link(GOOGLE)).unwrap();
         assert!(again.fonts.is_empty() && again.assets.is_empty());
         assert_eq!(again.sources[0].font_id, font.font_id);
-        assert_eq!(again.sources[0].disposition, FontDisposition::AlreadyInScene);
+        assert_eq!(
+            again.sources[0].disposition,
+            FontDisposition::AlreadyInScene
+        );
         std::fs::remove_dir_all(root).ok();
     }
 
@@ -886,7 +1147,10 @@ mod tests {
             .body(GOOGLE_700, UNLICENSED);
         let refusal =
             prepare_font_link(&mut store, &fetcher, EMPTY, &css_link(GOOGLE)).unwrap_err();
-        assert!(matches!(refusal.refusal, Refusal::FontEmbeddingRefused { .. }));
+        assert!(matches!(
+            refusal.refusal,
+            Refusal::FontEmbeddingRefused { .. }
+        ));
         std::fs::remove_dir_all(root).ok();
     }
 
@@ -920,7 +1184,10 @@ mod tests {
 
         // Credentials and plain HTTP are named offences, not host misses.
         assert!(matches!(
-            check_url("https://user:pw@fonts.gstatic.com/a.woff2", &["fonts.gstatic.com"]),
+            check_url(
+                "https://user:pw@fonts.gstatic.com/a.woff2",
+                &["fonts.gstatic.com"]
+            ),
             Err(Refusal::FontUrlHasCredentials { .. })
         ));
         assert!(matches!(
@@ -949,7 +1216,10 @@ mod tests {
             b"@import url(\"https://fonts.googleapis.com/css2?family=Inter\");",
         );
         let refusal = prepare_font_link(&mut store, &fetcher, EMPTY, &css_link(a)).unwrap_err();
-        assert!(matches!(refusal.refusal, Refusal::FontFetchHostNotTrusted { .. }));
+        assert!(matches!(
+            refusal.refusal,
+            Refusal::FontFetchHostNotTrusted { .. }
+        ));
         std::fs::remove_dir_all(root).ok();
     }
 
@@ -975,7 +1245,10 @@ mod tests {
         assert!(matches!(refusal.refusal, Refusal::FontFetchFailed { .. }));
         let right = LinkedSource::CssUrl {
             url: GOOGLE.into(),
-            integrity: Some(format!("sha384-{}", base64(&Sha384::digest(css.as_bytes())))),
+            integrity: Some(format!(
+                "sha384-{}",
+                base64(&Sha384::digest(css.as_bytes()))
+            )),
         };
         assert!(prepare_font_link(&mut store, &fetcher, EMPTY, &right).is_ok());
         std::fs::remove_dir_all(root).ok();

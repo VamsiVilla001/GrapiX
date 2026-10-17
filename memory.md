@@ -118,6 +118,67 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-10-17 — Local DirectUrl font resolution verified; 2.8 stays active (Codex, mission 1)
+
+**Partial — 2.8.** `LinkedSource::DirectUrl { url, format }` now resolves
+through `prepare_font_link`. It reuses the existing provider font-CDN
+allowlists (`fonts.gstatic.com`, `fonts.bunny.net`, `use.typekit.net`), HTTPS,
+credential/port checks, redirect checks and bounded downloads. Other hosts
+refuse by name. File ingest verifies the container and metadata, requires the
+existing recorded licence policy, derives identity from the content hash and
+deduplicates cached bytes. An explicitly declared format that differs from
+the bytes refuses before caching. Returned file faces keep the original URL;
+assets record the provider and source URL. No contract or generated type was
+changed, no font was installed, and Program still consumes packaged bytes.
+
+`manager::linked_source_from_input` preserves existing Adobe kit/CSS input
+and recognizes TTF/OTF/WOFF/WOFF2 URL paths, including query strings and
+uppercase suffixes. It preserves credentials and nonstandard ports for the
+policy to refuse, rather than erasing them when recognizing an Adobe kit.
+The Editor adapter is Claude's lane: the exact requested handoff is to replace
+`Editor/shell/src/lib.rs::linked_source` with a call to this shared helper and
+add its shell mapping test. That adapter change and a live Editor interaction
+were not run in this slice; the resolver was executed through its real API.
+
+**Verified by execution:**
+
+- `cargo test -p gx-asset-plane fonts::`: **42 passed**, 0 failed. New cases
+  cover all four formats, immutable hash/cache identity, repeated ingest,
+  provenance, redirects, invalid URLs/ports/credentials, unlicensed/malformed
+  bytes, declared-format mismatch and size limits. The final full gate also
+  executes the classifier's preserve-before-validate regressions.
+- `cargo test -p gx-asset-plane
+  fonts::link::tests::live_google_direct_download_matches_the_css_asset --
+  --ignored --exact --nocapture`: **1 passed** against the real HTTPS
+  transport on Windows. Inter resolved via Google Fonts CSS and then directly
+  from its CDN as WOFF2, with the same verified SHA-256:
+  `ef572f9187a8be018d9d9c2c6b77c1f6cb2af4199f02fc16c292ea10ab25a2cc`.
+  The cached test assets were removed. This manual network check is explicitly
+  ignored in the ordinary offline gate and fails on network/source failure;
+  its successful execution is in agent/tmp/mission1-font-live.log.
+- `npm run check`: **exit 0** on the final corrected source; boundaries OK,
+  **302 generated files current**, type checks OK, **40 Node / 357 Editor /
+  696 Rust tests passed**, **385 conformance passed / 0 failed / 9 skipped**.
+  Rust's two ignored tests are the existing endpoint-dependent check and the
+  explicitly executed manual font network check. Default engine-host exclusion
+  and protected fixture-token rejection remain as previously documented.
+  Evidence: agent/tmp/mission1-font-full-check.log.
+- `cargo run -p gx-pixel-gate -- check`: **exit 0**; no further baseline
+  change. Evidence: agent/tmp/mission1-font-pixel-gate.log.
+- `git diff --check` passes. Tracker snapshots retain 2.8 and 4.5 as active;
+  only 2.8's verification comment changes in this commit.
+
+**External gate / mission sequencing.** The user explicitly chose to keep
+the live Adobe kit and macOS font checks as external gates. 2.8's exact
+Done-when, "All sources resolve on both platforms", is therefore unmet;
+11.13 is not unblocked. Mission subtask #8 is Partial/blocked after its local
+work. Subtasks #9 (MCP) and #11 (import) explicitly start after #8 is done,
+so they remain waiting and were not started out of order. The Figma corpus
+URL is supplied and accessible (see the preceding entry); it is no longer a
+missing input. No import fidelity or MCP completion is claimed.
+
+---
+
 ## 2026-10-16 — 3.7 real mesh geometry verified; local colour baseline corrected (Codex, mission 1)
 
 **Implemented — 3.7's reopened geometry criteria.** GLB primitives now load
