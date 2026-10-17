@@ -107,14 +107,32 @@ function layerHeader(
 
   const name = document.createElement("span");
   name.className = "timeline-layer-name";
-  const caret = entry.trackCount === 0 ? "" : entry.collapsed ? "▸ " : "▾ ";
-  name.textContent = `${caret}${entry.label}`;
+  name.textContent = entry.label;
+
+  // The fold control is a button of its own: it looks clickable, so one click
+  // does what it says. Clicking elsewhere on the row still only selects.
+  const caret = document.createElement("button");
+  caret.type = "button";
+  caret.className = "timeline-caret";
+  caret.dataset.timelineToggle = entry.objectId;
+  if (entry.trackCount === 0) {
+    caret.disabled = true;
+    caret.style.visibility = "hidden";
+  } else {
+    caret.textContent = entry.collapsed ? "▸" : "▾";
+    caret.setAttribute("aria-expanded", String(!entry.collapsed));
+    caret.setAttribute(
+      "aria-label",
+      `${entry.collapsed ? "Expand" : "Collapse"} ${entry.label} tracks`,
+    );
+  }
 
   element.append(
     layerSwitch(document, "toggleVisibility", entry.objectId, layer.visible, layer.visibility),
     layerSwitch(document, "toggleLock", entry.objectId, layer.locked, layer.lock),
     swatch,
     index,
+    caret,
     name,
   );
 }

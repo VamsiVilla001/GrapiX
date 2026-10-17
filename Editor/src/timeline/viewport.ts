@@ -35,7 +35,7 @@ export interface TimelineViewport {
   readonly rowHeight: number;
 }
 
-export const DEFAULT_ROW_HEIGHT = 22;
+export const DEFAULT_ROW_HEIGHT = 24;
 export const DEFAULT_PIXELS_PER_FRAME = 6;
 
 export function frameToX(viewport: TimelineViewport, frame: number): number {

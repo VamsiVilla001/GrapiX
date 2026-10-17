@@ -244,6 +244,20 @@ resolution gap is the next renderer/font subtask; no 11.13 unblock is claimed.
 
 ---
 
+## 2026-10-17 — UX review fixes (Claude + Codex review): object list, toolbar, preset dialog, targets
+
+No tracker row changed. Evidence and before/after: `agent/tmp/ux-review/REVIEW.md` (not tracked). Changes in `Editor/web/{style.css,index.html,main.ts}`, `Editor/src/timeline/{panel,viewport}.ts`:
+- **Object list (11.8)** was an unstyled wall of text; now compact rows (name, kind, Hide/Lock toggles, indent by aria-level, whole row selects). Position/alpha/shown/locked stay in the accessibility tree, clipped. Because the select button is a full-row overlay, automation must click it with `evaluate(el => el.click())`, not at its centre.
+- Type floor 12px (was 9–11.5px on 128 of 177 text items), `--faint` #9a9a9a (13 contrast failures, all 4.43:1, gone), 24px minimum targets (46 to 8 under 24px), timeline rows 24px.
+- Timeline tools grouped by scope (Keys / Presets / Phases) with counts, controls disabled with the reason on them, one row that scrolls instead of wrapping (a wrapped bar left the track area 0px high at 1024x768).
+- Inline duration validation under the toolbar; in-app preset save dialog replaces `window.prompt` for presets (15 other prompts remain); single-click timeline caret button; Jump to hold; Animation panel open by default.
+- Fixed a real bug exposed by this: typing a frame then clicking a key button swallowed the first click (blur change re-rendered between mousedown and mouseup). The frame now commits on input.
+- Codex review fixes: aria-invalid="true", Save disabled while a save is in flight, pending save captures session+project.
+- Not done: keyboard navigation of timeline keys, pinned transport, 1024x768 still cramped, remaining prompts.
+`npm run check` exit 0 (385 conformance passed, 0 failed, 9 skipped); all live checks in agent/tmp/ui-check re-run against the new UI.
+
+---
+
 ## 2026-10-17 — Editor font link box now uses the asset plane classifier (Claude)
 
 No tracker row changed. `Editor/shell/src/lib.rs::linked_source` now calls `gx_asset_plane::fonts::manager::linked_source_from_input` (codex, c581389), so a pasted .ttf/.otf/.woff/.woff2 URL becomes `LinkedSource::DirectUrl`, CSS URLs stay stylesheets and Adobe kit URLs/ids stay kits; a credential-bearing kit URL is not turned into a kit id. New shell test `the_font_link_box_classifies_direct_files_stylesheets_and_adobe_kits`. `npm run check` exit 0 on the combined tree (385 conformance passed, 0 failed, 9 skipped). 2.8 and 11.13 stay gated on the Adobe live-kit and macOS checks the user kept external; this is not a 2.8 completion.

@@ -29,6 +29,7 @@ import {
   type TimelineSnapshot,
 } from "../src/timeline/repaint-plan";
 import { renderTimelinePanel, visibleKeyCount } from "../src/timeline/panel";
+import { timelineLayers } from "../src/timeline/layers";
 import {
   clampViewport,
   frameToSeconds,
@@ -153,6 +154,43 @@ describe("node count is flat in key count (11.10 done-when)", () => {
     // there are a dozen rows when there are a thousand. 500 objects with one
     // track each is 500 group rows plus 500 track rows.
     expect((many.headers as unknown as FakeElement).attributes.get("aria-setsize")).toBe("1000");
+  });
+});
+
+describe("the layer fold control", () => {
+  // The object manager builds the layer rows, so objects need their full base.
+  const full = (doc: SceneDocument): SceneDocument => ({
+    ...doc,
+    objects: doc.objects.map((object) => ({
+      ...object, visible: true, locked: false, opacity: 1, zDepth: 0, zIndex: 0, layerId: "", width: 100, height: 50,
+      rotation: 0, rotationX: 0, rotationY: 0, scaleX: 1, scaleY: 1, scaleZ: 1,
+    })) as unknown as SceneDocument["objects"],
+  });
+  const layerRows = (source: SceneDocument, collapsed: readonly string[] = []): FakeElement[] => {
+    const doc = full(source);
+    const parts = renderTimelinePanel(fakeDocument, timelineModel(doc, { collapsedIds: collapsed }), viewport, timelineLayers(doc));
+    return (parts.headers as unknown as FakeElement).children.filter((child) => child.className === "timeline-group-header");
+  };
+  const caretOf = (row: FakeElement): FakeElement => row.children.find((child) => child.className === "timeline-caret")!;
+
+  it("is a button of its own, so one click does what the arrow says", () => {
+    const [row] = layerRows(scene(2, 3));
+    const caret = caretOf(row!);
+    expect(caret.dataset.timelineToggle).toBe("o0");
+    expect(caret.attributes.get("aria-expanded")).toBe("true");
+    expect(caret.attributes.get("aria-label")).toBe("Collapse o0 tracks");
+    expect(caret.textContent).toBe("▾");
+    // The name no longer carries the arrow as text.
+    const name = row!.children.find((child) => child.className === "timeline-layer-name")!;
+    expect(name.textContent).toBe("o0");
+  });
+
+  it("says expanded or collapsed in its label and glyph", () => {
+    const [collapsed] = layerRows(scene(2, 3), ["o0"]);
+    expect(caretOf(collapsed!).attributes.get("aria-expanded")).toBe("false");
+    expect(caretOf(collapsed!).attributes.get("aria-label")).toBe("Expand o0 tracks");
+    expect(caretOf(collapsed!).textContent).toBe("▸");
+
   });
 });
 

@@ -15,7 +15,7 @@
   --rule: #343434;
   --text: #d0d0d0;
   --dim: #a4a4a4;
-  --faint: #888888;
+  --faint: #9a9a9a;
   --accent: #3d8ff5;
   --accent-quiet: #273b54;
   --good: #35a47c;
@@ -75,7 +75,7 @@ body {
 }
 
 .timeline-head h2 {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -113,7 +113,7 @@ body {
   align-items: center;
   padding: 0 8px;
   color: var(--text);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -128,7 +128,7 @@ body {
   align-items: center;
   padding: 0 10px 0 24px;
   color: var(--dim);
-  font-size: 11.5px;
+  font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -240,7 +240,7 @@ code {
 
 .label {
   color: var(--faint);
-  font-size: 10.5px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.07em;
 }
@@ -425,7 +425,7 @@ button.primary:hover:not(:disabled) {
 
 .pane-head h2,
 .panel h2 {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -435,7 +435,7 @@ button.primary:hover:not(:disabled) {
 .meta {
   color: var(--faint);
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: 12px;
   margin-left: auto;
 }
 
@@ -549,7 +549,7 @@ button.primary:hover:not(:disabled) {
 .pane-note,
 .panel-note {
   color: var(--faint);
-  font-size: 11.5px;
+  font-size: 12px;
   padding: 8px 14px;
   border-top: 1px solid var(--rule);
   max-width: 80ch;
@@ -603,7 +603,7 @@ button.primary:hover:not(:disabled) {
 
 .object-kind {
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: 12px;
   color: var(--accent);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -620,7 +620,7 @@ button.primary:hover:not(:disabled) {
 
 .object-id {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--faint);
 }
 
@@ -673,7 +673,7 @@ button.primary:hover:not(:disabled) {
   flex: 1 1 100%;
   color: var(--dim);
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: 12px;
 }
 
 .asset-manager-mount [role="gridcell"]::before {
@@ -683,7 +683,7 @@ button.primary:hover:not(:disabled) {
 
 .asset-manager-mount [role="listitem"] > button {
   padding: 3px 7px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* The control contract is a compact handoff, not a second inspector. */
@@ -703,7 +703,7 @@ button.primary:hover:not(:disabled) {
   border-radius: 4px;
   color: var(--dim);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .control-contract-mount [role="listitem"]::before {
@@ -715,7 +715,7 @@ button.primary:hover:not(:disabled) {
 
 .control-contract-mount [role="listitem"] > button {
   padding: 3px 7px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .project-tools {
@@ -757,7 +757,7 @@ button.primary:hover:not(:disabled) {
   display: grid;
   gap: 4px;
   color: var(--dim);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .take-page-mount [role="gridcell"]::before {
@@ -813,12 +813,12 @@ button.primary:hover:not(:disabled) {
   flex: 1 1 100%;
   order: 2;
   color: var(--dim);
-  font-size: 10.5px;
+  font-size: 12px;
 }
 
 .scene-manager-mount [role="listitem"] > button {
   padding: 3px 7px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .scene-manager-mount [aria-description^="unavailable"] {
@@ -846,7 +846,7 @@ button.primary:hover:not(:disabled) {
   border: 0;
   background: transparent;
   color: var(--dim);
-  font-size: 11.5px;
+  font-size: 12px;
   padding: 4px 9px;
 }
 
@@ -879,7 +879,7 @@ button.primary:hover:not(:disabled) {
   border: 1px solid var(--rule);
   background: var(--panel);
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .result.good {
@@ -913,7 +913,7 @@ button.primary:hover:not(:disabled) {
   align-items: center;
   gap: 6px;
   color: var(--faint);
-  font-size: 10.5px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -928,7 +928,7 @@ button.primary:hover:not(:disabled) {
   align-items: center;
   gap: 5px;
   color: var(--faint);
-  font-size: 10.5px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -940,7 +940,7 @@ button.primary:hover:not(:disabled) {
 .animation-summary {
   color: var(--dim);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 12px;
   margin-bottom: 7px;
 }
 
@@ -992,7 +992,7 @@ button.primary:hover:not(:disabled) {
 
 .object-tools button {
   padding: 3px 8px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .has-current-key .keyframe-toggle {
@@ -1009,7 +1009,7 @@ button.primary:hover:not(:disabled) {
   overflow: hidden;
   color: var(--faint);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1027,7 +1027,7 @@ button.primary:hover:not(:disabled) {
   background: var(--panel-2);
   color: var(--faint);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .keyframe-chip.current {
@@ -1050,7 +1050,7 @@ button.primary:hover:not(:disabled) {
   border: 1px solid var(--rule);
   background: var(--panel-2);
   color: var(--text);
-  font: 11px var(--mono);
+  font: 12px var(--mono);
   padding: 3px 5px;
 }
 
@@ -1069,7 +1069,7 @@ button.primary:hover:not(:disabled) {
 .keyframe-detail button {
   height: 28px;
   padding: 3px 7px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .bezier-controls {
@@ -1128,7 +1128,7 @@ button.primary:hover:not(:disabled) {
 }
 
 .log-title {
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -1145,7 +1145,7 @@ button.primary:hover:not(:disabled) {
   display: flex;
   gap: 10px;
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: 12px;
   padding: 2px 0;
   border-bottom: 1px solid #1f272e;
 }
@@ -1177,7 +1177,7 @@ button.primary:hover:not(:disabled) {
  * authoring commands and the virtualised three-canvas timeline are retained. */
 body { font-size: 12px; line-height: 1.4; }
 button, input, select, textarea { font-family: var(--font); }
-button { border-radius: 3px; padding: 3px 8px; font-size: 11px; min-height: 25px; }
+button { border-radius: 3px; padding: 3px 8px; font-size: 12px; min-height: 25px; }
 button img { width: 16px; height: 16px; vertical-align: middle; filter: brightness(0) invert(.74); }
 button img:not(:only-child) { margin-right: 5px; }
 button[aria-pressed="true"] { background: var(--accent-quiet); border-color: var(--accent); }
@@ -1192,14 +1192,14 @@ button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); 
 .menu-items button { display: flex; width: 100%; justify-content: space-between; text-align: left; border: 0; background: transparent; padding: 7px 10px; white-space: nowrap; }
 .menu-items button:hover { background: var(--accent-quiet); }
 kbd { color: var(--dim); font-family: var(--font); margin-left: 20px; }
-.workspace-title { margin-left: auto; color: var(--faint); font-size: 11px; padding-right: 8px; }
+.workspace-title { margin-left: auto; color: var(--faint); font-size: 12px; padding-right: 8px; }
 .brand { gap: 5px; }
 .brand .mark { font-size: 15px; font-weight: 600; }
-.brand .product { font-size: 11px; }
+.brand .product { font-size: 12px; }
 .scene-identity { gap: 9px; justify-content: center; min-width: 0; }
 .scene-identity .field { display: flex; flex-direction: row; flex: 0 1 auto; align-items: center; gap: 6px; margin: 0; }
 .scene-identity input { width: 125px; padding: 3px 6px; height: 25px; }
-.scene-identity .label { font-size: 10px; }
+.scene-identity .label { font-size: 12px; }
 .bar > .actions { gap: 4px; flex-wrap: wrap; }
 .creation-tools { grid-column: 1; grid-row: 3; display: flex; gap: 5px; align-items: center; padding: 2px 0; }
 .creation-tools button { width: 31px; height: 29px; padding: 4px; background: transparent; border-color: transparent; }
@@ -1215,7 +1215,7 @@ kbd { color: var(--dim); font-family: var(--font); margin-left: 20px; }
 .panel h2, .pane-head h2, .timeline-head h2 { text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 500; color: #c7c7c7; }
 .panel > h2, .panel-title-row { position: relative; padding: 0 0 8px; margin-bottom: 9px; border-bottom: 1px solid var(--rule); }
 .panel-title-row h2 { flex: 1; }
-.panel-disclosure { float: right; min-height: 18px; height: 18px; padding: 0 3px; margin-left: 5px; border: 0; background: transparent; }
+.panel-disclosure { float: right; min-height: 24px; height: 24px; min-width: 24px; padding: 0 5px; margin-left: 5px; border: 0; background: transparent; }
 .panel-disclosure img { width: 13px; height: 13px; }
 .panel-section-collapsed { padding: 7px 12px; }
 .panel-section-collapsed > :not(h2):not(.panel-title-row) { display: none !important; }
@@ -1231,7 +1231,7 @@ kbd { color: var(--dim); font-family: var(--font); margin-left: 20px; }
 .viewer-footer button { height: 23px; min-height: 23px; padding: 2px 5px; }
 .viewer-fit { background: #181818; padding: 2px 12px; border: 1px solid var(--rule); border-radius: 3px; }
 .viewer-footer .meta { margin-left: 0; }
-.preview-only { margin-left: auto; color: var(--faint); font-size: 10px; }
+.preview-only { margin-left: auto; color: var(--faint); font-size: 12px; }
 .timecode { font-family: var(--mono); font-weight: 600; color: var(--accent); white-space: nowrap; }
 .preview-transport { display: flex; justify-content: center; gap: 10px; margin: 8px 0 17px; }
 .preview-transport button { background: transparent; border-color: transparent; min-width: 27px; }
@@ -1239,16 +1239,16 @@ kbd { color: var(--dim); font-family: var(--font); margin-left: 20px; }
 .preview-settings { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
 .preview-settings dt { color: var(--dim); }
 .preview-settings dd { color: var(--text); }
-.preview-panel .meta { display: block; font-family: var(--font); font-size: 11px; }
-.preview-options { margin: 4px 0 6px; color: var(--dim); font-size: 10px; }
+.preview-panel .meta { display: block; font-family: var(--font); font-size: 12px; }
+.preview-options { margin: 4px 0 6px; color: var(--dim); font-size: 12px; }
 .preview-options summary { cursor: pointer; }
 .preview-options[open] summary { margin-bottom: 5px; }
 .property-section { padding: 2px 0 6px; border-bottom: 1px solid var(--rule); }
-.property-section h3, .property-section summary { font-size: 11px; font-weight: 600; color: #c4c4c4; margin: 6px 0; }
+.property-section h3, .property-section summary { font-size: 12px; font-weight: 600; color: #c4c4c4; margin: 6px 0; }
 .property-section summary { cursor: pointer; }
 .property-section [role="gridcell"] { display: grid; grid-template-columns: minmax(75px,1fr) auto auto; align-items: center; gap: 5px; min-height: 22px; color: var(--accent); font-size: 12px; }
-.property-section [role="gridcell"]::before { content: attr(aria-label); color: var(--dim); font-size: 11px; }
-.property-section button { background: transparent; font-size: 10px; padding: 1px 4px; min-height: 21px; }
+.property-section [role="gridcell"]::before { content: attr(aria-label); color: var(--dim); font-size: 12px; }
+.property-section button { background: transparent; font-size: 12px; padding: 1px 4px; min-height: 21px; }
 .property-section [role="gridcell"] { grid-template-columns: minmax(58px,1fr) minmax(42px,75px) 51px; gap: 4px; }
 .property-value { min-width: 0; width: 100%; padding: 2px 3px; min-height: 22px; text-align: right; color: var(--accent); background: transparent; border: 1px solid transparent; border-radius: 2px; font: inherit; }
 .property-value:hover { border-color: var(--rule); }
@@ -1268,9 +1268,9 @@ select { min-width: 0; max-width: 100%; color: var(--text); background: #191919;
 .preview-settings { gap: 5px; }
 .preview-transport { margin: 5px 0 10px; }
 .scene-manager-mount [role="listitem"] { padding: 5px 6px; gap: 3px; border-color: #323232; }
-.scene-manager-mount [role="listitem"] > button { padding: 2px 4px; font-size: 10px; min-height: 21px; }
-.scene-manager-mount [role="status"] { font-size: 9px; }
-.scene-manager-summary { color: var(--dim); font-size: 10px; margin: 7px 0; }
+.scene-manager-mount [role="listitem"] > button { padding: 2px 4px; font-size: 12px; min-height: 21px; }
+.scene-manager-mount [role="status"] { font-size: 12px; }
+.scene-manager-summary { color: var(--dim); font-size: 12px; margin: 7px 0; }
 .graphic-search { width: 100%; min-width: 0; margin: 0 0 8px; padding: 5px 7px; background: #191919; border: 1px solid var(--rule); }
 .preview-panel > h2 { margin-bottom: 5px; padding-bottom: 6px; }
 .preview-panel .preview-settings { margin-bottom: 6px; }
@@ -1285,31 +1285,31 @@ select { min-width: 0; max-width: 100%; color: var(--text); background: #191919;
 .timeline-bar { grid-template-rows: auto 23px minmax(0,1fr); background: #1b1b1b; }
 .timeline-head { gap: 7px; padding: 6px 10px; flex-wrap: wrap; background: #232323; }
 .timeline-head > h2 { margin-right: 6px; }
-.timeline-head .frame-control { margin-left: 0; font-size: 10px; gap: 4px; }
-.timeline-head button, .timeline-head select { min-height: 23px; height: 23px; font-size: 10px; padding: 2px 5px; }
-.timeline-head .meta { font-size: 10px; }
+.timeline-head .frame-control { margin-left: 0; font-size: 12px; gap: 4px; }
+.timeline-head button, .timeline-head select { min-height: 23px; height: 23px; font-size: 12px; padding: 2px 5px; }
+.timeline-head .meta { font-size: 12px; }
 .timeline-clock { display: grid; min-width: 125px; padding: 0 10px; border-right: 1px solid var(--rule); }
 .timeline-clock .timecode { font-size: 18px; line-height: 1.2; }
-#timeline-frame-line { color: var(--dim); font-size: 10px; }
+#timeline-frame-line { color: var(--dim); font-size: 12px; }
 .timeline-ruler { display: grid; grid-template-columns: 240px minmax(0,1fr); height: 23px; background: #252525; border-bottom: 1px solid var(--rule); }
-.layer-column-heading { color: var(--dim); padding: 4px 9px; font-size: 10px; border-right: 1px solid var(--rule); }
+.layer-column-heading { color: var(--dim); padding: 4px 9px; font-size: 12px; border-right: 1px solid var(--rule); }
 #timeline-ruler-ticks { position: relative; overflow: hidden; }
-#timeline-ruler-ticks span { position: absolute; top: 3px; padding-left: 4px; height: 19px; border-left: 1px solid #747474; white-space: nowrap; color: var(--dim); font: 10px var(--mono); }
+#timeline-ruler-ticks span { position: absolute; top: 3px; padding-left: 4px; height: 19px; border-left: 1px solid #747474; white-space: nowrap; color: var(--dim); font: 12px var(--mono); }
 .timeline { grid-template-columns: 240px minmax(0,1fr); }
 .timeline-headers { background: #212121; }
 .timeline-group-header { background: #242424; border-bottom-color: #303030; padding: 0 7px; gap: 5px; font-weight: 400; }
 .timeline-group-header[aria-selected="true"] { background: #343c4a; }
 .timeline-row-header { background: #202020; border-bottom-color: #2c2c2c; }
-.timeline-layer-switch { width: 20px; height: 20px; min-height: 20px; padding: 2px; border: 0; background: transparent !important; flex-shrink: 0; }
+.timeline-layer-switch { width: 24px; height: 24px; min-height: 24px; padding: 2px; border: 0; background: transparent !important; flex-shrink: 0; }
 .timeline-layer-switch img { width: 13px; height: 13px; }
 .timeline-layer-switch[data-action="toggleVisibility"][aria-pressed="false"] img, .timeline-layer-switch[data-action="toggleLock"][aria-pressed="false"] img { opacity: .3; }
 .timeline-layer-label { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
-.timeline-layer-index { width: 16px; text-align: right; color: var(--dim); font-size: 10px; }
+.timeline-layer-index { width: 16px; text-align: right; color: var(--dim); font-size: 12px; }
 .timeline-layer-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .log-bar { max-height: 72px; background: #202020; }
 .log-title { text-transform: none; letter-spacing: 0; padding: 3px 10px; }
 .log { padding: 0 10px 5px; }
-.log li { font-size: 10px; border-bottom-color: #292929; }
+.log li { font-size: 12px; border-bottom-color: #292929; }
 @media (max-width: 1100px) {
   .bar { column-gap: 8px; }
   .scene-identity input { width: 95px; }
@@ -1318,3 +1318,123 @@ select { min-width: 0; max-width: 100%; color: var(--text); background: #191919;
   .timeline-head .meta { display: none; }
   .preview-settings { grid-template-columns: 1fr; gap: 4px; }
 }
+
+/* --- UX review fixes (17 Oct 2026) ---------------------------------------
+ * Evidence: agent/tmp/ux-review/REVIEW.md. Everything below overrides earlier
+ * rules on purpose, so the review's changes can be read in one place.
+ */
+
+/* One floor for every control: WCAG 2.5.8 asks for 24px targets. */
+button, select, input[type="number"], input[type="text"] { min-height: 24px; }
+
+/* Object list (11.8). The model still emits every cell for assistive tech and
+ * agents; the row shows name, kind, position and alpha, with visibility and
+ * lock as toggles. The whole row is the select target. */
+#object-manager { display: flex; flex-direction: column; gap: 3px; }
+#object-manager > [role="row"] {
+  position: relative;
+  display: grid;
+  grid-template-columns: 24px auto minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "caret name name      name name"
+    ".     kind kind      vis  lock";
+  align-items: center;
+  column-gap: 6px;
+  min-height: 48px;
+  padding: 4px 6px 4px calc(6px + var(--depth, 0) * 14px);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--panel);
+}
+#object-manager > [role="row"]:hover { background: #292929; }
+#object-manager > [role="row"][aria-selected="true"] { border-color: var(--accent); background: #1a2b36; }
+#object-manager > [role="row"][aria-level="2"] { --depth: 1; }
+#object-manager > [role="row"][aria-level="3"] { --depth: 2; }
+#object-manager > [role="row"][aria-level="4"] { --depth: 3; }
+#object-manager > [role="row"][aria-level="5"] { --depth: 4; }
+#object-manager > [role="row"][aria-level="6"] { --depth: 5; }
+#object-manager > [role="row"]:has(> button[data-action="select"]:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+#object-manager button[data-action="select"] {
+  position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0;
+  padding: 0; border: 0; border-radius: 4px; background: transparent;
+  color: transparent; font-size: 0; cursor: pointer; z-index: 0;
+}
+#object-manager button[data-action="select"]:focus-visible { outline: none; }
+#object-manager button[data-action]:not([data-action="select"]) { position: relative; z-index: 1; }
+#object-manager button[data-action="toggleVisibility"],
+#object-manager button[data-action="toggleLock"] { min-width: 44px; padding: 2px 6px; }
+#object-manager button[data-action="toggleVisibility"] { grid-area: vis; }
+#object-manager button[data-action="toggleLock"] { grid-area: lock; }
+#object-manager button[data-action="expand"],
+#object-manager button[data-action="collapse"] {
+  grid-area: caret; width: 24px; padding: 0; border-color: transparent; background: transparent; font-size: 0;
+}
+#object-manager button[data-action="expand"]::before { content: "\25B8"; font-size: 14px; }
+#object-manager button[data-action="collapse"]::before { content: "\25BE"; font-size: 14px; }
+#object-manager button[data-action="expand"][disabled] { visibility: hidden; }
+
+#object-manager [role="gridcell"] { margin: 0; pointer-events: none; min-width: 0; }
+#object-manager [role="gridcell"]::before { content: none; }
+#object-manager [id$="/name"] { grid-area: name; color: var(--text); font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#object-manager [id$="/kind"] { grid-area: kind; color: var(--dim); font-size: 12px; }
+/* Position, alpha, shown and locked stay in the accessibility tree (clipped,
+ * not removed); Properties owns position and alpha, and the toggles carry
+ * shown and locked. */
+#object-manager [id$="/transform"], #object-manager [id$="/alpha"], #object-manager [id$="/visible"], #object-manager [id$="/locked"] {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+
+/* State is carried by the toggle, not by two extra text lines. */
+#object-manager > [role="row"][data-hidden="true"] [id$="/name"],
+#object-manager > [role="row"][data-hidden="true"] [id$="/kind"] { opacity: .5; }
+#object-manager > [role="row"][data-hidden="true"] button[data-action="toggleVisibility"],
+#object-manager > [role="row"][data-locked="true"] button[data-action="toggleLock"] { border-color: var(--accent); color: #fff; background: var(--accent-quiet); }
+
+/* Timeline tools: one group per scope, each says what it acts on. */
+.timeline-tools { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; padding: 4px 10px 8px; background: #232323; border-bottom: 1px solid var(--rule); }
+.tl-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; padding: 2px 8px 6px; border: 1px solid var(--rule); border-radius: 4px; }
+.tl-group > legend { padding: 0 4px; color: var(--dim); font-size: 12px; }
+.tl-group .frame-control { margin: 0; }
+.tl-group button, .tl-group select { height: 24px; min-height: 24px; }
+.tl-sep { align-self: stretch; width: 1px; margin: 2px 2px; background: var(--rule); }
+.tl-group[data-idle="true"] > legend { color: var(--faint); }
+.timeline-head { flex-wrap: nowrap; }
+.timeline-head #timeline-jump-hold { margin-left: auto; }
+.field-error { color: #ff8f84; font-size: 12px; }
+.field-error:empty, .field-error[hidden] { display: none; }
+.field-hint { color: var(--dim); font-size: 12px; margin: 4px 0; }
+input[aria-invalid="true"] { border-color: var(--bad); outline-color: var(--bad); }
+button[disabled][title] { cursor: not-allowed; }
+.timeline-caret { width: 24px; height: 24px; min-height: 24px; padding: 0; border: 0; background: transparent; color: var(--dim); font-size: 14px; line-height: 1; flex-shrink: 0; }
+.timeline-caret:hover:not(:disabled) { color: var(--text); background: #343434; }
+#preset-save-dialog { width: min(460px, calc(100vw - 32px)); margin: auto; border: 1px solid #484848; border-radius: 5px; padding: 22px; color: var(--text); background: var(--panel); }
+#preset-save-dialog::backdrop { background: #0008; }
+#preset-save-dialog .field { display: grid; gap: 4px; margin: 10px 0 0; }
+#preset-save-dialog .dialog-choice { display: flex; gap: 16px; margin: 10px 0 0; padding: 6px 10px 8px; border: 1px solid var(--rule); border-radius: 4px; }
+#preset-save-dialog .dialog-choice legend { padding: 0 4px; color: var(--dim); font-size: 12px; }
+#preset-save-dialog .dialog-choice label { display: flex; align-items: center; gap: 6px; }
+#preset-save-dialog button[type="submit"][disabled] { opacity: .5; }
+.timeline-bar { grid-template-rows: auto auto 24px minmax(0, 1fr); }
+/* Preset browser reuses the card styling; its buttons read as actions, not text. */
+#preset-browser-mount [role="region"] { display: grid; gap: 6px; }
+#preset-browser-mount [role="list"] { display: grid; gap: 6px; list-style: none; }
+#preset-browser-mount [role="listitem"] > button { min-height: 24px; }
+#preset-browser-mount [role="listitem"] > button[data-action="apply"] { background: var(--accent-quiet); border-color: var(--accent); }
+/* Tools stay on one row and scroll sideways rather than wrapping: a wrapped
+ * toolbar took the whole timeline at 1024x768 (measured: track area 0px). */
+.timeline-tools { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; }
+.tl-group { flex-wrap: nowrap; flex: 0 0 auto; }
+.tl-group .frame-control { flex: 0 0 auto; white-space: nowrap; }
+.tl-group button { white-space: nowrap; }
+button, select, input[type="number"], input[type="text"], input[type="range"] { min-height: 24px !important; }
+.timeline-tools-wrap { min-width: 0; background: #232323; border-bottom: 1px solid var(--rule); }
+.timeline-tools-wrap .timeline-tools { border-bottom: 0; }
+.timeline-tools-error { margin: 0; padding: 0 12px 6px; text-transform: none; letter-spacing: 0; }
+.field-error { text-transform: none; letter-spacing: 0; }
+/* A long preset name must not widen the toolbar and bring a scrollbar in. */
+#timeline-preset { width: 150px; max-width: 150px; text-overflow: ellipsis; }
+/* Two pixels back from every panel: transform controls must stay above the
+ * fold of the right dock at 1440x900 (11.9 / 11.64 acceptance). */
+.panel { padding: 8px 12px 10px; }
+.panel > h2, .panel-title-row { padding: 0 0 6px; margin-bottom: 7px; }

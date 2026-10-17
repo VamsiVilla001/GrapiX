@@ -17,6 +17,7 @@
 
 import type {
   AnimationSurface,
+  SessionKey,
   CommandOutcome,
   ControlField,
   ControlValue,
@@ -310,7 +311,15 @@ const ui = {
   timelinePresetApplyOut: need<HTMLButtonElement>("timeline-preset-apply-out"),
   timelinePresetDuration: need<HTMLInputElement>("timeline-preset-duration"),
   timelinePresetSave: need<HTMLButtonElement>("timeline-preset-save"),
-  timelinePresetSavePhase: need<HTMLSelectElement>("timeline-preset-save-phase"),
+  timelineJumpHold: need<HTMLButtonElement>("timeline-jump-hold"),
+  timelinePresetDurationError: need<HTMLSpanElement>("timeline-preset-duration-error"),
+  presetSaveDialog: need<HTMLDialogElement>("preset-save-dialog"),
+  presetSaveForm: need<HTMLFormElement>("preset-save-form"),
+  presetSaveId: need<HTMLInputElement>("preset-save-id"),
+  presetSaveSummary: need<HTMLParagraphElement>("preset-save-summary"),
+  presetSaveExisting: need<HTMLParagraphElement>("preset-save-existing"),
+  presetSaveError: need<HTMLParagraphElement>("preset-save-error"),
+  presetSaveSubmit: need<HTMLButtonElement>("preset-save-submit"),
   presetBrowserMount: need<HTMLDivElement>("preset-browser-mount"),
   phaseKind: need<HTMLSelectElement>("phase-kind"),
   phaseSet: need<HTMLButtonElement>("phase-set"),
@@ -1079,6 +1088,11 @@ function renderPanels(document_: SceneDocument): void {
     collapsedIds: collapsed,
   });
   ui.objectManager.replaceChildren(renderNode(document, objects) as unknown as Node);
+  // The row carries its own state for styling: the toggles say what pressing does, this says what is.
+  for (const row of ui.objectManager.querySelectorAll<HTMLElement>('[role="row"]')) {
+    row.dataset.hidden = String(row.querySelector('[id$="/visible"]')?.textContent === "hidden");
+    row.dataset.locked = String(row.querySelector('[id$="/locked"]')?.textContent === "locked");
+  }
 
   ui.fontEmpty.hidden = document_.fonts.length > 0;
   const fonts = fontManagerPanel(document_, {
@@ -1112,6 +1126,7 @@ function renderPanels(document_: SceneDocument): void {
 
   renderInspector(document_);
   renderPresetBrowser(document_);
+  syncTimelineControls();
   updateTimeReadouts();
   const animation = keyframePanelModel(document_, selection, animationSurface, currentFrame);
   ui.animationFrame.value = String(animation.currentFrame);
@@ -1461,6 +1476,7 @@ async function runKeyEdit(plan: EditPlan): Promise<void> {
 function setKeySelection(next: Iterable<string>): void {
   selectedKeys = new Set(next);
   selectionRevision += 1;
+  syncTimelineControls();
   if (scene) paintTimeline(currentTimelineModel(scene));
 }
 
@@ -1470,6 +1486,16 @@ function onTimelineClick(event: MouseEvent): void {
   if (!scene || !timelineLayers) return;
   const target = event.target;
   if (!(target instanceof Element)) return;
+
+  const caret = target.closest<HTMLElement>("[data-timeline-toggle]");
+  if (caret?.dataset.timelineToggle) {
+    const objectId = caret.dataset.timelineToggle;
+    collapsedTimelineIds = collapsedTimelineIds.includes(objectId)
+      ? collapsedTimelineIds.filter((id) => id !== objectId)
+      : [...collapsedTimelineIds, objectId];
+    renderTimeline(scene);
+    return;
+  }
 
   const group = target.closest<HTMLElement>(".timeline-group-header");
   if (target.closest("[data-layer-action]")) {
@@ -1711,6 +1737,100 @@ function syncPresetDuration(): void {
     ui.timelinePresetDuration.disabled = preset !== undefined;
     ui.timelinePresetDuration.value = "";
   }
+  if (param?.type === "duration") {
+    ui.timelinePresetDuration.min = String(param.min);
+    ui.timelinePresetDuration.max = String(param.max);
+  } else {
+    ui.timelinePresetDuration.removeAttribute("max");
+    ui.timelinePresetDuration.min = "1";
+  }
+  syncTimelineControls();
+}
+
+/** The declared duration range of the chosen preset, if it declares one. */
+function presetDurationRange(): { min: number; max: number } | undefined {
+  const preset = motionPresets.find((candidate) => candidate.id === ui.timelinePreset.value);
+  const param = preset?.params.find((candidate) => candidate.type === "duration");
+  return param?.type === "duration" ? { min: param.min, max: param.max } : undefined;
+}
+
+/** What is wrong with the duration field, said before anything is sent. */
+function presetDurationProblem(): string | undefined {
+  const raw = ui.timelinePresetDuration.value.trim();
+  if (raw === "") return undefined;
+  const value = Number(raw);
+  const preset = motionPresets.find((candidate) => candidate.id === ui.timelinePreset.value);
+  const range = presetDurationRange();
+  if (!Number.isFinite(value)) return "Enter a number of milliseconds.";
+  if (preset && !range) return `${preset.id} has no duration setting: leave this empty.`;
+  if (range && (value < range.min || value > range.max)) {
+    return `${preset?.id ?? "This preset"} allows ${range.min}\u2013${range.max} ms; ${value} ms is outside that.`;
+  }
+  return undefined;
+}
+
+function syncPresetDurationError(): void {
+  const problem = presetDurationProblem();
+  ui.timelinePresetDurationError.textContent = problem ?? "";
+  ui.timelinePresetDurationError.hidden = problem === undefined;
+  if (problem === undefined) ui.timelinePresetDuration.removeAttribute("aria-invalid");
+  else ui.timelinePresetDuration.setAttribute("aria-invalid", "true");
+}
+
+/** Each group says what it acts on, and controls with nothing to act on are
+ *  disabled with the reason on them, never silently inert. */
+function syncTimelineControls(): void {
+  const keyCount = selectedKeys.size;
+  const objects = scene ? scene.objects.filter((object) => selection.includes(object.id)) : [];
+  const keysLegend = document.getElementById("tl-legend-keys");
+  const presetsLegend = document.getElementById("tl-legend-presets");
+  if (keysLegend) keysLegend.textContent = keyCount === 0 ? "Keys \u00b7 none selected" : `Keys \u00b7 ${keyCount} selected`;
+  if (presetsLegend) {
+    presetsLegend.textContent =
+      objects.length === 0 ? "Presets \u00b7 select an object" : objects.length === 1 ? `Presets \u00b7 ${objects[0]!.name}` : `Presets \u00b7 ${objects.length} objects`;
+  }
+  document.getElementById("tl-group-keys")?.setAttribute("data-idle", String(keyCount === 0));
+  document.getElementById("tl-group-presets")?.setAttribute("data-idle", String(objects.length === 0));
+
+  const set = (element: HTMLButtonElement | HTMLSelectElement, reason: string | undefined): void => {
+    element.disabled = reason !== undefined;
+    if (reason === undefined) element.removeAttribute("title");
+    else element.title = reason;
+  };
+  set(ui.timelineEasing, keyCount === 0 ? "Select keys in the timeline to change their easing" : undefined);
+  const noObject = objects.length === 0 ? "Select an object to apply a preset to" : undefined;
+  const noPreset = ui.timelinePreset.value === "" ? "Choose a preset first" : undefined;
+  set(ui.timelinePresetApply, noObject ?? noPreset);
+  set(ui.timelinePresetApplyOut, noObject ?? noPreset);
+  set(ui.timelinePresetSave, presetSaveBlocker());
+  set(ui.phaseSet, keyCount === 0 ? "Select the keys the phase should cover" : undefined);
+  syncPresetDurationError();
+}
+
+/** The frame where the build-in is done: the hold phase if one is set, else
+ *  the end of the in phase, else the end of each track's first move. */
+function holdFrame(document_: SceneDocument): number | undefined {
+  const phases = document_.timeline.phases;
+  const hold = phases.find((phase) => phase.kind === "hold");
+  if (hold) return Number(hold.startFrame);
+  const buildIn = phases.find((phase) => phase.kind === "in");
+  if (buildIn) return Number(buildIn.endFrame);
+  const seconds = document_.timeline.channels
+    .map((channel) => channel.keys[1]?.frame)
+    .filter((frame): frame is NonNullable<typeof frame> => frame !== undefined)
+    .map(Number);
+  return seconds.length === 0 ? undefined : Math.max(...seconds);
+}
+
+function jumpToHold(): void {
+  if (!scene) return;
+  const frame = holdFrame(scene);
+  if (frame === undefined) {
+    log("jump to hold: nothing in this graphic animates, so there is no build-in to finish", "bad");
+    return;
+  }
+  setCurrentFrame(frame);
+  log(`jumped to frame ${frame}, the end of the build-in`, "good");
 }
 
 /** Why the current key selection cannot be saved as a preset, if it cannot. */
@@ -1796,6 +1916,13 @@ async function applyStarterPreset(phase: "in" | "out" = "in"): Promise<void> {
     log("select an object to apply a preset to", "bad");
     return;
   }
+  const durationProblem = presetDurationProblem();
+  if (durationProblem !== undefined) {
+    syncPresetDurationError();
+    ui.timelinePresetDuration.focus();
+    log(`preset refused: ${durationProblem}`, "bad");
+    return;
+  }
   const preset = motionPresets.find((candidate) => candidate.id === presetId);
   const kinds = new Set(
     scene.objects.filter((object) => selection.includes(object.id)).map((object) => object.type),
@@ -1827,50 +1954,107 @@ async function applyStarterPreset(phase: "in" | "out" = "in"): Promise<void> {
 }
 
 
-/** Save the selected keys of one object as one phase of a project preset
- *  (11.15). Rust captures from the document it holds, not from what the
- *  browser believes, so the preset is exactly the keys that exist. */
-async function saveSelectionAsPreset(suggestedId?: string): Promise<void> {
+/** The keys the preset dialog will save, held while it is open. */
+let pendingPresetSave:
+  | { session: SessionKey; project: string; objectId: string; refs: { property: string; frame: number }[] }
+  | undefined;
+/** True from the moment Save is pressed until Rust answers. */
+let presetSaving = false;
+
+/** Describe what saving under the typed name would do, and whether it can. */
+function presetSaveCheck(): void {
+  const id = ui.presetSaveId.value.trim();
+  const phase = (ui.presetSaveForm.elements.namedItem("preset-save-phase") as RadioNodeList).value === "out" ? "out" : "in";
+  let problem: string | undefined;
+  if (id === "") problem = "Give the preset a name.";
+  else if (!/^[A-Za-z0-9_-]+$/.test(id)) problem = "Use letters, digits, - and _ only.";
+  else if (starterPresetIds.has(id)) problem = `${id} is a starter preset and cannot be replaced. Choose another name.`;
+  const existing = motionPresets.find((preset) => preset.id === id && !starterPresetIds.has(id));
+  if (existing && problem === undefined) {
+    const has = (name: "in" | "out"): boolean => {
+      const phaseSpec = existing.phases[name];
+      return phaseSpec.channels.length > 0 || (typeof phaseSpec.duration === "number" && phaseSpec.duration > 0);
+    };
+    ui.presetSaveExisting.textContent =
+      `${id} is saved: in ${has("in") ? "present" : "missing"}, out ${has("out") ? "present" : "missing"}. ` +
+      (has(phase) ? `Saving will replace its ${phase} phase.` : `Saving will add its ${phase} phase.`);
+  } else {
+    ui.presetSaveExisting.textContent = id === "" || problem ? "" : `New preset. Save its other phase later under the same name to make it usable.`;
+  }
+  ui.presetSaveError.textContent = problem ?? "";
+  if (problem !== undefined && id !== "") ui.presetSaveId.setAttribute("aria-invalid", "true");
+  else ui.presetSaveId.removeAttribute("aria-invalid");
+  // Editing the form while a save is in flight must not re-enable Save.
+  ui.presetSaveSubmit.disabled = problem !== undefined || presetSaving;
+}
+
+/** Open the save dialog for the selected keys of one object (11.15). */
+function saveSelectionAsPreset(suggestedId?: string): void {
   const session = activeSession(workspace);
-  const project = projectSceneProject;
   if (!scene || !session) return;
   const blocker = presetSaveBlocker();
-  if (blocker !== undefined || project === undefined) {
+  if (blocker !== undefined || projectSceneProject === undefined) {
     log(`preset save refused: ${blocker ?? "save this graphic into a scene first"}`, "bad");
     return;
   }
   const refs = [...selectedKeys].flatMap((id) => {
     const parsed = parseKeyId(id);
-    return parsed ? [parsed] : [];
+    return parsed ? [{ property: parsed.property, frame: parsed.frame, objectId: parsed.objectId }] : [];
   });
   const objectId = refs[0]!.objectId;
-  const phase = ui.timelinePresetSavePhase.value === "out" ? "out" : "in";
-  const entered = window.prompt(
-    `Preset id for the ${phase} phase (letters, digits, - or _). Saving the other phase under the same id completes it.`,
-    suggestedId ?? ui.timelinePreset.value,
-  );
-  if (entered === null) return;
-  const presetId = entered.trim();
-  if (presetId === "") {
-    log("preset save refused: a preset needs an id", "bad");
-    return;
-  }
+  const object = scene.objects.find((candidate) => candidate.id === objectId);
+  const frames = refs.map((ref) => ref.frame);
+  pendingPresetSave = {
+    session: session.key,
+    project: projectSceneProject,
+    objectId,
+    refs: refs.map(({ property, frame }) => ({ property, frame })),
+  };
+  presetSaving = false;
+  ui.presetSaveSummary.textContent =
+    `${refs.length} key${refs.length === 1 ? "" : "s"} on ${object?.name ?? objectId}, frames ${Math.min(...frames)}\u2013${Math.max(...frames)}, saved into the ${projectSceneProject} project.`;
+  ui.presetSaveForm.reset();
+  ui.presetSaveId.value = suggestedId ?? (ui.timelinePreset.value !== "" && !starterPresetIds.has(ui.timelinePreset.value) ? ui.timelinePreset.value : "");
+  presetSaveCheck();
+  ui.presetSaveDialog.showModal();
+  ui.presetSaveId.focus();
+}
+
+async function submitPresetSave(): Promise<void> {
+  const pending = pendingPresetSave;
+  if (!scene || !pending || presetSaving) return;
+  presetSaveCheck();
+  if (ui.presetSaveSubmit.disabled) return;
+  const presetId = ui.presetSaveId.value.trim();
+  const phase = (ui.presetSaveForm.elements.namedItem("preset-save-phase") as RadioNodeList).value === "out" ? "out" : "in";
+  presetSaving = true;
+  ui.presetSaveSubmit.disabled = true;
   const outcome = await runCommand(
     {
       command: "saveMotionPreset",
-      project,
-      target: { target: "session", session: session.key },
-      objectId,
+      project: pending.project,
+      target: { target: "session", session: pending.session },
+      objectId: pending.objectId,
       presetId,
       phase,
-      keys: refs.map((ref) => ({ property: ref.property, frame: wireFrame(ref.frame) })),
+      keys: pending.refs.map((ref) => ({ property: ref.property, frame: wireFrame(ref.frame) })),
     },
     {
-      label: `Saved ${refs.length} key(s) as the ${phase} phase of ${presetId}`,
+      label: `Saved ${pending.refs.length} key(s) as the ${phase} phase of ${presetId}`,
       refusal: "preset save refused",
+      onRefusal: (message) => {
+        ui.presetSaveError.textContent = message;
+      },
     },
   );
-  if (outcome) await refreshPresetLibrary(presetId);
+  presetSaving = false;
+  if (outcome) {
+    ui.presetSaveDialog.close();
+    pendingPresetSave = undefined;
+    await refreshPresetLibrary(presetId);
+  } else {
+    presetSaveCheck();
+  }
 }
 
 /** Clicks inside the preset browser: apply a card's phase or save into it. */
@@ -1885,7 +2069,7 @@ function onPresetBrowserClick(event: MouseEvent): void {
     ui.timelinePreset.value = presetId;
     void applyStarterPreset("in");
   } else if (button.dataset.action === "saveAsPreset") {
-    void saveSelectionAsPreset(presetId);
+    saveSelectionAsPreset(presetId);
   }
 }
 
@@ -3363,7 +3547,9 @@ function wireWorkspaceChrome(): void {
   ] as const) {
     document.getElementById(id)?.addEventListener("click", () => { pausePreview("manual step"); setCurrentFrame(next()); });
   }
-  const defaults = new Set(["fonts", "text-styles", "materials", "assets", "animation", "bindings", "control-contract", "take-page", "publish"]);
+  // Animation stays open: it is where the current task lives. The rest are
+  // reference panels and start folded.
+  const defaults = new Set(["fonts", "text-styles", "materials", "assets", "bindings", "control-contract", "take-page", "publish"]);
   for (const panel of document.querySelectorAll<HTMLElement>(".panel[data-panel]")) {
     const heading = panel.querySelector<HTMLElement>(":scope > h2, :scope > .panel-title-row h2");
     if (!heading) continue;
@@ -3976,7 +4162,12 @@ async function start(): Promise<void> {
   ui.timelineEasing.addEventListener("change", onEasingChosen);
   ui.timelinePresetApply.addEventListener("click", () => void applyStarterPreset("in"));
   ui.timelinePresetApplyOut.addEventListener("click", () => void applyStarterPreset("out"));
-  ui.timelinePresetSave.addEventListener("click", () => void saveSelectionAsPreset());
+  ui.timelinePresetSave.addEventListener("click", () => saveSelectionAsPreset());
+  ui.timelineJumpHold.addEventListener("click", jumpToHold);
+  ui.timelinePresetDuration.addEventListener("input", syncPresetDurationError);
+  ui.presetSaveForm.addEventListener("input", presetSaveCheck);
+  ui.presetSaveForm.addEventListener("submit", (event) => { event.preventDefault(); void submitPresetSave(); });
+  document.getElementById("preset-save-cancel")!.addEventListener("click", () => ui.presetSaveDialog.close());
   ui.presetBrowserMount.addEventListener("click", onPresetBrowserClick);
   ui.timelinePreset.addEventListener("change", () => {
     syncPresetDuration();
@@ -3999,9 +4190,20 @@ async function start(): Promise<void> {
   ui.sampleDataApply.addEventListener("click", onSampleDataApply);
   ui.sampleDataRevert.addEventListener("click", onSampleDataRevert);
   ui.controlMount.addEventListener("click", (event) => void onControlContractClick(event));
-  ui.animationFrame.addEventListener("change", () => {
-    setCurrentFrame(Number(ui.animationFrame.value));
-  });
+  // Commit the frame as it is typed. Committing only on blur re-rendered the
+  // inspector between mousedown and mouseup of the next click, so the first
+  // click on a key button after typing a frame was swallowed. A commit that
+  // changes nothing renders nothing.
+  const commitFrame = (): void => {
+    const typed = Number(ui.animationFrame.value);
+    if (ui.animationFrame.value.trim() === "" || !Number.isFinite(typed)) return;
+    const duration = scene ? Number(scene.timeline.durationFrames) : typed;
+    const next = Math.min(duration, Math.max(0, Math.round(typed)));
+    if (next === currentFrame && String(next) === ui.animationFrame.value) return;
+    setCurrentFrame(typed);
+  };
+  ui.animationFrame.addEventListener("input", commitFrame);
+  ui.animationFrame.addEventListener("change", commitFrame);
   ui.timelineGraphClose.addEventListener("click", closeSpeedGraph);
   ui.timelineZoom.addEventListener("input", onTimelineZoom);
   ui.timelineMount.addEventListener("click", onTimelineClick);
