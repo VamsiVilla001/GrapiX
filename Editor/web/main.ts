@@ -1494,6 +1494,11 @@ function onTimelineClick(event: MouseEvent): void {
       ? collapsedTimelineIds.filter((id) => id !== objectId)
       : [...collapsedTimelineIds, objectId];
     renderTimeline(scene);
+    // Rebuilding the track headers replaces the focused disclosure button.
+    // Keep keyboard users on the same track after expanding or collapsing it.
+    const replacement = [...ui.timelineMount.querySelectorAll<HTMLButtonElement>("[data-timeline-toggle]")]
+      .find((button) => button.dataset.timelineToggle === objectId);
+    replacement?.focus({ preventScroll: true });
     return;
   }
 
@@ -1829,6 +1834,7 @@ function jumpToHold(): void {
     log("jump to hold: nothing in this graphic animates, so there is no build-in to finish", "bad");
     return;
   }
+  pausePreview("jump to hold");
   setCurrentFrame(frame);
   log(`jumped to frame ${frame}, the end of the build-in`, "good");
 }
@@ -1843,6 +1849,11 @@ function presetSaveBlocker(): string | undefined {
   );
   if (objects.size === 0) return "select the keys to save in the timeline";
   if (objects.size > 1) return "select keys of one object: a preset is one object's motion";
+  const frames = [...selectedKeys].flatMap((id) => {
+    const key = parseKeyId(id);
+    return key ? [key.frame] : [];
+  });
+  if (new Set(frames).size < 2) return "select keys at two different frames: a preset needs a motion span";
   return undefined;
 }
 
@@ -1990,6 +2001,7 @@ function presetSaveCheck(): void {
 
 /** Open the save dialog for the selected keys of one object (11.15). */
 function saveSelectionAsPreset(suggestedId?: string): void {
+  if (presetSaving || ui.presetSaveDialog.open) return;
   const session = activeSession(workspace);
   if (!scene || !session) return;
   const blocker = presetSaveBlocker();
@@ -2010,7 +2022,6 @@ function saveSelectionAsPreset(suggestedId?: string): void {
     objectId,
     refs: refs.map(({ property, frame }) => ({ property, frame })),
   };
-  presetSaving = false;
   ui.presetSaveSummary.textContent =
     `${refs.length} key${refs.length === 1 ? "" : "s"} on ${object?.name ?? objectId}, frames ${Math.min(...frames)}\u2013${Math.max(...frames)}, saved into the ${projectSceneProject} project.`;
   ui.presetSaveForm.reset();
@@ -2020,6 +2031,17 @@ function saveSelectionAsPreset(suggestedId?: string): void {
   ui.presetSaveId.focus();
 }
 
+/** Keep one pending save attached to its dialog until the command responds. */
+function setPresetSaving(saving: boolean): void {
+  presetSaving = saving;
+  ui.presetSaveForm.setAttribute("aria-busy", String(saving));
+  for (const control of ui.presetSaveForm.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input, button")) {
+    control.disabled = saving;
+  }
+  ui.presetSaveSubmit.textContent = saving ? "Saving…" : "Save preset";
+  presetSaveCheck();
+}
+
 async function submitPresetSave(): Promise<void> {
   const pending = pendingPresetSave;
   if (!scene || !pending || presetSaving) return;
@@ -2027,8 +2049,7 @@ async function submitPresetSave(): Promise<void> {
   if (ui.presetSaveSubmit.disabled) return;
   const presetId = ui.presetSaveId.value.trim();
   const phase = (ui.presetSaveForm.elements.namedItem("preset-save-phase") as RadioNodeList).value === "out" ? "out" : "in";
-  presetSaving = true;
-  ui.presetSaveSubmit.disabled = true;
+  setPresetSaving(true);
   const outcome = await runCommand(
     {
       command: "saveMotionPreset",
@@ -2047,7 +2068,7 @@ async function submitPresetSave(): Promise<void> {
       },
     },
   );
-  presetSaving = false;
+  setPresetSaving(false);
   if (outcome) {
     ui.presetSaveDialog.close();
     pendingPresetSave = undefined;
@@ -4167,7 +4188,12 @@ async function start(): Promise<void> {
   ui.timelinePresetDuration.addEventListener("input", syncPresetDurationError);
   ui.presetSaveForm.addEventListener("input", presetSaveCheck);
   ui.presetSaveForm.addEventListener("submit", (event) => { event.preventDefault(); void submitPresetSave(); });
-  document.getElementById("preset-save-cancel")!.addEventListener("click", () => ui.presetSaveDialog.close());
+  document.getElementById("preset-save-cancel")!.addEventListener("click", () => {
+    if (!presetSaving) ui.presetSaveDialog.close();
+  });
+  ui.presetSaveDialog.addEventListener("cancel", (event) => {
+    if (presetSaving) event.preventDefault();
+  });
   ui.presetBrowserMount.addEventListener("click", onPresetBrowserClick);
   ui.timelinePreset.addEventListener("change", () => {
     syncPresetDuration();

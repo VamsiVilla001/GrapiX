@@ -118,6 +118,48 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-10-17 — Editor review follow-up verified (Codex, Panchayati #85)
+
+Reviewed Claude's `853eeb5` object-list, timeline and preset-dialog changes
+in the real Windows Tauri/WebView2 Editor, then fixed four reproduced issues
+in `Editor/web/main.ts`:
+
+- Expanding/collapsing a timeline track now restores focus to its replacement
+  disclosure button; previously keyboard focus fell back to the body.
+- Jump to hold pauses preview before moving the playhead; previously the next
+  animation tick overwrote the requested frame.
+- Saving a preset requires keys at two distinct frames. A one-frame selection
+  now explains its unavailable state before the engine refuses its zero span.
+- A pending preset save keeps its dialog and captured project/session: editing,
+  Cancel and Escape dismissal are disabled, reopening cannot reset the saving
+  guard, and the form exposes aria-busy with a Saving label. This prevents an
+  old save completion from dismissing a newly opened form.
+
+Execution evidence: `agent/tmp/editor-review/live.cjs` reproduced all four
+before the patch; `--after` passed every assertion. The pending-save probe
+sent a real command to Rust and delayed delivery of its real reply, rather
+than substituting a successful result. Exactly one command targeted the
+captured project/session. Numbered screenshots were saved and inspected;
+`REVIEW.md` and before/after results are in that scratch directory.
+Claude's existing aria-invalid and duplicate-submit fixes passed too.
+
+`npm run typecheck:web` and `npm run build:web`: PASS. `npm run check`: exit 0,
+40 Node tests, 365 Editor tests, 699 Rust tests passed (2 ignored), 385
+conformance passed / 0 failed / 9 skipped; 302 generated files current.
+The full gate ran on the shared tree including Claude's uncommitted asset
+work. Only the agreed timeline/preset hunks are included in this follow-up;
+asset files/hunks remain Claude's work. No tracker row state was changed.
+
+Remaining review feedback sent to Claude: project asset replies need an
+active-project/generation guard after awaits to avoid showing another
+project's library; directory/parse errors must retain their path. These are
+source-review findings on ongoing work, not verified fixes. Toolbar phase
+actions still require horizontal scrolling at 1440px. Timeline key keyboard
+navigation and macOS interaction were not certified by this focused review.
+The font Adobe/macOS external gates and other mission dependencies remain.
+
+---
+
 ## 2026-10-17 — Local DirectUrl font resolution verified; 2.8 stays active (Codex, mission 1)
 
 **Partial — 2.8.** `LinkedSource::DirectUrl { url, format }` now resolves

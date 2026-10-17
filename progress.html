@@ -130,6 +130,10 @@ const KEY = "grapix-build-progress-v1";
 // here was marked done only after the work was verified by execution against
 // the build plan's "Done when" criterion — see the governance rule in
 // AGENTS.md and LLM-GOVERNANCE.md.
+// 17 Oct 2026 (Codex review): timeline disclosure focus, paused hold jump,
+// nonzero preset span and pending-save dialog verified in Windows Tauri.
+// npm check: 40 Node, 365 Editor, 699 Rust (2 ignored), conformance 385/0/9.
+// Evidence: memory.md and agent/tmp/editor-review. No row state changed.
 const INITIAL_STATE = {
   "11.41": "done", // Verified 16 Oct 2026 (Claude): one control request renders a pinned revision at frame N to a PNG served by hash; byte-identical repeat; engine/mock parity over the wire for 8 cases; CROSS_MACHINE_TOLERANCE defined and tested; the golden-frame gate and 8.9 render.preview draw through it (conformance 380/0/9, pixel gate unchanged). The Program-timing clause moved to 3.21 by user decision; the timed run still skips until Program holds cadence.
   "11.64": "done", // Verified 15 Oct: independent graphics and actual thumbnails; saved/unopened and partial preview states tested after app restart.
