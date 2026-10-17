@@ -621,22 +621,13 @@ fn cmd_asset_prepare_files(
     })
 }
 
-/// What the author typed: an Adobe kit URL or bare kit id becomes an Adobe
-/// Fonts link, anything else a stylesheet URL. `canonical_link_source` then
-/// refuses whatever is not a trusted host or a valid kit id, by name.
+/// What the author typed. The classification lives in the asset plane so the
+/// shell, the tests and any other caller cannot disagree: an Adobe kit URL or
+/// bare kit id is an Adobe Fonts link, a URL ending .ttf/.otf/.woff/.woff2 is a
+/// direct font file, anything else a stylesheet URL. `prepare_font_link` then
+/// refuses whatever is not a trusted host or a valid source, by name.
 fn linked_source(link: &str) -> LinkedSource {
-    let link = link.trim();
-    if let Some(id) = link
-        .strip_prefix("https://use.typekit.net/")
-        .and_then(|rest| rest.strip_suffix(".css"))
-    {
-        return LinkedSource::AdobeFonts { project_id: id.to_owned() };
-    }
-    if link.contains("://") {
-        LinkedSource::CssUrl { url: link.to_owned(), integrity: None }
-    } else {
-        LinkedSource::AdobeFonts { project_id: link.to_owned() }
-    }
+    gx_asset_plane::fonts::manager::linked_source_from_input(link)
 }
 
 /// The verified bytes of one cached font asset, for the browser's font
@@ -700,6 +691,36 @@ mod tests {
     use gx_contracts::control::ControlField;
 
     use super::*;
+
+    #[test]
+    fn the_font_link_box_classifies_direct_files_stylesheets_and_adobe_kits() {
+        let direct = |url: &str| matches!(linked_source(url), LinkedSource::DirectUrl { .. });
+        for url in [
+            "https://fonts.gstatic.com/s/inter/v13/abc.woff2?x=1",
+            "https://fonts.gstatic.com/s/inter/v13/abc.WOFF",
+            "https://fonts.gstatic.com/s/inter/v13/abc.ttf",
+            "https://fonts.gstatic.com/s/inter/v13/abc.otf",
+        ] {
+            assert!(direct(url), "{url} should be a direct font file");
+        }
+        assert!(matches!(
+            linked_source("https://fonts.googleapis.com/css2?family=Inter"),
+            LinkedSource::CssUrl { .. }
+        ));
+        assert!(matches!(
+            linked_source("https://use.typekit.net/abc1234.css"),
+            LinkedSource::AdobeFonts { project_id } if project_id == "abc1234"
+        ));
+        assert!(matches!(
+            linked_source("  abc1234  "),
+            LinkedSource::AdobeFonts { project_id } if project_id == "abc1234"
+        ));
+        // A credential-bearing kit URL is not quietly turned into a kit id.
+        assert!(!matches!(
+            linked_source("https://user:pw@use.typekit.net/abc1234.css"),
+            LinkedSource::AdobeFonts { .. }
+        ));
+    }
 
     struct Scratch(std::path::PathBuf);
 

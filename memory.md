@@ -244,6 +244,12 @@ resolution gap is the next renderer/font subtask; no 11.13 unblock is claimed.
 
 ---
 
+## 2026-10-17 — Editor font link box now uses the asset plane classifier (Claude)
+
+No tracker row changed. `Editor/shell/src/lib.rs::linked_source` now calls `gx_asset_plane::fonts::manager::linked_source_from_input` (codex, c581389), so a pasted .ttf/.otf/.woff/.woff2 URL becomes `LinkedSource::DirectUrl`, CSS URLs stay stylesheets and Adobe kit URLs/ids stay kits; a credential-bearing kit URL is not turned into a kit id. New shell test `the_font_link_box_classifies_direct_files_stylesheets_and_adobe_kits`. `npm run check` exit 0 on the combined tree (385 conformance passed, 0 failed, 9 skipped). 2.8 and 11.13 stay gated on the Adobe live-kit and macOS checks the user kept external; this is not a 2.8 completion.
+
+---
+
 ## 2026-10-16 — 11.8 done (Claude, Panchayati mission 1); Step 0 re-verified
 
 No product code changed. Step 0: the CubicBezier/graphic-preview/keyframe UI diff was already committed in ca63a6a; `npm run check` exit 0, `build:web` ok, and live Tauri/WebView2 (dev, CDP 9223) re-checks of 11.9/11.21/11.63/11.64 passed: keyframe-workflow-check, scene-manager-check (two graphics, undo across switches, search) and, after restarting the app, keyframe-reopen-check.
