@@ -410,6 +410,10 @@ let projectAssetProblems: readonly string[] = [];
 const adoptionTried = new Set<string>();
 /** The project whose folder listing is held in projectAssetLibrary. */
 let projectAssetListing: string | undefined;
+/** Folder listings asked for, and the newest one shown: a slower, older
+ *  reply never replaces a newer one. */
+let projectAssetListingsAsked = 0;
+let projectAssetListingShown = 0;
 let takePageState: TakePageState = EMPTY_TAKE_PAGE_STATE;
 let takePagePreviewDocument: SceneDocument | null = null;
 let controlProperties: readonly ControlProperty[] | undefined;
@@ -3331,18 +3335,22 @@ interface AdoptReport {
 }
 
 /** Bring the open graphic's assets into its project, refresh the project's
- *  library, and start previews. Idempotent and quiet when nothing changed. */
+ *  library, and start previews. Idempotent and quiet when nothing changed.
+ *  A reply that arrives after the author has moved to another project is
+ *  dropped: it describes a folder no panel is showing. */
 async function syncProjectAssets(): Promise<void> {
   const project = projectSceneProject;
   const document_ = scene;
   if (!document_) return;
+  if (project !== projectAssetListing && (projectAssetListing !== undefined || projectAssetLibrary.length > 0)) {
+    // Another project's library must not stand in for this one while its
+    // own listing is on the way.
+    projectAssetLibrary = [];
+    projectAssetStored = new Set();
+    projectAssetProblems = [];
+    projectAssetListing = undefined;
+  }
   if (project === undefined) {
-    if (projectAssetListing !== undefined || projectAssetLibrary.length > 0) {
-      projectAssetLibrary = [];
-      projectAssetStored = new Set();
-      projectAssetProblems = [];
-      projectAssetListing = undefined;
-    }
     startAssetPreviews(document_.assets);
     return;
   }
@@ -3370,6 +3378,7 @@ async function syncProjectAssets(): Promise<void> {
       for (const asset of pending) adoptionTried.delete(`${project}|${asset.checksum}`);
       problems = [`could not take assets into project ${project}: ${describe(error)}`];
     }
+    if (projectSceneProject !== project) return;
   }
   // Read the folder only when something may have changed: a different
   // project, or assets just taken in. Not on every edit.
@@ -3377,13 +3386,19 @@ async function syncProjectAssets(): Promise<void> {
     startAssetPreviews([...document_.assets, ...projectAssetLibrary]);
     return;
   }
+  const asked = ++projectAssetListingsAsked;
+  let library: AssetLibraryItem[] | undefined;
   try {
-    const library = await shell().invoke<AssetLibraryItem[]>("cmd_project_assets", { project });
+    library = await shell().invoke<AssetLibraryItem[]>("cmd_project_assets", { project });
+  } catch (error) {
+    problems = [...problems, `project assets unreadable: ${describe(error)}`];
+  }
+  if (projectSceneProject !== project || asked < projectAssetListingShown) return;
+  projectAssetListingShown = asked;
+  if (library) {
     projectAssetListing = project;
     projectAssetLibrary = library;
     projectAssetStored = new Set(library.flatMap((asset) => (asset.checksum === undefined ? [] : [asset.checksum])));
-  } catch (error) {
-    problems = [...problems, `project assets unreadable: ${describe(error)}`];
   }
   projectAssetProblems = problems;
   startAssetPreviews([...document_.assets, ...projectAssetLibrary]);

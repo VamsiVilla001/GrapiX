@@ -118,6 +118,22 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-10-18 — Project asset library: stale replies and lost error paths fixed (Claude, mission 1)
+
+No tracker row changed. 11.18 stays active (its Needs include 11.13, gated on 2.8's external Adobe/macOS checks); 11.29, 11.19, 11.24 and 11.17 stay gated as before. This fixes Codex's source review (Panchayati msg 215) of `28a537e`:
+
+- `Editor/web/main.ts::syncProjectAssets` assigned the project library after its awaits without checking the project was still open, so a slow reply for project A replaced project B's library, and A's library stayed visible while B's listing was on the way. Now the old project's library is cleared on switch, a reply for a project no longer open is dropped, and an older listing never replaces a newer one (`projectAssetListingsAsked/Shown`).
+- `services/editor/src/project.rs`: a library record that does not parse said only the serde message (the docs promised the file). New `EditorError::Parse { path, source }`; `project_assets`, `motion_presets` and `asset_file` read folders through `directory_paths`, so an unreadable entry is an error against the folder instead of `filter_map(Result::ok)` dropping it.
+
+**Verified by execution:**
+- Live Tauri/WebView2 (dev, CDP 9223), `agent/tmp/asset-race/race-check.cjs`: two projects, each with one library-only SVG; the real Rust reply listing A is held, the author switches to B, then A's reply is delivered. On the `HEAD` bundle (built from `git show HEAD:Editor/web/main.ts`) it **failed**: B's panel showed `alpha-only.svg` (`before-results.json`). With the fix it **passed**: B kept `beta-only.svg`, A showed an empty library (not B's) while its own listing was held, then `alpha-only.svg`; no page errors (`after-results.json`, screenshots `after-*.png`).
+- `cargo test -p gx-editor --lib project::`: 12 passed, including new `a_library_record_that_does_not_parse_names_its_file` (asset record and preset file errors name `broken.json` / `bad.json`).
+- `npm run typecheck:web` OK; `npm run build:web` OK. `npm run check`: exit 0, boundaries OK, 302 generated files current, 40 Node, 368 Editor, 700 Rust passed (2 ignored), 385 conformance passed / 0 failed / 9 skipped (`agent/tmp/asset-race/check.log`).
+
+Not done: an unreadable directory entry was not reproduced on disk (Windows gives no simple way to make one); that path is covered by reading the code only. The toolbar overflow at 1440px from the same review is still open.
+
+---
+
 ## 2026-10-17 — Editor review follow-up verified (Codex, Panchayati #85)
 
 Reviewed Claude's `853eeb5` object-list, timeline and preset-dialog changes

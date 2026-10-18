@@ -35,6 +35,9 @@ pub enum EditorError {
     Write(gx_fs::AtomicWriteError),
     /// A document could not be serialised.
     Serialize(serde_json::Error),
+    /// A file on disk did not parse. Carries the file, so a library listing
+    /// with one bad record says which one.
+    Parse { path: PathBuf, source: serde_json::Error },
 }
 
 impl std::fmt::Display for EditorError {
@@ -42,6 +45,7 @@ impl std::fmt::Display for EditorError {
         match self {
             Self::Refused(refusal) => write!(f, "{refusal}"),
             Self::Io { path, source } => write!(f, "{}: {source}", path.display()),
+            Self::Parse { path, source } => write!(f, "{}: {source}", path.display()),
             Self::Write(source) => write!(f, "{source}"),
             Self::Serialize(source) => write!(f, "{source}"),
         }
@@ -311,28 +315,12 @@ impl Projects {
     /// parse is an error naming it, never a preset silently left out.
     pub fn motion_presets(&self, project: &str) -> Result<Vec<MotionPreset>, EditorError> {
         self.require_project(project)?;
-        let directory = self.motion_presets_directory(project);
-        let entries = match std::fs::read_dir(&directory) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(source) => return Err(EditorError::Io { path: directory, source }),
-        };
-        let mut paths = entries
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
+        let mut paths = directory_paths(&self.motion_presets_directory(project))?
+            .into_iter()
             .filter(|path| path.extension().and_then(|extension| extension.to_str()) == Some("json"))
             .collect::<Vec<_>>();
         paths.sort();
-        paths
-            .into_iter()
-            .map(|path| {
-                let bytes = std::fs::read(&path).map_err(|source| EditorError::Io {
-                    path: path.clone(),
-                    source,
-                })?;
-                serde_json::from_slice(&bytes).map_err(EditorError::Serialize)
-            })
-            .collect()
+        paths.iter().map(|path| read_json(path)).collect()
     }
 
     /// Take an asset into the project: its bytes under `assets/<hash>.<ext>`
@@ -387,27 +375,14 @@ impl Projects {
     /// shorter library.
     pub fn project_assets(&self, project: &str) -> Result<Vec<AssetLibraryItem>, EditorError> {
         self.require_project(project)?;
-        let directory = self.assets_directory(project);
-        let entries = match std::fs::read_dir(&directory) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(source) => return Err(EditorError::Io { path: directory, source }),
-        };
-        let mut paths = entries
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
+        let mut paths = directory_paths(&self.assets_directory(project))?
+            .into_iter()
             .filter(|path| path.extension().and_then(|extension| extension.to_str()) == Some("json"))
             .collect::<Vec<_>>();
         paths.sort();
         let mut items = paths
-            .into_iter()
-            .map(|path| {
-                let bytes = std::fs::read(&path).map_err(|source| EditorError::Io {
-                    path: path.clone(),
-                    source,
-                })?;
-                serde_json::from_slice::<AssetLibraryItem>(&bytes).map_err(EditorError::Serialize)
-            })
+            .iter()
+            .map(|path| read_json::<AssetLibraryItem>(path))
             .collect::<Result<Vec<_>, _>>()?;
         items.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.asset_id.cmp(&b.asset_id)));
         Ok(items)
@@ -418,14 +393,8 @@ impl Projects {
     fn asset_file(&self, project: &str, hash: &ContentHash) -> Result<Option<PathBuf>, EditorError> {
         self.require_project(project)?;
         require_hash(hash)?;
-        let directory = self.assets_directory(project);
-        let entries = match std::fs::read_dir(&directory) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(source) => return Err(EditorError::Io { path: directory, source }),
-        };
         let prefix = format!("{}.", hash.0);
-        Ok(entries.filter_map(Result::ok).map(|entry| entry.path()).find(|path| {
+        Ok(directory_paths(&self.assets_directory(project))?.into_iter().find(|path| {
             path.file_name()
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name.starts_with(&prefix) && !name.ends_with(".json"))
@@ -546,6 +515,42 @@ fn require_hash(hash: &ContentHash) -> Result<(), EditorError> {
     } else {
         Err(Refusal::AssetMissing { hash: hash.clone() }.into())
     }
+}
+
+/// The paths in a library folder; empty when the folder does not exist yet.
+/// An entry the system cannot read is an error against the folder, never a
+/// file quietly missing from the listing.
+fn directory_paths(directory: &Path) -> Result<Vec<PathBuf>, EditorError> {
+    let entries = match std::fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(source) => {
+            return Err(EditorError::Io {
+                path: directory.to_path_buf(),
+                source,
+            })
+        }
+    };
+    entries
+        .map(|entry| {
+            entry.map(|entry| entry.path()).map_err(|source| EditorError::Io {
+                path: directory.to_path_buf(),
+                source,
+            })
+        })
+        .collect()
+}
+
+/// One library record, with a read or parse failure naming its file.
+fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, EditorError> {
+    let bytes = std::fs::read(path).map_err(|source| EditorError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    serde_json::from_slice(&bytes).map_err(|source| EditorError::Parse {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
 fn asset_hash(item: &AssetLibraryItem) -> Result<ContentHash, EditorError> {
@@ -1063,6 +1068,28 @@ mod tests {
         projects.adopt_asset("news", &odd, b"odd").unwrap();
         let hash = odd.checksum.take().unwrap();
         assert!(root.join("news").join("assets").join(format!("{}.bin", hash.0)).exists());
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn a_library_record_that_does_not_parse_names_its_file() {
+        let root = scratch("project-library-parse");
+        let projects = Projects::at_root(&root);
+        projects.create_project("news").unwrap();
+        let item = asset_item("Logo", "assets/images/abc.png", b"logo");
+        projects.adopt_asset("news", &item, b"logo").unwrap();
+
+        let assets = root.join("news").join("assets");
+        std::fs::write(assets.join("broken.json"), b"{ not json").unwrap();
+        let error = projects.project_assets("news").unwrap_err();
+        assert!(matches!(&error, EditorError::Parse { path, .. } if path == &assets.join("broken.json")));
+        assert!(error.to_string().contains("broken.json"), "{error}");
+
+        let presets = root.join("news").join("motion-presets");
+        std::fs::create_dir_all(&presets).unwrap();
+        std::fs::write(presets.join("bad.json"), b"[]").unwrap();
+        let error = projects.motion_presets("news").unwrap_err();
+        assert!(error.to_string().contains("bad.json"), "{error}");
         std::fs::remove_dir_all(root).expect("clean up");
     }
 }
