@@ -286,6 +286,20 @@ resolution gap is the next renderer/font subtask; no 11.13 unblock is claimed.
 
 ---
 
+## 2026-10-18 — Project-owned assets and asset previews (Claude)
+
+No tracker row changed (11.18 stays active: its Needs include 11.13, gated on 2.8). User report: imported assets had no preview, and assets must live in a project container. Finding: bytes went only to the shared per-user import cache (`gx_fs::cache_root()/assets`); no project folder contained its assets, and the asset card had no image.
+
+**Research (dated 18 Oct 2026, product docs, not measurements):** Viz Artist keeps assets in Graphic Hub project folders, references existing fonts rather than duplicating them, and archives a scene with every dependency; Ross XPression is explicitly project-based so a graphic travels with what it needs and Import Scene brings a scene's assets across; After Effects treats files at or below the project folder as relative and offers Collect Files and Find Missing Footage. Chyron search results said nothing about a media library. Common pattern adopted: the project container owns the assets, scenes reference them, collecting a project brings the files.
+
+**Built:** `<project>/assets/<hash>.<ext>` plus `<hash>.json` (the library record) in `services/editor/src/project.rs` (`adopt_asset`, `read_asset`, `project_assets`, hash re-verified, path-like hashes refused). Shell commands `cmd_project_assets_adopt`, `cmd_project_assets`, `cmd_asset_bytes` (boundary lists updated). A project-bound graphic adopts its assets from the cache on every view update (cached in `adoptionTried`), so existing imports migrate on open and new imports and save-to-project are covered by one mechanism. Previews are small PNG thumbnails built from the project bytes (image, SVG, video first frame); 3D models and undecodable video say why on the card; a ProRes/HEVC/H.264 file is named from its sample-description code (`describeVideoCodec`). The panel shows where each asset lives, a project library with Add to graphic, and detail rows only for the selected asset.
+
+**Verified live** (`agent/tmp/ui-check/asset-project-check.cjs`, driving the editor's real native file dialog with window messages via `pick-files.ps1`; Tauri's `invoke` is read-only so it cannot be stubbed): PNG, SVG and two QuickTime files imported; project folder holds each file plus record; PNG and SVG thumbnails render; the 17 MB file is ProRes 4444 XQ and is explained; another scene of the same project offers the assets and Add to graphic makes no second copy; a scene whose bytes were only in the cache was adopted on open. `npm run check` exit 0 (385 conformance passed, 0 failed, 9 skipped); 14 asset-panel unit tests; 2 service tests.
+
+**Not built:** carrying a scene's assets when it moves between projects, Find Missing / relink for assets, 3D model and ProRes preview, an independent graphic cannot hold assets in a project until it is saved into one (it says so).
+
+---
+
 ## 2026-10-17 — UX review fixes (Claude + Codex review): object list, toolbar, preset dialog, targets
 
 No tracker row changed. Evidence and before/after: `agent/tmp/ux-review/REVIEW.md` (not tracked). Changes in `Editor/web/{style.css,index.html,main.ts}`, `Editor/src/timeline/{panel,viewport}.ts`:

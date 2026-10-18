@@ -50,7 +50,7 @@ use gx_contracts::control::{apply_control_values, fillable_properties, ControlFi
 use gx_contracts::design_system::{starter_presets, MotionPreset};
 use gx_contracts::platform::service_data_root;
 use gx_contracts::font::EmbeddingPolicy;
-use gx_contracts::scene::SceneDocument;
+use gx_contracts::scene::{AssetLibraryItem, SceneDocument};
 use gx_contracts::{ContentHash, Refusal, Revision, TakeId};
 use gx_editor::{CommandError, Projects, Workspace};
 use serde::{Deserialize, Serialize};
@@ -654,6 +654,110 @@ fn cmd_font_bytes(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// What taking assets into a project did, by asset id. Nothing is summarised
+/// into a count: an asset that could not be taken in is named with the reason.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdoptReport {
+    /// Newly written into the project's asset folder.
+    pub adopted: Vec<String>,
+    /// Already there; the record was refreshed, the bytes untouched.
+    pub already_present: Vec<String>,
+    /// Neither the project nor the import cache holds verifiable bytes.
+    pub missing: Vec<AdoptMissing>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdoptMissing {
+    pub asset_id: String,
+    pub reason: String,
+}
+
+/// Take assets into a project so the project folder owns them (build plan
+/// 11.18). Bytes come from the project if it already holds them, otherwise
+/// from the shared import cache, which is where an import lands first; either
+/// way they are re-hashed against the asset's address before they are filed.
+#[tauri::command]
+fn cmd_project_assets_adopt(
+    state: tauri::State<'_, ShellState>,
+    project: String,
+    items: Vec<AssetLibraryItem>,
+) -> Result<AdoptReport, EditorError> {
+    let projects = projects()?;
+    let mut report = AdoptReport { adopted: Vec::new(), already_present: Vec::new(), missing: Vec::new() };
+    for item in &items {
+        let Some(hash) = item.checksum.clone() else {
+            report.missing.push(AdoptMissing {
+                asset_id: item.asset_id.clone(),
+                reason: "no content hash has arrived for this asset".into(),
+            });
+            continue;
+        };
+        if let Some(bytes) = projects.read_asset(&project, &hash).map_err(project_error)? {
+            projects.adopt_asset(&project, item, &bytes).map_err(project_error)?;
+            report.already_present.push(item.asset_id.clone());
+            continue;
+        }
+        let cached = state
+            .with_asset_store(|store| Ok(store.cache_path(&hash)))
+            .ok()
+            .and_then(|path| std::fs::read(path).ok());
+        match cached {
+            Some(bytes) if content_hash(&bytes) == hash => {
+                projects.adopt_asset(&project, item, &bytes).map_err(project_error)?;
+                report.adopted.push(item.asset_id.clone());
+            }
+            Some(_) => report.missing.push(AdoptMissing {
+                asset_id: item.asset_id.clone(),
+                reason: "the cached bytes no longer match the asset's content hash".into(),
+            }),
+            None => report.missing.push(AdoptMissing {
+                asset_id: item.asset_id.clone(),
+                reason: "the bytes are in neither the project nor the import cache; re-import the file".into(),
+            }),
+        }
+    }
+    Ok(report)
+}
+
+/// Every asset the project's own folder holds, so a scene can reuse one the
+/// project already has instead of importing it again.
+#[tauri::command]
+fn cmd_project_assets(project: String) -> Result<Vec<AssetLibraryItem>, EditorError> {
+    projects()?.project_assets(&project).map_err(project_error)
+}
+
+/// The verified bytes of one asset, for previews: the project's copy when a
+/// project is named and holds it, otherwise the import cache. The address is
+/// checked as a SHA-256 before it touches a path, and the bytes are re-hashed
+/// before they leave.
+#[tauri::command]
+fn cmd_asset_bytes(
+    state: tauri::State<'_, ShellState>,
+    project: Option<String>,
+    checksum: ContentHash,
+) -> Result<tauri::ipc::Response, EditorError> {
+    let valid = checksum.0.len() == 64 && checksum.0.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+    if !valid {
+        return Err(refused(Refusal::AssetMissing { hash: checksum }));
+    }
+    if let Some(project) = project {
+        if let Some(bytes) = projects()?.read_asset(&project, &checksum).map_err(project_error)? {
+            return Ok(tauri::ipc::Response::new(bytes));
+        }
+    }
+    let path = state.with_asset_store(|store| Ok(store.cache_path(&checksum)))?;
+    let bytes = std::fs::read(&path).map_err(|_| refused(Refusal::AssetMissing { hash: checksum.clone() }))?;
+    if content_hash(&bytes) != checksum {
+        return Err(refused(Refusal::AssetHashMismatch {
+            expected: checksum,
+            actual: content_hash(&bytes),
+        }));
+    }
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// Build and run the Editor window.
 pub fn run() {
     let workspace = Workspace::new(projects().ok());
@@ -680,6 +784,9 @@ pub fn run() {
             cmd_font_prepare_link,
             cmd_font_bytes,
             cmd_asset_prepare_files,
+            cmd_project_assets_adopt,
+            cmd_project_assets,
+            cmd_asset_bytes,
         ])
         .run(tauri::generate_context!())
         .expect("the Editor shell failed to start");

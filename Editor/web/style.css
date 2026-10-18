@@ -1438,3 +1438,18 @@ button, select, input[type="number"], input[type="text"], input[type="range"] { 
  * fold of the right dock at 1440x900 (11.9 / 11.64 acceptance). */
 .panel { padding: 8px 12px 10px; }
 .panel > h2, .panel-title-row { padding: 0 0 6px; margin-bottom: 7px; }
+/* Asset previews: a thumbnail, never an empty box. */
+.asset-manager-mount .graphic-thumbnail { flex: 1 1 100%; max-height: 120px; }
+.asset-manager-mount [role="alert"] { padding: 6px 8px; border: 1px solid var(--bad); border-radius: 3px; background: #2a1a18; color: #ff8f84; font-size: 12px; }
+#asset-manager\/project-library { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--rule); }
+/* Asset cards: a contained thumbnail, and detail only for the selected asset.
+ * Unselected cards keep their detail in the accessibility tree (clipped, not
+ * removed); selecting a card shows it. */
+.asset-manager-mount .graphic-thumbnail { min-width: 0; max-width: 100%; width: 100%; height: auto; max-height: 120px; object-fit: contain; }
+.asset-manager-mount li[id^="asset/"]:not([aria-selected="true"]) [id$="/content-hash"],
+.asset-manager-mount li[id^="asset/"]:not([aria-selected="true"]) [id$="/path"],
+.asset-manager-mount li[id^="asset/"]:not([aria-selected="true"]) [id$="/availability"],
+.asset-manager-mount li[id^="asset/"]:not([aria-selected="true"]) [id*="/provenance/"] {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+.asset-manager-mount li[id^="asset/"] { position: relative; }

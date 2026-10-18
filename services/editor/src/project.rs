@@ -19,7 +19,8 @@ use gx_contracts::color::WorkingColorSpace;
 use gx_contracts::control::TakePage;
 use gx_contracts::design_system::MotionPreset;
 use gx_contracts::project::{ProjectSettings, PROJECT_SETTINGS_FILE};
-use gx_contracts::scene::{parse_scene_document, SceneDocument};
+use gx_contracts::scene::{parse_scene_document, AssetLibraryItem, SceneDocument};
+use gx_contracts::ContentHash;
 use gx_contracts::Refusal;
 
 /// What the Editor service can fail at.
@@ -111,6 +112,10 @@ impl Projects {
 
     fn take_page_path(&self, project: &str, page_id: &str) -> PathBuf {
         self.take_pages_directory(project).join(format!("{page_id}.json"))
+    }
+
+    fn assets_directory(&self, project: &str) -> PathBuf {
+        self.project_directory(project).join("assets")
     }
 
     fn motion_presets_directory(&self, project: &str) -> PathBuf {
@@ -330,6 +335,103 @@ impl Projects {
             .collect()
     }
 
+    /// Take an asset into the project: its bytes under `assets/<hash>.<ext>`
+    /// and its library record beside them as `assets/<hash>.json`.
+    ///
+    /// The project folder owns its assets, so it can be copied, archived or
+    /// opened on another machine without a per-user cache. The on-disk name is
+    /// the content hash (ADR-0002 B.3: never derive a filename from user
+    /// text); the extension is chosen from a closed set so the folder stays
+    /// readable in a file browser. The bytes are re-hashed first: bytes that
+    /// are not the asset's address are refused, never filed under it.
+    pub fn adopt_asset(&self, project: &str, item: &AssetLibraryItem, bytes: &[u8]) -> Result<(), EditorError> {
+        self.require_project(project)?;
+        let hash = asset_hash(item)?;
+        let actual = gx_asset_plane::content_hash(bytes);
+        if actual != hash {
+            return Err(Refusal::AssetHashMismatch { expected: hash, actual }.into());
+        }
+        let directory = self.assets_directory(project);
+        std::fs::create_dir_all(&directory).map_err(|source| EditorError::Io {
+            path: directory.clone(),
+            source,
+        })?;
+        let extension = asset_extension(item);
+        gx_fs::write_atomic(&directory.join(format!("{}.{extension}", hash.0)), bytes).map_err(EditorError::Write)?;
+        let record = serde_json::to_vec_pretty(item).map_err(EditorError::Serialize)?;
+        gx_fs::write_atomic(&directory.join(format!("{}.json", hash.0)), &record).map_err(EditorError::Write)
+    }
+
+    /// Whether the project already holds the bytes for this content address.
+    pub fn has_asset(&self, project: &str, hash: &ContentHash) -> Result<bool, EditorError> {
+        Ok(self.asset_file(project, hash)?.is_some())
+    }
+
+    /// The verified bytes of a project asset, or `None` when the project does
+    /// not hold them. A file whose bytes no longer match its name is an error
+    /// naming the hash, never served.
+    pub fn read_asset(&self, project: &str, hash: &ContentHash) -> Result<Option<Vec<u8>>, EditorError> {
+        let Some(path) = self.asset_file(project, hash)? else {
+            return Ok(None);
+        };
+        let bytes = std::fs::read(&path).map_err(|source| EditorError::Io { path, source })?;
+        let actual = gx_asset_plane::content_hash(&bytes);
+        if &actual != hash {
+            return Err(Refusal::AssetHashMismatch { expected: hash.clone(), actual }.into());
+        }
+        Ok(Some(bytes))
+    }
+
+    /// Every asset record the project holds, sorted by name then id. A record
+    /// that does not parse is an error naming its file, never a quietly
+    /// shorter library.
+    pub fn project_assets(&self, project: &str) -> Result<Vec<AssetLibraryItem>, EditorError> {
+        self.require_project(project)?;
+        let directory = self.assets_directory(project);
+        let entries = match std::fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(source) => return Err(EditorError::Io { path: directory, source }),
+        };
+        let mut paths = entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().and_then(|extension| extension.to_str()) == Some("json"))
+            .collect::<Vec<_>>();
+        paths.sort();
+        let mut items = paths
+            .into_iter()
+            .map(|path| {
+                let bytes = std::fs::read(&path).map_err(|source| EditorError::Io {
+                    path: path.clone(),
+                    source,
+                })?;
+                serde_json::from_slice::<AssetLibraryItem>(&bytes).map_err(EditorError::Serialize)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        items.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.asset_id.cmp(&b.asset_id)));
+        Ok(items)
+    }
+
+    /// The file holding a content address, found by its hash prefix so the
+    /// extension never has to be known to look it up.
+    fn asset_file(&self, project: &str, hash: &ContentHash) -> Result<Option<PathBuf>, EditorError> {
+        self.require_project(project)?;
+        require_hash(hash)?;
+        let directory = self.assets_directory(project);
+        let entries = match std::fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(source) => return Err(EditorError::Io { path: directory, source }),
+        };
+        let prefix = format!("{}.", hash.0);
+        Ok(entries.filter_map(Result::ok).map(|entry| entry.path()).find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(&prefix) && !name.ends_with(".json"))
+        }))
+    }
+
     /// The projects that exist, in directory order.
     pub fn list_projects(&self) -> Result<Vec<String>, EditorError> {
         let mut names = match std::fs::read_dir(&self.root) {
@@ -436,6 +538,34 @@ impl Projects {
 /// dot Windows would drop — would address a file the store does not own.
 /// Refused rather than sanitised: rewriting the id would save the author's
 /// work under a name they did not choose.
+/// A content address is 64 lowercase hex digits; anything else could name a
+/// path outside the project's asset folder.
+fn require_hash(hash: &ContentHash) -> Result<(), EditorError> {
+    if hash.0.len() == 64 && hash.0.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')) {
+        Ok(())
+    } else {
+        Err(Refusal::AssetMissing { hash: hash.clone() }.into())
+    }
+}
+
+fn asset_hash(item: &AssetLibraryItem) -> Result<ContentHash, EditorError> {
+    let hash = item.checksum.clone().ok_or_else(|| Refusal::AssetMissing {
+        hash: ContentHash(String::new()),
+    })?;
+    require_hash(&hash)?;
+    Ok(hash)
+}
+
+/// The extension a project asset file carries: the library path's own, if it
+/// is a short alphanumeric one, otherwise `bin`.
+fn asset_extension(item: &AssetLibraryItem) -> String {
+    std::path::Path::new(&item.path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .filter(|extension| (1..=5).contains(&extension.len()) && extension.bytes().all(|byte| byte.is_ascii_alphanumeric()))
+        .map_or_else(|| "bin".to_owned(), str::to_ascii_lowercase)
+}
+
 fn require_component(
     value: &str,
     refusal: impl FnOnce(String) -> Refusal,
@@ -842,6 +972,97 @@ mod tests {
             assert!(record.get(field).is_some(), "the saved record names {field}");
         }
 
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    // --- project-owned assets ------------------------------------------------
+
+    fn asset_item(name: &str, path: &str, bytes: &[u8]) -> AssetLibraryItem {
+        AssetLibraryItem {
+            asset_id: format!("asset_{name}"),
+            name: name.into(),
+            kind: AssetKind::Image,
+            path: path.into(),
+            checksum: Some(gx_asset_plane::content_hash(bytes)),
+            mime_type: Some("image/png".into()),
+            size_bytes: Some(bytes.len() as u64),
+            status: None,
+            provenance: AssetProvenance::default(),
+        }
+    }
+
+    #[test]
+    fn an_adopted_asset_lives_in_the_project_and_reads_back_verified() {
+        let root = scratch("project-assets");
+        let projects = Projects::at_root(&root);
+        projects.create_project("news").unwrap();
+        let bytes = b"not really a png".to_vec();
+        let item = asset_item("Logo", "assets/images/abc.png", &bytes);
+        let hash = item.checksum.clone().unwrap();
+
+        assert!(!projects.has_asset("news", &hash).unwrap());
+        assert_eq!(projects.read_asset("news", &hash).unwrap(), None);
+        projects.adopt_asset("news", &item, &bytes).unwrap();
+
+        // Named by hash with the library path's extension; the record sits beside it.
+        let file = root.join("news").join("assets").join(format!("{}.png", hash.0));
+        assert_eq!(std::fs::read(&file).unwrap(), bytes);
+        assert!(projects.has_asset("news", &hash).unwrap());
+        assert_eq!(projects.read_asset("news", &hash).unwrap(), Some(bytes.clone()));
+        assert_eq!(projects.project_assets("news").unwrap(), vec![item.clone()]);
+
+        // Adopting the same asset again is the same file, not a second copy.
+        projects.adopt_asset("news", &item, &bytes).unwrap();
+        assert_eq!(std::fs::read_dir(root.join("news").join("assets")).unwrap().count(), 2);
+
+        // A file that no longer matches its name is refused, never served.
+        std::fs::write(&file, b"tampered").unwrap();
+        assert!(matches!(
+            projects.read_asset("news", &hash),
+            Err(EditorError::Refused(Refusal::AssetHashMismatch { .. }))
+        ));
+        std::fs::remove_dir_all(root).expect("clean up");
+    }
+
+    #[test]
+    fn project_assets_refuse_wrong_bytes_unknown_projects_and_path_like_hashes() {
+        let root = scratch("project-assets-refusals");
+        let projects = Projects::at_root(&root);
+        projects.create_project("news").unwrap();
+        let item = asset_item("Logo", "assets/images/abc.png", b"right bytes");
+
+        // Bytes that are not the asset's address are not filed under it.
+        assert!(matches!(
+            projects.adopt_asset("news", &item, b"other bytes"),
+            Err(EditorError::Refused(Refusal::AssetHashMismatch { .. }))
+        ));
+        assert!(projects.project_assets("news").unwrap().is_empty());
+
+        // A project that does not exist is refused, not created.
+        assert!(matches!(
+            projects.adopt_asset("nowhere", &item, b"right bytes"),
+            Err(EditorError::Refused(Refusal::ProjectNotFound { .. }))
+        ));
+        assert!(!root.join("nowhere").exists());
+
+        // An address that could name a path is refused before it touches one.
+        let evil = gx_contracts::ContentHash("../../scenes/escape".into());
+        assert!(matches!(
+            projects.read_asset("news", &evil),
+            Err(EditorError::Refused(Refusal::AssetMissing { .. }))
+        ));
+        let mut no_hash = item.clone();
+        no_hash.checksum = None;
+        assert!(matches!(
+            projects.adopt_asset("news", &no_hash, b"right bytes"),
+            Err(EditorError::Refused(Refusal::AssetMissing { .. }))
+        ));
+
+        // An odd extension falls back to the closed default.
+        let mut odd = asset_item("Odd", "assets/images/x.not_an_extension", b"odd");
+        projects.adopt_asset("news", &odd, b"odd").unwrap();
+        let hash = odd.checksum.take().unwrap();
+        assert!(root.join("news").join("assets").join(format!("{}.bin", hash.0)).exists());
         std::fs::remove_dir_all(root).expect("clean up");
     }
 }

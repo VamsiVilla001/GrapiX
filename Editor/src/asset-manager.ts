@@ -14,8 +14,28 @@ import type { UiNode } from "./agent-surface";
 /// the kind; the shell refuses a file that is none of these by name.
 export const ASSET_FILE_EXTENSIONS = ["png", "jpg", "jpeg", "svg", "glb", "mp4", "mov", "webm", "mkv"];
 
+/// What the panel knows about one asset's preview, keyed by content hash.
+/// A preview that cannot be made says why, in words, on the asset itself: an
+/// empty box would read as "still loading" forever.
+export type AssetPreview =
+  | { readonly kind: "loading" }
+  | { readonly kind: "ready"; readonly src: string }
+  | { readonly kind: "unavailable"; readonly reason: string };
+
 export interface AssetManagerState {
   readonly selectedAssetId?: string;
+  /// Previews by content hash.
+  readonly previews?: ReadonlyMap<string, AssetPreview>;
+  /// The project the open graphic belongs to. Absent means an independent
+  /// graphic, whose assets are held only in the per-user import cache until it
+  /// is saved into a project.
+  readonly project?: string;
+  /// Content hashes of assets the project's own folder holds.
+  readonly projectStored?: ReadonlySet<string>;
+  /// Assets the project holds that this graphic does not use yet.
+  readonly projectLibrary?: readonly AssetLibraryItem[];
+  /// Assets that could not be taken into the project, with the reason.
+  readonly projectProblems?: readonly string[];
   /// An import is in flight; a second one would race the first's batch.
   readonly importing?: boolean;
   /// The last import outcome, shown as a status line.
@@ -46,6 +66,72 @@ function usesAsset(document: SceneDocument, object: SceneObject, assetId: string
       materialIds.includes(material.materialId) &&
       material.textures.some((texture) => texture.assetId === assetId),
   );
+}
+
+/// Video codecs a QuickTime or MP4 file names in its sample description, by
+/// four-character code. Only codecs worth naming to an author are listed.
+const VIDEO_CODECS: readonly (readonly [string, string])[] = [
+  ["ap4x", "ProRes 4444 XQ"],
+  ["ap4h", "ProRes 4444"],
+  ["apch", "ProRes 422 HQ"],
+  ["apcn", "ProRes 422"],
+  ["apcs", "ProRes 422 LT"],
+  ["apco", "ProRes 422 Proxy"],
+  ["hvc1", "HEVC (H.265)"],
+  ["hev1", "HEVC (H.265)"],
+  ["avc1", "H.264"],
+  ["mjpa", "Motion JPEG"],
+  ["vp09", "VP9"],
+  ["av01", "AV1"],
+];
+
+/// Name the codec of a QuickTime/MP4 video from its bytes, looking at the head
+/// and the tail where the movie header usually sits. `undefined` when none of
+/// the known codes appear: the caller then says nothing about the codec rather
+/// than guessing one.
+export function describeVideoCodec(bytes: Uint8Array): string | undefined {
+  const window = 4 * 1024 * 1024;
+  const text = (view: Uint8Array): string => {
+    let out = "";
+    for (let index = 0; index < view.length; index += 1) out += String.fromCharCode(view[index]!);
+    return out;
+  };
+  const head = text(bytes.subarray(0, Math.min(bytes.length, window)));
+  const tail = bytes.length > window ? text(bytes.subarray(Math.max(window, bytes.length - window))) : "";
+  for (const [code, name] of VIDEO_CODECS) {
+    if (head.includes(code) || tail.includes(code)) return name;
+  }
+  return undefined;
+}
+
+/// The one-line statement of where an asset's bytes live.
+export function storageStatement(
+  asset: AssetLibraryItem,
+  state: Pick<AssetManagerState, "project" | "projectStored">,
+): string {
+  if (state.project === undefined) {
+    return "import cache only: save this graphic into a project to keep its assets with it";
+  }
+  if (asset.checksum !== undefined && state.projectStored?.has(asset.checksum) === true) {
+    return `in project ${state.project}`;
+  }
+  return `not in project ${state.project} yet`;
+}
+
+function previewNodes(asset: AssetLibraryItem, state: AssetManagerState): { image?: UiNode["image"]; cells: UiNode[] } {
+  const preview = asset.checksum === undefined ? undefined : state.previews?.get(asset.checksum);
+  const label = "Preview";
+  const id = `asset/${asset.assetId}/preview`;
+  if (asset.checksum === undefined) {
+    return { cells: [{ id, role: "gridcell", label, value: "unavailable — no content hash has arrived" }] };
+  }
+  if (preview === undefined || preview.kind === "loading") {
+    return { cells: [{ id, role: "gridcell", label, value: "loading…" }] };
+  }
+  if (preview.kind === "unavailable") {
+    return { cells: [{ id, role: "gridcell", label, value: `unavailable — ${preview.reason}` }] };
+  }
+  return { image: { src: preview.src, alt: `Preview of ${asset.name}` }, cells: [] };
 }
 
 function availability(asset: SceneDocument["assets"][number]): string {
@@ -102,6 +188,7 @@ export function assetManagerPanel(
 ): UiNode {
   const items: UiNode[] = document.assets.map((asset) => {
     const users = assetUsers(document, asset.assetId);
+    const preview = previewNodes(asset, state);
 
     return {
       id: `asset/${asset.assetId}`,
@@ -109,7 +196,15 @@ export function assetManagerPanel(
       label: asset.name,
       description: `${asset.kind} · ${availability(asset)} · origin ${asset.provenance.origin ?? NOT_RECORDED}`,
       selected: state.selectedAssetId === asset.assetId,
+      ...(preview.image === undefined ? {} : { image: preview.image }),
       children: [
+        ...preview.cells,
+        {
+          id: `asset/${asset.assetId}/storage`,
+          role: "gridcell",
+          label: "Stored",
+          value: storageStatement(asset, state),
+        },
         {
           id: `asset/${asset.assetId}/kind`,
           role: "gridcell",
@@ -152,12 +247,55 @@ export function assetManagerPanel(
   if (state.notice !== undefined) {
     children.push({ id: "asset-manager/notice", role: "status", label: "Asset manager", value: state.notice });
   }
+  for (const [index, problem] of (state.projectProblems ?? []).entries()) {
+    children.push({ id: `asset-manager/problem/${index}`, role: "alert", label: "Asset not in project", value: problem });
+  }
   children.push({ id: "asset-manager/list", role: "list", label: "Assets", children: items });
+
+  // What the project already holds and this graphic does not use: reusing one
+  // is one action, so the same file is never imported into a project twice.
+  const inScene = new Set(document.assets.map((asset) => asset.checksum).filter((hash) => hash !== undefined));
+  const reusable = (state.projectLibrary ?? []).filter(
+    (asset) => asset.checksum === undefined || !inScene.has(asset.checksum),
+  );
+  if (state.project !== undefined) {
+    children.push({
+      id: "asset-manager/project-library",
+      role: "list",
+      label: `Project library · ${state.project}`,
+      description:
+        reusable.length === 0
+          ? "every asset in this project is already in this graphic"
+          : `${reusable.length} asset(s) in the project not used by this graphic`,
+      children: reusable.map((asset): UiNode => {
+        const preview = previewNodes(asset, state);
+        const clash = document.assets.find((candidate) => candidate.assetId === asset.assetId);
+        return {
+          id: `project-asset/${asset.assetId}`,
+          role: "listitem",
+          label: asset.name,
+          description: `${asset.kind} · in project ${state.project}`,
+          ...(preview.image === undefined ? {} : { image: preview.image }),
+          actions: [
+            {
+              name: "addToScene",
+              label: "Add to graphic",
+              ...(clash === undefined ? {} : { unavailable: `this graphic already has an asset with id ${asset.assetId}` }),
+            },
+          ],
+          children: preview.cells,
+        };
+      }),
+    });
+  }
   return {
     id: "asset-manager",
     role: "region",
     label: "Assets",
-    description: `${document.assets.length} asset(s) in ${document.name}`,
+    description:
+      state.project === undefined
+        ? `${document.assets.length} asset(s) in ${document.name} · independent graphic, not in a project`
+        : `${document.assets.length} asset(s) in ${document.name} · kept in project ${state.project}`,
     actions: [
       {
         name: "importFiles",

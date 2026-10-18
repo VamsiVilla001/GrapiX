@@ -30,6 +30,7 @@ import type {
   SceneEasing,
   SceneEdit,
   SceneKeyframe,
+  AssetLibraryItem,
   PreparedAssetBatch,
   PreparedFontBatch,
   SceneTarget,
@@ -71,7 +72,7 @@ import {
   materialManagerPanel,
   usersOf,
 } from "../src/material-manager";
-import { ASSET_FILE_EXTENSIONS, assetManagerPanel, assetUsers } from "../src/asset-manager";
+import { ASSET_FILE_EXTENSIONS, assetManagerPanel, assetUsers, describeVideoCodec, type AssetPreview } from "../src/asset-manager";
 import { textStylePanel, textStyleUsers } from "../src/text-style";
 import {
   sceneManagerPanel,
@@ -398,6 +399,17 @@ let selectedAssetId: string | undefined;
 /// Asset import state (11.39), shown in the Assets panel.
 let assetImporting = false;
 let assetNotice: string | undefined;
+/** Previews by content hash: the same bytes preview the same everywhere. */
+const assetPreviews = new Map<string, AssetPreview>();
+/** The project folder's own asset records, and which hashes it holds. */
+let projectAssetLibrary: readonly AssetLibraryItem[] = [];
+let projectAssetStored: ReadonlySet<string> = new Set();
+let projectAssetProblems: readonly string[] = [];
+/** Project and hash pairs already offered to the project, so a view update
+ *  does not re-copy files it has already taken in. */
+const adoptionTried = new Set<string>();
+/** The project whose folder listing is held in projectAssetLibrary. */
+let projectAssetListing: string | undefined;
 let takePageState: TakePageState = EMPTY_TAKE_PAGE_STATE;
 let takePagePreviewDocument: SceneDocument | null = null;
 let controlProperties: readonly ControlProperty[] | undefined;
@@ -536,6 +548,7 @@ function adoptView(view: SessionView): void {
   projectSceneProject = view.origin?.project;
   if (view.origin) currentProject = view.origin.project;
   if ((projectSceneProject ?? currentProject) !== presetLibraryProject) void refreshPresetLibrary();
+  void syncProjectAssets();
   ui.sceneId.readOnly = view.origin !== undefined;
   ui.sceneId.title =
     view.origin === undefined
@@ -1115,8 +1128,18 @@ function renderPanels(document_: SceneDocument): void {
   );
   ui.materialMount.replaceChildren(renderNode(document, materials) as unknown as Node);
   ui.assetEmpty.hidden = document_.assets.length > 0;
+  const assetProject = projectSceneProject;
   const assets = assetManagerPanel(document_, {
     ...(selectedAssetId === undefined ? {} : { selectedAssetId }),
+    previews: assetPreviews,
+    ...(assetProject === undefined
+      ? {}
+      : {
+          project: assetProject,
+          projectStored: projectAssetStored,
+          projectLibrary: projectAssetLibrary,
+          projectProblems: projectAssetProblems,
+        }),
     ...(assetImporting ? { importing: true } : {}),
     ...(assetNotice === undefined ? {} : { notice: assetNotice }),
   });
@@ -3289,6 +3312,191 @@ function relinkSelectedMaterial(document_: SceneDocument, fromId: string, fromNa
   });
 }
 
+// ---------------------------------------------------------------------------
+// Project-owned assets and previews (11.18)
+//
+// A project is a container: its folder owns the asset files, scenes reference
+// them by id, and a graphic saved into a project brings its assets along. The
+// shell copies bytes from the import cache into <project>/assets and keeps a
+// record beside each file; this layer asks it to, shows the result, and builds
+// previews from the project's verified bytes.
+// ---------------------------------------------------------------------------
+
+const PREVIEW_PX = 240;
+
+interface AdoptReport {
+  adopted: string[];
+  alreadyPresent: string[];
+  missing: { assetId: string; reason: string }[];
+}
+
+/** Bring the open graphic's assets into its project, refresh the project's
+ *  library, and start previews. Idempotent and quiet when nothing changed. */
+async function syncProjectAssets(): Promise<void> {
+  const project = projectSceneProject;
+  const document_ = scene;
+  if (!document_) return;
+  if (project === undefined) {
+    if (projectAssetListing !== undefined || projectAssetLibrary.length > 0) {
+      projectAssetLibrary = [];
+      projectAssetStored = new Set();
+      projectAssetProblems = [];
+      projectAssetListing = undefined;
+    }
+    startAssetPreviews(document_.assets);
+    return;
+  }
+  const pending = document_.assets.filter(
+    (asset) => asset.checksum !== undefined && !adoptionTried.has(`${project}|${asset.checksum}`),
+  );
+  let problems = projectAssetProblems;
+  if (pending.length > 0) {
+    for (const asset of pending) adoptionTried.add(`${project}|${asset.checksum}`);
+    try {
+      const report = await shell().invoke<AdoptReport>("cmd_project_assets_adopt", { project, items: pending });
+      problems = report.missing.map((missing) => {
+        const name = pending.find((asset) => asset.assetId === missing.assetId)?.name ?? missing.assetId;
+        return `${name}: ${missing.reason}`;
+      });
+      // A missing asset is retried next time, so re-importing it heals it.
+      for (const missing of report.missing) {
+        const asset = pending.find((candidate) => candidate.assetId === missing.assetId);
+        if (asset) adoptionTried.delete(`${project}|${asset.checksum}`);
+      }
+      if (report.adopted.length > 0) {
+        log(`Took ${report.adopted.length} asset(s) into project ${project}`, "good");
+      }
+    } catch (error) {
+      for (const asset of pending) adoptionTried.delete(`${project}|${asset.checksum}`);
+      problems = [`could not take assets into project ${project}: ${describe(error)}`];
+    }
+  }
+  // Read the folder only when something may have changed: a different
+  // project, or assets just taken in. Not on every edit.
+  if (pending.length === 0 && projectAssetListing === project) {
+    startAssetPreviews([...document_.assets, ...projectAssetLibrary]);
+    return;
+  }
+  try {
+    const library = await shell().invoke<AssetLibraryItem[]>("cmd_project_assets", { project });
+    projectAssetListing = project;
+    projectAssetLibrary = library;
+    projectAssetStored = new Set(library.flatMap((asset) => (asset.checksum === undefined ? [] : [asset.checksum])));
+  } catch (error) {
+    problems = [...problems, `project assets unreadable: ${describe(error)}`];
+  }
+  projectAssetProblems = problems;
+  startAssetPreviews([...document_.assets, ...projectAssetLibrary]);
+  if (scene) renderPanels(scene);
+}
+
+/** Make a preview for every asset that does not have one yet. */
+function startAssetPreviews(assets: readonly AssetLibraryItem[]): void {
+  for (const asset of assets) {
+    const hash = asset.checksum;
+    if (hash === undefined || assetPreviews.has(hash)) continue;
+    assetPreviews.set(hash, { kind: "loading" });
+    void (async () => {
+      let preview: AssetPreview;
+      try {
+        const bytes = await shell().invoke<ArrayBuffer>("cmd_asset_bytes", {
+          project: projectSceneProject ?? null,
+          checksum: hash,
+        });
+        preview = await buildAssetPreview(asset, bytes);
+      } catch (error) {
+        preview = { kind: "unavailable", reason: describe(error) };
+      }
+      assetPreviews.set(hash, preview);
+      if (scene) renderPanels(scene);
+    })();
+  }
+}
+
+async function buildAssetPreview(asset: AssetLibraryItem, bytes: ArrayBuffer): Promise<AssetPreview> {
+  const mime = asset.mimeType ?? "";
+  if (asset.kind === "image" || asset.kind === "svg") {
+    return rasterPreview(new Blob([bytes], { type: mime || (asset.kind === "svg" ? "image/svg+xml" : "image/png") }));
+  }
+  if (asset.kind === "video") {
+    const preview = await videoPreview(new Blob([bytes], { type: mime || "video/mp4" }));
+    if (preview.kind === "ready") return preview;
+    // Say what the file is, so the author knows it is the format and not a
+    // broken import: a browser engine cannot decode ProRes, for one.
+    const codec = describeVideoCodec(new Uint8Array(bytes));
+    return codec === undefined
+      ? preview
+      : {
+          kind: "unavailable",
+          reason: `${codec} video cannot be decoded in this window; the file is kept in the project unchanged`,
+        };
+  }
+  if (asset.kind === "model") {
+    return { kind: "unavailable", reason: "3D models have no preview yet; the file is in the project" };
+  }
+  return { kind: "unavailable", reason: `${asset.kind} assets have no preview` };
+}
+
+/** Scale a drawable into a small PNG so a 17 MB image costs a thumbnail. */
+function thumbnailOf(source: CanvasImageSource, width: number, height: number): string {
+  const scale = Math.min(1, PREVIEW_PX / Math.max(width, height, 1));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(width * scale));
+  canvas.height = Math.max(1, Math.round(height * scale));
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("a 2D canvas is not available to draw the preview");
+  context.drawImage(source, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/png");
+}
+
+async function rasterPreview(blob: Blob): Promise<AssetPreview> {
+  const url = URL.createObjectURL(blob);
+  try {
+    const image = new Image();
+    image.src = url;
+    try {
+      await image.decode();
+    } catch {
+      return { kind: "unavailable", reason: "the file could not be decoded as an image" };
+    }
+    // An SVG with no intrinsic size is drawn at the preview size.
+    const width = image.naturalWidth > 0 ? image.naturalWidth : PREVIEW_PX;
+    const height = image.naturalHeight > 0 ? image.naturalHeight : PREVIEW_PX;
+    return { kind: "ready", src: thumbnailOf(image, width, height) };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function videoPreview(blob: Blob): Promise<AssetPreview> {
+  const url = URL.createObjectURL(blob);
+  try {
+    const video = document.createElement("video");
+    video.muted = true;
+    video.preload = "auto";
+    video.src = url;
+    const once = (name: "loadeddata" | "seeked"): Promise<boolean> =>
+      new Promise((resolve) => {
+        const timer = window.setTimeout(() => resolve(false), 8000);
+        video.addEventListener(name, () => { window.clearTimeout(timer); resolve(true); }, { once: true });
+        video.addEventListener("error", () => { window.clearTimeout(timer); resolve(false); }, { once: true });
+      });
+    if (!(await once("loadeddata"))) {
+      return { kind: "unavailable", reason: "this video cannot be decoded in this window (codec or container)" };
+    }
+    const target = Number.isFinite(video.duration) ? Math.min(0.1, video.duration / 2) : 0;
+    if (target > 0) {
+      const seeked = once("seeked");
+      video.currentTime = target;
+      if (!(await seeked)) return { kind: "unavailable", reason: "the first frame could not be read" };
+    }
+    if (video.videoWidth === 0) return { kind: "unavailable", reason: "the video has no picture" };
+    return { kind: "ready", src: thumbnailOf(video, video.videoWidth, video.videoHeight) };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 function onAssetManagerClick(event: MouseEvent): void {
   if (!scene) return;
   const target = event.target;
@@ -3296,6 +3504,14 @@ function onAssetManagerClick(event: MouseEvent): void {
   const button = target.closest<HTMLButtonElement>("button[data-action][data-for]");
   if (button?.dataset.for === "asset-manager") {
     if (button.dataset.action === "importFiles" && !button.disabled) void importAssetFiles();
+    return;
+  }
+  if (button?.dataset.action === "addToScene" && button.dataset.for?.startsWith("project-asset/") && !button.disabled) {
+    const assetId = button.dataset.for.slice("project-asset/".length);
+    const item = projectAssetLibrary.find((candidate) => candidate.assetId === assetId);
+    if (item) {
+      void runEdits([{ edit: "addAssets", assets: [item] }], `Added ${item.name} from the project library`, "assets");
+    }
     return;
   }
   const row = target.closest<HTMLLIElement>('li[role="listitem"][id^="asset/"]');
@@ -3353,7 +3569,10 @@ async function importAssetFiles(): Promise<void> {
       log(assetNotice);
       return;
     }
-    const added = `Imported ${batch.assets.length} asset(s): ${batch.assets.map((asset) => asset.name).join(", ")}`;
+    const where = projectSceneProject === undefined
+      ? "held in the import cache until this graphic is saved into a project"
+      : `kept in project ${projectSceneProject}`;
+    const added = `Imported ${batch.assets.length} asset(s), ${where}: ${batch.assets.map((asset) => asset.name).join(", ")}`;
     const outcome = await runEdits([{ edit: "addAssets", assets: batch.assets }], added, "assets");
     assetNotice = outcome ? `${added}${skippedNote}` : undefined;
   } catch (error) {
