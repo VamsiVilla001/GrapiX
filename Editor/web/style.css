@@ -1472,3 +1472,6 @@ button, select, input[type="number"], input[type="text"], input[type="range"] { 
    font row widens the whole column and the import fields run off its edge. */
 #font-mount [role="gridcell"] { min-width: 0; overflow-wrap: anywhere; }
 #font-mount [role="region"], #font-mount [role="listitem"] { min-width: 0; }
+#close-confirm-dialog { width: min(420px, calc(100vw - 32px)); margin: auto; border: 1px solid #484848; border-radius: 5px; padding: 22px; color: var(--text); background: var(--panel); }
+#close-confirm-dialog::backdrop { background: #0008; }
+#close-confirm-message { color: var(--dim); margin: 8px 0 14px; }

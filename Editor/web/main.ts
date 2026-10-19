@@ -342,6 +342,8 @@ const ui = {
   timelineJumpHold: need<HTMLButtonElement>("timeline-jump-hold"),
   timelinePresetDurationError: need<HTMLSpanElement>("timeline-preset-duration-error"),
   presetSaveDialog: need<HTMLDialogElement>("preset-save-dialog"),
+  closeConfirmDialog: need<HTMLDialogElement>("close-confirm-dialog"),
+  closeConfirmMessage: need<HTMLParagraphElement>("close-confirm-message"),
   presetSaveForm: need<HTMLFormElement>("preset-save-form"),
   presetSaveId: need<HTMLInputElement>("preset-save-id"),
   presetSaveSummary: need<HTMLParagraphElement>("preset-save-summary"),
@@ -683,6 +685,21 @@ function switchToScene(key: number): void {
   log(`Switched to ${result.view.document.name}`, "good");
 }
 
+/// Ask, in the page, whether to close a graphic and lose its unsaved changes.
+/// Not `window.confirm`: in the shell the dialog plugin replaces it with an
+/// asynchronous call whose Promise is always truthy, so a guard written as
+/// `!window.confirm(...)` never stopped a close. Escape, the close button and
+/// "Keep editing" all answer no; only the explicit discard answers yes.
+function confirmDiscard(name: string): Promise<boolean> {
+  const dialog = ui.closeConfirmDialog;
+  ui.closeConfirmMessage.textContent = `${name} has unsaved changes. Close it and lose them?`;
+  dialog.returnValue = "";
+  return new Promise((resolve) => {
+    dialog.addEventListener("close", () => resolve(dialog.returnValue === "discard"), { once: true });
+    dialog.showModal();
+  });
+}
+
 async function closeScene(key: number): Promise<void> {
   captureActiveSession();
   const session = workspace.sessions.find((candidate) => candidate.key === key);
@@ -692,7 +709,7 @@ async function closeScene(key: number): Promise<void> {
   // click must never be able to lose an edit on its own. Rust refuses an
   // unforced close of a dirty session by name if this view is stale.
   const force = session.view.dirty;
-  if (force && !window.confirm(`${name} has unsaved changes. Close it and lose them?`)) {
+  if (force && !(await confirmDiscard(name))) {
     log(`close refused: ${name} has unsaved changes`, "bad");
     return;
   }

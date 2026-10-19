@@ -460,6 +460,19 @@
         <div class="dialog-actions"><button id="manager-create-cancel" type="button">Cancel</button><button type="submit">Create</button></div>
       </form>
     </dialog>
+    <!-- Closing a graphic with unsaved changes asks here, in the page. The
+         webview's window.confirm is replaced by an asynchronous plugin call,
+         which answered "yes" to every close without asking (11.29). -->
+    <dialog id="close-confirm-dialog" aria-labelledby="close-confirm-title" aria-describedby="close-confirm-message">
+      <form id="close-confirm-form" method="dialog">
+        <h2 id="close-confirm-title">Unsaved changes</h2>
+        <p id="close-confirm-message"></p>
+        <div class="dialog-actions">
+          <button id="close-confirm-keep" type="submit" value="keep" autofocus>Keep editing</button>
+          <button id="close-confirm-discard" type="submit" value="discard" class="danger-quiet">Close and lose changes</button>
+        </div>
+      </form>
+    </dialog>
     <dialog id="preset-save-dialog" aria-labelledby="preset-save-title" aria-describedby="preset-save-summary">
       <form id="preset-save-form">
         <h2 id="preset-save-title">Save keys as motion preset</h2>

@@ -118,6 +118,38 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-10-19 — 11.29 done; closing an unsaved graphic no longer discards it silently (Claude, mission 1)
+
+**Done — 11.29.** Its Need, 11.18, is done. Per-graphic sessions had already been built and verified (13 Sep); this is a re-run of the whole Done-when on today's Editor, with Rust-owned sessions.
+
+**Bug found and fixed:** the "unsaved changes" question used `window.confirm`. In the shell, `tauri-plugin-dialog`'s init script replaces `window.confirm` with an `async` function, so `!window.confirm(...)` is always false. The capability set also never grants `dialog:allow-confirm`.
+- **Effect:** every close of an unsaved graphic sent `closeScene force=true` and discarded the work without asking. The first live run caught it: the script declined, and the log still read "Closed Lower third…, discarding unsaved changes".
+- **Fix:** the question is now an in-page `<dialog id="close-confirm-dialog">`, awaited (`confirmDiscard`). "Keep editing", Escape and the dialog's own close all answer no; only "Close and lose changes" answers yes.
+- No other `window.confirm` or `alert` use remains. `window.prompt` is not replaced by the plugin; the scripted prompts go through it.
+
+**Verified live:** `agent/tmp/scenes-1129/scenes.cjs`, 4 of 4 checks, on a freshly started Editor (Tauri/WebView2, CDP 9223), two graphics A and B in one project:
+1. Both graphics are listed as tabs; switching changes the active one.
+2. With B active, every panel shows only B:
+   - object rows `b-card`, `b1`, `b2`; nothing selected; frame 0; no collapsed groups;
+   - undo disabled, so A's edit is not on B's history;
+   - the composition name, the timeline layer names and the bindings panel's sample data (`score`, not `player`) are all B's.
+3. Switching keeps each graphic's own state, and neither can change the other:
+   - A kept its selection `a3`, frame 60, collapsed `a-card` and x=555, even after an undo in B;
+   - B's edit was undone with redo available, and its selection `b1`, frame 20, x=900 and redo all survived an undo in A.
+4. Closing A with an unsaved edit:
+   - the dialog asks "Lower third … has unsaved changes. Close it and lose them?";
+   - Keep, and then Escape, each log "close refused: Lower third … has unsaved changes", and A stays open with its edit;
+   - a direct `closeScene force=false` is refused by Rust: `sessionHasUnsavedChanges`, "session 3 for Lower third … has unsaved changes";
+   - "Close and lose changes" closes it and activates its left neighbour.
+
+The script waits for the Editor's own "Set X = n" report, not the typed text, before reading state. An earlier read raced the edit.
+
+**Gate:** `npm run check` result is in the commit message.
+
+**Not covered here:** drag-to-dock (11.5's mechanism; layout is not part of this row) and macOS.
+
+---
+
 ## 2026-10-19 — 11.18 done: Editor panels reachable and working, run live (Claude, mission 1)
 
 **Done — 11.18.** All its Needs were done once 11.13 closed. A read-only comparison with the 1.x panels (archive branch) was run first. Most 1.x gaps are owned by later rows:
