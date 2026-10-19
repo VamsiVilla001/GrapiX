@@ -123,6 +123,7 @@ impl Server {
 
     /// Register a handler for one tool. The tool must exist in the registry.
     pub fn register(&mut self, tool: &'static str, handler: Box<dyn ToolHandler>) {
+        assert!(ToolRegistry::get(tool).is_some(), "unregistered MCP tool {tool}");
         self.handlers.insert(tool, handler);
     }
 
@@ -166,9 +167,7 @@ impl Server {
             // changing type. A client reading `result.tools` against an array
             // finds nothing and concludes the server has no tools at all —
             // which is the discovery failure this surface exists to prevent.
-            "tools/list" => Ok(serde_json::json!({
-                "tools": ToolRegistry::all(),
-            })),
+            "tools/list" => self.list(),
             "tools/call" => self.call(request.params),
             other => Err((
                 METHOD_NOT_FOUND,
@@ -186,6 +185,20 @@ impl Server {
             },
             Err((code, message, data)) => self.error(id, code, &message, data),
         })
+    }
+
+    /// Discover installed handlers with schemas generated from their inputs.
+    fn list(&self) -> Result<serde_json::Value, (i64, String, Option<StructuredRefusal>)> {
+        let mut tools = Vec::new();
+        for descriptor in ToolRegistry::all().iter().filter(|tool| self.handlers.contains_key(tool.name)) {
+            let mut value = serde_json::to_value(descriptor)
+                .expect("a tool descriptor is serialisable");
+            value["description"] = serde_json::json!(descriptor.summary);
+            value["inputSchema"] = gx_contracts::mcp::input_schema(descriptor.input)
+                .map_err(|refusal| (REFUSED, refusal.to_string(), Some(StructuredRefusal::error(refusal))))?;
+            tools.push(value);
+        }
+        Ok(serde_json::json!({ "tools": tools }))
     }
 
     /// Dispatch a `tools/call` through the scope gate to its handler.
@@ -376,7 +389,10 @@ mod tests {
 
     #[test]
     fn tools_list_returns_the_whole_registry_under_the_spec_field() {
-        let server = Server::new(Vec::new());
+        let mut server = Server::new(Vec::new());
+        for tool in ToolRegistry::all() {
+            server.register(tool.name, Box::new(Echo));
+        }
         let reply = server
             .handle(request(1, "tools/list", serde_json::Value::Null))
             .expect("tools/list always replies");
@@ -388,6 +404,27 @@ mod tests {
             .expect("the registry arrives under `tools`")
             .len();
         assert_eq!(listed, ToolRegistry::all().len());
+        for tool in result["tools"].as_array().unwrap() {
+            let name = tool["name"].as_str().unwrap();
+            let descriptor = ToolRegistry::get(name).unwrap();
+            let generated = gx_contracts::mcp::input_schema(descriptor.input).unwrap();
+            assert_eq!(tool["inputSchema"], generated, "{name}");
+            assert_eq!(tool["inputSchema"]["type"], "object", "{name}");
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../Shared/generated-ts/schemas/mcp")
+                .join(format!("{name}.schema.json"));
+            let stored: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+            assert_eq!(tool["inputSchema"], stored, "stale generated MCP schema for {name}");
+        }
+    }
+
+    #[test]
+    fn tools_list_only_advertises_installed_handlers() {
+        let server = Server::new(Vec::new());
+        let reply = server.handle(request(1, "tools/list", serde_json::Value::Null)).unwrap();
+        let tools = reply.result.unwrap()["tools"].as_array().unwrap().clone();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["name"], "system.capability");
     }
 
     #[test]

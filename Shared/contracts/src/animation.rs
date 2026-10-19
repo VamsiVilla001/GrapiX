@@ -87,7 +87,7 @@ impl Default for SceneEasing {
 }
 
 /// One animatable property on one object.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct KeyframeChannel {
     /// Stable object id the channel belongs to. The object lookup is by id,

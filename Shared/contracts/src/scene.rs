@@ -136,7 +136,7 @@ impl AssetLibraryItem {
 
 /// The scene's output canvas. Resolution and rate are configuration, never
 /// constants (ADR-0002 Part C), and the rate is rational (invariant 12).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SceneCanvas {
     pub width: u32,
@@ -150,7 +150,7 @@ pub struct SceneCanvas {
 /// normalised 0–1 until instantiation (G.6.2). `#[serde(default)]` keeps a
 /// scene authored before the field existed valid and equivalent to an empty
 /// channel set.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SceneTimeline {
     /// Total duration in frames at the canvas rate.
@@ -173,14 +173,14 @@ pub type DataContext = serde_json::Map<String, serde_json::Value>;
 // ---------------------------------------------------------------------------
 
 /// A 2D point in scene coordinates.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 pub struct Vec2 {
     pub x: f64,
     pub y: f64,
 }
 
 /// A 3D point in scene coordinates.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 pub struct Vec3 {
     pub x: f64,
     pub y: f64,
@@ -190,7 +190,7 @@ pub struct Vec3 {
 /// Transform, box and appearance state every object carries — the shared core
 /// the hierarchy resolver composes and the inspector edits. Ported from 1.x
 /// `BaseSceneObject`; what was left behind is listed in the module doc.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ObjectBase {
     pub id: String,
@@ -311,7 +311,7 @@ impl ObjectBase {
 }
 
 /// Point text grows from its origin; paragraph text wraps inside the base box.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum TextLayout {
     #[default]
@@ -320,7 +320,7 @@ pub enum TextLayout {
 }
 
 /// What to do when shaped text does not fit its box. Never silently clipped.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum TextAutoFit {
     #[default]
@@ -330,7 +330,7 @@ pub enum TextAutoFit {
 }
 
 /// CSS `writing-mode` values, which is what the shaper (3.6) consumes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum WritingMode {
     #[default]
@@ -339,7 +339,7 @@ pub enum WritingMode {
     VerticalLr,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum VerticalAlign {
     #[default]
@@ -350,7 +350,7 @@ pub enum VerticalAlign {
 
 /// Base direction. `Auto` resolves from the first strong character, which is
 /// what makes bidi text (3.6) correct without the author declaring it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum TextDirection {
     #[default]
@@ -374,7 +374,7 @@ pub enum TextCase {
     SmallCaps,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum TextOverflow {
     #[default]
@@ -383,7 +383,7 @@ pub enum TextOverflow {
     Clip,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum TextAlign {
     #[default]
@@ -394,7 +394,7 @@ pub enum TextAlign {
 
 /// Underline and strikethrough: drawn from the font's metrics rather than
 /// shaped, so they are object state and not part of the font definition.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TextDecoration {
     #[serde(default)]
@@ -407,7 +407,7 @@ pub struct TextDecoration {
 /// never by a system family name (ADR-0002 A.4's one rule), which is why
 /// family, weight, style and stretch are on `FontDefinition` and not here.
 /// The colour is the base's `fill`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TextObject {
     #[serde(flatten)]
@@ -454,7 +454,7 @@ pub struct TextObject {
 }
 
 /// A rectangle filling the base box. `radius` is the corner radius.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RectObject {
     #[serde(flatten)]
@@ -465,7 +465,7 @@ pub struct RectObject {
 
 /// An ellipse inscribed in the base box. It carries no fields of its own —
 /// the box is the ellipse, and the fill and stroke are the base's.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct EllipseObject {
     #[serde(flatten)]
@@ -475,7 +475,7 @@ pub struct EllipseObject {
 /// An image drawn into the base box. The asset is referenced by id into the
 /// scene's asset library — the stable address, so a replace-in-place keeps
 /// this binding (1.7). How the pixels fit the box is 1.3's fit enum.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageObject {
     #[serde(flatten)]
@@ -490,7 +490,7 @@ pub struct ImageObject {
 
 /// A group: a hierarchy container that affects descendants but paints no
 /// pixels. Children are object ids, in scene order.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GroupObject {
     #[serde(flatten)]
@@ -505,7 +505,7 @@ pub struct GroupObject {
 // ---------------------------------------------------------------------------
 
 /// A polyline in object-local coordinates, stroked with the base's stroke.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LineObject {
     #[serde(flatten)]
@@ -517,7 +517,7 @@ pub struct LineObject {
 /// round-trips with the web's proven vector-animation format. Segment k→k+1 is
 /// a cubic bezier; tangents are relative to their vertex. All three arrays
 /// must be the same length — the constraint that also makes a path animatable.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BezierPath {
     pub closed: bool,
@@ -528,7 +528,7 @@ pub struct BezierPath {
 
 /// An After-Effects-style shape layer: a bezier path with fill and stroke
 /// (the base carries both) and AE's Trim Paths.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ShapeObject {
     #[serde(flatten)]
@@ -569,7 +569,7 @@ pub struct ShapeObject {
     pub trim_offset: Option<f64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum FillRule {
     #[default]
@@ -578,7 +578,7 @@ pub enum FillRule {
 }
 
 /// A brush point: position, pressure, time.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 pub struct BrushPoint {
     pub x: f64,
     pub y: f64,
@@ -590,7 +590,7 @@ pub struct BrushPoint {
     pub time: Option<f64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum BrushBlendMode {
     Normal,
@@ -601,7 +601,7 @@ pub enum BrushBlendMode {
 }
 
 /// One paint stroke.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PaintStroke {
     pub id: String,
@@ -619,7 +619,7 @@ pub struct PaintStroke {
 }
 
 /// A paint object: a set of strokes composited with one blend mode.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PaintObject {
     #[serde(flatten)]
@@ -629,7 +629,7 @@ pub struct PaintObject {
     pub paint_blend_mode: BrushBlendMode,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum MeshPrimitiveKind {
     Model,
@@ -641,7 +641,7 @@ pub enum MeshPrimitiveKind {
 }
 
 /// One bevel of a slab, measured inward from its outline.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SlabBevel {
     pub enabled: bool,
@@ -654,7 +654,7 @@ pub struct SlabBevel {
 /// XPression-style slab controls: a rounded, skewed extrusion with
 /// independent front and back bevels. Geometry only — face culling is a
 /// material property and arrives with 1.3's material model.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SlabProperties {
     /// Corner radius of the slab outline, in scene units.
@@ -699,7 +699,7 @@ impl Default for SlabProperties {
 
 /// A 3D mesh: a primitive or an imported glTF model. Meshes are the only
 /// objects whose X/Y rotations compose down the hierarchy.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MeshObject {
     #[serde(flatten)]
@@ -745,7 +745,7 @@ pub struct MeshObject {
     pub animation_loop: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum LightKind {
     Directional,
@@ -754,7 +754,7 @@ pub enum LightKind {
 }
 
 /// A light source. Affects meshes; paints no pixels itself.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LightObject {
     #[serde(flatten)]
@@ -787,7 +787,7 @@ pub struct LightObject {
     pub cast_shadow: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum CameraKind {
     Perspective,
@@ -796,7 +796,7 @@ pub enum CameraKind {
 
 /// A camera. The scene's active camera selects the Program view; absence
 /// means the synthetic 2D orthographic camera.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CameraObject {
     #[serde(flatten)]
@@ -821,7 +821,7 @@ pub struct CameraObject {
     pub up: Option<Vec3>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum LayerKind {
     Object,
@@ -829,7 +829,7 @@ pub enum LayerKind {
 }
 
 /// A layer: a hierarchy container like a group, with a kind. Paints no pixels.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LayerObject {
     #[serde(flatten)]
@@ -839,14 +839,14 @@ pub struct LayerObject {
     pub child_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum MarkerKind {
     Event,
 }
 
 /// A named marker that emits an event when the playhead reaches its frame.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MarkerObject {
     #[serde(flatten)]
@@ -858,7 +858,7 @@ pub struct MarkerObject {
 /// The authorable object kinds. A tagged enum, not an open struct: the set of
 /// kinds a scene may contain is a reviewed contract, and the renderer refuses
 /// a kind it does not know by name rather than ignoring it (invariant 18).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(
     tag = "type",
     rename_all = "camelCase",
@@ -966,7 +966,7 @@ impl SceneObject {
 // ---------------------------------------------------------------------------
 
 /// Why an edge was not taken.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum HierarchyDiagnosticCode {
     MissingChild,
@@ -977,7 +977,7 @@ pub enum HierarchyDiagnosticCode {
 
 /// An edge the resolver refused, with the reason. The scene still resolves;
 /// the diagnostic is how the editor surfaces what was dropped.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct HierarchyDiagnostic {
     pub code: HierarchyDiagnosticCode,
@@ -1042,7 +1042,7 @@ impl Inherited {
 /// Serialisable because the Editor consumes this result rather than
 /// reimplementing it: `resolve_hierarchy` is the single implementation of the
 /// composition rules (invariant 22), and this is the shape it returns.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedObject {
     pub id: String,
@@ -1072,7 +1072,7 @@ pub struct ResolvedObject {
 }
 
 /// An accepted parent → child edge.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct HierarchyEdge {
     pub parent_id: String,
@@ -1080,7 +1080,7 @@ pub struct HierarchyEdge {
 }
 
 /// A container's accepted children, in the order it claimed them.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct HierarchyChildren {
     pub parent_id: String,
@@ -1088,7 +1088,7 @@ pub struct HierarchyChildren {
 }
 
 /// The result of resolving a scene's hierarchy.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct HierarchyResolution {
     /// Every object's effective state, in the document's source order.
@@ -1388,7 +1388,7 @@ fn apply(m: (f64, f64, f64, f64, f64, f64), x: f64, y: f64) -> (f64, f64) {
 /// The scene document: the unit the Editor authors, the package carries and
 /// the engine prepares. Self-describing — fonts, assets and objects travel
 /// together so a published package never depends on outside state.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SceneDocument {
     pub id: String,

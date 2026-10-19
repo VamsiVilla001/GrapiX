@@ -97,7 +97,7 @@ pub struct ScopeDenial {
 /// so the agent sees the frame it asked for, never whatever happened to be on
 /// Preview. The hash is optional only so that a missing pin is refused by name
 /// (`RevisionUnpinned`, invariant 61).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewRequest {
     pub take_id: crate::TakeId,
@@ -106,6 +106,126 @@ pub struct PreviewRequest {
     #[ts(optional)]
     pub content_hash: Option<crate::ContentHash>,
     pub frame: u64,
+}
+
+/// An MCP call with no arguments still has an object input schema.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EmptyArgs {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectRef {
+    pub project: String,
+}
+
+/// Retains the existing read-tool wire spelling (`scene_id`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SceneRef {
+    pub project: String,
+    pub scene_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PackageBuild {
+    #[ts(type = "string")]
+    pub output: std::path::PathBuf,
+    pub scene: crate::scene::SceneDocument,
+    #[serde(default)]
+    pub sources: Vec<PackageBuildSource>,
+    #[serde(default)]
+    pub design_system_version: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PackageBuildSource {
+    pub path: String,
+    #[ts(type = "string")]
+    pub source: std::path::PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PackageRef {
+    #[ts(type = "string")]
+    pub package: std::path::PathBuf,
+}
+
+/// MCP scheduling is an optional engine frame, never a client clock.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProgramArgs {
+    pub take_id: String,
+    pub revision: u64,
+    #[serde(default)]
+    pub content_hash: Option<crate::ContentHash>,
+    #[serde(default)]
+    pub frame: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClearArgs {
+    #[serde(default)]
+    pub frame: Option<u64>,
+}
+
+/// Output configuration shared by MCP and the control plane.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputConfig {
+    /// Adapter identity; this does not determine whether the output is live.
+    pub adapter: String,
+    pub live: bool,
+    /// An operator has acknowledged a free-running reference.
+    pub accept_free_run: bool,
+}
+
+/// Generate the actual handler input, rather than a second JSON description.
+/// Unknown input names fail closed; the exhaustive registry test catches an
+/// added tool whose input has not been connected here.
+pub fn input_schema(input: &str) -> Result<serde_json::Value, Refusal> {
+    use crate::command::{ConfirmDesignSystem, CreateProject, CreateScene, DeleteScene, EditScene};
+    macro_rules! schema {
+        ($ty:ty) => {
+            schemars::generate::SchemaSettings::draft2020_12()
+                .into_generator().into_root_schema_for::<$ty>()
+        };
+    }
+    let schema = match input {
+        "()" => schema!(EmptyArgs),
+        "ProjectRef" => schema!(ProjectRef),
+        "SceneRef" => schema!(SceneRef),
+        "CreateProject" => schema!(CreateProject),
+        "CreateScene" => schema!(CreateScene),
+        "DeleteScene" => schema!(DeleteScene),
+        "EditScene" => schema!(EditScene),
+        "ConfirmDesignSystem" => schema!(ConfirmDesignSystem),
+        "DesignSystemImport" => schema!(crate::design_system::DesignSystemImport),
+        "PreviewRequest" => schema!(PreviewRequest),
+        "PackageBuild" => schema!(PackageBuild),
+        "PackageRef" => schema!(PackageRef),
+        "ProgramArgs" => schema!(ProgramArgs),
+        "ClearArgs" => schema!(ClearArgs),
+        "ReviewRequest" => schema!(crate::ReviewRequest),
+        "OutputConfig" => schema!(OutputConfig),
+        other => return Err(Refusal::NotImplemented {
+            what: format!("no generated MCP input schema for {other}"),
+        }),
+    };
+    let mut value = serde_json::to_value(schema).map_err(|error| Refusal::TransportFailed {
+        detail: format!("generating MCP schema for {input}: {error}"),
+    })?;
+    value["$comment"] = serde_json::json!(
+        "GENERATED by gx-contract-codegen from gx-contracts::mcp. Do not edit (invariant 23)."
+    );
+    // The MCP seam uses parse_strict even where serde's underlying contract
+    // tolerates unknown fields. Express that seam's top-level closure too.
+    value["additionalProperties"] = serde_json::Value::Bool(false);
+    Ok(value)
 }
 
 /// `render.preview`'s structured result. The PNG itself travels beside it as
@@ -175,16 +295,16 @@ pub const TOOLS: &[ToolDescriptor] = &[
     // packages (8.10).
     tool("packages.build", "packages", ToolEffect::Write, Scope::Author, "PackageBuild", "PackageManifest", "Build and verify a package. All-or-nothing."),
     tool("packages.inspect", "packages", ToolEffect::Read, Scope::Author, "PackageRef", "PackageManifest", "Read a package's manifest. Verifies without publishing."),
-    tool("packages.publish", "packages", ToolEffect::Write, Scope::Author, "PackagePublish", "PublishResult", "Publish a package. Returns Take ID and revision."),
+    tool("packages.publish", "packages", ToolEffect::Write, Scope::Author, "PackageRef", "PublishResult", "Publish a package. Returns Take ID and revision."),
     // playout and outputs (8.11) — scope-gated, and the reason the whole
     // scope model exists.
     tool("playout.library", "playout", ToolEffect::Read, Scope::Author, "()", "LibraryList", "Published takes, their revisions, each revision's content hash and review state."),
     // 11.38: review is an operator's act. `Take` is the scope a human
     // operator holds and an agent credential never does (invariant 65).
     tool("playout.review", "playout", ToolEffect::Write, Scope::Take, "ReviewRequest", "PublishedRevision", "Set a published revision's review state: draft, proposed or approved. The content does not change."),
-    tool("playout.cue", "playout", ToolEffect::Write, Scope::Cue, "CueRequest", "TakeCommitted", "Cue a published revision."),
-    tool("playout.take", "playout", ToolEffect::Write, Scope::Take, "TakeRequest", "TakeCommitted", "Take a published revision to Program."),
-    tool("playout.clear", "playout", ToolEffect::Write, Scope::Clear, "ClearRequest", "TakeCommitted", "Clear Program."),
+    tool("playout.cue", "playout", ToolEffect::Write, Scope::Cue, "ProgramArgs", "TakeCommitted", "Cue a published revision."),
+    tool("playout.take", "playout", ToolEffect::Write, Scope::Take, "ProgramArgs", "TakeCommitted", "Take a published revision to Program."),
+    tool("playout.clear", "playout", ToolEffect::Write, Scope::Clear, "ClearArgs", "TakeCommitted", "Clear Program."),
     tool("outputs.list", "outputs", ToolEffect::Read, Scope::Author, "()", "OutputList", "Adapters, status and reference lock."),
     tool("outputs.configure", "outputs", ToolEffect::Write, Scope::ConfigureOutput, "OutputConfig", "OutputState", "Configure an output. is_live applies."),
 ];

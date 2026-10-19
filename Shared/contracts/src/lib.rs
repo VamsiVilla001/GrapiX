@@ -43,7 +43,7 @@ use ts_rs::TS;
 pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Stable identity of a published scene. Survives every republish.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS, schemars::JsonSchema)]
 pub struct TakeId(pub String);
 
 impl std::fmt::Display for TakeId {
@@ -64,7 +64,7 @@ impl std::fmt::Display for ContentHash {
 
 /// Publish revision. Exact-match only: a take against a stale revision is
 /// refused, never coerced (invariant 17).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS, schemars::JsonSchema)]
 pub struct Revision(pub u64);
 
 impl Revision {
@@ -106,7 +106,7 @@ pub enum ReviewState {
 }
 
 /// `playout.review`'s input: which revision, and the state an operator sets.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewRequest {
     pub take_id: TakeId,
@@ -167,7 +167,7 @@ pub struct Epoch(pub u64);
 /// 29.97 is 30000/1001 and cannot be represented in binary floating point.
 /// Accumulating a rounded rate across an 8-hour soak drifts the clock, so this
 /// type deliberately offers no `f64` constructor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 pub struct RationalRate {
     pub num: u32,
     pub den: u32,

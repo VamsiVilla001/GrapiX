@@ -33,8 +33,7 @@ use crate::{Refusal, StructuredRefusal};
 /// Carried across from 1.x `MATERIAL_BLEND_MODES` unchanged, because a scene
 /// authored there must mean the same thing here.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize, TS,
-)]
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum BlendMode {
     #[default]
@@ -100,8 +99,7 @@ impl BlendMode {
 /// enum called `fit`, and `cover` is the one it called `fill`. The names kept
 /// are CSS's, because that is the vocabulary designers hand work over in.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize, TS,
-)]
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum FitMode {
     /// Fill the box exactly, changing the aspect ratio.
@@ -152,7 +150,7 @@ impl FitMode {
 }
 
 /// Which faces are drawn. Carried from 1.x `MaterialCullMode`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum CullMode {
     None,
@@ -167,7 +165,7 @@ impl CullMode {
 
 /// How alpha is interpreted. Straight and premultiplied are different images,
 /// and guessing between them is a visible halo on every soft edge.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum AlphaMode {
     Opaque,
@@ -186,7 +184,7 @@ impl AlphaMode {
     ];
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum DepthMode {
     Disabled,
@@ -199,7 +197,7 @@ impl DepthMode {
     pub const ALL: [DepthMode; 3] = [DepthMode::Disabled, DepthMode::Read, DepthMode::ReadWrite];
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum TextureWrapMode {
     #[default]
@@ -208,7 +206,7 @@ pub enum TextureWrapMode {
     MirrorRepeat,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum TextureFiltering {
     Nearest,
@@ -221,7 +219,7 @@ pub enum TextureFiltering {
 /// 1.x carried fifteen values here, ten of which its loader rewrote to `pbr`
 /// on the way in — load-only compatibility aliases for a format 2.0 does not
 /// read. Only the kinds that behave differently are carried.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum MaterialKind {
     /// A flat colour or gradient, unlit.
@@ -241,7 +239,7 @@ pub enum MaterialKind {
 }
 
 /// One texture input of a material.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MaterialTextureSlot {
     /// The slot's name in the shader or the primitive: `baseColor`,
@@ -261,7 +259,7 @@ pub struct MaterialTextureSlot {
 }
 
 /// A material as the library holds it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MaterialDefinition {
     pub material_id: String,
@@ -304,7 +302,7 @@ fn one() -> f64 {
 /// overrides in the same field. An untagged union like that deserialises by
 /// trial, and a shape that nearly matches the wrong arm is accepted silently,
 /// so only the object form is carried.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MaterialBinding {
     pub material_id: String,
@@ -329,7 +327,7 @@ impl MaterialBinding {
 /// Held as data and exchanged in the capability handshake, never derived from
 /// a feature flag (invariant 21): "this build has shader compositing compiled
 /// in" is not the same claim as "this device draws overlay correctly".
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MaterialSupport {
     pub blend_modes: Vec<BlendMode>,

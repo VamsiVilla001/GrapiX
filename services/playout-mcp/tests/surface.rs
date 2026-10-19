@@ -174,7 +174,13 @@ fn capability_discovery_answers_before_any_scope_is_granted() {
     );
 
     let tools = replies[0]["result"]["tools"].as_array().unwrap();
-    let names: Vec<&str> = tools
+    assert_eq!(tools.len(), 1, "only installed handlers are advertised");
+    assert_eq!(tools[0]["name"], "system.capability");
+    assert_eq!(tools[0]["inputSchema"], gx_contracts::mcp::input_schema("()").unwrap());
+    // The capability catalogue describes the shared contracts, including
+    // tools that this particular server has not installed. Discovery of the
+    // callable instance surface remains tools/list's responsibility.
+    let names: Vec<&str> = replies[1]["result"]["tools"].as_array().unwrap()
         .iter()
         .map(|tool| tool["name"].as_str().unwrap())
         .collect();

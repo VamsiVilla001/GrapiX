@@ -37,7 +37,7 @@ use crate::Refusal;
 /// There is no `Default`. A project declares its space and every scene in it
 /// carries the same one, because a guessed space changes every
 /// semi-transparent pixel without anyone having chosen it (invariant 18).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum WorkingColorSpace {
     /// Display-referred sRGB: components stay sRGB-encoded while they

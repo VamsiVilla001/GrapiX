@@ -500,7 +500,7 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
       "group": "packages",
       "effect": "write",
       "requiredScope": "author",
-      "input": "PackagePublish",
+      "input": "PackageRef",
       "output": "PublishResult",
       "summary": "Publish a package. Returns Take ID and revision."
     },
@@ -527,7 +527,7 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
       "group": "playout",
       "effect": "write",
       "requiredScope": "cue",
-      "input": "CueRequest",
+      "input": "ProgramArgs",
       "output": "TakeCommitted",
       "summary": "Cue a published revision."
     },
@@ -536,7 +536,7 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
       "group": "playout",
       "effect": "write",
       "requiredScope": "take",
-      "input": "TakeRequest",
+      "input": "ProgramArgs",
       "output": "TakeCommitted",
       "summary": "Take a published revision to Program."
     },
@@ -545,7 +545,7 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
       "group": "playout",
       "effect": "write",
       "requiredScope": "clear",
-      "input": "ClearRequest",
+      "input": "ClearArgs",
       "output": "TakeCommitted",
       "summary": "Clear Program."
     },

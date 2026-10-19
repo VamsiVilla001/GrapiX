@@ -29,6 +29,7 @@ use gx_control_plane::intent::{check_pin, TakeAt};
 use gx_control_plane::message::OutputConfig;
 use gx_control_plane::peer::EnginePeer;
 use gx_contracts::Refusal;
+use gx_contracts::mcp::{PackageBuild as BuildArgs, PackageRef, ProgramArgs, ClearArgs};
 use gx_mcp_server::ToolHandler;
 use gx_playout::{OutputEnvironment, Playout, PublishedLibrary, PublishedScene};
 use parking_lot::Mutex;
@@ -170,24 +171,6 @@ fn package_refusal(error: gx_asset_plane::package::PackageError) -> Refusal {
 /// `packages.build`: build and verify a package, all-or-nothing.
 pub struct PackagesBuild;
 
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct BuildArgs {
-    output: std::path::PathBuf,
-    scene: gx_contracts::scene::SceneDocument,
-    #[serde(default)]
-    sources: Vec<BuildSource>,
-    #[serde(default)]
-    design_system_version: Option<u32>,
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct BuildSource {
-    path: String,
-    source: std::path::PathBuf,
-}
-
 impl ToolHandler for PackagesBuild {
     fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
         let args: BuildArgs = parse(args)?;
@@ -212,12 +195,6 @@ impl ToolHandler for PackagesBuild {
 
         serde_json::to_value(manifest).map_err(transport_failed)
     }
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PackageRef {
-    package: std::path::PathBuf,
 }
 
 /// `packages.inspect`: read a package's manifest without publishing it.
@@ -281,24 +258,6 @@ pub struct ProgramTools<P: EnginePeer> {
     pub environment: OutputEnvironment,
 }
 
-/// How a caller names the revision it wants, the content hash it pins, and
-/// when.
-///
-/// There is no `now`: the only scheduling expressible is the next opportunity
-/// or an explicit frame, which is ADR-002's intent rule made structural
-/// (invariants 8 and 9). The hash is optional here only so that a missing pin
-/// is refused by name (`RevisionUnpinned`, invariant 61).
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ProgramArgs {
-    take_id: String,
-    revision: u64,
-    #[serde(default)]
-    content_hash: Option<gx_contracts::ContentHash>,
-    #[serde(default)]
-    frame: Option<u64>,
-}
-
 /// What a listing or review answers with for one revision.
 fn published_revision(scene: &PublishedScene) -> gx_contracts::PublishedRevision {
     gx_contracts::PublishedRevision {
@@ -307,13 +266,6 @@ fn published_revision(scene: &PublishedScene) -> gx_contracts::PublishedRevision
         content_hash: scene.content_hash.clone(),
         review: scene.review,
     }
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ClearArgs {
-    #[serde(default)]
-    frame: Option<u64>,
 }
 
 fn scheduled(frame: Option<u64>) -> TakeAt {

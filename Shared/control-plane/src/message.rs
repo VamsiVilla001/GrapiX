@@ -18,19 +18,8 @@ use crate::render::{RenderRequest, RenderedFrame};
 use crate::sequence::{MessageId, Sequence};
 use crate::status::{EngineStatus, PerformanceSummary, ReferenceTransition};
 
-/// Output configuration. Live output is gated by ADR-005, evaluated in
-/// `crate::capability::live_allowed`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct OutputConfig {
-    /// Adapter name. Never used to decide whether the output is live
-    /// (invariant 20) - it names a device, nothing more.
-    pub adapter: String,
-    /// Whether this output is intended to reach an audience.
-    pub live: bool,
-    /// Set only when an operator has been told the reference is not locked.
-    pub accept_free_run: bool,
-}
+// Keep the established import path; contracts owns the shape and its schema.
+pub use gx_contracts::mcp::OutputConfig;
 
 /// Everything a client may ask for. Playout may send all of these; the Editor
 /// may send none of the Program-affecting ones (invariants 4 and 5), which is

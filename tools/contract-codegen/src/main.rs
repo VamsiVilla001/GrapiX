@@ -40,6 +40,7 @@ use gx_contracts::material::{
 };
 use gx_contracts::mcp::{
     CapabilitySurface, EnumSurface, PreviewFrame, PreviewRequest, ScopeDenial, ToolDescriptor, ToolEffect,
+    EmptyArgs, ProjectRef, SceneRef, PackageBuild, PackageBuildSource, PackageRef, ProgramArgs, ClearArgs,
 };
 use gx_contracts::package::{PackageFileEntry, PackageManifest};
 use gx_contracts::authoring::{ObjectDeletion, ObjectDuplication};
@@ -379,6 +380,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     write_command_schemas(&workspace_root())?;
+    let mcp_schemas = workspace_root().join("Shared/generated-ts/schemas/mcp");
+    std::fs::create_dir_all(&mcp_schemas)?;
+    for tool in gx_contracts::mcp::ToolRegistry::all() {
+        let schema = gx_contracts::mcp::input_schema(tool.input)?;
+        let mut fields = vec![("$comment".to_owned(), schema["$comment"].clone())];
+        fields.extend(schema.as_object().unwrap().iter()
+            .filter(|(name, _)| name.as_str() != "$comment")
+            .map(|(name, value)| (name.clone(), value.clone())));
+        std::fs::write(mcp_schemas.join(format!("{}.schema.json", tool.name)),
+            format_schema_document(fields)?)?;
+    }
+    export_all!(&out, EmptyArgs, ProjectRef, SceneRef, PackageBuild, PackageBuildSource, PackageRef, ProgramArgs, ClearArgs);
     write_capability_surface(&out)?;
     write_barrel(&out)?;
     write_transfer_reference(&workspace_root())?;
@@ -623,15 +636,10 @@ fn check_advertised_types_resolve(dir: &std::path::Path) -> Result<(), Box<dyn s
         "ObjectList",
         "OutputList",
         "OutputState",
-        "PackageBuild",
-        "PackagePublish",
-        "PackageRef",
         "PreflightReport",
         "ProjectList",
-        "ProjectRef",
         "PublishResult",
         "SceneList",
-        "SceneRef",
     ];
 
     let mut missing: Vec<String> = Vec::new();
@@ -867,6 +875,33 @@ fn workspace_root() -> PathBuf {
 
 #[cfg(test)]
 mod schema_tests {
+    #[test]
+    fn every_mcp_tool_has_a_valid_object_schema() {
+        for tool in gx_contracts::mcp::ToolRegistry::all() {
+            let schema = gx_contracts::mcp::input_schema(tool.input).unwrap();
+            assert_eq!(schema["type"], "object", "{}", tool.name);
+            let validator = jsonschema::validator_for(&schema).unwrap();
+            assert!(!validator.is_valid(&serde_json::json!([])), "{}", tool.name);
+            assert!(!validator.is_valid(&serde_json::json!({"unexpected": true})), "{}", tool.name);
+        }
+    }
+
+    #[test]
+    fn package_build_schema_accepts_the_real_scene_contract_and_rejects_a_broken_scene() {
+        let schema = gx_contracts::mcp::input_schema("PackageBuild").unwrap();
+        let validator = jsonschema::validator_for(&schema).unwrap();
+        let args = gx_contracts::mcp::PackageBuild {
+            output: "news.gpxpkg".into(),
+            scene: gx_contracts::scene::new_scene("score", "Score", gx_contracts::color::WorkingColorSpace::NEW_PROJECT),
+            sources: Vec::new(),
+            design_system_version: None,
+        };
+        let mut value = serde_json::to_value(args).unwrap();
+        assert!(validator.is_valid(&value));
+        value["scene"]["canvas"]["width"] = serde_json::json!("wide");
+        assert!(!validator.is_valid(&value));
+    }
+
     use std::collections::BTreeSet;
 
     use super::*;

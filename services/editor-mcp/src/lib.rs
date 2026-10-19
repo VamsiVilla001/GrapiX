@@ -24,13 +24,14 @@
 use std::marker::PhantomData;
 
 use gx_contracts::command::{parse_strict, EditorCommand};
+use gx_contracts::mcp::{ProjectRef as ProjectRefArgs, SceneRef};
 use gx_contracts::scene::resolve_hierarchy;
 use gx_contracts::validate::preflight;
 use gx_contracts::Refusal;
 use gx_editor::{CommandError, Projects, Workspace};
 use gx_mcp_server::ToolHandler;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 /// Parse a read tool's argument into the type it names.
 ///
@@ -53,6 +54,32 @@ fn to_value(value: impl Serialize) -> Result<serde_json::Value, Refusal> {
 /// A `project` handle held by the handlers.
 pub struct EditorTools {
     pub projects: Projects,
+}
+
+/// The shipped author-only surface. It has no Program-control connection or
+/// operator scopes. Every registered read and write uses the same store.
+pub fn server(projects: Projects) -> gx_mcp_server::Server {
+    use gx_contracts::command::{ConfirmDesignSystem, CreateProject, CreateScene, DeleteScene, EditScene};
+    let mut server = gx_mcp_server::Server::new(vec![gx_contracts::auth::Scope::Author]);
+    server.register("project.list", Box::new(ProjectList(projects.clone())));
+    server.register("project.create", Box::new(CommandTool::<CreateProject>::new(projects.clone())));
+    server.register("scenes.get", Box::new(SceneGet(projects.clone())));
+    server.register("scenes.list", Box::new(SceneList(projects.clone())));
+    server.register("scenes.create", Box::new(CommandTool::<CreateScene>::new(projects.clone())));
+    server.register("scenes.delete", Box::new(CommandTool::<DeleteScene>::new(projects.clone())));
+    server.register("scenes.edit", Box::new(CommandTool::<EditScene>::new(projects.clone())));
+    server.register("objects.hierarchy", Box::new(ObjectsHierarchy(projects.clone())));
+    server.register("materials.list", Box::new(MaterialsUsage(projects.clone())));
+    server.register("bindings.schema", Box::new(BindingsSchema(projects.clone())));
+    server.register("designsystem.get", Box::new(DesignSystemGet(projects.clone())));
+    server.register("designsystem.list_versions", Box::new(DesignSystemListVersions(projects.clone())));
+    server.register("designsystem.import", Box::new(DesignSystemImportTool(projects.clone())));
+    server.register("designsystem.commit", Box::new(CommandTool::<ConfirmDesignSystem>::new(projects.clone())));
+    server.register("validate.preflight", Box::new(ValidatePreflight {
+        projects,
+        material_support: gx_contracts::material::MaterialSupport::none(),
+    }));
+    server
 }
 
 // --- writes (11.36) ---------------------------------------------------------
@@ -115,13 +142,6 @@ impl ToolHandler for ProjectList {
 
 // --- scenes (8.3) ----------------------------------------------------------
 
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct SceneRef {
-    project: String,
-    scene_id: String,
-}
-
 /// `scenes.get`: one scene document, whole.
 ///
 /// The whole document rather than a per-field API is how "full property
@@ -142,12 +162,7 @@ pub struct SceneList(pub Projects);
 
 impl ToolHandler for SceneList {
     fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
-        #[derive(Deserialize, Serialize)]
-        #[serde(deny_unknown_fields)]
-        struct Args {
-            project: String,
-        }
-        let args: Args = parse(args)?;
+        let args: ProjectRefArgs = parse(args)?;
         let scenes = self.0.list_scenes(&args.project).map_err(Refusal::from)?;
         Ok(serde_json::json!({ "scenes": scenes }))
     }
@@ -329,12 +344,6 @@ impl ToolHandler for DesignSystemImportTool {
         }?;
         to_value(draft)
     }
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ProjectRefArgs {
-    project: String,
 }
 
 /// `designsystem.get`: the active system and its version.

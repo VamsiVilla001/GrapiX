@@ -1834,6 +1834,7 @@ dependencies = [
  "gx-contracts",
  "gx-editor",
  "gx-mcp-server",
+ "jsonschema",
  "serde",
  "serde_json",
 ]

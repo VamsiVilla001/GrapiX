@@ -441,7 +441,7 @@ pub struct DesignSystemCommit {
 /// guess would select a mapper, and the wrong mapper does not fail loudly — it
 /// reads the wrong fields and produces a plausible token set, which is the
 /// silent substitution invariant 18 forbids.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DesignSystemImport {
     pub project: String,
