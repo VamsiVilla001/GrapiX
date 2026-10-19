@@ -145,6 +145,24 @@ pub fn set_object_field(
     field: &ObjectField,
 ) -> Result<EditEffect, Refusal> {
     field.validate()?;
+    // Text may only name a font the scene carries and has switched on: any
+    // other would be drawn in a fallback face (invariant 18).
+    if let ObjectField::FontId(font_id) = field {
+        match scene.fonts.iter().find(|font| &font.font_id == font_id) {
+            None => {
+                return Err(Refusal::SceneFontUnknown {
+                    font_id: font_id.clone(),
+                    object: object_ids.join(", "),
+                })
+            }
+            Some(font) if !font.enabled => {
+                return Err(Refusal::InvalidFontData {
+                    detail: format!("font {font_id} is switched off; switch it on before text uses it"),
+                })
+            }
+            Some(_) => {}
+        }
+    }
 
     let selected: Vec<usize> = scene
         .objects
@@ -350,5 +368,29 @@ mod tests {
             set_object_locked(&mut scene, "card", false),
             Err(Refusal::ObjectLocked { owner, .. }) if owner == "group"
         ));
+    }
+
+    #[test]
+    fn text_names_only_a_font_the_scene_carries_and_has_switched_on() {
+        let font = |id: &str, enabled: bool| -> crate::font::FontDefinition {
+            serde_json::from_value(serde_json::json!({
+                "fontId": id, "family": id, "displayName": id, "faces": [], "fallbackFamilies": [],
+                "embeddingPolicy": "restricted", "enabled": enabled, "status": "Ready"
+            }))
+            .unwrap()
+        };
+        let mut scene = new_scene("scene", "Scene", crate::color::WorkingColorSpace::NEW_PROJECT);
+        scene.fonts = vec![font("on", true), font("off", false), font("other", true)];
+        let text = crate::authoring::create_object(&mut scene, "text", "Title").unwrap();
+        let ids = vec![text.clone()];
+        assert!(matches!(
+            set_object_field(&mut scene, &ids, &ObjectField::FontId("ghost".into())),
+            Err(Refusal::SceneFontUnknown { font_id, object }) if font_id == "ghost" && object == text
+        ));
+        assert!(matches!(
+            set_object_field(&mut scene, &ids, &ObjectField::FontId("off".into())),
+            Err(Refusal::InvalidFontData { detail }) if detail.contains("off is switched off")
+        ));
+        assert!(set_object_field(&mut scene, &ids, &ObjectField::FontId("other".into())).is_ok());
     }
 }

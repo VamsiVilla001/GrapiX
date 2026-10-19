@@ -84,9 +84,18 @@ const font = (fontId: string, displayName: string): unknown => ({
   fontId,
   family: displayName,
   displayName,
-  faces: [{ weight: 400 }],
+  faces: [
+    {
+      faceId: `${fontId}-400`,
+      family: displayName,
+      weight: 400,
+      style: "normal",
+      source: { kind: "file", assetId: `${fontId}-asset`, format: "woff2" },
+    },
+  ],
   fallbackFamilies: ["Arial"],
   embeddingPolicy: "installable",
+  enabled: true,
 });
 
 describe("material usage is read from the document, never indexed", () => {

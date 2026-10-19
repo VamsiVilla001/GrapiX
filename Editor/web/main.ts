@@ -57,10 +57,22 @@ import {
   parseFieldInput,
 } from "../src/inspector";
 import {
+  FONT_LINK_SOURCES,
+  FONT_STATUS_FILTERS,
+  fontAssignTargets,
+  fontLinkFor,
   fontManagerPanel,
+  fontStatus,
+  fontUpdateRefused,
   fontUsers,
   isFontRemovalRefused,
+  parseFallbackFamilies,
   planFontRemoval,
+  withIngestNames,
+  type FontLinkSource,
+  type FontManagerState,
+  type FontPatch,
+  type FontStatusFilter,
 } from "../src/font-manager";
 import {
   browserFontEnvironment,
@@ -288,6 +300,13 @@ const ui = {
   controlMount: need<HTMLDivElement>("control-mount"),
   fontMount: need<HTMLDivElement>("font-mount"),
   fontEmpty: need<HTMLParagraphElement>("font-empty"),
+  fontSearch: need<HTMLInputElement>("font-search"),
+  fontStatusFilter: need<HTMLSelectElement>("font-status-filter"),
+  fontLinkSource: need<HTMLSelectElement>("font-link-source"),
+  fontLink: need<HTMLInputElement>("font-link"),
+  fontFamilyOverride: need<HTMLInputElement>("font-family-override"),
+  fontDisplayName: need<HTMLInputElement>("font-display-name"),
+  fontLicence: need<HTMLInputElement>("font-licence"),
   materialMount: need<HTMLDivElement>("material-mount"),
   textStyleMount: need<HTMLDivElement>("text-style-mount"),
   textStyleEmpty: need<HTMLParagraphElement>("text-style-empty"),
@@ -387,7 +406,12 @@ let registeredFonts = "";
 const fontRegistry = new FontRegistry(browserFontEnvironment(), async (asset) => {
   if (!asset.checksum) throw new Error(`asset ${asset.assetId} has no content hash`);
   try {
-    return await shell().invoke<ArrayBuffer>("cmd_font_bytes", { checksum: asset.checksum });
+    // The project's own copy first, so a project opened on another machine
+    // (or after the import cache is cleared) still has its fonts.
+    return await shell().invoke<ArrayBuffer>("cmd_asset_bytes", {
+      project: projectSceneProject ?? null,
+      checksum: asset.checksum,
+    });
   } catch (error) {
     // The shell's error is structured; the registry reports `message`, so the
     // refusal's name has to be put there or the author reads "[object Object]".
@@ -1111,14 +1135,7 @@ function renderPanels(document_: SceneDocument): void {
     row.dataset.locked = String(row.querySelector('[id$="/locked"]')?.textContent === "locked");
   }
 
-  ui.fontEmpty.hidden = document_.fonts.length > 0;
-  const fonts = fontManagerPanel(document_, {
-    ...(selectedFontId === undefined ? {} : { selectedFontId }),
-    ...(fontReport === undefined ? {} : { unresolvedFontIds: fontReport.unresolvedFontIds }),
-    ...(fontIngesting ? { ingesting: true } : {}),
-    ...(fontNotice === undefined ? {} : { notice: fontNotice }),
-  });
-  ui.fontMount.replaceChildren(renderNode(document, fonts) as unknown as Node);
+  renderFontManager(document_);
 
   ui.textStyleEmpty.hidden = document_.textStyles.length > 0;
   ui.textStyleMount.replaceChildren(
@@ -3037,10 +3054,52 @@ async function deleteObject(): Promise<void> {
   });
 }
 
+/** What the font panel is drawn from: the document, the registry's last
+ *  answer, the selection Assign would change, and the filters. */
+function fontManagerState(): FontManagerState {
+  return {
+    ...(selectedFontId === undefined ? {} : { selectedFontId }),
+    ...(fontReport === undefined
+      ? {}
+      : {
+          unresolvedFontIds: fontReport.unresolvedFontIds,
+          readyFontIds: fontReport.ready,
+          problems: fontReport.failures,
+        }),
+    selectedObjectIds: selection,
+    search: ui.fontSearch.value,
+    statusFilter: ui.fontStatusFilter.value as FontStatusFilter,
+    ...(fontIngesting ? { ingesting: true } : {}),
+    ...(fontNotice === undefined ? {} : { notice: fontNotice }),
+  };
+}
+
+function renderFontManager(document_: SceneDocument): void {
+  ui.fontEmpty.hidden = document_.fonts.length > 0;
+  const state = fontManagerState();
+  ui.fontMount.replaceChildren(renderNode(document, fontManagerPanel(document_, state)) as unknown as Node);
+  // The sample line is drawn in the font's own face, as 1.x did, but only
+  // once the registry has the face: before that the browser would paint it
+  // in a substitute and the sample would show the wrong typeface.
+  for (const font of document_.fonts) {
+    const row = document.getElementById(`font/${font.fontId}`);
+    if (!row) continue;
+    const { status } = fontStatus(font, state);
+    row.dataset.status = status;
+    const sample = document.getElementById(`font/${font.fontId}/sample`);
+    if (sample && status === "ready") {
+      sample.style.fontFamily = `"${(font.faces[0]?.family ?? font.family).replace(/["\\]/g, "\\$&")}"`;
+    }
+  }
+}
+
 function onFontManagerClick(event: MouseEvent): void {
   if (!scene) return;
   const target = event.target;
   if (!(target instanceof Element)) return;
+  // An input edits in place; redrawing the row now would replace the field
+  // under the pointer and lose the edit.
+  if (target instanceof HTMLInputElement) return;
   const button = target.closest<HTMLButtonElement>("button[data-action][data-for]");
   if (button?.dataset.for === "font-manager") {
     if (button.dataset.action === "ingestFiles") void ingestFontFiles();
@@ -3059,6 +3118,14 @@ function onFontManagerClick(event: MouseEvent): void {
     void removeFont(font.fontId);
     return;
   }
+  if (button?.dataset.action === "assign") {
+    void assignFont(font.fontId);
+    return;
+  }
+  if (button?.dataset.action === "replace") {
+    void replaceFont(font.fontId);
+    return;
+  }
   if (button?.dataset.action !== "reveal") return;
   const users = fontUsers(scene, font.fontId);
   log(
@@ -3073,60 +3140,185 @@ function onFontManagerClick(event: MouseEvent): void {
 /// one undo entry. A file that records no licence is not assumed packageable:
 /// the author states its licence, or keeps it on this workstation.
 async function ingestFontFiles(): Promise<void> {
-  let paths: string[];
+  const paths = await pickFontFiles(true);
+  if (paths.length === 0) return;
+  await ingestFonts(`${paths.length} font file(s)`, (target) => prepareFontFiles(target, paths));
+}
+
+async function pickFontFiles(multiple: boolean): Promise<string[]> {
   try {
     const picked = await openFileDialog({
-      multiple: true,
+      multiple,
       filters: [{ name: "Fonts", extensions: ["otf", "ttf", "woff", "woff2"] }],
     });
-    paths = picked === null || picked === undefined ? [] : Array.isArray(picked) ? picked : [picked];
+    return picked === null || picked === undefined ? [] : Array.isArray(picked) ? picked : [picked];
   } catch (error) {
     log(describe(error), "bad");
+    return [];
+  }
+}
+
+/// Verify and cache font files under the licence the author stated, or ask
+/// for one when a file records none.
+async function prepareFontFiles(target: SceneTarget, paths: readonly string[]): Promise<PreparedFontBatch> {
+  const stated = ui.fontLicence.value.trim();
+  const prepare = (embeddingPolicy: "package" | "restricted", license: string | null) =>
+    shell().invoke<PreparedFontBatch>("cmd_font_prepare_files", { target, paths, embeddingPolicy, license });
+  try {
+    return await prepare("package", stated === "" ? null : stated);
+  } catch (error) {
+    if (refusalCode(error) !== "fontEmbeddingRefused") throw error;
+    const entered = window.prompt(
+      `${describe(error)}\nEnter the licence these fonts are under to package them, ` +
+        "or leave blank to keep them on this workstation only.",
+      "",
+    );
+    if (entered === null) throw error;
+    return entered.trim() === "" ? prepare("restricted", null) : prepare("package", entered.trim());
+  }
+}
+
+/// Replace a font's file under the same id (1.x's Replace), as one
+/// `replaceFont` edit: text and styles stay on the font, and its display
+/// name, fallbacks and enabled state are kept.
+async function replaceFont(fontId: string): Promise<void> {
+  const session = activeSession(workspace);
+  const font = scene?.fonts.find((candidate) => candidate.fontId === fontId);
+  if (!session || !font || fontIngesting) return;
+  const [path] = await pickFontFiles(false);
+  if (path === undefined) return;
+  fontIngesting = true;
+  fontNotice = `Replacing ${font.displayName}…`;
+  if (scene) renderFontManager(scene);
+  try {
+    const batch = await prepareFontFiles({ target: "session", session: session.key }, [path]);
+    const [replacement] = batch.fonts;
+    if (replacement === undefined) {
+      const already = batch.sources.find((source) => source.disposition.kind !== "added");
+      fontNotice = `Font replace refused: ${already ? `${already.source} is already in this scene` : "the file held no font"}`;
+      log(fontNotice, "bad");
+      return;
+    }
+    const replaced = `Replaced ${font.displayName}'s file with ${batch.sources[0]?.source ?? path}`;
+    const outcome = await runEdits(
+      [{ edit: "replaceFont", fontId, font: replacement, assets: batch.assets }],
+      replaced,
+      "fonts",
+    );
+    fontNotice = outcome ? replaced : undefined;
+  } catch (error) {
+    fontNotice = `Font replace refused: ${describe(error)}`;
+    log(fontNotice, "bad");
+  } finally {
+    fontIngesting = false;
+    if (scene) renderPanels(scene);
+  }
+}
+
+/// An in-place edit of a font's display name, fallbacks or enabled state
+/// (1.x's card fields): one `updateFont` edit and one undo entry, checked
+/// the way Rust checks it before it is sent.
+function onFontManagerChange(event: Event): void {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  const match = /^font\/(.+)\/(displayName|fallbacks|enabled)$/.exec(target.dataset.for ?? "");
+  if (!match) return;
+  const [, fontId = "", field] = match;
+  const patch: FontPatch =
+    field === "enabled"
+      ? { enabled: target.checked }
+      : field === "displayName"
+        ? { displayName: target.value.trim() }
+        : { fallbackFamilies: parseFallbackFamilies(target.value) };
+  void updateFont(fontId, patch);
+}
+
+async function updateFont(fontId: string, patch: FontPatch): Promise<void> {
+  if (!scene) return;
+  const refused = fontUpdateRefused(scene, fontId, patch);
+  if (refused !== undefined) {
+    // An edit that changes nothing is not an error; the field is just redrawn.
+    if (refused.code !== "unchanged") {
+      fontNotice = `Font change refused [${refused.code}]: ${refused.refused}`;
+      log(fontNotice, "bad");
+    }
+    renderFontManager(scene);
     return;
   }
-  if (paths.length === 0) return;
-  await ingestFonts(`${paths.length} font file(s)`, async (target) => {
-    const prepare = (embeddingPolicy: "package" | "restricted", license: string | null) =>
-      shell().invoke<PreparedFontBatch>("cmd_font_prepare_files", { target, paths, embeddingPolicy, license });
-    try {
-      return await prepare("package", null);
-    } catch (error) {
-      if (refusalCode(error) !== "fontEmbeddingRefused") throw error;
-      const entered = window.prompt(
-        `${describe(error)}\nEnter the licence these fonts are under to package them, ` +
-          "or leave blank to keep them on this workstation only.",
-        "",
-      );
-      if (entered === null) throw error;
-      return entered.trim() === "" ? prepare("restricted", null) : prepare("package", entered.trim());
-    }
-  });
+  const name = scene.fonts.find((candidate) => candidate.fontId === fontId)?.displayName ?? fontId;
+  const outcome = await runEdits(
+    [
+      {
+        edit: "updateFont",
+        fontId,
+        ...(patch.displayName === undefined ? {} : { displayName: patch.displayName }),
+        ...(patch.fallbackFamilies === undefined ? {} : { fallbackFamilies: [...patch.fallbackFamilies] }),
+        ...(patch.enabled === undefined ? {} : { enabled: patch.enabled }),
+      },
+    ],
+    `Changed font ${name}`,
+    "fonts",
+  );
+  // A refusal leaves the document as it was; redraw so the field says so.
+  if (!outcome && scene) renderFontManager(scene);
 }
 
-/// Download a Google Fonts, Bunny Fonts or Adobe Fonts link into the project
-/// (docs/p2-licensing-positions.md §5) and add it as one `addFonts` edit.
+/// Download a Google Fonts, CSS, Adobe Fonts or direct file link into the
+/// project (docs/p2-licensing-positions.md §5) and add it as one `addFonts`
+/// edit. The link is read under the source the author chose (1.x's tabs).
 async function ingestFontLink(): Promise<void> {
-  const link = window.prompt(
-    "Font link: a Google Fonts or Bunny Fonts stylesheet URL, or an Adobe Fonts kit URL or id",
-    "",
+  const request = fontLinkFor(ui.fontLinkSource.value as FontLinkSource, ui.fontLink.value);
+  if ("refused" in request) {
+    fontNotice = `Font link refused: ${request.refused}`;
+    if (scene) renderFontManager(scene);
+    ui.fontLink.focus();
+    return;
+  }
+  const added = await ingestFonts(request.link, (target) =>
+    shell().invoke<PreparedFontBatch>("cmd_font_prepare_link", { target, link: request.link }),
   );
-  if (link === null || link.trim() === "") return;
-  await ingestFonts(link.trim(), (target) =>
-    shell().invoke<PreparedFontBatch>("cmd_font_prepare_link", { target, link: link.trim() }),
+  if (added) ui.fontLink.value = "";
+}
+
+function showFontLinkSource(): void {
+  const chosen = FONT_LINK_SOURCES.find((entry) => entry.source === ui.fontLinkSource.value);
+  ui.fontLink.placeholder = chosen?.placeholder ?? "";
+}
+
+/// Give the selected text this font, as one undoable edit (1.x's Assign).
+async function assignFont(fontId: string): Promise<void> {
+  if (!scene) return;
+  const font = scene.fonts.find((candidate) => candidate.fontId === fontId);
+  if (!font) return;
+  const objectIds = fontAssignTargets(scene, font, fontManagerState());
+  if (objectIds.length === 0) return;
+  await runEdits(
+    [{ edit: "setObjectField", objectIds, field: { name: "fontId", value: fontId } }],
+    `Assigned ${font.displayName} to ${objectIds.join(", ")}`,
+    "fonts",
   );
 }
 
+/// Prepare a batch, apply the author's optional names, and add it as one edit.
+/// True when fonts were added.
 async function ingestFonts(
   label: string,
   prepare: (target: SceneTarget) => Promise<PreparedFontBatch>,
-): Promise<void> {
+): Promise<boolean> {
   const session = activeSession(workspace);
-  if (!session || fontIngesting) return;
+  if (!session || fontIngesting) return false;
   fontIngesting = true;
   fontNotice = `Adding ${label}…`;
   if (scene) renderPanels(scene);
   try {
-    const batch = await prepare({ target: "session", session: session.key });
+    const prepared = await prepare({ target: "session", session: session.key });
+    const batch = {
+      ...prepared,
+      fonts: withIngestNames(prepared.fonts, {
+        family: ui.fontFamilyOverride.value,
+        displayName: ui.fontDisplayName.value,
+      }),
+    };
     const skipped = batch.sources
       .filter((source) => source.disposition.kind !== "added")
       .map((source) =>
@@ -3138,14 +3330,21 @@ async function ingestFonts(
     if (batch.fonts.length === 0) {
       fontNotice = `Nothing added${skippedNote}`;
       log(fontNotice);
-      return;
+      return false;
     }
     const added = `Added ${batch.fonts.length} font(s): ${batch.fonts.map((font) => font.displayName).join(", ")}`;
     const outcome = await runEdits([{ edit: "addFonts", fonts: batch.fonts, assets: batch.assets }], added, "fonts");
     fontNotice = outcome ? `${added}${skippedNote}` : undefined;
+    if (!outcome) return false;
+    // The names and licence were for this ingest; the next one starts blank.
+    ui.fontFamilyOverride.value = "";
+    ui.fontDisplayName.value = "";
+    ui.fontLicence.value = "";
+    return true;
   } catch (error) {
     fontNotice = `Font ingest refused: ${describe(error)}`;
     log(fontNotice, "bad");
+    return false;
   } finally {
     fontIngesting = false;
     if (scene) renderPanels(scene);
@@ -4443,6 +4642,21 @@ async function start(): Promise<void> {
   ui.objectRename.addEventListener("click", () => void renameObject());
   ui.objectDelete.addEventListener("click", () => void deleteObject());
   ui.fontMount.addEventListener("click", onFontManagerClick);
+  ui.fontMount.addEventListener("change", onFontManagerChange);
+  ui.fontMount.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && event.target instanceof HTMLInputElement) event.target.blur();
+  });
+  ui.fontStatusFilter.replaceChildren(
+    ...FONT_STATUS_FILTERS.map((filter) => new Option(filter === "all" ? "All states" : filter, filter)),
+  );
+  ui.fontLinkSource.replaceChildren(...FONT_LINK_SOURCES.map((entry) => new Option(entry.label, entry.source)));
+  showFontLinkSource();
+  ui.fontLinkSource.addEventListener("change", showFontLinkSource);
+  ui.fontSearch.addEventListener("input", () => scene && renderFontManager(scene));
+  ui.fontStatusFilter.addEventListener("change", () => scene && renderFontManager(scene));
+  ui.fontLink.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") void ingestFontLink();
+  });
   ui.textStyleMount.addEventListener("click", (event) => void onTextStyleClick(event));
   ui.materialMount.addEventListener("click", onMaterialManagerClick);
   ui.assetMount.addEventListener("click", onAssetManagerClick);

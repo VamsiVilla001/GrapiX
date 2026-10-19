@@ -1453,3 +1453,22 @@ button, select, input[type="number"], input[type="text"], input[type="range"] { 
   position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
 }
 .asset-manager-mount li[id^="asset/"] { position: relative; }
+
+/* Font manager (11.13), after the 1.x panel: filters, then the import card. */
+.font-filter-row,
+.font-link-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.font-filter-row .graphic-search { flex: 1 1 0; width: 0; min-width: 0; margin: 0; }
+.font-link-row input { flex: 1 1 0; width: 0; min-width: 0; }
+.font-link-row select, .font-filter-row select { flex: 0 1 auto; min-width: 0; max-width: 45%; }
+.font-import { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin-bottom: 8px; padding: 8px; border: 1px solid var(--rule); }
+.font-import > input { width: 100%; min-width: 0; }
+.font-import .font-link-row { margin-bottom: 0; }
+/* The sample is the point of the line: drawn large, in the font itself. */
+.asset-manager-mount [role="gridcell"][id$="/sample"] { color: var(--text); font-size: 18px; line-height: 1.3; }
+.asset-manager-mount [role="gridcell"][id$="/sample"]::before { font-family: var(--mono); font-size: 12px; }
+.asset-manager-mount [role="listitem"][data-status]:not([data-status="ready"]) [id$="/status"] { color: var(--bad); }
+.asset-manager-mount [role="listitem"][data-status="loading"] [id$="/status"] { color: var(--dim); }
+/* URLs, hashes and licence text are long unbroken strings; without this one
+   font row widens the whole column and the import fields run off its edge. */
+#font-mount [role="gridcell"] { min-width: 0; overflow-wrap: anywhere; }
+#font-mount [role="region"], #font-mount [role="listitem"] { min-width: 0; }

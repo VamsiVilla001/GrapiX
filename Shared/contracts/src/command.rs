@@ -329,6 +329,28 @@ commands! {
         /// Remove one font nothing names, with the font assets no other font
         /// uses. The only way a font leaves a scene.
         RemoveFont = "removeFont" { pub font_id: String },
+        /// Change a font's display name, fallbacks or enabled state (11.13).
+        /// Switching off a font something names is refused, as removing it is.
+        UpdateFont = "updateFont" {
+            pub font_id: String,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub display_name: Option<String>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub fallback_families: Option<Vec<String>>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub enabled: Option<bool>,
+        },
+        /// Replace a font's faces and files under the same id (11.13): what
+        /// names the font keeps naming it, and its display name, fallbacks
+        /// and enabled state are kept.
+        ReplaceFont = "replaceFont" {
+            pub font_id: String,
+            pub font: FontDefinition,
+            pub assets: Vec<AssetLibraryItem>,
+        },
         /// Add imported assets with the provenance their import filled in
         /// (11.39). The only way a non-font asset enters a scene.
         AddAssets = "addAssets" { pub assets: Vec<AssetLibraryItem> },
@@ -371,6 +393,8 @@ pub enum EditEffect {
     ProjectCreated { project: String },
     TakePageSaved { project: String, page_id: String },
     FontRemoved { font_id: String, asset_ids: Vec<String> },
+    /// The font's old files nothing uses any more left with the replace.
+    FontReplaced { font_id: String, asset_ids: Vec<String> },
     DesignSystemConfirmed { project: String, version: u32 },
 }
 
@@ -600,6 +624,20 @@ fn apply_edit(
             asset_ids: font_edit::remove_font(scene, &p.font_id)?,
             font_id: p.font_id.clone(),
         },
+        SceneEdit::UpdateFont(p) => {
+            font_edit::update_font(
+                scene,
+                &p.font_id,
+                p.display_name.as_deref(),
+                p.fallback_families.as_deref(),
+                p.enabled,
+            )?;
+            EditEffect::None
+        }
+        SceneEdit::ReplaceFont(p) => EditEffect::FontReplaced {
+            asset_ids: font_edit::replace_font(scene, &p.font_id, &p.font, &p.assets)?,
+            font_id: p.font_id.clone(),
+        },
         SceneEdit::AddAssets(p) => {
             asset_edit::add_assets(scene, &p.assets)?;
             EditEffect::None
@@ -707,6 +745,8 @@ pub mod witness {
             SceneEdit::AddFonts(_) => 27,
             SceneEdit::RemoveFont(_) => 28,
             SceneEdit::AddAssets(_) => 29,
+            SceneEdit::UpdateFont(_) => 30,
+            SceneEdit::ReplaceFont(_) => 31,
         }
     }
 
@@ -1095,6 +1135,55 @@ pub mod witness {
                     kind: AssetKind::Font,
                     path: "assets/fonts/added.woff2".into(),
                     checksum: Some(ContentHash("added".into())),
+                    mime_type: Some("font/woff2".into()),
+                    size_bytes: Some(1),
+                    status: None,
+                    provenance: crate::provenance::AssetProvenance::default(),
+                }],
+            }),
+            // The font is unused, so it may be switched off as well as renamed.
+            SceneEdit::UpdateFont(UpdateFont {
+                font_id: "added-font".into(),
+                display_name: Some("Added Display".into()),
+                fallback_families: Some(vec!["Arial".into()]),
+                enabled: Some(false),
+            }),
+            SceneEdit::ReplaceFont(ReplaceFont {
+                font_id: "added-font".into(),
+                font: FontDefinition {
+                    font_id: "replacement-font".into(),
+                    family: "Replaced".into(),
+                    display_name: "Replaced".into(),
+                    faces: vec![crate::font::FontFaceDefinition {
+                        face_id: "replaced-face".into(),
+                        family: "Replaced".into(),
+                        weight: 700,
+                        style: crate::font::FontStyle::Normal,
+                        stretch: None,
+                        unicode_range: None,
+                        source: crate::font::FontSource::File {
+                            asset_id: "replaced-font-asset".into(),
+                            format: crate::font::FontFormat::Woff2,
+                            original_url: None,
+                            stylesheet_url: None,
+                        },
+                        status: None,
+                        error_message: None,
+                    }],
+                    fallback_families: Vec::new(),
+                    embedding_policy: EmbeddingPolicy::Package,
+                    license: Some("OFL".into()),
+                    enabled: true,
+                    source_label: None,
+                    status: FontLoadStatus::Ready,
+                    error_message: None,
+                },
+                assets: vec![AssetLibraryItem {
+                    asset_id: "replaced-font-asset".into(),
+                    name: "Replaced".into(),
+                    kind: AssetKind::Font,
+                    path: "assets/fonts/replaced.woff2".into(),
+                    checksum: Some(ContentHash("replaced".into())),
                     mime_type: Some("font/woff2".into()),
                     size_bytes: Some(1),
                     status: None,

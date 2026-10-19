@@ -1508,6 +1508,29 @@
       ],
       "type": "object"
     },
+    "ReplaceFont": {
+      "description": "Replace a font's faces and files under the same id (11.13): what\nnames the font keeps naming it, and its display name, fallbacks\nand enabled state are kept.",
+      "properties": {
+        "assets": {
+          "items": {
+            "$ref": "#/$defs/AssetLibraryItem"
+          },
+          "type": "array"
+        },
+        "font": {
+          "$ref": "#/$defs/FontDefinition"
+        },
+        "fontId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fontId",
+        "font",
+        "assets"
+      ],
+      "type": "object"
+    },
     "Rgba": {
       "description": "A colour, with the space it was authored in.\n\nComponents are 0–1 floats rather than 8-bit bytes because the working\nspace is linear and 8 bits of linear has visible banding in the shadows.",
       "properties": {
@@ -1945,6 +1968,32 @@
           "type": "object"
         },
         {
+          "$ref": "#/$defs/UpdateFont",
+          "properties": {
+            "edit": {
+              "const": "updateFont",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/ReplaceFont",
+          "properties": {
+            "edit": {
+              "const": "replaceFont",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
           "$ref": "#/$defs/AddAssets",
           "properties": {
             "edit": {
@@ -2322,6 +2371,39 @@
     "TokenRef": {
       "description": "A token reference in a preset: `{duration.base}`, `{easing.brand-in}`.\n\nA preset that hardcodes a value instead of referencing a token is a bug for\nthe same reason a component hardcoding a hex colour is (G.6.1). Kept as a\nstring with a checked shape rather than a free string, so a malformed\nreference is caught at parse, not at render.",
       "type": "string"
+    },
+    "UpdateFont": {
+      "description": "Change a font's display name, fallbacks or enabled state (11.13).\nSwitching off a font something names is refused, as removing it is.",
+      "properties": {
+        "displayName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "fallbackFamilies": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "fontId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fontId"
+      ],
+      "type": "object"
     },
     "UpdateKeyframe": {
       "description": "Replace a key that already exists at `keyframe.frame`.",

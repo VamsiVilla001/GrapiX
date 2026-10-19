@@ -118,6 +118,72 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-10-19 — 11.13 font manager ported from 1.x; updateFont and replaceFont (Claude, mission 1)
+
+**Partial — 11.13 stays active.** Its own Done-when passes live on Windows; it Needs 2.8, which is not done (below). User decisions on 18 Oct: 2.8 accepts a Windows-only finish (macOS dropped); the user supplied the Adobe kit `dgy5lkh` for the live Adobe check; start 11.13 now; Claude writes `UpdateFont`/`ReplaceFont` itself (contracts are otherwise Codex's lane, mission 10; Codex confirmed it had not touched these files).
+
+**Ported from the 1.x `FontManagerPanel`** (archive branch `Editor/apps/editor-web/src/components/FontManagerPanel.tsx`, store `editorStore.ts:1614-1694`):
+- Each font shows its status (from the registry: ready, loading, missing, invalid, error, disabled), a sample line drawn in its own face only once loaded, its faces, source, usage, fallbacks and licence.
+- Search and a status filter. Neither hides a font from the take blocker.
+- In-place edits: display name, fallbacks and Enabled, as one `updateFont` each.
+- **Assign** to the selected text (`setObjectField fontId`), unavailable with its reason.
+- **Replace** (was a dead button that did nothing).
+- **Remove**, refused while in use.
+- Link ingest picks a source (Google Fonts, CSS / @import, Adobe Fonts, Direct URL) instead of `window.prompt`. A Google family name becomes its stylesheet URL. Before this, a typed name went to the shell, whose classifier reads anything without `://` as an Adobe kit id.
+- Optional family override, display name and licence at import.
+- The font loader reads the project's copy first (`cmd_asset_bytes`), so a project keeps its fonts without the per-user cache.
+
+**Contracts** (`Shared/contracts`):
+- `SceneEdit::UpdateFont {fontId, displayName?, fallbackFamilies?, enabled?}`:
+  - all or nothing;
+  - refuses a blank name, a blank or repeated fallback, more than 12 fallbacks, and an update that changes nothing (`invalidFontData`);
+  - switching off a font that text or a style names is refused as `fontInUse`, the same rule as Remove (invariant 18).
+- `SceneEdit::ReplaceFont {fontId, font, assets}`:
+  - keeps the id, display name, fallbacks and enabled state, and takes the new faces and files;
+  - drops old files nothing uses (`EditEffect::FontReplaced`);
+  - refuses what `addFonts` refuses, plus a different record under an existing asset id.
+- `setObjectField fontId` now refuses a font the scene does not carry (`sceneFontUnknown`) or has switched off. Before this, `apply_edits` accepted any font id, because only animation is re-validated after edits.
+- No new `Refusal` variants (lib.rs untouched). The TS mirror is `fontUpdateRefused` (invariant 27). Witnesses added to the command trace.
+
+**Verified by execution:**
+- `cargo test -p gx-contracts`: 238 passed, with and without `fixtures` (6 new font/field tests).
+- Editor vitest: 386 passed (`font-manager.test.ts` 26 cases).
+- `npm run codegen` on Codex's committed `4c970a4`: only this change's delta, including `schemas/mcp/scenes.edit.schema.json`.
+- `npm run check`: exit 0. Boundaries OK, **344 generated files current**, **40 Node / 386 Editor / 710 Rust passed (2 ignored)**, **385 conformance passed / 0 failed / 9 skipped**. Log: `agent/tmp/font-1113/check.log`.
+- **Live strict case**, `agent/tmp/font-1113/font-case.cjs`, real Tauri/WebView2 on CDP 9223. The native file dialog is driven by `pick-files.ps1`, and every `cmd_execute` is recorded.
+  - **Phase 1:** 12 of 12 passed.
+    - One action ingested OTF, TTF, WOFF and WOFF2 plus a byte-identical copy as **one `addFonts`**. Each asset checksum equals its file's SHA-256, and the copy was named a duplicate.
+    - Every face was in `document.fonts` before use; samples were drawn in-face.
+    - Ingest undid as one entry.
+    - A new text object took the Hebrew font through Assign (one `setObjectField`), and `document.fonts.check` was true at once.
+    - Rename, fallbacks and switch-off were one `updateFont` each. A repeated fallback was refused with nothing sent. The in-use font's toggle is disabled, naming "Title (text-1)". Undo restores.
+    - Replace swapped the in-use font's file under the same id: name kept, text stayed on it, one undo entry.
+    - Remove of the used font is refused in the panel and by Rust (`fontInUse`). Deleting its only text does not remove it.
+    - Explicit Remove is one command and one undo entry.
+    - Search and status filter worked.
+    - Family override, display name and licence applied, then cleared.
+    - Save wrote the fonts, hashes and the text's font, and the font files are in `<project>/assets`.
+  - **Phase 2**, after killing and relaunching the Editor process: 4 of 4 passed.
+    - The same fonts reopened, all ready, with the text still on its font.
+    - A Google family name ("Roboto Slab") ingested as one command: 7 faces, ready, Apache-2.0.
+    - The Adobe kit was refused by name (2.8 below).
+    - With the Hebrew bytes moved out of the project folder and the cache, the alert and Publish read "unresolved font(s): Noto Sans Hebrew Regular", with no sample drawn.
+  - Results are in `ingest-results.json`, `reopen-results.json` and numbered screenshots.
+- Panel width measured live: the Fonts section is 268 of 268 px. Long URLs and hashes had widened it to 332 px before `overflow-wrap`.
+
+**2.8 finding (Codex's row; asset-plane not edited):**
+- The user's Adobe kit does not resolve on Windows. The kit CSS and the first face downloaded, then `fonts/metadata.rs::inspect_font` refused: "font has no readable family name". Adobe ships kit fonts with the name table stripped.
+- The kit CSS (`agent/tmp/font-1113/adobe-kit-dgy5lkh.css`) declares every face: `new-science-mono` and `gear-wide`, with weights 100 to 900.
+- Suggested fix, sent to Codex: take family, weight and style from the `@font-face` descriptor for stylesheet sources.
+- 11.13 cannot close until 2.8 does.
+
+**Not done / known:**
+- The Editor viewport still draws no text ("text pixels await the engine-rendered viewport (13.5)"). "Usable at once" is proven by registration and `document.fonts.check`.
+- Ingested fonts still get the 1.x default fallbacks `Arial, sans-serif` (noted 3 Oct), now editable.
+- The live-case project `Fonts 11.13 1792390017388` is kept in the user data folder as evidence.
+
+---
+
 ## 2026-10-19 — Partial MCP input schemas and shipped author stdio server (Codex, mission 10 #89)
 
 **Partial — 8.1 remains active.** Every one of the 30 registry tools has a

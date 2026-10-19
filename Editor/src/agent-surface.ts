@@ -284,7 +284,11 @@ export function renderNode(document: DocumentLike, node: UiNode): ElementLike {
       input.setAttribute("type", node.input.type);
       input.setAttribute("class", "property-value");
       input.setAttribute("aria-label", node.label);
-      input.setAttribute("data-inspector-field", node.id.slice("inspector/".length));
+      // Which node the input edits, as a button's `data-for` says.
+      input.setAttribute("data-for", node.id);
+      if (node.id.startsWith("inspector/")) {
+        input.setAttribute("data-inspector-field", node.id.slice("inspector/".length));
+      }
       input.setAttribute("value", node.input.value);
       input.setAttribute("step", "any");
       if (node.input.mixed) input.setAttribute("placeholder", "Mixed");

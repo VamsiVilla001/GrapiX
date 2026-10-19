@@ -199,6 +199,22 @@
         </section>
         <section data-panel="fonts" class="panel">
           <h2>Fonts</h2>
+          <!-- Ported from the 1.x FontManagerPanel (11.13): search and status
+               filter, then the import card's link source and optional names
+               and licence. The actions and list are font-manager.ts's. -->
+          <div class="font-filter-row">
+            <input id="font-search" class="graphic-search" type="search" placeholder="Search fonts" aria-label="Search fonts by name, family or source" />
+            <select id="font-status-filter" aria-label="Show fonts in this state"></select>
+          </div>
+          <div class="font-import" role="group" aria-label="Font import">
+            <div class="font-link-row">
+              <select id="font-link-source" aria-label="Font link source"></select>
+              <input id="font-link" type="text" aria-label="Font link" />
+            </div>
+            <input id="font-family-override" type="text" placeholder="Family override (optional)" aria-label="Family override for the next ingest" />
+            <input id="font-display-name" type="text" placeholder="Display name (optional)" aria-label="Display name for the next ingest" />
+            <input id="font-licence" type="text" placeholder="Licence (optional, font files)" aria-label="Licence the next font files are under" />
+          </div>
           <div id="font-mount" class="asset-manager-mount"></div>
           <p id="font-empty" class="empty">No fonts in this scene.</p>
         </section>
