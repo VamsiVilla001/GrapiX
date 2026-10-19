@@ -118,6 +118,49 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-10-19 — 11.18 done: Editor panels reachable and working, run live (Claude, mission 1)
+
+**Done — 11.18.** All its Needs were done once 11.13 closed. A read-only comparison with the 1.x panels (archive branch) was run first. Most 1.x gaps are owned by later rows:
+- **11.45:** stacking, reparenting and groups;
+- **11.46:** the per-type inspector, covering fill, stroke, size, text layout and camera;
+- **11.47 and 11.48:** image, shape and 3D objects;
+- **11.50:** creating and editing materials;
+- **11.52:** the asset browser, versioned replace and delete;
+- **11.43:** scene settings and canvas size;
+- **11.31:** shortcuts.
+
+Those were not pulled into 11.18. The gaps that were 11.18's own were fixed (Editor only, no contract change):
+- **Duplicate and Delete** act on the whole selection as one batch, so one undo entry. `object-manager.ts::selectionRoots` drops objects a selected group already carries, so a selected child is never deleted twice.
+- **Asset Relink** in the Assets panel, on the existing `relinkAsset` edit. The asset keeps its id; another kind, the same bytes or a missing hash is refused (`planAssetRelink`). A font's file is left to the Fonts panel's Replace, which updates the font with it.
+- **Two buttons that silently did nothing:**
+  - the font panel's **Publish** now runs the same publish as the toolbar;
+  - the material **Edit** stub (it logged "not available") is now an unavailable action naming 11.50.
+
+**Verified by execution** (`agent/tmp/parity-1118/parity.cjs`, real Tauri/WebView2 on CDP 9223, native file dialog, every `cmd_execute` recorded):
+- **Phase 1:** 7 of 7 passed.
+  - **Graphics:** create, save, duplicate (prompted id and name), open, delete. The deleted graphic's file is gone.
+  - **Objects:**
+    - a new rect is selected on create, and rename keeps the selection;
+    - Duplicate over two selected objects is one `[duplicateObject, duplicateObject]` batch, and the copies become the selection;
+    - undo removes both;
+    - Delete over a group plus its child sends one `deleteObject`, and the group takes its children;
+    - undo; hide, then undo.
+  - **Properties:** x=640 keeps the selection. Opacity 1.5 is refused ("Opacity must be between 0 and 1 (0% to 100%), not 1.5") with no command sent. Undo restores.
+  - **Fonts:** a file was ingested and a text object created on it. The panel's Publish ran the real publish and reported "asset plane unreachable at 127.0.0.1:4401", since no engine was running.
+  - **Assets:**
+    - a PNG imported with its preview;
+    - relink to another PNG was one `relinkAsset` with the same asset id, then undo and redo;
+    - relink to an SVG was refused ("logo.png is image; badge.svg is svg") with nothing sent;
+    - the font file's Relink names the Fonts panel.
+  - **Materials:** "shared by 2 objects", delete of the in-use material unavailable, relink brand→alt then undo, delete the unused material then undo, and Edit names 11.50.
+  - **Saved:** the stored file holds the six objects, the renamed strap, the relinked asset's new hash and the two Brand bindings.
+- **Phase 2**, after killing and relaunching the Editor: the graphics list ("Extra" kept, the copy gone), the same objects, the font ready, the relinked asset's hash with its preview, and the material bindings all reopened. The strap could be selected.
+- Editor vitest: 393 passed (8 new). Typecheck and `build:web` OK. `npm run check` result is in the commit message.
+
+**Not built (owned elsewhere):** the deeper parity listed above, plus asset rename and delete (11.52) and Delete/F2 keys (11.31). Image and model objects cannot yet be created from an imported asset (11.47/11.48).
+
+---
+
 ## 2026-10-19 — 2.8 and 11.13 done (Claude, on the user's instruction)
 
 **2.8 → done.** The user said: "close 2.8 yourself and move on to 11.18" (2.8 was Codex's row; Codex was told on Panchayati). The plan row's Done-when now reads "All sources resolve on Windows (the macOS run was dropped from this step by user decision, 18 Oct 2026)", in both `GrapiX-Build-Plan.md` and the plan copy in `progress.html`. Windows evidence for each source:

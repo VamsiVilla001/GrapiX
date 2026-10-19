@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 import type { SceneDocument, SceneObject } from "@grapix/contracts";
 import { findNode } from "../src/agent-surface";
 import { fontManagerPanel, fontUsers } from "../src/font-manager";
-import { materialManagerPanel, relinkMaterial, usersOf } from "../src/material-manager";
+import { MATERIAL_EDIT_UNAVAILABLE, materialManagerPanel, relinkMaterial, usersOf } from "../src/material-manager";
 
 function base(id: string): Record<string, unknown> {
   return {
@@ -127,6 +127,13 @@ describe("material usage is read from the document, never indexed", () => {
     expect(findNode(panel, "material/brand")!.description).toBe("unused");
     const del = findNode(panel, "material/brand")!.actions!.find((a) => a.name === "delete")!;
     expect(del.unavailable).toBeUndefined();
+  });
+
+  it("Edit says it belongs to the lit material type rather than doing nothing", () => {
+    const panel = materialManagerPanel(scene([], [brandMaterial]));
+    const edit = findNode(panel, "material/brand")!.actions!.find((a) => a.name === "edit")!;
+    expect(edit.unavailable).toBe(MATERIAL_EDIT_UNAVAILABLE);
+    expect(MATERIAL_EDIT_UNAVAILABLE).toContain("11.50");
   });
 
   it("marks the selected material for the rendered panel", () => {

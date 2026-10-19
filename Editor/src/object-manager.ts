@@ -156,6 +156,33 @@ function hasCollapsedAncestor(
   return false;
 }
 
+/// The selected objects no other selected object contains, in document
+/// order: what a Duplicate or Delete over a selection acts on. A group's
+/// children go with the group, so naming them as well would act twice
+/// (a second delete of an object the first already removed refuses).
+export function selectionRoots(document: SceneDocument, ids: readonly string[]): string[] {
+  const selected = new Set(ids);
+  const parentOf = new Map<string, string>();
+  for (const object of document.objects) {
+    for (const child of childIdsOf(object) ?? []) {
+      if (!parentOf.has(child)) parentOf.set(child, object.id);
+    }
+  }
+  const coveredBySelection = (id: string): boolean => {
+    const visited = new Set<string>();
+    let current = parentOf.get(id);
+    while (current !== undefined && !visited.has(current)) {
+      if (selected.has(current)) return true;
+      visited.add(current);
+      current = parentOf.get(current);
+    }
+    return false;
+  };
+  return document.objects
+    .map((object) => object.id)
+    .filter((id) => selected.has(id) && !coveredBySelection(id));
+}
+
 function cell(rowId: string, key: string, label: string, value: string): UiNode {
   return { id: `${rowId}/${key}`, role: "gridcell", label, value };
 }

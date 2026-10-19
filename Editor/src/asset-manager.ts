@@ -42,6 +42,45 @@ export interface AssetManagerState {
   readonly notice?: string;
 }
 
+/// A font's file is not relinked here: the font records the family and faces
+/// read from that file, and only the Fonts panel's Replace updates them with
+/// the bytes (`replaceFont`).
+export const FONT_ASSET_RELINK_UNAVAILABLE =
+  "a font's file is replaced with Replace in the Fonts panel, which updates the font with it";
+
+/// What a relink would send: the asset keeps its id, its users and its
+/// project path, and points at the replacement's bytes (1.x's Relink).
+export interface AssetRelinkPlan {
+  readonly assetId: string;
+  readonly newHash: string;
+  readonly newSize?: NonNullable<AssetLibraryItem["sizeBytes"]>;
+}
+
+/// Check a relink before it is sent. The replacement must be the same kind of
+/// asset (an image cannot stand in for a video: its users would draw nothing)
+/// and must be different bytes. `refused` names the reason.
+export function planAssetRelink(
+  document: SceneDocument,
+  assetId: string,
+  replacement: Pick<AssetLibraryItem, "name" | "kind" | "checksum" | "sizeBytes">,
+): AssetRelinkPlan | { readonly refused: string } {
+  const asset = document.assets.find((candidate) => candidate.assetId === assetId);
+  if (!asset) return { refused: `no asset ${assetId} in ${document.name}` };
+  if (asset.kind === "font") return { refused: FONT_ASSET_RELINK_UNAVAILABLE };
+  if (replacement.checksum === undefined) return { refused: `${replacement.name} has no content hash` };
+  if (replacement.kind !== asset.kind) {
+    return { refused: `${asset.name} is ${asset.kind}; ${replacement.name} is ${replacement.kind}` };
+  }
+  if (replacement.checksum === asset.checksum) {
+    return { refused: `${asset.name} already holds the bytes of ${replacement.name}` };
+  }
+  return {
+    assetId,
+    newHash: replacement.checksum,
+    ...(replacement.sizeBytes === undefined ? {} : { newSize: replacement.sizeBytes }),
+  };
+}
+
 /// The object ids that reference an asset, in document order.
 ///
 /// Covers `ImageObject.assetId`, `MeshObject.modelAssetId`, and
@@ -197,6 +236,19 @@ export function assetManagerPanel(
       description: `${asset.kind} · ${availability(asset)} · origin ${asset.provenance.origin ?? NOT_RECORDED}`,
       selected: state.selectedAssetId === asset.assetId,
       ...(preview.image === undefined ? {} : { image: preview.image }),
+      actions: [
+        // Points the asset at another file of the same kind; every object
+        // using it follows, because they name the asset, not the file.
+        {
+          name: "relink",
+          label: "Relink",
+          ...(asset.kind === "font"
+            ? { unavailable: FONT_ASSET_RELINK_UNAVAILABLE }
+            : state.importing
+              ? { unavailable: "an import is already running" }
+              : {}),
+        },
+      ],
       children: [
         ...preview.cells,
         {

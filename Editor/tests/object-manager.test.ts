@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 
 import type { SceneDocument, SceneObject } from "@grapix/contracts";
 import { agentView, findNode, moveFocus, visibleRows } from "../src/agent-surface";
-import { alphaLabel, objectManagerPanel, transformSummary } from "../src/object-manager";
+import { alphaLabel, objectManagerPanel, selectionRoots, transformSummary } from "../src/object-manager";
 
 function base(id: string, name: string): Omit<SceneObject & { type: "rect" }, "type"> {
   return {
@@ -220,5 +220,26 @@ describe("an agent sees what a person sees", () => {
     const shut = objectManagerPanel(document, { selectedIds: [], collapsedIds: ["g"] });
     // With the group shut, the next row is the one after its subtree.
     expect(moveFocus(shut, "g", "ArrowDown")).toBe("z");
+  });
+});
+
+describe("duplicate and delete act on the selection's top-level objects", () => {
+  const document = scene([
+    group("outer", "Outer", ["inner", "a"]),
+    group("inner", "Inner", ["b"]),
+    rect("a", "A"),
+    rect("b", "B"),
+    rect("c", "C"),
+  ]);
+
+  it("drops objects a selected group already carries, in document order", () => {
+    expect(selectionRoots(document, ["b", "c", "outer"])).toEqual(["outer", "c"]);
+    expect(selectionRoots(document, ["b", "inner"])).toEqual(["inner"]);
+    expect(selectionRoots(document, ["c", "a"])).toEqual(["a", "c"]);
+  });
+
+  it("is empty for nothing selected or ids the scene does not hold", () => {
+    expect(selectionRoots(document, [])).toEqual([]);
+    expect(selectionRoots(document, ["ghost"])).toEqual([]);
   });
 });

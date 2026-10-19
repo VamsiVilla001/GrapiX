@@ -5,7 +5,13 @@ import { describe, expect, it } from "vitest";
 
 import type { SceneDocument, SceneObject } from "@grapix/contracts";
 import { findNode } from "../src/agent-surface";
-import { assetManagerPanel, assetUsers, describeVideoCodec } from "../src/asset-manager";
+import {
+  FONT_ASSET_RELINK_UNAVAILABLE,
+  assetManagerPanel,
+  assetUsers,
+  describeVideoCodec,
+  planAssetRelink,
+} from "../src/asset-manager";
 
 function base(id: string): Record<string, unknown> {
   return {
@@ -242,5 +248,49 @@ describe("naming a video's codec", () => {
 
   it("says nothing rather than guessing when no known code appears", () => {
     expect(describeVideoCodec(new Uint8Array(4096))).toBeUndefined();
+  });
+});
+
+describe("relinking an asset keeps its id and changes only its bytes", () => {
+  const document = scene([], [ready]);
+  const file = (kind: string, checksum?: string) =>
+    ({ name: "new-logo.png", kind, ...(checksum === undefined ? {} : { checksum }), sizeBytes: 42 }) as never;
+
+  it("is offered on every asset, and waits for a running import", () => {
+    const relink = (state = {}) =>
+      findNode(assetManagerPanel(document, state), "asset/logo")!.actions!.find((action) => action.name === "relink")!;
+    expect(relink().unavailable).toBeUndefined();
+    expect(relink({ importing: true }).unavailable).toBe("an import is already running");
+  });
+
+  it("plans new bytes for the same id", () => {
+    expect(planAssetRelink(document, "logo", file("image", "b".repeat(64)))).toEqual({
+      assetId: "logo",
+      newHash: "b".repeat(64),
+      newSize: 42,
+    });
+  });
+
+  it("leaves a font's file to the Fonts panel's Replace", () => {
+    const fontFile = { ...ready, assetId: "inter", name: "inter.woff2", kind: "font" };
+    const withFont = scene([], [fontFile]);
+    const relink = findNode(assetManagerPanel(withFont), "asset/inter")!.actions!.find((action) => action.name === "relink")!;
+    expect(relink.unavailable).toBe(FONT_ASSET_RELINK_UNAVAILABLE);
+    expect(planAssetRelink(withFont, "inter", { ...fontFile, checksum: "b".repeat(64) } as never)).toEqual({
+      refused: FONT_ASSET_RELINK_UNAVAILABLE,
+    });
+  });
+
+  it("refuses another kind, the same bytes, no hash, or an unknown asset", () => {
+    expect(planAssetRelink(document, "logo", file("video", "b".repeat(64)))).toEqual({
+      refused: "Logo is image; new-logo.png is video",
+    });
+    expect(planAssetRelink(document, "logo", file("image", "a".repeat(64)))).toEqual({
+      refused: "Logo already holds the bytes of new-logo.png",
+    });
+    expect(planAssetRelink(document, "logo", file("image"))).toEqual({ refused: "new-logo.png has no content hash" });
+    expect(planAssetRelink(document, "nope", file("image", "b".repeat(64)))).toEqual({
+      refused: "no asset nope in Asset test",
+    });
   });
 });

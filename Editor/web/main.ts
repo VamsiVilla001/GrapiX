@@ -46,6 +46,7 @@ import { GraphicPreviewRenderer } from "../src/graphic-preview";
 import { renderNode } from "../src/agent-surface";
 import {
   objectManagerPanel,
+  selectionRoots,
   setObjectExpanded,
 } from "../src/object-manager";
 import {
@@ -84,7 +85,14 @@ import {
   materialManagerPanel,
   usersOf,
 } from "../src/material-manager";
-import { ASSET_FILE_EXTENSIONS, assetManagerPanel, assetUsers, describeVideoCodec, type AssetPreview } from "../src/asset-manager";
+import {
+  ASSET_FILE_EXTENSIONS,
+  assetManagerPanel,
+  assetUsers,
+  describeVideoCodec,
+  planAssetRelink,
+  type AssetPreview,
+} from "../src/asset-manager";
 import { textStylePanel, textStyleUsers } from "../src/text-style";
 import {
   sceneManagerPanel,
@@ -2997,30 +3005,40 @@ async function createObject(): Promise<void> {
   });
 }
 
+/** The selection's top-level objects (a group carries its children), or a
+ *  named refusal when nothing is selected. */
+function selectedRoots(verb: string): string[] {
+  const roots = scene ? selectionRoots(scene, selection) : [];
+  if (roots.length === 0) log(`select an object to ${verb}`, "bad");
+  return roots;
+}
+
+/** Duplicate every selected object as one batch: one undo entry, and the
+ *  copies become the selection. */
 async function duplicateObject(): Promise<void> {
-  const objectId = soleSelection("duplicate");
-  if (!objectId) return;
-  await runEdits([{ edit: "duplicateObject", objectId }], {
-    label: (effects) => {
-      for (const effect of effects) {
-        if (effect.effect !== "objectDuplicated") continue;
-        const { newObjectId, createdObjectIds, copiedChannelCount } = effect;
-        const extra: string[] = [];
-        if (createdObjectIds.length > 1) extra.push(`${createdObjectIds.length - 1} child object(s)`);
-        if (copiedChannelCount > 0) extra.push(`${copiedChannelCount} channel(s)`);
-        return extra.length
-          ? `Duplicated ${objectId} as ${newObjectId}, with ${extra.join(" and ")}`
-          : `Duplicated ${objectId} as ${newObjectId}`;
-      }
-      return `Duplicated ${objectId}`;
+  const objectIds = selectedRoots("duplicate");
+  if (objectIds.length === 0) return;
+  await runEdits(
+    objectIds.map((objectId) => ({ edit: "duplicateObject" as const, objectId })),
+    {
+      label: (effects) => {
+        const lines = effects.flatMap((effect, index) => {
+          if (effect.effect !== "objectDuplicated") return [];
+          const { newObjectId, createdObjectIds, copiedChannelCount } = effect;
+          const extra: string[] = [];
+          if (createdObjectIds.length > 1) extra.push(`${createdObjectIds.length - 1} child object(s)`);
+          if (copiedChannelCount > 0) extra.push(`${copiedChannelCount} channel(s)`);
+          const from = objectIds[index] ?? "";
+          return [extra.length ? `${from} as ${newObjectId}, with ${extra.join(" and ")}` : `${from} as ${newObjectId}`];
+        });
+        return lines.length ? `Duplicated ${lines.join("; ")}` : `Duplicated ${objectIds.join(", ")}`;
+      },
+      select: (effects) => {
+        const copies = effects.flatMap((effect) => (effect.effect === "objectDuplicated" ? [effect.newObjectId] : []));
+        return copies.length ? copies : undefined;
+      },
     },
-    select: (effects) => {
-      for (const effect of effects) {
-        if (effect.effect === "objectDuplicated") return [effect.newObjectId];
-      }
-      return undefined;
-    },
-  });
+  );
 }
 
 async function renameObject(): Promise<void> {
@@ -3032,26 +3050,35 @@ async function renameObject(): Promise<void> {
   await runEdits([{ edit: "renameObject", objectId, name }], `Renamed ${objectId} to ${name.trim()}`);
 }
 
+/** Delete every selected object as one batch: one undo entry. */
 async function deleteObject(): Promise<void> {
-  const objectId = soleSelection("delete");
-  if (!objectId) return;
-  await runEdits([{ edit: "deleteObject", objectId }], {
-    // Everything a delete took beyond the object named, said out loud: a
-    // group silently eating its children is how authors lose work.
-    label: (effects) => {
-      for (const effect of effects) {
-        if (effect.effect !== "objectDeleted") continue;
-        const { removedObjectIds, removedChannelCount, clearedActiveCamera } = effect;
+  const objectIds = selectedRoots("delete");
+  if (objectIds.length === 0) return;
+  await runEdits(
+    objectIds.map((objectId) => ({ edit: "deleteObject" as const, objectId })),
+    {
+      // Everything a delete took beyond the objects named, said out loud: a
+      // group silently eating its children is how authors lose work.
+      label: (effects) => {
+        let children = 0;
+        let channels = 0;
+        let camera = false;
+        for (const effect of effects) {
+          if (effect.effect !== "objectDeleted") continue;
+          children += effect.removedObjectIds.length - 1;
+          channels += effect.removedChannelCount;
+          camera ||= effect.clearedActiveCamera;
+        }
         const also: string[] = [];
-        if (removedObjectIds.length > 1) also.push(`${removedObjectIds.length - 1} child object(s)`);
-        if (removedChannelCount > 0) also.push(`${removedChannelCount} animation channel(s)`);
-        if (clearedActiveCamera) also.push("the scene's active camera");
-        return also.length ? `Deleted ${objectId}, and with it ${also.join(", ")}` : `Deleted ${objectId}`;
-      }
-      return `Deleted ${objectId}`;
+        if (children > 0) also.push(`${children} child object(s)`);
+        if (channels > 0) also.push(`${channels} animation channel(s)`);
+        if (camera) also.push("the scene's active camera");
+        const named = objectIds.join(", ");
+        return also.length ? `Deleted ${named}, and with it ${also.join(", ")}` : `Deleted ${named}`;
+      },
+      select: () => [],
     },
-    select: () => [],
-  });
+  );
 }
 
 /** What the font panel is drawn from: the document, the registry's last
@@ -3104,6 +3131,8 @@ function onFontManagerClick(event: MouseEvent): void {
   if (button?.dataset.for === "font-manager") {
     if (button.dataset.action === "ingestFiles") void ingestFontFiles();
     else if (button.dataset.action === "ingestLink") void ingestFontLink();
+    // The same publish as the toolbar's; the panel only adds the font blocker.
+    else if (button.dataset.action === "publish") void publish();
     return;
   }
   const row = target.closest<HTMLLIElement>('li[role="listitem"][id^="font/"]');
@@ -3469,11 +3498,6 @@ function onMaterialManagerClick(event: MouseEvent): void {
     });
     return;
   }
-  if (button?.dataset.action === "edit") {
-    // Said out loud rather than a button that silently only selects.
-    log(`material edit is not available in this build; ${material.name} is selected`, "bad");
-    return;
-  }
   if (button?.dataset.action !== undefined && button.dataset.action !== "reveal") return;
   const users = usersOf(scene, material.materialId);
   log(
@@ -3734,6 +3758,10 @@ function onAssetManagerClick(event: MouseEvent): void {
 
   selectedAssetId = asset.assetId;
   renderPanels(scene);
+  if (button?.dataset.action === "relink" && !button.disabled) {
+    void relinkAsset(asset.assetId);
+    return;
+  }
 
   const users = assetUsers(scene, asset.assetId);
   log(
@@ -3791,6 +3819,60 @@ async function importAssetFiles(): Promise<void> {
     assetNotice = outcome ? `${added}${skippedNote}` : undefined;
   } catch (error) {
     assetNotice = `Asset import refused: ${describe(error)}`;
+    log(assetNotice, "bad");
+  } finally {
+    assetImporting = false;
+    if (scene) renderPanels(scene);
+  }
+}
+
+/// Point one asset at another file of the same kind (1.x's Relink), as one
+/// `relinkAsset` edit: the asset keeps its id, so every object using it
+/// follows. The file is verified and cached as an import would be.
+async function relinkAsset(assetId: string): Promise<void> {
+  const session = activeSession(workspace);
+  const asset = scene?.assets.find((candidate) => candidate.assetId === assetId);
+  if (!session || !asset || assetImporting) return;
+  let path: string | undefined;
+  try {
+    const picked = await openFileDialog({
+      multiple: false,
+      filters: [{ name: "Images, SVG, video and 3D models", extensions: ASSET_FILE_EXTENSIONS }],
+    });
+    path = (Array.isArray(picked) ? picked[0] : picked) ?? undefined;
+  } catch (error) {
+    log(describe(error), "bad");
+    return;
+  }
+  if (path === undefined) return;
+  assetImporting = true;
+  assetNotice = `Relinking ${asset.name}…`;
+  if (scene) renderPanels(scene);
+  try {
+    const batch = await shell().invoke<PreparedAssetBatch>("cmd_asset_prepare_files", {
+      target: { target: "session", session: session.key },
+      paths: [path],
+    });
+    // A file already in this graphic is offered as that asset's bytes.
+    const already = batch.sources.find((source) => source.disposition.kind === "alreadyInScene");
+    const replacement =
+      batch.assets[0] ?? scene?.assets.find((candidate) => candidate.assetId === already?.assetId);
+    if (!scene || !replacement) {
+      assetNotice = "Relink refused: the picked file held no asset";
+      log(assetNotice, "bad");
+      return;
+    }
+    const plan = planAssetRelink(scene, assetId, replacement);
+    if ("refused" in plan) {
+      assetNotice = `Relink refused: ${plan.refused}`;
+      log(assetNotice, "bad");
+      return;
+    }
+    const relinked = `Relinked ${asset.name} to ${replacement.name}`;
+    const outcome = await runEdits([{ edit: "relinkAsset", ...plan }], relinked, "assets");
+    assetNotice = outcome ? relinked : undefined;
+  } catch (error) {
+    assetNotice = `Relink refused: ${describe(error)}`;
     log(assetNotice, "bad");
   } finally {
     assetImporting = false;

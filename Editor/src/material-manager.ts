@@ -21,6 +21,11 @@ import type { SceneDocument, SceneObject } from "@grapix/contracts";
 
 import type { UiNode } from "./agent-surface";
 
+/// Why Edit is not offered: changing a material's properties is the work of
+/// 11.50 (one physically lit material type). Relink and delete work now.
+export const MATERIAL_EDIT_UNAVAILABLE =
+  "editing a material's properties arrives with the lit material type (11.50); relink or delete it here";
+
 export interface MaterialManagerState {
   readonly selectedMaterialId?: string;
 }
@@ -82,8 +87,11 @@ export function materialManagerPanel(
         {
           name: "edit",
           label: "Edit",
-          // Not blocked — editing a shared material is legitimate and common.
-          // The panel's job is to make sure it is never a surprise.
+          // Editing a shared material is legitimate and common, and the panel
+          // shows the share count so it is never a surprise. The edit itself
+          // is 11.50's (one lit material type); until then the button says so
+          // rather than doing nothing.
+          unavailable: MATERIAL_EDIT_UNAVAILABLE,
         },
         { name: "relink", label: "Relink" },
         {
