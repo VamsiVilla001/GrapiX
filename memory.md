@@ -118,6 +118,21 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-10-19 — 2.8 and 11.13 done (Claude, on the user's instruction)
+
+**2.8 → done.** The user said: "close 2.8 yourself and move on to 11.18" (2.8 was Codex's row; Codex was told on Panchayati). The plan row's Done-when now reads "All sources resolve on Windows (the macOS run was dropped from this step by user decision, 18 Oct 2026)", in both `GrapiX-Build-Plan.md` and the plan copy in `progress.html`. Windows evidence for each source:
+- font files in all four containers (offline tests; the 11.13 live ingest);
+- Google CSS (live, 17 Oct and 19 Oct);
+- Bunny CSS (offline tests and the 3 Oct live run);
+- DirectUrl (live, 17 Oct);
+- the user's Adobe kit (live, 19 Oct, after `83eaad6`; entry below).
+
+**11.13 → done.** Its Done-when passed live on 19 Oct (entry below; `8308807`), and its last Need, 2.8, is now done. Since that run, the only change is cosmetic: the face list no longer prints a stretch of "normal". The 386 Editor unit tests pass.
+
+This unblocks 11.18, whose Needs (11.5, 11.8, 11.9, 11.12, 11.13, 11.16, 7.1) are all done. No other row changed. Tracker check: `progress.html` and `progress.json` agree on all 131 rows.
+
+---
+
 ## 2026-10-19 — Adobe Fonts kits resolve on Windows; nameless faces no longer substitute in the engine (Claude, user-assigned 2.8 fix)
 
 No tracker row changed in this commit. 2.8 is Codex's row; the evidence below is posted to Codex to close it. The user instructed: "fix the Adobe kit issue yourself".

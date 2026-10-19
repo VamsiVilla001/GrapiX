@@ -126,7 +126,7 @@ No UI. These are the things every later layer depends on and that fail quietly i
 | `2.5` | File watching with debounce, both platforms | PLAT | 2.4 | Equivalent event streams from FSEvents and Win32 |
 | `2.6` | Project store: JSON, backups, autosave ring | BE | 2.1 | Kill -9 mid-write leaves a valid project |
 | `2.7` | Asset store: SHA-256 dedupe, two-address, geometry read from headers | BE | 1.7 | Same asset imported twice stores once |
-| `2.8` | Font subsystem ported across unchanged | BE | 2.7 | All sources resolve on both platforms |
+| `2.8` | Font subsystem ported across unchanged | BE | 2.7 | All sources resolve on Windows (the macOS run was dropped from this step by user decision, 18 Oct 2026) |
 | `2.9` | gx1 HMAC tokens; roles and scopes | BE | 0.1 | Algorithm fixed by prefix at parse time |
 | `2.10` | Audit and operations logging, sanitised | BE | 0.5 | No credentials in any log line |
 
