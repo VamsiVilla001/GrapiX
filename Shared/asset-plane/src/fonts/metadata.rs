@@ -28,29 +28,55 @@ pub struct InspectedFont {
 /// unwrapped first — ttf-parser reads raw sfnt; `container::verify_font_file`
 /// is the entry point that decodes any accepted container and calls this.
 pub fn inspect_font(bytes: &[u8]) -> Result<InspectedFont, Refusal> {
+    inspect(bytes, None)
+}
+
+/// Inspect a face a stylesheet's `@font-face` rule declares. That rule names
+/// the family, and the declaration is what a page and a template select by.
+/// Adobe Fonts kit files carry an empty family name (and `-` for the full and
+/// PostScript names), so the declared family stands in when the file names
+/// none; a file's own name is still preferred when it has one. The tables are
+/// parsed exactly as for any font: unreadable bytes refuse as before.
+pub fn inspect_declared_font(bytes: &[u8], declared_family: &str) -> Result<InspectedFont, Refusal> {
+    inspect(bytes, Some(declared_family))
+}
+
+fn inspect(bytes: &[u8], declared_family: Option<&str>) -> Result<InspectedFont, Refusal> {
     let face = ttf_parser::Face::parse(bytes, 0).map_err(|e| Refusal::InvalidFontData {
         detail: format!("unparseable font: {e:?}"),
     })?;
 
-    let family = face
+    let named = face
         .names()
         .into_iter()
         .find(|n| n.name_id == ttf_parser::name_id::FAMILY)
         .and_then(|n| n.to_string())
         .map(|s| clean_name(&s))
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| Refusal::InvalidFontData {
-            detail: "font has no readable family name".into(),
-        })?;
+        .filter(|s| !s.is_empty());
+    let declared = declared_family.map(clean_name).filter(|s| !s.is_empty());
+    let (family, from_declaration) = match (named, declared) {
+        (Some(family), _) => (family, false),
+        (None, Some(family)) => (family, true),
+        (None, None) => {
+            return Err(Refusal::InvalidFontData {
+                detail: "font has no readable family name".into(),
+            })
+        }
+    };
 
-    let display_name = face
-        .names()
-        .into_iter()
-        .find(|n| n.name_id == ttf_parser::name_id::FULL_NAME)
-        .and_then(|n| n.to_string())
-        .map(|s| clean_name(&s))
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| family.clone());
+    // A file that does not name its family names nothing else usefully
+    // either (Adobe's kit files say `-`), so the declaration names it whole.
+    let display_name = if from_declaration {
+        family.clone()
+    } else {
+        face.names()
+            .into_iter()
+            .find(|n| n.name_id == ttf_parser::name_id::FULL_NAME)
+            .and_then(|n| n.to_string())
+            .map(|s| clean_name(&s))
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| family.clone())
+    };
 
     let subfamily = face
         .names()
@@ -135,7 +161,7 @@ fn clean_licence(value: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use gx_contracts::font::FontFormat;
 
@@ -157,5 +183,46 @@ mod tests {
     fn garbage_bytes_are_refused_by_name() {
         let result = inspect_font(b"this is not a font");
         assert!(matches!(result, Err(Refusal::InvalidFontData { .. })));
+        assert!(matches!(
+            inspect_declared_font(b"this is not a font", "kit-family"),
+            Err(Refusal::InvalidFontData { .. })
+        ));
+    }
+
+    /// An sfnt whose family names (IDs 1 and 16) are present but empty, as
+    /// Adobe Fonts serves kit files.
+    pub(crate) fn blank_family_names(sfnt: &[u8]) -> Vec<u8> {
+        let mut out = sfnt.to_vec();
+        let be16 = |b: &[u8], at: usize| usize::from(u16::from_be_bytes([b[at], b[at + 1]]));
+        let tables = be16(&out, 4);
+        let record = (0..tables)
+            .map(|i| 12 + 16 * i)
+            .find(|&r| &out[r..r + 4] == b"name")
+            .expect("the fixture has a name table");
+        let offset = u32::from_be_bytes(out[record + 8..record + 12].try_into().unwrap()) as usize;
+        for i in 0..be16(&out, offset + 2) {
+            let r = offset + 6 + 12 * i;
+            if matches!(be16(&out, r + 6), 1 | 16) {
+                out[r + 8] = 0;
+                out[r + 9] = 0;
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn a_declared_family_names_a_face_whose_file_names_none() {
+        let named = include_bytes!("../../tests/fixtures/fonts/inter-latin.ttf");
+        let blank = blank_family_names(named);
+        assert!(matches!(
+            inspect_font(&blank),
+            Err(Refusal::InvalidFontData { detail }) if detail == "font has no readable family name"
+        ));
+        let inspected = inspect_declared_font(&blank, " new-science-mono ").unwrap();
+        assert_eq!(inspected.family, "new-science-mono");
+        assert_eq!(inspected.display_name, "new-science-mono");
+        // The file's own name wins when it has one.
+        assert_eq!(inspect_declared_font(named, "kit-family").unwrap().family, "Inter");
+        assert!(matches!(inspect_declared_font(&blank, "  "), Err(Refusal::InvalidFontData { .. })));
     }
 }

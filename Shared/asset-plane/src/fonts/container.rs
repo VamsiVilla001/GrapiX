@@ -17,7 +17,7 @@ use allsorts::tables::{FontTableProvider, TTCF_MAGIC};
 use gx_contracts::font::FontFormat;
 use gx_contracts::Refusal;
 
-use super::metadata::{inspect_font, sniff_format, InspectedFont};
+use super::metadata::{inspect_declared_font, inspect_font, sniff_format, InspectedFont};
 
 /// A font file that decoded and answered inspection.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,9 +49,23 @@ pub fn sfnt_bytes(bytes: &[u8]) -> Result<Cow<'_, [u8]>, Refusal> {
 /// Decode the container and inspect the result. This is the one verification
 /// every ingest path runs before bytes may be cached as a font.
 pub fn verify_font_file(bytes: &[u8]) -> Result<VerifiedFontFile, Refusal> {
+    verify(bytes, None)
+}
+
+/// As [`verify_font_file`], for a face a stylesheet declares: the
+/// `@font-face` family names the face when the file names none (Adobe Fonts
+/// kits). See `metadata::inspect_declared_font`.
+pub fn verify_declared_font_file(bytes: &[u8], declared_family: &str) -> Result<VerifiedFontFile, Refusal> {
+    verify(bytes, Some(declared_family))
+}
+
+fn verify(bytes: &[u8], declared_family: Option<&str>) -> Result<VerifiedFontFile, Refusal> {
     let format = sniff_format(bytes);
     let sfnt = sfnt_bytes(bytes)?;
-    let inspected = inspect_font(&sfnt)?;
+    let inspected = match declared_family {
+        Some(family) => inspect_declared_font(&sfnt, family)?,
+        None => inspect_font(&sfnt)?,
+    };
     Ok(VerifiedFontFile {
         format: format.expect("sfnt_bytes refuses bytes without a recognised container"),
         inspected,

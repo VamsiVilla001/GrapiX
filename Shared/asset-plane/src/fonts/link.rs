@@ -40,7 +40,7 @@ use gx_contracts::scene::AssetLibraryItem;
 use gx_contracts::{ContentHash, Refusal};
 use sha2::{Digest, Sha256, Sha384, Sha512};
 
-use super::container::{verify_font_file, VerifiedFontFile};
+use super::container::{verify_declared_font_file, verify_font_file, VerifiedFontFile};
 use super::css::{parse_font_stylesheet, ParsedFontFace, ParsedFontSource};
 use super::ingest::{
     font_asset_item, prepare_font_files, store_font_asset, BatchBuilder, FontFileInput,
@@ -327,7 +327,8 @@ pub fn prepare_font_link(
                 limit_bytes: MAX_LINK_BYTES,
             }));
         }
-        let verified = verify_font_file(&bytes).map_err(|refusal| {
+        // The `@font-face` rule names the face; Adobe kit files name nothing.
+        let verified = verify_declared_font_file(&bytes, &collected.face.family).map_err(|refusal| {
             refuse_link(match refusal {
                 Refusal::InvalidFontData { detail } => Refusal::InvalidFontData {
                     detail: format!("{}: {detail}", source.url),
@@ -925,6 +926,38 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// The user's real Adobe Fonts kit, whose files carry empty family names.
+    /// Needs the kit id in `GX_LIVE_ADOBE_KIT` (kits are per account, so none
+    /// is committed) and HTTPS access; a missing id or a network failure fails.
+    #[test]
+    #[ignore = "manual live Adobe Fonts check; needs GX_LIVE_ADOBE_KIT and HTTPS access"]
+    fn live_adobe_kit_resolves_under_its_declared_families() {
+        let kit = std::env::var("GX_LIVE_ADOBE_KIT").expect("set GX_LIVE_ADOBE_KIT to an Adobe Fonts kit id");
+        let (mut store, root) = store();
+        let batch = prepare_font_link(
+            &mut store,
+            &UreqFontFetcher::new(),
+            EMPTY,
+            &LinkedSource::AdobeFonts { project_id: kit },
+        )
+        .expect("live Adobe Fonts kit must resolve");
+        assert!(!batch.fonts.is_empty());
+        for font in &batch.fonts {
+            assert!(!font.family.trim().is_empty() && font.faces.iter().all(|face| face.family == font.family));
+            assert!(font.license.as_deref().is_some_and(|l| !l.is_empty()));
+            println!(
+                "live Adobe family {}: {} face(s), weights {:?}",
+                font.family,
+                font.faces.len(),
+                font.faces.iter().map(|face| face.weight).collect::<Vec<_>>()
+            );
+        }
+        for asset in &batch.assets {
+            assert!(store.contains(asset.checksum.as_ref().unwrap()).unwrap());
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn direct_url_policy_refuses_before_any_request() {
         for (url, code) in [
@@ -1091,6 +1124,52 @@ mod tests {
                 if url == ADOBE_FACE && sheet == kit
         ));
         assert!(store.contains(&content_hash(UNLICENSED)).unwrap());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    /// Adobe serves kit files whose family name is empty; the kit's
+    /// `@font-face` rule is what names them. Two such families in one kit
+    /// stay two fonts under their declared names.
+    #[test]
+    fn an_adobe_kit_whose_files_name_no_family_takes_the_declared_names() {
+        let (mut store, root) = store();
+        let kit = "https://use.typekit.net/dgy5lkh.css";
+        let mono = "https://use.typekit.net/af/3ff53c/00000000000000007756ad5c/31/l?primer=x&fvd=n7&v=3";
+        let wide = "https://use.typekit.net/af/1a2b3c/00000000000000007760dcb7/31/l?primer=x&fvd=n4&v=3";
+        let css = format!(
+            "@font-face {{ font-family: \"new-science-mono\"; src: url(\"{mono}\") format(\"opentype\"); \
+               font-style: normal; font-weight: 700; }}\n\
+             @font-face {{ font-family: \"gear-wide\"; src: url(\"{wide}\") format(\"opentype\"); \
+               font-style: normal; font-weight: 400; }}"
+        );
+        let otf = crate::fonts::metadata::tests::blank_family_names(include_bytes!(
+            "../../tests/fixtures/fonts/inter-latin.otf"
+        ));
+        let ttf = crate::fonts::metadata::tests::blank_family_names(TTF);
+        assert!(verify_font_file(&otf).is_err(), "the file names no family");
+        let fetcher = FakeFetcher::default()
+            .body(kit, css.as_bytes())
+            .body(mono, &otf)
+            .body(wide, &ttf);
+        let batch = prepare_font_link(
+            &mut store,
+            &fetcher,
+            EMPTY,
+            &LinkedSource::AdobeFonts {
+                project_id: "dgy5lkh".into(),
+            },
+        )
+        .unwrap();
+
+        let named: Vec<_> = batch
+            .fonts
+            .iter()
+            .map(|font| (font.family.as_str(), font.faces[0].family.as_str(), font.faces[0].weight))
+            .collect();
+        assert_eq!(named, [("new-science-mono", "new-science-mono", 700), ("gear-wide", "gear-wide", 400)]);
+        // The file's own licence record, else Adobe's packaging position.
+        assert!(batch.fonts.iter().all(|font| font.license.as_deref().is_some_and(|l| !l.is_empty())));
+        assert!(store.contains(&content_hash(&otf)).unwrap() && store.contains(&content_hash(&ttf)).unwrap());
         std::fs::remove_dir_all(root).ok();
     }
 

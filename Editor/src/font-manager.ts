@@ -326,7 +326,7 @@ export function withIngestNames(
 
 function facesSummary(font: FontDefinition): string {
   return font.faces
-    .map((face) => `${face.weight} ${face.style}${face.stretch ? ` ${face.stretch}` : ""}`)
+    .map((face) => `${face.weight} ${face.style}${face.stretch && face.stretch !== "normal" ? ` ${face.stretch}` : ""}`)
     .join(" · ");
 }
 

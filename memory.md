@@ -118,6 +118,44 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-10-19 — Adobe Fonts kits resolve on Windows; nameless faces no longer substitute in the engine (Claude, user-assigned 2.8 fix)
+
+No tracker row changed in this commit. 2.8 is Codex's row; the evidence below is posted to Codex to close it. The user instructed: "fix the Adobe kit issue yourself".
+
+**Cause:** Adobe kit files keep a name table, but the family (ID 1) is an empty string and the full and PostScript names are `-`. That was checked by dumping the real `new-science-mono` 700 file from kit `dgy5lkh`, kept in scratch only and never committed (Adobe font files must not be redistributed).
+- `fonts/metadata.rs::inspect_font` therefore refused the whole kit: "font has no readable family name".
+- **Engine (`render-engine/worker/src/text.rs`):** fontdb keeps `""` as the family, so every blank-named face answered to the empty name. In the old code the text's lookup by `""` at the default weight could pick a different font's face.
+
+**Fix:**
+- `metadata::inspect_declared_font` and `container::verify_declared_font_file`: a stylesheet face's `@font-face` family names it when the file names none; a file's own name still wins. The tables are parsed as before. The stylesheet path in `link.rs` uses these; file and DirectUrl ingest stay strict.
+- **Engine:** a face whose file names no family (blank, or unnamed so that fontdb refuses it) is registered with `push_face_info` under the family, weight and style its definition declares (`declared_face`).
+
+**Verified by execution:**
+- `cargo test -p gx-asset-plane fonts::`: 44 passed, 1 ignored. New tests:
+  - `a_declared_family_names_a_face_whose_file_names_none`;
+  - `an_adobe_kit_whose_files_name_no_family_takes_the_declared_names` (two blank-named families in one kit stay two fonts).
+- `cargo test -p gx-render-worker text::`: 8 passed. New `faces_whose_files_name_no_family_shape_under_their_declared_family`: a bold (OS/2 700) blank-named font with a blank-named regular fallback.
+  - **On the old loading code (run, then restored) it FAILED:** every glyph was drawn in the fallback (`beta-regular`), a silent substitution.
+  - With the fix it passes.
+- Live, against the real kit on Windows: `GX_LIVE_ADOBE_KIT=dgy5lkh cargo test -p gx-asset-plane fonts::link::tests::live_adobe_kit_resolves_under_its_declared_families -- --ignored --exact` passed. It found new-science-mono (6 faces), gear-wide (6) and gear-wide-ultra (1), each licensed by its Adobe EULA URL. Log: `agent/tmp/font-1113/live-adobe.log`.
+- Live in the Editor (Tauri/WebView2), `agent/tmp/font-1113/adobe-live.cjs`, Adobe source plus kit id through the real "Add font link":
+  - "Added 3 font(s): new-science-mono, gear-wide, gear-wide-ultra" as one `addFonts`;
+  - all three ready, with in-face samples, and `document.fonts.check` true for each;
+  - "Took 13 asset(s) into project";
+  - undone afterwards, leaving the evidence project as saved. Results: `adobe-live-results.json`.
+- `npm run check`: exit 0. Boundaries OK, 344 generated current, 40 Node / 386 Editor / 713 Rust passed (3 ignored, the new opt-in live Adobe test included), 385 conformance passed / 0 failed / 9 skipped. Log: `agent/tmp/font-1113/check-adobe.log`.
+
+**2.8 on Windows** (the user accepted Windows-only on 18 Oct), every source now has live or test evidence:
+- font files: OTF, TTF, WOFF and WOFF2;
+- Google CSS, live;
+- Bunny CSS, in offline tests and the 3 Oct live run;
+- DirectUrl, live on 17 Oct;
+- Adobe kit, live now.
+
+Closing 2.8 is Codex's call on its row; 11.13 closes once 2.8 is done.
+
+---
+
 ## 2026-10-19 — 11.13 font manager ported from 1.x; updateFont and replaceFont (Claude, mission 1)
 
 **Partial — 11.13 stays active.** Its own Done-when passes live on Windows; it Needs 2.8, which is not done (below). User decisions on 18 Oct: 2.8 accepts a Windows-only finish (macOS dropped); the user supplied the Adobe kit `dgy5lkh` for the live Adobe check; start 11.13 now; Claude writes `UpdateFont`/`ReplaceFont` itself (contracts are otherwise Codex's lane, mission 10; Codex confirmed it had not touched these files).

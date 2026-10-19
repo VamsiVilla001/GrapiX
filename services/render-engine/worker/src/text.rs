@@ -452,21 +452,34 @@ fn load_definition(
         // WOFF/WOFF2 are delivery wrappers; fontdb reads only sfnt. The
         // container module is the one decoder the ingest path also verified
         // with, so a font that ingested is a font that loads here.
-        let sfnt = gx_asset_plane::fonts::container::sfnt_bytes(bytes)?;
-        let ids = database.load_font_source(fontdb::Source::Binary(Arc::new(sfnt.into_owned())));
+        let sfnt: Arc<Vec<u8>> = Arc::new(gx_asset_plane::fonts::container::sfnt_bytes(bytes)?.into_owned());
+        let mut ids: Vec<fontdb::ID> = database
+            .load_font_source(fontdb::Source::Binary(sfnt.clone()))
+            .into_iter()
+            .collect();
         if ids.is_empty() {
-            return Err(Refusal::InvalidFontData {
-                detail: format!("font {} contains no readable face", face.face_id),
-            });
+            // fontdb refuses a face that names no family; the bytes must
+            // still be a font before the declaration may name them.
+            gx_asset_plane::fonts::metadata::inspect_declared_font(&sfnt, &face.family).map_err(|_| {
+                Refusal::InvalidFontData {
+                    detail: format!("font {} contains no readable face", face.face_id),
+                }
+            })?;
+            ids.push(declared_face(database, None, fontdb::Source::Binary(sfnt.clone()), face)?);
         }
         for id in ids {
-            let loaded_family = database
+            let named = database
                 .face(id)
                 .and_then(|info| info.families.first())
-                .map(|family| family.0.clone())
-                .ok_or_else(|| Refusal::InvalidFontData {
-                    detail: format!("font {} carries no family name", face.face_id),
-                })?;
+                .map(|family| family.0.trim().to_owned())
+                .filter(|family| !family.is_empty());
+            let (id, loaded_family) = match named {
+                Some(family) => (id, family),
+                None => {
+                    let source = fontdb::Source::Binary(sfnt.clone());
+                    (declared_face(database, Some(id), source, face)?, face.family.trim().to_owned())
+                }
+            };
             if is_primary && primary_family.is_none() {
                 *primary_family = Some(loaded_family);
             }
@@ -474,6 +487,51 @@ fn load_definition(
         }
     }
     Ok(())
+}
+
+/// File a face under the family its definition declares, when its file names
+/// none. Adobe Fonts kit files carry an empty family name (the kit's
+/// stylesheet declares it): fontdb refuses a face with no name at all, and
+/// would file every blank-named face under the same empty family, where one
+/// font's text could be drawn in another's face. Weight and style come from
+/// the declaration as well, as the stylesheet stated them.
+fn declared_face(
+    database: &mut fontdb::Database,
+    loaded: Option<fontdb::ID>,
+    source: fontdb::Source,
+    face: &gx_contracts::font::FontFaceDefinition,
+) -> Result<fontdb::ID, Refusal> {
+    let family = face.family.trim();
+    if family.is_empty() {
+        return Err(Refusal::InvalidFontData {
+            detail: format!("font {} carries no family name", face.face_id),
+        });
+    }
+    let existing = loaded.and_then(|id| {
+        let info = database.face(id).cloned();
+        database.remove_face(id);
+        info
+    });
+    let mut info = existing.unwrap_or(fontdb::FaceInfo {
+        id: fontdb::ID::dummy(),
+        source,
+        index: 0,
+        families: Vec::new(),
+        post_script_name: String::new(),
+        style: fontdb::Style::Normal,
+        weight: fontdb::Weight::NORMAL,
+        stretch: fontdb::Stretch::Normal,
+        monospaced: false,
+    });
+    info.families = vec![(family.to_owned(), fontdb::Language::English_UnitedStates)];
+    info.post_script_name = family.replace(' ', "-");
+    info.weight = fontdb::Weight(face.weight);
+    info.style = match face.style {
+        FontStyle::Normal => fontdb::Style::Normal,
+        FontStyle::Italic => fontdb::Style::Italic,
+        FontStyle::Oblique => fontdb::Style::Oblique,
+    };
+    Ok(database.push_face_info(info))
 }
 
 fn apply_case(text: &str, text_case: TextCase) -> String {
@@ -739,6 +797,61 @@ mod tests {
         let (document, assets) = white_text("A\nB", 100.0, |text| text.line_height = Some(1.5));
         let height = prepare_texts(&document, &assets).expect("shapes").objects[0].height;
         assert!((height - 300.0).abs() <= 1.0, "two lines at 1.5 gave {height}");
+    }
+
+    /// An sfnt whose family names (IDs 1 and 16) are present but empty, as
+    /// Adobe Fonts serves kit files.
+    fn blank_family_names(sfnt: &[u8]) -> Vec<u8> {
+        let mut out = sfnt.to_vec();
+        let be16 = |b: &[u8], at: usize| usize::from(u16::from_be_bytes([b[at], b[at + 1]]));
+        let record = (0..be16(&out, 4))
+            .map(|i| 12 + 16 * i)
+            .find(|&r| &out[r..r + 4] == b"name")
+            .expect("the fixture has a name table");
+        let offset = u32::from_be_bytes(out[record + 8..record + 12].try_into().unwrap()) as usize;
+        for i in 0..be16(&out, offset + 2) {
+            let r = offset + 6 + 12 * i;
+            if matches!(be16(&out, r + 6), 1 | 16) {
+                out[r + 8] = 0;
+                out[r + 9] = 0;
+            }
+        }
+        out
+    }
+
+    /// Set OS/2 usWeightClass, as Adobe's bold kit files carry 700.
+    fn with_weight_class(sfnt: &[u8], weight: u16) -> Vec<u8> {
+        let mut out = sfnt.to_vec();
+        let tables = usize::from(u16::from_be_bytes([out[4], out[5]]));
+        let record = (0..tables)
+            .map(|i| 12 + 16 * i)
+            .find(|&r| &out[r..r + 4] == b"OS/2")
+            .expect("the fixture has an OS/2 table");
+        let offset = u32::from_be_bytes(out[record + 8..record + 12].try_into().unwrap()) as usize;
+        out[offset + 4..offset + 6].copy_from_slice(&weight.to_be_bytes());
+        out
+    }
+
+    /// Adobe Fonts kit files name no family; their definitions do. fontdb
+    /// files such faces under an empty name, so a bold kit font and a
+    /// regular fallback both answered to "" and the regular one won the
+    /// lookup: the text was drawn in its fallback. Each face is now found
+    /// under its declared family, and the text's own font draws it.
+    #[test]
+    fn faces_whose_files_name_no_family_shape_under_their_declared_family() {
+        const LATIN: &[u8] = include_bytes!("../../../../Shared/asset-plane/tests/fixtures/fonts/inter-latin.ttf");
+        let mut bold = font("alpha", "Alpha", "alpha", vec!["Beta".into()]);
+        bold.faces[0].weight = 700;
+        let fonts = vec![bold, font("beta", "Beta", "beta", Vec::new())];
+        let bytes = AssetBytes::from([
+            (ContentHash("alpha".into()), with_weight_class(&blank_family_names(INTER), 700)),
+            (ContentHash("beta".into()), blank_family_names(LATIN)),
+        ]);
+        let prepared = prepare_texts(&scene("Office", "alpha", fonts), &bytes).expect("the faces shape");
+        let glyphs = &prepared.objects[0].glyphs;
+        assert!(!glyphs.is_empty() && glyphs.iter().all(|g| g.glyph_id != 0));
+        let faces: Vec<&str> = glyphs.iter().map(|g| g.face_id.as_str()).collect();
+        assert!(faces.iter().all(|f| *f == "alpha-regular"), "drawn in {faces:?}, not the text's own font");
     }
 
     #[test]
