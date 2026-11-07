@@ -134,6 +134,17 @@ const KEY = "grapix-build-progress-v1";
 // nonzero preset span and pending-save dialog verified in Windows Tauri.
 // npm check: 40 Node, 365 Editor, 699 Rust (2 ignored), conformance 385/0/9.
 // Evidence: memory.md and agent/tmp/editor-review. No row state changed.
+// 7 Nov 2026 (Claude, reconciled with memory.md). Notes for work that sits
+// outside a row state change:
+// - 3.17 and 16.9 stay pending. Vello spike in tools/vello-spike (c5e3657):
+//   Vello Hybrid with vello_cpu as its CPU reference is recommended, blocked
+//   until Hybrid ships on wgpu 30; lyon-on-GPU is still to be measured.
+// - 11.43 stays pending (it still Needs 11.30). Toward it, in 0c2fd04:
+//   SceneEdit::SetCanvas and broadcast frame rates (24, 25, 29.97, 30, 50,
+//   59.94, 60, custom num/den), verified live; a draggable playhead handle.
+// - GPU render engine move: Panchayati task #103 over 3.16 to 3.22. Done so
+//   far: 0.2 (wgpu 30.0.1, 4492e5e) and the spike. Program and Preview still
+//   come from the CPU rasteriser. 3.16 is the next ready row.
 const INITIAL_STATE = {
   "11.41": "done", // Verified 16 Oct 2026 (Claude): one control request renders a pinned revision at frame N to a PNG served by hash; byte-identical repeat; engine/mock parity over the wire for 8 cases; CROSS_MACHINE_TOLERANCE defined and tested; the golden-frame gate and 8.9 render.preview draw through it (conformance 380/0/9, pixel gate unchanged). The Program-timing clause moved to 3.21 by user decision; the timed run still skips until Program holds cadence.
   "11.64": "done", // Verified 15 Oct: independent graphics and actual thumbnails; saved/unopened and partial preview states tested after app restart.

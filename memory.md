@@ -118,6 +118,21 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-07 — Tracker reconciled with memory.md (Claude, tracker notes only)
+
+The user asked for progress.json and progress.html to reflect today's work. No row state changed.
+
+- **Checked:** every row that changed state today (0.2, 7.2, 11.17, 8.14, 8.6, 11.19, 11.24) has the same state in both files, and each has its row note in progress.html. Both files hold 134 rows: 120 done and 14 active. The drift that the rmcp session reported in msg 317 (P.2 and P.3 missing from progress.html) is not real. They sit on the same line as P.1 in INITIAL_STATE.
+- **Added**, as dated notes in the progress.json `$comment` and in the progress.html header comment above INITIAL_STATE:
+  - The Vello spike: 3.17 and 16.9 stay pending.
+  - Frame rates and the playhead handle: toward 11.43, which stays pending because it still Needs 11.30.
+  - The GPU render engine move as Panchayati task #103 over 3.16 to 3.22. 3.16 is the next ready row.
+  - Short notes in progress.json for 7.2, 11.17 and 8.14.
+  The INITIAL_STATE object is unchanged, so the page's snapshot fingerprint is unchanged.
+- **Gate:** see the commit message.
+
+---
+
 ## 2026-11-07 — 8.14 started: the MCP wire ported onto rmcp 3.9; 2026-07-28 with fallback to 2025-06-18; stateless HTTP on 127.0.0.1 (Claude, rmcp port session)
 
 **Active — 8.14** (its Needs 8.13, 11.36 and 11.38 are done). This entry is the transport half of the row: the three tiers (read / author on a draft handle / propose) and the row's own conformance test over every tool are not started. 8.1 stays active for the same reason it was.
