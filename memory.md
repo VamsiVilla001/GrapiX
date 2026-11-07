@@ -118,6 +118,33 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-07 — Vello Hybrid spike for 3.17 / 16.9 (Claude, side session)
+
+**Not done — 3.17 and 16.9 stay pending**; tracker comments only. User decision 7 Nov: "start the wgpu bump and Vello spike now, queue rmcp". Isolated probe `tools/vello-spike/` (own workspace and lockfile, not a product member, no product dependency; reads `gx-render-worker` by path only to time its CPU rasteriser). Full method, tables and heatmaps: `tools/vello-spike/README.md`; raw logs and PNGs: `agent/tmp/vello-spike/`.
+
+**Versions:** `vello` 0.11.0 (wgpu 30.0.1, MSRV 1.89), `vello_hybrid` 0.2.0 (**wgpu 29.0.4**, MSRV 1.88), `vello_cpu` 0.3.0 (MSRV 1.89), `tiny-skia` 0.12.0. Hybrid and classic cannot share one device; the probe opens one per crate. After 0.2's bump (4492e5e) the worker and classic Vello share the single wgpu 30 in the spike's lock; only Hybrid pulls wgpu 29. `gx-vello-spike negotiate` runs the product's unchanged `gpu::negotiate()` (T0, 8192 here).
+
+**Ran:** `cargo build --release` in its own target dir (`agent/tmp/vello-spike/target`); `gx-vello-spike.exe` three times each on DX12/DXC, DX12/Auto (= FXC here) and Vulkan, RTX 3070 Ti, driver 591.59; `run.ps1 -Backend vulkan` end to end. Gate before commit: `npm run check` exit 0 (353 codegen, 40 Node / 403 Editor / 739 Rust, conformance 386/0/9); a first attempt failed at codegen:check with os error 1224 (a generated file mapped by another session's concurrent gate), not a code failure. Three workloads at 1920x1080 RGBA8 (lower-third, scorebug, full-screen radial panel with 50 dashed/joined strokes), 5 warmups + 30 samples, scene build + render + synchronous readback.
+
+**p50 ms (median of 3 runs), DX12-DXC / Vulkan:**
+- GPU only (no readback): classic 0.83/0.71, 3.24/4.06, 5.21/3.08; Hybrid 0.43/0.28, 0.96/0.73, 2.56/2.23 (lower-third, scorebug, full-panel).
+- With readback: every backend 4 to 9 ms; the 8 MB synchronous copy is about 4 to 5 ms of it.
+- `vello_cpu` (single thread) 2.4 to 7.8; tiny-skia 2.8 to 34; existing worker CPU 72 to 577 (no AA, gradients flattened, plain strokes; for scale only).
+- Init: classic DX12/FXC 4.3 to 4.6 s, DX12/DXC 0.3 to 0.7 s, Vulkan 40 to 56 ms; Hybrid under 0.7 s everywhere.
+- The machine was shared with another agent's builds and a live Editor: p99 is noisy, p50 only.
+
+**Pixels** (premultiplied, against `headless::CROSS_MACHINE_TOLERANCE`): Hybrid vs `vello_cpu` worst 1 code value everywhere (lower-third full frame PASS; scorebug 0.16% and full-panel 1.74% of pixels exceed the 0.1% share). Cross-family pairs fail by 49 to 197 at AA edges; gradients differ by exactly 1. Classic draws a notch where a dash crosses a miter join (worst 197); tiny-skia, `vello_cpu` and Hybrid agree there. Every backend is identical run to run; Hybrid is identical across DX12/Vulkan/FXC/DXC, classic shifts by up to 4 on 1,146 pixels between FXC and DXC.
+
+**Recommendation for 3.17:** Vello Hybrid with `vello_cpu` as its CPU reference, once Hybrid ships on the product's wgpu. Not classic (compiler-dependent output, dashed-join defect, no matching CPU reference, slow FXC start). lyon-on-GPU is not yet measured and 3.17 needs it.
+
+**Role of `vello_cpu`** (user question, 7 Nov): never Program (rule 28). It is the same-algorithm CPU reference that makes 3.17's GPU-vs-CPU match achievable (Hybrid vs `vello_cpu` worst 1; vs tiny-skia up to 78), gives CI, T2/T3 and headless renders (11.41) the same pixels as Program, is 25 to 85x faster than the worker's CPU path with AA, gradients, dashes, joins and caps, and isolates GPU defects. Limits: only useful with Hybrid; the pair must be pinned together (`vello_common` 0.2 vs 0.3 today); multithreaded mode not timed.
+
+**Blockers:** wgpu coupling (Hybrid on 29, product on 30; Vello's release pins become the product's pin); DXC (wgpu 30 `Auto` silently falls back to FXC; choose explicitly and ship `dxcompiler.dll`); Hybrid maturity (mask layers, some blend modes and filter graphs panic; 3.19 must pre-validate and refuse by name); text (Vello uses `skrifa` outlines, 3.13 uses `swash`; 3.18 must pick one, shaping stays cosmic-text over package-owned bytes). MSRV: none today.
+
+**3.17 still needs:** lyon-on-GPU on the same workloads; a GPU-vs-CPU threshold decision (the 0.1% cross-machine share is too tight for same-family AA); the chosen backend drawing real `SceneDocument`s with images and the colour pipeline. **16.9 still needs:** real broadcast content (reference scenes, Figma corpus, text, images), long runs with p99.9 on a quiet machine, pipelined readback, 4K, a second GPU vendor.
+
+---
+
 ## 2026-11-07 — 0.2: wgpu 26 → 30.0.1 in the render worker (Claude, wgpu side session)
 
 **0.2 stays done**, with its pin moved by the user's decision of 7 November ("start the wgpu bump and Vello spike now, queue rmcp"). Plan row 0.2 now says wgpu 30 (`GrapiX-Build-Plan.md`, `progress.html` PLAN and comment, `progress.json` comment). Dated notes were added under ADR-0001 C.2 and ADR-0003's current-worker table; the rows themselves record history and are unchanged.

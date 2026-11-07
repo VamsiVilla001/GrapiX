@@ -1,0 +1,31 @@
+# Isolated Vello / Vello Hybrid probe for build-plan 3.17 and 16.9.
+#
+# Its own workspace root on purpose: it is NOT a member of the GrapiX
+# product workspace, has its own lockfile, and nothing in the product depends
+# on it. It reads the render worker by path only to time the existing CPU
+# rasteriser on equivalent scenes through its public API; it never changes it.
+[workspace]
+
+[package]
+name = "gx-vello-spike"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.89"
+license = "LicenseRef-Proprietary"
+publish = false
+
+[dependencies]
+vello = "0.11"
+vello_hybrid = "0.2"
+vello_cpu = "0.3"
+tiny-skia = "0.12"
+# vello_hybrid 0.2.0 (latest) is built on wgpu 29, vello 0.11 on wgpu 30:
+# they cannot share one device, so each gets its own (see README).
+wgpu29 = { package = "wgpu", version = "29" }
+pollster = "0.4"
+gx-render-worker = { path = "../../services/render-engine/worker" }
+gx-contracts = { path = "../../Shared/contracts" }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
+[profile.release]
+debug = false
