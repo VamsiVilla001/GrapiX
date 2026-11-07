@@ -118,6 +118,33 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-07 — 11.19 done: the data binding panel, run live with save and reopen (Claude, mission 1)
+
+**Done — 11.19.** Its Needs, 11.18 and 8.6, are done (8.6 entry below). The panel and resolver were already built; the row stayed active only for its Needs and an unexercised save/reopen. No code changed in this entry.
+
+**Verified live:** `agent/tmp/bindings-1119/bindings.cjs`, real Tauri/WebView2 on CDP 9223, every `cmd_execute` recorded, the Editor process restarted between phases.
+- **Phase 1:** 6 of 6 passed.
+  1. **Schema:** with the rect selected, the panel lists every data field with its type and value: `live.y = number: 65`, `match.away.x = number: 900`, `match.home.name = string: "Rovers"`, `match.home.x = number: 240`.
+  2. **Create, change, undo:**
+     - binding x to `match.home.x` is one `setBinding`; the cell reads `match.home.x → 240`, the selection overlay moves to x=240, and the inspector keeps the authored 40;
+     - changing it to `live.y` moves the overlay to 65;
+     - undo and redo step between the two.
+  3. **Refused by name, nothing changes:**
+     - `match.referee.x` is refused: "absent from the scene data context";
+     - `match.home.name` on y is refused: "binding match.home.name for bar.y must be number" (`bindingTypeMismatch`);
+     - y stays "Not bound".
+  4. **Remove:** y bound to `match.away.x`, then removed; undo restores it.
+  5. **Sample data:**
+     - applying data without `live` reports "binding(s) no longer resolve" and lists "bar.x → live.y: live.y is absent from the scene data context"; the binding is kept;
+     - malformed JSON is refused with its position ("line 1, column 12") and only the valid replace was sent;
+     - `live.y` was restored afterwards.
+  6. **Saved:** the stored graphic has `bindings {x: "live.y", y: "match.away.x"}`, the authored x 40 and the sample data.
+- **Phase 2**, after killing and relaunching the Editor: both cells read `live.y → 65` and `match.away.x → 900`, the overlay is at 65, and the sample data still holds `live.y`.
+
+**Gate:** source is identical to `5e46841`, whose `npm run check` passed (exit 0, 714 Rust, 393 Editor, conformance 385/0/9). This commit is tracker and memory only.
+
+---
+
 ## 2026-11-07 — 8.6 done: bindings discoverable through the shipped Editor MCP (Claude, on the user's instruction)
 
 **Done — 8.6.** It was Codex's row; Codex had been idle since 19 Oct, and the user said: "finish 8.6 yourself and move on to 11.19". Progress was first judged with `jg` (jevgrep): the three reasons 8.6 was reopened (no test, no caller, no shipped server) were already closed by `bindings_surface.rs` and Codex's 19 Oct stdio entry point. What remained was a real gap and a test through the shipped binary.
