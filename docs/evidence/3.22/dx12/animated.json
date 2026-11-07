@@ -1,0 +1,281 @@
+{
+  "adapter": "NVIDIA GeForce RTX 3070 Ti (Dx12)",
+  "rows": [
+    {
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 727,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9253246,
+        "strict4_4": false,
+        "workingRelative": 2.7939677238464355e-7
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "result": {
+        "encodedExactly": true,
+        "frame": 10,
+        "pass": true,
+        "preview": {
+          "differing": 210,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9628850,
+        "strict4_4": false,
+        "workingRelative": 6.187048597894318e-7
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "result": {
+        "encodedExactly": true,
+        "frame": 19,
+        "pass": true,
+        "preview": {
+          "differing": 210,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9788572,
+        "strict4_4": false,
+        "workingRelative": 3.340634293635958e-7
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "result": {
+        "encodedExactly": true,
+        "frame": 20,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9635550,
+        "strict4_4": true,
+        "workingRelative": 5.532118052542501e-7
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "result": {
+        "encodedExactly": true,
+        "frame": 35,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 10319956,
+        "strict4_4": true,
+        "workingRelative": 3.3900550988619216e-7
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "result": {
+        "encodedExactly": true,
+        "frame": 50,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 11089497,
+        "strict4_4": true,
+        "workingRelative": 4.415959153902804e-7
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9647629,
+        "strict4_4": true,
+        "workingRelative": 8.887715097216642e-8
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "result": {
+        "encodedExactly": true,
+        "frame": 10,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 10073290,
+        "strict4_4": true,
+        "workingRelative": 1.1468916909507243e-6
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "result": {
+        "encodedExactly": true,
+        "frame": 19,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 10182111,
+        "strict4_4": true,
+        "workingRelative": 6.805329917369818e-7
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "result": {
+        "encodedExactly": true,
+        "frame": 20,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9983247,
+        "strict4_4": true,
+        "workingRelative": 3.653852616025688e-7
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "result": {
+        "encodedExactly": true,
+        "frame": 35,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 10673947,
+        "strict4_4": true,
+        "workingRelative": 4.297590407986718e-7
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "result": {
+        "encodedExactly": true,
+        "frame": 50,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 11501164,
+        "strict4_4": true,
+        "workingRelative": 8.124148394017539e-7
+      },
+      "workingSpace": "linear-srgb"
+    }
+  ]
+}

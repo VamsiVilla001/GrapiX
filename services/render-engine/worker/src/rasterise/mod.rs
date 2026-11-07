@@ -61,7 +61,10 @@ impl PreparedPaths {
             // 3.13: the object's effective opacity, already composed through
             // its ancestors, applies to every path it drew. Before this the
             // vector path ignored opacity and drew a 50% rectangle opaque.
-            let opacity = resolved.opacity as f32;
+            // 3.22: an object with effects is drawn at full opacity; its
+            // effects run on those pixels and its opacity applies after them
+            // (`prepared::compose`), as on the GPU.
+            let opacity = if object.base().effects().is_empty() { resolved.opacity as f32 } else { 1.0 };
             for path in &mut paths[first..] {
                 path.paint = path.paint.scaled(opacity);
             }
@@ -239,6 +242,21 @@ impl RasterSurface {
     pub(crate) fn composite(&mut self, x: u32, y: u32, source: WorkingRgba) {
         let index = (y as usize) * (self.width as usize) + (x as usize);
         self.pixels[index] = source.over(self.pixels[index]);
+    }
+
+    /// Pixels for an effect pass to rewrite in place (3.22).
+    pub(crate) fn pixels_mut(&mut self) -> &mut [WorkingRgba] {
+        &mut self.pixels
+    }
+
+    /// Scale every component by `k`: a layer's opacity, applied after its
+    /// effects (3.22).
+    pub(crate) fn scale(&mut self, k: f32) {
+        if k != 1.0 {
+            for px in &mut self.pixels {
+                *px = px.scaled(k);
+            }
+        }
     }
 
     /// Blend a same-sized layer onto this surface in `mode` (3.20), every

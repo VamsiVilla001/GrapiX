@@ -211,7 +211,7 @@ impl PreparedScene {
                 .document
                 .objects
                 .iter()
-                .any(|object| object.base().blend_mode == BlendMode::DancingDissolve)
+                .any(|object| object.base().blend_mode() == BlendMode::DancingDissolve)
     }
 
     /// A named phase prepared with this revision.
@@ -299,6 +299,9 @@ impl PreparedScene {
 /// every vector was drawn first, then every text, whatever the scene said.
 /// Meshes are refused at publish (`support.rs`), so there are none to draw.
 ///
+/// 3.22: an object with effects takes the same route; its effect stack runs
+/// on that layer (`crate::effects`, the CPU reference) before it is blended.
+///
 /// 3.20: an object in a blend mode other than `normal` is drawn alone onto a
 /// transparent layer the size of the canvas, and that layer is blended onto
 /// what is below it pixel by pixel through `crate::blend`, the CPU reference
@@ -321,8 +324,9 @@ fn compose(
     for index in PreparedScene::draw_order(document) {
         let object = &document.objects[index];
         let id = object.base().id.as_str();
-        let mode = object.base().blend_mode;
-        if mode != BlendMode::Normal {
+        let mode = object.base().blend_mode();
+        let effects = object.base().effects();
+        if mode != BlendMode::Normal || !effects.is_empty() {
             let shown = effective
                 .get(index)
                 .is_some_and(|resolved| resolved.visible && resolved.opacity > 0.0);
@@ -335,6 +339,23 @@ fn compose(
             }
             if matches!(object, SceneObject::Text(_)) {
                 crate::text::rasterise_text(texts, id, document, effective, &mut layer)?;
+            }
+            if !effects.is_empty() {
+                // 3.22: effects act on the layer's own pixels before its
+                // opacity, as After Effects orders them: the paths and glyphs
+                // of an object with effects are drawn at full opacity
+                // (`PreparedPaths::prepare`, `text`), and it applies here.
+                let opacity = effective[index].opacity as f32;
+                let chain: Vec<crate::effects::PackedEffect> = effects
+                    .iter()
+                    .map(|instance| {
+                        let mut packed = crate::effects::PackedEffect::identity();
+                        packed.pack(instance, document.working_color_space);
+                        packed
+                    })
+                    .collect();
+                crate::effects::apply_chain(&chain, layer.pixels_mut());
+                layer.scale(opacity);
             }
             surface.blend_layer(&layer, mode, crate::blend::dissolve_seed(id, mode, scene_frame));
             continue;

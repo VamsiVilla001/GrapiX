@@ -160,6 +160,44 @@ pub fn is_animatable(kind: &str, property: &str) -> bool {
     ANIMATABLE_OBJECT_KINDS.contains(&kind) && ANIMATABLE_PROPERTIES.contains(&property)
 }
 
+/// The domain of an effect parameter channel (3.22): `None` when `property`
+/// is not an `effects.<effectId>.<path>` address, `Some(None)` when it is one
+/// but names no effect or parameter on this object.
+pub fn effect_parameter_domain(
+    object: &crate::scene::SceneObject,
+    property: &str,
+) -> Option<Option<crate::effect::Domain>> {
+    let (effect_id, path) = crate::effect::split_effect_property(property)?;
+    if !property.starts_with(crate::effect::EFFECT_PROPERTY_PREFIX) {
+        return None;
+    }
+    Some(
+        object
+            .base()
+            .effects()
+            .iter()
+            .find(|instance| instance.effect_id == effect_id)
+            .and_then(|instance| instance.domain(path)),
+    )
+}
+
+/// Whether `property` is animatable on this object: a base property, or a
+/// parameter of one of its effects.
+pub fn is_animatable_on(object: &crate::scene::SceneObject, property: &str) -> bool {
+    let kind = object.kind();
+    is_animatable(kind, property)
+        || (ANIMATABLE_OBJECT_KINDS.contains(&kind)
+            && matches!(effect_parameter_domain(object, property), Some(Some(_))))
+}
+
+fn effect_domain_in(scene: &SceneDocument, object_id: &str, property: &str) -> Option<crate::effect::Domain> {
+    scene
+        .objects
+        .iter()
+        .find(|object| object.base().id == object_id)
+        .and_then(|object| effect_parameter_domain(object, property).flatten())
+}
+
 /// Refuse duplicate object ids before addressing an object by id.
 fn refuse_duplicate_object_ids(scene: &SceneDocument) -> Result<(), Refusal> {
     let mut seen = std::collections::BTreeSet::new();
@@ -191,8 +229,7 @@ fn channel_index(
     refuse_duplicate_object_ids(scene)?;
     let index = object_index(scene, object_id)?;
     let object = &scene.objects[index];
-    let kind = object.kind();
-    if !is_animatable(kind, property) {
+    if !is_animatable_on(object, property) {
         return Err(Refusal::AnimationPropertyUnsupported {
             object: object_id.to_owned(),
             property: property.to_owned(),
@@ -225,6 +262,24 @@ fn validate_key(
         });
     }
     validate_property_domain(object_id, property, key.frame, key.value)?;
+    if let Some(domain) = effect_domain_in(scene, object_id, property) {
+        if !domain.admits(key.value) {
+            return Err(Refusal::KeyframeValueOutOfDomain {
+                object: object_id.into(),
+                property: property.into(),
+                frame: key.frame,
+                value: key.value.to_string(),
+                allowed: domain.describe(),
+            });
+        }
+        if domain.is_discrete() && key.easing != SceneEasing::Hold {
+            return Err(Refusal::InvalidKeyframeEasing {
+                object: object_id.to_owned(),
+                property: property.to_owned(),
+                detail: "a switch or choice takes hold keys only".to_owned(),
+            });
+        }
+    }
     match (key.easing, key.bezier) {
         (SceneEasing::CustomBezier, None) => {
             return Err(Refusal::InvalidKeyframeEasing {
@@ -272,8 +327,10 @@ fn validate_property_domain(object: &str, property: &str, frame: u64, value: f64
 
 /// Exact extrema of the outgoing value curve, checked at edit/prepare time.
 /// Time controls are monotone, so its y extrema cover every sampled frame.
-fn validate_segments(object: &str, property: &str, keys: &[SceneKeyframe]) -> Result<(), Refusal> {
-    if !matches!(property, "opacity" | "width" | "height") { return Ok(()); }
+fn validate_segments(scene: &SceneDocument, object: &str, property: &str, keys: &[SceneKeyframe]) -> Result<(), Refusal> {
+    let effect = effect_domain_in(scene, object, property)
+        .filter(|domain| matches!(domain, crate::effect::Domain::Range { .. }));
+    if effect.is_none() && !matches!(property, "opacity" | "width" | "height") { return Ok(()); }
     for pair in keys.windows(2) {
         let (from, to) = (&pair[0], &pair[1]);
         if from.easing != SceneEasing::CustomBezier || from.value == to.value { continue; }
@@ -299,6 +356,17 @@ fn validate_segments(object: &str, property: &str, keys: &[SceneKeyframe]) -> Re
         for u in roots.into_iter().filter(|u| *u > 0.0 && *u < 1.0) {
             let value = from.value + (to.value - from.value) * bezier_axis(points.y1, points.y2, u);
             validate_property_domain(object, property, from.frame, value)?;
+            if let Some(domain) = effect {
+                if !domain.admits(value) {
+                    return Err(Refusal::KeyframeValueOutOfDomain {
+                        object: object.into(),
+                        property: property.into(),
+                        frame: from.frame,
+                        value: value.to_string(),
+                        allowed: domain.describe(),
+                    });
+                }
+            }
         }
     }
     Ok(())
@@ -313,7 +381,7 @@ pub fn validate_scene_animation(scene: &SceneDocument) -> Result<(), Refusal> {
     let mut channels = std::collections::BTreeSet::new();
     for channel in &scene.timeline.channels {
         let index = object_index(scene, &channel.object_id)?;
-        if !is_animatable(scene.objects[index].kind(), &channel.property) {
+        if !is_animatable_on(&scene.objects[index], &channel.property) {
             return Err(Refusal::AnimationPropertyUnsupported {
                 object: channel.object_id.clone(),
                 property: channel.property.clone(),
@@ -345,7 +413,7 @@ pub fn validate_scene_animation(scene: &SceneDocument) -> Result<(), Refusal> {
                 });
             }
         }
-        validate_segments(&channel.object_id, &channel.property, &channel.keys)?;
+        validate_segments(scene, &channel.object_id, &channel.property, &channel.keys)?;
     }
     Ok(())
 }
@@ -371,12 +439,32 @@ pub fn set_base_property(
     validate_property_domain(object_id, property, 0, value)?;
     refuse_duplicate_object_ids(scene)?;
     let index = object_index(scene, object_id)?;
-    let kind = scene.objects[index].kind();
-    if !is_animatable(kind, property) {
+    if !is_animatable_on(&scene.objects[index], property) {
         return Err(Refusal::AnimationPropertyUnsupported {
             object: object_id.to_owned(),
             property: property.to_owned(),
         });
+    }
+    // 3.22: an effect parameter, through the effect's typed table.
+    if let Some((effect_id, path)) = crate::effect::split_effect_property(property) {
+        let domain = effect_domain_in(scene, object_id, property)
+            .expect("is_animatable_on resolved the parameter");
+        if !domain.admits(value) {
+            return Err(Refusal::KeyframeValueOutOfDomain {
+                object: object_id.into(),
+                property: property.into(),
+                frame: 0,
+                value: value.to_string(),
+                allowed: domain.describe(),
+            });
+        }
+        let effects = scene.objects[index].base_mut().effects.get_or_insert_with(Vec::new);
+        let instance = effects
+            .iter_mut()
+            .find(|instance| instance.effect_id == effect_id)
+            .expect("is_animatable_on found the effect");
+        instance.set(path, value);
+        return Ok(());
     }
     let base = scene.objects[index].base_mut();
     match property {
@@ -569,7 +657,7 @@ pub fn set_keyframe(
                 keys.push(key);
                 keys.sort_by_key(|key| key.frame);
             }
-            validate_segments(object_id, property, &keys)?;
+            validate_segments(scene, object_id, property, &keys)?;
             scene.timeline.channels[index].keys = keys;
         }
         None => scene.timeline.channels.push(KeyframeChannel {
@@ -625,8 +713,8 @@ pub fn move_keyframe(
     let mut keys = channel.keys.clone();
     keys[key_index].frame = to_frame;
     keys.sort_by_key(|key| key.frame);
-    validate_segments(object_id, property, &keys)?;
-    channel.keys = keys;
+    validate_segments(scene, object_id, property, &keys)?;
+    scene.timeline.channels[index].keys = keys;
     Ok(())
 }
 
@@ -672,9 +760,10 @@ fn remove_keyframe_inner(
     let mut keys = channel.keys.clone();
     let removed = keys.remove(key_index);
     // Removing a middle key joins two formerly separate segments.
-    if validate_join { validate_segments(object_id, property, &keys)?; }
-    channel.keys = keys;
-    if channel.keys.is_empty() {
+    if validate_join { validate_segments(scene, object_id, property, &keys)?; }
+    let now_empty = keys.is_empty();
+    scene.timeline.channels[index].keys = keys;
+    if now_empty {
         scene.timeline.channels.remove(index);
     }
     Ok(removed)
@@ -1277,6 +1366,55 @@ mod tests {
             easing: SceneEasing::Linear,
             bezier: None,
         }
+    }
+
+    fn graded(id: &str) -> SceneObject {
+        use crate::effect::{Effect, EffectInstance, Levels, Tint};
+        let mut object = rect(id);
+        object.base_mut().effects = Some(vec![
+            EffectInstance::new("grade", Effect::Levels(Levels::default())),
+            EffectInstance::new("wash", Effect::Tint(Tint::default())),
+        ]);
+        object
+    }
+
+    #[test]
+    fn every_effect_parameter_is_keyframable_through_its_typed_table() {
+        // 3.22: effects.<effectId>.<path>, validated by each effect's own
+        // parameter table, and written back by set_base_property.
+        let mut scene = scene_with(vec![graded("plate")]);
+        let object = &scene.objects[0];
+        assert!(is_animatable_on(object, "effects.grade.rgb.gamma"));
+        assert!(is_animatable_on(object, "effects.wash.mapWhiteTo.g"));
+        assert!(is_animatable_on(object, "effects.grade.enabled"));
+        assert!(!is_animatable_on(object, "effects.grade.rgb.sparkle"));
+        assert!(!is_animatable_on(object, "effects.missing.amount"));
+        set_keyframe(&mut scene, "plate", "effects.grade.rgb.gamma", key(0, 1.0)).unwrap();
+        set_keyframe(&mut scene, "plate", "effects.grade.rgb.gamma", key(50, 2.2)).unwrap();
+        assert!(validate_scene_animation(&scene).is_ok());
+        let value = evaluate_channel(&scene.timeline.channels[0], 25).unwrap().unwrap();
+        set_base_property(&mut scene, "plate", "effects.grade.rgb.gamma", value).unwrap();
+        assert_eq!(scene.objects[0].base().effects()[0].value("rgb.gamma"), Some(value));
+
+        assert!(matches!(
+            set_keyframe(&mut scene, "plate", "effects.grade.rgb.gamma", key(60, 0.0)),
+            Err(Refusal::KeyframeValueOutOfDomain { allowed, .. }) if allowed == "0.01..=10"
+        ));
+        assert!(matches!(
+            set_keyframe(&mut scene, "plate", "effects.wash.amount", overshoot_key(0, 0.0))
+                .and_then(|_| set_keyframe(&mut scene, "plate", "effects.wash.amount", key(10, 1.0))),
+            Err(Refusal::KeyframeValueOutOfDomain { .. })
+        ), "a bezier that overshoots 0..=1 is refused at its extremum");
+        assert!(matches!(
+            set_keyframe(&mut scene, "plate", "effects.grade.clipToOutputWhite", key(0, 0.0)),
+            Err(Refusal::InvalidKeyframeEasing { detail, .. }) if detail.contains("hold")
+        ));
+        let hold = SceneKeyframe { easing: SceneEasing::Hold, ..key(0, 0.0) };
+        set_keyframe(&mut scene, "plate", "effects.grade.clipToOutputWhite", hold).unwrap();
+        assert!(matches!(
+            set_keyframe(&mut scene, "plate", "effects.grade.sparkle", key(0, 1.0)),
+            Err(Refusal::AnimationPropertyUnsupported { .. })
+        ));
     }
 
     fn overshoot_key(frame: u64, value: f64) -> SceneKeyframe {

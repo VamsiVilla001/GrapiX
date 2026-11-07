@@ -23,6 +23,8 @@ pub mod output;
 pub mod scene;
 #[cfg(test)]
 mod blend_tests;
+#[cfg(test)]
+pub(crate) mod effect_tests;
 
 /// An object's placement from local pixel coordinates into f64 stage space:
 /// x' = a*x + c*y + tx; y' = b*x + d*y + ty.
@@ -58,6 +60,9 @@ pub struct LayerInput {
     pub pixels: Vec<WorkingRgba>,
     pub working_space: WorkingColorSpace,
     pub blend_mode: BlendMode,
+    /// The layer's effect stack, packed (3.22). Its length is fixed at
+    /// prepare; a disabled effect is packed as an identity step.
+    pub effects: Vec<crate::effects::PackedEffect>,
     pub state: LayerState,
 }
 
@@ -114,6 +119,51 @@ struct Layer {
     document_path: String,
     mode: u32,
     view: wgpu::TextureView,
+    chain: Option<EffectChain>,
+}
+
+/// A layer's effect stack on the GPU, built at prepare (3.22): one step per
+/// effect, alternating between two layer-sized targets; the composite pass
+/// samples the last.
+struct EffectChain {
+    width: u32,
+    height: u32,
+    steps: Vec<EffectStep>,
+    _targets: [wgpu::Texture; 2],
+    output: wgpu::TextureView,
+}
+
+struct EffectStep {
+    uniform: wgpu::Buffer,
+    curve: wgpu::Buffer,
+    group: wgpu::BindGroup,
+}
+
+impl Layer {
+    /// What the composite pass samples: the effect chain's output, or the
+    /// source itself.
+    fn sampled(&self) -> &wgpu::TextureView {
+        self.chain.as_ref().map_or(&self.view, |chain| &chain.output)
+    }
+}
+
+/// 16 bytes of kind, then eight vec4s of parameters.
+const EFFECT_UNIFORM_BYTES: usize = 16 + crate::effects::PARAMS * 4;
+
+fn effect_uniform(effect: &crate::effects::PackedEffect) -> [u8; EFFECT_UNIFORM_BYTES] {
+    let mut bytes = [0; EFFECT_UNIFORM_BYTES];
+    bytes[..4].copy_from_slice(&effect.kind.to_le_bytes());
+    for (value, dest) in effect.params.iter().zip(bytes[16..].chunks_exact_mut(4)) {
+        dest.copy_from_slice(&value.to_le_bytes());
+    }
+    bytes
+}
+
+fn write_curve(bytes: &mut Vec<u8>, effect: &crate::effects::PackedEffect) {
+    bytes.clear();
+    for value in &effect.curve {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
 }
 
 struct TileResources {
@@ -155,6 +205,8 @@ pub struct PreparedCompositor {
     tiles: Vec<TileResources>,
     clear_pipeline: wgpu::ComputePipeline,
     composite_pipeline: wgpu::ComputePipeline,
+    effect_pipeline: Option<wgpu::ComputePipeline>,
+    curve_scratch: Vec<u8>,
     // Validate the entire frame before writing any GPU state. Reused scratch
     // keeps matrix construction out of the allocator on the frame path.
     uniform_scratch: Vec<[u8; UNIFORM_BYTES]>,
@@ -274,6 +326,24 @@ impl PreparedCompositor {
         };
         let clear_pipeline = pipeline("clear");
         let composite_pipeline = pipeline("composite");
+        // 3.22: one effect pipeline for every layer's steps, built only when
+        // some layer has effects.
+        let effect_pipeline = inputs.iter().any(|input| !input.effects.is_empty()).then(|| {
+            crate::render_work::gpu_build();
+            let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("gx-effects"),
+                source: wgpu::ShaderSource::Wgsl(effects_shader().into()),
+            });
+            crate::render_work::gpu_build();
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("effect_step"),
+                layout: None,
+                module: &module,
+                entry_point: Some("effect_step"),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        });
         let layers: Vec<Layer> = inputs
             .iter()
             .map(|input| {
@@ -300,11 +370,17 @@ impl PreparedCompositor {
                     texture.size(),
                 );
                 crate::render_work::gpu_build();
+                let view = texture.create_view(&Default::default());
+                let chain = effect_pipeline
+                    .as_ref()
+                    .filter(|_| !input.effects.is_empty())
+                    .map(|pipeline| effect_chain(device, pipeline, input, &view));
                 Layer {
                     object_id: input.object_id.clone(),
                     document_path: input.document_path.clone(),
                     mode: crate::blend::mode_index(input.blend_mode),
-                    view: texture.create_view(&Default::default()),
+                    view,
+                    chain,
                 }
             })
             .collect();
@@ -370,7 +446,7 @@ impl PreparedCompositor {
                 let groups = layers
                     .iter()
                     .enumerate()
-                    .map(|(i, layer)| group(&layer.view, i % 2, (i + 1) % 2, &uniforms[i]))
+                    .map(|(i, layer)| group(layer.sampled(), i % 2, (i + 1) % 2, &uniforms[i]))
                     .collect();
                 let padded_row = (r.width * 16).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
                     * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
@@ -401,6 +477,8 @@ impl PreparedCompositor {
             tiles,
             clear_pipeline,
             composite_pipeline,
+            effect_pipeline,
+            curve_scratch: Vec::with_capacity(crate::effects::CURVE_FLOATS * 4),
             uniform_scratch,
             submitted: false,
         })
@@ -413,6 +491,29 @@ impl PreparedCompositor {
         &mut self,
         states: &[LayerState],
     ) -> Result<CompositeSubmission, CompositorError> {
+        self.composite_with_effects(states, None)
+    }
+
+    /// Submit one frame with this frame's packed effect parameters (3.22):
+    /// one entry per layer, each as long as that layer's prepared chain.
+    /// `None` keeps the parameters last written.
+    pub fn composite_with_effects(
+        &mut self,
+        states: &[LayerState],
+        effects: Option<&[Vec<crate::effects::PackedEffect>]>,
+    ) -> Result<CompositeSubmission, CompositorError> {
+        if let Some(effects) = effects {
+            let lengths_match = effects.len() == self.layers.len()
+                && effects.iter().zip(&self.layers).all(|(packed, layer)| {
+                    packed.len() == layer.chain.as_ref().map_or(0, |chain| chain.steps.len())
+                });
+            if !lengths_match {
+                return Err(CompositorError::LayerCount {
+                    expected: self.layers.len(),
+                    actual: effects.len(),
+                });
+            }
+        }
         if states.len() != self.layers.len() {
             return Err(CompositorError::LayerCount {
                 expected: self.layers.len(),
@@ -438,11 +539,39 @@ impl PreparedCompositor {
                 );
             }
         }
+        if let Some(effects) = effects {
+            for (layer, packed) in self.layers.iter().zip(effects) {
+                let Some(chain) = &layer.chain else { continue };
+                for (step, effect) in chain.steps.iter().zip(packed) {
+                    self.queue.write_buffer(&step.uniform, 0, &effect_uniform(effect));
+                    if effect.kind == crate::effects::CURVES {
+                        write_curve(&mut self.curve_scratch, effect);
+                        self.queue.write_buffer(&step.curve, 0, &self.curve_scratch);
+                    }
+                }
+            }
+        }
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("gx-composite-frame"),
             });
+        let mut effect_dispatches = 0;
+        if let Some(pipeline) = &self.effect_pipeline {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("gx-effects"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(pipeline);
+            for chain in self.layers.iter().filter_map(|layer| layer.chain.as_ref()) {
+                for step in &chain.steps {
+                    pass.set_bind_group(0, &step.group, &[]);
+                    pass.dispatch_workgroups(chain.width.div_ceil(16), chain.height.div_ceil(16), 1);
+                    effect_dispatches += 1;
+                }
+            }
+        }
+        crate::render_work::gpu_effect_dispatch(effect_dispatches);
         for tile in &self.tiles {
             let bounds = tile.tile.render_bounds;
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -665,6 +794,74 @@ fn pack_uniform(geometry: &[f32; 12], key: [u32; 4]) -> [u8; UNIFORM_BYTES] {
 /// a Dissolve hash input, never a coordinate in float math (invariant 38).
 fn key(mode: u32, tile: Tile, state: LayerState) -> [u32; 4] {
     [mode, state.seed, tile.render_bounds.x, tile.render_bounds.y]
+}
+
+/// Build one layer's effect chain at prepare (3.22).
+fn effect_chain(
+    device: &wgpu::Device,
+    pipeline: &wgpu::ComputePipeline,
+    input: &LayerInput,
+    source: &wgpu::TextureView,
+) -> EffectChain {
+    let targets: [wgpu::Texture; 2] = std::array::from_fn(|_| {
+        float_texture(
+            device,
+            input.width,
+            input.height,
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING,
+        )
+    });
+    let views: [wgpu::TextureView; 2] = std::array::from_fn(|i| {
+        crate::render_work::gpu_build();
+        targets[i].create_view(&Default::default())
+    });
+    let layout = pipeline.get_bind_group_layout(0);
+    let mut curve_bytes = Vec::new();
+    let steps: Vec<EffectStep> = input
+        .effects
+        .iter()
+        .enumerate()
+        .map(|(i, effect)| {
+            crate::render_work::gpu_build();
+            let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("gx-effect-params"),
+                contents: &effect_uniform(effect),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+            write_curve(&mut curve_bytes, effect);
+            crate::render_work::gpu_build();
+            let curve = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("gx-effect-curve"),
+                contents: &curve_bytes,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            });
+            let src = if i == 0 { source } else { &views[(i - 1) % 2] };
+            crate::render_work::gpu_build();
+            let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("gx-effect-step"),
+                layout: &layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(src) },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&views[i % 2]) },
+                    wgpu::BindGroupEntry { binding: 2, resource: uniform.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 3, resource: curve.as_entire_binding() },
+                ],
+            });
+            EffectStep { uniform, curve, group }
+        })
+        .collect();
+    crate::render_work::gpu_build();
+    let output = targets[(steps.len() - 1) % 2].create_view(&Default::default());
+    EffectChain { width: input.width, height: input.height, steps, _targets: targets, output }
+}
+
+/// The effect shader: generated mode constants and the blend guards, then the
+/// pointwise kernels (3.22).
+pub(crate) fn effects_shader() -> String {
+    let mut source = crate::blend::wgsl_mode_constants();
+    source.push_str(include_str!("blend.wgsl"));
+    source.push_str(include_str!("effects.wgsl"));
+    source
 }
 
 /// The compositor shader: generated mode constants, the blend functions, the

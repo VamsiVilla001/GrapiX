@@ -25,6 +25,7 @@
 pub mod blend;
 pub mod clock;
 pub mod colour_pipeline;
+pub mod effects;
 pub mod compositor;
 pub mod emission;
 pub mod engine;

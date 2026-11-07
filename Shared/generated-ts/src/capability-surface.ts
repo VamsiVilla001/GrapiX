@@ -318,6 +318,7 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
     "sceneHierarchyInvalid",
     "objectKindNotDrawable",
     "scenePropertyNotDrawable",
+    "effectInvalid",
     "assetBatchEmpty",
     "assetKindNotAddable",
     "assetFormatUnrecognised",

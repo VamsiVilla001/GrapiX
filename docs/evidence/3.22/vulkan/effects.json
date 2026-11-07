@@ -1,0 +1,726 @@
+{
+  "adapter": "NVIDIA GeForce RTX 3070 Ti (Vulkan)",
+  "rows": [
+    {
+      "effect": "fill",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9076057,
+        "strict4_4": true,
+        "workingRelative": 1.1861622084552437e-7
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "fill-alpha",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9586361,
+        "strict4_4": true,
+        "workingRelative": 1.083720917449682e-7
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "tint",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9274388,
+        "strict4_4": true,
+        "workingRelative": 1.5065759839671955e-7
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "levels",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9638636,
+        "strict4_4": true,
+        "workingRelative": 1.3062431492016913e-7
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "levels-unclipped",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9722401,
+        "strict4_4": true,
+        "workingRelative": 1.882042255374472e-7
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "curves",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9614346,
+        "strict4_4": true,
+        "workingRelative": 1.710442631974729e-7
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "hue-saturation",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 8792457,
+        "strict4_4": true,
+        "workingRelative": 7.163286568356853e-7
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "hue-saturation-down",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 10255101,
+        "strict4_4": true,
+        "workingRelative": 2.0694862712389295e-7
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "colorize",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 306,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 10065996,
+        "strict4_4": false,
+        "workingRelative": 2.1913479031354655e-7
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "brightness-contrast",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9566475,
+        "strict4_4": true,
+        "workingRelative": 3.3870887250486703e-7
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "brightness-contrast-low",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 8739557,
+        "strict4_4": true,
+        "workingRelative": 2.2746527861272625e-7
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "brightness-contrast-legacy",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 10741814,
+        "strict4_4": true,
+        "workingRelative": 1.1296808111183054e-7
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "exposure",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 10572084,
+        "strict4_4": true,
+        "workingRelative": 9.19681042432785e-6
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "exposure-down",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 7898875,
+        "strict4_4": true,
+        "workingRelative": 4.82719485717098e-7
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "chain",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 10706902,
+        "strict4_4": true,
+        "workingRelative": 6.011464392940979e-7
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "fill",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9625577,
+        "strict4_4": true,
+        "workingRelative": 1.5191403690550942e-7
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "fill-alpha",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 10226062,
+        "strict4_4": true,
+        "workingRelative": 1.1147556477908438e-7
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "tint",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9598749,
+        "strict4_4": true,
+        "workingRelative": 1.2651167935473495e-7
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "levels",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9963947,
+        "strict4_4": true,
+        "workingRelative": 5.41056749625568e-7
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "levels-unclipped",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 10003581,
+        "strict4_4": true,
+        "workingRelative": 5.41056749625568e-7
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "curves",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 10167086,
+        "strict4_4": true,
+        "workingRelative": 1.105708875570599e-7
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "hue-saturation",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9475336,
+        "strict4_4": true,
+        "workingRelative": 3.2917928365350235e-6
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "hue-saturation-down",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 11041747,
+        "strict4_4": true,
+        "workingRelative": 2.800824177029426e-7
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "colorize",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 10758912,
+        "strict4_4": true,
+        "workingRelative": 1.7037753252679977e-7
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "brightness-contrast",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9641207,
+        "strict4_4": true,
+        "workingRelative": 7.768730938551016e-7
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "brightness-contrast-low",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9459376,
+        "strict4_4": true,
+        "workingRelative": 4.7657422896918433e-7
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "brightness-contrast-legacy",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 10174259,
+        "strict4_4": true,
+        "workingRelative": 3.029049935321382e-7
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "exposure",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 10945779,
+        "strict4_4": true,
+        "workingRelative": 4.308089387450309e-7
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "exposure-down",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 8236431,
+        "strict4_4": true,
+        "workingRelative": 3.675802986435883e-7
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "chain",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 11167772,
+        "strict4_4": true,
+        "workingRelative": 8.525094017386436e-7
+      },
+      "workingSpace": "linear-srgb"
+    }
+  ],
+  "threshold": "4.4 tie-aware: max 1 code value; at most 0.1% of pixels differing other than proven tie flips (GPU bytes = CPU encode of GPU floats, floats within 1e-4 of the reference); strict4_4 recorded alongside"
+}

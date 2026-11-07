@@ -133,7 +133,8 @@ fn rasterise_selected(
             }
         };
 
-        let opacity = resolved.opacity as f32;
+        // 3.22: with effects, opacity applies after them (`prepared::compose`).
+        let opacity = if text.base.effects().is_empty() { resolved.opacity as f32 } else { 1.0 };
         if opacity <= 0.0 {
             continue;
         }

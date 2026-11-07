@@ -75,5 +75,13 @@ canvas because the stencil and silhouette modes change the backdrop outside
 the object. A layer at zero opacity does nothing in any mode. Gates and
 evidence: `compositor::blend_tests`, `engine::blend_tests`, `docs/evidence/3.20/`.
 
+**3.22 effects:** an object's effect stack (`gx_contracts::effect`) runs on
+the layer's own pixels before its opacity. Each effect is packed per frame
+into a fixed f32 block (`src/effects.rs`); the CPU reference and the GPU
+kernel (`src/compositor/effects.wgsl`) read the same block. The GPU chain is
+built at prepare (one step per effect, two ping-pong targets) and runs one
+dispatch per effect per frame. The pointwise effects are drawn; the spatial
+ones refuse by name. Evidence: `docs/evidence/3.22/`.
+
 EffectCraft component provenance and its retained licence are in
 `THIRD_PARTY_NOTICES.md` and `EFFECTCRAFT-LICENSE`.

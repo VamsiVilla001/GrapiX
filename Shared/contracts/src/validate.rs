@@ -119,6 +119,14 @@ pub fn validate_scene_document(
     // document is self-describing (1.1), so an id that does not resolve here
     // will never resolve later — there is no ambient registry to consult.
     for (index, object) in document.objects.iter().enumerate() {
+        // 3.22: a malformed effect stack refuses by object and effect.
+        if let Err(refusal) = crate::effect::validate_effects(&object.base().id, object.base().effects()) {
+            let given = match &refusal {
+                Refusal::EffectInvalid { effect_id, .. } => serde_json::json!(effect_id),
+                _ => serde_json::Value::Null,
+            };
+            found.push(StructuredRefusal::error(refusal).at(format!("objects[{index}].effects"), given));
+        }
         match object {
             SceneObject::Text(text) => {
                 if document.font(&text.font_id).is_none() {

@@ -2,6 +2,7 @@
 import type { BlendMode } from "./BlendMode";
 import type { CameraKind } from "./CameraKind";
 import type { ColorValue } from "./ColorValue";
+import type { EffectInstance } from "./EffectInstance";
 import type { JsonValue } from "./serde_json/JsonValue";
 import type { MaterialBinding } from "./MaterialBinding";
 import type { Vec2 } from "./Vec2";
@@ -80,7 +81,14 @@ materialSlots?: { [key in string]?: MaterialBinding },
 /**
  * How this layer composites onto what is drawn below it (3.20): the
  * layer blend mode of Photoshop, After Effects and Figma, from the same
- * vocabulary materials use (1.3). Omitted from the wire when `normal`,
- * so a scene that uses no blend mode serialises as it did before.
+ * vocabulary materials use (1.3). Absent means `normal`, so a scene that
+ * uses no blend mode serialises as it did before; an explicit `normal`
+ * round-trips as written. Read it through [`ObjectBase::blend_mode`].
  */
-blendMode?: BlendMode, };
+blendMode?: BlendMode,
+/**
+ * The layer's effect stack (3.22), applied in order to its own pixels
+ * before it is transformed and blended. Read it through
+ * [`ObjectBase::effects`]; absent and empty both mean none.
+ */
+effects?: Array<EffectInstance>, };

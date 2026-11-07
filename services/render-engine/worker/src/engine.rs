@@ -1039,6 +1039,8 @@ mod gpu_tests;
 mod output_tests;
 #[cfg(test)]
 mod blend_tests;
+#[cfg(test)]
+mod effect_tests;
 
 #[cfg(test)]
 mod tests {

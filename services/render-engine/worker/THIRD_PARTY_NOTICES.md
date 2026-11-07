@@ -26,3 +26,19 @@ bit-pattern coverage, flush and bound guards that keep NaN and infinity out
 of every layer (EffectCraft's DX12 32-bit runs emitted NaN), the
 overflow-safe order in colour clipping, the per-object Dissolve seed, the
 zero-opacity skip, and the stencil clamp of luminance to [0, 1].
+
+## Effects (3.22)
+
+`src/effects.rs` (the CPU reference) and `src/compositor/effects.wgsl` (its
+GPU twin) port the Fill, Tint, Levels, Curves (Fritsch–Carlson), Hue/
+Saturation, Brightness & Contrast and Exposure formulas and the HSL
+conversions from EffectCraft's `crates/effects/src/color_fx.rs` and
+`crates/color/src/lib.rs`, pinned at `9a7d3e76991d5372448033b473dc12c2480a6a04`.
+
+Copyright (c) 2026 ArtCraft Team and the EffectCraft contributors.
+Used under the MIT licence retained in `EFFECTCRAFT-LICENSE`.
+EffectCraft's string-keyed registry and per-frame allocation were not ported.
+GrapiX's own: the typed contract, the packed parameter block both renderers
+read, the prepared per-layer effect chain, coverage tests on bit patterns,
+transparent pixels never gaining coverage, exact identity settings, Exposure
+in linear light in either working space, and effects before opacity.

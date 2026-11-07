@@ -368,6 +368,63 @@
         }
       ]
     },
+    "BlurDimensions": {
+      "description": "Which axes a blur or glow spreads along.",
+      "enum": [
+        "horizontal-and-vertical",
+        "horizontal",
+        "vertical"
+      ],
+      "type": "string"
+    },
+    "BoxBlur": {
+      "properties": {
+        "dimensions": {
+          "$ref": "#/$defs/BlurDimensions",
+          "default": "horizontal-and-vertical"
+        },
+        "iterations": {
+          "default": 1.0,
+          "description": "1–50, rounded.",
+          "format": "double",
+          "type": "number"
+        },
+        "radius": {
+          "default": 0.0,
+          "description": "Pixels, 0–1000.",
+          "format": "double",
+          "type": "number"
+        },
+        "repeatEdgePixels": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "BrightnessContrast": {
+      "description": "Brightness & Contrast.",
+      "properties": {
+        "brightness": {
+          "default": 0.0,
+          "description": "-1.5–1.5.",
+          "format": "double",
+          "type": "number"
+        },
+        "contrast": {
+          "default": 0.0,
+          "description": "-1–1.",
+          "format": "double",
+          "type": "number"
+        },
+        "useLegacy": {
+          "default": false,
+          "description": "After Effects' legacy linear formula, which clips; otherwise tone\ncurves that keep black and white fixed.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "BrushBlendMode": {
       "enum": [
         "normal",
@@ -440,11 +497,28 @@
           ]
         },
         "blendMode": {
-          "$ref": "#/$defs/BlendMode",
-          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BlendMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Absent means `normal`, so a scene that\nuses no blend mode serialises as it did before; an explicit `normal`\nround-trips as written. Read it through [`ObjectBase::blend_mode`]."
         },
         "cameraKind": {
           "$ref": "#/$defs/CameraKind"
+        },
+        "effects": {
+          "description": "The layer's effect stack (3.22), applied in order to its own pixels\nbefore it is transformed and blended. Read it through\n[`ObjectBase::effects`]; absent and empty both mean none.",
+          "items": {
+            "$ref": "#/$defs/EffectInstance"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "far": {
           "format": "double",
@@ -950,6 +1024,110 @@
       ],
       "type": "string"
     },
+    "CurvePoint": {
+      "description": "A control point of a tone curve, both coordinates 0–1.",
+      "properties": {
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "y": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "type": "object"
+    },
+    "Curves": {
+      "description": "Curves: each channel is a monotone cubic through its points (at least\ntwo), extended linearly beyond the end points. Colour channels go through\nthe RGB curve first, then their own.",
+      "properties": {
+        "alpha": {
+          "default": [
+            {
+              "x": 0.0,
+              "y": 0.0
+            },
+            {
+              "x": 1.0,
+              "y": 1.0
+            }
+          ],
+          "items": {
+            "$ref": "#/$defs/CurvePoint"
+          },
+          "type": "array"
+        },
+        "blue": {
+          "default": [
+            {
+              "x": 0.0,
+              "y": 0.0
+            },
+            {
+              "x": 1.0,
+              "y": 1.0
+            }
+          ],
+          "items": {
+            "$ref": "#/$defs/CurvePoint"
+          },
+          "type": "array"
+        },
+        "green": {
+          "default": [
+            {
+              "x": 0.0,
+              "y": 0.0
+            },
+            {
+              "x": 1.0,
+              "y": 1.0
+            }
+          ],
+          "items": {
+            "$ref": "#/$defs/CurvePoint"
+          },
+          "type": "array"
+        },
+        "red": {
+          "default": [
+            {
+              "x": 0.0,
+              "y": 0.0
+            },
+            {
+              "x": 1.0,
+              "y": 1.0
+            }
+          ],
+          "items": {
+            "$ref": "#/$defs/CurvePoint"
+          },
+          "type": "array"
+        },
+        "rgb": {
+          "default": [
+            {
+              "x": 0.0,
+              "y": 0.0
+            },
+            {
+              "x": 1.0,
+              "y": 1.0
+            }
+          ],
+          "items": {
+            "$ref": "#/$defs/CurvePoint"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "DepthMode": {
       "enum": [
         "disabled",
@@ -957,6 +1135,312 @@
         "read-write"
       ],
       "type": "string"
+    },
+    "DirectionalBlur": {
+      "properties": {
+        "direction": {
+          "default": 0.0,
+          "description": "Degrees.",
+          "format": "double",
+          "type": "number"
+        },
+        "length": {
+          "default": 0.0,
+          "description": "Pixels, 0–1000.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "DropShadow": {
+      "properties": {
+        "color": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.0,
+            "g": 0.0,
+            "r": 0.0,
+            "space": "srgb"
+          }
+        },
+        "direction": {
+          "default": 135.0,
+          "description": "Degrees, clockwise from up.",
+          "format": "double",
+          "type": "number"
+        },
+        "distance": {
+          "default": 5.0,
+          "description": "Pixels, 0–1000.",
+          "format": "double",
+          "type": "number"
+        },
+        "opacity": {
+          "default": 0.5,
+          "description": "0–1.",
+          "format": "double",
+          "type": "number"
+        },
+        "shadowOnly": {
+          "default": false,
+          "type": "boolean"
+        },
+        "softness": {
+          "default": 0.0,
+          "description": "Pixels, 0–1000.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "EffectInstance": {
+      "description": "One entry in an object's effect stack.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Fill",
+          "properties": {
+            "effect": {
+              "const": "fill",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/Tint",
+          "properties": {
+            "effect": {
+              "const": "tint",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/Levels",
+          "properties": {
+            "effect": {
+              "const": "levels",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/Curves",
+          "properties": {
+            "effect": {
+              "const": "curves",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/HueSaturation",
+          "properties": {
+            "effect": {
+              "const": "hue-saturation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/BrightnessContrast",
+          "properties": {
+            "effect": {
+              "const": "brightness-contrast",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/Exposure",
+          "properties": {
+            "effect": {
+              "const": "exposure",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/GaussianBlur",
+          "properties": {
+            "effect": {
+              "const": "gaussian-blur",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/BoxBlur",
+          "properties": {
+            "effect": {
+              "const": "box-blur",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/DirectionalBlur",
+          "properties": {
+            "effect": {
+              "const": "directional-blur",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/Glow",
+          "properties": {
+            "effect": {
+              "const": "glow",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/DropShadow",
+          "properties": {
+            "effect": {
+              "const": "drop-shadow",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/GradientRamp",
+          "properties": {
+            "effect": {
+              "const": "gradient-ramp",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/LinearWipe",
+          "properties": {
+            "effect": {
+              "const": "linear-wipe",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/RadialWipe",
+          "properties": {
+            "effect": {
+              "const": "radial-wipe",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/IrisWipe",
+          "properties": {
+            "effect": {
+              "const": "iris-wipe",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "effectId": {
+          "description": "Stable within the object: keyframe channels address the effect by it,\nso reordering the stack keeps every channel valid.",
+          "type": "string"
+        },
+        "enabled": {
+          "default": true,
+          "description": "A disabled effect is skipped entirely. Keyframable with hold keys.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "effectId"
+      ],
+      "type": "object"
+    },
+    "EffectPoint": {
+      "description": "A point in the layer's own pixels.",
+      "properties": {
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "y": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "type": "object"
     },
     "EllipseObject": {
       "description": "An ellipse inscribed in the base box. It carries no fields of its own —\nthe box is the ellipse, and the fill and stroke are the base's.",
@@ -981,8 +1465,25 @@
           ]
         },
         "blendMode": {
-          "$ref": "#/$defs/BlendMode",
-          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BlendMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Absent means `normal`, so a scene that\nuses no blend mode serialises as it did before; an explicit `normal`\nround-trips as written. Read it through [`ObjectBase::blend_mode`]."
+        },
+        "effects": {
+          "description": "The layer's effect stack (3.22), applied in order to its own pixels\nbefore it is transformed and blended. Read it through\n[`ObjectBase::effects`]; absent and empty both mean none.",
+          "items": {
+            "$ref": "#/$defs/EffectInstance"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "fill": {
           "anyOf": [
@@ -1136,6 +1637,52 @@
           "type": "string"
         }
       ]
+    },
+    "Exposure": {
+      "description": "Exposure, in linear light whatever the working space.",
+      "properties": {
+        "exposure": {
+          "default": 0.0,
+          "description": "Stops, -20–20.",
+          "format": "double",
+          "type": "number"
+        },
+        "gammaCorrection": {
+          "default": 1.0,
+          "description": "0.01–10.",
+          "format": "double",
+          "type": "number"
+        },
+        "offset": {
+          "default": 0.0,
+          "description": "-1–1, added after the gain.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "Fill": {
+      "description": "Paints the layer's pixels with a colour, keeping their coverage.",
+      "properties": {
+        "color": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.0,
+            "g": 0.0,
+            "r": 1.0,
+            "space": "srgb"
+          }
+        },
+        "opacity": {
+          "default": 1.0,
+          "description": "0–1: how much of the colour replaces the layer's own.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
     },
     "FillRule": {
       "enum": [
@@ -1464,6 +2011,52 @@
       ],
       "type": "string"
     },
+    "GaussianBlur": {
+      "properties": {
+        "blurriness": {
+          "default": 0.0,
+          "description": "Pixels, 0–1000.",
+          "format": "double",
+          "type": "number"
+        },
+        "dimensions": {
+          "$ref": "#/$defs/BlurDimensions",
+          "default": "horizontal-and-vertical"
+        },
+        "repeatEdgePixels": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "Glow": {
+      "properties": {
+        "dimensions": {
+          "$ref": "#/$defs/BlurDimensions",
+          "default": "horizontal-and-vertical"
+        },
+        "intensity": {
+          "default": 1.0,
+          "description": "0–10.",
+          "format": "double",
+          "type": "number"
+        },
+        "radius": {
+          "default": 10.0,
+          "description": "Pixels, 0–1000.",
+          "format": "double",
+          "type": "number"
+        },
+        "threshold": {
+          "default": 0.6,
+          "description": "0–1.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
     "GradientCoordinateMode": {
       "description": "Whether a gradient's coordinates are the object's or the scene's. An\nobject-space gradient follows its object; a scene-space one stays put\nwhile the object moves through it.",
       "enum": [
@@ -1471,6 +2064,55 @@
         "scene"
       ],
       "type": "string"
+    },
+    "GradientRamp": {
+      "properties": {
+        "blendWithOriginal": {
+          "default": 0.0,
+          "description": "0–1.",
+          "format": "double",
+          "type": "number"
+        },
+        "end": {
+          "$ref": "#/$defs/EffectPoint",
+          "default": {
+            "x": 0.0,
+            "y": 100.0
+          }
+        },
+        "endColor": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 1.0,
+            "g": 1.0,
+            "r": 1.0,
+            "space": "srgb"
+          }
+        },
+        "shape": {
+          "$ref": "#/$defs/RampShape",
+          "default": "linear"
+        },
+        "start": {
+          "$ref": "#/$defs/EffectPoint",
+          "default": {
+            "x": 0.0,
+            "y": 0.0
+          }
+        },
+        "startColor": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.0,
+            "g": 0.0,
+            "r": 0.0,
+            "space": "srgb"
+          }
+        }
+      },
+      "type": "object"
     },
     "GradientSpread": {
       "description": "What a gradient does outside its 0–1 span. CSS's own names.",
@@ -1522,8 +2164,15 @@
           ]
         },
         "blendMode": {
-          "$ref": "#/$defs/BlendMode",
-          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BlendMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Absent means `normal`, so a scene that\nuses no blend mode serialises as it did before; an explicit `normal`\nround-trips as written. Read it through [`ObjectBase::blend_mode`]."
         },
         "childIds": {
           "default": [],
@@ -1531,6 +2180,16 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "effects": {
+          "description": "The layer's effect stack (3.22), applied in order to its own pixels\nbefore it is transformed and blended. Read it through\n[`ObjectBase::effects`]; absent and empty both mean none.",
+          "items": {
+            "$ref": "#/$defs/EffectInstance"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "fill": {
           "anyOf": [
@@ -1665,6 +2324,52 @@
       ],
       "type": "object"
     },
+    "HueSaturation": {
+      "description": "Hue/Saturation, master controls and Colorize.",
+      "properties": {
+        "colorize": {
+          "default": false,
+          "type": "boolean"
+        },
+        "colorizeHue": {
+          "default": 0.0,
+          "description": "Degrees.",
+          "format": "double",
+          "type": "number"
+        },
+        "colorizeLightness": {
+          "default": 0.0,
+          "description": "-1–1.",
+          "format": "double",
+          "type": "number"
+        },
+        "colorizeSaturation": {
+          "default": 0.25,
+          "description": "0–1.",
+          "format": "double",
+          "type": "number"
+        },
+        "hue": {
+          "default": 0.0,
+          "description": "Degrees.",
+          "format": "double",
+          "type": "number"
+        },
+        "lightness": {
+          "default": 0.0,
+          "description": "-1–1.",
+          "format": "double",
+          "type": "number"
+        },
+        "saturation": {
+          "default": 0.0,
+          "description": "-1–1.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
     "ImageObject": {
       "description": "An image drawn into the base box. The asset is referenced by id into the\nscene's asset library — the stable address, so a replace-in-place keeps\nthis binding (1.7). How the pixels fit the box is 1.3's fit enum.",
       "properties": {
@@ -1692,8 +2397,25 @@
           ]
         },
         "blendMode": {
-          "$ref": "#/$defs/BlendMode",
-          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BlendMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Absent means `normal`, so a scene that\nuses no blend mode serialises as it did before; an explicit `normal`\nround-trips as written. Read it through [`ObjectBase::blend_mode`]."
+        },
+        "effects": {
+          "description": "The layer's effect stack (3.22), applied in order to its own pixels\nbefore it is transformed and blended. Read it through\n[`ObjectBase::effects`]; absent and empty both mean none.",
+          "items": {
+            "$ref": "#/$defs/EffectInstance"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "fill": {
           "anyOf": [
@@ -1834,6 +2556,52 @@
       ],
       "type": "object"
     },
+    "IrisWipe": {
+      "properties": {
+        "center": {
+          "$ref": "#/$defs/EffectPoint",
+          "default": {
+            "x": 0.0,
+            "y": 0.0
+          }
+        },
+        "feather": {
+          "default": 0.0,
+          "description": "Pixels, 0–1000.",
+          "format": "double",
+          "type": "number"
+        },
+        "innerRadius": {
+          "default": 0.0,
+          "description": "Pixels, 0–10000.",
+          "format": "double",
+          "type": "number"
+        },
+        "outerRadius": {
+          "default": 0.0,
+          "description": "Pixels, 0–10000.",
+          "format": "double",
+          "type": "number"
+        },
+        "points": {
+          "default": 6.0,
+          "description": "6–32, rounded.",
+          "format": "double",
+          "type": "number"
+        },
+        "rotation": {
+          "default": 0.0,
+          "description": "Degrees.",
+          "format": "double",
+          "type": "number"
+        },
+        "useInnerRadius": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "KeyframeChannel": {
       "description": "One animatable property on one object.",
       "properties": {
@@ -1890,8 +2658,15 @@
           ]
         },
         "blendMode": {
-          "$ref": "#/$defs/BlendMode",
-          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BlendMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Absent means `normal`, so a scene that\nuses no blend mode serialises as it did before; an explicit `normal`\nround-trips as written. Read it through [`ObjectBase::blend_mode`]."
         },
         "childIds": {
           "default": [],
@@ -1899,6 +2674,16 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "effects": {
+          "description": "The layer's effect stack (3.22), applied in order to its own pixels\nbefore it is transformed and blended. Read it through\n[`ObjectBase::effects`]; absent and empty both mean none.",
+          "items": {
+            "$ref": "#/$defs/EffectInstance"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "fill": {
           "anyOf": [
@@ -2037,6 +2822,103 @@
       ],
       "type": "object"
     },
+    "Levels": {
+      "description": "Levels: the RGB controls map every colour channel, then each channel's\nown; the alpha controls map coverage where the layer drew.",
+      "properties": {
+        "alpha": {
+          "$ref": "#/$defs/LevelsChannel",
+          "default": {
+            "gamma": 1.0,
+            "inputBlack": 0.0,
+            "inputWhite": 1.0,
+            "outputBlack": 0.0,
+            "outputWhite": 1.0
+          }
+        },
+        "blue": {
+          "$ref": "#/$defs/LevelsChannel",
+          "default": {
+            "gamma": 1.0,
+            "inputBlack": 0.0,
+            "inputWhite": 1.0,
+            "outputBlack": 0.0,
+            "outputWhite": 1.0
+          }
+        },
+        "clipToOutputBlack": {
+          "default": true,
+          "description": "Clip values below input black / above input white.",
+          "type": "boolean"
+        },
+        "clipToOutputWhite": {
+          "default": true,
+          "type": "boolean"
+        },
+        "green": {
+          "$ref": "#/$defs/LevelsChannel",
+          "default": {
+            "gamma": 1.0,
+            "inputBlack": 0.0,
+            "inputWhite": 1.0,
+            "outputBlack": 0.0,
+            "outputWhite": 1.0
+          }
+        },
+        "red": {
+          "$ref": "#/$defs/LevelsChannel",
+          "default": {
+            "gamma": 1.0,
+            "inputBlack": 0.0,
+            "inputWhite": 1.0,
+            "outputBlack": 0.0,
+            "outputWhite": 1.0
+          }
+        },
+        "rgb": {
+          "$ref": "#/$defs/LevelsChannel",
+          "default": {
+            "gamma": 1.0,
+            "inputBlack": 0.0,
+            "inputWhite": 1.0,
+            "outputBlack": 0.0,
+            "outputWhite": 1.0
+          }
+        }
+      },
+      "type": "object"
+    },
+    "LevelsChannel": {
+      "description": "One channel's levels, in 0–1 units.",
+      "properties": {
+        "gamma": {
+          "default": 1.0,
+          "description": "0.01–10; 1 is linear.",
+          "format": "double",
+          "type": "number"
+        },
+        "inputBlack": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "inputWhite": {
+          "default": 1.0,
+          "format": "double",
+          "type": "number"
+        },
+        "outputBlack": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "outputWhite": {
+          "default": 1.0,
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
     "LicenseClass": {
       "description": "The terms an asset may be used under, as a class a show profile can test\n(13.8) rather than free licence text.",
       "oneOf": [
@@ -2108,8 +2990,15 @@
           ]
         },
         "blendMode": {
-          "$ref": "#/$defs/BlendMode",
-          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BlendMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Absent means `normal`, so a scene that\nuses no blend mode serialises as it did before; an explicit `normal`\nround-trips as written. Read it through [`ObjectBase::blend_mode`]."
         },
         "castShadow": {
           "default": false,
@@ -2132,6 +3021,16 @@
           "format": "double",
           "type": [
             "number",
+            "null"
+          ]
+        },
+        "effects": {
+          "description": "The layer's effect stack (3.22), applied in order to its own pixels\nbefore it is transformed and blended. Read it through\n[`ObjectBase::effects`]; absent and empty both mean none.",
+          "items": {
+            "$ref": "#/$defs/EffectInstance"
+          },
+          "type": [
+            "array",
             "null"
           ]
         },
@@ -2327,8 +3226,25 @@
           ]
         },
         "blendMode": {
-          "$ref": "#/$defs/BlendMode",
-          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BlendMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Absent means `normal`, so a scene that\nuses no blend mode serialises as it did before; an explicit `normal`\nround-trips as written. Read it through [`ObjectBase::blend_mode`]."
+        },
+        "effects": {
+          "description": "The layer's effect stack (3.22), applied in order to its own pixels\nbefore it is transformed and blended. Read it through\n[`ObjectBase::effects`]; absent and empty both mean none.",
+          "items": {
+            "$ref": "#/$defs/EffectInstance"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "fill": {
           "anyOf": [
@@ -2470,6 +3386,29 @@
       ],
       "type": "object"
     },
+    "LinearWipe": {
+      "properties": {
+        "angle": {
+          "default": 90.0,
+          "description": "Degrees.",
+          "format": "double",
+          "type": "number"
+        },
+        "completion": {
+          "default": 0.0,
+          "description": "0–1.",
+          "format": "double",
+          "type": "number"
+        },
+        "feather": {
+          "default": 0.0,
+          "description": "Pixels, 0–1000.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
     "MarkerKind": {
       "enum": [
         "event"
@@ -2499,8 +3438,25 @@
           ]
         },
         "blendMode": {
-          "$ref": "#/$defs/BlendMode",
-          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BlendMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Absent means `normal`, so a scene that\nuses no blend mode serialises as it did before; an explicit `normal`\nround-trips as written. Read it through [`ObjectBase::blend_mode`]."
+        },
+        "effects": {
+          "description": "The layer's effect stack (3.22), applied in order to its own pixels\nbefore it is transformed and blended. Read it through\n[`ObjectBase::effects`]; absent and empty both mean none.",
+          "items": {
+            "$ref": "#/$defs/EffectInstance"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "eventName": {
           "type": "string"
@@ -2843,8 +3799,15 @@
           ]
         },
         "blendMode": {
-          "$ref": "#/$defs/BlendMode",
-          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BlendMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Absent means `normal`, so a scene that\nuses no blend mode serialises as it did before; an explicit `normal`\nround-trips as written. Read it through [`ObjectBase::blend_mode`]."
         },
         "clipIndex": {
           "format": "uint32",
@@ -2865,6 +3828,16 @@
           "description": "Extrusion depth in scene units.",
           "format": "double",
           "type": "number"
+        },
+        "effects": {
+          "description": "The layer's effect stack (3.22), applied in order to its own pixels\nbefore it is transformed and blended. Read it through\n[`ObjectBase::effects`]; absent and empty both mean none.",
+          "items": {
+            "$ref": "#/$defs/EffectInstance"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "fill": {
           "anyOf": [
@@ -3098,8 +4071,25 @@
           ]
         },
         "blendMode": {
-          "$ref": "#/$defs/BlendMode",
-          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BlendMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Absent means `normal`, so a scene that\nuses no blend mode serialises as it did before; an explicit `normal`\nround-trips as written. Read it through [`ObjectBase::blend_mode`]."
+        },
+        "effects": {
+          "description": "The layer's effect stack (3.22), applied in order to its own pixels\nbefore it is transformed and blended. Read it through\n[`ObjectBase::effects`]; absent and empty both mean none.",
+          "items": {
+            "$ref": "#/$defs/EffectInstance"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "fill": {
           "anyOf": [
@@ -3360,6 +4350,47 @@
       ],
       "type": "object"
     },
+    "RadialWipe": {
+      "properties": {
+        "center": {
+          "$ref": "#/$defs/EffectPoint",
+          "default": {
+            "x": 0.0,
+            "y": 0.0
+          }
+        },
+        "completion": {
+          "default": 0.0,
+          "description": "0–1.",
+          "format": "double",
+          "type": "number"
+        },
+        "direction": {
+          "$ref": "#/$defs/WipeDirection",
+          "default": "clockwise"
+        },
+        "feather": {
+          "default": 0.0,
+          "description": "Pixels, 0–1000.",
+          "format": "double",
+          "type": "number"
+        },
+        "startAngle": {
+          "default": 0.0,
+          "description": "Degrees.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "RampShape": {
+      "enum": [
+        "linear",
+        "radial"
+      ],
+      "type": "string"
+    },
     "RationalRate": {
       "description": "A frame rate as an exact rational. Never a float (invariant 12).\n\n29.97 is 30000/1001 and cannot be represented in binary floating point.\nAccumulating a rounded rate across an 8-hour soak drifts the clock, so this\ntype deliberately offers no `f64` constructor.",
       "properties": {
@@ -3403,8 +4434,25 @@
           ]
         },
         "blendMode": {
-          "$ref": "#/$defs/BlendMode",
-          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BlendMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Absent means `normal`, so a scene that\nuses no blend mode serialises as it did before; an explicit `normal`\nround-trips as written. Read it through [`ObjectBase::blend_mode`]."
+        },
+        "effects": {
+          "description": "The layer's effect stack (3.22), applied in order to its own pixels\nbefore it is transformed and blended. Read it through\n[`ObjectBase::effects`]; absent and empty both mean none.",
+          "items": {
+            "$ref": "#/$defs/EffectInstance"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "fill": {
           "anyOf": [
@@ -3996,13 +5044,30 @@
           ]
         },
         "blendMode": {
-          "$ref": "#/$defs/BlendMode",
-          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BlendMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Absent means `normal`, so a scene that\nuses no blend mode serialises as it did before; an explicit `normal`\nround-trips as written. Read it through [`ObjectBase::blend_mode`]."
         },
         "compoundPaths": {
           "description": "Additional subpaths for compound paths; `path` remains primary.",
           "items": {
             "$ref": "#/$defs/BezierPath"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "effects": {
+          "description": "The layer's effect stack (3.22), applied in order to its own pixels\nbefore it is transformed and blended. Read it through\n[`ObjectBase::effects`]; absent and empty both mean none.",
+          "items": {
+            "$ref": "#/$defs/EffectInstance"
           },
           "type": [
             "array",
@@ -4388,8 +5453,15 @@
           ]
         },
         "blendMode": {
-          "$ref": "#/$defs/BlendMode",
-          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BlendMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Absent means `normal`, so a scene that\nuses no blend mode serialises as it did before; an explicit `normal`\nround-trips as written. Read it through [`ObjectBase::blend_mode`]."
         },
         "decoration": {
           "$ref": "#/$defs/TextDecoration",
@@ -4401,6 +5473,16 @@
         "direction": {
           "$ref": "#/$defs/TextDirection",
           "default": "auto"
+        },
+        "effects": {
+          "description": "The layer's effect stack (3.22), applied in order to its own pixels\nbefore it is transformed and blended. Read it through\n[`ObjectBase::effects`]; absent and empty both mean none.",
+          "items": {
+            "$ref": "#/$defs/EffectInstance"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "fill": {
           "anyOf": [
@@ -4735,6 +5817,38 @@
       ],
       "type": "object"
     },
+    "Tint": {
+      "description": "Maps luminance to a colour ramp between two colours.",
+      "properties": {
+        "amount": {
+          "default": 1.0,
+          "description": "0–1.",
+          "format": "double",
+          "type": "number"
+        },
+        "mapBlackTo": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 0.0,
+            "g": 0.0,
+            "r": 0.0,
+            "space": "srgb"
+          }
+        },
+        "mapWhiteTo": {
+          "$ref": "#/$defs/Rgba",
+          "default": {
+            "a": 1.0,
+            "b": 1.0,
+            "g": 1.0,
+            "r": 1.0,
+            "space": "srgb"
+          }
+        }
+      },
+      "type": "object"
+    },
     "TokenRef": {
       "description": "A token reference in a preset: `{duration.base}`, `{easing.brand-in}`.\n\nA preset that hardcodes a value instead of referencing a token is a bug for\nthe same reason a component hardcoding a hex colour is (G.6.1). Kept as a\nstring with a checked shape rather than a free string, so a malformed\nreference is caught at parse, not at render.",
       "type": "string"
@@ -4785,6 +5899,14 @@
         "top",
         "middle",
         "bottom"
+      ],
+      "type": "string"
+    },
+    "WipeDirection": {
+      "enum": [
+        "clockwise",
+        "counterclockwise",
+        "both"
       ],
       "type": "string"
     },

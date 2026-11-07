@@ -19,6 +19,7 @@ pub mod color;
 mod container_paint;
 pub mod design_system;
 pub mod drawability;
+pub mod effect;
 pub mod enforce;
 pub mod font;
 pub mod import;
@@ -862,6 +863,10 @@ pub enum Refusal {
     /// the engine cannot draw yet (3.13). Ignoring it would draw a different
     /// graphic from the one authored. `owner` is the step that will draw it.
     ScenePropertyNotDrawable { object: String, property: String, owner: String },
+    /// An entry in an object's effect stack is malformed (3.22): an empty,
+    /// dotted or repeated `effectId`, a parameter outside its domain, or a
+    /// curve with fewer than two points. Drawing it would mean guessing.
+    EffectInvalid { object: String, effect_id: String, detail: String },
     /// A project's settings file exists but is not a settings document this
     /// build reads. Reading it as if absent would compose every scene in the
     /// wrong space.
@@ -1456,6 +1461,9 @@ impl std::fmt::Display for Refusal {
                 f,
                 "{object}: {property} cannot be drawn by this engine yet (build-plan step {owner} draws it)"
             ),
+            Refusal::EffectInvalid { object, effect_id, detail } => {
+                write!(f, "{object}: effect {effect_id} is invalid: {detail}")
+            }
             Refusal::AssetBatchEmpty => f.write_str("asset add carries no assets"),
             Refusal::AssetKindNotAddable { asset_id, kind } => write!(
                 f,
@@ -1944,6 +1952,7 @@ impl Refusal {
             Self::SceneHierarchyInvalid { parent: "audit".into(), child: "audit".into(), problem: "cycle".into() },
             Self::ObjectKindNotDrawable { object: "audit".into(), kind: "image".into(), owner: "3.17".into() },
             Self::ScenePropertyNotDrawable { object: "audit".into(), property: "decoration".into(), owner: "3.18".into() },
+            Self::EffectInvalid { object: "audit".into(), effect_id: "audit".into(), detail: "audit".into() },
             Self::AssetBatchEmpty,
             Self::AssetKindNotAddable { asset_id: "audit".into(), kind: crate::scene::AssetKind::Font },
             Self::AssetFormatUnrecognised { file: "audit".into() },
@@ -2112,6 +2121,7 @@ impl Refusal {
             Self::SceneHierarchyInvalid { .. } => "sceneHierarchyInvalid",
             Self::ObjectKindNotDrawable { .. } => "objectKindNotDrawable",
             Self::ScenePropertyNotDrawable { .. } => "scenePropertyNotDrawable",
+            Self::EffectInvalid { .. } => "effectInvalid",
             Self::AssetBatchEmpty => "assetBatchEmpty",
             Self::AssetKindNotAddable { .. } => "assetKindNotAddable",
             Self::AssetFormatUnrecognised { .. } => "assetFormatUnrecognised",

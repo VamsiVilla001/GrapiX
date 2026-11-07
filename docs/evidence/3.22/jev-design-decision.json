@@ -1,0 +1,59 @@
+{
+  "model": "jev-1.14.0",
+  "answers": {
+    "placement": {
+      "type": "choice",
+      "choice": "object_stack",
+      "confidence": 0.97,
+      "probabilities": {
+        "object_stack": 0.98,
+        "adjustment_layers_only": 0.01,
+        "both_now": 0.01
+      }
+    },
+    "typing": {
+      "type": "choice",
+      "choice": "tagged_enum_inline",
+      "confidence": 0.92,
+      "probabilities": {
+        "tagged_enum_inline": 0.95,
+        "kind_plus_params_enum": 0.05,
+        "registry_table": 0
+      }
+    },
+    "keyframe_addressing": {
+      "type": "choice",
+      "choice": "stable_id_path",
+      "confidence": 0.56,
+      "probabilities": {
+        "stable_id_path": 0.71,
+        "index_path": 0,
+        "typed_channel_target": 0.29
+      }
+    },
+    "gpu_memory": {
+      "type": "choice",
+      "choice": "prepare_max_extent",
+      "confidence": 1,
+      "probabilities": {
+        "prepare_max_extent": 1,
+        "fixed_cap": 0,
+        "pool_per_frame": 0
+      }
+    },
+    "first_increment": {
+      "type": "choice",
+      "choice": "contract_and_pointwise",
+      "confidence": 0.96,
+      "probabilities": {
+        "contract_and_pointwise": 0.97,
+        "contract_and_blurs": 0.03,
+        "everything_at_once": 0
+      }
+    },
+    "port_kernels_not_design": {
+      "type": "noul",
+      "noul": 0.96
+    }
+  }
+}

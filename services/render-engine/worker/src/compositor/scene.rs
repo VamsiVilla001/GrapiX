@@ -56,6 +56,10 @@ pub struct GpuScene {
     channels: Vec<KeyframeChannel>,
     layers: Vec<MappedLayer>,
     states: Vec<LayerState>,
+    // 3.22: each layer's effect stack, re-packed in place every frame from
+    // the evaluated scene (no per-frame allocation).
+    effects: Vec<Vec<crate::effects::PackedEffect>>,
+    space: gx_contracts::color::WorkingColorSpace,
     sources: Vec<SourceTrace>,
     clear_frame: Arc<Frame>,
 }
@@ -157,7 +161,17 @@ impl GpuScene {
                 crate::text::rasterise_text(scene.texts(), &id, &local, &effective, &mut surface)?;
             }
             let origin = [origin[0] - phase[0], origin[1] - phase[1]];
-            let blend_mode = object.base().blend_mode;
+            let blend_mode = object.base().blend_mode();
+            let effects: Vec<crate::effects::PackedEffect> = object
+                .base()
+                .effects()
+                .iter()
+                .map(|instance| {
+                    let mut packed = crate::effects::PackedEffect::identity();
+                    packed.pack(instance, doc.working_color_space);
+                    packed
+                })
+                .collect();
             let mut state = layer_state(object.base().anchor, resolved, origin);
             state.seed = frame_seed(&id, blend_mode, 0);
             inputs.push(LayerInput {
@@ -168,6 +182,7 @@ impl GpuScene {
                 pixels: surface.pixels().to_vec(),
                 working_space: doc.working_color_space,
                 blend_mode,
+                effects,
                 state,
             });
             sources.push(SourceTrace {
@@ -195,6 +210,7 @@ impl GpuScene {
             .map_err(compositor_refusal)?;
         let ring = compositor.output_ring().map_err(compositor_refusal)?;
         let states = inputs.iter().map(|input| input.state).collect();
+        let effects = inputs.iter().map(|input| input.effects.clone()).collect();
         let clear_frame = Arc::new(Frame {
             width: doc.canvas.width,
             height: doc.canvas.height,
@@ -207,6 +223,8 @@ impl GpuScene {
             channels: doc.timeline.channels.clone(),
             layers,
             states,
+            effects,
+            space: doc.working_color_space,
             sources,
             clear_frame,
         })
@@ -246,8 +264,14 @@ impl GpuScene {
             );
             state.seed = frame_seed(&layer.object_id, layer.blend_mode, scene_frame);
         }
+        for (packed, layer) in self.effects.iter_mut().zip(&self.layers) {
+            let instances = self.evaluated.objects[layer.object_index].base().effects();
+            for (slot, instance) in packed.iter_mut().zip(instances) {
+                slot.pack(instance, self.space);
+            }
+        }
         self.compositor
-            .composite(&self.states)
+            .composite_with_effects(&self.states, Some(&self.effects))
             .map_err(compositor_refusal)?;
         Ok(self.ring.submit(tag))
     }

@@ -96,6 +96,14 @@ describe("layer blend modes (3.20)", () => {
     mustBuild({ ...rect2d("normal", 0), blendMode: "normal" } as unknown as SceneObject);
     mustBuild(rect2d("omitted", 0));
   });
+
+  it("names an effect stack instead of drawing the layer without it (3.22)", () => {
+    const unsupported: string[] = [];
+    const graded = { ...rect2d("plate", 0), effects: [{ effectId: "g", enabled: true, effect: "levels" }] } as unknown as SceneObject;
+    expect(buildViewportObject(graded, HD, unsupported)).toBeNull();
+    expect(unsupported).toEqual(["plate: effects (levels) await the engine-rendered viewport (13.5)"]);
+    mustBuild({ ...rect2d("bare", 0), effects: [] } as unknown as SceneObject);
+  });
 });
 
 describe("2D and 3D share one depth-tested scene", () => {

@@ -13,6 +13,8 @@ pub struct RenderWork {
     pub gpu_layer_dispatches: u64,
     /// 3.21 output-encode dispatches (one per tile per frame).
     pub gpu_output_dispatches: u64,
+    /// 3.22 effect-step dispatches (one per effect per layer per frame).
+    pub gpu_effect_dispatches: u64,
 }
 
 thread_local! { static WORK: Cell<RenderWork> = Cell::new(RenderWork::default()); }
@@ -30,6 +32,7 @@ impl RenderWork {
             gpu_resource_builds: self.gpu_resource_builds - before.gpu_resource_builds,
             gpu_layer_dispatches: self.gpu_layer_dispatches - before.gpu_layer_dispatches,
             gpu_output_dispatches: self.gpu_output_dispatches - before.gpu_output_dispatches,
+            gpu_effect_dispatches: self.gpu_effect_dispatches - before.gpu_effect_dispatches,
         }
     }
 }
@@ -55,6 +58,9 @@ pub(crate) fn gpu_dispatch(count: usize) {
 }
 pub(crate) fn gpu_output_dispatch(count: usize) {
     record(|w| w.gpu_output_dispatches += count as u64);
+}
+pub(crate) fn gpu_effect_dispatch(count: usize) {
+    record(|w| w.gpu_effect_dispatches += count as u64);
 }
 
 #[derive(Debug, Clone, Serialize)]

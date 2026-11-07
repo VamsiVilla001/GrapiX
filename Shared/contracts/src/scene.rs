@@ -266,11 +266,18 @@ pub struct ObjectBase {
     pub material_slots: Option<BTreeMap<String, MaterialBinding>>,
     /// How this layer composites onto what is drawn below it (3.20): the
     /// layer blend mode of Photoshop, After Effects and Figma, from the same
-    /// vocabulary materials use (1.3). Omitted from the wire when `normal`,
-    /// so a scene that uses no blend mode serialises as it did before.
-    #[serde(default, skip_serializing_if = "BlendMode::is_normal")]
-    #[ts(as = "Option<BlendMode>", optional)]
-    pub blend_mode: BlendMode,
+    /// vocabulary materials use (1.3). Absent means `normal`, so a scene that
+    /// uses no blend mode serialises as it did before; an explicit `normal`
+    /// round-trips as written. Read it through [`ObjectBase::blend_mode`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub blend_mode: Option<BlendMode>,
+    /// The layer's effect stack (3.22), applied in order to its own pixels
+    /// before it is transformed and blended. Read it through
+    /// [`ObjectBase::effects`]; absent and empty both mean none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub effects: Option<Vec<crate::effect::EffectInstance>>,
 }
 
 fn default_true() -> bool {
@@ -284,6 +291,16 @@ fn default_scale() -> f64 {
 }
 
 impl ObjectBase {
+    /// The layer's effect stack, in order; empty when the document gives none.
+    pub fn effects(&self) -> &[crate::effect::EffectInstance] {
+        self.effects.as_deref().unwrap_or(&[])
+    }
+
+    /// The layer blend mode; `normal` when the document gives none.
+    pub fn blend_mode(&self) -> BlendMode {
+        self.blend_mode.unwrap_or_default()
+    }
+
     /// A base with identity transform, an empty box, visible and unlocked.
     /// The common case for building an object; every field is then set by
     /// name.
@@ -313,7 +330,8 @@ impl ObjectBase {
             stroke_width: 0.0,
             bindings: None,
             material_slots: None,
-            blend_mode: BlendMode::Normal,
+            blend_mode: None,
+            effects: None,
         }
     }
 }
@@ -1746,6 +1764,25 @@ mod parse_tests {
         let base = document.objects[0].base();
         assert!(base.visible, "an omitted `visible` defaults to true");
         assert_eq!(base.scale_x, 1.0);
+    }
+
+    #[test]
+    fn a_layer_blend_mode_round_trips_whether_omitted_or_explicitly_normal() {
+        // 3.20 shipped blendMode omitted-when-normal on a non-optional field,
+        // so an explicit "normal" fell out of the re-serialised document and
+        // was refused as an unknown field.
+        for (fragment, expected) in [
+            ("", crate::material::BlendMode::Normal),
+            (r#","blendMode":"normal""#, crate::material::BlendMode::Normal),
+            (r#","blendMode":"overlay""#, crate::material::BlendMode::Overlay),
+        ] {
+            let json = authored(&format!(r#"{{"type":"rect","id":"bg","name":"bg"{fragment}}}"#), "");
+            let document = parse_scene_document(json.as_bytes())
+                .unwrap_or_else(|refusal| panic!("{fragment:?} must parse: {refusal:?}"));
+            assert_eq!(document.objects[0].base().blend_mode(), expected);
+            let wire = serde_json::to_value(&document).unwrap();
+            assert_eq!(wire["objects"][0].get("blendMode").is_some(), !fragment.is_empty());
+        }
     }
 
     #[test]

@@ -277,6 +277,12 @@ export function buildViewportObject(
     unsupported.push(`${object.id}: blend mode ${object.blendMode} awaits the engine-rendered viewport (13.5)`);
     return null;
   }
+  // 3.22: effects run in the engine; drawing the layer without them would
+  // show a different graphic.
+  if (object.effects !== undefined && object.effects.length > 0) {
+    unsupported.push(`${object.id}: effects (${object.effects.map((e) => e.effect).join(", ")}) await the engine-rendered viewport (13.5)`);
+    return null;
+  }
 
   let mesh: THREE.Mesh;
   switch (object.type) {

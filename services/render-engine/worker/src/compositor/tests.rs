@@ -15,6 +15,7 @@ fn layer(id: &str, colour: Rgba, space: WorkingColorSpace, width: u32, height: u
         pixels: vec![WorkingRgba::from_source(colour, space); (width * height) as usize],
         working_space: space,
         blend_mode: BlendMode::Normal,
+        effects: Vec::new(),
         state: LayerState::default(),
     }
 }

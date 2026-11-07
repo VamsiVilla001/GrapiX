@@ -1341,6 +1341,14 @@ fn drive_material_refusals(report: &mut Report) {
     let found = gx_contracts::validate::validate_scene_document(&trimmed, &draws_everything, &Default::default(), false);
     report.record(PLANE, "ShapeTrimInvalid is produced for a trim value outside 0-100", expect(found.iter().any(|refusal| matches!(&refusal.code, Refusal::ShapeTrimInvalid { object, field, .. } if object == "trimmed" && field == "trimStart")), format!("an out-of-range trim was not refused as ShapeTrimInvalid: {found:?}")));
 
+    // 3.22: a malformed effect stack refuses by object and effect.
+    let mut doubled = gx_contracts::command::witness::fixture_scene();
+    let tint = gx_contracts::effect::EffectInstance::new("wash", gx_contracts::effect::Effect::Tint(Default::default()));
+    doubled.objects[0].base_mut().effects = Some(vec![tint.clone(), tint]);
+    let doubled_id = doubled.objects[0].base().id.clone();
+    let found = gx_contracts::validate::validate_scene_document(&doubled, &draws_everything, &Default::default(), false);
+    report.record(PLANE, "EffectInvalid is produced for an effect id used twice on one object", expect(found.iter().any(|refusal| matches!(&refusal.code, Refusal::EffectInvalid { object, effect_id, .. } if *object == doubled_id && effect_id == "wash")), format!("a repeated effectId was not refused as EffectInvalid: {found:?}")));
+
     // 3.13: a hierarchy the resolver had to repair refuses at validation.
     let mut orphaned = gx_contracts::command::witness::fixture_scene();
     orphaned.objects.push(gx_contracts::scene::SceneObject::Group(gx_contracts::scene::GroupObject {
@@ -1680,6 +1688,7 @@ fn is_driven(variant: &str) -> bool {
             | "SceneHierarchyInvalid"
             | "ObjectKindNotDrawable"
             | "ScenePropertyNotDrawable"
+            | "EffectInvalid"
             | "AssetBatchEmpty"
             | "AssetKindNotAddable"
             | "AssetFormatUnrecognised"
