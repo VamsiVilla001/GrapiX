@@ -1037,6 +1037,8 @@ impl ReadbackReport {
 mod gpu_tests;
 #[cfg(test)]
 mod output_tests;
+#[cfg(test)]
+mod blend_tests;
 
 #[cfg(test)]
 mod tests {

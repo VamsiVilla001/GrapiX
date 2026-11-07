@@ -261,25 +261,109 @@
       "type": "object"
     },
     "BlendMode": {
-      "description": "Every blend mode the authoring vocabulary contains, supported or not.\n\nCarried across from 1.x `MATERIAL_BLEND_MODES` unchanged, because a scene\nauthored there must mean the same thing here.",
+      "description": "Every blend mode the authoring vocabulary contains, supported or not.\n\nThe first ten are 1.x's `MATERIAL_BLEND_MODES`, unchanged in name and\norder, because a scene authored there must mean the same thing here. 3.20\nappends the rest of the Photoshop and After Effects Layer > Blending Mode\nmenus, so every mode a PSD, an After Effects project or a Figma file names\nhas exactly one variant and never a nearest neighbour. Together they are\nthe 27 Photoshop modes and the After Effects ones; the formulas are\nEffectCraft's (`crates/color/src/blend.rs` at 9a7d3e7, MIT OR Apache-2.0),\nported with attribution in the render worker.\n\nTwo pairs share a formula and stay separate because the source menus name\nthem separately: `add` (After Effects) and `linear-dodge` (Photoshop's\n\"Linear Dodge (Add)\"); `difference` and `classic-difference` differ only in\nhow layer opacity applies. `alpha-mask` and `inverse-alpha-mask` are After\nEffects' Stencil Alpha and Silhouette Alpha under their 1.x names.",
       "oneOf": [
         {
           "enum": [
             "normal",
-            "add",
             "multiply",
             "screen",
             "darken",
             "lighten",
-            "subtract",
-            "alpha-mask",
-            "inverse-alpha-mask"
+            "color-burn",
+            "linear-burn",
+            "darker-color",
+            "color-dodge",
+            "lighter-color",
+            "soft-light",
+            "hard-light",
+            "linear-light",
+            "vivid-light",
+            "pin-light",
+            "hard-mix",
+            "difference",
+            "exclusion",
+            "divide",
+            "hue",
+            "saturation",
+            "color",
+            "luminosity"
           ],
+          "type": "string"
+        },
+        {
+          "const": "add",
+          "description": "After Effects Add: `b + s`, over-range kept.",
           "type": "string"
         },
         {
           "const": "overlay",
           "description": "The recorded live fault: 1.x's browser renderer had no `overlay`, so\nit drew `screen` instead and nobody was told. It is in the vocabulary\nbecause authors use it; it is not fixed-function, so an engine without\na shader compositing path must refuse it (invariant 18).",
+          "type": "string"
+        },
+        {
+          "const": "subtract",
+          "description": "`max(b - s, 0)`.",
+          "type": "string"
+        },
+        {
+          "const": "alpha-mask",
+          "description": "After Effects Stencil Alpha: the backdrop is kept where this layer is\nopaque, everywhere on the stage.",
+          "type": "string"
+        },
+        {
+          "const": "inverse-alpha-mask",
+          "description": "After Effects Silhouette Alpha: the backdrop is cut out where this\nlayer is opaque, everywhere on the stage.",
+          "type": "string"
+        },
+        {
+          "const": "dissolve",
+          "description": "Photoshop and After Effects Dissolve: each pixel shows the layer or\nthe backdrop by a fixed per-pixel threshold against the layer's alpha.",
+          "type": "string"
+        },
+        {
+          "const": "dancing-dissolve",
+          "description": "After Effects Dancing Dissolve: Dissolve with a new pattern each frame.",
+          "type": "string"
+        },
+        {
+          "const": "classic-color-burn",
+          "description": "After Effects Classic Color Burn: opacity fades the layer toward white\nbefore the formula applies; negative results are kept.",
+          "type": "string"
+        },
+        {
+          "const": "classic-color-dodge",
+          "description": "After Effects Classic Color Dodge: opacity fades the layer toward\nblack before the formula applies.",
+          "type": "string"
+        },
+        {
+          "const": "linear-dodge",
+          "description": "Photoshop Linear Dodge (Add): the same formula as `add`.",
+          "type": "string"
+        },
+        {
+          "const": "classic-difference",
+          "description": "After Effects Classic Difference: opacity fades the layer toward black\nbefore the formula applies.",
+          "type": "string"
+        },
+        {
+          "const": "stencil-luma",
+          "description": "After Effects Stencil Luma: the backdrop is scaled by this layer's\nluminance, everywhere on the stage.",
+          "type": "string"
+        },
+        {
+          "const": "silhouette-luma",
+          "description": "After Effects Silhouette Luma: the backdrop is scaled by one minus\nthis layer's luminance, everywhere on the stage.",
+          "type": "string"
+        },
+        {
+          "const": "alpha-add",
+          "description": "After Effects Alpha Add: source-over colour, alpha `min(sa + da, 1)`.",
+          "type": "string"
+        },
+        {
+          "const": "luminescent-premul",
+          "description": "After Effects Luminescent Premul: source-over colour without the\nlayer's own alpha clipping its over-range values.",
           "type": "string"
         }
       ]
@@ -354,6 +438,10 @@
             "object",
             "null"
           ]
+        },
+        "blendMode": {
+          "$ref": "#/$defs/BlendMode",
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
         },
         "cameraKind": {
           "$ref": "#/$defs/CameraKind"
@@ -892,6 +980,10 @@
             "null"
           ]
         },
+        "blendMode": {
+          "$ref": "#/$defs/BlendMode",
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
+        },
         "fill": {
           "anyOf": [
             {
@@ -1429,6 +1521,10 @@
             "null"
           ]
         },
+        "blendMode": {
+          "$ref": "#/$defs/BlendMode",
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
+        },
         "childIds": {
           "default": [],
           "items": {
@@ -1594,6 +1690,10 @@
             "object",
             "null"
           ]
+        },
+        "blendMode": {
+          "$ref": "#/$defs/BlendMode",
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
         },
         "fill": {
           "anyOf": [
@@ -1788,6 +1888,10 @@
             "object",
             "null"
           ]
+        },
+        "blendMode": {
+          "$ref": "#/$defs/BlendMode",
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
         },
         "childIds": {
           "default": [],
@@ -2002,6 +2106,10 @@
             "object",
             "null"
           ]
+        },
+        "blendMode": {
+          "$ref": "#/$defs/BlendMode",
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
         },
         "castShadow": {
           "default": false,
@@ -2218,6 +2326,10 @@
             "null"
           ]
         },
+        "blendMode": {
+          "$ref": "#/$defs/BlendMode",
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
+        },
         "fill": {
           "anyOf": [
             {
@@ -2385,6 +2497,10 @@
             "object",
             "null"
           ]
+        },
+        "blendMode": {
+          "$ref": "#/$defs/BlendMode",
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
         },
         "eventName": {
           "type": "string"
@@ -2726,6 +2842,10 @@
             "null"
           ]
         },
+        "blendMode": {
+          "$ref": "#/$defs/BlendMode",
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
+        },
         "clipIndex": {
           "format": "uint32",
           "minimum": 0,
@@ -2976,6 +3096,10 @@
             "object",
             "null"
           ]
+        },
+        "blendMode": {
+          "$ref": "#/$defs/BlendMode",
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
         },
         "fill": {
           "anyOf": [
@@ -3277,6 +3401,10 @@
             "object",
             "null"
           ]
+        },
+        "blendMode": {
+          "$ref": "#/$defs/BlendMode",
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
         },
         "fill": {
           "anyOf": [
@@ -3867,6 +3995,10 @@
             "null"
           ]
         },
+        "blendMode": {
+          "$ref": "#/$defs/BlendMode",
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
+        },
         "compoundPaths": {
           "description": "Additional subpaths for compound paths; `path` remains primary.",
           "items": {
@@ -4254,6 +4386,10 @@
             "object",
             "null"
           ]
+        },
+        "blendMode": {
+          "$ref": "#/$defs/BlendMode",
+          "description": "How this layer composites onto what is drawn below it (3.20): the\nlayer blend mode of Photoshop, After Effects and Figma, from the same\nvocabulary materials use (1.3). Omitted from the wire when `normal`,\nso a scene that uses no blend mode serialises as it did before."
         },
         "decoration": {
           "$ref": "#/$defs/TextDecoration",

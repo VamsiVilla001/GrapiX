@@ -31,6 +31,18 @@ pub struct SourceTrace {
 struct MappedLayer {
     object_index: usize,
     origin: [f64; 2],
+    object_id: String,
+    blend_mode: BlendMode,
+}
+
+/// The Dissolve seed of a layer at a frame; 0 for modes that use none.
+fn frame_seed(object_id: &str, mode: BlendMode, scene_frame: u64) -> u32 {
+    match mode {
+        BlendMode::Dissolve | BlendMode::DancingDissolve => {
+            crate::blend::dissolve_seed(object_id, mode, scene_frame)
+        }
+        _ => 0,
+    }
 }
 
 pub struct GpuScene {
@@ -145,7 +157,9 @@ impl GpuScene {
                 crate::text::rasterise_text(scene.texts(), &id, &local, &effective, &mut surface)?;
             }
             let origin = [origin[0] - phase[0], origin[1] - phase[1]];
-            let state = layer_state(object.base().anchor, resolved, origin);
+            let blend_mode = object.base().blend_mode;
+            let mut state = layer_state(object.base().anchor, resolved, origin);
+            state.seed = frame_seed(&id, blend_mode, 0);
             inputs.push(LayerInput {
                 object_id: id.clone(),
                 document_path: path.clone(),
@@ -153,11 +167,11 @@ impl GpuScene {
                 height,
                 pixels: surface.pixels().to_vec(),
                 working_space: doc.working_color_space,
-                blend_mode: BlendMode::Normal,
+                blend_mode,
                 state,
             });
             sources.push(SourceTrace {
-                object_id: id,
+                object_id: id.clone(),
                 document_path: path,
                 object_kind: object.kind().into(),
                 route: "cpu-prepared-source-at-prepare",
@@ -167,6 +181,8 @@ impl GpuScene {
             layers.push(MappedLayer {
                 object_index: index,
                 origin,
+                object_id: id,
+                blend_mode,
             });
         }
         let stage = Stage::new(
@@ -228,6 +244,7 @@ impl GpuScene {
                 &effective[layer.object_index],
                 layer.origin,
             );
+            state.seed = frame_seed(&layer.object_id, layer.blend_mode, scene_frame);
         }
         self.compositor
             .composite(&self.states)
@@ -321,6 +338,7 @@ fn layer_state(anchor: Option<Vec2>, resolved: &ResolvedObject, origin: [f64; 2]
         } else {
             0.0
         },
+        seed: 0,
     }
 }
 

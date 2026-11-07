@@ -86,6 +86,18 @@ function mustBuild(object: SceneObject): THREE.Mesh {
   return built!;
 }
 
+describe("layer blend modes (3.20)", () => {
+  it("names a non-normal blend mode instead of drawing it as normal", () => {
+    const unsupported: string[] = [];
+    const overlay = { ...rect2d("plate", 0), blendMode: "overlay" } as unknown as SceneObject;
+    expect(buildViewportObject(overlay, HD, unsupported)).toBeNull();
+    expect(unsupported).toEqual(["plate: blend mode overlay awaits the engine-rendered viewport (13.5)"]);
+    // Normal, explicit or omitted, still draws.
+    mustBuild({ ...rect2d("normal", 0), blendMode: "normal" } as unknown as SceneObject);
+    mustBuild(rect2d("omitted", 0));
+  });
+});
+
 describe("2D and 3D share one depth-tested scene", () => {
   it("places the plane between the two meshes on the view axis", () => {
     const back = mustBuild(mesh3d("back", -100));

@@ -18,7 +18,8 @@
     { "materialId": "multiply", "name": "Multiply", "kind": "solid-color", "blendMode": "multiply" },
     { "materialId": "screen", "name": "Screen", "kind": "solid-color", "blendMode": "screen" },
     { "materialId": "darken", "name": "Darken", "kind": "solid-color", "blendMode": "darken" },
-    { "materialId": "lighten", "name": "Lighten", "kind": "solid-color", "blendMode": "lighten" }
+    { "materialId": "lighten", "name": "Lighten", "kind": "solid-color", "blendMode": "lighten" },
+    { "materialId": "linear-dodge", "name": "Linear dodge", "kind": "solid-color", "blendMode": "linear-dodge" }
   ],
   "objects": [
     { "type": "rect", "id": "ramp-red", "name": "colour ramp red", "x": 0, "y": 0, "width": 54, "height": 30, "fill": { "type": "solid", "color": { "r": 1, "g": 0, "b": 0, "a": 1, "space": "srgb" } } },

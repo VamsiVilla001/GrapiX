@@ -24,7 +24,7 @@ use std::sync::OnceLock;
 use gx_contracts::animation::{evaluate_channel, set_base_property, validate_scene_animation};
 use gx_contracts::color::OutputTransform;
 use gx_contracts::control::validate_control_fields;
-use gx_contracts::material::MaterialSupport;
+use gx_contracts::material::{BlendMode, MaterialSupport};
 use gx_contracts::phases::{validate_phases, PhaseKind, TimelinePhase};
 use gx_contracts::scene::{
     resolve_hierarchy, HierarchyDiagnostic, ResolvedObject, SceneDocument, SceneObject,
@@ -135,7 +135,7 @@ impl PreparedScene {
         let meshes = prepare_meshes(&resolved, available, asset_bytes, support)?;
         let static_frame = OnceLock::new();
         if build_reference {
-            let _ = static_frame.set(compose(&resolved, &resolution.effective, &paths, &texts)?);
+            let _ = static_frame.set(compose(&resolved, &resolution.effective, &paths, &texts, 0)?);
         }
         let by_id = resolution
             .effective
@@ -195,17 +195,23 @@ impl PreparedScene {
     /// composed once at publish, in draw order across object kinds.
     pub fn frame(&self, output: OutputTransform) -> Frame {
         self.static_frame.get_or_init(|| {
-            compose(&self.resolved, &self.effective, &self.paths, &self.texts)
+            compose(&self.resolved, &self.effective, &self.paths, &self.texts, 0)
                 .expect("semantically prepared static reference remains drawable")
         }).encode(output, self.document.working_color_space)
     }
     /// Whether Program must evaluate this scene for each output frame.
     pub fn has_animation(&self) -> bool {
+        // A Dancing Dissolve layer changes its pattern every frame (3.20).
         self.document
             .timeline
             .channels
             .iter()
             .any(|channel| !channel.keys.is_empty())
+            || self
+                .document
+                .objects
+                .iter()
+                .any(|object| object.base().blend_mode == BlendMode::DancingDissolve)
     }
 
     /// A named phase prepared with this revision.
@@ -250,7 +256,7 @@ impl PreparedScene {
         }
         let resolution = resolve_hierarchy(&evaluated.objects);
         let paths = PreparedPaths::prepare(&evaluated, &resolution.effective)?;
-        let surface = compose(&evaluated, &resolution.effective, &paths, &self.texts)?;
+        let surface = compose(&evaluated, &resolution.effective, &paths, &self.texts, scene_frame)?;
         Ok(surface.encode(output, self.document.working_color_space))
     }
 
@@ -261,6 +267,21 @@ impl PreparedScene {
         let mut order: Vec<usize> = (0..document.objects.len()).collect();
         order.sort_by_key(|&index| document.objects[index].base().z_index);
         order
+    }
+
+    /// The composited working-space surface at a scene frame, before any
+    /// output encode: the CPU reference's own float pixels (3.20 gates).
+    #[cfg(test)]
+    pub(crate) fn working_at(&self, scene_frame: u64) -> Result<RasterSurface, Refusal> {
+        let mut evaluated = self.resolved.clone();
+        for channel in &self.resolved.timeline.channels {
+            if let Some(value) = evaluate_channel(channel, scene_frame)? {
+                set_base_property(&mut evaluated, &channel.object_id, &channel.property, value)?;
+            }
+        }
+        let resolution = resolve_hierarchy(&evaluated.objects);
+        let paths = PreparedPaths::prepare(&evaluated, &resolution.effective)?;
+        compose(&evaluated, &resolution.effective, &paths, &self.texts, scene_frame)
     }
 
     /// Glyph runs shaped from packaged fonts only.
@@ -277,11 +298,19 @@ impl PreparedScene {
 /// Compose a frame in draw order across object kinds (3.13). Before this,
 /// every vector was drawn first, then every text, whatever the scene said.
 /// Meshes are refused at publish (`support.rs`), so there are none to draw.
+///
+/// 3.20: an object in a blend mode other than `normal` is drawn alone onto a
+/// transparent layer the size of the canvas, and that layer is blended onto
+/// what is below it pixel by pixel through `crate::blend`, the CPU reference
+/// the GPU compositor is held to. The whole canvas is visited, because the
+/// stencil and silhouette modes change the backdrop outside the object too.
+/// A hidden or fully transparent object changes nothing, in every mode.
 fn compose(
     document: &SceneDocument,
     effective: &[ResolvedObject],
     paths: &PreparedPaths,
     texts: &PreparedTexts,
+    scene_frame: u64,
 ) -> Result<RasterSurface, Refusal> {
     crate::render_work::cpu_frame();
     let mut surface = RasterSurface::transparent(document.canvas.width, document.canvas.height);
@@ -292,6 +321,24 @@ fn compose(
     for index in PreparedScene::draw_order(document) {
         let object = &document.objects[index];
         let id = object.base().id.as_str();
+        let mode = object.base().blend_mode;
+        if mode != BlendMode::Normal {
+            let shown = effective
+                .get(index)
+                .is_some_and(|resolved| resolved.visible && resolved.opacity > 0.0);
+            if !shown {
+                continue;
+            }
+            let mut layer = RasterSurface::transparent(surface.width(), surface.height());
+            if let Some(object_paths) = by_object.get(id) {
+                LyonPathRasteriser.rasterise_into(object_paths, &mut layer);
+            }
+            if matches!(object, SceneObject::Text(_)) {
+                crate::text::rasterise_text(texts, id, document, effective, &mut layer)?;
+            }
+            surface.blend_layer(&layer, mode, crate::blend::dissolve_seed(id, mode, scene_frame));
+            continue;
+        }
         if let Some(object_paths) = by_object.get(id) {
             LyonPathRasteriser.rasterise_into(object_paths, &mut surface);
         }

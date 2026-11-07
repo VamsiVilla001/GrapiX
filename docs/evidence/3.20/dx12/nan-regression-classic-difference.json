@@ -1,0 +1,9 @@
+{
+  "adapter": "NVIDIA GeForce RTX 3070 Ti (Dx12)",
+  "bitIdenticalRuns": 200,
+  "mode": "classic-difference",
+  "nonFiniteValues": 0,
+  "overRangePixels": 873,
+  "partialAlphaPixels": 51,
+  "runs": 200
+}

@@ -1,0 +1,1450 @@
+{
+  "adapter": "NVIDIA GeForce RTX 3070 Ti (Vulkan)",
+  "criterion": "working-space floats within 1e-4 relative (absolute below 1e-3) of the CPU renderer; output bytes exactly the CPU encode of the GPU working pixels; at most one code value from the CPU frame",
+  "rows": [
+    {
+      "mode": "normal",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 3880,
+        "worstRelative": 1.1037897706955846e-7,
+        "worstUlps": 1
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "add",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 6039,
+        "worstRelative": 1.6556843718262826e-7,
+        "worstUlps": 2
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "multiply",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 4187,
+        "worstRelative": 1.7221198334027576e-7,
+        "worstUlps": 2
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "screen",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 9989,
+        "worstRelative": 1.6131160407439893e-7,
+        "worstUlps": 2
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "overlay",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 7170,
+        "worstRelative": 1.85684285725074e-7,
+        "worstUlps": 2
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "darken",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 3071,
+        "worstRelative": 1.1095429641727605e-7,
+        "worstUlps": 1
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "lighten",
+      "preview": {
+        "differingPixels": 27,
+        "pixels": 15360,
+        "worstDelta": 1
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 4617,
+        "worstRelative": 1.3620802974401158e-7,
+        "worstUlps": 2
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "subtract",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 5581,
+        "worstRelative": 2.328307999732715e-7,
+        "worstUlps": 2
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "alpha-mask",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 0,
+        "worstRelative": 0.0,
+        "worstUlps": 0
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "inverse-alpha-mask",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 0,
+        "worstRelative": 0.0,
+        "worstUlps": 0
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "dissolve",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 1805,
+        "worstRelative": 1.986821445143505e-7,
+        "worstUlps": 2
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "dancing-dissolve",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 1805,
+        "worstRelative": 1.986821445143505e-7,
+        "worstUlps": 2
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "color-burn",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 1698,
+        "worstRelative": 6.720877081534127e-7,
+        "worstUlps": 7
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "classic-color-burn",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 14966,
+        "worstRelative": 0.00002724783553276211,
+        "worstUlps": 3834792
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "linear-burn",
+      "preview": {
+        "differingPixels": 66,
+        "pixels": 15360,
+        "worstDelta": 1
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 3650,
+        "worstRelative": 2.9802325229866256e-7,
+        "worstUlps": 4
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "darker-color",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 3003,
+        "worstRelative": 1.3620802974401158e-7,
+        "worstUlps": 2
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "color-dodge",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 5969,
+        "worstRelative": 1.8062016238218348e-7,
+        "worstUlps": 3
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "classic-color-dodge",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 4649,
+        "worstRelative": 1.393519681869293e-7,
+        "worstUlps": 2
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "linear-dodge",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 6039,
+        "worstRelative": 1.6556843718262826e-7,
+        "worstUlps": 2
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "lighter-color",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 4447,
+        "worstRelative": 1.3338103599380702e-7,
+        "worstUlps": 2
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "soft-light",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 6415,
+        "worstRelative": 1.5743437131732207e-7,
+        "worstUlps": 2
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "hard-light",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 5673,
+        "worstRelative": 2.5457555352659256e-7,
+        "worstUlps": 3
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "linear-light",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 3479,
+        "worstRelative": 3.239381385355955e-7,
+        "worstUlps": 4
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "vivid-light",
+      "preview": {
+        "differingPixels": 271,
+        "pixels": 15360,
+        "worstDelta": 1
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 4580,
+        "worstRelative": 8.596809379923798e-7,
+        "worstUlps": 12
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "pin-light",
+      "preview": {
+        "differingPixels": 348,
+        "pixels": 15360,
+        "worstDelta": 1
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 4983,
+        "worstRelative": 4.197507905701059e-7,
+        "worstUlps": 4
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "hard-mix",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 374,
+        "worstRelative": 8.563887377022184e-8,
+        "worstUlps": 1
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "difference",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 7267,
+        "worstRelative": 2.328307999732715e-7,
+        "worstUlps": 2
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "classic-difference",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 2901,
+        "worstRelative": 1.6742875175168592e-7,
+        "worstUlps": 2
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "exclusion",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 7114,
+        "worstRelative": 5.960470161880949e-7,
+        "worstUlps": 8
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "divide",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 9292,
+        "worstRelative": 1.733845351736818e-7,
+        "worstUlps": 2
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "hue",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 7397,
+        "worstRelative": 0.000014200543773768004,
+        "worstUlps": 846460584
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "saturation",
+      "preview": {
+        "differingPixels": 27,
+        "pixels": 15360,
+        "worstDelta": 1
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 8813,
+        "worstRelative": 0.000024309927539434284,
+        "worstUlps": 852546073
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "color",
+      "preview": {
+        "differingPixels": 27,
+        "pixels": 15360,
+        "worstDelta": 1
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 9105,
+        "worstRelative": 0.000011654275112960022,
+        "worstUlps": 843593740
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "luminosity",
+      "preview": {
+        "differingPixels": 27,
+        "pixels": 15360,
+        "worstDelta": 1
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 9240,
+        "worstRelative": 8.48464253522252e-7,
+        "worstUlps": 8
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "stencil-luma",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 0,
+        "worstRelative": 0.0,
+        "worstUlps": 0
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "silhouette-luma",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 0,
+        "worstRelative": 0.0,
+        "worstUlps": 0
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "alpha-add",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 3865,
+        "worstRelative": 1.1037897706955846e-7,
+        "worstUlps": 1
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "luminescent-premul",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 3865,
+        "worstRelative": 1.1037897706955846e-7,
+        "worstUlps": 1
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "mode": "normal",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 2018,
+        "worstRelative": 1.0100061587081655e-7,
+        "worstUlps": 1
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "add",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 7065,
+        "worstRelative": 1.6401843083713175e-7,
+        "worstUlps": 2
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "multiply",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 1428,
+        "worstRelative": 1.165659000434971e-7,
+        "worstUlps": 1
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "screen",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 5767,
+        "worstRelative": 1.6483308229453542e-7,
+        "worstUlps": 2
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "overlay",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 5362,
+        "worstRelative": 3.209407850590651e-7,
+        "worstUlps": 4
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "darken",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 1650,
+        "worstRelative": 8.907953485959297e-8,
+        "worstUlps": 1
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "lighten",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 4642,
+        "worstRelative": 1.0866671118492377e-7,
+        "worstUlps": 1
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "subtract",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 3684,
+        "worstRelative": 2.0020019064759254e-7,
+        "worstUlps": 3
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "alpha-mask",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 0,
+        "worstRelative": 0.0,
+        "worstUlps": 0
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "inverse-alpha-mask",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 0,
+        "worstRelative": 0.0,
+        "worstUlps": 0
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "dissolve",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 285,
+        "worstRelative": 1.1831006929696741e-7,
+        "worstUlps": 1
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "dancing-dissolve",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 285,
+        "worstRelative": 1.1831006929696741e-7,
+        "worstUlps": 1
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "color-burn",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 1534,
+        "worstRelative": 1.7332095580968598e-7,
+        "worstUlps": 2
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "classic-color-burn",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 15274,
+        "worstRelative": 0.000018476028344593942,
+        "worstUlps": 239
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "linear-burn",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 2154,
+        "worstRelative": 1.0997271004953291e-7,
+        "worstUlps": 1
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "darker-color",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 3689,
+        "worstRelative": 1.0204298206417661e-7,
+        "worstUlps": 1
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "color-dodge",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 6555,
+        "worstRelative": 2.4673050802448415e-7,
+        "worstUlps": 4
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "classic-color-dodge",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 6900,
+        "worstRelative": 2.248714281449793e-7,
+        "worstUlps": 3
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "linear-dodge",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 7065,
+        "worstRelative": 1.6401843083713175e-7,
+        "worstUlps": 2
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "lighter-color",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 2105,
+        "worstRelative": 1.0866671118492377e-7,
+        "worstUlps": 1
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "soft-light",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 9060,
+        "worstRelative": 2.3699304563251644e-7,
+        "worstUlps": 3
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "hard-light",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 3216,
+        "worstRelative": 1.1909572350532471e-7,
+        "worstUlps": 1
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "linear-light",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 1624,
+        "worstRelative": 1.9433902309629048e-7,
+        "worstUlps": 2
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "vivid-light",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 2897,
+        "worstRelative": 5.04801903389307e-7,
+        "worstUlps": 5
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "pin-light",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 2384,
+        "worstRelative": 1.0260045257837191e-7,
+        "worstUlps": 1
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "hard-mix",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 244,
+        "worstRelative": 1.0997271004953291e-7,
+        "worstUlps": 1
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "difference",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 5515,
+        "worstRelative": 2.5221646637874073e-7,
+        "worstUlps": 3
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "classic-difference",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 3917,
+        "worstRelative": 1.8217989463664708e-6,
+        "worstUlps": 16
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "exclusion",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 9459,
+        "worstRelative": 6.107438821345568e-7,
+        "worstUlps": 9
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "divide",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 13352,
+        "worstRelative": 2.372104432879496e-7,
+        "worstUlps": 2
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "hue",
+      "preview": {
+        "differingPixels": 160,
+        "pixels": 15360,
+        "worstDelta": 1
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 9490,
+        "worstRelative": 1.5677310329920147e-6,
+        "worstUlps": 818859520
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "saturation",
+      "preview": {
+        "differingPixels": 160,
+        "pixels": 15360,
+        "worstDelta": 1
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 9224,
+        "worstRelative": 0.000013409005077846814,
+        "worstUlps": 845569390
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "color",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 12106,
+        "worstRelative": 8.950414667197037e-6,
+        "worstUlps": 832320820
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "luminosity",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 10769,
+        "worstRelative": 0.000014942655980121344,
+        "worstUlps": 847272768
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "stencil-luma",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 0,
+        "worstRelative": 0.0,
+        "worstUlps": 0
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "silhouette-luma",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 0,
+        "worstRelative": 0.0,
+        "worstUlps": 0
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "alpha-add",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 2003,
+        "worstRelative": 1.0100061587081655e-7,
+        "worstUlps": 1
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "mode": "luminescent-premul",
+      "preview": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "program": {
+        "differingPixels": 0,
+        "pixels": 15360,
+        "worstDelta": 0
+      },
+      "working": {
+        "differingValues": 2003,
+        "worstRelative": 1.0100061587081655e-7,
+        "worstUlps": 1
+      },
+      "workingSpace": "linear-srgb"
+    }
+  ]
+}

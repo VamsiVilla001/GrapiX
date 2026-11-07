@@ -240,6 +240,26 @@ impl RasterSurface {
         let index = (y as usize) * (self.width as usize) + (x as usize);
         self.pixels[index] = source.over(self.pixels[index]);
     }
+
+    /// Blend a same-sized layer onto this surface in `mode` (3.20), every
+    /// pixel, through the CPU reference `crate::blend`. `seed` is the layer's
+    /// Dissolve seed; the noise key is the stage pixel's integer index.
+    pub(crate) fn blend_layer(&mut self, layer: &RasterSurface, mode: gx_contracts::material::BlendMode, seed: u32) {
+        assert_eq!((layer.width, layer.height), (self.width, self.height));
+        let dissolve = matches!(
+            mode,
+            gx_contracts::material::BlendMode::Dissolve | gx_contracts::material::BlendMode::DancingDissolve
+        );
+        let width = self.width as usize;
+        for (index, (dst, src)) in self.pixels.iter_mut().zip(&layer.pixels).enumerate() {
+            let noise = if dissolve {
+                crate::blend::hash_noise((index % width) as u32, (index / width) as u32, seed)
+            } else {
+                0.5
+            };
+            *dst = crate::blend::blend(mode, *dst, *src, noise);
+        }
+    }
 }
 
 /// The scene-logic-facing vector backend contract.

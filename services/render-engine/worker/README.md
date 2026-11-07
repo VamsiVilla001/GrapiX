@@ -65,5 +65,15 @@ through a three-slot asynchronous ring that never stalls the frame loop.
 (`GX_GPU_321_EVIDENCE_DIR`, `GX_GPU_321_ASSERT_BUDGET`). Committed evidence
 and the measured budget are under `docs/evidence/3.21/`.
 
+**3.20 blend modes:** every layer composites through `blend_pixel` in
+`src/compositor/blend.wgsl`, the GPU twin of the CPU reference `src/blend.rs`
+(all 38 contract modes: the 27 Photoshop modes and the After Effects ones).
+The mode numbers are generated from `BlendMode::ALL` and prepended to the
+shader. The CPU renderer blends an object in a non-normal mode through a
+canvas-sized layer surface (`RasterSurface::blend_layer`), visiting the whole
+canvas because the stencil and silhouette modes change the backdrop outside
+the object. A layer at zero opacity does nothing in any mode. Gates and
+evidence: `compositor::blend_tests`, `engine::blend_tests`, `docs/evidence/3.20/`.
+
 EffectCraft component provenance and its retained licence are in
 `THIRD_PARTY_NOTICES.md` and `EFFECTCRAFT-LICENSE`.

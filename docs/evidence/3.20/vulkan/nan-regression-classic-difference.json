@@ -1,0 +1,9 @@
+{
+  "adapter": "NVIDIA GeForce RTX 3070 Ti (Vulkan)",
+  "bitIdenticalRuns": 200,
+  "mode": "classic-difference",
+  "nonFiniteValues": 0,
+  "overRangePixels": 873,
+  "partialAlphaPixels": 46,
+  "runs": 200
+}

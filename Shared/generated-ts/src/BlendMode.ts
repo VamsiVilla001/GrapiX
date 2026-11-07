@@ -3,7 +3,19 @@
 /**
  * Every blend mode the authoring vocabulary contains, supported or not.
  *
- * Carried across from 1.x `MATERIAL_BLEND_MODES` unchanged, because a scene
- * authored there must mean the same thing here.
+ * The first ten are 1.x's `MATERIAL_BLEND_MODES`, unchanged in name and
+ * order, because a scene authored there must mean the same thing here. 3.20
+ * appends the rest of the Photoshop and After Effects Layer > Blending Mode
+ * menus, so every mode a PSD, an After Effects project or a Figma file names
+ * has exactly one variant and never a nearest neighbour. Together they are
+ * the 27 Photoshop modes and the After Effects ones; the formulas are
+ * EffectCraft's (`crates/color/src/blend.rs` at 9a7d3e7, MIT OR Apache-2.0),
+ * ported with attribution in the render worker.
+ *
+ * Two pairs share a formula and stay separate because the source menus name
+ * them separately: `add` (After Effects) and `linear-dodge` (Photoshop's
+ * "Linear Dodge (Add)"); `difference` and `classic-difference` differ only in
+ * how layer opacity applies. `alpha-mask` and `inverse-alpha-mask` are After
+ * Effects' Stencil Alpha and Silhouette Alpha under their 1.x names.
  */
-export type BlendMode = "normal" | "add" | "multiply" | "screen" | "overlay" | "darken" | "lighten" | "subtract" | "alpha-mask" | "inverse-alpha-mask";
+export type BlendMode = "normal" | "add" | "multiply" | "screen" | "overlay" | "darken" | "lighten" | "subtract" | "alpha-mask" | "inverse-alpha-mask" | "dissolve" | "dancing-dissolve" | "color-burn" | "classic-color-burn" | "linear-burn" | "darker-color" | "color-dodge" | "classic-color-dodge" | "linear-dodge" | "lighter-color" | "soft-light" | "hard-light" | "linear-light" | "vivid-light" | "pin-light" | "hard-mix" | "difference" | "classic-difference" | "exclusion" | "divide" | "hue" | "saturation" | "color" | "luminosity" | "stencil-luma" | "silhouette-luma" | "alpha-add" | "luminescent-premul";

@@ -2,7 +2,8 @@
 //!
 //! Drawing backends supply premultiplied pixels in the declared working
 //! space. This module owns only upload, affine warping, opacity and ordered
-//! source-over composition. It does not depend on a 2D or text backend.
+//! composition in every contract blend mode (3.20, `crate::blend` and
+//! `blend.wgsl`). It does not depend on a 2D or text backend.
 //! Pipelines, textures, bind groups, uniforms and diagnostic readback buffers
 //! are created at prepare. The frame path updates uniforms and dispatches.
 //!
@@ -20,6 +21,8 @@ use crate::rasterizer::Frame;
 use crate::tiling::{Stage, Tile, TileError, TilePlan};
 pub mod output;
 pub mod scene;
+#[cfg(test)]
+mod blend_tests;
 
 /// An object's placement from local pixel coordinates into f64 stage space:
 /// x' = a*x + c*y + tx; y' = b*x + d*y + ty.
@@ -28,6 +31,9 @@ pub struct LayerState {
     pub affine: [f64; 6],
     /// Effective opacity, including ancestors; applied once on the GPU.
     pub opacity: f32,
+    /// Dissolve seed for this frame (3.20, `crate::blend::dissolve_seed`);
+    /// ignored by every other mode.
+    pub seed: u32,
 }
 
 impl Default for LayerState {
@@ -35,6 +41,7 @@ impl Default for LayerState {
         Self {
             affine: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
             opacity: 1.0,
+            seed: 0,
         }
     }
 }
@@ -105,6 +112,7 @@ impl From<TileError> for CompositorError {
 struct Layer {
     object_id: String,
     document_path: String,
+    mode: u32,
     view: wgpu::TextureView,
 }
 
@@ -149,7 +157,7 @@ pub struct PreparedCompositor {
     composite_pipeline: wgpu::ComputePipeline,
     // Validate the entire frame before writing any GPU state. Reused scratch
     // keeps matrix construction out of the allocator on the frame path.
-    uniform_scratch: Vec<[f32; 12]>,
+    uniform_scratch: Vec<[u8; UNIFORM_BYTES]>,
     submitted: bool,
 }
 
@@ -205,17 +213,19 @@ impl PreparedCompositor {
         let mut uniform_scratch = Vec::with_capacity(uniform_count);
         for tile in plan.tiles() {
             for input in inputs {
-                uniform_scratch.push(uniforms(stage, *tile, input.state).map_err(
+                let geometry = uniforms(stage, *tile, input.state).map_err(
                     |(field, detail)| {
                         mapping(&input.object_id, &input.document_path, field, detail)
                     },
-                )?);
+                )?;
+                let mode = crate::blend::mode_index(input.blend_mode);
+                uniform_scratch.push(pack_uniform(&geometry, key(mode, *tile, input.state)));
             }
         }
         crate::render_work::gpu_build();
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("gx-compositor"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("composite.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(compositor_shader().into()),
         });
         crate::render_work::gpu_build();
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -239,7 +249,7 @@ impl PreparedCompositor {
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: wgpu::BufferSize::new(48),
+                        min_binding_size: wgpu::BufferSize::new(UNIFORM_BYTES as u64),
                     },
                     count: None,
                 },
@@ -293,6 +303,7 @@ impl PreparedCompositor {
                 Layer {
                     object_id: input.object_id.clone(),
                     document_path: input.document_path.clone(),
+                    mode: crate::blend::mode_index(input.blend_mode),
                     view: texture.create_view(&Default::default()),
                 }
             })
@@ -317,15 +328,15 @@ impl PreparedCompositor {
                     crate::render_work::gpu_build();
                     targets[i].create_view(&Default::default())
                 });
-                let make_uniform = |data: &[f32; 12]| {
+                let make_uniform = |data: &[u8; UNIFORM_BYTES]| {
                     crate::render_work::gpu_build();
                     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some("gx-compositor-uniform"),
-                        contents: &float_bytes(data),
+                        contents: data,
                         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                     })
                 };
-                let clear_uniform = make_uniform(&[0.0; 12]);
+                let clear_uniform = make_uniform(&[0; UNIFORM_BYTES]);
                 let group =
                     |src: &wgpu::TextureView, dst: usize, out: usize, uniform: &wgpu::Buffer| {
                         crate::render_work::gpu_build();
@@ -410,10 +421,12 @@ impl PreparedCompositor {
         }
         for (tile_index, tile) in self.tiles.iter().enumerate() {
             for (i, (state, layer)) in states.iter().zip(&self.layers).enumerate() {
-                self.uniform_scratch[tile_index * states.len() + i] =
+                let geometry =
                     uniforms(self.stage, tile.tile, *state).map_err(|(field, detail)| {
                         mapping(&layer.object_id, &layer.document_path, field, detail)
                     })?;
+                self.uniform_scratch[tile_index * states.len() + i] =
+                    pack_uniform(&geometry, key(layer.mode, tile.tile, *state));
             }
         }
         for (tile_index, tile) in self.tiles.iter().enumerate() {
@@ -421,7 +434,7 @@ impl PreparedCompositor {
                 self.queue.write_buffer(
                     uniform,
                     0,
-                    &float_bytes(&self.uniform_scratch[tile_index * states.len() + i]),
+                    &self.uniform_scratch[tile_index * states.len() + i],
                 );
             }
         }
@@ -451,7 +464,7 @@ impl PreparedCompositor {
         Ok(CompositeSubmission {
             tiles: self.tiles.len(),
             layer_dispatches: self.tiles.len() * states.len(),
-            uniform_bytes: self.uniform_scratch.len() * 48,
+            uniform_bytes: self.uniform_scratch.len() * UNIFORM_BYTES,
         })
     }
 
@@ -633,14 +646,34 @@ fn float_texture(
     })
 }
 
+/// One layer's uniform: three f32 vec4s of geometry and opacity, then one
+/// u32 vec4 key (3.20: blend mode, Dissolve seed, tile stage pixel).
+const UNIFORM_BYTES: usize = 64;
+
 // Explicit little-endian packing keeps unsafe code and a layout-cast dependency
-// out of the worker. A uniform is exactly three WGSL vec4s.
-fn float_bytes(values: &[f32; 12]) -> [u8; 48] {
-    let mut bytes = [0; 48];
-    for (value, dest) in values.iter().zip(bytes.chunks_exact_mut(4)) {
-        dest.copy_from_slice(&value.to_le_bytes());
+// out of the worker.
+fn pack_uniform(geometry: &[f32; 12], key: [u32; 4]) -> [u8; UNIFORM_BYTES] {
+    let mut bytes = [0; UNIFORM_BYTES];
+    let words = geometry.iter().map(|v| v.to_bits()).chain(key);
+    for (word, dest) in words.zip(bytes.chunks_exact_mut(4)) {
+        dest.copy_from_slice(&word.to_le_bytes());
     }
     bytes
+}
+
+/// The integer key: mode, seed and the tile's first stage pixel. The pixel is
+/// a Dissolve hash input, never a coordinate in float math (invariant 38).
+fn key(mode: u32, tile: Tile, state: LayerState) -> [u32; 4] {
+    [mode, state.seed, tile.render_bounds.x, tile.render_bounds.y]
+}
+
+/// The compositor shader: generated mode constants, the blend functions, the
+/// layer pass. One module, so the blend has a single GPU definition.
+pub(crate) fn compositor_shader() -> String {
+    let mut source = crate::blend::wgsl_mode_constants();
+    source.push_str(include_str!("blend.wgsl"));
+    source.push_str(include_str!("composite.wgsl"));
+    source
 }
 
 fn mapping(id: &str, path: &str, field: &str, detail: impl Into<String>) -> CompositorError {
@@ -657,15 +690,6 @@ fn validate_input(
     limit: u32,
 ) -> Result<(), CompositorError> {
     let fail = |field, detail| mapping(&input.object_id, &input.document_path, field, detail);
-    if input.blend_mode != BlendMode::Normal {
-        return Err(fail(
-            "blendMode",
-            format!(
-                "{:?} is not implemented by 3.16; requires 3.20",
-                input.blend_mode
-            ),
-        ));
-    }
     if input.working_space != space {
         return Err(fail(
             "workingColorSpace",

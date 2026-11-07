@@ -30,14 +30,27 @@ use crate::{Refusal, StructuredRefusal};
 
 /// Every blend mode the authoring vocabulary contains, supported or not.
 ///
-/// Carried across from 1.x `MATERIAL_BLEND_MODES` unchanged, because a scene
-/// authored there must mean the same thing here.
+/// The first ten are 1.x's `MATERIAL_BLEND_MODES`, unchanged in name and
+/// order, because a scene authored there must mean the same thing here. 3.20
+/// appends the rest of the Photoshop and After Effects Layer > Blending Mode
+/// menus, so every mode a PSD, an After Effects project or a Figma file names
+/// has exactly one variant and never a nearest neighbour. Together they are
+/// the 27 Photoshop modes and the After Effects ones; the formulas are
+/// EffectCraft's (`crates/color/src/blend.rs` at 9a7d3e7, MIT OR Apache-2.0),
+/// ported with attribution in the render worker.
+///
+/// Two pairs share a formula and stay separate because the source menus name
+/// them separately: `add` (After Effects) and `linear-dodge` (Photoshop's
+/// "Linear Dodge (Add)"); `difference` and `classic-difference` differ only in
+/// how layer opacity applies. `alpha-mask` and `inverse-alpha-mask` are After
+/// Effects' Stencil Alpha and Silhouette Alpha under their 1.x names.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum BlendMode {
     #[default]
     Normal,
+    /// After Effects Add: `b + s`, over-range kept.
     Add,
     Multiply,
     Screen,
@@ -48,9 +61,59 @@ pub enum BlendMode {
     Overlay,
     Darken,
     Lighten,
+    /// `max(b - s, 0)`.
     Subtract,
+    /// After Effects Stencil Alpha: the backdrop is kept where this layer is
+    /// opaque, everywhere on the stage.
     AlphaMask,
+    /// After Effects Silhouette Alpha: the backdrop is cut out where this
+    /// layer is opaque, everywhere on the stage.
     InverseAlphaMask,
+    /// Photoshop and After Effects Dissolve: each pixel shows the layer or
+    /// the backdrop by a fixed per-pixel threshold against the layer's alpha.
+    Dissolve,
+    /// After Effects Dancing Dissolve: Dissolve with a new pattern each frame.
+    DancingDissolve,
+    ColorBurn,
+    /// After Effects Classic Color Burn: opacity fades the layer toward white
+    /// before the formula applies; negative results are kept.
+    ClassicColorBurn,
+    LinearBurn,
+    DarkerColor,
+    ColorDodge,
+    /// After Effects Classic Color Dodge: opacity fades the layer toward
+    /// black before the formula applies.
+    ClassicColorDodge,
+    /// Photoshop Linear Dodge (Add): the same formula as `add`.
+    LinearDodge,
+    LighterColor,
+    SoftLight,
+    HardLight,
+    LinearLight,
+    VividLight,
+    PinLight,
+    HardMix,
+    Difference,
+    /// After Effects Classic Difference: opacity fades the layer toward black
+    /// before the formula applies.
+    ClassicDifference,
+    Exclusion,
+    Divide,
+    Hue,
+    Saturation,
+    Color,
+    Luminosity,
+    /// After Effects Stencil Luma: the backdrop is scaled by this layer's
+    /// luminance, everywhere on the stage.
+    StencilLuma,
+    /// After Effects Silhouette Luma: the backdrop is scaled by one minus
+    /// this layer's luminance, everywhere on the stage.
+    SilhouetteLuma,
+    /// After Effects Alpha Add: source-over colour, alpha `min(sa + da, 1)`.
+    AlphaAdd,
+    /// After Effects Luminescent Premul: source-over colour without the
+    /// layer's own alpha clipping its over-range values.
+    LuminescentPremul,
 }
 
 impl BlendMode {
@@ -59,7 +122,7 @@ impl BlendMode {
     /// A constant rather than a hand-written list at each call site: a mode
     /// added to the enum appears here, and in every capability declaration
     /// and validator built from it, without anyone remembering a second list.
-    pub const ALL: [BlendMode; 10] = [
+    pub const ALL: [BlendMode; 38] = [
         BlendMode::Normal,
         BlendMode::Add,
         BlendMode::Multiply,
@@ -70,13 +133,114 @@ impl BlendMode {
         BlendMode::Subtract,
         BlendMode::AlphaMask,
         BlendMode::InverseAlphaMask,
+        BlendMode::Dissolve,
+        BlendMode::DancingDissolve,
+        BlendMode::ColorBurn,
+        BlendMode::ClassicColorBurn,
+        BlendMode::LinearBurn,
+        BlendMode::DarkerColor,
+        BlendMode::ColorDodge,
+        BlendMode::ClassicColorDodge,
+        BlendMode::LinearDodge,
+        BlendMode::LighterColor,
+        BlendMode::SoftLight,
+        BlendMode::HardLight,
+        BlendMode::LinearLight,
+        BlendMode::VividLight,
+        BlendMode::PinLight,
+        BlendMode::HardMix,
+        BlendMode::Difference,
+        BlendMode::ClassicDifference,
+        BlendMode::Exclusion,
+        BlendMode::Divide,
+        BlendMode::Hue,
+        BlendMode::Saturation,
+        BlendMode::Color,
+        BlendMode::Luminosity,
+        BlendMode::StencilLuma,
+        BlendMode::SilhouetteLuma,
+        BlendMode::AlphaAdd,
+        BlendMode::LuminescentPremul,
+    ];
+
+    /// The 27 modes of Photoshop's Layer > Blending Mode menu, in its order.
+    pub const PHOTOSHOP: [BlendMode; 27] = [
+        BlendMode::Normal,
+        BlendMode::Dissolve,
+        BlendMode::Darken,
+        BlendMode::Multiply,
+        BlendMode::ColorBurn,
+        BlendMode::LinearBurn,
+        BlendMode::DarkerColor,
+        BlendMode::Lighten,
+        BlendMode::Screen,
+        BlendMode::ColorDodge,
+        BlendMode::LinearDodge,
+        BlendMode::LighterColor,
+        BlendMode::Overlay,
+        BlendMode::SoftLight,
+        BlendMode::HardLight,
+        BlendMode::VividLight,
+        BlendMode::LinearLight,
+        BlendMode::PinLight,
+        BlendMode::HardMix,
+        BlendMode::Difference,
+        BlendMode::Exclusion,
+        BlendMode::Subtract,
+        BlendMode::Divide,
+        BlendMode::Hue,
+        BlendMode::Saturation,
+        BlendMode::Color,
+        BlendMode::Luminosity,
+    ];
+
+    /// The modes of After Effects' Layer > Blending Mode menu, in its order.
+    pub const AFTER_EFFECTS: [BlendMode; 38] = [
+        BlendMode::Normal,
+        BlendMode::Dissolve,
+        BlendMode::DancingDissolve,
+        BlendMode::Darken,
+        BlendMode::Multiply,
+        BlendMode::ColorBurn,
+        BlendMode::ClassicColorBurn,
+        BlendMode::LinearBurn,
+        BlendMode::DarkerColor,
+        BlendMode::Add,
+        BlendMode::Lighten,
+        BlendMode::Screen,
+        BlendMode::ColorDodge,
+        BlendMode::ClassicColorDodge,
+        BlendMode::LinearDodge,
+        BlendMode::LighterColor,
+        BlendMode::Overlay,
+        BlendMode::SoftLight,
+        BlendMode::HardLight,
+        BlendMode::LinearLight,
+        BlendMode::VividLight,
+        BlendMode::PinLight,
+        BlendMode::HardMix,
+        BlendMode::Difference,
+        BlendMode::ClassicDifference,
+        BlendMode::Exclusion,
+        BlendMode::Subtract,
+        BlendMode::Divide,
+        BlendMode::Hue,
+        BlendMode::Saturation,
+        BlendMode::Color,
+        BlendMode::Luminosity,
+        BlendMode::AlphaMask,
+        BlendMode::StencilLuma,
+        BlendMode::InverseAlphaMask,
+        BlendMode::SilhouetteLuma,
+        BlendMode::AlphaAdd,
+        BlendMode::LuminescentPremul,
     ];
 
     /// Whether this mode is expressible with fixed-function GPU blend
     /// factors.
     ///
-    /// A property of the mode's mathematics, not of any renderer: these six
-    /// are a source/destination factor pair, and the other four must read the
+    /// A property of the mode's mathematics, not of any renderer: these seven
+    /// are a source/destination factor pair, and the others must read the
     /// destination in a shader. Recorded here so a capability declaration has
     /// something to be checked against, and so "we support overlay" cannot be
     /// claimed by a backend that only has fixed-function blending.
@@ -89,7 +253,26 @@ impl BlendMode {
                 | BlendMode::Screen
                 | BlendMode::Darken
                 | BlendMode::Lighten
+                | BlendMode::LinearDodge
         )
+    }
+
+    /// Whether the mode changes the backdrop everywhere on the stage, not
+    /// only under the layer: the stencil and silhouette modes. A renderer
+    /// that bounds a layer's work to its footprint must not bound these.
+    pub const fn acts_on_whole_backdrop(self) -> bool {
+        matches!(
+            self,
+            BlendMode::AlphaMask
+                | BlendMode::InverseAlphaMask
+                | BlendMode::StencilLuma
+                | BlendMode::SilhouetteLuma
+        )
+    }
+
+    /// Whether the mode is the default, for omitting it from the wire.
+    pub fn is_normal(&self) -> bool {
+        *self == BlendMode::Normal
     }
 }
 
@@ -471,12 +654,12 @@ mod tests {
         // 1.3's core claim. The enum is the authoring vocabulary; what a peer
         // can draw is data that peer declares. Conflating the two is how a
         // mode becomes "supported" because a build flag was set.
-        assert_eq!(BlendMode::ALL.len(), 10);
+        assert_eq!(BlendMode::ALL.len(), 38);
         assert!(!BlendMode::Overlay.is_fixed_function());
         assert!(BlendMode::Screen.is_fixed_function());
 
         let fixed = MaterialSupport::fixed_function();
-        assert_eq!(fixed.blend_modes.len(), 6);
+        assert_eq!(fixed.blend_modes.len(), 7);
         assert!(!fixed.blend_modes.contains(&BlendMode::Overlay));
         assert!(MaterialSupport::none().blend_modes.is_empty());
     }
@@ -532,6 +715,38 @@ mod tests {
             refusal.field.as_deref(),
             Some("materials[material_1].textures.baseColor.fit")
         );
+    }
+
+    #[test]
+    fn the_vocabulary_covers_photoshop_and_after_effects_once_each() {
+        // 3.20: every mode either menu names is one variant, and no variant
+        // is outside both menus.
+        use std::collections::BTreeSet;
+        let all: BTreeSet<_> = BlendMode::ALL.into_iter().collect();
+        assert_eq!(all.len(), BlendMode::ALL.len(), "ALL has no duplicates");
+        let photoshop: BTreeSet<_> = BlendMode::PHOTOSHOP.into_iter().collect();
+        let after_effects: BTreeSet<_> = BlendMode::AFTER_EFFECTS.into_iter().collect();
+        assert_eq!(photoshop.len(), 27);
+        assert_eq!(after_effects.len(), BlendMode::AFTER_EFFECTS.len());
+        assert!(photoshop.is_subset(&all) && after_effects.is_subset(&all));
+        assert_eq!(&photoshop | &after_effects, all);
+        // 1.x's ten keep their wire names and their places.
+        let first: Vec<_> = BlendMode::ALL[..10]
+            .iter()
+            .map(|mode| serde_json::to_value(mode).unwrap())
+            .collect();
+        assert_eq!(
+            first,
+            serde_json::json!([
+                "normal", "add", "multiply", "screen", "overlay", "darken",
+                "lighten", "subtract", "alpha-mask", "inverse-alpha-mask"
+            ])
+            .as_array()
+            .unwrap()
+            .clone()
+        );
+        assert_eq!(serde_json::to_value(BlendMode::ClassicColorBurn).unwrap(), "classic-color-burn");
+        assert_eq!(serde_json::to_value(BlendMode::LuminescentPremul).unwrap(), "luminescent-premul");
     }
 
     #[test]

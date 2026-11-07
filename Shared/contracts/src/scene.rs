@@ -44,7 +44,7 @@ use ts_rs::TS;
 use crate::color::{ColorValue, Rgba, WorkingColorSpace};
 use crate::font::FontDefinition;
 use crate::provenance::AssetProvenance;
-use crate::material::{CullMode, FitMode, MaterialBinding};
+use crate::material::{BlendMode, CullMode, FitMode, MaterialBinding};
 use crate::{ContentHash, RationalRate, Refusal, Revision};
 
 // ---------------------------------------------------------------------------
@@ -264,6 +264,13 @@ pub struct ObjectBase {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub material_slots: Option<BTreeMap<String, MaterialBinding>>,
+    /// How this layer composites onto what is drawn below it (3.20): the
+    /// layer blend mode of Photoshop, After Effects and Figma, from the same
+    /// vocabulary materials use (1.3). Omitted from the wire when `normal`,
+    /// so a scene that uses no blend mode serialises as it did before.
+    #[serde(default, skip_serializing_if = "BlendMode::is_normal")]
+    #[ts(as = "Option<BlendMode>", optional)]
+    pub blend_mode: BlendMode,
 }
 
 fn default_true() -> bool {
@@ -306,6 +313,7 @@ impl ObjectBase {
             stroke_width: 0.0,
             bindings: None,
             material_slots: None,
+            blend_mode: BlendMode::Normal,
         }
     }
 }

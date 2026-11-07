@@ -270,6 +270,14 @@ export function buildViewportObject(
 ): THREE.Mesh | null {
   const base = object;
 
+  // 3.20: a layer blend mode other than normal is composited by the engine;
+  // WebGL's fixed-function blending would draw it as normal, which is the
+  // silent substitution invariant 18 forbids. Name it and draw nothing.
+  if (object.blendMode !== undefined && object.blendMode !== "normal") {
+    unsupported.push(`${object.id}: blend mode ${object.blendMode} awaits the engine-rendered viewport (13.5)`);
+    return null;
+  }
+
   let mesh: THREE.Mesh;
   switch (object.type) {
     case "rect":

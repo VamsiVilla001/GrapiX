@@ -1,0 +1,224 @@
+{
+  "budgetMicros": 10000,
+  "method": "loop paced at 20 ms like the clock pump, clock advanced one frame per emit_frame; then 100 settled frames (submit, GPU, readback, copy, waited for) as the per-frame end-to-end figure; emit wall time plus ring submit-to-delivery latency; 50 warm-up frames then 300 measured; debug or release as built",
+  "overBudget": [
+    "lower-third 1920x1080: settled p99 11022 us",
+    "stats-page 1920x1080: settled p99 14004 us",
+    "lower-third 3840x2160: settled p99 20463 us",
+    "scorebug 3840x2160: settled p99 22567 us",
+    "stats-page 3840x2160: settled p99 43691 us"
+  ],
+  "profile": "release",
+  "rows": [
+    {
+      "adapter": "NVIDIA GeForce RTX 3070 Ti (Dx12)",
+      "delivered": 349,
+      "emitMicros": {
+        "max": 3165,
+        "p50": 2474,
+        "p99": 3045
+      },
+      "endToEndP99Micros": 11022,
+      "framesBehindMax": 1,
+      "framesMeasured": 300,
+      "height": 1080,
+      "rate": "50",
+      "readbackLatencyMicros": {
+        "max": 23098,
+        "p50": 21941,
+        "p99": 22937
+      },
+      "ringFull": 0,
+      "settledMicros": {
+        "max": 17334,
+        "p50": 5647,
+        "p99": 11022
+      },
+      "superseded": 0,
+      "width": 1920,
+      "work": {
+        "cpuFullFrameRasterizations": 0,
+        "cpuSourceRasterizations": 0,
+        "gpuLayerDispatches": 1050,
+        "gpuOutputDispatches": 350,
+        "gpuResourceBuilds": 0
+      },
+      "workload": "lower-third"
+    },
+    {
+      "adapter": "NVIDIA GeForce RTX 3070 Ti (Dx12)",
+      "delivered": 349,
+      "emitMicros": {
+        "max": 3913,
+        "p50": 2843,
+        "p99": 3657
+      },
+      "endToEndP99Micros": 7851,
+      "framesBehindMax": 1,
+      "framesMeasured": 300,
+      "height": 1080,
+      "rate": "50",
+      "readbackLatencyMicros": {
+        "max": 23407,
+        "p50": 21969,
+        "p99": 22877
+      },
+      "ringFull": 0,
+      "settledMicros": {
+        "max": 13639,
+        "p50": 6259,
+        "p99": 7851
+      },
+      "superseded": 0,
+      "width": 1920,
+      "work": {
+        "cpuFullFrameRasterizations": 0,
+        "cpuSourceRasterizations": 0,
+        "gpuLayerDispatches": 8050,
+        "gpuOutputDispatches": 350,
+        "gpuResourceBuilds": 0
+      },
+      "workload": "scorebug"
+    },
+    {
+      "adapter": "NVIDIA GeForce RTX 3070 Ti (Dx12)",
+      "delivered": 337,
+      "emitMicros": {
+        "max": 5526,
+        "p50": 4013,
+        "p99": 5241
+      },
+      "endToEndP99Micros": 14004,
+      "framesBehindMax": 11,
+      "framesMeasured": 300,
+      "height": 1080,
+      "rate": "50",
+      "readbackLatencyMicros": {
+        "max": 24249,
+        "p50": 21949,
+        "p99": 23180
+      },
+      "ringFull": 11,
+      "settledMicros": {
+        "max": 21503,
+        "p50": 13013,
+        "p99": 14004
+      },
+      "superseded": 1,
+      "width": 1920,
+      "work": {
+        "cpuFullFrameRasterizations": 0,
+        "cpuSourceRasterizations": 0,
+        "gpuLayerDispatches": 24069,
+        "gpuOutputDispatches": 339,
+        "gpuResourceBuilds": 0
+      },
+      "workload": "stats-page"
+    },
+    {
+      "adapter": "NVIDIA GeForce RTX 3070 Ti (Dx12)",
+      "delivered": 347,
+      "emitMicros": {
+        "max": 9633,
+        "p50": 7767,
+        "p99": 9193
+      },
+      "endToEndP99Micros": 20463,
+      "framesBehindMax": 3,
+      "framesMeasured": 300,
+      "height": 2160,
+      "rate": "50",
+      "readbackLatencyMicros": {
+        "max": 29572,
+        "p50": 27222,
+        "p99": 28577
+      },
+      "ringFull": 1,
+      "settledMicros": {
+        "max": 34436,
+        "p50": 18385,
+        "p99": 20463
+      },
+      "superseded": 1,
+      "width": 3840,
+      "work": {
+        "cpuFullFrameRasterizations": 0,
+        "cpuSourceRasterizations": 0,
+        "gpuLayerDispatches": 1047,
+        "gpuOutputDispatches": 349,
+        "gpuResourceBuilds": 0
+      },
+      "workload": "lower-third"
+    },
+    {
+      "adapter": "NVIDIA GeForce RTX 3070 Ti (Dx12)",
+      "delivered": 340,
+      "emitMicros": {
+        "max": 9514,
+        "p50": 7902,
+        "p99": 9273
+      },
+      "endToEndP99Micros": 22567,
+      "framesBehindMax": 6,
+      "framesMeasured": 300,
+      "height": 2160,
+      "rate": "50",
+      "readbackLatencyMicros": {
+        "max": 28727,
+        "p50": 26954,
+        "p99": 28416
+      },
+      "ringFull": 8,
+      "settledMicros": {
+        "max": 40928,
+        "p50": 20900,
+        "p99": 22567
+      },
+      "superseded": 1,
+      "width": 3840,
+      "work": {
+        "cpuFullFrameRasterizations": 0,
+        "cpuSourceRasterizations": 0,
+        "gpuLayerDispatches": 7866,
+        "gpuOutputDispatches": 342,
+        "gpuResourceBuilds": 0
+      },
+      "workload": "scorebug"
+    },
+    {
+      "adapter": "NVIDIA GeForce RTX 3070 Ti (Dx12)",
+      "delivered": 195,
+      "emitMicros": {
+        "max": 12251,
+        "p50": 6099,
+        "p99": 9582
+      },
+      "endToEndP99Micros": 43691,
+      "framesBehindMax": 20,
+      "framesMeasured": 300,
+      "height": 2160,
+      "rate": "50",
+      "readbackLatencyMicros": {
+        "max": 395256,
+        "p50": 84748,
+        "p99": 362447
+      },
+      "ringFull": 153,
+      "settledMicros": {
+        "max": 102643,
+        "p50": 42115,
+        "p99": 43691
+      },
+      "superseded": 0,
+      "width": 3840,
+      "work": {
+        "cpuFullFrameRasterizations": 0,
+        "cpuSourceRasterizations": 0,
+        "gpuLayerDispatches": 13987,
+        "gpuOutputDispatches": 197,
+        "gpuResourceBuilds": 0
+      },
+      "workload": "stats-page"
+    }
+  ]
+}

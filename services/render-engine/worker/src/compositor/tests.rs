@@ -34,12 +34,11 @@ fn near(actual: WorkingRgba, expected: WorkingRgba) {
 fn unsupported_mappings_name_object_and_document_field() {
     let space = WorkingColorSpace::Srgb;
     let mut input = layer("plate", Rgba::srgb(0.2, 0.3, 0.4, 1.0), space, 2, 2);
-    input.blend_mode = BlendMode::Overlay;
-    assert!(
-        matches!(validate_input(&input, space, 8192), Err(CompositorError::Mapping {
-        object_id, document_path, ..
-    }) if object_id == "plate" && document_path == "objects[plate].blendMode")
-    );
+    // 3.20: every contract blend mode composites; none refuses.
+    for mode in BlendMode::ALL {
+        input.blend_mode = mode;
+        assert!(validate_input(&input, space, 8192).is_ok(), "{mode:?}");
+    }
     input.blend_mode = BlendMode::Normal;
     assert!(
         matches!(validate_input(&input, WorkingColorSpace::LinearSrgb, 8192),
@@ -65,6 +64,7 @@ fn inverse_uniforms_subtract_distant_stage_origin_before_narrowing() {
     let state = LayerState {
         affine: [2.0, 0.0, 0.0, 2.0, 1e12 + 0.25, -1e12 + 0.5],
         opacity: 0.5,
+        seed: 0,
     };
     let p = uniforms(stage, plan.tiles()[1], state).unwrap();
     assert_eq!(p[0], 0.5);
@@ -87,7 +87,8 @@ fn inverse_uniforms_subtract_distant_stage_origin_before_narrowing() {
             plan.tiles()[0],
             LayerState {
                 affine,
-                opacity: 1.0
+                opacity: 1.0,
+                seed: 0,
             }
         )
         .is_err());
@@ -188,6 +189,7 @@ fn gpu_affine_opacity_and_repeat_frames_reuse_resources() {
     let state = LayerState {
         affine: [0.0, 1.0, -1.0, 0.0, 4.0, 1.0],
         opacity: 0.5,
+        seed: 0,
     };
     compositor.composite(&[state]).unwrap();
     let first = compositor.readback_reference().unwrap();
@@ -210,7 +212,8 @@ fn gpu_affine_opacity_and_repeat_frames_reuse_resources() {
     assert!(compositor
         .composite(&[LayerState {
             affine: [0.0; 6],
-            opacity: 1.0
+            opacity: 1.0,
+            seed: 0,
         }])
         .is_err());
     assert_eq!(
@@ -223,6 +226,7 @@ fn gpu_affine_opacity_and_repeat_frames_reuse_resources() {
         .composite(&[LayerState {
             affine: [1.0, 0.0, 0.0, 1.0, 0.5, 0.5],
             opacity: 1.0,
+            seed: 0,
         }])
         .unwrap();
     let second = compositor.readback_reference().unwrap();
@@ -283,6 +287,7 @@ fn gpu_tiles_match_single_target_at_fractional_distant_origin() {
     input.state = LayerState {
         affine: [2.0, 0.25, -0.5, 1.75, 1e12 + 7.25, -1e12 + 2.5],
         opacity: 0.8,
+        seed: 0,
     };
     let states = [input.state];
     let mut whole = PreparedCompositor::prepare(&gpu, stage, space, &[input.clone()]).unwrap();
@@ -320,6 +325,7 @@ fn gpu_stage_above_actual_texture_limit_has_no_seam() {
             -5.0,
         ],
         opacity: 0.5,
+        seed: 0,
     };
     let state = input.state;
     let expected = input.pixels[0].scaled(0.5);

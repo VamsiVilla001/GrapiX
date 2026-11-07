@@ -22,6 +22,7 @@
 //! (invariant 35), and a large stage is never one GPU texture: only tiles
 //! become render targets (invariant 37).
 
+pub mod blend;
 pub mod clock;
 pub mod colour_pipeline;
 pub mod compositor;
