@@ -1475,3 +1475,31 @@ button, select, input[type="number"], input[type="text"], input[type="range"] { 
 #close-confirm-dialog { width: min(420px, calc(100vw - 32px)); margin: auto; border: 1px solid #484848; border-radius: 5px; padding: 22px; color: var(--text); background: var(--panel); }
 #close-confirm-dialog::backdrop { background: #0008; }
 #close-confirm-message { color: var(--dim); margin: 8px 0 14px; }
+
+/* Playhead handle (11.44 context): a tab in the ruler row, with the line the
+   canvas interaction layer draws down through the tracks. */
+.timeline-ruler { position: relative; }
+.timeline-ruler-track { position: absolute; left: 240px; right: 0; top: 0; bottom: 0; pointer-events: none; overflow: hidden; }
+.timeline-playhead { position: absolute; top: 0; width: 16px; height: 100%; margin-left: -8px; pointer-events: auto; cursor: ew-resize; }
+.timeline-playhead::before { content: ""; position: absolute; left: 1px; top: 2px; width: 14px; height: 15px; background: #2d8ceb; clip-path: polygon(0 0, 100% 0, 100% 55%, 50% 100%, 0 55%); border-radius: 2px 2px 0 0; }
+.timeline-playhead::after { content: ""; position: absolute; left: 7px; top: 16px; width: 2px; bottom: -2px; background: #2d8ceb; }
+.timeline-playhead:focus-visible { outline: none; }
+.timeline-playhead:focus-visible::before { box-shadow: 0 0 0 2px #fff8; }
+#timeline-ruler-ticks { cursor: ew-resize; }
+.canvas-rate-control { margin-left: auto; }
+.rate-custom { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+.rate-custom input { width: 110px; }
+#manager-create-rate-row { margin-top: 8px; }
+
+/* Scene import report (11.17): every element, its tier, every substitution. */
+#import-report-dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 64px); margin: auto; border: 1px solid #484848; border-radius: 5px; padding: 22px; color: var(--text); background: var(--panel); }
+#import-report-dialog::backdrop { background: #0008; }
+#import-report-dialog h2 { margin: 0 0 10px; font-size: 16px; }
+.import-report-mount { display: grid; gap: 8px; max-height: calc(100vh - 220px); overflow: auto; }
+.import-report-mount > section::before { content: attr(aria-label) " · " attr(aria-description); display: block; margin-bottom: 6px; font-weight: 600; }
+.import-report-mount [role="alert"], .import-report-mount [role="status"] { padding: 6px 8px; border-left: 3px solid var(--rule); background: #1c1c1c; font-size: 12px; }
+.import-report-mount [role="alert"] { border-left-color: #d9534f; }
+.import-report-mount ul[role="list"] { display: grid; gap: 6px; margin: 8px 0 0; padding: 0; list-style: none; }
+.import-report-mount li[role="listitem"] { display: grid; gap: 4px; padding: 7px 8px; border: 1px solid var(--rule); border-radius: 4px; font-family: var(--mono); font-size: 12px; color: var(--dim); }
+.import-report-mount li[role="listitem"]::before { content: attr(aria-label) " · " attr(aria-description); color: var(--text); font-family: var(--ui); font-weight: 600; }
+.import-report-mount li [role="alert"]::before, .import-report-mount li [role="status"]::before { content: attr(aria-label) " (" attr(aria-description) "): "; color: var(--text); }

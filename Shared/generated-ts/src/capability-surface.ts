@@ -370,6 +370,15 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
       "summary": "Apply one ordered, atomic batch of scene edits to a stored scene. Objects, keyframes, presets, phases, controls, text styles, bindings, materials and asset relinks are edits; the whole batch lands or none of it does."
     },
     {
+      "name": "scenes.import",
+      "group": "scenes",
+      "effect": "write",
+      "requiredScope": "author",
+      "input": "ImportScene",
+      "output": "CommandOutcome",
+      "summary": "Import an SVG into a new stored scene through the four-tier pipeline (7.2). The outcome's imported effect is the report naming every substitution; the source is retained in the project by content hash. Refuses an existing scene id, and stores nothing on any refusal."
+    },
+    {
       "name": "objects.list",
       "group": "objects",
       "effect": "read",

@@ -1355,6 +1355,26 @@
       ],
       "type": "object"
     },
+    "RationalRate": {
+      "description": "A frame rate as an exact rational. Never a float (invariant 12).\n\n29.97 is 30000/1001 and cannot be represented in binary floating point.\nAccumulating a rounded rate across an 8-hour soak drifts the clock, so this\ntype deliberately offers no `f64` constructor.",
+      "properties": {
+        "den": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "num": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "num",
+        "den"
+      ],
+      "type": "object"
+    },
     "RelinkAsset": {
       "description": "Point a library asset at new bytes, keeping its id and bindings.",
       "properties": {
@@ -1625,6 +1645,38 @@
         "objectId",
         "property"
       ],
+      "type": "object"
+    },
+    "SetCanvas": {
+      "description": "Change the canvas: its rational frame rate and/or its size (11.43).\nFrames are canonical (invariant 12): a rate change keeps every key\nframe number and the duration in frames, so the graphic plays the\nsame frames at the new rate; only its wall-clock length changes.",
+      "properties": {
+        "frameRate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RationalRate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "height": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "width": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "SetObjectField": {
@@ -2349,6 +2401,19 @@
       "properties": {
         "edit": {
           "const": "addAssets",
+          "type": "string"
+        }
+      },
+      "required": [
+        "edit"
+      ],
+      "type": "object"
+    },
+    {
+      "$ref": "#/$defs/SetCanvas",
+      "properties": {
+        "edit": {
+          "const": "setCanvas",
           "type": "string"
         }
       },

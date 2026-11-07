@@ -188,7 +188,7 @@ pub struct OutputConfig {
 /// Unknown input names fail closed; the exhaustive registry test catches an
 /// added tool whose input has not been connected here.
 pub fn input_schema(input: &str) -> Result<serde_json::Value, Refusal> {
-    use crate::command::{ConfirmDesignSystem, CreateProject, CreateScene, DeleteScene, EditScene};
+    use crate::command::{ConfirmDesignSystem, CreateProject, CreateScene, DeleteScene, EditScene, ImportScene};
     macro_rules! schema {
         ($ty:ty) => {
             schemars::generate::SchemaSettings::draft2020_12()
@@ -203,6 +203,7 @@ pub fn input_schema(input: &str) -> Result<serde_json::Value, Refusal> {
         "CreateScene" => schema!(CreateScene),
         "DeleteScene" => schema!(DeleteScene),
         "EditScene" => schema!(EditScene),
+        "ImportScene" => schema!(ImportScene),
         "ConfirmDesignSystem" => schema!(ConfirmDesignSystem),
         "DesignSystemImport" => schema!(crate::design_system::DesignSystemImport),
         "PreviewRequest" => schema!(PreviewRequest),
@@ -273,6 +274,7 @@ pub const TOOLS: &[ToolDescriptor] = &[
     tool("scenes.create", "scenes", ToolEffect::Write, Scope::Author, "CreateScene", "CommandOutcome", "Create an empty scene. Refuses until the project exists, and refuses an existing scene id."),
     tool("scenes.delete", "scenes", ToolEffect::Write, Scope::Author, "DeleteScene", "CommandOutcome", "Delete a stored scene. Refuses a scene that is not stored."),
     tool("scenes.edit", "scenes", ToolEffect::Write, Scope::Author, "EditScene", "CommandOutcome", "Apply one ordered, atomic batch of scene edits to a stored scene. Objects, keyframes, presets, phases, controls, text styles, bindings, materials and asset relinks are edits; the whole batch lands or none of it does."),
+    tool("scenes.import", "scenes", ToolEffect::Write, Scope::Author, "ImportScene", "CommandOutcome", "Import an SVG into a new stored scene through the four-tier pipeline (7.2). The outcome's imported effect is the report naming every substitution; the source is retained in the project by content hash. Refuses an existing scene id, and stores nothing on any refusal."),
     tool("objects.list", "objects", ToolEffect::Read, Scope::Author, "SceneRef", "ObjectList", "Every object, with its full authored property surface."),
     tool("objects.hierarchy", "objects", ToolEffect::Read, Scope::Author, "SceneRef", "HierarchyResolution", "Resolved transforms and refused edges."),
     // materials, assets, fonts (8.4). Read here; their mutations are

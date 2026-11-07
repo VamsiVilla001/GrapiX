@@ -118,6 +118,32 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-07 — 7.2 and 11.17 done: SVG import reachable end to end; broadcast frame rates; playhead handle (Claude, mission 1)
+
+User decisions, 7 Nov 2026: "finish 7.2 yourself and move on to 11.17", "ignore the macOS support for now", "the timeline fader must have a handle as in the attached image" (blue tab on the ruler with a line through the tracks), and "do not hard code the timeline or application to 50fps; it shall work at 29.97, 30, 59.94, 60 and more broadcast based formats".
+
+**Done — 7.2.** The pipeline existed with no caller and no byte retention. Now:
+- `EditorCommand::ImportScene` (contracts, index 13, in the witness set) imports an SVG into a stored scene; the MCP tool `scenes.import` is `CommandTool::<ImportScene>` so it goes through the one executor (the contracts test `every_authoring_write_tool_takes_an_editor_command_payload` forced this; a bespoke handler was written first and removed). Outcome: `stored` + `imported { report }` effects.
+- `SceneSource::ImportSvg { id, source_name, svg }` opens an unbound session with the report as an `Imported` effect; the shell's `cmd_import_file(path, id)` reads the file, `promote_verified`s the bytes into the asset cache, then runs `OpenScene`. It is listed in `SHELL_MUTATE` (R1 comment updated: it carries no document).
+- The imported scene carries its source as an `AssetLibraryItem` (`import_<hash16>`, kind svg, `assets/imports/`, provenance tool "GrapiX import"); `import_into_project` adopts the bytes by hash and refuses an existing id, a non-SVG, or a working-space mismatch before any write.
+- The scanner refuses a truncated or rootless document (`ImportFailure::Malformed`); before, `<svg><rect id="a"/><rect` imported as one rect with nothing reported.
+- Evidence: `services/editor-mcp/tests/import_surface.rs` (shipped binary over stdio, 2 tests), `services/editor/src/command.rs` session-import tests, `services/editor/src/import.rs` malformed test. Figma is 18.x, PSD/AI are 11.59; the Figma corpus N8W7SjKPdQH9sDXXHIq6Br needs a token only for 18.2.
+
+**Done — 11.17.** `Editor/src/import-panel.ts` renders the report as a UiNode tree (summary is an `alert` when anything was lost at error severity; one `listitem` per element with tier and "became X" / "dropped, no object"; one child per substitution with `feature → replacement`, reason, severity). `#import-report-dialog` in index.html; "Import SVG…" toolbar button and File menu item; `importSvg()` in main.ts answers the native picker, calls `cmd_import_file`, presents the session and shows the report from the `imported` effect. Tests: `Editor/tests/import-panel.test.ts` (5).
+- **Live** (`agent/tmp/import-1117/import-check.cjs`, Tauri/WebView2 CDP 9223; only the OS picker is answered in-page at the IPC fetch because the window-message driver could not reach a picker on another virtual desktop): author 4/4, reopen 1/1 after a process restart, no page errors. Report dialog screenshot `import-report.png`. Save into a project adopts the source under the report hash (`assets/<sha>.svg`, byte for byte) and it survives the restart.
+
+**Frame rates (toward 11.43, no row change).** Nothing in the clock, playback or presets was hard-coded; what was missing was any way to set a rate and the P50 new-scene default being the only choice. Added `SceneEdit::SetCanvas { frameRate?, width?, height? }` (index 32, witness at 59.94; refuses zero via `RationalRate::new`, unchanged via `ObjectFieldUnchanged`), `Editor/src/frame-rate.ts` (24, 25, 29.97=30000/1001, 30, 50, 59.94=60000/1001, 60, plus a custom `num/den`; a decimal is refused naming its rational), a Rate select in the New-graphic dialog (applied as `setCanvas` on the stored copy before opening, so the graphic is created at its rate) and in the composition header (one `setCanvas`, undoable). Frames stay canonical: keys keep their frame numbers across a rate change.
+- **Live** (`agent/tmp/rate-playhead/rate-playhead.cjs`): author 5/5, reopen 1/1 after a restart. At 29.97/30/59.94/60 the header, frame line, ruler second tick (`0:00:01:00`) and the stored exact ratio agree; 2 s of playback gives 59 of 60 and 119 of 120 frames (the last tick lands just under 2 s); the 300 ms fade-in ends at frame 9 (29.97) and 18 (59.94) with no key beside it; header 60→29.97 is one `setCanvas`, frame 48 reads `0:00:01:18`, undo restores `0:00:00:48`; "29.97/1" is refused with "29.97 is 30000/1001" and nothing is sent.
+- Fixed on the way: an empty timeline returned before drawing the ruler, so a new graphic had no ticks and no playhead.
+
+**Playhead handle.** `#timeline-playhead` (role slider) in a `timeline-ruler-track` over the ruler: a blue (#2d8ceb) pentagon tab with a 2 px line through the tracks, positioned by `frameToX` on every ruler render and scrub. Press or drag on the ruler or the handle scrubs (pointer capture, playback paused first); ArrowLeft/Right step a frame, PageUp/Down a timecode second, Home/End jump. Live: handle at frame 0 sits on the ruler's left edge, a drag lands on frame 40, a press jumps to 100, keys step to 101 and 131. Screenshot `agent/tmp/rate-playhead/playhead.png` sent to the user.
+
+**Shared tree note.** Another session (rmcp port, 8.14) has uncommitted changes in `services/mcp-server`, `services/playout-mcp` and `Cargo.lock`; they are not in my commit.
+
+**Gate:** `npm run check` exit 0 on the second run (`agent/tmp/import-1117/check-2.log`): boundaries OK, codegen 353 current, 403 Editor/Node TS tests, 731 Rust (3 ignored), conformance 386/0/9. The first run (`check.log`) failed only to build `services/playout-mcp` against the rmcp session's then-uncommitted `ToolHandler: Send` bound in `gx-mcp-server`; they had already removed it by the time I looked, and `cargo test --workspace --exclude gx-engine-host --exclude gx-playout-mcp` was 704/0/3 meanwhile (`rust-excl.log`).
+
+---
+
 ## 2026-11-07 — 11.24 done on Windows: spacebar preview and integrated parity (Claude, mission 1)
 
 **Done — 11.24**, Windows-only by user decision ("accept Windows-only for 11.24 and start it", 7 Nov 2026). The plan row's Done-when now says so, in `GrapiX-Build-Plan.md` and in the plan copy in `progress.html`. Its Needs (11.6, 11.19, 11.23) are done. The earlier Windows evidence was taken on a much older Editor, so the whole criterion was re-run on today's.

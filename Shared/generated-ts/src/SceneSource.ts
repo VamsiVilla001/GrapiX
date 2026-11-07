@@ -3,4 +3,4 @@
 /**
  * Where `OpenScene` takes its document from.
  */
-export type SceneSource = { "source": "new", id: string, name: string, } | { "source": "file", path: string, } | { "source": "project", project: string, sceneId: string, };
+export type SceneSource = { "source": "new", id: string, name: string, } | { "source": "file", path: string, } | { "source": "project", project: string, sceneId: string, } | { "source": "importSvg", id: string, sourceName: string, svg: string, };

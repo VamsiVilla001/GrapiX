@@ -24,7 +24,7 @@ pub mod fidelity;
 pub mod import;
 pub mod project;
 
-pub use command::{CommandError, Workspace};
+pub use command::{import_into_project, CommandError, Workspace};
 pub use design_system::{
     drift_report, ingest_claude_design, ingest_figma, ingest_w3c, DesignSystemStore, DriftEntry,
     DriftReport, Provenance, StampedTemplate,

@@ -59,7 +59,7 @@ pub struct EditorTools {
 /// The shipped author-only surface. It has no Program-control connection or
 /// operator scopes. Every registered read and write uses the same store.
 pub fn server(projects: Projects) -> gx_mcp_server::Server {
-    use gx_contracts::command::{ConfirmDesignSystem, CreateProject, CreateScene, DeleteScene, EditScene};
+    use gx_contracts::command::{ConfirmDesignSystem, CreateProject, CreateScene, DeleteScene, EditScene, ImportScene};
     let mut server = gx_mcp_server::Server::new(vec![gx_contracts::auth::Scope::Author]);
     server.register("project.list", Box::new(ProjectList(projects.clone())));
     server.register("project.create", Box::new(CommandTool::<CreateProject>::new(projects.clone())));
@@ -68,6 +68,7 @@ pub fn server(projects: Projects) -> gx_mcp_server::Server {
     server.register("scenes.create", Box::new(CommandTool::<CreateScene>::new(projects.clone())));
     server.register("scenes.delete", Box::new(CommandTool::<DeleteScene>::new(projects.clone())));
     server.register("scenes.edit", Box::new(CommandTool::<EditScene>::new(projects.clone())));
+    server.register("scenes.import", Box::new(CommandTool::<ImportScene>::new(projects.clone())));
     server.register("objects.hierarchy", Box::new(ObjectsHierarchy(projects.clone())));
     server.register("materials.list", Box::new(MaterialsUsage(projects.clone())));
     server.register("bindings.schema", Box::new(BindingsSchema(projects.clone())));

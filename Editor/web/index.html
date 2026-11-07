@@ -27,6 +27,7 @@
           <button data-invoke="project-create" type="button">New scene…</button>
           <button data-invoke="new-scene" type="button">New graphic…</button>
           <button data-invoke="open-scene" type="button">Open graphic file…</button>
+          <button data-invoke="import-svg" type="button">Import SVG…</button>
           <button data-invoke="save-scene" type="button">Save graphic file…</button>
         </div></details>
         <details class="app-menu"><summary>Edit</summary><div class="menu-items">
@@ -61,6 +62,7 @@
       <div class="actions">
         <button id="new-scene" type="button">New</button>
         <button id="open-scene" type="button">Open…</button>
+        <button id="import-svg" type="button" title="Import an SVG as a new graphic, with a report of every substitution">Import SVG…</button>
         <button id="save-scene" type="button">Save…</button>
         <button id="undo" type="button" disabled>Undo</button>
         <button id="redo" type="button" disabled>Redo</button>
@@ -99,6 +101,12 @@
         <div class="pane-head">
           <h2>Composition <span id="composition-name">Untitled</span></h2>
           <span id="canvas-size" class="meta"></span>
+          <!-- The graphic's rational frame rate (11.43). A change is one
+               setCanvas edit; frames are canonical, so keys keep their frame. -->
+          <label class="frame-control canvas-rate-control">
+            <span>Rate</span>
+            <select id="canvas-rate" aria-label="Frame rate of this graphic"></select>
+          </label>
         </div>
         <div class="viewport-stage">
           <div class="viewport-surface">
@@ -433,7 +441,14 @@
       </div>
       <p id="timeline-preset-duration-error" class="field-error timeline-tools-error" role="alert" hidden></p>
       </div>
-      <div class="timeline-ruler"><span class="layer-column-heading">Layers · visibility / lock</span><div id="timeline-ruler-ticks" aria-hidden="true"></div></div>
+      <div class="timeline-ruler"><span class="layer-column-heading">Layers · visibility / lock</span>
+        <!-- The ruler scrubs: press or drag anywhere on it, or drag the
+             playhead handle. The handle is a slider for the keyboard. -->
+        <div id="timeline-ruler-ticks" aria-hidden="true"></div>
+        <div id="timeline-ruler-track" class="timeline-ruler-track">
+          <div id="timeline-playhead" class="timeline-playhead" role="slider" tabindex="0" aria-label="Playhead" aria-valuemin="0" aria-valuenow="0" aria-valuemax="0" title="Drag to scrub; Left/Right step a frame"></div>
+        </div>
+      </div>
       <div id="timeline-mount" class="timeline-mount"></div>
     </section>
     </div>
@@ -456,6 +471,14 @@
         <h2 id="manager-create-title">New scene</h2>
         <p id="manager-create-description"></p>
         <label class="field"><span id="manager-create-name-label">Scene name</span><input id="manager-create-name" type="text" required maxlength="120" autocomplete="off" /></label>
+        <div id="manager-create-rate-row" class="field">
+          <label class="field"><span>Frame rate</span><select id="manager-create-rate" aria-label="Frame rate of the new graphic"></select></label>
+          <div id="manager-create-custom-rate" class="rate-custom" hidden>
+            <input id="manager-create-rate-num" type="text" inputmode="numeric" placeholder="numerator" aria-label="Frame rate numerator" />
+            <span>/</span>
+            <input id="manager-create-rate-den" type="text" inputmode="numeric" placeholder="denominator" aria-label="Frame rate denominator" value="1" />
+          </div>
+        </div>
         <p id="manager-create-error" role="alert"></p>
         <div class="dialog-actions"><button id="manager-create-cancel" type="button">Cancel</button><button type="submit">Create</button></div>
       </form>
@@ -463,6 +486,15 @@
     <!-- Closing a graphic with unsaved changes asks here, in the page. The
          webview's window.confirm is replaced by an asynchronous plugin call,
          which answered "yes" to every close without asking (11.29). -->
+    <dialog id="import-report-dialog" aria-labelledby="import-report-title">
+      <form id="import-report-form" method="dialog">
+        <h2 id="import-report-title">Import report</h2>
+        <div id="import-report-mount" class="import-report-mount"></div>
+        <div class="dialog-actions">
+          <button id="import-report-close" type="submit" value="close" autofocus>Close report</button>
+        </div>
+      </form>
+    </dialog>
     <dialog id="close-confirm-dialog" aria-labelledby="close-confirm-title" aria-describedby="close-confirm-message">
       <form id="close-confirm-form" method="dialog">
         <h2 id="close-confirm-title">Unsaved changes</h2>

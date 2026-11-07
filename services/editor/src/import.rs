@@ -21,16 +21,57 @@
 
 use gx_asset_plane::content_hash;
 use gx_contracts::import::{ImportEntry, ImportReport, ImportTier, Substitution};
+use gx_contracts::provenance::{AssetOrigin, AssetProvenance, ProvenanceTool};
 use gx_contracts::scene::{
-    ObjectBase, RectObject, SceneCanvas, SceneDocument, SceneObject, SceneTimeline,
+    AssetKind, AssetLibraryItem, ObjectBase, RectObject, SceneCanvas, SceneDocument, SceneObject,
+    SceneTimeline,
 };
 use gx_contracts::{RationalRate, RefusalSeverity};
 
 /// What an import produced: a scene, and the full account of what it cost.
+/// Every command surface carries the report beside the scene as an
+/// `Imported` effect, so a scene is never shown without what it lost.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportOutcome {
     pub scene: SceneDocument,
     pub report: ImportReport,
+}
+
+/// The tool an imported source's provenance names (11.39).
+pub const IMPORT_TOOL: &str = "GrapiX import";
+
+/// The library record for a retained source: kind `svg`, addressed by its
+/// content hash, filed under `assets/imports/`. The scene carries it so the
+/// report's `source_hash` names an asset the graphic owns, and saving the
+/// graphic into a project takes the bytes with it like any other asset.
+pub fn source_asset(source_name: &str, bytes: &[u8]) -> AssetLibraryItem {
+    let hash = content_hash(bytes);
+    // A file name that is not one canonical component would address a path
+    // the library does not own; the hash-named fallback never can.
+    let file_name = if gx_contracts::platform::is_canonical_filename(source_name) {
+        source_name.to_owned()
+    } else {
+        format!("{}.svg", &hash.0[..16])
+    };
+    AssetLibraryItem {
+        asset_id: format!("import_{}", &hash.0[..16]),
+        name: source_name.to_owned(),
+        kind: AssetKind::Svg,
+        path: format!("assets/imports/{file_name}"),
+        checksum: Some(hash),
+        mime_type: Some("image/svg+xml".into()),
+        size_bytes: Some(bytes.len() as u64),
+        status: None,
+        provenance: AssetProvenance {
+            origin: Some(AssetOrigin::Human),
+            tool: Some(ProvenanceTool {
+                name: IMPORT_TOOL.into(),
+                version: Some(env!("CARGO_PKG_VERSION").into()),
+            }),
+            sources: vec![source_name.to_owned()],
+            ..AssetProvenance::default()
+        },
+    }
 }
 
 /// Import an SVG document into a scene, reporting every departure.
@@ -49,7 +90,7 @@ pub fn import_svg(
     let mut objects = Vec::new();
     let mut entries = Vec::new();
 
-    for (index, element) in elements(text).into_iter().enumerate() {
+    for (index, element) in elements(text)?.into_iter().enumerate() {
         let source_id = element
             .attribute("id")
             .unwrap_or_else(|| format!("node-{index}"));
@@ -181,7 +222,8 @@ pub fn import_svg(
         },
         timeline: SceneTimeline { duration_frames: 1, ..Default::default() },
         data_context: Default::default(),
-        assets: Vec::new(),
+        // The source itself, retained with the graphic (7.2).
+        assets: vec![source_asset(source_name, bytes)],
         fonts: Vec::new(),
         materials: Vec::new(),
         controls: Vec::new(),
@@ -212,6 +254,11 @@ pub fn import_svg(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImportFailure {
     NotUtf8,
+    /// The text is not a whole SVG document: no `<svg>` root, a tag that
+    /// never closes, or a root that is never closed. A truncated file would
+    /// otherwise import as whatever came before the cut, with no report of
+    /// what was lost after it.
+    Malformed(String),
     /// The pipeline produced a report that failed its own contract. A defect
     /// in this crate rather than in the source document, surfaced rather than
     /// swallowed.
@@ -222,6 +269,7 @@ impl std::fmt::Display for ImportFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotUtf8 => f.write_str("the source is not valid UTF-8, so it is not SVG"),
+            Self::Malformed(detail) => write!(f, "the source is not a whole SVG document: {detail}"),
             Self::UnexplainedLoss(detail) => {
                 write!(f, "the import produced an unexplained loss: {detail}")
             }
@@ -257,10 +305,12 @@ impl Element {
 /// interpret becomes an element with an unrecognised tag, which the caller
 /// reports as a named loss rather than skipping — so the parser's limits show
 /// up in the report instead of as silently missing objects.
-fn elements(text: &str) -> Vec<Element> {
+fn elements(text: &str) -> Result<Vec<Element>, ImportFailure> {
     let mut found = Vec::new();
     let bytes = text.as_bytes();
     let mut i = 0;
+    // Whether the root was seen, and whether it closes itself (`<svg/>`).
+    let mut root: Option<bool> = None;
 
     while i < bytes.len() {
         if bytes[i] != b'<' {
@@ -273,14 +323,17 @@ fn elements(text: &str) -> Vec<Element> {
             continue;
         }
         let Some(end) = text[i..].find('>').map(|offset| i + offset) else {
-            break;
+            return Err(ImportFailure::Malformed(format!("the tag opened at byte {i} is never closed")));
         };
         let inner = &text[i + 1..end];
+        let self_closing = inner.ends_with('/');
         let inner = inner.strip_suffix('/').unwrap_or(inner);
 
         let mut parts = inner.split_whitespace();
         if let Some(tag) = parts.next() {
-            if tag != "svg" {
+            if tag == "svg" {
+                root.get_or_insert(self_closing);
+            } else {
                 found.push(Element {
                     tag: tag.to_owned(),
                     attributes: attributes(inner),
@@ -289,7 +342,13 @@ fn elements(text: &str) -> Vec<Element> {
         }
         i = end + 1;
     }
-    found
+    match root {
+        None => Err(ImportFailure::Malformed("there is no <svg> root element".into())),
+        Some(false) if !text.contains("</svg>") => {
+            Err(ImportFailure::Malformed("the <svg> root is never closed, so the file is cut short".into()))
+        }
+        Some(_) => Ok(found),
+    }
 }
 
 /// Pull `name="value"` pairs out of a start tag's body.
@@ -425,6 +484,20 @@ mod tests {
             }],
         };
         assert!(bad.validate().is_err());
+    }
+
+    #[test]
+    fn a_cut_short_or_rootless_source_is_refused_rather_than_half_imported() {
+        for (svg, says) in [
+            ("<svg><rect id=\"a\"/><rect", "never closed"),
+            ("<svg><rect id=\"a\"/>", "cut short"),
+            ("<rect id=\"a\"/>", "no <svg> root"),
+        ] {
+            let error = import_svg("cut.svg", svg.as_bytes(), "cut").expect_err(svg);
+            assert!(matches!(&error, ImportFailure::Malformed(_)), "{svg}: {error:?}");
+            assert!(error.to_string().contains(says), "{svg}: {error}");
+        }
+        assert!(import_svg("empty.svg", b"<svg/>", "empty").is_ok(), "an empty but whole document imports");
     }
 
     #[test]

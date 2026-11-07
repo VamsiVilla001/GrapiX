@@ -296,6 +296,23 @@ impl Workspace {
             EditorCommand::SaveMotionPreset(p) => {
                 self.save_motion_preset(p.project, p.target, p.object_id, p.preset_id, p.phase, p.keys)
             }
+            EditorCommand::ImportScene(p) => {
+                let outcome = import_into_project(
+                    self.projects()?,
+                    &p.project,
+                    &p.scene_id,
+                    p.name.as_deref(),
+                    &p.source_name,
+                    &p.svg,
+                )?;
+                Ok(CommandOutcome {
+                    session: None,
+                    effects: vec![
+                        EditEffect::Stored { origin: SceneOrigin { project: p.project, scene_id: p.scene_id } },
+                        EditEffect::Imported { report: outcome.report },
+                    ],
+                })
+            }
         }
     }
 
@@ -347,6 +364,17 @@ impl Workspace {
         let (document, origin, path) = match source {
             SceneSource::New { id, name } => (new_scene(&id, &name, gx_contracts::color::WorkingColorSpace::NEW_PROJECT), None, None),
             SceneSource::File { path } => (read_scene_file(&path)?, None, Some(path)),
+            SceneSource::ImportSvg { id, source_name, svg } => {
+                let outcome = import_svg_document(&source_name, svg.as_bytes(), &id)?;
+                let key = self.open_document(outcome.scene, None, None);
+                return Ok(CommandOutcome {
+                    session: Some(self.sessions.last().expect("the session was just opened").view()),
+                    effects: vec![
+                        EditEffect::SessionOpened { session: key },
+                        EditEffect::Imported { report: outcome.report },
+                    ],
+                });
+            }
             SceneSource::Project { project, scene_id } => {
                 let origin = SceneOrigin { project, scene_id };
                 if let Some(existing) = self
@@ -367,18 +395,22 @@ impl Workspace {
                 (document, Some(origin), None)
             }
         };
+        let key = self.open_document(document, origin, path);
+        Ok(CommandOutcome {
+            session: Some(self.sessions.last().expect("the session was just opened").view()),
+            effects: vec![EditEffect::SessionOpened { session: key }],
+        })
+    }
+
+    /// Install a document as a new session and return its key.
+    fn open_document(&mut self, document: SceneDocument, origin: Option<SceneOrigin>, path: Option<String>) -> SessionKey {
         let key = SessionKey(self.next_key);
         self.next_key = self
             .next_key
             .checked_add(1)
             .expect("fewer than u32::MAX sessions are opened in one Editor run");
-        let session = Session::open(key, document, origin, path);
-        let view = session.view();
-        self.sessions.push(session);
-        Ok(CommandOutcome {
-            session: Some(view),
-            effects: vec![EditEffect::SessionOpened { session: key }],
-        })
+        self.sessions.push(Session::open(key, document, origin, path));
+        key
     }
 
     /// Unsaved work blocks a close by name; `force` is the explicit
@@ -808,6 +840,81 @@ fn scene_exists(projects: &Projects, project: &str, scene_id: &str) -> Result<bo
 }
 
 /// A stored scene needs a name an author can find it by.
+/// Run the 7.2 pipeline for a command. A failure is a refusal naming the
+/// source, never an empty scene: the import is all or nothing.
+pub(crate) fn import_svg_document(
+    source_name: &str,
+    bytes: &[u8],
+    scene_id: &str,
+) -> Result<crate::import::ImportOutcome, CommandError> {
+    let mut outcome = crate::import::import_svg(source_name, bytes, scene_id).map_err(|error| {
+        CommandError::Refused(Refusal::SceneParseFailed {
+            detail: format!("import of {source_name}: {error}"),
+        })
+    })?;
+    // The scene is named after its source, as the author will look for it.
+    outcome.scene.name = std::path::Path::new(source_name)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| !stem.trim().is_empty())
+        .unwrap_or(source_name)
+        .to_owned();
+    require_scene_name(&outcome.scene)?;
+    // What the pipeline built must be a scene the Editor would accept from
+    // disk: the same strict reader, so no import can produce a document the
+    // engine later refuses.
+    let bytes = serde_json::to_vec(&outcome.scene).map_err(|error| {
+        CommandError::Refused(Refusal::SceneParseFailed { detail: error.to_string() })
+    })?;
+    parse_scene_document(&bytes).map_err(CommandError::Refused)?;
+    Ok(outcome)
+}
+
+/// Import an SVG straight into a stored project scene (7.2, `importScene`).
+/// The scene is written and its source adopted into the project's assets by
+/// content hash, so the report's `source_hash` resolves inside the project.
+/// An existing scene id refuses: an import never overwrites.
+pub fn import_into_project(
+    projects: &Projects,
+    project: &str,
+    scene_id: &str,
+    name: Option<&str>,
+    source_name: &str,
+    svg: &str,
+) -> Result<crate::import::ImportOutcome, CommandError> {
+    let declared = projects.settings(project)?.working_color_space;
+    if scene_exists(projects, project, scene_id)? {
+        return Err(Refusal::SceneAlreadyExists { project: project.to_owned(), scene_id: scene_id.to_owned() }.into());
+    }
+    let mut outcome = import_svg_document(source_name, svg.as_bytes(), scene_id)?;
+    if let Some(name) = name {
+        outcome.scene.name = name.trim().to_owned();
+        require_scene_name(&outcome.scene)?;
+    }
+    // Every refusal comes before the first write: a project in another
+    // working space refuses here, so no source is adopted for a scene that
+    // will never be stored (3.15).
+    if outcome.scene.working_color_space != declared {
+        return Err(Refusal::SceneWorkingSpaceMismatch {
+            project: project.to_owned(),
+            scene_id: scene_id.to_owned(),
+            scene: outcome.scene.working_color_space,
+            project_space: declared,
+        }
+        .into());
+    }
+    let source = outcome
+        .scene
+        .assets
+        .iter()
+        .find(|item| item.checksum.is_some() && item.checksum == outcome.report.source_hash)
+        .cloned()
+        .expect("an import carries its source as an asset");
+    projects.adopt_asset(project, &source, svg.as_bytes())?;
+    projects.write_scene(project, &outcome.scene)?;
+    Ok(outcome)
+}
+
 fn require_scene_name(document: &SceneDocument) -> Result<(), CommandError> {
     if document.name.trim().is_empty() {
         return Err(Refusal::SceneNameEmpty.into());
@@ -997,6 +1104,51 @@ mod tests {
             radius: 0.0,
         }));
         scene
+    }
+
+    // --- import (7.2, 11.17) -------------------------------------------------
+
+    #[test]
+    fn an_svg_import_opens_an_unbound_session_with_its_report() {
+        let svg = r#"<svg><rect id="bar" x="1" y="2" width="30" height="40"/><g id="group"/></svg>"#;
+        let mut workspace = Workspace::new(None);
+        let outcome = run(
+            &mut workspace,
+            EditorCommand::OpenScene(OpenScene {
+                source: SceneSource::ImportSvg { id: "brand".into(), source_name: "Brand Pack.svg".into(), svg: svg.into() },
+            }),
+        );
+        let view = outcome.session.expect("an import opens a session");
+        assert_eq!(view.document.name, "Brand Pack", "named after the file");
+        assert_eq!(view.origin, None, "an import is unbound until saved");
+        let report = outcome
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                EditEffect::Imported { report } => Some(report),
+                _ => None,
+            })
+            .expect("the report travels with the session");
+        assert_eq!(report.entries.len(), 2);
+        assert_eq!(report.source_name, "Brand Pack.svg");
+        assert!(view.document.assets.iter().any(|item| item.checksum == report.source_hash), "source retained");
+    }
+
+    #[test]
+    fn a_broken_svg_import_refuses_and_opens_nothing() {
+        let mut workspace = Workspace::new(None);
+        let error = workspace
+            .execute(EditorCommand::OpenScene(OpenScene {
+                source: SceneSource::ImportSvg { id: "cut".into(), source_name: "cut.svg".into(), svg: "<svg><rect".into() },
+            }))
+            .expect_err("a truncated SVG refuses");
+        match error {
+            CommandError::Refused(Refusal::SceneParseFailed { detail }) => {
+                assert!(detail.contains("cut.svg") && detail.contains("never closed"), "{detail}");
+            }
+            other => panic!("expected a parse refusal, got {other:?}"),
+        }
+        assert_eq!(open_new(&mut workspace, "next", "Next"), SessionKey(1), "no session was opened");
     }
 
     // --- sessions (workspace.test.ts) -------------------------------------

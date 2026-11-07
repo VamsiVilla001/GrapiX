@@ -1329,6 +1329,38 @@
       ],
       "type": "object"
     },
+    "ImportScene": {
+      "description": "Import an SVG into a new stored scene through the four-tier\npipeline (7.2). The source is adopted into the project by content\nhash; the report is an `Imported` effect. Refuses an existing id.",
+      "properties": {
+        "name": {
+          "description": "The scene's display name; the source file's stem when absent.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project": {
+          "type": "string"
+        },
+        "sceneId": {
+          "type": "string"
+        },
+        "sourceName": {
+          "description": "The source's own file name, kept in the report and the asset.",
+          "type": "string"
+        },
+        "svg": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project",
+        "sceneId",
+        "sourceName",
+        "svg"
+      ],
+      "type": "object"
+    },
     "KeyRef": {
       "description": "One authored key a capture names: a property and the frame it sits on.",
       "properties": {
@@ -1766,6 +1798,26 @@
       },
       "required": [
         "name"
+      ],
+      "type": "object"
+    },
+    "RationalRate": {
+      "description": "A frame rate as an exact rational. Never a float (invariant 12).\n\n29.97 is 30000/1001 and cannot be represented in binary floating point.\nAccumulating a rounded rate across an 8-hour soak drifts the clock, so this\ntype deliberately offers no `f64` constructor.",
+      "properties": {
+        "den": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "num": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "num",
+        "den"
       ],
       "type": "object"
     },
@@ -2541,6 +2593,19 @@
             "edit"
           ],
           "type": "object"
+        },
+        {
+          "$ref": "#/$defs/SetCanvas",
+          "properties": {
+            "edit": {
+              "const": "setCanvas",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -2642,6 +2707,31 @@
             "sceneId"
           ],
           "type": "object"
+        },
+        {
+          "description": "An SVG document imported through the 7.2 pipeline. The text travels\nwhole so the hash in the report is the hash of what was supplied; the\nsession opens unbound, with the report as an `Imported` effect.",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "source": {
+              "const": "importSvg",
+              "type": "string"
+            },
+            "sourceName": {
+              "type": "string"
+            },
+            "svg": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "id",
+            "sourceName",
+            "svg"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -2712,6 +2802,38 @@
         "objectId",
         "property"
       ],
+      "type": "object"
+    },
+    "SetCanvas": {
+      "description": "Change the canvas: its rational frame rate and/or its size (11.43).\nFrames are canonical (invariant 12): a rate change keeps every key\nframe number and the duration in frames, so the graphic plays the\nsame frames at the new rate; only its wall-clock length changes.",
+      "properties": {
+        "frameRate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RationalRate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "height": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "width": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "SetObjectField": {
@@ -3276,6 +3398,19 @@
       "properties": {
         "command": {
           "const": "saveMotionPreset",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "type": "object"
+    },
+    {
+      "$ref": "#/$defs/ImportScene",
+      "properties": {
+        "command": {
+          "const": "importScene",
           "type": "string"
         }
       },

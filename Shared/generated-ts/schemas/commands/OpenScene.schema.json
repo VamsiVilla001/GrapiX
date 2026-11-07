@@ -65,6 +65,31 @@
             "sceneId"
           ],
           "type": "object"
+        },
+        {
+          "description": "An SVG document imported through the 7.2 pipeline. The text travels\nwhole so the hash in the report is the hash of what was supplied; the\nsession opens unbound, with the report as an `Imported` effect.",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "source": {
+              "const": "importSvg",
+              "type": "string"
+            },
+            "sourceName": {
+              "type": "string"
+            },
+            "svg": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "id",
+            "sourceName",
+            "svg"
+          ],
+          "type": "object"
         }
       ]
     }

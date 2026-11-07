@@ -10,6 +10,8 @@
 //   invariant 23 generated output is generated, never hand-authored
 //   invariant 60 every authoring mutation is an `EditorCommand`:
 //     R1 the Tauri surface is exactly `cmd_execute` plus the named reads
+//        (and `cmd_import_file`, which reads a file and then runs one
+//        `OpenScene` through the same executor)
 //     R2 store writes happen only in the Editor store chokepoints
 //     R3 Editor-side crates never call contract mutators except via `apply_edits`
 //     R4 the browser invokes only named shell commands, never with a document
@@ -30,8 +32,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SKIPPED_DIRECTORIES = ["node_modules", "target", "dist", ".git", ".claude", "agent", "legacy", "bindings"];
 
-/** The one mutating Tauri command and the pure reads (spec 11.36 §4.4). */
-const SHELL_MUTATE = ["cmd_execute"];
+/** The mutating Tauri commands and the pure reads (spec 11.36 §4.4).
+ *  `cmd_import_file` reads a source file, caches its bytes by hash and runs
+ *  one `OpenScene` through the executor; it carries no document. */
+const SHELL_MUTATE = ["cmd_execute", "cmd_import_file"];
 const SHELL_READ = [
   "cmd_session_view", "cmd_publish", "cmd_take_page_preview",
   "cmd_object_kinds", "cmd_animation_surface", "cmd_control_properties",

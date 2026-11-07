@@ -17,8 +17,10 @@
 
 import type {
   AnimationSurface,
+  RationalRate,
   SessionKey,
   CommandOutcome,
+  ImportReport,
   ControlField,
   ControlValue,
   EditEffect,
@@ -44,6 +46,8 @@ import { presetBlocker, presetBrowserPanel } from "../src/motion-preset-browser"
 import { SceneViewport } from "../src/viewport";
 import { GraphicPreviewRenderer } from "../src/graphic-preview";
 import { renderNode } from "../src/agent-surface";
+import { BROADCAST_RATES, parseRateChoice, rateKey, sameRate } from "../src/frame-rate";
+import { sceneImportPanel } from "../src/import-panel";
 import {
   objectManagerPanel,
   selectionRoots,
@@ -274,6 +278,9 @@ const ui = {
   sceneName: need<HTMLInputElement>("scene-name"),
   newScene: need<HTMLButtonElement>("new-scene"),
   openScene: need<HTMLButtonElement>("open-scene"),
+  importSvg: need<HTMLButtonElement>("import-svg"),
+  importReportDialog: need<HTMLDialogElement>("import-report-dialog"),
+  importReportMount: need<HTMLDivElement>("import-report-mount"),
   saveScene: need<HTMLButtonElement>("save-scene"),
   projectSelect: need<HTMLSelectElement>("project-select"),
   projectCreate: need<HTMLButtonElement>("project-create"),
@@ -293,6 +300,14 @@ const ui = {
   overlay: need<SVGSVGElement>("viewport-overlay"),
   sceneTabs: need<HTMLElement>("scene-tabs"),
   canvasSize: need<HTMLSpanElement>("canvas-size"),
+  canvasRate: need<HTMLSelectElement>("canvas-rate"),
+  managerRate: need<HTMLSelectElement>("manager-create-rate"),
+  managerRateRow: need<HTMLDivElement>("manager-create-rate-row"),
+  managerCustomRate: need<HTMLDivElement>("manager-create-custom-rate"),
+  managerRateNum: need<HTMLInputElement>("manager-create-rate-num"),
+  managerRateDen: need<HTMLInputElement>("manager-create-rate-den"),
+  timelineRulerTicks: need<HTMLDivElement>("timeline-ruler-ticks"),
+  timelinePlayhead: need<HTMLDivElement>("timeline-playhead"),
   objectManager: need<HTMLDivElement>("object-manager"),
   objectKind: need<HTMLSelectElement>("object-kind"),
   objectCreate: need<HTMLButtonElement>("object-create"),
@@ -806,7 +821,8 @@ function renderSceneState(): void {
   // before the graph is torn down rather than let it write into disposed
   // objects.
   pausePreview("the document changed");
-  ui.canvasSize.textContent = `${scene.canvas.width} × ${scene.canvas.height} @ ${scene.canvas.frameRate.num}/${scene.canvas.frameRate.den}`;
+  ui.canvasSize.textContent = `${scene.canvas.width} × ${scene.canvas.height} · ${formatRate(scene.canvas.frameRate)}`;
+  showRateChoice(ui.canvasRate, scene.canvas.frameRate);
   ui.canvas.width = scene.canvas.width;
   ui.canvas.height = scene.canvas.height;
 
@@ -1379,6 +1395,9 @@ function renderTimeline(document_: SceneDocument, structureChanged = true): void
     timelineLayers = null;
     lastSnapshot = null;
     timelineStructure = "";
+    // The ruler and its playhead still belong to the graphic: an empty
+    // timeline has a rate, a duration and a current frame to scrub.
+    renderTimelineRuler(model);
     return;
   }
 
@@ -1432,6 +1451,71 @@ function renderTimelineRuler(model: TimelineModel): void {
     ticks.push(tick);
   }
   host.replaceChildren(...ticks);
+  positionPlayhead();
+}
+
+/** Put the ruler's playhead handle on the current frame. Cheap on purpose:
+ *  one style and three attributes, so a scrub never touches the ticks. */
+function positionPlayhead(): void {
+  const handle = ui.timelinePlayhead;
+  if (!scene) {
+    handle.hidden = true;
+    return;
+  }
+  const duration = Number(scene.timeline.durationFrames);
+  const x = frameToX(timelineViewport, currentFrame);
+  handle.hidden = x < 0 || x > timelineViewport.width;
+  handle.style.left = `${x}px`;
+  handle.setAttribute("aria-valuenow", String(currentFrame));
+  handle.setAttribute("aria-valuemax", String(duration));
+  handle.setAttribute("aria-valuetext", formatTimecode(currentFrame, scene.canvas.frameRate));
+}
+
+/** The frame under a pointer on the ruler, clamped to the scene. */
+function rulerFrameAt(clientX: number): number {
+  const bounds = ui.timelineRulerTicks.getBoundingClientRect();
+  const frame = xToFrame(timelineViewport, clientX - bounds.left);
+  return Math.min(Number(scene?.timeline.durationFrames ?? 0), Math.max(0, frame));
+}
+
+let rulerScrub: { pointerId: number } | undefined;
+
+/// Press or drag on the ruler, or on its handle, scrubs. Playback is paused
+/// first: a scrub during playback would be overwritten by the next tick.
+function onRulerPointerDown(event: PointerEvent): void {
+  if (!scene || event.button !== 0) return;
+  event.preventDefault();
+  if (playback) pausePreview("scrubbing");
+  rulerScrub = { pointerId: event.pointerId };
+  ui.timelineRulerTicks.setPointerCapture(event.pointerId);
+  setCurrentFrame(rulerFrameAt(event.clientX));
+}
+
+function onRulerPointerMove(event: PointerEvent): void {
+  if (!rulerScrub || rulerScrub.pointerId !== event.pointerId) return;
+  const frame = rulerFrameAt(event.clientX);
+  if (frame !== currentFrame) setCurrentFrame(frame);
+}
+
+function onRulerPointerUp(event: PointerEvent): void {
+  if (!rulerScrub || rulerScrub.pointerId !== event.pointerId) return;
+  rulerScrub = undefined;
+  if (ui.timelineRulerTicks.hasPointerCapture(event.pointerId)) ui.timelineRulerTicks.releasePointerCapture(event.pointerId);
+}
+
+/// The handle is a slider: arrows step a frame, Home/End jump, Page keys
+/// move a timecode second.
+function onPlayheadKeyDown(event: KeyboardEvent): void {
+  if (!scene) return;
+  const second = Math.max(1, Math.round(scene.canvas.frameRate.num / scene.canvas.frameRate.den));
+  const steps: Record<string, number | "home" | "end"> = {
+    ArrowLeft: -1, ArrowRight: 1, ArrowDown: -1, ArrowUp: 1, PageDown: -second, PageUp: second, Home: "home", End: "end",
+  };
+  const step = steps[event.key];
+  if (step === undefined) return;
+  event.preventDefault();
+  if (playback) pausePreview("scrubbing");
+  setCurrentFrame(step === "home" ? 0 : step === "end" ? Number(scene.timeline.durationFrames) : currentFrame + step);
 }
 
 /** Wheel over the timeline: rows vertically, frames with Shift or a
@@ -1497,6 +1581,7 @@ function paintTimeline(model: TimelineModel): void {
 /** Repaint after a scrub. Deliberately does NOT rebuild the DOM: only the
  *  interaction layer is dirty, which is 11.11's done-when in practice. */
 function repaintTimelineForScrub(): void {
+  positionPlayhead();
   if (!scene || !timelineLayers) return;
   paintTimeline(currentTimelineModel(scene));
 }
@@ -4338,6 +4423,8 @@ async function createProject(): Promise<void> {
 }
 
 let managerCreateKind: "container" | "graphic" = "container";
+/** The contract's rate for a new graphic (`new_scene`): 50/1. */
+const DEFAULT_RATE: RationalRate = { num: 50, den: 1 };
 
 function showManagerCreate(kind: "container" | "graphic"): void {
   managerCreateKind = kind;
@@ -4349,14 +4436,76 @@ function showManagerCreate(kind: "container" | "graphic"): void {
     ? "Keep multiple graphics together. Each graphic has its own layers and timeline."
     : currentProject === undefined ? "Create an independent graphic. Save it into a scene when ready."
       : `Add an independent graphic to ${currentProject}.`;
+  ui.managerRateRow.hidden = kind === "container";
+  ui.managerRate.value = "50/1";
+  ui.managerCustomRate.hidden = true;
+  ui.managerRateNum.value = "";
+  ui.managerRateDen.value = "1";
   ui.managerDialog.showModal();
   ui.managerName.focus();
+}
+
+/** Fill a rate select: every broadcast rate, then Custom. */
+function fillRateSelect(select: HTMLSelectElement): void {
+  select.replaceChildren(
+    ...BROADCAST_RATES.map((entry) => new Option(entry.label, entry.key)),
+    new Option("Custom (num/den)…", "custom"),
+  );
+}
+
+/** Show a document's rate in a select; a rate outside the list reads as
+ *  Custom with its exact ratio in the label. */
+function showRateChoice(select: HTMLSelectElement, rate: RationalRate): void {
+  const key = rateKey(rate);
+  const custom = [...select.options].find((option) => option.value === "custom");
+  if (custom) custom.textContent = key === "custom" ? `Custom: ${rate.num}/${rate.den} (${formatRate(rate)})` : "Custom (num/den)…";
+  select.value = key;
+}
+
+/// Change the open graphic's frame rate from the header: one setCanvas edit.
+/// Frames are canonical, so every key keeps its frame; the clock, ruler and
+/// playback follow the new rate.
+async function changeCanvasRate(): Promise<void> {
+  if (!scene) return;
+  const current = scene.canvas.frameRate;
+  let parsed = parseRateChoice(ui.canvasRate.value, "", "");
+  if (ui.canvasRate.value === "custom") {
+    const typed = window.prompt("Frame rate as a whole-number ratio, numerator/denominator (29.97 is 30000/1001)", `${current.num}/${current.den}`);
+    if (typed === null) {
+      showRateChoice(ui.canvasRate, current);
+      return;
+    }
+    const [num = "", den = "1"] = typed.split("/");
+    parsed = parseRateChoice("custom", num, den);
+  }
+  if (!parsed.ok) {
+    log(`frame rate refused: ${parsed.refused}`, "bad");
+    showRateChoice(ui.canvasRate, current);
+    return;
+  }
+  if (sameRate(parsed.rate, current)) return;
+  const outcome = await runEdits(
+    [{ edit: "setCanvas", frameRate: parsed.rate }],
+    `Set frame rate to ${formatRate(parsed.rate)} (${parsed.rate.num}/${parsed.rate.den}); frames keep their numbers`,
+    "scene",
+  );
+  if (!outcome && scene) showRateChoice(ui.canvasRate, scene.canvas.frameRate);
 }
 
 async function submitManagerCreate(): Promise<void> {
   const name = ui.managerName.value.trim();
   const submit = ui.managerForm.querySelector<HTMLButtonElement>('button[type="submit"]')!;
   if (!name || submit.disabled) return;
+  // The rate is checked before anything is created, so a bad ratio leaves
+  // nothing behind. The default keeps the contract's new-scene rate.
+  const rate = managerCreateKind === "graphic"
+    ? parseRateChoice(ui.managerRate.value, ui.managerRateNum.value, ui.managerRateDen.value)
+    : undefined;
+  if (rate && !rate.ok) {
+    ui.managerError.textContent = rate.refused;
+    return;
+  }
+  const chosenRate = rate?.ok && !sameRate(rate.rate, DEFAULT_RATE) ? rate.rate : undefined;
   submit.disabled = true;
   ui.managerError.textContent = "";
   try {
@@ -4366,18 +4515,19 @@ async function submitManagerCreate(): Promise<void> {
       await loadProjects(name);
       log(`Created scene ${name}`, "good");
     } else {
-      // The display name is free text; the stable storage id is a safe slug.
-      const slug = name.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "graphic";
-      const ids = new Set([...(projectCatalog?.scenes.map((item) => item.sceneId) ?? []),
-        ...workspace.sessions.map((item) => item.view.document.id)]);
-      let id = slug;
-      for (let suffix = 2; ids.has(id); suffix += 1) id = `${slug}-${suffix}`;
+      const id = freshGraphicId(name);
       if (currentProject === undefined) {
         const opened = await runCommand({ command: "openScene", source: { source: "new", id, name } }, `Created graphic ${name}`);
         if (!opened) throw new Error("The graphic could not be opened. See Activity for the refusal.");
+        if (chosenRate) await runEdits([{ edit: "setCanvas", frameRate: chosenRate }], `Set frame rate to ${formatRate(chosenRate)}`, "scene");
       } else {
         const project = currentProject;
         await execute({ command: "createScene", project, sceneId: id, name });
+        // Applied to the stored copy before it opens, so the graphic is
+        // created at its rate rather than opened dirty.
+        if (chosenRate) {
+          await execute({ command: "editScene", target: { target: "stored", project, sceneId: id }, edits: [{ edit: "setCanvas", frameRate: chosenRate }] });
+        }
         ui.graphicSearch.value = "";
         await refreshProjectCatalog();
         const opened = await runCommand({ command: "openScene", source: { source: "project", project, sceneId: id } }, `Created graphic ${name}`);
@@ -4588,6 +4738,57 @@ async function newScene(): Promise<void> {
   showManagerCreate("graphic");
 }
 
+/// The display name is free text; the stable storage id is a safe slug no
+/// stored or open graphic already uses.
+function freshGraphicId(name: string): string {
+  const slug = name.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "graphic";
+  const ids = new Set([...(projectCatalog?.scenes.map((item) => item.sceneId) ?? []),
+    ...workspace.sessions.map((item) => item.view.document.id)]);
+  let id = slug;
+  for (let suffix = 2; ids.has(id); suffix += 1) id = `${slug}-${suffix}`;
+  return id;
+}
+
+/// Import an SVG as a new unbound graphic (11.17 over 7.2). The shell keeps
+/// the source bytes by hash and opens the session; the report arrives as the
+/// command's `imported` effect and is shown before the author works on it.
+async function importSvg(): Promise<void> {
+  if (refusesDiscard("import")) return;
+  let path: string | undefined;
+  try {
+    const picked = await openFileDialog({
+      multiple: false,
+      filters: [{ name: "SVG document", extensions: ["svg"] }],
+    });
+    path = (Array.isArray(picked) ? picked[0] : picked) ?? undefined;
+  } catch (error) {
+    log(describe(error), "bad");
+    return;
+  }
+  if (!path) return;
+  const file = path.split(/[\\/]/).pop() || path;
+  const id = freshGraphicId(file.replace(/\.svg$/i, ""));
+  let outcome: CommandOutcome;
+  try {
+    outcome = await shell().invoke<CommandOutcome>("cmd_import_file", { path, id });
+  } catch (error) {
+    log(`import of ${file} refused: ${describe(error)}`, "bad");
+    return;
+  }
+  if (outcome.session) presentView(outcome.session);
+  for (const effect of outcome.effects) {
+    if (effect.effect !== "imported") continue;
+    const substitutions = effect.report.entries.reduce((sum, entry) => sum + entry.substitutions.length, 0);
+    log(`Imported ${file}: ${effect.report.entries.length} element(s), ${substitutions} substitution(s)`, substitutions === 0 ? "good" : "bad");
+    showImportReport(effect.report);
+  }
+}
+
+function showImportReport(report: ImportReport): void {
+  ui.importReportMount.replaceChildren(renderNode(document, sceneImportPanel(report)) as unknown as Node);
+  if (!ui.importReportDialog.open) ui.importReportDialog.showModal();
+}
+
 async function openScene(): Promise<void> {
   if (refusesDiscard("open file")) return;
   let path: string | undefined;
@@ -4684,6 +4885,7 @@ async function start(): Promise<void> {
 
   ui.newScene.addEventListener("click", () => void newScene());
   ui.openScene.addEventListener("click", () => void openScene());
+  ui.importSvg.addEventListener("click", () => void importSvg());
   ui.saveScene.addEventListener("click", () => void saveScene());
   ui.projectCreate.addEventListener("click", () => void createProject());
   ui.projectRefresh.addEventListener("click", () => void loadProjects(currentProject));
@@ -4692,6 +4894,19 @@ async function start(): Promise<void> {
   ui.graphicCreate.addEventListener("click", () => showManagerCreate("graphic"));
   ui.graphicSearch.addEventListener("input", renderProjectManager);
   ui.managerForm.addEventListener("submit", (event) => { event.preventDefault(); void submitManagerCreate(); });
+  fillRateSelect(ui.managerRate);
+  fillRateSelect(ui.canvasRate);
+  ui.managerRate.addEventListener("change", () => {
+    ui.managerCustomRate.hidden = ui.managerRate.value !== "custom";
+    if (!ui.managerCustomRate.hidden) ui.managerRateNum.focus();
+  });
+  ui.canvasRate.addEventListener("change", () => void changeCanvasRate());
+  ui.timelineRulerTicks.addEventListener("pointerdown", onRulerPointerDown);
+  ui.timelinePlayhead.addEventListener("pointerdown", onRulerPointerDown);
+  ui.timelineRulerTicks.addEventListener("pointermove", onRulerPointerMove);
+  ui.timelineRulerTicks.addEventListener("pointerup", onRulerPointerUp);
+  ui.timelineRulerTicks.addEventListener("pointercancel", onRulerPointerUp);
+  ui.timelinePlayhead.addEventListener("keydown", onPlayheadKeyDown);
   document.getElementById("manager-create-cancel")!.addEventListener("click", () => ui.managerDialog.close());
   ui.sceneManagerMount.addEventListener("click", onSceneManagerClick);
   ui.sceneName.addEventListener("input", () => {

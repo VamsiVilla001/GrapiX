@@ -413,6 +413,33 @@ fn cmd_execute(state: tauri::State<'_, ShellState>, command: serde_json::Value) 
     execute(&mut state.workspace(), command)
 }
 
+/// Import an SVG file as a new unbound graphic (7.2, 11.17). The source bytes
+/// go into the asset cache under their hash first, so the graphic's source
+/// asset resolves when it is saved into a project; then the session opens
+/// with the report as an `Imported` effect.
+#[tauri::command]
+fn cmd_import_file(state: tauri::State<'_, ShellState>, path: String, id: String) -> Result<CommandOutcome, EditorError> {
+    let bytes = std::fs::read(&path).map_err(|error| EditorError::ReadFile {
+        path: path.clone(),
+        detail: error.to_string(),
+    })?;
+    let svg = String::from_utf8(bytes).map_err(|_| {
+        refused(Refusal::SceneParseFailed { detail: format!("{path} is not UTF-8 text, so it is not an SVG document") })
+    })?;
+    let source_name = std::path::Path::new(&path)
+        .file_name()
+        .map_or_else(|| path.clone(), |name| name.to_string_lossy().into_owned());
+    state.with_asset_store(|store| {
+        store
+            .promote_verified(&content_hash(svg.as_bytes()), svg.as_bytes())
+            .map_err(|error| EditorError::AssetCache { detail: error.to_string() })
+    })?;
+    execute(
+        &mut state.workspace(),
+        EditorCommand::OpenScene(OpenScene { source: SceneSource::ImportSvg { id, source_name, svg } }),
+    )
+}
+
 #[tauri::command]
 fn cmd_session_view(state: tauri::State<'_, ShellState>, session: SessionKey) -> Result<SessionView, EditorError> {
     state.workspace().view(session).map_err(|error| command_error(error, None))
@@ -766,6 +793,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             cmd_execute,
+            cmd_import_file,
             cmd_session_view,
             cmd_publish,
             cmd_take_page_preview,

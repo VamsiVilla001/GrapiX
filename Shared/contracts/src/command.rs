@@ -17,12 +17,13 @@ use crate::authoring::{self, ObjectDeletion, ObjectDuplication};
 use crate::bindings::{self, BindingIssue};
 use crate::control::{self, ControlField, TakePage};
 use crate::design_system::{self, DesignSystem, DesignSystemCommit, MotionPreset};
+use crate::import::ImportReport;
 use crate::object_edit::{self, ObjectField};
 use crate::phases::{self, TimelinePhase};
 use crate::font::FontDefinition;
 use crate::scene::{AssetLibraryItem, DataContext, SceneDocument};
 use crate::text_style::{self, TextStyle};
-use crate::{asset_edit, font_edit, material_edit, ContentHash, Refusal};
+use crate::{asset_edit, font_edit, material_edit, ContentHash, RationalRate, Refusal};
 
 /// Declares one wire enum together with its named payload structs.
 ///
@@ -131,6 +132,14 @@ pub enum SceneSource {
     File { path: String },
     /// A stored project scene; an already-open origin is reused.
     Project { project: String, scene_id: String },
+    /// An SVG document imported through the 7.2 pipeline. The text travels
+    /// whole so the hash in the report is the hash of what was supplied; the
+    /// session opens unbound, with the report as an `Imported` effect.
+    ImportSvg {
+        id: String,
+        source_name: String,
+        svg: String,
+    },
 }
 
 /// Where `SaveScene` writes a session's document.
@@ -244,6 +253,20 @@ commands! {
             pub phase: PresetPhase,
             pub keys: Vec<KeyRef>,
         },
+        /// Import an SVG into a new stored scene through the four-tier
+        /// pipeline (7.2). The source is adopted into the project by content
+        /// hash; the report is an `Imported` effect. Refuses an existing id.
+        ImportScene = "importScene" {
+            pub project: String,
+            pub scene_id: String,
+            /// The scene's display name; the source file's stem when absent.
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub name: Option<String>,
+            /// The source's own file name, kept in the report and the asset.
+            pub source_name: String,
+            pub svg: String,
+        },
     }
 }
 
@@ -354,6 +377,21 @@ commands! {
         /// Add imported assets with the provenance their import filled in
         /// (11.39). The only way a non-font asset enters a scene.
         AddAssets = "addAssets" { pub assets: Vec<AssetLibraryItem> },
+        /// Change the canvas: its rational frame rate and/or its size (11.43).
+        /// Frames are canonical (invariant 12): a rate change keeps every key
+        /// frame number and the duration in frames, so the graphic plays the
+        /// same frames at the new rate; only its wall-clock length changes.
+        SetCanvas = "setCanvas" {
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub frame_rate: Option<RationalRate>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub width: Option<u32>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub height: Option<u32>,
+        },
     }
 }
 
@@ -395,6 +433,8 @@ pub enum EditEffect {
     FontRemoved { font_id: String, asset_ids: Vec<String> },
     /// The font's old files nothing uses any more left with the replace.
     FontReplaced { font_id: String, asset_ids: Vec<String> },
+    /// A session opened from an import (7.2): every substitution, named.
+    Imported { report: ImportReport },
     DesignSystemConfirmed { project: String, version: u32 },
 }
 
@@ -642,7 +682,44 @@ fn apply_edit(
             asset_edit::add_assets(scene, &p.assets)?;
             EditEffect::None
         }
+        SceneEdit::SetCanvas(p) => {
+            set_canvas(scene, p.frame_rate, p.width, p.height)?;
+            EditEffect::None
+        }
     })
+}
+
+/// Apply a canvas change, all or nothing. A rate with a zero term is refused
+/// (`InvalidRate`), a zero side is refused by name, and an edit that changes
+/// nothing is refused rather than recorded as an empty history entry.
+fn set_canvas(
+    scene: &mut SceneDocument,
+    frame_rate: Option<RationalRate>,
+    width: Option<u32>,
+    height: Option<u32>,
+) -> Result<(), Refusal> {
+    let mut canvas = scene.canvas.clone();
+    if let Some(rate) = frame_rate {
+        canvas.frame_rate = RationalRate::new(rate.num, rate.den)?;
+    }
+    for (field, value, slot) in [("canvas.width", width, &mut canvas.width), ("canvas.height", height, &mut canvas.height)] {
+        if let Some(value) = value {
+            if value == 0 {
+                return Err(Refusal::ObjectFieldValueInvalid {
+                    field: field.to_owned(),
+                    detail: "must be at least 1 pixel".to_owned(),
+                });
+            }
+            *slot = value;
+        }
+    }
+    if canvas == scene.canvas {
+        return Err(Refusal::ObjectFieldUnchanged {
+            field: "canvas".to_owned(),
+        });
+    }
+    scene.canvas = canvas;
+    Ok(())
 }
 
 /// Parse typed JSON, refusing any key the type does not carry.
@@ -710,6 +787,7 @@ pub mod witness {
             EditorCommand::SaveTakePage(_) => 10,
             EditorCommand::ConfirmDesignSystem(_) => 11,
             EditorCommand::SaveMotionPreset(_) => 12,
+            EditorCommand::ImportScene(_) => 13,
         }
     }
 
@@ -747,6 +825,7 @@ pub mod witness {
             SceneEdit::AddAssets(_) => 29,
             SceneEdit::UpdateFont(_) => 30,
             SceneEdit::ReplaceFont(_) => 31,
+            SceneEdit::SetCanvas(_) => 32,
         }
     }
 
@@ -818,6 +897,13 @@ pub mod witness {
             EditorCommand::DeleteScene(DeleteScene {
                 project: "witness-project".into(),
                 scene_id: "copy".into(),
+            }),
+            EditorCommand::ImportScene(ImportScene {
+                project: "witness-project".into(),
+                scene_id: "imported".into(),
+                name: None,
+                source_name: "witness.svg".into(),
+                svg: r#"<svg><rect id="bar" width="10" height="10"/><g id="group"/></svg>"#.into(),
             }),
             EditorCommand::SaveTakePage(SaveTakePage {
                 project: "witness-project".into(),
@@ -1222,6 +1308,12 @@ pub mod witness {
                         c2pa_manifest: Some("assets/c2pa/added.c2pa".into()),
                     },
                 }],
+            }),
+            // 59.94 is 60000/1001: a rate a float cannot carry, carried exact.
+            SceneEdit::SetCanvas(SetCanvas {
+                frame_rate: Some(RationalRate::P59_94),
+                width: None,
+                height: None,
             }),
         ]
     }
@@ -1793,5 +1885,30 @@ mod tests {
             );
             assert!(scene.timeline.channels.is_empty());
         }
+    }
+
+    #[test]
+    fn set_canvas_changes_the_rate_exactly_and_keeps_every_frame() {
+        let mut scene = new_scene("rate", "Rate", crate::color::WorkingColorSpace::NEW_PROJECT);
+        let text = authoring::create_object(&mut scene, "rect", "Plate").unwrap();
+        animation::create_keyframe(&mut scene, &text, "x", SceneKeyframe { frame: 48, value: 10.0, easing: Default::default(), bezier: None }).unwrap();
+        let ctx = EditContext::default();
+        let edits = [SceneEdit::SetCanvas(SetCanvas { frame_rate: Some(RationalRate::P29_97), width: None, height: None })];
+        apply_edits(&mut scene, &edits, &ctx).unwrap();
+        assert_eq!(scene.canvas.frame_rate, RationalRate { num: 30000, den: 1001 }, "the rational is carried exact");
+        assert_eq!(scene.timeline.duration_frames, 250, "frames are canonical: the duration in frames is kept");
+        assert_eq!(scene.timeline.channels[0].keys[0].frame, 48, "a key stays on its frame");
+
+        let edits = [SceneEdit::SetCanvas(SetCanvas { frame_rate: None, width: Some(3840), height: Some(2160) })];
+        apply_edits(&mut scene, &edits, &ctx).unwrap();
+        assert_eq!((scene.canvas.width, scene.canvas.height), (3840, 2160));
+
+        let before = scene.clone();
+        let refused = |edit: SetCanvas| apply_edits(&mut scene.clone(), &[SceneEdit::SetCanvas(edit)], &ctx).unwrap_err();
+        assert!(matches!(refused(SetCanvas { frame_rate: Some(RationalRate { num: 0, den: 1 }), width: None, height: None }), Refusal::InvalidRate { num: 0, den: 1 }));
+        assert!(matches!(refused(SetCanvas { frame_rate: None, width: Some(0), height: None }), Refusal::ObjectFieldValueInvalid { .. }));
+        assert!(matches!(refused(SetCanvas { frame_rate: Some(RationalRate::P29_97), width: Some(3840), height: None }), Refusal::ObjectFieldUnchanged { .. }));
+        assert!(matches!(refused(SetCanvas { frame_rate: None, width: None, height: None }), Refusal::ObjectFieldUnchanged { .. }));
+        assert_eq!(scene, before, "a refused canvas edit changes nothing");
     }
 }

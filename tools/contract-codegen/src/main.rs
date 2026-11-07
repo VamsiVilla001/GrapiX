@@ -42,6 +42,7 @@ use gx_contracts::mcp::{
     CapabilitySurface, EnumSurface, PreviewFrame, PreviewRequest, ScopeDenial, ToolDescriptor, ToolEffect,
     EmptyArgs, ProjectRef, SceneRef, PackageBuild, PackageBuildSource, PackageRef, ProgramArgs, ClearArgs,
 };
+use gx_contracts::import::{ImportEntry, ImportReport, ImportTier, Substitution};
 use gx_contracts::package::{PackageFileEntry, PackageManifest};
 use gx_contracts::authoring::{ObjectDeletion, ObjectDuplication};
 use gx_contracts::text_style::{StyleColor, StyleNumber, TextStyle};
@@ -221,6 +222,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         GroupObject,
         SceneObject,
         SceneDocument,
+        // gx-contracts: import pipeline report (7.2)
+        ImportTier,
+        Substitution,
+        ImportEntry,
+        ImportReport,
         // gx-contracts: typed Editor command model (11.36)
         SessionKey,
         SceneOrigin,
