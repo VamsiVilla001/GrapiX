@@ -5045,9 +5045,19 @@ function resizeBy(region: RegionId, delta: number): void {
   renderLayout();
 }
 
+/** The element an event happened on. A drag of selected text starts on a
+ *  Text node, and a few events target the document itself; neither has
+ *  `closest`, so a text node answers with its parent and anything else with
+ *  nothing, rather than throwing out of the handler. */
+function eventElement(event: Event): Element | null {
+  const target = event.target;
+  if (target instanceof Element) return target;
+  return target instanceof Node ? target.parentElement : null;
+}
+
 function wireDocking(): void {
   document.addEventListener("dragstart", (event) => {
-    const handle = (event.target as Element | null)?.closest<HTMLElement>("[data-dock-handle]");
+    const handle = eventElement(event)?.closest<HTMLElement>("[data-dock-handle]");
     const panel = handle?.closest<HTMLElement>("[data-panel]");
     if (!panel?.dataset.panel || !event.dataTransfer) return;
     draggedPanel = panel.dataset.panel;
@@ -5057,7 +5067,7 @@ function wireDocking(): void {
   });
   document.addEventListener("dragover", (event) => {
     if (!draggedPanel) return;
-    const host = (event.target as Element | null)?.closest<HTMLElement>(".dock-region");
+    const host = eventElement(event)?.closest<HTMLElement>(".dock-region");
     if (!host?.dataset.region) return;
     event.preventDefault();
     document.querySelectorAll(".drop-target").forEach((node) => node.classList.remove("drop-target"));
@@ -5065,7 +5075,7 @@ function wireDocking(): void {
     if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
   });
   document.addEventListener("drop", (event) => {
-    const host = (event.target as Element | null)?.closest<HTMLElement>(".dock-region");
+    const host = eventElement(event)?.closest<HTMLElement>(".dock-region");
     const region = host?.dataset.region as RegionId | undefined;
     if (!draggedPanel || !host || !region || !REGIONS.includes(region)) return;
     event.preventDefault();
@@ -5077,7 +5087,7 @@ function wireDocking(): void {
   document.addEventListener("dragend", clearDockGesture);
 
   document.addEventListener("pointerdown", (event) => {
-    const handle = (event.target as Element | null)?.closest<HTMLElement>(".dock-resizer");
+    const handle = eventElement(event)?.closest<HTMLElement>(".dock-resizer");
     const region = handle?.dataset.resizeRegion as RegionId | undefined;
     if (!handle || !region || !REGIONS.includes(region)) return;
     const horizontal = region === "bottom";
@@ -5120,7 +5130,7 @@ function wireDocking(): void {
   document.addEventListener("pointerup", finishResize);
   document.addEventListener("pointercancel", finishResize);
   document.addEventListener("keydown", (event) => {
-    const handle = (event.target as Element | null)?.closest<HTMLElement>(".dock-resizer");
+    const handle = eventElement(event)?.closest<HTMLElement>(".dock-resizer");
     const region = handle?.dataset.resizeRegion as RegionId | undefined;
     if (!region || !REGIONS.includes(region)) return;
     const grows =

@@ -118,6 +118,41 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-07 — 11.24 done on Windows: spacebar preview and integrated parity (Claude, mission 1)
+
+**Done — 11.24**, Windows-only by user decision ("accept Windows-only for 11.24 and start it", 7 Nov 2026). The plan row's Done-when now says so, in `GrapiX-Build-Plan.md` and in the plan copy in `progress.html`. Its Needs (11.6, 11.19, 11.23) are done. The earlier Windows evidence was taken on a much older Editor, so the whole criterion was re-run on today's.
+
+**Verified live:** `agent/tmp/preview-1124/preview.cjs`, real Tauri/WebView2 on CDP 9223. A 250-frame, 50/1 graphic moves its plate linearly from x 100 to 1100 over frames 0 to 100. Every shell call is recorded.
+- **Phase 1:** 6 of 6 passed, no page errors.
+  1. **Space on the page** plays; space again pauses, and the frame (30) is held.
+  2. **Typing and controls are not stolen:**
+     - in the inspector X field the Space keydown reaches the field with `defaultPrevented: false` (the numeric field drops whitespace itself), and nothing plays;
+     - the sample-data box and the font search keep the typed space;
+     - space on a focused "next frame" button advances one frame only;
+     - Shift, Ctrl and Alt+Space do nothing.
+     - The script asserts focus is in each field first; an earlier draft targeted the Name field, which sits in a collapsed group and cannot take focus, so its space went to the page and correctly played.
+  3. **Frame-consistent scrubbing:**
+     - frames 0, 25, 50, 75, 100, 150 give x 100, 350, 600, 850, 1100, 1100, forwards and backwards alike;
+     - playback stopped at frame 51 shows x 610, and scrubbing to 51 shows the same.
+  4. **Measured on this workstation (NVIDIA Ampere, 60 Hz display):**
+     - 250 frames played in 5035 ms;
+     - all 251 frames 0 to 250 shown, monotonic, stopping exactly at 250;
+     - the Editor's own measure is 250 frame updates at mean 1.81 ms, p95 2.50 ms, against a 20 ms budget;
+     - rAF p95 gap 16.8 ms;
+     - **zero shell calls during playback**: no publish, take, cue, output or document write.
+  5. **Panels drive animation:**
+     - inspector keys on Tag, X 300 at 0 and 700 at 50, evaluate to 500 at 25;
+     - the timeline applies the `fade` preset (`createKeyframe`, `editProperty`, `applyPreset`);
+     - undo/redo work by button and by Ctrl+Z/Ctrl+Y on the page.
+  6. **Saved:** `plate.x:2`, `tag.x:2`, `tag.opacity:2`.
+- **Phase 2**, after killing and relaunching the Editor: the same x at every scrubbed frame, Tag still 500 at 25, and space plays and pauses with no shell calls.
+
+**Bug fixed during the run:** the first full run recorded a page error: "event.target?.closest is not a function". In the bundle that expression appears only in the dock's drag and pointer handlers. They cast `event.target` to `Element`, but a drag of selected text targets a Text node and some events target the document. A new `eventElement(event)` helper returns the element, a text node's parent, or null; all five handlers use it. The rerun on the fixed bundle recorded no errors in either phase. The exact trigger was not isolated: a synthetic Text-node drag did not reproduce it on the old page.
+
+**Gate:** `npm run check` exit 0: 344 generated current, 40 Node, 393 Editor, 714 Rust (3 ignored), conformance 385/0/9 (`agent/tmp/preview-1124/check.log`).
+
+---
+
 ## 2026-11-07 — 11.19 done: the data binding panel, run live with save and reopen (Claude, mission 1)
 
 **Done — 11.19.** Its Needs, 11.18 and 8.6, are done (8.6 entry below). The panel and resolver were already built; the row stayed active only for its Needs and an unexercised save/reopen. No code changed in this entry.
