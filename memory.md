@@ -118,6 +118,97 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-07 — 3.16 verified done: GPU Program/Preview engine wiring (Codex, #103)
+
+**Implemented — 3.16 done. #103 remains doing for 3.17-3.22. Resume here.**
+The user asked to read topic:10 msg 326, finish 3.16 and wire the GPU
+compositor into Program. Read it and posted the plan and LOCK gate in msg
+327 **before engine wiring and Cargo**. LOCK commit-lock posted in msg 329
+after all gates passed, before tracker/memory edits. Work stayed in the
+canonical shared worktree on agent/shared; no other worker's files were dirty.
+
+**Final implementation:**
+- Engine publish and recovery prepare a GPU cache per pinned revision.
+  `compositor/scene.rs` maps the bound SceneDocument through the same stable
+  z-index order across object types, retains object ids/document paths and
+  shares the semantic keyframe/hierarchy evaluator. Real Preview and Program
+  now execute GPU affine/opacity/normal-source-over passes in the scene's
+  declared working space, into bounded tile targets. No CPU production
+  backend is selected for an authored take.
+- The stated bridge to pending 3.17/3.18 is **CPU-prepared object source
+  textures at prepare only**, named in the source traces. Packaged glyphs use
+  their existing real outlines, not advance rectangles or system fonts.
+  A cropped source raster window preserves the reference's coverage grid
+  without allocating a full-stage CPU frame. GPU semantic preparation keeps
+  the CPU static reference lazy; explicit headless/pixel renders still use it.
+- Frame submission evaluates uniforms, dispatches the prepared GPU pipelines,
+  reads working pixels once through reusable synchronous buffers and uses the
+  existing CPU colour authority to encode/quantise once per output. Poll/map
+  failure deadlines and mapping cancellation cleanup bound this simple 3.16
+  readback. **No 3.21 asynchronous-ring or p99 frame-budget claim.**
+- Authored Take refuses T2/T3 before committing; the mock has the same guard.
+  Width/height source animation is refused through one shared contracts rule
+  used by real and mock publication, rather than frozen. Oversized source
+  textures refuse by object and document node path; a refused publish leaves
+  pinned Program unchanged. GPU sources larger than one texture still need
+  a later source backend; the stage itself already tiles.
+- Recovery rebuilds GPU resources during prepare and keeps output inhibited
+  until re-armed. Clear preserves the authored output dimensions using a
+  preallocated transparent frame. A simulated T2 transition during Program
+  returns the named render refusal with zero CPU fallback work. Identifier-only
+  control fixtures remain explicitly labelled diagnostics, without authored
+  scene content; they are not a fallback for a published scene.
+- Executed work counters record at CPU compose/source raster and persistent
+  GPU construction/dispatch sites. Engine frame traces take actual counter
+  differences. Source descriptions name the route, object, path and dimensions.
+- Updated renderer/reference documentation and retained the original shader
+  attribution. No product dependency, Cargo.lock, generated contract or golden
+  image changed. No 3.17 backend choice was made.
+
+**Executed against every 3.16 Done-when, final code:**
+- Vulkan: `cargo test -p gx-render-worker --lib -- --include-ignored --test-threads=1`
+  with `GX_GPU_316_BACKEND=vulkan`: **109 passed, 0 failed, 0 ignored**. This
+  explicitly executes all nine hardware proofs (four core and five engine).
+- DX12/FXC: `cargo test -p gx-render-worker engine::gpu_tests -- --include-ignored --test-threads=1`
+  with `GX_GPU_316_BACKEND=dx12`: **7 passed, 0 failed, 0 ignored** (five engine
+  hardware proofs and two CPU-tier/mapping checks). Both negotiate the real
+  NVIDIA GeForce RTX 3070 Ti; no-adapter execution fails the hardware proofs.
+- The committed 1920x1080 packaged-font lower third deliberately orders text
+  before its plate in the source array; stable z-index composition places the
+  plate below text and an accent above it. At frames 0/25/50/100, sRGB Preview
+  and Rec.709 Program are byte-identical to the CPU reference in **both**
+  working spaces, on **both** backends. Existing half-black-over-white output
+  codes match the independently specified 3.15 references to +/-1.
+- Lower-third traces: preparation builds 3 named CPU source textures and 24
+  persistent GPU resources, with 0 CPU full-frame rasterisations. Each emitted
+  pair records 3 GPU layer dispatches and **0 CPU full-frame rasterisations,
+  0 CPU source rasterisations and 0 persistent GPU builds**.
+- The real Engine renders an 8199x3 stage above its actual 8192 texture limit;
+  every pixel is white, including the seam. The existing core proof also
+  checks fractional transforms and distant +/-1e12 stage origins against an
+  untiled target. Named source-bound refusal, refused-publish preservation,
+  clear, recovery/re-arm and simulated tier-loss paths pass.
+- All six existing golden frames match GPU Preview byte-for-byte on DX12 and
+  Vulkan. The first cache attempt moved 37 colour-ramp text/vector edge pixels
+  (worst delta 230); the source-window rounding fix removed the difference.
+  The final measured comparisons are committed; **no golden was re-baselined**.
+- `cargo run -p gx-pixel-gate -- check`: **exit 0**, unchanged CPU baselines.
+- `npm run check`: **exit 0**; boundaries OK, **353 generated files current**,
+  typechecks pass, **40 Node / 403 Editor / 744 Rust passed**, 0 failed,
+  12 Rust ignored (nine hardware proofs explicitly executed above, plus three
+  pre-existing ignores); **conformance 386 passed / 0 failed / 9 skipped**.
+- `cargo build -p gx-render-worker`: **exit 0**, shipped worker binary rebuilt.
+  Worktree guard, tracker mirror/evidence audit and git diff --check pass.
+
+**Evidence:** `docs/evidence/3.16/README.md`, per-backend JSON frame/source
+traces, golden differences, large-stage/recovery records, and the actual DX12
+lower-third Preview PNG. Local logs remain under `agent/tmp/gpu-316-wiring/`.
+Both tracker files now mark only 3.16 done; all 135 stored row states match.
+The whole render core remains Partial: GPU source drawing, text drawing,
+masks, full blends, asynchronous output and effects belong to 3.17-3.22.
+
+---
+
 ## 2026-11-07 — 3.16 started: prepared tiled GPU layer compositor (Codex, Panchayati #103)
 
 **Partial — 3.16 active; #103 doing. Resume here.** The user asked Codex to

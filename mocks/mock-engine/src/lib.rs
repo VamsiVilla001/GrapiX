@@ -153,6 +153,9 @@ impl MockEngine {
                 cause: refusal.code,
             });
         }
+        if let Some(cause) = gx_contracts::drawability::gpu_compositor_animation_refusal(&scene) {
+            return PublishReply::Refused(gx_asset_plane::PublishRefusal::PreparationRefused { cause });
+        }
         let take_id = TakeId(scene.id.clone());
         let revision = self
             .published
@@ -394,6 +397,9 @@ impl EnginePeer for MockEngine {
             ClientRequest::Take(req) => {
                 if let Err(refusal) = self.check_published(&req.take_id, req.revision, req.content_hash.as_ref()) {
                     return EngineReply::Refused(refusal);
+                }
+                if self.published_scene(&req.take_id, req.revision).is_some() && !self.device_tier.live_capable() {
+                    return EngineReply::Refused(Refusal::TierTooLow { actual: self.device_tier });
                 }
                 let in_phase = self
                     .published_scene(&req.take_id, req.revision)
@@ -810,5 +816,30 @@ mod tests {
             e.drain_events().is_empty(),
             "a drained event does not repeat"
         );
+    }
+
+    #[test]
+    fn authored_program_uses_the_shared_compositor_refusals() {
+        let mut scene = gx_contracts::scene::parse_scene_document(br#"{
+            "id":"gpu-mock","name":"GPU mock guard","version":1,
+            "canvas":{"width":16,"height":16,"frameRate":{"num":50,"den":1}},
+            "timeline":{"durationFrames":100},"dataContext":{},"assets":[],"fonts":[],"materials":[],
+            "objects":[{"type":"rect","id":"card","name":"Card","width":8,"height":8}]
+        }"#).unwrap();
+        for tier in [DeviceTier::T2, DeviceTier::T3] {
+            let mut engine = MockEngine::new().with_device_tier(tier);
+            let PublishReply::Published { take_id, revision, content_hash } = engine.publish_scene(scene.clone()) else { panic!("reference scene publishes"); };
+            assert!(matches!(engine.handle(ClientRequest::Take(TakeRequest {
+                take_id, revision, content_hash: Some(content_hash), at: TakeAt::NextOpportunity,
+            })), EngineReply::Refused(Refusal::TierTooLow { actual }) if actual == tier));
+        }
+        scene.timeline.channels.push(gx_contracts::animation::KeyframeChannel {
+            object_id: "card".into(), property: "width".into(),
+            keys: vec![gx_contracts::animation::SceneKeyframe { frame: 0, value: 8.0, easing: Default::default(), bezier: None }],
+        });
+        let expected = gx_contracts::drawability::gpu_compositor_animation_refusal(&scene).unwrap();
+        assert!(matches!(MockEngine::new().publish_scene(scene), PublishReply::Refused(
+            gx_asset_plane::PublishRefusal::PreparationRefused { cause }
+        ) if cause == expected));
     }
 }

@@ -1,0 +1,28 @@
+{
+  "id": "gpu-reference-lower-third-50",
+  "name": "GPU compositor reference lower third",
+  "version": 3,
+  "workingColorSpace": "srgb",
+  "canvas": { "width": 1920, "height": 1080, "frameRate": { "num": 50, "den": 1 } },
+  "timeline": {
+    "durationFrames": 100,
+    "channels": [
+      { "objectId": "lower-third", "property": "x", "keys": [{ "frame": 0, "value": 0 }, { "frame": 100, "value": 40 }] },
+      { "objectId": "lower-third", "property": "opacity", "keys": [{ "frame": 0, "value": 0 }, { "frame": 100, "value": 1 }] }
+    ]
+  },
+  "dataContext": {},
+  "assets": [{ "assetId": "inter", "name": "Inter", "kind": "font", "path": "fonts/Inter-Regular.ttf", "checksum": "3127f0b873387ee37e2040135a06e9e9c05030f509eb63689529becf28b50384" }],
+  "fonts": [{
+    "fontId": "inter", "family": "Inter", "displayName": "Inter",
+    "faces": [{ "faceId": "inter-regular", "family": "Inter", "weight": 400, "style": "normal", "source": { "kind": "file", "assetId": "inter", "format": "ttf" }, "status": "Ready" }],
+    "fallbackFamilies": [], "embeddingPolicy": "package", "license": "SIL OFL 1.1", "enabled": true, "status": "Ready"
+  }],
+  "materials": [],
+  "objects": [
+    { "type": "text", "id": "headline", "name": "Headline", "x": 200, "y": 816, "width": 600, "height": 90, "zIndex": 1, "text": "GRAPIX LIVE", "fontId": "inter", "size": 56, "fill": { "type": "solid", "color": { "r": 1, "g": 1, "b": 1, "a": 1, "space": "srgb" } } },
+    { "type": "rect", "id": "plate", "name": "Plate", "x": 160, "y": 800, "width": 1200, "height": 160, "zIndex": 0, "radius": 12, "fill": { "type": "solid", "color": { "r": 0.04, "g": 0.18, "b": 0.42, "a": 0.9, "space": "srgb" } } },
+    { "type": "rect", "id": "accent", "name": "Accent over text", "x": 440, "y": 840, "width": 160, "height": 18, "zIndex": 2, "fill": { "type": "solid", "color": { "r": 1, "g": 0.2, "b": 0.1, "a": 1, "space": "srgb" } } },
+    { "type": "group", "id": "lower-third", "name": "Animated lower third", "childIds": ["headline", "plate", "accent"] }
+  ]
+}

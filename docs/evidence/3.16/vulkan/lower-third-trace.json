@@ -1,0 +1,251 @@
+{
+  "fixture": "gpu-lower-third-50.json",
+  "runs": [
+    {
+      "adapter": "NVIDIA GeForce RTX 3070 Ti (Vulkan)",
+      "frames": [
+        {
+          "previewVersusCpuReference": {
+            "differingPixels": 0,
+            "worstChannelDelta": 0
+          },
+          "programVersusCpuReference": {
+            "differingPixels": 0,
+            "worstChannelDelta": 0
+          },
+          "trace": {
+            "backend": "gpu-compositor",
+            "engineFrame": 1,
+            "sceneFrame": 0,
+            "work": {
+              "cpuFullFrameRasterizations": 0,
+              "cpuSourceRasterizations": 0,
+              "gpuLayerDispatches": 3,
+              "gpuResourceBuilds": 0
+            }
+          }
+        },
+        {
+          "previewVersusCpuReference": {
+            "differingPixels": 0,
+            "worstChannelDelta": 0
+          },
+          "programVersusCpuReference": {
+            "differingPixels": 0,
+            "worstChannelDelta": 0
+          },
+          "trace": {
+            "backend": "gpu-compositor",
+            "engineFrame": 26,
+            "sceneFrame": 25,
+            "work": {
+              "cpuFullFrameRasterizations": 0,
+              "cpuSourceRasterizations": 0,
+              "gpuLayerDispatches": 3,
+              "gpuResourceBuilds": 0
+            }
+          }
+        },
+        {
+          "previewVersusCpuReference": {
+            "differingPixels": 0,
+            "worstChannelDelta": 0
+          },
+          "programVersusCpuReference": {
+            "differingPixels": 0,
+            "worstChannelDelta": 0
+          },
+          "trace": {
+            "backend": "gpu-compositor",
+            "engineFrame": 51,
+            "sceneFrame": 50,
+            "work": {
+              "cpuFullFrameRasterizations": 0,
+              "cpuSourceRasterizations": 0,
+              "gpuLayerDispatches": 3,
+              "gpuResourceBuilds": 0
+            }
+          }
+        },
+        {
+          "previewVersusCpuReference": {
+            "differingPixels": 0,
+            "worstChannelDelta": 0
+          },
+          "programVersusCpuReference": {
+            "differingPixels": 0,
+            "worstChannelDelta": 0
+          },
+          "trace": {
+            "backend": "gpu-compositor",
+            "engineFrame": 101,
+            "sceneFrame": 100,
+            "work": {
+              "cpuFullFrameRasterizations": 0,
+              "cpuSourceRasterizations": 0,
+              "gpuLayerDispatches": 3,
+              "gpuResourceBuilds": 0
+            }
+          }
+        }
+      ],
+      "prepareWork": {
+        "cpuFullFrameRasterizations": 0,
+        "cpuSourceRasterizations": 3,
+        "gpuLayerDispatches": 0,
+        "gpuResourceBuilds": 24
+      },
+      "readback": "bounded synchronous float readback; output encoding once per output; 3.21 not claimed",
+      "sources": [
+        {
+          "documentPath": "objects[1]",
+          "height": 162,
+          "objectId": "plate",
+          "objectKind": "rect",
+          "route": "cpu-prepared-source-at-prepare",
+          "width": 1202
+        },
+        {
+          "documentPath": "objects[0]",
+          "height": 45,
+          "objectId": "headline",
+          "objectKind": "text",
+          "route": "cpu-prepared-source-at-prepare",
+          "width": 331
+        },
+        {
+          "documentPath": "objects[2]",
+          "height": 20,
+          "objectId": "accent",
+          "objectKind": "rect",
+          "route": "cpu-prepared-source-at-prepare",
+          "width": 162
+        }
+      ],
+      "workingSpace": "srgb"
+    },
+    {
+      "adapter": "NVIDIA GeForce RTX 3070 Ti (Vulkan)",
+      "frames": [
+        {
+          "previewVersusCpuReference": {
+            "differingPixels": 0,
+            "worstChannelDelta": 0
+          },
+          "programVersusCpuReference": {
+            "differingPixels": 0,
+            "worstChannelDelta": 0
+          },
+          "trace": {
+            "backend": "gpu-compositor",
+            "engineFrame": 1,
+            "sceneFrame": 0,
+            "work": {
+              "cpuFullFrameRasterizations": 0,
+              "cpuSourceRasterizations": 0,
+              "gpuLayerDispatches": 3,
+              "gpuResourceBuilds": 0
+            }
+          }
+        },
+        {
+          "previewVersusCpuReference": {
+            "differingPixels": 0,
+            "worstChannelDelta": 0
+          },
+          "programVersusCpuReference": {
+            "differingPixels": 0,
+            "worstChannelDelta": 0
+          },
+          "trace": {
+            "backend": "gpu-compositor",
+            "engineFrame": 26,
+            "sceneFrame": 25,
+            "work": {
+              "cpuFullFrameRasterizations": 0,
+              "cpuSourceRasterizations": 0,
+              "gpuLayerDispatches": 3,
+              "gpuResourceBuilds": 0
+            }
+          }
+        },
+        {
+          "previewVersusCpuReference": {
+            "differingPixels": 0,
+            "worstChannelDelta": 0
+          },
+          "programVersusCpuReference": {
+            "differingPixels": 0,
+            "worstChannelDelta": 0
+          },
+          "trace": {
+            "backend": "gpu-compositor",
+            "engineFrame": 51,
+            "sceneFrame": 50,
+            "work": {
+              "cpuFullFrameRasterizations": 0,
+              "cpuSourceRasterizations": 0,
+              "gpuLayerDispatches": 3,
+              "gpuResourceBuilds": 0
+            }
+          }
+        },
+        {
+          "previewVersusCpuReference": {
+            "differingPixels": 0,
+            "worstChannelDelta": 0
+          },
+          "programVersusCpuReference": {
+            "differingPixels": 0,
+            "worstChannelDelta": 0
+          },
+          "trace": {
+            "backend": "gpu-compositor",
+            "engineFrame": 101,
+            "sceneFrame": 100,
+            "work": {
+              "cpuFullFrameRasterizations": 0,
+              "cpuSourceRasterizations": 0,
+              "gpuLayerDispatches": 3,
+              "gpuResourceBuilds": 0
+            }
+          }
+        }
+      ],
+      "prepareWork": {
+        "cpuFullFrameRasterizations": 0,
+        "cpuSourceRasterizations": 3,
+        "gpuLayerDispatches": 0,
+        "gpuResourceBuilds": 24
+      },
+      "readback": "bounded synchronous float readback; output encoding once per output; 3.21 not claimed",
+      "sources": [
+        {
+          "documentPath": "objects[1]",
+          "height": 162,
+          "objectId": "plate",
+          "objectKind": "rect",
+          "route": "cpu-prepared-source-at-prepare",
+          "width": 1202
+        },
+        {
+          "documentPath": "objects[0]",
+          "height": 45,
+          "objectId": "headline",
+          "objectKind": "text",
+          "route": "cpu-prepared-source-at-prepare",
+          "width": 331
+        },
+        {
+          "documentPath": "objects[2]",
+          "height": 20,
+          "objectId": "accent",
+          "objectKind": "rect",
+          "route": "cpu-prepared-source-at-prepare",
+          "width": 162
+        }
+      ],
+      "workingSpace": "linear-srgb"
+    }
+  ]
+}

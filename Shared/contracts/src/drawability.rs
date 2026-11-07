@@ -37,6 +37,20 @@ pub fn refuse_what_the_software_path_cannot_draw(document: &SceneDocument) -> Re
     }
 }
 
+/// 3.16's prepared-source bridge cannot change source geometry on the frame
+/// path. Engine and mock publication use this one rule; CPU reference renders
+/// remain available independently. No width/height animation is silently frozen.
+pub fn gpu_compositor_animation_refusal(document: &SceneDocument) -> Option<Refusal> {
+    document.timeline.channels.iter().enumerate().find_map(|(index, channel)| {
+        if channel.keys.is_empty() || !matches!(channel.property.as_str(), "width" | "height") { return None; }
+        Some(Refusal::ScenePropertyNotDrawable {
+            object: channel.object_id.clone(),
+            property: format!("timeline.channels[{index}].property: animated {} needs a GPU source backend", channel.property),
+            owner: "3.17/3.18".into(),
+        })
+    })
+}
+
 /// Every authored kind or property the software path cannot draw, each with
 /// its JSON path and the offending value. The validator's form.
 pub fn drawability_refusals(document: &SceneDocument) -> Vec<StructuredRefusal> {

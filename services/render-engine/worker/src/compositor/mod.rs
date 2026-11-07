@@ -1,4 +1,4 @@
-//! Prepared GPU layer compositor (3.16, Partial).
+//! Prepared GPU layer compositor (3.16).
 //!
 //! Drawing backends supply premultiplied pixels in the declared working
 //! space. This module owns only upload, affine warping, opacity and ordered
@@ -6,9 +6,9 @@
 //! Pipelines, textures, bind groups, uniforms and diagnostic readback buffers
 //! are created at prepare. The frame path updates uniforms and dispatches.
 //!
-//! This first increment is not yet wired to Engine's Program/Preview paths.
-//! `readback_reference` is blocking diagnostic readback, not 3.21's output
-//! ring. The software rasteriser remains the current engine and pixel reference.
+//! `scene` maps pinned scenes and owns the Engine's Program/Preview GPU state.
+//! Simple bounded synchronous readback serves 3.16; 3.21's asynchronous ring
+//! and timing target remain separate. CPU sources are rasterised at prepare.
 
 use gx_contracts::color::{OutputTransform, WorkingColorSpace};
 use gx_contracts::material::BlendMode;
@@ -18,6 +18,7 @@ use crate::colour_pipeline::WorkingRgba;
 use crate::gpu::Gpu;
 use crate::rasterizer::Frame;
 use crate::tiling::{Stage, Tile, TileError, TilePlan};
+pub mod scene;
 
 /// An object's placement from local pixel coordinates into f64 stage space:
 /// x' = a*x + c*y + tx; y' = b*x + d*y + ty.
@@ -116,6 +117,15 @@ struct TileResources {
     padded_row: u32,
 }
 
+// Cancellation must unmap a buffer as well: a timed-out diagnostic/Program
+// readback may be retried, and must not leave a pending mapping that panics.
+struct ReadMapping<'a>(&'a wgpu::Buffer);
+impl Drop for ReadMapping<'_> {
+    fn drop(&mut self) {
+        self.0.unmap();
+    }
+}
+
 /// Work submitted by the compositor, independent of the source drawing
 /// backend. These counts describe dispatches, not GPU timing claims.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -201,10 +211,12 @@ impl PreparedCompositor {
                 )?);
             }
         }
+        crate::render_work::gpu_build();
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("gx-compositor"),
             source: wgpu::ShaderSource::Wgsl(include_str!("composite.wgsl").into()),
         });
+        crate::render_work::gpu_build();
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("gx-compositor"),
             entries: &[
@@ -232,12 +244,14 @@ impl PreparedCompositor {
                 },
             ],
         });
+        crate::render_work::gpu_build();
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("gx-compositor"),
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
         let pipeline = |entry| {
+            crate::render_work::gpu_build();
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some(entry),
                 layout: Some(&pipeline_layout),
@@ -274,6 +288,7 @@ impl PreparedCompositor {
                     },
                     texture.size(),
                 );
+                crate::render_work::gpu_build();
                 Layer {
                     object_id: input.object_id.clone(),
                     document_path: input.document_path.clone(),
@@ -297,9 +312,12 @@ impl PreparedCompositor {
                             | wgpu::TextureUsages::COPY_SRC,
                     )
                 });
-                let views: [wgpu::TextureView; 2] =
-                    std::array::from_fn(|i| targets[i].create_view(&Default::default()));
+                let views: [wgpu::TextureView; 2] = std::array::from_fn(|i| {
+                    crate::render_work::gpu_build();
+                    targets[i].create_view(&Default::default())
+                });
                 let make_uniform = |data: &[f32; 12]| {
+                    crate::render_work::gpu_build();
                     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some("gx-compositor-uniform"),
                         contents: &float_bytes(data),
@@ -309,6 +327,7 @@ impl PreparedCompositor {
                 let clear_uniform = make_uniform(&[0.0; 12]);
                 let group =
                     |src: &wgpu::TextureView, dst: usize, out: usize, uniform: &wgpu::Buffer| {
+                        crate::render_work::gpu_build();
                         device.create_bind_group(&wgpu::BindGroupDescriptor {
                             label: Some("gx-compositor"),
                             layout: &layout,
@@ -343,6 +362,7 @@ impl PreparedCompositor {
                     .collect();
                 let padded_row = (r.width * 16).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
                     * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+                crate::render_work::gpu_build();
                 let readback = device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("gx-compositor-diagnostic-readback"),
                     size: u64::from(padded_row) * u64::from(r.height),
@@ -425,6 +445,7 @@ impl PreparedCompositor {
             }
         }
         self.queue.submit([encoder.finish()]);
+        crate::render_work::gpu_dispatch(self.tiles.len() * states.len());
         self.submitted = true;
         Ok(CompositeSubmission {
             tiles: self.tiles.len(),
@@ -444,9 +465,10 @@ impl PreparedCompositor {
         })
     }
 
-    /// Inspect the already-composited working pixels. Blocking by design and
-    /// diagnostic only; the Program clock must not use this (3.21 owns that).
-    pub fn readback_reference(&mut self) -> Result<CompositeReference, CompositorError> {
+    /// Simple synchronous working-space readback for 3.16. Prepared buffers
+    /// bound memory; polling and mapping have a five-second failure deadline.
+    /// This is not 3.21's asynchronous ring or a frame-timing guarantee.
+    pub fn readback_working(&mut self) -> Result<CompositeReference, CompositorError> {
         if !self.submitted {
             return Err(CompositorError::Readback("no frame submitted".into()));
         }
@@ -481,11 +503,15 @@ impl PreparedCompositor {
                 .map_async(wgpu::MapMode::Read, move |r| {
                     let _ = sender.send(r);
                 });
+            let _mapping = ReadMapping(&tile.readback);
             self.device
-                .poll(wgpu::PollType::wait_indefinitely())
+                .poll(wgpu::PollType::Wait {
+                    submission_index: None,
+                    timeout: Some(std::time::Duration::from_secs(5)),
+                })
                 .map_err(|e| CompositorError::Readback(e.to_string()))?;
             receiver
-                .recv()
+                .recv_timeout(std::time::Duration::from_secs(5))
                 .map_err(|e| CompositorError::Readback(e.to_string()))?
                 .map_err(|e| CompositorError::Readback(e.to_string()))?;
             {
@@ -518,7 +544,6 @@ impl PreparedCompositor {
                     }
                 }
             }
-            tile.readback.unmap();
         }
         Ok(CompositeReference {
             width: self.stage.width,
@@ -526,6 +551,11 @@ impl PreparedCompositor {
             working_space: self.working_space,
             pixels,
         })
+    }
+
+    /// Kept for callers of the original diagnostic-only core increment.
+    pub fn readback_reference(&mut self) -> Result<CompositeReference, CompositorError> {
+        self.readback_working()
     }
 }
 
@@ -571,6 +601,7 @@ fn float_texture(
     height: u32,
     usage: wgpu::TextureUsages,
 ) -> wgpu::Texture {
+    crate::render_work::gpu_build();
     device.create_texture(&wgpu::TextureDescriptor {
         label: Some("gx-compositor-float"),
         size: wgpu::Extent3d {

@@ -182,6 +182,7 @@ impl RasterBounds {
 /// [`RasterSurface::encode`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct RasterSurface {
+    origin: [f64; 2],
     width: u32,
     height: u32,
     pixels: Vec<WorkingRgba>,
@@ -190,12 +191,21 @@ pub struct RasterSurface {
 impl RasterSurface {
     /// Create a transparent surface. Transparent is the same in every space.
     pub fn transparent(width: u32, height: u32) -> Self {
+        Self::window(width, height, [0.0, 0.0])
+    }
+
+    /// CPU preparation can crop a source without changing its sampling grid
+    /// or the f32 geometry that the CPU reference tests for coverage.
+    pub(crate) fn window(width: u32, height: u32, origin: [f64; 2]) -> Self {
         Self {
+            origin,
             width,
             height,
             pixels: vec![WorkingRgba::transparent(); (width as usize) * (height as usize)],
         }
     }
+
+    pub(crate) fn origin(&self) -> [f64; 2] { self.origin }
 
     /// Width in scene pixels.
     pub fn width(&self) -> u32 {

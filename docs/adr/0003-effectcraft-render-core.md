@@ -171,6 +171,15 @@ drivers, and confirmed show targets, are still to be named.
 
 ## EffectCraft reuse catalogue
 
+> **7 November 2026, 3.16 engine wiring:** SceneDocument order now feeds
+> prepared GPU caches per pinned revision, and authored Preview/Program
+> composite through them. Existing vector/glyph rasterisers prepare named
+> object source textures once; they never run on the Program frame path.
+> CPU reference frames are lazy and remain for headless/pixel verification.
+> Synchronous readback is bounded; 3.21's ring/timing claim remains open.
+> DX12/FXC and Vulkan execution traces, golden comparisons and a stage above
+> the actual texture limit are retained under `docs/evidence/3.16/`.
+
 Reference clone: `agent/reference/effectcraft` at the pinned commit, never
 built into the product. Upstream has moved on (0.9.0 on 12 October); each
 port cites the commit it was taken from.

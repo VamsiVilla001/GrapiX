@@ -1,10 +1,9 @@
 //! The software rasteriser.
 //!
-//! This is the frame producer for a sub-T0 device (invariant 19: T2 is the
-//! software tier, CI and no-GPU environments only). It renders Program to a
-//! memory buffer rather than a GPU texture, and it is honest about being
-//! software: the capability exchange reports the tier, so nobody confuses its
-//! output with a hardware frame.
+//! CPU reference and identifier-only control diagnostics. Since 3.16 authored
+//! Program uses the GPU scene cache and refuses on a sub-T0 device; this type
+//! is never an implicit production fallback. The diagnostic fixture path is
+//! explicit and carries no SceneDocument content.
 //!
 //! Scene content is prepared and rasterised once at publish time. This stage
 //! owns the current encoded base frame, applies the device-derived tile plan,

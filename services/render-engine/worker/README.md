@@ -8,35 +8,54 @@ can be built once may be built per Program frame (invariant 35), and a large
 stage is never one GPU texture — only tiles become render targets
 (invariant 37).
 
-**Partial — 3.16:** `src/compositor` prepares an independent GPU layer
-compositor on the negotiated hardware device. Drawing backends supply
-premultiplied working-space float layers in effective order. Affine transforms,
-opacity, transparent bilinear sampling and normal source-over composition run
-on the GPU into bounded tile targets. Pipelines, textures, bind groups,
-uniforms and diagnostic readback buffers are prepared once; frame submission
-only validates state, writes uniforms and dispatches. DX12 explicitly uses FXC
-for this baseline shader, rather than changing compiler with DLL availability.
+**3.16 GPU composition:** `src/compositor/scene.rs` maps bound SceneDocuments
+in stable z-index order across object types. The engine prepares one GPU cache
+per pinned revision at publish and recovery. Preview and Program use its GPU
+affine transforms, effective opacity and premultiplied source-over composition
+in the declared working space, with bounded tile targets and tile-local f64
+subtraction before narrowing. DX12 selects FXC explicitly. T2/T3 authored
+Program and hardware loss refuse by name; no CPU backend is selected instead.
 
-This core is not yet connected to `PreparedScene` or the engine's
-Preview/Program paths. Those still use the CPU renderer. `output_tiles()`
-borrows the working-space GPU results for a future output pass;
-`readback_reference()` is exclusive, blocking diagnostic readback with CPU
-reference output encoding, and must not drive the Program clock. The bounded
-asynchronous output ring belongs to 3.21. Oversized source layers currently
-refuse by object and path; source backends must supply bounded layers.
+The bridge to 3.17/3.18 is explicit: existing vector and packaged-glyph
+rasterisers produce **object source textures at prepare only**, labelled
+`cpu-prepared-source-at-prepare` in the source trace. No CPU full-frame surface
+is built at GPU publication. Source sampling windows preserve the reference
+coverage grid without a full-stage CPU allocation. Supported animation updates
+transform/opacity uniforms through the shared semantic evaluator. Source-size
+animation (width/height) and oversized source textures refuse by object and
+document path; GPU source backends remain later work. Containers inherit
+transforms, visibility and opacity through the shared hierarchy resolver.
+
+Pipelines, textures, views, bind groups, uniforms, clear frames and readback
+buffers are prepared once. `output_tiles()` borrows GPU working tiles;
+`readback_working()` uses reusable buffers with bounded synchronous polling
+and cancellation cleanup. One working readback feeds the existing CPU output
+encoders, quantising once per output. The asynchronous ring and output timing
+target belong to **3.21**, which is not claimed here. `PreparedScene::frame_at`
+remains the explicit CPU headless/pixel reference; identifier-only control
+fixtures remain labelled diagnostic frames with no authored scene content.
 
 Explicit hardware proof (fails if a hardware GPU is unavailable):
 
 ```text
 cargo test -p gx-render-worker compositor::tests -- --include-ignored --test-threads=1
+cargo test -p gx-render-worker engine::gpu_tests -- --include-ignored --test-threads=1
 ```
 
-The ordinary suite runs mapping/precision checks and explicitly ignores four
-hardware tests. The hardware tests cover both working spaces and output
+The ordinary suite runs mapping/precision/tier-refusal checks and explicitly
+ignores hardware proofs. The hardware tests cover both working spaces and output
 reference codes, order, affine motion, opacity, fractional sampling,
 repeat-frame resource identity, distant origins, and seam-free GPU tiles,
-including a stage wider than the actual negotiated texture limit. They prove
-the layer core; they do not close 3.16's scene/engine/trace criteria.
+including a stage wider than the actual negotiated texture limit. Engine tests
+publish/take the packaged-font lower third, inspect actual frame-work counters,
+compare both output frames to the CPU reference and all six unchanged golden
+frames, and verify recovery, clear and named refusal behaviour.
+
+For a Windows backend matrix, set `GX_GPU_316_BACKEND` to `dx12` or `vulkan`
+before running the Engine proof. `GX_GPU_316_EVIDENCE_DIR` can name an absolute
+directory under `agent/tmp/` to retain the executed JSON traces and PNGs.
+Committed evidence is under `docs/evidence/3.16/` at the repository root.
+No-adapter execution fails these explicit proofs, and never counts as PASS.
 
 EffectCraft component provenance and its retained licence are in
 `THIRD_PARTY_NOTICES.md` and `EFFECTCRAFT-LICENSE`.

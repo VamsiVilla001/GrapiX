@@ -1,0 +1,17 @@
+{
+  "allPixelsWhite": true,
+  "height": 3,
+  "stageWidth": 8199,
+  "textureLimit": 8192,
+  "trace": {
+    "backend": "gpu-compositor",
+    "engineFrame": 1,
+    "sceneFrame": 0,
+    "work": {
+      "cpuFullFrameRasterizations": 0,
+      "cpuSourceRasterizations": 0,
+      "gpuLayerDispatches": 2,
+      "gpuResourceBuilds": 0
+    }
+  }
+}

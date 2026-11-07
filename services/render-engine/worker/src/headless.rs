@@ -1,8 +1,8 @@
 //! Headless render (11.41): a pinned revision's authored frame, as an image.
 //!
 //! One function draws. [`render_png`] evaluates a prepared scene at a scene
-//! frame through `PreparedScene::frame_at`, the evaluation Program itself uses
-//! but without Program's clock or take key, and encodes the sRGB result as a
+//! frame through the CPU reference `PreparedScene::frame_at`, with the shared
+//! semantic evaluator but without Program's GPU cache or take key, and encodes the sRGB result as a
 //! PNG. The control request, the mock engine and the golden-frame gate all
 //! reach pixels through it, and so must every later consumer: thumbnails,
 //! approval previews, `render.preview` and Phase 13 parity.

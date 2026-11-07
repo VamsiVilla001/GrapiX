@@ -9,11 +9,13 @@
 //! **Status: Partial.** The engine now produces real Program frames and
 //! serves the control plane as a live peer: device tier is negotiated from
 //! hardware, the clock is engine-owned (ADR-002), and a committed take drives
-//! a rasteriser. What is not here yet is a *scene* renderer — the control
-//! plane has no scene-content contract, so Program is a deterministic take
-//! key, not drawn scene content. GPU-accelerated scene rasterisation remains
-//! later work; tiling already enforces the render-target limit in the
-//! software path (T2) that runs today.
+//! GPU scene compositor. 3.16 maps SceneDocument order into cached source
+//! textures, prepares resources per revision, and produces real Preview and
+//! Program frames through GPU affine/opacity/source-over passes. Authored
+//! Program refuses on T2/T3. CPU vector/glyph source preparation bridges the
+//! pending GPU drawing steps 3.17/3.18; the CPU full-frame path remains the
+//! headless/pixel reference. Identifier-only control fixtures are explicit
+//! diagnostic frames and carry no authored scene content.
 //!
 //! Two rules here are load-bearing and were paid for once already in 1.x:
 //! nothing that can be built once may be built per Program frame
@@ -34,6 +36,7 @@ pub mod prepared;
 pub mod rasterise;
 pub mod rasterizer;
 pub mod recovery;
+pub mod render_work;
 pub mod support;
 pub mod tiling;
 pub mod text;

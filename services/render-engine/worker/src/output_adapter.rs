@@ -32,6 +32,9 @@ pub trait OutputAdapter: fmt::Debug + Send {
 /// Failure while a Program frame is reaching a configured output.
 #[derive(Debug)]
 pub enum OutputAdapterError {
+    /// A GPU frame failed; preserve the named cause and never substitute CPU
+    /// pixels or a black success frame.
+    Render { cause: Refusal },
     /// The recording directory could not be created before an atomic write.
     CreateRecordingDirectory {
         path: PathBuf,
@@ -47,6 +50,7 @@ pub enum OutputAdapterError {
 impl fmt::Display for OutputAdapterError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Render { cause } => write!(f, "Program render refused: {cause}"),
             Self::CreateRecordingDirectory { path, source } => {
                 write!(
                     f,
@@ -68,6 +72,7 @@ impl fmt::Display for OutputAdapterError {
 impl std::error::Error for OutputAdapterError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::Render { .. } => None,
             Self::CreateRecordingDirectory { source, .. } => Some(source),
             Self::WriteRecordingFrame { source, .. } => Some(source),
         }

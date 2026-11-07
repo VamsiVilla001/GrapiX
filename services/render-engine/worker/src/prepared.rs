@@ -19,6 +19,7 @@
 //! or resolves ids per frame.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
 
 use gx_contracts::animation::{evaluate_channel, set_base_property, validate_scene_animation};
 use gx_contracts::color::OutputTransform;
@@ -60,9 +61,9 @@ pub struct PreparedScene {
     by_id: HashMap<String, usize>,
     /// Tessellated vector draw commands, built once per publication.
     paths: PreparedPaths,
-    /// The whole static frame, composed once at publish in draw order and in
-    /// the scene's working space.
-    static_frame: RasterSurface,
+    /// CPU reference only. Built at reference preparation or lazily for an
+    /// explicit headless render; GPU publication and Program never need it.
+    static_frame: OnceLock<RasterSurface>,
     /// Shaped glyph runs, restricted to fonts carried by the scene.
     texts: PreparedTexts,
     /// Prepared primitive/glTF geometry, materials, lights and camera.
@@ -81,6 +82,28 @@ impl PreparedScene {
         available: &HashSet<ContentHash>,
         asset_bytes: &AssetBytes,
         support: &MaterialSupport,
+    ) -> Result<Self, Refusal> {
+        Self::prepare_inner(document, available, asset_bytes, support, true)
+    }
+
+    /// Engine semantic preparation. The CPU reference frame is lazy: GPU
+    /// publication and Program never build a CPU full-stage surface. A
+    /// subsequent explicit headless/reference request can still build it.
+    pub(crate) fn prepare_for_gpu(
+        document: SceneDocument,
+        available: &HashSet<ContentHash>,
+        asset_bytes: &AssetBytes,
+        support: &MaterialSupport,
+    ) -> Result<Self, Refusal> {
+        Self::prepare_inner(document, available, asset_bytes, support, false)
+    }
+
+    fn prepare_inner(
+        document: SceneDocument,
+        available: &HashSet<ContentHash>,
+        asset_bytes: &AssetBytes,
+        support: &MaterialSupport,
+        build_reference: bool,
     ) -> Result<Self, Refusal> {
         // Document-level validation is the shared implementation in
         // `gx_contracts::validate`, not a copy here. The Editor must be able
@@ -110,7 +133,10 @@ impl PreparedScene {
         let paths = PreparedPaths::prepare(&resolved, &resolution.effective)?;
         let texts = prepare_texts(&resolved, asset_bytes)?;
         let meshes = prepare_meshes(&resolved, available, asset_bytes, support)?;
-        let static_frame = compose(&resolved, &resolution.effective, &paths, &texts)?;
+        let static_frame = OnceLock::new();
+        if build_reference {
+            let _ = static_frame.set(compose(&resolved, &resolution.effective, &paths, &texts)?);
+        }
         let by_id = resolution
             .effective
             .iter()
@@ -136,7 +162,9 @@ impl PreparedScene {
         &self.document
     }
 
-    /// Every object's effective state, in the document's draw order.
+    pub(crate) fn resolved_document(&self) -> &SceneDocument { &self.resolved }
+
+    /// Every object's effective state, in the document's source order.
     pub fn effective(&self) -> &[ResolvedObject] {
         &self.effective
     }
@@ -166,7 +194,10 @@ impl PreparedScene {
     /// Encode the static frame for one explicit output transform. It was
     /// composed once at publish, in draw order across object kinds.
     pub fn frame(&self, output: OutputTransform) -> Frame {
-        self.static_frame.encode(output, self.document.working_color_space)
+        self.static_frame.get_or_init(|| {
+            compose(&self.resolved, &self.effective, &self.paths, &self.texts)
+                .expect("semantically prepared static reference remains drawable")
+        }).encode(output, self.document.working_color_space)
     }
     /// Whether Program must evaluate this scene for each output frame.
     pub fn has_animation(&self) -> bool {
@@ -252,6 +283,7 @@ fn compose(
     paths: &PreparedPaths,
     texts: &PreparedTexts,
 ) -> Result<RasterSurface, Refusal> {
+    crate::render_work::cpu_frame();
     let mut surface = RasterSurface::transparent(document.canvas.width, document.canvas.height);
     let mut by_object: HashMap<&str, Vec<&crate::rasterise::PreparedPath>> = HashMap::new();
     for path in paths.paths() {

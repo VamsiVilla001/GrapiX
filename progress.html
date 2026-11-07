@@ -142,9 +142,9 @@ const KEY = "grapix-build-progress-v1";
 // - 11.43 stays pending (it still Needs 11.30). Toward it, in 0c2fd04:
 //   SceneEdit::SetCanvas and broadcast frame rates (24, 25, 29.97, 30, 50,
 //   59.94, 60, custom num/den), verified live; a draggable playhead handle.
-// - GPU render engine move: Panchayati task #103 over 3.16 to 3.22. Done so
-//   far: 0.2 (wgpu 30.0.1, 4492e5e) and the spike. Program and Preview still
-//   come from the CPU rasteriser. 3.16 now has a Partial GPU layer core; see its active row.
+// - GPU render engine move: Panchayati #103 over 3.16 to 3.22. 3.16 is verified done:
+//   authored Program and Preview composite on the GPU; vector/glyph sources are
+//   CPU-prepared at prepare only. See docs/evidence/3.16; 3.17-3.22 stay open.
 const INITIAL_STATE = {
   "11.41": "done", // Verified 16 Oct 2026 (Claude): one control request renders a pinned revision at frame N to a PNG served by hash; byte-identical repeat; engine/mock parity over the wire for 8 cases; CROSS_MACHINE_TOLERANCE defined and tested; the golden-frame gate and 8.9 render.preview draw through it (conformance 380/0/9, pixel gate unchanged). The Program-timing clause moved to 3.21 by user decision; the timed run still skips until Program holds cadence.
   "11.64": "done", // Verified 15 Oct: independent graphics and actual thumbnails; saved/unopened and partial preview states tested after app restart.
@@ -224,7 +224,7 @@ const INITIAL_STATE = {
   "3.13": "done", // 16 Oct: 22-item inventory rechecked; shared light/container paint refusals, Editor warnings and real/mock/MCP wire parity verified. Full gate 679 Rust + 377 conformance passes; see memory.md.
   "3.14": "done", // EffectCraft spike halted at failed required gates (DX12, 2160p budget), rerun 12 Oct; decision in ADR-0003
   "3.15": "done", // project working colour space: sRGB or linear declared per project (new = sRGB, pre-3.15 = linear), schema 3 with lossless upgrade, mismatch refuses by name, engine composites in the scene space; 50% overlap and coverage/gradient/blur references verified 13 Oct
-  "3.16": "active", // 7 Nov 2026 (Codex): 3.16 started under Panchayati #103. Partial: prepared GPU float-layer compositor, normal source-over, affine/opacity uniforms, tile-local f64 subtraction, named mappings and bounded GPU tile targets. Focused hardware proof passed 6/6 including four GPU cases. SceneDocument mapping, Engine Preview/Program integration and reference lower-third no-CPU frame trace remain open; production frames still use the CPU renderer. 3.17-3.22 are not started by this increment.
+  "3.16": "done", // 7 Nov 2026 (Codex): 3.16 verified done. SceneDocument stable cross-type order feeds prepared GPU caches per pinned revision; authored Preview/Program use GPU affine/opacity/normal-source-over in both working spaces. CPU vector/glyph source textures are prepared once and named in traces; no CPU full-frame or source rasterisation and no persistent GPU builds occur on the traced Program frame path. Vulkan worker library including hardware proofs: 109/0/0; DX12 Engine proofs: 7/0/0. Both output references and all six unchanged golden frames match byte-for-byte on both backends; CPU pixel gate passes. Engine stage 8199x3 exceeds actual limit 8192 and has no seam. T2/T3 Take and hardware loss refuse by name; unsupported source-size mappings name object/path. Recovery, clear and refused-publish preservation pass. Executed artifacts: docs/evidence/3.16. Synchronous bounded float readback only; 3.17-3.22 remain open and task #103 remains doing.
   // 3.17 and 16.9 stay pending (7 Nov 2026, Claude, Vello spike; no state change). tools/vello-spike: Vello Hybrid 0.2 recommended for 3.17 with vello_cpu as its same-algorithm CPU reference (worst 1 code value apart); classic Vello not (compiler-dependent pixels, dashed-join defect). Blockers: Hybrid is on wgpu 29, product on 30; GPU-vs-CPU threshold undecided. Still owed: lyon-on-GPU benchmark, real broadcast content, pipelined readback. See memory.md and tools/vello-spike/README.md.
   // Phase 4 — the pixel gate. The instrument, built before anything else
   // changes pixels.

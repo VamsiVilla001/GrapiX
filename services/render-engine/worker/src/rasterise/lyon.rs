@@ -570,10 +570,11 @@ pub(crate) fn fill_union(
         max_x = max_x.max(corner.x);
         max_y = max_y.max(corner.y);
     }
-    let min_x = min_x.floor().max(0.0) as u32;
-    let min_y = min_y.floor().max(0.0) as u32;
-    let max_x = max_x.ceil().min(surface.width() as f32).max(0.0) as u32;
-    let max_y = max_y.ceil().min(surface.height() as f32).max(0.0) as u32;
+    let origin = surface.origin();
+    let min_x = (f64::from(min_x.floor()) - origin[0]).max(0.0) as u32;
+    let min_y = (f64::from(min_y.floor()) - origin[1]).max(0.0) as u32;
+    let max_x = (f64::from(max_x.ceil()) - origin[0]).min(f64::from(surface.width())).max(0.0) as u32;
+    let max_y = (f64::from(max_y.ceil()) - origin[1]).min(f64::from(surface.height())).max(0.0) as u32;
     if min_x >= max_x || min_y >= max_y {
         return;
     }
@@ -584,14 +585,14 @@ pub(crate) fn fill_union(
         if area == 0.0 {
             continue;
         }
-        let x0 = a.x.min(b.x).min(c.x).floor().max(min_x as f32) as u32;
-        let y0 = a.y.min(b.y).min(c.y).floor().max(min_y as f32) as u32;
-        let x1 = a.x.max(b.x).max(c.x).ceil().min(max_x as f32) as u32;
-        let y1 = a.y.max(b.y).max(c.y).ceil().min(max_y as f32) as u32;
+        let x0 = (f64::from(a.x.min(b.x).min(c.x).floor()) - origin[0]).max(f64::from(min_x)) as u32;
+        let y0 = (f64::from(a.y.min(b.y).min(c.y).floor()) - origin[1]).max(f64::from(min_y)) as u32;
+        let x1 = (f64::from(a.x.max(b.x).max(c.x).ceil()) - origin[0]).min(f64::from(max_x)).max(0.0) as u32;
+        let y1 = (f64::from(a.y.max(b.y).max(c.y).ceil()) - origin[1]).min(f64::from(max_y)).max(0.0) as u32;
         for y in y0..y1 {
             for x in x0..x1 {
-                let sample_x = x as f32 + 0.5;
-                let sample_y = y as f32 + 0.5;
+                let sample_x = (origin[0] + f64::from(x) + 0.5) as f32;
+                let sample_y = (origin[1] + f64::from(y) + 0.5) as f32;
                 let ab = edge(a, b, sample_x, sample_y);
                 let bc = edge(b, c, sample_x, sample_y);
                 let ca = edge(c, a, sample_x, sample_y);

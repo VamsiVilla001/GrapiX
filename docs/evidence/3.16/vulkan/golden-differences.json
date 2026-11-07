@@ -1,0 +1,48 @@
+{
+  "adapter": "NVIDIA GeForce RTX 3070 Ti (Vulkan)",
+  "comparisons": [
+    {
+      "difference": {
+        "differingPixels": 0,
+        "worstChannelDelta": 0
+      },
+      "scene": "colour-ramp-50.json"
+    },
+    {
+      "difference": {
+        "differingPixels": 0,
+        "worstChannelDelta": 0
+      },
+      "scene": "rate-25.json"
+    },
+    {
+      "difference": {
+        "differingPixels": 0,
+        "worstChannelDelta": 0
+      },
+      "scene": "rate-29-97.json"
+    },
+    {
+      "difference": {
+        "differingPixels": 0,
+        "worstChannelDelta": 0
+      },
+      "scene": "rate-30.json"
+    },
+    {
+      "difference": {
+        "differingPixels": 0,
+        "worstChannelDelta": 0
+      },
+      "scene": "rate-59-94.json"
+    },
+    {
+      "difference": {
+        "differingPixels": 0,
+        "worstChannelDelta": 0
+      },
+      "scene": "rate-60.json"
+    }
+  ],
+  "rebaselined": false
+}

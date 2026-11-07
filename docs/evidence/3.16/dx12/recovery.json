@@ -1,0 +1,21 @@
+{
+  "cpuFallback": false,
+  "hardwareLossRefused": "tierTooLow(T2)",
+  "prepareWork": {
+    "cpuFullFrameRasterizations": 0,
+    "cpuSourceRasterizations": 1,
+    "gpuLayerDispatches": 0,
+    "gpuResourceBuilds": 16
+  },
+  "resumedFrame": {
+    "backend": "gpu-compositor",
+    "engineFrame": 2,
+    "sceneFrame": 1,
+    "work": {
+      "cpuFullFrameRasterizations": 0,
+      "cpuSourceRasterizations": 0,
+      "gpuLayerDispatches": 1,
+      "gpuResourceBuilds": 0
+    }
+  }
+}

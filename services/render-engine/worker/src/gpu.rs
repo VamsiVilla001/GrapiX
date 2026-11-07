@@ -8,9 +8,9 @@
 //!
 //! The rule that matters here is the same one the contracts encode: a device
 //! that cannot go to air is discovered and reported, never silently downgraded
-//! *to*. If there is no real GPU, this module says so and the worker runs the
-//! software rasteriser at a sub-T0 tier — degraded by construction, and
-//! reported as such on every capability exchange.
+//! *to*. If there is no real GPU, this module says so; authored Program
+//! refuses at that tier. Explicit CPU reference/headless renders remain
+//! available, and every capability exchange reports the negotiated tier.
 
 use gx_contracts::DeviceTier;
 
@@ -24,6 +24,7 @@ pub struct Gpu {
 }
 
 struct GpuInner {
+    info: wgpu::AdapterInfo,
     device: wgpu::Device,
     queue: wgpu::Queue,
     max_texture_dimension_2d: u32,
@@ -36,6 +37,13 @@ struct GpuInner {
 /// every capability exchange, so a control room learns the truth before it
 /// tries to go live.
 pub fn negotiate() -> Gpu {
+    negotiate_backends(wgpu::Backends::PRIMARY | wgpu::Backends::GL)
+}
+
+#[cfg(test)]
+pub(crate) fn negotiate_for_test(backends: wgpu::Backends) -> Gpu { negotiate_backends(backends) }
+
+fn negotiate_backends(backends: wgpu::Backends) -> Gpu {
     // wgpu 30 has no `Default` for the descriptor; this is the same set of
     // defaults without a display handle (the worker is headless).
     // Choose FXC explicitly for the compositor's baseline WGSL. `Auto`
@@ -43,7 +51,7 @@ pub fn negotiate() -> Gpu {
     // requiring DXC must ship and select it explicitly, never fall back.
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     descriptor.backend_options.dx12.shader_compiler = wgpu::Dx12Compiler::Fxc;
-    descriptor.backends = wgpu::Backends::PRIMARY | wgpu::Backends::GL;
+    descriptor.backends = backends;
     let instance = wgpu::Instance::new(descriptor);
 
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -84,6 +92,7 @@ pub fn negotiate() -> Gpu {
     let max_texture_dimension_2d = device.limits().max_texture_dimension_2d;
     Gpu {
         inner: Some(GpuInner {
+            info,
             device,
             queue,
             max_texture_dimension_2d,
@@ -106,6 +115,15 @@ fn tier_for(device_type: wgpu::DeviceType) -> DeviceTier {
 }
 
 impl Gpu {
+    pub(crate) fn diagnostic_description(&self) -> Option<String> {
+        self.inner.as_ref().map(|gpu| format!("{} ({:?})", gpu.info.name, gpu.info.backend))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn without_hardware(tier: DeviceTier) -> Self {
+        assert!(!tier.live_capable());
+        Self { inner: None, tier }
+    }
     /// Internal device access for prepared GPU backends. A CPU adapter never
     /// receives these handles and cannot silently become a compositor.
     pub(crate) fn device_queue(&self) -> Option<(&wgpu::Device, &wgpu::Queue)> {
