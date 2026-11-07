@@ -39,6 +39,7 @@ use gx_control_plane::render::check_render;
 use gx_control_plane::status::{Degradation, EngineStatus, ProgramState};
 
 use crate::clock::ProgramClock;
+use crate::compositor::output::{Delivered, Submitted};
 use crate::compositor::scene::{GpuScene, SourceTrace};
 use crate::render_work::{ProgramFrameTrace, RenderWork};
 use crate::emission::{FrameEmitter, ProgramEmission};
@@ -78,6 +79,18 @@ pub struct Engine {
     gpu_prepared: HashMap<(TakeId, Revision), GpuScene>,
     last_render_trace: Option<ProgramFrameTrace>,
     gpu_clear_frame: Option<Arc<Frame>>,
+    /// 3.21: the Program and Preview frames the GPU readback ring last
+    /// delivered, with the pinned scene they belong to. Held between
+    /// deliveries, so a frame whose readback has not completed repeats the
+    /// last delivered picture instead of waiting.
+    gpu_delivered: Option<((TakeId, Revision), Arc<Frame>, Arc<Frame>)>,
+    /// The frames last emitted, whatever produced them.
+    last_frames: Option<(Arc<Frame>, Arc<Frame>)>,
+    /// Recently emitted frames awaiting release by their consumers; once a
+    /// frame has no other owner its allocation goes back to the readback
+    /// ring (bounded, oldest dropped).
+    recycle: std::collections::VecDeque<Arc<Frame>>,
+    readback: ReadbackReport,
     /// Content hashes the asset plane has verified into the store.
     assets: HashSet<ContentHash>,
     /// Verified asset bytes bound by content hash. Mesh and font preparation
@@ -133,6 +146,10 @@ impl Engine {
             gpu_prepared: HashMap::new(),
             last_render_trace: None,
             gpu_clear_frame: None,
+            gpu_delivered: None,
+            last_frames: None,
+            recycle: std::collections::VecDeque::new(),
+            readback: ReadbackReport::default(),
             assets: HashSet::new(),
             asset_bytes: HashMap::new(),
             program: None,
@@ -453,11 +470,28 @@ impl Engine {
 
     /// Render and emit one Preview/Program pair at the engine's current frame.
     ///
-    /// Authored scenes evaluate uniforms and composite cached sources on the
-    /// GPU. 3.16 uses bounded synchronous working readback and existing output
-    /// encoding; 3.21 owns asynchronous readback and its timing guarantee.
-    /// Consumer delivery uses bounded latest-frame slots.
+    /// Authored scenes evaluate uniforms, composite cached sources and encode
+    /// both outputs on the GPU. The readback is pipelined through a bounded
+    /// asynchronous ring (3.21): this call queues the current frame and emits
+    /// the newest frame whose readback has completed, so the live loop never
+    /// waits on the GPU. Consumer delivery uses bounded latest-frame slots.
     pub fn emit_frame(&mut self) -> Result<ProgramEmission, OutputAdapterError> {
+        self.emit(false)
+    }
+
+    /// As [`Engine::emit_frame`], but waits (bounded) until the current
+    /// frame is read back, so the emitted frame is exactly this clock frame.
+    /// For tests and synchronous callers, never for the live loop.
+    pub fn emit_frame_settled(&mut self) -> Result<ProgramEmission, OutputAdapterError> {
+        self.emit(true)
+    }
+
+    /// The GPU readback ring's delivery report since this engine started.
+    pub fn readback_report(&self) -> &ReadbackReport {
+        &self.readback
+    }
+
+    fn emit(&mut self, settled: bool) -> Result<ProgramEmission, OutputAdapterError> {
         self.sync_clock();
         let frame_number = self.clock.frame();
         let started = Instant::now();
@@ -467,16 +501,71 @@ impl Engine {
             let state = self.program.as_ref().expect("scene time requires Program");
             self.ensure_program_backend(&state.take_id, state.revision)
                 .map_err(|cause| OutputAdapterError::Render { cause })?;
-            let scene = self.gpu_prepared.get_mut(&(state.take_id.clone(), state.revision))
+            let key = (state.take_id.clone(), state.revision);
+            let scene = self.gpu_prepared.get_mut(&key)
                 .expect("backend checked before rendering");
-            let (program, preview) = scene.render(scene_frame).map_err(|cause| OutputAdapterError::Render { cause })?;
-            (Arc::new(program), Arc::new(preview), "gpu-compositor")
+            let recycle = &mut self.recycle;
+            let mut i = 0;
+            while i < recycle.len() {
+                if Arc::strong_count(&recycle[i]) == 1 {
+                    if let Some(Ok(frame)) = recycle.remove(i).map(Arc::try_unwrap) {
+                        scene.recycle(frame.pixels);
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+            if settled {
+                let (program, preview) = scene.render(scene_frame).map_err(|cause| OutputAdapterError::Render { cause })?;
+                let (program, preview) = (Arc::new(program), Arc::new(preview));
+                self.gpu_delivered = Some((key, Arc::clone(&program), Arc::clone(&preview)));
+                (program, preview, "gpu-compositor")
+            } else {
+                let submitted = scene.submit(scene_frame, frame_number).map_err(|cause| OutputAdapterError::Render { cause })?;
+                if submitted == Submitted::RingFull {
+                    self.readback.ring_full += 1;
+                }
+                if let Some(delivered) = scene.collect().map_err(|cause| OutputAdapterError::Render { cause })? {
+                    self.readback.record(frame_number, &delivered);
+                    self.gpu_delivered = Some((key.clone(), Arc::new(delivered.program), Arc::new(delivered.preview)));
+                }
+                self.readback.superseded = scene.ring_counters().1;
+                match &self.gpu_delivered {
+                    Some((held, program, preview)) if *held == key => {
+                        (Arc::clone(program), Arc::clone(preview), "gpu-compositor")
+                    }
+                    // The new scene's first readback is still in flight: the
+                    // previous picture repeats for the pipeline's latency.
+                    _ => {
+                        self.readback.awaiting_first += 1;
+                        let fallback = self.last_frames.clone();
+                        let (program, preview) = match fallback {
+                            Some(frames) => frames,
+                            None => {
+                                let clear = match self.gpu_clear_frame.clone() {
+                                    Some(clear) => clear,
+                                    None => Arc::new(self.rasterizer.render(frame_number)),
+                                };
+                                (Arc::clone(&clear), clear)
+                            }
+                        };
+                        (program, preview, "gpu-compositor-awaiting-readback")
+                    }
+                }
+            }
         } else if let Some(clear) = self.gpu_clear_frame.as_ref().filter(|_| self.program.is_none() || self.output_inhibited) {
             (clear.clone(), clear.clone(), "clear-or-inhibited")
         } else {
             (Arc::new(self.rasterizer.render(frame_number)), Arc::new(self.preview_rasterizer.render(frame_number)),
              if self.program.is_some() && !self.output_inhibited { "identifier-only-diagnostic" } else { "clear-or-inhibited" })
         };
+        if let Some((old_program, old_preview)) = self.last_frames.replace((Arc::clone(&program), Arc::clone(&preview))) {
+            self.recycle.push_back(old_program);
+            self.recycle.push_back(old_preview);
+            while self.recycle.len() > 8 {
+                self.recycle.pop_front();
+            }
+        }
         self.last_render_trace = Some(ProgramFrameTrace { engine_frame: frame_number,
             scene_frame: scene_frame.unwrap_or(0), backend, work: RenderWork::snapshot().since(work_before) });
         let render_nanos = started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
@@ -513,7 +602,7 @@ impl Engine {
 
     /// Render Program for synchronous callers and tests.
     pub fn render_program(&mut self) -> Frame {
-        self.emit_frame()
+        self.emit_frame_settled()
             .expect("the configured output adapter must accept Program")
             .frame
             .as_ref()
@@ -907,8 +996,47 @@ impl EnginePeer for Engine {
     }
 }
 
+/// How the GPU readback ring delivered Program (3.21), for the frame-timing
+/// record. Latencies are submit-to-delivery wall time of each delivered
+/// frame, in a bounded window; counts cover the engine's lifetime.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadbackReport {
+    /// Frames delivered by the ring.
+    pub delivered: u64,
+    /// Frames composited but not read back because every slot was in flight.
+    pub ring_full: u64,
+    /// Completed frames replaced by a newer completed frame before emission.
+    pub superseded: u64,
+    /// Clock frames that repeated the previous picture while a newly taken
+    /// scene's first readback was still in flight.
+    pub awaiting_first: u64,
+    /// Clock frames between a frame's submission and the emission that
+    /// delivered it, most recent last (bounded).
+    pub frames_behind: Vec<u64>,
+    /// Submit-to-delivery latency of each delivered frame, nanoseconds,
+    /// most recent last (bounded).
+    pub latency_nanos: Vec<u64>,
+}
+
+impl ReadbackReport {
+    const WINDOW: usize = 4096;
+
+    fn record(&mut self, clock_frame: u64, delivered: &Delivered) {
+        self.delivered += 1;
+        if self.latency_nanos.len() == Self::WINDOW {
+            self.latency_nanos.remove(0);
+            self.frames_behind.remove(0);
+        }
+        self.latency_nanos.push(delivered.latency.as_nanos().min(u128::from(u64::MAX)) as u64);
+        self.frames_behind.push(clock_frame.saturating_sub(delivered.tag));
+    }
+}
+
 #[cfg(test)]
 mod gpu_tests;
+#[cfg(test)]
+mod output_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1172,11 +1300,11 @@ mod tests {
     fn a_stalled_preview_consumer_never_blocks_program() {
         let frames = Arc::new(AtomicU64::new(0));
         let mut e = Engine::new(Arc::clone(&frames), Locality::CoLocated);
-        e.emit_frame().expect("first frame emits");
+        e.emit_frame_settled().expect("first frame emits");
         e.take_program().expect("Program consumer takes frame zero");
 
         frames.store(1, Ordering::Relaxed);
-        let emission = e.emit_frame().expect("second frame emits");
+        let emission = e.emit_frame_settled().expect("second frame emits");
         assert_eq!(emission.sample.frame, 1);
         assert_eq!(e.preview_drops().consumer_busy, 1);
         assert_eq!(e.program_drops().consumer_busy, 0);
@@ -1280,9 +1408,9 @@ mod tests {
         ));
 
         frames.store(1, Ordering::Relaxed);
-        let start = e.emit_frame().unwrap().frame;
+        let start = e.emit_frame_settled().unwrap().frame;
         frames.store(21, Ordering::Relaxed);
-        let end = e.emit_frame().unwrap().frame;
+        let end = e.emit_frame_settled().unwrap().frame;
         assert_ne!(
             &start.pixels[32..],
             &end.pixels[32..],
@@ -1304,9 +1432,9 @@ mod tests {
         ));
 
         frames.store(50, Ordering::Relaxed);
-        let held_a = e.emit_frame().unwrap().frame;
+        let held_a = e.emit_frame_settled().unwrap().frame;
         frames.store(70, Ordering::Relaxed);
-        let held_b = e.emit_frame().unwrap().frame;
+        let held_b = e.emit_frame_settled().unwrap().frame;
         assert_eq!(
             &held_a.pixels[32..],
             &held_b.pixels[32..],

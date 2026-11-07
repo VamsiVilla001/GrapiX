@@ -57,5 +57,13 @@ directory under `agent/tmp/` to retain the executed JSON traces and PNGs.
 Committed evidence is under `docs/evidence/3.16/` at the repository root.
 No-adapter execution fails these explicit proofs, and never counts as PASS.
 
+**3.21 GPU output and readback:** `src/compositor/output.rs` and `output.wgsl`
+encode Program (Rec.709) and Preview (sRGB) RGBA8 on the GPU with exactly one
+quantisation, byte-identical to the CPU colour authority, and read them back
+through a three-slot asynchronous ring that never stalls the frame loop.
+`engine::output_tests` holds the gates and the frame-budget benchmark
+(`GX_GPU_321_EVIDENCE_DIR`, `GX_GPU_321_ASSERT_BUDGET`). Committed evidence
+and the measured budget are under `docs/evidence/3.21/`.
+
 EffectCraft component provenance and its retained licence are in
 `THIRD_PARTY_NOTICES.md` and `EFFECTCRAFT-LICENSE`.

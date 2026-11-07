@@ -3,13 +3,13 @@
 //! evaluates semantic transforms/opacity and composites the cached sources
 //! on the GPU. No scene frame can fall back to CPU rasterisation.
 use gx_contracts::animation::{evaluate_channel, set_base_property, KeyframeChannel};
-use gx_contracts::color::OutputTransform;
 use gx_contracts::material::BlendMode;
 use gx_contracts::scene::{resolve_hierarchy, ResolvedObject, SceneDocument, SceneObject, Vec2};
 use gx_contracts::Refusal;
 use serde::Serialize;
 use std::sync::Arc;
 
+use super::output::{Delivered, OutputRing, Submitted};
 use super::{CompositorError, LayerInput, LayerState, PreparedCompositor};
 use crate::gpu::Gpu;
 use crate::prepared::PreparedScene;
@@ -35,6 +35,9 @@ struct MappedLayer {
 
 pub struct GpuScene {
     compositor: PreparedCompositor,
+    // 3.21: GPU output encode and the bounded asynchronous readback ring,
+    // built with the compositor at prepare.
+    ring: OutputRing,
     // Mutable semantic evaluation scratch owned by this pinned GPU revision.
     // Authoring and the immutable PreparedScene are never changed.
     evaluated: SceneDocument,
@@ -174,6 +177,7 @@ impl GpuScene {
         .map_err(|e| mapping_refusal(&doc.id, "canvas", &e.to_string()))?;
         let compositor = PreparedCompositor::prepare(gpu, stage, doc.working_color_space, &inputs)
             .map_err(compositor_refusal)?;
+        let ring = compositor.output_ring().map_err(compositor_refusal)?;
         let states = inputs.iter().map(|input| input.state).collect();
         let clear_frame = Arc::new(Frame {
             width: doc.canvas.width,
@@ -182,6 +186,7 @@ impl GpuScene {
         });
         Ok(Self {
             compositor,
+            ring,
             evaluated: doc.clone(),
             channels: doc.timeline.channels.clone(),
             layers,
@@ -198,7 +203,13 @@ impl GpuScene {
         self.clear_frame.clone()
     }
 
-    pub fn render(&mut self, scene_frame: u64) -> Result<(Frame, Frame), Refusal> {
+    /// Evaluate `scene_frame`, composite it and queue its output encode and
+    /// readback under `tag` (3.21). Never waits for the GPU.
+    pub fn submit(&mut self, scene_frame: u64, tag: u64) -> Result<Submitted, Refusal> {
+        if !self.ring.has_idle_slot() {
+            self.ring.note_ring_full();
+            return Ok(Submitted::RingFull);
+        }
         for channel in &self.channels {
             if let Some(value) = evaluate_channel(channel, scene_frame)? {
                 set_base_property(
@@ -221,14 +232,60 @@ impl GpuScene {
         self.compositor
             .composite(&self.states)
             .map_err(compositor_refusal)?;
-        let working = self
-            .compositor
-            .readback_working()
+        Ok(self.ring.submit(tag))
+    }
+
+    /// The newest frame whose readback completed, without waiting.
+    pub fn collect(&mut self) -> Result<Option<Delivered>, Refusal> {
+        self.ring.collect().map_err(compositor_refusal)
+    }
+
+    /// Give a frame allocation back to the readback ring for reuse.
+    pub fn recycle(&mut self, pixels: Vec<u8>) {
+        self.ring.recycle(pixels);
+    }
+
+    /// Readback refusals and superseded frames, for the frame-timing report.
+    pub fn ring_counters(&self) -> (u64, u64) {
+        (self.ring.ring_full(), self.ring.superseded())
+    }
+
+    /// Render one frame and wait for it: for callers outside the live loop
+    /// (tests, synchronous renders). Returns (Program, Preview).
+    pub fn render(&mut self, scene_frame: u64) -> Result<(Frame, Frame), Refusal> {
+        const SETTLED: u64 = u64::MAX;
+        if self.submit(scene_frame, SETTLED)? == Submitted::RingFull {
+            // Drain the frames already in flight, then submit again.
+            while self.ring.collect().map_err(compositor_refusal)?.is_some() {}
+            self.ring
+                .wait_for_idle(std::time::Duration::from_secs(5))
+                .map_err(compositor_refusal)?;
+            if self.ring.submit(SETTLED) == Submitted::RingFull {
+                return Err(compositor_refusal(CompositorError::Readback(
+                    "no readback slot became idle".into(),
+                )));
+            }
+        }
+        let delivered = self
+            .ring
+            .wait_for(SETTLED, std::time::Duration::from_secs(5))
             .map_err(compositor_refusal)?;
-        Ok((
-            working.encode(OutputTransform::Rec709),
-            working.encode(OutputTransform::Srgb),
-        ))
+        Ok((delivered.program, delivered.preview))
+    }
+}
+
+#[cfg(test)]
+impl GpuScene {
+    /// The settled render plus the working-space pixels the GPU composited,
+    /// so a test can check the GPU output encode against the CPU encode of
+    /// the same pixels (3.21: exactly one quantisation, byte-identical).
+    pub fn render_with_working(
+        &mut self,
+        scene_frame: u64,
+    ) -> Result<(Frame, Frame, super::CompositeReference), Refusal> {
+        let (program, preview) = self.render(scene_frame)?;
+        let working = self.compositor.readback_working().map_err(compositor_refusal)?;
+        Ok((program, preview, working))
     }
 }
 

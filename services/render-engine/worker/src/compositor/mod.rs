@@ -18,6 +18,7 @@ use crate::colour_pipeline::WorkingRgba;
 use crate::gpu::Gpu;
 use crate::rasterizer::Frame;
 use crate::tiling::{Stage, Tile, TileError, TilePlan};
+pub mod output;
 pub mod scene;
 
 /// An object's placement from local pixel coordinates into f64 stage space:
@@ -463,6 +464,20 @@ impl PreparedCompositor {
                 .iter()
                 .map(|tile| (tile.tile, &tile.targets[self.layers.len() % 2]))
         })
+    }
+
+    /// Build the 3.21 output stage for this compositor: the GPU encode pass,
+    /// its tables, the output surfaces and every readback ring slot. Called
+    /// at prepare; nothing here runs on the frame path.
+    pub fn output_ring(&self) -> Result<output::OutputRing, CompositorError> {
+        output::OutputRing::prepare(
+            &self.device,
+            &self.queue,
+            self.stage,
+            self.working_space,
+            &self.tiles,
+            self.layers.len() % 2,
+        )
     }
 
     /// Simple synchronous working-space readback for 3.16. Prepared buffers

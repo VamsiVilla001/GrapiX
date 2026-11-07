@@ -279,6 +279,26 @@ does not start 3.17-3.22, change a pixel baseline, or mark #103 done.
 
 ---
 
+## 2026-11-07 — 3.21 started: GPU output encode with one quantisation and the asynchronous readback ring (Claude)
+
+User instruction, 7 Nov 2026: move the remaining CPU parts of the frame path to the GPU (shapes and text are 3.17/3.18, taken by codex; readback and output are this row). 3.21's Needs (3.11, 3.15, 3.16) are done. **3.21 is active, not done**: see the budget below.
+
+**Done.**
+- `compositor/output.wgsl` + `compositor/output.rs`: one compute pass per tile reads the composited rgba32float working tile and writes Program (Rec.709) and Preview (sRGB) RGBA8. The shader evaluates no transfer curve: `OutputTables` holds, per output and working space, the smallest f32 straight value reaching each code value, bisected from `WorkingRgba::encode` itself. A float binary search finds a candidate code and an exact integer rule (`quotient_reaches`, mirrored in Rust for tests) settles it against the correctly rounded quotient `r / a`, so WGSL's 2.5 ULP division cannot move a code. Result: byte-identical to the CPU encode.
+- `OutputRing`: three staging slots (Program then Preview bytes in one buffer), `submit` never waits, `collect` returns the newest completed frame and counts superseded ones, a full ring refuses *before* the composite so GPU work is bounded by the ring depth. Frame allocations are recycled (`recycle`) and the copy out of the mapped slot runs on four threads.
+- Engine: `emit_frame` is the pipelined live path (queue this frame, emit the newest delivered, one frame behind at the paced rate, a new scene's first readback repeats the last picture and is counted as `awaiting_first`); `emit_frame_settled` waits for exactly the frame asked for (tests, `render_program`). `ReadbackReport` carries delivered / ring_full / superseded / awaiting_first, frames-behind and latency windows. `render_work` gains `gpu_output_dispatches` so the 3.16 trace counters are unchanged.
+- Tests: `compositor::output::tests` (2: thresholds exact at both ends of every code; the integer rule equals the CPU encode on 200,000 random premultiplied pixels per space plus every threshold ±2 ULP at eight alphas) and `engine::output_tests` (4, hardware: GPU encode equals the CPU encode of the same working pixels on 20 frames incl. fractional translations in both spaces; the ring delivers the frame it was given, byte-identical to a settled render, 1 frame behind, 3 layer + 1 output dispatch and no CPU work per frame; an unpaced 2160p loop saturates the ring without stalling; the budget benchmark). `engine::gpu_tests` (codex's 3.16 gates) now run through the ring unchanged and still match the CPU rasteriser byte for byte at integer translations.
+
+**Budget (release, RTX 3070 Ti, DX12/FXC, 50 fps, settled p99; Vulkan within a few percent).** Lower third 1080p **6.6 ms** and scorebug 1080p **8.2 ms** meet the 10 ms target. Stats page 1080p 13.5 ms; 2160p: lower third 19.7, scorebug 22.4, stats page 44.1 ms: **not met**. Two causes, neither in this row's code: (1) 3.16's `composite()` dispatches every layer over the whole tile with rgba32float (about 96 B/px/layer; 71 layers at 2160p ≈ 56 GB/frame). The fix (dispatch each layer over its warped bounding box, optionally rgba16float targets) is in codex's compositor; reported on topic 10 msg 340, unanswered because codex is out of limit until 21:12 on 7 Nov. (2) The copy of two 33 MB surfaces out of the mapped slot at 2160p, about 8 ms on four threads; going further means the output adapter consuming the mapped buffer or Preview read back at a lower rate. Before recycling, a fresh allocation per frame paged in by the OS cost 5 ms at 1080p and 22 ms at 2160p on its own. Evidence: `docs/evidence/3.21/` (README with method, `dx12/` and `vulkan/` JSON).
+
+**Still owed for 3.21.** The 10 ms p99 on the stats page and at 2160p (above); nothing else. The headless-while-Program timed run (invariant 14) now passes in conformance (below).
+
+**Lessons.** (1) Polling the ring only at emit time makes "latency" read as one frame interval; report pipeline depth (frames behind) and a settled per-frame time instead. (2) A test loop that is not paced to the clock measures queue build-up, not the frame path. (3) A 2160p frame is 33 MB; allocating it per frame costs more than copying it.
+
+**Gate:** npm run check exit 0 (agent/tmp/gpu-321/check.log): boundaries OK, codegen 353 current, typecheck OK, 40 Node and 403 Editor TS tests, 746 Rust passed / 0 failed / 16 ignored, conformance 387 passed / 0 failed / 8 skipped. The headless-while-Program timed run, skipped before because Program could not hold cadence, now runs and passes: Program alone 150 frames (0 late, 0 missed); with 7 headless 1080p renders 171 frames (0 late, 0 missed). Hardware: `cargo test -p gx-render-worker -- --include-ignored` 115 passed / 0 failed (Vulkan, debug); `engine::output_tests` 4/4 in release on DX12 and on Vulkan; `engine::gpu_tests` 7/7 on DX12.
+
+---
+
 ## 2026-11-07 — Tracker reconciled with memory.md (Claude, tracker notes only)
 
 The user asked for progress.json and progress.html to reflect today's work. No row state changed.

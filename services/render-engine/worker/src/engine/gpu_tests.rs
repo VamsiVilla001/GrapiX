@@ -168,7 +168,7 @@ fn gpu_engine_lower_third_trace_and_output_comparisons() {
         let mut frames = Vec::new();
         for scene_frame in [0, 25, 50, 100] {
             ticks.store(1 + scene_frame, Ordering::Relaxed);
-            let program = engine.emit_frame().unwrap().frame;
+            let program = engine.emit_frame_settled().unwrap().frame;
             let preview = engine.take_preview().unwrap();
             let trace = engine.program_frame_trace().unwrap().clone();
             assert_eq!(trace.backend, "gpu-compositor");
@@ -250,7 +250,7 @@ fn gpu_engine_half_black_working_spaces_and_order() {
         let pin = publish(&mut engine, doc);
         assert!(matches!(take(&mut engine, &pin), EngineReply::Taken(_)));
         ticks.store(1, Ordering::Relaxed);
-        let program = engine.emit_frame().unwrap().frame;
+        let program = engine.emit_frame_settled().unwrap().frame;
         let preview = engine.take_preview().unwrap();
         for (frame, code) in [(&*program, program_code), (&*preview, preview_code)] {
             let pixel = &frame.pixels[(5 * frame.width as usize + 5) * 4..][..4];
@@ -280,7 +280,7 @@ fn gpu_engine_unchanged_golden_frames_measured_without_rebaselining() {
         let pin = publish(&mut engine, doc);
         assert!(matches!(take(&mut engine, &pin), EngineReply::Taken(_)));
         ticks.fetch_add(1, Ordering::Relaxed);
-        engine.emit_frame().unwrap();
+        engine.emit_frame_settled().unwrap();
         let preview = engine.take_preview().unwrap();
         let baseline = root
             .join("tests/baselines")
@@ -330,7 +330,7 @@ fn gpu_engine_stage_above_texture_limit_and_clear() {
     let pin = publish(&mut engine, doc);
     assert!(matches!(take(&mut engine, &pin), EngineReply::Taken(_)));
     ticks.store(1, Ordering::Relaxed);
-    let program = engine.emit_frame().unwrap().frame;
+    let program = engine.emit_frame_settled().unwrap().frame;
     assert_eq!(program.width, limit + 7);
     assert!(
         program
@@ -353,7 +353,7 @@ fn gpu_engine_stage_above_texture_limit_and_clear() {
     }) if object == "card" && property.starts_with("objects[0]:"))
     );
     assert_eq!(
-        engine.emit_frame().unwrap().frame,
+        engine.emit_frame_settled().unwrap().frame,
         program,
         "a refused publish must not alter pinned Program"
     );
@@ -363,7 +363,7 @@ fn gpu_engine_stage_above_texture_limit_and_clear() {
         })),
         EngineReply::Cleared(_)
     ));
-    let clear = engine.emit_frame().unwrap().frame;
+    let clear = engine.emit_frame_settled().unwrap().frame;
     assert!(clear.is_black());
     assert_eq!((clear.width, clear.height), (program.width, program.height));
 }
@@ -387,7 +387,7 @@ fn gpu_engine_recovery_rebuilds_only_at_prepare_and_never_falls_back() {
         let pin = publish(&mut original, super::tests::animated_scene());
         assert!(matches!(take(&mut original, &pin), EngineReply::Taken(_)));
         ticks.store(1, Ordering::Relaxed);
-        assert!(!original.emit_frame().unwrap().frame.is_black());
+        assert!(!original.emit_frame_settled().unwrap().frame.is_black());
     }
     let (mut engine, ticks) = hardware_engine();
     let before = RenderWork::snapshot();
@@ -398,7 +398,7 @@ fn gpu_engine_recovery_rebuilds_only_at_prepare_and_never_falls_back() {
     assert_eq!(prepare.cpu_full_frame_rasterizations, 0);
     assert!(prepare.gpu_resource_builds > 0);
     assert!(engine.output_inhibited());
-    assert!(engine.emit_frame().unwrap().frame.is_black());
+    assert!(engine.emit_frame_settled().unwrap().frame.is_black());
     assert!(matches!(
         engine.handle(ClientRequest::ConfigureOutput(OutputConfig {
             adapter: "virtual".into(),
@@ -408,7 +408,7 @@ fn gpu_engine_recovery_rebuilds_only_at_prepare_and_never_falls_back() {
         EngineReply::OutputConfigured { .. }
     ));
     ticks.store(2, Ordering::Relaxed);
-    assert!(!engine.emit_frame().unwrap().frame.is_black());
+    assert!(!engine.emit_frame_settled().unwrap().frame.is_black());
     let trace = engine.program_frame_trace().unwrap().clone();
     assert_eq!(trace.backend, "gpu-compositor");
     assert_eq!(trace.work.gpu_resource_builds, 0);
@@ -416,7 +416,7 @@ fn gpu_engine_recovery_rebuilds_only_at_prepare_and_never_falls_back() {
     engine.gpu = Gpu::without_hardware(DeviceTier::T2);
     let before = RenderWork::snapshot();
     assert!(matches!(
-        engine.emit_frame(),
+        engine.emit_frame_settled(),
         Err(OutputAdapterError::Render {
             cause: Refusal::TierTooLow {
                 actual: DeviceTier::T2

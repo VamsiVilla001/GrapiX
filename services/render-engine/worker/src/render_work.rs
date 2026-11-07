@@ -11,6 +11,8 @@ pub struct RenderWork {
     pub cpu_source_rasterizations: u64,
     pub gpu_resource_builds: u64,
     pub gpu_layer_dispatches: u64,
+    /// 3.21 output-encode dispatches (one per tile per frame).
+    pub gpu_output_dispatches: u64,
 }
 
 thread_local! { static WORK: Cell<RenderWork> = Cell::new(RenderWork::default()); }
@@ -27,6 +29,7 @@ impl RenderWork {
                 - before.cpu_source_rasterizations,
             gpu_resource_builds: self.gpu_resource_builds - before.gpu_resource_builds,
             gpu_layer_dispatches: self.gpu_layer_dispatches - before.gpu_layer_dispatches,
+            gpu_output_dispatches: self.gpu_output_dispatches - before.gpu_output_dispatches,
         }
     }
 }
@@ -49,6 +52,9 @@ pub(crate) fn gpu_build() {
 }
 pub(crate) fn gpu_dispatch(count: usize) {
     record(|w| w.gpu_layer_dispatches += count as u64);
+}
+pub(crate) fn gpu_output_dispatch(count: usize) {
+    record(|w| w.gpu_output_dispatches += count as u64);
 }
 
 #[derive(Debug, Clone, Serialize)]
