@@ -7,6 +7,8 @@
 //! from a second process, and the source bytes are in the project under the
 //! hash the report gives.
 
+mod support;
+
 use gx_contracts::color::WorkingColorSpace;
 use gx_contracts::project::ProjectSettings;
 use gx_contracts::ContentHash;
@@ -29,43 +31,10 @@ fn scratch(label: &str) -> std::path::PathBuf {
     path
 }
 
-fn call(id: u64, tool: &str, arguments: serde_json::Value) -> serde_json::Value {
-    serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "tools/call",
-        "params": { "name": tool, "arguments": arguments },
-    })
-}
-
-/// One session with the shipped binary: initialize, then the calls.
-fn shipped_session(root: &std::path::Path, calls: &[serde_json::Value]) -> Vec<serde_json::Value> {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-    let mut child = Command::new(env!("CARGO_BIN_EXE_gx-editor-mcp"))
-        .arg("--root")
-        .arg(root)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("the shipped server starts");
-    let mut input = child.stdin.take().expect("stdin");
-    writeln!(input, "{}", serde_json::json!({ "jsonrpc": "2.0", "id": 0, "method": "initialize" })).unwrap();
-    for call in calls {
-        writeln!(input, "{call}").unwrap();
-    }
-    drop(input);
-    let output = child.wait_with_output().expect("the shipped server exits");
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    let replies: Vec<serde_json::Value> = String::from_utf8(output.stdout)
-        .expect("utf-8 replies")
-        .lines()
-        .map(|line| serde_json::from_str(line).expect("a JSON-RPC reply per line"))
-        .collect();
-    assert_eq!(replies.len(), calls.len() + 1, "one reply per request");
-    replies[1..].to_vec()
-}
+// The shipped binary is driven through the shared conformant client (8.14):
+// real handshake, one request at a time, the value read from
+// `structuredContent`.
+use support::{call, shipped_session};
 
 fn import_args(scene_id: &str) -> serde_json::Value {
     serde_json::json!({

@@ -1,10 +1,14 @@
-//! The MCP transport: JSON-RPC 2.0 over stdio (build plan 8.1, transport half).
+//! The MCP server: the one scope gate and the one dispatcher (build plan 8.1,
+//! transport half; 8.14 for the wire).
 //!
-//! An MCP server for a local tool surface speaks newline-delimited JSON-RPC
-//! 2.0 — one message per line, no `Content-Length` headers (the 2025 spec
-//! simplified away the LSP framing). This module owns the wire, the three
-//! lifecycle methods, and the one rule everything else depends on: **the scope
-//! gate lives here and nowhere else.** Every `tools/call` passes through
+//! Real clients reach it through [`wire`], which carries it on the official
+//! Rust SDK (rmcp) over stdio and stateless streamable HTTP, speaking the
+//! 2026-07-28 and 2025-06-18 revisions. [`Server::handle`] and
+//! [`Server::serve`] are the in-process API the handler tests and the
+//! conformance harness drive: newline-delimited JSON-RPC with no handshake,
+//! the tool's value as `result`. Both paths call [`Server::call_tool`], and
+//! that is the one rule everything else depends on: **the scope gate lives
+//! here and nowhere else.** Every `tools/call` passes through
 //! `ToolRegistry::authorise` before a handler is reached, so a tool cannot be
 //! reached by a caller that does not hold its scope — and a handler author
 //! never has the option of forgetting to check.
@@ -22,6 +26,13 @@ use gx_contracts::mcp::{ToolRegistry, TOOL_SCHEMA_VERSION};
 use gx_contracts::{Refusal, StructuredRefusal};
 use serde::{Deserialize, Serialize};
 
+pub mod wire;
+
+pub use wire::{
+    serve_http_listener, Jobs, McpService, HANDSHAKE_PROTOCOL_VERSION, HTTP_PATH,
+    SUPPORTED_PROTOCOL_VERSIONS,
+};
+
 /// What a tool does when called.
 ///
 /// Arguments arrive as `serde_json::Value` because the wire is untyped; the
@@ -30,6 +41,40 @@ use serde::{Deserialize, Serialize};
 /// named refusal rather than as a transport error.
 pub trait ToolHandler {
     fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal>;
+
+    /// True when `handle` already returns an MCP `CallToolResult`
+    /// (`content` plus `structuredContent`), as `render.preview` does to carry
+    /// its PNG as an image block. The wire passes such a value through instead
+    /// of wrapping it a second time. Declared, never sniffed from the value.
+    fn returns_call_tool_result(&self) -> bool {
+        false
+    }
+}
+
+/// One tool as `tools/list` advertises it: its registry entry and the input
+/// schema generated from the contract type it takes.
+#[derive(Debug, Clone)]
+pub struct ListedTool {
+    pub descriptor: &'static gx_contracts::mcp::ToolDescriptor,
+    pub input_schema: serde_json::Value,
+}
+
+/// What a handler returned, and whether it is already a `CallToolResult`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ToolOutput {
+    /// A contract value; the wire carries it as `structuredContent`.
+    Value(serde_json::Value),
+    /// A complete MCP `CallToolResult` built by the handler.
+    CallToolResult(serde_json::Value),
+}
+
+impl ToolOutput {
+    /// The value as the in-process API has always returned it.
+    pub fn into_value(self) -> serde_json::Value {
+        match self {
+            Self::Value(value) | Self::CallToolResult(value) => value,
+        }
+    }
 }
 
 /// `system.capability`: the discovery surface, as a tool.
@@ -187,17 +232,48 @@ impl Server {
         })
     }
 
+    /// The installed tools, in registry order, with schemas generated from
+    /// their inputs. Both the in-process API and the MCP wire list from here.
+    pub fn listed_tools(&self) -> Result<Vec<ListedTool>, Refusal> {
+        ToolRegistry::all()
+            .iter()
+            .filter(|tool| self.handlers.contains_key(tool.name))
+            .map(|descriptor| {
+                Ok(ListedTool {
+                    descriptor,
+                    input_schema: gx_contracts::mcp::input_schema(descriptor.input)?,
+                })
+            })
+            .collect()
+    }
+
+    /// Call one tool through the scope gate. Both the in-process API and the
+    /// MCP wire dispatch from here, so there is one gate on every path.
+    pub fn call_tool(&self, name: &str, args: serde_json::Value) -> Result<ToolOutput, Refusal> {
+        let handler = self.authorised_handler(name)?;
+        let value = handler.handle(args)?;
+        Ok(if handler.returns_call_tool_result() {
+            ToolOutput::CallToolResult(value)
+        } else {
+            ToolOutput::Value(value)
+        })
+    }
+
     /// Discover installed handlers with schemas generated from their inputs.
     fn list(&self) -> Result<serde_json::Value, (i64, String, Option<StructuredRefusal>)> {
-        let mut tools = Vec::new();
-        for descriptor in ToolRegistry::all().iter().filter(|tool| self.handlers.contains_key(tool.name)) {
-            let mut value = serde_json::to_value(descriptor)
-                .expect("a tool descriptor is serialisable");
-            value["description"] = serde_json::json!(descriptor.summary);
-            value["inputSchema"] = gx_contracts::mcp::input_schema(descriptor.input)
-                .map_err(|refusal| (REFUSED, refusal.to_string(), Some(StructuredRefusal::error(refusal))))?;
-            tools.push(value);
-        }
+        let listed = self
+            .listed_tools()
+            .map_err(|refusal| (REFUSED, refusal.to_string(), Some(StructuredRefusal::error(refusal))))?;
+        let tools: Vec<serde_json::Value> = listed
+            .into_iter()
+            .map(|tool| {
+                let mut value = serde_json::to_value(tool.descriptor)
+                    .expect("a tool descriptor is serialisable");
+                value["description"] = serde_json::json!(tool.descriptor.summary);
+                value["inputSchema"] = tool.input_schema;
+                value
+            })
+            .collect();
         Ok(serde_json::json!({ "tools": tools }))
     }
 
@@ -224,20 +300,15 @@ impl Server {
             .cloned()
             .unwrap_or(serde_json::Value::Null);
 
-        match self.authorised_handler(name) {
-            Ok(handler) => handler.handle(args).map_err(|refusal| {
+        self.call_tool(name, args)
+            .map(ToolOutput::into_value)
+            .map_err(|refusal| {
                 (
                     REFUSED,
                     refusal.to_string(),
                     Some(StructuredRefusal::error(refusal)),
                 )
-            }),
-            Err(refusal) => Err((
-                REFUSED,
-                refusal.to_string(),
-                Some(StructuredRefusal::error(refusal)),
-            )),
-        }
+            })
     }
 
     fn error(

@@ -6,11 +6,17 @@
 //! still leave the schema undiscoverable, which is the whole of 8.6's
 //! done-when.
 
+mod support;
+
 use gx_contracts::auth::Scope;
 use gx_contracts::scene::SceneDocument;
 use gx_editor::Projects;
 use gx_editor_mcp::BindingsSchema;
 use gx_mcp_server::Server;
+// The shipped binary is driven through the shared conformant client (8.14):
+// real handshake, one request at a time, the value read from
+// `structuredContent`. The in-process tests below keep `drive`.
+use support::shipped_session;
 
 fn drive(server: &Server, requests: &[serde_json::Value]) -> Vec<serde_json::Value> {
     let input: String = requests
@@ -155,36 +161,6 @@ fn the_schema_is_gated_by_the_transport_not_the_handler() {
     assert!(replies[0]["result"].is_null(), "an unscoped caller got a result: {}", replies[0]);
     assert!(!replies[0]["error"].is_null());
     std::fs::remove_dir_all(root).expect("clean up");
-}
-
-/// One session with the shipped `gx-editor-mcp` binary: initialize, then the
-/// given tool calls, each answered on its own line.
-fn shipped_session(root: &std::path::Path, calls: &[serde_json::Value]) -> Vec<serde_json::Value> {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-    let mut child = Command::new(env!("CARGO_BIN_EXE_gx-editor-mcp"))
-        .arg("--root")
-        .arg(root)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("the shipped server starts");
-    let mut input = child.stdin.take().expect("stdin");
-    writeln!(input, "{}", serde_json::json!({ "jsonrpc": "2.0", "id": 0, "method": "initialize" })).unwrap();
-    for call in calls {
-        writeln!(input, "{call}").unwrap();
-    }
-    drop(input);
-    let output = child.wait_with_output().expect("the shipped server exits");
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    let replies: Vec<serde_json::Value> = String::from_utf8(output.stdout)
-        .expect("utf-8 replies")
-        .lines()
-        .map(|line| serde_json::from_str(line).expect("a JSON-RPC reply per line"))
-        .collect();
-    assert_eq!(replies.len(), calls.len() + 1, "one reply per request");
-    replies[1..].to_vec()
 }
 
 /// 8.6 against the entry point an agent launches: the data schema is

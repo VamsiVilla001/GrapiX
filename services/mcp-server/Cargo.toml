@@ -20,3 +20,18 @@ path = "src/lib.rs"
 gx-contracts = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# The MCP wire (build plan 8.14): the official Rust SDK carries the protocol
+# revisions and both transports; `Server` stays the gate and the dispatcher.
+# Default features are off so no client, OAuth or proc-macro code is built.
+rmcp = { version = "3.9", default-features = false, features = [
+  "server",
+  "transport-io",
+  "transport-streamable-http-server",
+] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-std", "macros", "sync"] }
+tokio-util = { version = "0.7" }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio", "service"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "io-util", "macros", "time"] }

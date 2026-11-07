@@ -122,6 +122,12 @@ impl<P: EnginePeer, I: ImageSource> ToolHandler for RenderPreview<P, I> {
             "structuredContent": serde_json::to_value(frame).map_err(transport_failed)?,
         }))
     }
+
+    /// The value above is already the MCP `CallToolResult`: the wire must
+    /// carry the image block as it is, not wrap the whole thing as text.
+    fn returns_call_tool_result(&self) -> bool {
+        true
+    }
 }
 
 /// Standard base64 with padding (RFC 4648 §4), which MCP image content uses.

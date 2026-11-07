@@ -118,6 +118,38 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-07 — 8.14 started: the MCP wire ported onto rmcp 3.9; 2026-07-28 with fallback to 2025-06-18; stateless HTTP on 127.0.0.1 (Claude, rmcp port session)
+
+**Active — 8.14** (its Needs 8.13, 11.36 and 11.38 are done). This entry is the transport half of the row: the three tiers (read / author on a draft handle / propose) and the row's own conformance test over every tool are not started. 8.1 stays active for the same reason it was.
+
+**Decision (parent session, 7 Nov 2026):** rmcp owns the shipped stdio and HTTP wire and it is spec-conformant. The hand-rolled loop answered a paramless `initialize`, served `tools/call` with no handshake, replied -32700 to a non-JSON line and returned the tool's value as a bare `result`; a real MCP client gets none of that. The in-process `Server::new / register / serve` API is unchanged, so every in-process test and the conformance harness (`conformance/src/headless.rs`, `refusal_audit/drawability.rs`) run as before.
+
+**What changed.**
+- `services/mcp-server`: depends on `rmcp = "3.9"` (`server`, `transport-io`, `transport-streamable-http-server`; default features off), tokio, tokio-util, hyper, hyper-util. `Server::listed_tools()` and `Server::call_tool()` are the one gate and dispatch both paths call; `ToolHandler::returns_call_tool_result()` (default false) lets a handler declare that it already builds a `CallToolResult`. New `src/wire.rs`: `McpService` (rmcp `ServerHandler`), `Server::drive(jobs)`, `Server::serve_stdio()`, `Server::serve_http(port, on_bound)`, `serve_http_listener()`.
+- The server is driven by **one thread**: rmcp answers the transport on a tokio runtime and sends each `tools/list` / `tools/call` over a channel to the thread that owns the `Server`. Calls run one at a time as before, and a handler need not be `Send` — `Playout<P>` is generic over an engine peer with no `Send` bound, and a `Send` requirement on `ToolHandler` broke every playout handler.
+- Revisions: `[2025-06-18, 2026-07-28]`. In rmcp 3.9 the 2026-07-28 revision has **no `initialize`** (SEP-2567): each request carries `_meta` with `io.modelcontextprotocol/protocolVersion` and `io.modelcontextprotocol/clientCapabilities`; over HTTP it also needs the `MCP-Protocol-Version`, `Mcp-Method` and `Mcp-Name` headers (SEP-2243). A client naming any other revision in `initialize` (2026-07-28, 2025-11-25, 2024-11-05) is answered 2025-06-18.
+- Results: a tool's value is `structuredContent` plus one text block with the same JSON. `render.preview` declares `returns_call_tool_result` and its image block passes through untouched. Refusals stay JSON-RPC error -32000 with the `StructuredRefusal` in `data`, unchanged.
+- HTTP: stateless, JSON responses, bound to `127.0.0.1` only (`serve_http_listener` refuses any other local address), `Host` must be `127.0.0.1`/`localhost`, and any browser `Origin` header is refused. No session id is ever issued.
+- `services/playout-mcp`: `RenderPreview::returns_call_tool_result`. Its `tests/surface.rs` is in-process and did not change.
+- `services/editor-mcp`: `main.rs` serves stdio through rmcp and takes `--http <port>`; README updated. New shared test client `tests/support/mod.rs` (`Session`, `shipped_session`, `tool_reply`, `HttpProcess`; the raw HTTP client is `services/mcp-server/tests/http/client.rs`, included by `#[path]`).
+
+**Tests whose framing changed, assertions unchanged:** `services/editor-mcp/tests/stdio_surface.rs`, `bindings_surface.rs` (its shipped-binary test only; its in-process tests are untouched) and `import_surface.rs` now talk to the binary through the shared client — a real `initialize`, `notifications/initialized`, one request at a time — and read the value from `structuredContent` via `tool_reply`. Every assertion on values and refusal codes is the one made before. `design_system_surface.rs` is in-process and unchanged.
+
+**Pinned so it cannot change silently:** on the shipped stdio wire a line that is not JSON-RPC gets **no reply** (rmcp drops it); `wire_surface.rs::a_line_that_is_not_json_rpc_gets_no_reply_on_the_shipped_wire`. The in-process `Server::serve` still answers -32700 (`malformed_json_is_a_parse_error_not_a_crash`). Also pinned: a request with neither handshake nor `_meta` is refused -32602 naming the missing keys, and the session stays open.
+
+**Not done, by name.** `outputSchema`: codegen has no output schemas (only `input_schema()`), so none were added; adding them means JsonSchema on every output contract type in `Shared/contracts/src/mcp.rs`. `gx-playout-mcp` has no binary, so there is no shipped Program MCP over rmcp yet; `services/playout-mcp` only gained the `render.preview` declaration.
+
+**Verified by execution.**
+- `cargo test -p gx-mcp-server`: 15 unit (the 8 in-process tests unchanged, 7 new in `wire::tests`) + 4 in `tests/http` over a real 127.0.0.1 socket — all pass.
+- `cargo test -p gx-playout-mcp`: 20 unit + 3 surface, all pass, no test changed.
+- `cargo test -p gx-editor-mcp`: 15 unit + bindings_surface 3 + design_system_surface 4 + http_surface 4 + import_surface 2 + stdio_surface 1 + wire_surface 4 = 33, all pass, every one against the rmcp binary.
+- `npm run check` on 4492e5e + this port, exit 0: boundaries OK, codegen 353 files current, typecheck OK, 403 Editor tests in 37 files, 739 Rust passed / 0 failed / 3 ignored, conformance 386 passed / 0 failed / 9 skipped.
+- Probed before any edit, with a scratch rmcp 3.9.0 stdio server against the old tests' exact messages: a paramless `initialize` → -32602 then exit; `tools/call` with no handshake → -32602 then exit; a non-JSON line → silently dropped; `initialize` asking 2026-07-28 → answered 2025-06-18. That probe is why the tests' framing had to change.
+
+**Process note.** Two gates ran at once today (mine and the wgpu session's, both on the shared tree); mine compiled the other session's half-finished wgpu 30 bump and failed in `wgpu-hal`, and theirs failed at codegen:check on a file mine had mapped. Read the mission channel before `npm run check`, post `LOCK gate` first, and wait for the other `UNLOCK`.
+
+**Rule learned:** the two halves of a split `tokio::io::duplex` must be `shutdown()`, not dropped, for the other side to read EOF; a test that only dropped its writer hung the whole shared build lock for twenty minutes (killed by the user's leave).
+
 ## 2026-11-07 — Vello Hybrid spike for 3.17 / 16.9 (Claude, side session)
 
 **Not done — 3.17 and 16.9 stay pending**; tracker comments only. User decision 7 Nov: "start the wgpu bump and Vello spike now, queue rmcp". Isolated probe `tools/vello-spike/` (own workspace and lockfile, not a product member, no product dependency; reads `gx-render-worker` by path only to time its CPU rasteriser). Full method, tables and heatmaps: `tools/vello-spike/README.md`; raw logs and PNGs: `agent/tmp/vello-spike/`.
