@@ -607,7 +607,11 @@ mod tests {
             })
             .collect();
         assert_eq!(versions, vec![3, 4, 5]);
-        fs::remove_dir_all(store.project_directory(&key)).unwrap();
+        // Best effort, as `TestProject`'s drop does: the assertions above are
+        // the test. On Windows another process can hold a just-written folder
+        // for longer than the test runs (a sharing violation), which is not a
+        // failure of the autosave ring.
+        let _ = fs::remove_dir_all(store.project_directory(&key));
     }
 
     #[test]

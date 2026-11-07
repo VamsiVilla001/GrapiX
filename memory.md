@@ -118,6 +118,32 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-07 — 8.6 done: bindings discoverable through the shipped Editor MCP (Claude, on the user's instruction)
+
+**Done — 8.6.** It was Codex's row; Codex had been idle since 19 Oct, and the user said: "finish 8.6 yourself and move on to 11.19". Progress was first judged with `jg` (jevgrep): the three reasons 8.6 was reopened (no test, no caller, no shipped server) were already closed by `bindings_surface.rs` and Codex's 19 Oct stdio entry point. What remained was a real gap and a test through the shipped binary.
+
+**Gap fixed:** `bindings.schema` named only non-string bindings as invalid. A path the data context lacks was advertised as an ordinary field with no warning, as was an image id naming an asset the scene does not carry.
+- `invalid` now comes from `gx_contracts::bindings::binding_issues`, the same rule `setBinding` and the Editor's resolver use (now `pub`). It names, with reasons:
+  - a path absent from the data;
+  - a wrong type or out-of-range value;
+  - an unbindable property;
+  - a non-string binding.
+- Each consumer in `fields` also says what type it expects (`binding_expects`, also from the contract table). A missing path is still listed as a field, since the template takes it.
+- No wire type or codegen changed.
+
+**Verified by execution:**
+- `cargo test -p gx-editor-mcp`: 15 unit and 3 `bindings_surface` tests passed, plus `stdio_surface`. New: `the_shipped_editor_mcp_discovers_bindings_and_refuses_bad_paths_by_name` spawns the real `gx-editor-mcp --root <scratch>`. Through it:
+  - `bindings.schema` returns the typed fields, and names "match.referee.x is absent from the scene data context" and "y binding on referee must be a string path";
+  - `scenes.edit setBinding` with `match.away.score` is refused with `bindingPathInvalid`, the message names the path, and nothing is written;
+  - a valid second consumer of `match.home.score` is accepted, and a **second process** reads it back with both consumers.
+- `cargo test -p gx-editor bindings_and_the_data_context_survive_save_and_reopen` passed.
+
+**Gate:** `npm run check` exit 0: 344 generated current, 40 Node, 393 Editor, 714 Rust (3 ignored), conformance 385/0/9 (`agent/tmp/bindings-86/check-3.log`). Three tests had started failing on this machine, two in `gx-project-store` and one in the render worker. They unwrapped `remove_dir_all` of a fresh folder under `%APPDATA%\GrapiX\GrapiX\data\projects` and got a sharing violation (os error 32). The folder stayed held for at least 20 s while the test process lived, and could be deleted once it exited. Nothing in-process holds a handle; Defender real-time scanning is on and a `SearchProtocolHost` started at the time of the runs. The code is unchanged since 11 Sep, and the 19 Oct gates passed.
+- Those cleanups are now best effort, as `TestProject`'s drop already was: `autosave_ring_evicts_the_oldest_entry_at_its_bound`, `tests/kill_mid_write.rs`, and the render worker's `a_complete_recovery_state_round_trips_through_the_atomic_journal` (same lock under the same data root). Their assertions are unchanged and pass. Every other test that unwraps its cleanup uses the temp folder and was unaffected.
+- Leftover empty `test-*` folders in the user's data folder are the known issue noted on 3 Oct.
+
+---
+
 ## 2026-10-19 — 11.29 done; closing an unsaved graphic no longer discards it silently (Claude, mission 1)
 
 **Done — 11.29.** Its Need, 11.18, is done. Per-graphic sessions had already been built and verified (13 Sep); this is a re-run of the whole Done-when on today's Editor, with Rust-owned sessions.

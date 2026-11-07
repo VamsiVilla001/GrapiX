@@ -62,5 +62,8 @@ fn killing_a_writer_mid_save_leaves_a_complete_project_document() {
         assert!(matches!(loaded.contents["version"].as_u64(), Some(1 | 2)));
     }
 
-    fs::remove_dir_all(project_directory).unwrap();
+    // Best effort: the loop above is the test. On Windows another process can
+    // hold a just-written folder for longer than the test runs (a sharing
+    // violation), which is not a failure of the atomic save.
+    let _ = fs::remove_dir_all(project_directory);
 }

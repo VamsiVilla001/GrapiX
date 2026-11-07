@@ -271,7 +271,19 @@ pub fn resolve_scene_bindings(scene: &SceneDocument) -> Result<SceneDocument, Re
     Ok(resolved)
 }
 
-fn binding_issues(scene: &SceneDocument) -> Vec<BindingIssue> {
+/// The value type a property's binding must resolve to (`"string"`,
+/// `"number"` or `"boolean"`), or `None` when the property cannot be bound on
+/// this object. The same table `set_binding` enforces, so a schema an agent
+/// reads and the refusal it would get cannot disagree (invariant 27).
+pub fn binding_expects(object: &SceneObject, property: &str) -> Option<&'static str> {
+    spec_for(object, property).map(|spec| spec.expected)
+}
+
+/// Every authored binding that would not apply against the scene's current
+/// data context, in document order: a non-string path, an unbindable
+/// property, a path the data lacks, or a value of the wrong type or range.
+/// The bindings stay authored; this names them (invariant 18).
+pub fn binding_issues(scene: &SceneDocument) -> Vec<BindingIssue> {
     let mut issues = Vec::new();
     for object in &scene.objects {
         let Some(bindings) = &object.base().bindings else {

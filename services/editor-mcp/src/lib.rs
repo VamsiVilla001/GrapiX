@@ -263,7 +263,11 @@ impl ToolHandler for MaterialsUsage {
 ///
 /// Discoverable rather than documented: an agent filling a template asks what
 /// data it takes and gets an answer derived from the scene, so a template
-/// whose bindings changed cannot keep advertising the old shape.
+/// whose bindings changed cannot keep advertising the old shape. Each field
+/// lists every object and property that reads it with the type it expects,
+/// and every binding that would not apply to the current data is named in
+/// `invalid` with the reason, by the same rule the Editor and `setBinding`
+/// use (`gx_contracts::bindings::binding_issues`, invariant 27).
 pub struct BindingsSchema(pub Projects);
 
 impl ToolHandler for BindingsSchema {
@@ -274,32 +278,46 @@ impl ToolHandler for BindingsSchema {
         // Path -> every object/property that reads it. A list, because one
         // field commonly drives several properties, and an agent changing it
         // must learn all of them: keying the consumer by path alone kept only
-        // the last one.
+        // the last one. A path the data lacks is still a field the template
+        // takes; `invalid` says it does not resolve now.
         let mut fields: std::collections::BTreeMap<String, Vec<serde_json::Value>> = Default::default();
-        // A binding that is not a string path is named, never advertised as a
-        // field — the old `unwrap_or_default` keyed it as "", a field no agent
-        // can fill, and hid which object was wrong (invariant 17).
-        let mut invalid = Vec::new();
         for object in &scene.objects {
             let base = object.base();
             let Some(bindings) = &base.bindings else {
                 continue;
             };
             for (property, path) in bindings {
-                match path.as_str() {
-                    Some(path) => fields
-                        .entry(path.to_owned())
-                        .or_default()
-                        .push(serde_json::json!({ "object": base.id, "property": property })),
-                    None => invalid.push(serde_json::json!({
-                        "object": base.id,
-                        "property": property,
-                        "binding": path,
-                        "reason": "binding path is not a string",
-                    })),
+                // A non-string binding is never a field: keyed as "" it would
+                // be a field no agent can fill (invariant 17). It is in `invalid`.
+                let Some(path) = path.as_str() else {
+                    continue;
+                };
+                let mut consumer = serde_json::json!({ "object": base.id, "property": property });
+                if let Some(expects) = gx_contracts::bindings::binding_expects(object, property) {
+                    consumer["expects"] = expects.into();
                 }
+                fields.entry(path.to_owned()).or_default().push(consumer);
             }
         }
+        let invalid: Vec<serde_json::Value> = gx_contracts::bindings::binding_issues(&scene)
+            .into_iter()
+            .map(|issue| {
+                // The binding as authored (a non-string stays its own JSON
+                // value), so the agent sees exactly what is wrong.
+                let authored = scene
+                    .objects
+                    .iter()
+                    .find(|object| object.base().id == issue.object_id)
+                    .and_then(|object| object.base().bindings.as_ref()?.get(&issue.property).cloned())
+                    .unwrap_or(serde_json::Value::String(issue.path));
+                serde_json::json!({
+                    "object": issue.object_id,
+                    "property": issue.property,
+                    "binding": authored,
+                    "reason": issue.detail,
+                })
+            })
+            .collect();
 
         Ok(serde_json::json!({
             "sceneId": scene.id,
@@ -832,26 +850,46 @@ mod tests {
         assert_eq!(
             schema["fields"],
             serde_json::json!({
-                "flags.0": [{ "object": "bar", "property": "visible" }],
-                "match.home.logo": [{ "object": "logo", "property": "assetId" }],
+                // Each consumer says the type the field must hold.
+                "flags.0": [{ "object": "bar", "property": "visible", "expects": "boolean" }],
+                "match.home.logo": [{ "object": "logo", "property": "assetId", "expects": "string" }],
                 // Two consumers of one path are both named. Keying by path
                 // alone kept only the last, so an agent changing this field
                 // would not learn it also moves `bar`.
                 "match.home.x": [
-                    { "object": "bar", "property": "x" },
-                    { "object": "shadow", "property": "x" },
+                    { "object": "bar", "property": "x", "expects": "number" },
+                    { "object": "shadow", "property": "x", "expects": "number" },
                 ],
                 // Absent from the data context and still advertised: the scene
                 // expects it, and hiding it would tell the agent the template
                 // takes less data than it does.
-                "match.referee.x": [{ "object": "referee", "property": "x" }],
+                "match.referee.x": [{ "object": "referee", "property": "x", "expects": "number" }],
             }),
         );
         assert!(
             schema["dataContext"]["match"].get("referee").is_none(),
             "the unresolved path is visible by its absence from the data context"
         );
-        assert_eq!(schema["invalid"], serde_json::json!([]));
+        // What would not apply to this data is named with the reason, by the
+        // same rule the Editor and setBinding use: the path the data lacks,
+        // and the logo id that names no asset the scene carries.
+        assert_eq!(
+            schema["invalid"],
+            serde_json::json!([
+                {
+                    "object": "logo",
+                    "property": "assetId",
+                    "binding": "match.home.logo",
+                    "reason": "match.home.logo names image asset home-logo, which the scene does not carry",
+                },
+                {
+                    "object": "referee",
+                    "property": "x",
+                    "binding": "match.referee.x",
+                    "reason": "match.referee.x is absent from the scene data context",
+                },
+            ]),
+        );
     }
 
     #[test]
@@ -873,13 +911,13 @@ mod tests {
 
         assert!(schema["fields"].get("").is_none(), "no empty field: {}", schema["fields"]);
         assert_eq!(
-            schema["invalid"],
-            serde_json::json!([{
+            schema["invalid"][0],
+            serde_json::json!({
                 "object": "bar",
                 "property": "y",
                 "binding": 42,
-                "reason": "binding path is not a string",
-            }]),
+                "reason": "y binding on bar must be a string path",
+            }),
         );
         assert_eq!(
             schema["fields"]["match.home.x"].as_array().map(Vec::len),

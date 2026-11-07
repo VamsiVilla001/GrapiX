@@ -110,19 +110,27 @@ fn an_agent_discovers_a_scenes_data_schema_over_the_wire() {
     assert_eq!(
         schema["fields"],
         serde_json::json!({
-            "flags.0": [{ "object": "bar", "property": "visible" }],
-            "match.home.score": [{ "object": "bar", "property": "x" }],
-            "match.referee.x": [{ "object": "referee", "property": "x" }],
+            "flags.0": [{ "object": "bar", "property": "visible", "expects": "boolean" }],
+            "match.home.score": [{ "object": "bar", "property": "x", "expects": "number" }],
+            "match.referee.x": [{ "object": "referee", "property": "x", "expects": "number" }],
         })
     );
     assert_eq!(
         schema["invalid"],
-        serde_json::json!([{
-            "object": "referee",
-            "property": "y",
-            "binding": 7,
-            "reason": "binding path is not a string",
-        }])
+        serde_json::json!([
+            {
+                "object": "referee",
+                "property": "x",
+                "binding": "match.referee.x",
+                "reason": "match.referee.x is absent from the scene data context",
+            },
+            {
+                "object": "referee",
+                "property": "y",
+                "binding": 7,
+                "reason": "y binding on referee must be a string path",
+            },
+        ])
     );
     std::fs::remove_dir_all(root).expect("clean up");
 }
@@ -146,5 +154,107 @@ fn the_schema_is_gated_by_the_transport_not_the_handler() {
     );
     assert!(replies[0]["result"].is_null(), "an unscoped caller got a result: {}", replies[0]);
     assert!(!replies[0]["error"].is_null());
+    std::fs::remove_dir_all(root).expect("clean up");
+}
+
+/// One session with the shipped `gx-editor-mcp` binary: initialize, then the
+/// given tool calls, each answered on its own line.
+fn shipped_session(root: &std::path::Path, calls: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let mut child = Command::new(env!("CARGO_BIN_EXE_gx-editor-mcp"))
+        .arg("--root")
+        .arg(root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the shipped server starts");
+    let mut input = child.stdin.take().expect("stdin");
+    writeln!(input, "{}", serde_json::json!({ "jsonrpc": "2.0", "id": 0, "method": "initialize" })).unwrap();
+    for call in calls {
+        writeln!(input, "{call}").unwrap();
+    }
+    drop(input);
+    let output = child.wait_with_output().expect("the shipped server exits");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let replies: Vec<serde_json::Value> = String::from_utf8(output.stdout)
+        .expect("utf-8 replies")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a JSON-RPC reply per line"))
+        .collect();
+    assert_eq!(replies.len(), calls.len() + 1, "one reply per request");
+    replies[1..].to_vec()
+}
+
+/// 8.6 against the entry point an agent launches: the data schema is
+/// discoverable with every consumer of a shared field and the type it
+/// expects; a binding that would not apply is named with its reason; a write
+/// of a path the data lacks is refused by name and changes nothing; a valid
+/// binding written through `scenes.edit` is in the schema a second process
+/// reads back from the project store.
+#[test]
+fn the_shipped_editor_mcp_discovers_bindings_and_refuses_bad_paths_by_name() {
+    let root = scratch("shipped");
+    let projects = Projects::at_root(&root);
+    projects.create_project("news").expect("a project exists");
+    let seeded: SceneDocument = serde_json::from_value(scene()).expect("the fixture is a scene");
+    projects.write_scene("news", &seeded).expect("the fixture is stored");
+    let schema_call = |id: u64| call(id, "bindings.schema", serde_json::json!({ "project": "news", "scene_id": "scorebug" }));
+    let edit = |id: u64, edits: serde_json::Value| {
+        call(
+            id,
+            "scenes.edit",
+            serde_json::json!({ "target": { "target": "stored", "project": "news", "sceneId": "scorebug" }, "edits": edits }),
+        )
+    };
+
+    let replies = shipped_session(
+        &root,
+        &[
+            schema_call(1),
+            // A path the data context lacks: refused by name, nothing written.
+            edit(2, serde_json::json!([{ "edit": "setBinding", "objectId": "referee", "property": "y", "path": "match.away.score" }])),
+            // A second consumer of an existing field.
+            edit(3, serde_json::json!([{ "edit": "setBinding", "objectId": "referee", "property": "y", "path": "match.home.score" }])),
+        ],
+    );
+
+    let schema = &replies[0]["result"];
+    assert!(replies[0]["error"].is_null(), "{}", replies[0]);
+    assert_eq!(schema["fields"]["match.home.score"], serde_json::json!([{ "object": "bar", "property": "x", "expects": "number" }]));
+    let invalid: Vec<(&str, &str)> = schema["invalid"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|issue| (issue["property"].as_str().unwrap(), issue["reason"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        invalid,
+        [
+            ("x", "match.referee.x is absent from the scene data context"),
+            ("y", "y binding on referee must be a string path"),
+        ]
+    );
+
+    let refused = &replies[1];
+    assert!(refused["result"].is_null(), "a bad path was accepted: {refused}");
+    assert_eq!(refused["error"]["data"]["code"]["refusal"], "bindingPathInvalid", "{refused}");
+    assert!(refused["error"]["message"].as_str().unwrap().contains("match.away.score"), "{refused}");
+    assert!(replies[2]["error"].is_null(), "the valid binding was refused: {}", replies[2]);
+
+    // A new process reads the project store: the written binding is there and
+    // the refused one is not.
+    let reread = shipped_session(&root, &[schema_call(4)]);
+    let schema = &reread[0]["result"];
+    assert_eq!(
+        schema["fields"]["match.home.score"],
+        serde_json::json!([
+            { "object": "bar", "property": "x", "expects": "number" },
+            { "object": "referee", "property": "y", "expects": "number" },
+        ])
+    );
+    assert!(schema["fields"].get("match.away.score").is_none());
+    assert_eq!(schema["invalid"].as_array().map(Vec::len), Some(1), "only the unresolved x remains: {}", schema["invalid"]);
     std::fs::remove_dir_all(root).expect("clean up");
 }

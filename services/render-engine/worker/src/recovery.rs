@@ -343,7 +343,10 @@ mod tests {
         let state = RecoveryState::empty(Epoch(7));
         journal.record(&state).unwrap();
         assert_eq!(journal.load().unwrap(), Some(state));
-        fs::remove_dir_all(journal.path().parent().unwrap()).unwrap();
+        // Best effort: the round trip above is the test. On Windows another
+        // process can hold a just-written folder under the user data root for
+        // longer than the test runs (a sharing violation).
+        let _ = fs::remove_dir_all(journal.path().parent().unwrap());
     }
 
     #[test]
