@@ -161,6 +161,14 @@ drivers, and confirmed show targets, are still to be named.
 > negotiation, tiers and the CPU-adapter refusal are unchanged, and it still
 > has no draw pipelines.
 
+> **7 November 2026, 3.16 first increment:** `worker/src/compositor` now has
+> prepare-time GPU compute pipelines for ordered working-space layers, affine
+> warping, opacity and normal source-over composition into bounded tile
+> targets. The baseline DX12 compiler is explicitly FXC. This is **Partial**:
+> SceneDocument mapping, Engine Preview/Program wiring and the reference
+> lower-third frame-path trace remain open. The historical table above is
+> unchanged; production frames still use the CPU renderer.
+
 ## EffectCraft reuse catalogue
 
 Reference clone: `agent/reference/effectcraft` at the pinned commit, never

@@ -118,6 +118,76 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-07 — 3.16 started: prepared tiled GPU layer compositor (Codex, Panchayati #103)
+
+**Partial — 3.16 active; #103 doing. Resume here.** The user asked Codex to
+read topic:10 messages 319-321 and start #103 with the GPU compositor. All
+3.16 Needs (3.1, 3.4, 3.9, 3.13, 3.15) are done. Entered the canonical shared
+worktree on agent/shared through tools/enter-agent.ps1; the worktree guard
+passed. Claude's msg 321 released the prior locks; Codex claimed #103 and
+posted gate/commit-lock coordination before builds and shared-file edits.
+
+**What changed:**
+- `services/render-engine/worker/src/compositor`: a backend-independent
+  prepared compositor taking explicitly ordered, premultiplied working-space
+  float layers. Normal source-over, transparent bilinear sampling, affine
+  warping and effective opacity execute as GPU compute passes into
+  rgba32float ping-pong tile targets. No EffectCraft product dependency.
+- Pipelines, source uploads, tile textures, bind groups, uniform buffers and
+  diagnostic readback buffers are built at prepare. The frame submission
+  validates every state before any GPU write, fills reusable uniform scratch,
+  writes uniforms and dispatches; it does not tessellate or rasterise CPU
+  pixels. Actual GPU handles are retained across the repeat-frame test.
+- Stage/translation subtraction is f64 before tile-local narrowing. Targets
+  use the existing overscanned TilePlan; only cores leave the diagnostic
+  readback. An explicit test renders a stage wider than the actual negotiated
+  device limit and checks every pixel, including seams. Another compares
+  single-target and 11-pixel-limit tiles at fractional transforms around
+  (+1e12, -1e12).
+- Unsupported blend mappings, mismatched working spaces, oversized/malformed
+  sources and invalid state refuse by object id and document field. A refused
+  frame preserves the previous GPU result. There is no CPU adapter fallback.
+- `gpu.rs` exposes device/queue only inside the worker and explicitly selects
+  FXC for the baseline DX12 shader, avoiding wgpu 30's DLL-dependent Auto
+  compiler selection. Existing T0/T2/T3 negotiation is unchanged.
+- Ported sampling, normal blending and warp structure from EffectCraft
+  common.wgsl/kernels.wgsl at 9a7d3e76991d5372448033b473dc12c2480a6a04;
+  source attribution, worker THIRD_PARTY_NOTICES.md and the MIT licence are
+  retained. No Cargo dependency or Cargo.lock change.
+- Both trackers now say 3.16 active, with the missing criteria named. Updated
+  worker README, docs/README and a dated ADR-0003 note to say Partial.
+
+**Executed verification on the final code:**
+- `cargo test -p gx-render-worker compositor::tests -- --include-ignored --test-threads=1`:
+  6 passed, 0 failed, 0 ignored. Four tests executed on negotiated hardware;
+  they fail if hardware is absent. They prove order, both working spaces
+  against CPU float references and independently specified Preview/Program
+  reference codes, affine rotation/translation, effective opacity, fractional
+  transparent sampling, clear/repeat frames, resource identity, distant
+  coordinates and seam-free GPU targets above the device texture limit.
+- `cargo run -p gx-pixel-gate -- check`: exit 0; CPU baselines unchanged.
+- `npm run check`: exit 0. Boundaries OK; 353 generated files current;
+  typechecks pass; 40 Node and 403 Editor tests pass; 741 Rust passed,
+  0 failed, 7 ignored; conformance 386 passed, 0 failed, 9 skipped.
+  Four of the seven ordinary-suite Rust ignores are the GPU tests explicitly
+  executed above; the other three ignores predate this change.
+- Logs: agent/tmp/gpu-316/{focused,pixel-gate,check}.log. Worktree guard and
+  git diff --check pass. No performance/certification claim is made.
+
+**Still required to close 3.16:** SceneDocument-to-layer preparation that
+preserves effective order across object types, wiring into real engine
+Preview and Program, fixture outputs through those paths, and the reference
+lower-third trace showing no CPU full-frame rasterisation on the frame path.
+Production Preview/Program and headless currently still use the CPU renderer.
+`output_tiles()` exposes the completed GPU working tiles without readback;
+`readback_reference()` is exclusive blocking diagnostics plus CPU reference
+output encoding, not a Program output implementation. Bounded asynchronous
+readback/encoding is 3.21. Source layers above a texture limit currently
+refuse; their drawing backend must supply bounded layers. This increment
+does not start 3.17-3.22, change a pixel baseline, or mark #103 done.
+
+---
+
 ## 2026-11-07 — Tracker reconciled with memory.md (Claude, tracker notes only)
 
 The user asked for progress.json and progress.html to reflect today's work. No row state changed.

@@ -33,7 +33,9 @@ records the 12 October 2026 decision: GrapiX owns a GPU-first compositor
 (build-plan steps `3.15`–`3.22`), whole-core adoption of EffectCraft is
 halted after the `3.14` spike, and EffectCraft components are ported with
 attribution under the owning steps. It also amends ADR-0002 B.1: compositing
-follows the project's working colour space. The compositor is **Planned**.
+follows the project's working colour space. The compositor is **Partial**:
+3.16 has a prepared GPU layer core, but SceneDocument mapping and the engine's
+Preview/Program cutover remain open; production frames still use the CPU path.
 
 **ADR numbering.** ADR files are numbered `0001`, `0002`, `0003`, and the
 Data Server ADR planned by step `19.1` will be `0004`. ADR-0001 contains its

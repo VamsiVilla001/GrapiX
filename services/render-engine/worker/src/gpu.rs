@@ -25,7 +25,6 @@ pub struct Gpu {
 
 struct GpuInner {
     device: wgpu::Device,
-    #[allow(dead_code)]
     queue: wgpu::Queue,
     max_texture_dimension_2d: u32,
 }
@@ -38,11 +37,12 @@ struct GpuInner {
 /// tries to go live.
 pub fn negotiate() -> Gpu {
     // wgpu 30 has no `Default` for the descriptor; this is the same set of
-    // defaults without a display handle (the worker is headless). One
-    // difference from wgpu 26: the DX12 shader compiler default is now `Auto`
-    // (DXC when found, else FXC) rather than FXC. No pipeline is compiled here
-    // yet; the drawing steps (3.16-3.17) must choose the compiler explicitly.
+    // defaults without a display handle (the worker is headless).
+    // Choose FXC explicitly for the compositor's baseline WGSL. `Auto`
+    // changes compiler according to DLL availability. A future drawing backend
+    // requiring DXC must ship and select it explicitly, never fall back.
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+    descriptor.backend_options.dx12.shader_compiler = wgpu::Dx12Compiler::Fxc;
     descriptor.backends = wgpu::Backends::PRIMARY | wgpu::Backends::GL;
     let instance = wgpu::Instance::new(descriptor);
 
@@ -106,6 +106,12 @@ fn tier_for(device_type: wgpu::DeviceType) -> DeviceTier {
 }
 
 impl Gpu {
+    /// Internal device access for prepared GPU backends. A CPU adapter never
+    /// receives these handles and cannot silently become a compositor.
+    pub(crate) fn device_queue(&self) -> Option<(&wgpu::Device, &wgpu::Queue)> {
+        self.inner.as_ref().map(|gpu| (&gpu.device, &gpu.queue))
+    }
+
     /// The negotiated tier. The single answer every tier question gets.
     pub fn tier(&self) -> DeviceTier {
         self.tier
