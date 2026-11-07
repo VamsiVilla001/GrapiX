@@ -80,7 +80,7 @@ Blocks literally everything. Nothing else starts until this is green.
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
 | `0.1` | Clean branch; one Cargo workspace, one lockfile | CON | — | cargo build at root builds all crates |
-| `0.2` | Pin toolchains: Rust, Node, wgpu 26 across every crate | CON | 0.1 | Versions pinned in-tree, CI enforces |
+| `0.2` | Pin toolchains: Rust, Node, wgpu 30 across every crate | CON | 0.1 | Versions pinned in-tree, CI enforces |
 | `0.3` | CI matrix on Windows and macOS from the first commit | PLAT | 0.1 | Both platforms green on an empty tree |
 | `0.4` | Dependency and licence policy; SBOM generated in CI | PLAT | 0.3 | SBOM artifact on every build |
 | `0.5` | tracing + OpenTelemetry skeleton | BE | 0.1 | A span reaches a collector |

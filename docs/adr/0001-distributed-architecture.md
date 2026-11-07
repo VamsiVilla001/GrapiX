@@ -480,6 +480,12 @@ run, not after.
 | SwiftShader / Lavapipe / WARP | **Adopt for T2** | CI and no-GPU environments. Never live. |
 | `rquickjs` | **Adopt** | Script sandbox. Deterministic, capped, no V8 in Program. |
 | FFmpeg / GStreamer + NVDEC | **Adopt for video tier** | Resolve the LGPL/GPL build question before writing code. |
+
+> **7 November 2026 (user decision):** the "Rust + wgpu" row above records
+> the pin when it was written. Production wgpu moved from 26 to 30.0.1
+> (`services/render-engine/worker`, build-plan `0.2`). Rust stays 1.89:
+> wgpu 30.0.1 needs 1.87, so no toolchain upgrade was required. Verification
+> is in `memory.md`.
 | Lottie import | **Adopt** | Strategic alternative to the AE runtime container. No licence, no resident process. |
 | NDI + SRT + OMT | **Adopt** | IP output not hostage to one vendor's licensing. |
 | AE runtime container | **Parked** | Unresolved licensing. Wrong foundation for new surface. |

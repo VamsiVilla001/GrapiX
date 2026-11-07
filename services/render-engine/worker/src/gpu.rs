@@ -1,4 +1,5 @@
-//! GPU device negotiation (ADR Part C: wgpu 26; invariant 19).
+//! GPU device negotiation (ADR Part C: wgpu 30.0.1, moved from 26 on
+//! 7 November 2026 by the user's decision; invariant 19).
 //!
 //! This is the *only* place the render worker learns what hardware it is
 //! running on, and therefore the only place a device tier is decided. Every
@@ -36,15 +37,20 @@ struct GpuInner {
 /// every capability exchange, so a control room learns the truth before it
 /// tries to go live.
 pub fn negotiate() -> Gpu {
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-        backends: wgpu::Backends::PRIMARY | wgpu::Backends::GL,
-        ..Default::default()
-    });
+    // wgpu 30 has no `Default` for the descriptor; this is the same set of
+    // defaults without a display handle (the worker is headless). One
+    // difference from wgpu 26: the DX12 shader compiler default is now `Auto`
+    // (DXC when found, else FXC) rather than FXC. No pipeline is compiled here
+    // yet; the drawing steps (3.16-3.17) must choose the compiler explicitly.
+    let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+    descriptor.backends = wgpu::Backends::PRIMARY | wgpu::Backends::GL;
+    let instance = wgpu::Instance::new(descriptor);
 
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::HighPerformance,
         force_fallback_adapter: false,
         compatible_surface: None,
+        apply_limit_buckets: false,
     }))
     .ok();
 
@@ -69,6 +75,7 @@ pub fn negotiate() -> Gpu {
         label: Some("grapix-render"),
         required_features: wgpu::Features::empty(),
         required_limits: wgpu::Limits::default(),
+        experimental_features: wgpu::ExperimentalFeatures::disabled(),
         memory_hints: wgpu::MemoryHints::Performance,
         trace: wgpu::Trace::Off,
     }))

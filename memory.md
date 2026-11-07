@@ -118,6 +118,43 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-07 — 0.2: wgpu 26 → 30.0.1 in the render worker (Claude, wgpu side session)
+
+**0.2 stays done**, with its pin moved by the user's decision of 7 November ("start the wgpu bump and Vello spike now, queue rmcp"). Plan row 0.2 now says wgpu 30 (`GrapiX-Build-Plan.md`, `progress.html` PLAN and comment, `progress.json` comment). Dated notes were added under ADR-0001 C.2 and ADR-0003's current-worker table; the rows themselves record history and are unchanged.
+
+**Versions:**
+- wgpu 26.0.1 → 30.0.1 (`services/render-engine/worker/Cargo.toml`, the only product crate that uses wgpu).
+- Rust unchanged: wgpu 30.0.1 needs 1.87, and the installed stable is 1.89.0, the workspace `rust-version`. No `rustup update` and no root `Cargo.toml` change.
+
+**`gpu.rs` changes for the API.** Semantics unchanged: PRIMARY|GL backends, HighPerformance, tier mapping, a CPU adapter never opens a device, invariant 19.
+- `InstanceDescriptor` has no `Default` in 30. It is `new_without_display_handle()` with the same defaults, and `Instance::new` takes it by value.
+- `RequestAdapterOptions` gains `apply_limit_buckets: false`.
+- `DeviceDescriptor` gains `experimental_features: ExperimentalFeatures::disabled()`.
+
+**Behaviour difference to know:**
+- wgpu 30's DX12 shader-compiler default is `Auto` (DXC if `dxcompiler.dll` is found, else FXC); wgpu 26 defaulted to FXC.
+- The worker compiles no shaders yet, so nothing observable changes. 3.16/3.17 must choose the compiler explicitly, because `Auto` falls back silently.
+
+**Lockfile trap, fixed:**
+- In the workspace lock, `gpu-allocator` 0.28 kept resolving to `windows 0.61.3`, already present for tauri/wry. wgpu-hal 30 passes it `windows 0.62.2` types, so the first `cargo test -p gx-render-worker` failed to compile wgpu-hal: "two different versions of crate `windows`". The rmcp session hit the same failure (Panchayati msg 309).
+- `gpu-allocator`'s range is `>=0.53, <=0.62`. Its lock entry now points at `windows 0.62.2`, which is also what a clean resolution of HEAD plus this change produces. tauri keeps 0.61.3.
+- If a later `cargo update` flips it back, the same E0277/E0308 errors in `wgpu-hal/src/dx12/suballocation.rs` return.
+
+**Commit hygiene:** the working-tree `Cargo.lock` also carried the rmcp session's uncommitted dependencies. The committed lock was resolved from a `git archive HEAD` export plus this change only and staged with `git update-index`, so none of their entries are in this commit.
+
+**Verified:**
+- `cargo test -p gx-render-worker`: 96 + 1 passed.
+- The product's own `gpu::negotiate()` on wgpu 30, called through the spike binary (`gx-vello-spike negotiate`): tier T0, hardware true, max_texture_dimension_2d 8192 on the RTX 3070 Ti, driver 591.59.
+- `cargo run -p gx-pixel-gate -- check`: exit 0.
+- `npm run check`: exit 0 — boundaries OK, codegen 353 current, 40 Node, 403 Editor, 739 Rust (3 ignored), conformance 386/0/9. That tree included the rmcp session's uncommitted mcp-server work.
+
+**Clippy:**
+- `cargo clippy -p gx-render-worker --all-targets -- -D warnings` fails before reaching the worker: `gx-contracts` has "empty line after doc comment" ×2 and "Err-variant very large" on committed code this change does not touch.
+- Without `-D`, the one `gpu.rs` note is the pre-existing "field `device` is never read".
+- CI's `cargo clippy --workspace --all-targets -- -D warnings` therefore fails today independent of this bump. It is owed separately.
+
+---
+
 ## 2026-11-07 — 7.2 and 11.17 done: SVG import reachable end to end; broadcast frame rates; playhead handle (Claude, mission 1)
 
 User decisions, 7 Nov 2026: "finish 7.2 yourself and move on to 11.17", "ignore the macOS support for now", "the timeline fader must have a handle as in the attached image" (blue tab on the ruler with a line through the tracks), and "do not hard code the timeline or application to 50fps; it shall work at 29.97, 30, 59.94, 60 and more broadcast based formats".

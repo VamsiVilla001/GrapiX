@@ -156,6 +156,11 @@ drivers, and confirmed show targets, are still to be named.
 | Images and gradients | No drawing path; gradients refused | `3.17` |
 | Meshes | Basic CPU projection; glTF geometry empty (the `3.7` defect) | `11.48`, `16.6`–`16.8` |
 
+> **7 November 2026:** the GPU row describes the worker when this ADR was
+> written. By the user's decision its wgpu moved from 26 to 30.0.1 (`0.2`);
+> negotiation, tiers and the CPU-adapter refusal are unchanged, and it still
+> has no draw pipelines.
+
 ## EffectCraft reuse catalogue
 
 Reference clone: `agent/reference/effectcraft` at the pinned commit, never

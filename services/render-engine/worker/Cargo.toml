@@ -20,7 +20,7 @@ cosmic-text = "0.15"
 swash = "0.2"
 gx-media-plane = { workspace = true }
 gx-fs = { workspace = true }
-wgpu = "26"
+wgpu = "30.0.1"
 pollster = "0.4"
 # MIT. 3.5 uses lyon's maintained path tessellator behind `PathRasteriser`, so
 # scene logic remains independent of any tessellation backend.
