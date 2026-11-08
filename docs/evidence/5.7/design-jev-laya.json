@@ -1,0 +1,136 @@
+{
+  "laya": {
+    "model": "convaiinnovations/laya-multilingual",
+    "max_len": 8192,
+    "state_tokens": 445,
+    "truncated": false,
+    "load_s": 14.44,
+    "predict_s": 1.924
+  },
+  "jev_model": "jev-1.14.0",
+  "rows": [
+    {
+      "question": "read_requests",
+      "type": "choice",
+      "laya": "playout_role",
+      "jev": "playout_role",
+      "agree": true,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "playout_role",
+        "probabilities": {
+          "playout_role": 0.5784,
+          "any_authenticated": 0.2285,
+          "new_observe_scope": 0.1932
+        },
+        "confidence": 0.1156,
+        "answer_confidence": 0.5784,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "playout_role",
+        "confidence": 0.68,
+        "probabilities": {
+          "playout_role": 0.79,
+          "any_authenticated": 0.09,
+          "new_observe_scope": 0.12
+        }
+      }
+    },
+    {
+      "question": "phase_scope",
+      "type": "choice",
+      "laya": "new_scope",
+      "jev": "take",
+      "agree": false,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "new_scope",
+        "probabilities": {
+          "take": 0.1456,
+          "cue": 0.1147,
+          "new_scope": 0.7397
+        },
+        "confidence": 0.3155,
+        "answer_confidence": 0.7397,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "take",
+        "confidence": 0.82,
+        "probabilities": {
+          "take": 0.88,
+          "cue": 0.03,
+          "new_scope": 0.09
+        }
+      }
+    },
+    {
+      "question": "refusal",
+      "type": "choice",
+      "laya": "unauthenticated",
+      "jev": "new_named",
+      "agree": false,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "unauthenticated",
+        "probabilities": {
+          "new_named": 0.3228,
+          "unauthenticated": 0.6772
+        },
+        "confidence": 0.0926,
+        "answer_confidence": 0.6772,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "new_named",
+        "confidence": 0.78,
+        "probabilities": {
+          "new_named": 0.89,
+          "unauthenticated": 0.11
+        }
+      }
+    },
+    {
+      "question": "trace",
+      "type": "choice",
+      "laya": "reply_only",
+      "jev": "recording_peer",
+      "agree": false,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "reply_only",
+        "probabilities": {
+          "recording_peer": 0.1412,
+          "tracing_span": 0.0798,
+          "reply_only": 0.779
+        },
+        "confidence": 0.3877,
+        "answer_confidence": 0.779,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "recording_peer",
+        "confidence": 0.56,
+        "probabilities": {
+          "recording_peer": 0.71,
+          "tracing_span": 0.29,
+          "reply_only": 0
+        }
+      }
+    }
+  ],
+  "agreement": 0.25
+}

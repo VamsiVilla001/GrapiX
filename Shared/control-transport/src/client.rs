@@ -69,7 +69,19 @@ impl Client {
         Self::connect_with(endpoint, None)
     }
 
+    /// Authenticate and stop: no capability exchange. For conformance, which
+    /// must see how the transport answers each request for a credential that
+    /// may not even read the capability (5.7). Products use
+    /// [`Self::connect_with_token`].
+    pub fn authenticate_only(addr: SocketAddr, token: Token) -> io::Result<Self> {
+        Self::open(Endpoint::Tcp(addr), Some(token), false)
+    }
+
     fn connect_with(endpoint: Endpoint, token: Option<Token>) -> io::Result<Self> {
+        Self::open(endpoint, token, true)
+    }
+
+    fn open(endpoint: Endpoint, token: Option<Token>, exchange: bool) -> io::Result<Self> {
         let stream = connect_endpoint(&endpoint)?;
         stream.set_low_latency()?;
         let (reader, writer) = stream.split()?;
@@ -107,6 +119,9 @@ impl Client {
                     return Err(io::Error::new(kind_for(&refusal), refusal.to_string()))
                 }
             }
+        }
+        if !exchange {
+            return Ok(client);
         }
         match client.request(ClientRequest::Capability) {
             Ok(EngineReply::Capability(capability)) => client.capability = capability,

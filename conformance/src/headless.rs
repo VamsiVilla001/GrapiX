@@ -277,6 +277,19 @@ fn timed_run(
         content_hash: Some(content_hash),
         at: TakeAt::NextOpportunity,
     }));
+    // A sub-T0 engine (a CI runner with no GPU) refuses a Program take by
+    // name, which is correct behaviour; it cannot run this check, so it is a
+    // skip that says so, never a pass (invariant 43).
+    if let EngineReply::Refused(Refusal::TierTooLow { actual }) = &taken {
+        report.record(
+            PLANE,
+            NAME,
+            Outcome::Skip(format!(
+                "the engine is {actual:?}, below T0, so it refuses a Program take; needs a T0 GPU"
+            )),
+        );
+        return;
+    }
     if !matches!(taken, EngineReply::Taken(_)) {
         report.record(
             PLANE,

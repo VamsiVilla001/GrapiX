@@ -118,6 +118,38 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-08 — 5.7 done: the control port enforces token scopes; third CI run fixes (Claude)
+
+**Resume here.** Next open Phase 5 row: 5.8 (L0 asset handoff by path). Phase 3: 3.21
+(Claude), 3.17 (Codex). 0.10 and 4.2 return to done on the first green CI run.
+
+**5.7** (`docs/evidence/5.7`). The transport verified a token and then ignored its
+claims; any role could Take or Clear. Now `ClientRequest::required_scope` (one
+exhaustive match: reads none; Cue; Take and Phase -> Take; Clear; ConfigureOutput)
+and `ClientRequest::authorise(role, scopes)` (Playout role required for every
+request) run in `server.rs` before the engine mutex; a refusal is the new
+`Refusal::ScopeNotGranted { request, required, role }` (TS regenerated, audit
+route). Design put to Jev and Laya: both chose Playout-role-only reads; Jev's
+Phase -> Take, named refusal and recording-peer trace were taken over Laya's new
+scope, reused Unauthenticated and reply-only check (low confidence; the last
+would not meet the done-when). Conformance: a recording mock behind the protected
+transport (author refused for all nine requests, trace empty; cue-only Playout
+cannot take; full Playout reaches all nine) and the real worker started with
+`--token` (author refused for all nine, Program untouched). Mutation check with
+enforcement stubbed: three checks fail. `Client::authenticate_only` added for
+conformance. Rule for the next session: an unprotected engine (no `--token`)
+still accepts everything; that is the L0 bind policy, not a gap in 5.7.
+
+**Third CI run (42458460363).** Lint and every Rust test passed; two conformance
+checks assumed the workstation's T0 GPU. The runner's engine is T2. "Live output
+refuses below T0" asked for a made-up adapter and got UnknownOutputAdapter; it now
+asks for `virtual`. "Headless renders while Program runs" now records a named skip
+when a sub-T0 engine refuses its Program take. Both models endorsed both fixes.
+
+**Executed.** `cargo run -p gx-conformance`: 529 passed, 0 failed, 9 skipped;
+gx-control-transport tests pass; `cargo fmt --check` and clippy `-D warnings` exit
+0; `npm run check` exit 0 (377 codegen files current, 43 Node, 412 Editor, 773 Rust passed / 0 failed / 26 ignored, conformance 529 passed / 0 failed / 9 skipped).
+
 ## 2026-11-08 — 5.5 done; Windows only (macOS removed from the todo); second CI run fixes (Claude)
 
 **Resume here.** Next: 5.7 (control-port scope enforcement), then 3.21; Codex has

@@ -265,6 +265,7 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
     "assetHashMismatch",
     "mediaTransportUnavailable",
     "mediaCodecNotOffered",
+    "scopeNotGranted",
     "rundownCursorOutOfRange",
     "rundownEntryUnknown",
     "automationExecutionDeferred",

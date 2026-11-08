@@ -11,8 +11,9 @@
 use gx_conformance::{
     asset_plane_suite, control_plane_delivery_suite, control_plane_fault_suite,
     control_plane_suite, editor_command_suite, headless_render_suite, locality_suite,
-    media_plane_suite, mock_product_suite, refusal_audit_suite, render_preview_suite,
-    scene_plane_suite, timing_plane_suite, Outcome, Report,
+    media_plane_suite, mock_product_suite, real_engine_scope_suite, refusal_audit_suite,
+    render_preview_suite, scene_plane_suite, scope_enforcement_suite, timing_plane_suite, Outcome,
+    Report,
 };
 use gx_contracts::{DeviceTier, Locality, RationalRate};
 use gx_control_plane::peer::EnginePeer;
@@ -59,6 +60,9 @@ fn main() {
     // client reads a different declared locality and every consumer adapts
     // through the same code.
     run_over_transport(&mut report, None, Locality::Lan);
+    // 5.7: the transport checks every request's scope before the engine sees it.
+    report.set_peer("recording mock behind the protected control transport (5.7)");
+    scope_enforcement_suite(&mut report);
 
     // The real engine, as a peer. The same control-plane suite that runs
     // against the mock runs against the actual render worker, which is the
@@ -66,6 +70,8 @@ fn main() {
     // binary is not built or no GPU is present, this records a skip rather
     // than a pass (invariant 43).
     run_against_real_engine(&mut report);
+    // 5.7 against the real worker, started protected.
+    run_scope_against_real_engine(&mut report);
 
     report.set_peer("plane contract, no peer");
     control_plane_delivery_suite(&mut report);
@@ -313,6 +319,57 @@ fn run_against_real_engine(report: &mut Report) {
 /// The worker binary. Cargo places a binary run via `cargo run` directly in
 /// `target/debug`, and a test/example executable in `target/debug/deps`, so
 /// look in the executable's own directory and its parent.
+/// Start the real worker with a control-port secret and run the 5.7 checks.
+fn run_scope_against_real_engine(report: &mut Report) {
+    const SECRET: &str = "conformance-real-engine-secret-0123456789";
+    report.set_peer("real render engine, protected by a token (5.7)");
+    let Some(worker) = worker_binary() else {
+        report.skip_unavailable("gx-render-worker binary not built");
+        return;
+    };
+    let port = free_port();
+    let asset_port = free_port();
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+    let journal = std::env::temp_dir().join(format!(
+        "gx-conformance-scope-{}-{port}/recovery.json",
+        std::process::id()
+    ));
+    let child = std::process::Command::new(&worker)
+        .args([
+            "--port",
+            &port.to_string(),
+            "--asset-port",
+            &asset_port.to_string(),
+            "--recovery-journal",
+            &journal.display().to_string(),
+            "--token",
+            SECRET,
+            "--publish",
+            &format!("conformance/published:1:{}", "a".repeat(64)),
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    let mut child = match child {
+        Ok(child) => child,
+        Err(e) => {
+            report.skip_unavailable(format!("could not spawn worker: {e}"));
+            return;
+        }
+    };
+    let _guard = KillOnDrop(&mut child);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while std::net::TcpStream::connect(addr).is_err() {
+        if std::time::Instant::now() >= deadline {
+            report.skip_unavailable("worker did not open its control port");
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    real_engine_scope_suite(addr, SECRET, report);
+}
+
 fn worker_binary() -> Option<std::path::PathBuf> {
     let current = std::env::current_exe().ok()?;
     let name = if cfg!(windows) {

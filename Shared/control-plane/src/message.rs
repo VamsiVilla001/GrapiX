@@ -6,6 +6,7 @@
 //! conformance suite asserts this absence over the serialised form, because a
 //! reviewer will not notice a field being added and a test will.
 
+use gx_contracts::auth::{Role, Scope};
 use gx_contracts::{DeviceTier, Refusal};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -48,6 +49,60 @@ pub enum ClientRequest {
     /// Render a pinned revision at one of its frames to an image (11.41).
     /// Never touches Program, so it is not a Program-affecting request.
     Render(RenderRequest),
+}
+
+impl ClientRequest {
+    /// The request's wire name: the `request` tag serde emits for it.
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Self::Authenticate { .. } => "authenticate",
+            Self::Capability => "capability",
+            Self::Status => "status",
+            Self::Cue(_) => "cue",
+            Self::Take(_) => "take",
+            Self::Clear(_) => "clear",
+            Self::Phase(_) => "phase",
+            Self::ConfigureOutput(_) => "configureOutput",
+            Self::Performance => "performance",
+            Self::Render(_) => "render",
+        }
+    }
+
+    /// The scope this request needs on the control port (5.7), beyond the
+    /// Playout role every request but `Authenticate` needs. `None` is a read.
+    ///
+    /// One exhaustive match, so a new request cannot be added without a scope
+    /// decision. `Phase` continues a stop point or plays a scene out: it
+    /// changes Program, so it needs the authority a take does.
+    pub const fn required_scope(&self) -> Option<Scope> {
+        match self {
+            Self::Authenticate { .. }
+            | Self::Capability
+            | Self::Status
+            | Self::Performance
+            | Self::Render(_) => None,
+            Self::Cue(_) => Some(Scope::Cue),
+            Self::Take(_) | Self::Phase(_) => Some(Scope::Take),
+            Self::Clear(_) => Some(Scope::Clear),
+            Self::ConfigureOutput(_) => Some(Scope::ConfigureOutput),
+        }
+    }
+
+    /// Whether a connection holding `role` and `scopes` may send this request
+    /// (5.7). The transport calls this before the engine sees the request.
+    pub fn authorise(&self, role: Role, scopes: &[Scope]) -> Result<(), Refusal> {
+        let required = self.required_scope();
+        let granted = role == Role::Playout && required.is_none_or(|scope| scopes.contains(&scope));
+        if granted {
+            Ok(())
+        } else {
+            Err(Refusal::ScopeNotGranted {
+                request: self.name().to_owned(),
+                required,
+                role,
+            })
+        }
+    }
 }
 
 /// Everything the engine may answer. A refusal is a reply, not an exception:

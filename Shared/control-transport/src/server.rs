@@ -52,13 +52,23 @@ pub struct Server<P: EnginePeer> {
     secret: Option<String>,
 }
 
-// The verified claims are held for the connection, but no request is checked
-// against their role's scopes here: scopes are enforced by the MCP server
-// (8.11, 8.13), not on the engine's control port. Named as an open finding of
-// the 8 Nov 2026 done-row review; the field stays so enforcement has it.
+/// What a connection has proved. A protected connection's claims are checked
+/// against every request before the engine sees it (5.7): the control port is
+/// Playout's, and each Program change needs its own scope
+/// (`ClientRequest::authorise`). An unprotected connection exists only on an
+/// L0 endpoint the bind policy approved without a secret.
 enum ConnectionAuthorization {
     Unprotected,
-    Authenticated(#[allow(dead_code)] Claims),
+    Authenticated(Claims),
+}
+
+impl ConnectionAuthorization {
+    fn authorise(&self, request: &ClientRequest) -> Result<(), Refusal> {
+        match self {
+            Self::Unprotected => Ok(()),
+            Self::Authenticated(claims) => request.authorise(claims.role, &claims.scopes),
+        }
+    }
 }
 
 impl<P: EnginePeer + Send + 'static> Server<P> {
@@ -243,6 +253,20 @@ fn handle_connection<P: EnginePeer>(
             request if authentication.is_none() => {
                 let _ = request;
                 (EngineReply::Refused(Refusal::Unauthenticated), Vec::new())
+            }
+            // 5.7: an out-of-scope request is answered here, so the engine is
+            // never locked for it and its handler never runs.
+            request
+                if authentication
+                    .as_ref()
+                    .is_some_and(|granted| granted.authorise(&request).is_err()) =>
+            {
+                let refusal = authentication
+                    .as_ref()
+                    .map(|granted| granted.authorise(&request))
+                    .and_then(Result::err)
+                    .expect("the guard saw a refusal");
+                (EngineReply::Refused(refusal), Vec::new())
             }
             request => {
                 // The engine is held only to validate and to drain events. A

@@ -1,0 +1,107 @@
+{
+  "laya": {
+    "model": "convaiinnovations/laya-multilingual",
+    "max_len": 8192,
+    "state_tokens": 716,
+    "truncated": false,
+    "load_s": 11.84,
+    "predict_s": 2.951
+  },
+  "jev_model": "jev-1.14.0",
+  "rows": [
+    {
+      "question": "row_done",
+      "type": "noul",
+      "laya": 0.8559,
+      "jev": 0.59,
+      "agree": false,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.8559,
+        "confidence": 0.8559,
+        "answer_confidence": 0.8559,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.59
+      }
+    },
+    {
+      "question": "ci_fix_adapter",
+      "type": "noul",
+      "laya": 0.9291,
+      "jev": 0.83,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9291,
+        "confidence": 0.9291,
+        "answer_confidence": 0.9291,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.83
+      }
+    },
+    {
+      "question": "ci_fix_skip",
+      "type": "noul",
+      "laya": 0.9648,
+      "jev": 0.91,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9648,
+        "confidence": 0.9648,
+        "answer_confidence": 0.9648,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.91
+      }
+    },
+    {
+      "question": "weakest",
+      "type": "choice",
+      "laya": "mock_engine",
+      "jev": "mock_engine",
+      "agree": true,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "mock_engine",
+        "probabilities": {
+          "mock_engine": 0.5587,
+          "trace_is_peer": 0.0225,
+          "unprotected_path": 0.0222,
+          "none": 0.3966
+        },
+        "confidence": 0.3783,
+        "answer_confidence": 0.5587,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "mock_engine",
+        "confidence": 0.47,
+        "probabilities": {
+          "mock_engine": 0.6,
+          "trace_is_peer": 0.11,
+          "unprotected_path": 0.28,
+          "none": 0.01
+        }
+      }
+    }
+  ],
+  "agreement": 0.75
+}

@@ -599,6 +599,16 @@ pub enum Refusal {
         locality: Locality,
         offered: Vec<MediaCodec>,
     },
+    /// The connection's credential does not carry the authority this control
+    /// request needs (5.7). Checked by the transport before the engine sees
+    /// the request: the control port is Playout's, so any other role is
+    /// refused even for reads, and a Program change needs its own scope.
+    /// `required` is `None` for a read, which needs the Playout role only.
+    ScopeNotGranted {
+        request: String,
+        required: Option<auth::Scope>,
+        role: auth::Role,
+    },
     /// A rundown cursor names a position the rundown does not have.
     RundownCursorOutOfRange { cursor: usize, len: usize },
     /// A rundown entry id that the loaded rundown does not contain.
@@ -1227,6 +1237,20 @@ impl std::fmt::Display for Refusal {
             Refusal::MediaTransportUnavailable { detail } => {
                 write!(f, "media transport unavailable: {detail}")
             }
+            Refusal::ScopeNotGranted {
+                request,
+                required,
+                role,
+            } => match required {
+                Some(scope) => write!(
+                    f,
+                    "a {role:?} credential without the {scope:?} scope may not send {request} on the control port"
+                ),
+                None => write!(
+                    f,
+                    "a {role:?} credential may not send {request}: the control port serves the Playout role only"
+                ),
+            },
             Refusal::MediaCodecNotOffered {
                 codec,
                 locality,
@@ -1968,6 +1992,11 @@ impl Refusal {
                 locality: Locality::Lan,
                 offered: vec![MediaCodec::Jpeg],
             },
+            Self::ScopeNotGranted {
+                request: "take".into(),
+                required: Some(auth::Scope::Take),
+                role: auth::Role::Editor,
+            },
             Self::RundownCursorOutOfRange { cursor: 9, len: 2 },
             Self::RundownEntryUnknown {
                 entry_id: "audit".into(),
@@ -2290,6 +2319,7 @@ impl Refusal {
             Self::AssetHashMismatch { .. } => "assetHashMismatch",
             Self::MediaTransportUnavailable { .. } => "mediaTransportUnavailable",
             Self::MediaCodecNotOffered { .. } => "mediaCodecNotOffered",
+            Self::ScopeNotGranted { .. } => "scopeNotGranted",
             Self::RundownCursorOutOfRange { .. } => "rundownCursorOutOfRange",
             Self::RundownEntryUnknown { .. } => "rundownEntryUnknown",
             Self::AutomationExecutionDeferred { .. } => "automationExecutionDeferred",

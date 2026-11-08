@@ -12,10 +12,12 @@ mod editor_commands;
 mod headless;
 mod refusal_audit;
 mod scene_plane;
+mod scope;
 pub use editor_commands::editor_command_suite;
 pub use headless::{headless_render_suite, render_preview_suite};
 pub use refusal_audit::refusal_audit_suite;
 pub use scene_plane::{mock_product_suite, scene_plane_suite};
+pub use scope::{real_engine_scope_suite, scope_enforcement_suite};
 
 use gx_asset_plane::{is_syntactically_safe, Transfer};
 use gx_contracts::{
@@ -351,8 +353,12 @@ pub fn control_plane_suite<P: EnginePeer>(peer: &mut P, report: &mut Report) {
             )),
         );
     } else {
+        // An adapter every peer knows ("virtual" is the real engine's
+        // software output; the mock accepts any name), so the tier is the only
+        // condition that can refuse. A made-up name let the real engine refuse
+        // UnknownOutputAdapter first on a sub-T0 CI runner (8 Nov 2026).
         let live = peer.handle(ClientRequest::ConfigureOutput(OutputConfig {
-            adapter: "conformance-live".into(),
+            adapter: "virtual".into(),
             live: true,
             accept_free_run: true,
         }));

@@ -1277,6 +1277,28 @@ fn drive_media_refusals(report: &mut Report) {
             "an engine lacking the negotiated codec was not refused as MediaCodecNotOffered",
         ),
     );
+    // 5.7: the request-to-scope table refuses an Editor credential's take.
+    // The full transport route is the scope enforcement suite.
+    report.record(
+        PLANE,
+        "ScopeNotGranted is produced for a control request the credential may not send",
+        expect(
+            matches!(
+                ClientRequest::Clear(gx_control_plane::intent::ClearRequest {
+                    at: gx_control_plane::intent::TakeAt::NextOpportunity,
+                })
+                .authorise(
+                    gx_contracts::auth::Role::Editor,
+                    &[gx_contracts::auth::Scope::Author],
+                ),
+                Err(Refusal::ScopeNotGranted {
+                    required: Some(gx_contracts::auth::Scope::Clear),
+                    ..
+                })
+            ),
+            "an Editor credential's clear was not refused as ScopeNotGranted",
+        ),
+    );
 }
 
 fn drive_asset_refusals(report: &mut Report) {
@@ -1841,6 +1863,7 @@ fn is_driven(variant: &str) -> bool {
             | "UnsafePackagePath"
             | "MediaTransportUnavailable"
             | "MediaCodecNotOffered"
+            | "ScopeNotGranted"
             | "AssetChunkOutOfOrder"
             | "AssetTransferAlreadyComplete"
             | "EmptyAssetTransfer"
