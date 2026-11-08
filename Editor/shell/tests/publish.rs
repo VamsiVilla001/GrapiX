@@ -10,7 +10,7 @@
 //! reports is the revision the engine actually issued.
 
 use std::net::{Ipv4Addr, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
@@ -49,7 +49,7 @@ impl Drop for KillOnDrop {
 /// machine's real one, and a scene this test published on an earlier run
 /// comes back as an existing revision — which is the engine behaving
 /// correctly and the test not being isolated.
-fn start_worker(binary: &PathBuf, control: u16, asset: u16, journal: &PathBuf) -> Option<KillOnDrop> {
+fn start_worker(binary: &Path, control: u16, asset: u16, journal: &Path) -> Option<KillOnDrop> {
     let child = KillOnDrop(
         Command::new(binary)
             .args([

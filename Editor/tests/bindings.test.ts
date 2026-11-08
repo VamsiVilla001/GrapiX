@@ -157,10 +157,10 @@ describe("preview resolution", () => {
       ok: false,
       issues: [
         {
-          code: "bindingTypeMismatch",
           objectId: "headline",
           property: "x",
           path: "match.headline",
+          detail: "match.headline is string; X requires number",
         },
       ],
     });
@@ -170,9 +170,14 @@ describe("preview resolution", () => {
     const resolution = resolveSceneBindings(scene([text({ madeUp: "match.headline", text: 42 })]));
     expect(resolution.ok).toBe(false);
     if (resolution.ok) return;
-    expect(resolution.issues.map((issue) => issue.code)).toEqual([
-      "bindingPropertyUnsupported",
-      "bindingPathNotString",
+    expect(resolution.issues).toEqual([
+      {
+        objectId: "headline",
+        property: "madeUp",
+        path: "match.headline",
+        detail: "madeUp is not a bindable property of text",
+      },
+      { objectId: "headline", property: "text", path: "42", detail: "text binding on headline must be a string path" },
     ]);
   });
 
@@ -181,7 +186,12 @@ describe("preview resolution", () => {
     (document.dataContext.match as Record<string, unknown>).home = { crest: "missing" };
     expect(resolveSceneBindings(document)).toMatchObject({
       ok: false,
-      issues: [{ code: "bindingAssetUnknown", property: "assetId" }],
+      issues: [
+        {
+          property: "assetId",
+          detail: "match.home.crest names image asset missing, which the scene does not carry",
+        },
+      ],
     });
   });
 });
@@ -282,7 +292,10 @@ describe("author-supplied sample data", () => {
     // And the preview refuses the whole resolution by name.
     expect(resolveSceneBindings(next)).toMatchObject({
       ok: false,
-      issues: [{ code: "bindingPathInvalid" }, { code: "bindingTypeMismatch" }],
+      issues: [
+        { property: "text", path: "match.headline" },
+        { property: "x", detail: "match.position.x is string; X requires number" },
+      ],
     });
   });
 });

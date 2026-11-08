@@ -93,6 +93,8 @@ struct Classified {
 
 /// Verify, cache and describe a batch of files. See the module docs for the
 /// all-or-nothing and identity guarantees.
+// A refusal carries its field, the given value and the allowed list; the Err variant is large by design.
+#[allow(clippy::result_large_err)]
 pub fn prepare_asset_files(
     store: &mut AssetStore,
     scene_assets: &[AssetLibraryItem],

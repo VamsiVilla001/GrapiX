@@ -429,10 +429,8 @@ mod tests {
 
     #[test]
     fn transparent_pixels_stay_transparent_in_every_effect() {
-        let mut levels = Levels::default();
-        levels.alpha.output_black = 0.5;
-        let mut fill = Fill::default();
-        fill.opacity = 1.0;
+        let levels = Levels { alpha: LevelsChannel { output_black: 0.5, ..Default::default() }, ..Default::default() };
+        let fill = Fill { opacity: 1.0, ..Default::default() };
         for effect in [Effect::Fill(fill), Effect::Tint(Tint::default()), Effect::Levels(levels)] {
             let o = apply_pixel(&packed(effect, WorkingColorSpace::Srgb), WorkingRgba::transparent());
             assert_eq!(o, WorkingRgba::transparent());
@@ -469,8 +467,10 @@ mod tests {
         let o = apply_pixel(&packed(Effect::HueSaturation(hs), s), WorkingRgba::opaque(1.0, 0.0, 0.0));
         assert!((o.r - 0.5).abs() < 1e-6 && (o.g - 0.5).abs() < 1e-6);
         // Curves: a point at (0.5, 0.75) lifts mid grey there.
-        let mut cv = Curves::default();
-        cv.rgb = vec![CurvePoint { x: 0.0, y: 0.0 }, CurvePoint { x: 0.5, y: 0.75 }, CurvePoint { x: 1.0, y: 1.0 }];
+        let cv = Curves {
+            rgb: vec![CurvePoint { x: 0.0, y: 0.0 }, CurvePoint { x: 0.5, y: 0.75 }, CurvePoint { x: 1.0, y: 1.0 }],
+            ..Default::default()
+        };
         let o = apply_pixel(&packed(Effect::Curves(cv), s), grey(0.5, 1.0));
         assert!((o.r - 0.75).abs() < 1e-4, "{o:?}");
     }

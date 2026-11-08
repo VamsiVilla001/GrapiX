@@ -178,8 +178,8 @@ const INITIAL_STATE = {
   "0.6": "done",   // StructuredRefusal: code, field, given, allowed, severity; serialises identically in Rust and generated TS
   "0.7": "done",   // RationalRate num/den, no f64 constructor; test forbids float rates
   "0.8": "done",   // Revision + if_revision: conflict returns the current revision; loser-recovery test passes
-  "0.9": "done",   // contracts package; Rust source of truth, TS generated, drift gate
-  "0.10": "done",  // conformance harness + mock-peer pattern, runs in gate
+  "0.9": "done",   // contracts package; Rust source of truth, TS generated, drift gate. 8 Nov 2026 (Claude, #104): breach found and fixed in one commit: the Editor preview hand-wrote BindingIssue; it now reports the generated type, and Shared/contracts/fixtures/binding-resolution.json holds TS and Rust to the same answers (docs/evidence/0.9).
+  "0.10": "active", // conformance harness + mock-peer pattern, runs in gate. 8 Nov 2026 (Claude, #104, user decision): active until CI runs the gate green; CI never ran on this tree (fmt --check failed every run since 11 Sep, agent/shared was not a trigger). Harness itself unchanged.
   "0.11": "done", // verified: all seven old heads merged, two registered checkouts, old provider folders and 12 temps removed, preservation hashes/settings checked, workspace guard rejects primary/clones/private branches; npm run check passed (379 JS/TS, 626 Rust; conformance 272 pass, 0 fail, 9 skip)
   // Phase 2 — platform primitives.
   "2.1": "done",   // atomic replacement (Shared/fs): unique temp + fsync + directory fsync + bounded retry on a Windows sharing violation; both rename races closed, one implementation, 7 tests
@@ -232,7 +232,7 @@ const INITIAL_STATE = {
   // Phase 4 — the pixel gate. The instrument, built before anything else
   // changes pixels.
   "4.1": "done",   // six reference scenes: colour ramp, safe areas, text, vector, 3D mesh, and every rate family; a coverage test fails the build if a fixed-function blend or fit mode has no reference scene
-  "4.2": "done",   // headless harness: prepares a scene and renders through PreparedScene::frame with no display and no GPU; dependency-free stored-DEFLATE PNG encoder with an own-output round-trip test
+  "4.2": "active",  // headless harness: prepares a scene and renders through PreparedScene::frame with no display and no GPU; dependency-free stored-DEFLATE PNG encoder with an own-output round-trip test. 8 Nov 2026 (Claude, #104, user decision): active until CI runs it green, as 0.10.
   "4.3": "done",   // baselines committed, and proven deterministic — two captures are byte-identical
   "4.4": "done",   // `check` reports scene, differing pixel count and worst channel delta, exit non-zero; verified against a real one-channel mutation: "colour-ramp-50: 1 differing pixels; worst channel delta 1". Wired into CI
   "4.5": "active", // 16 Oct: colour-ramp-50 still differs at 39,065 pixels (old opacity/text/mesh placeholders in accepted baseline); baseline untouched. Cross-platform equality still needs macOS.
@@ -241,7 +241,7 @@ const INITIAL_STATE = {
   "5.2": "done",   // session/auth/epoch; Program survives a control disconnect
   "5.3": "done",   // hash preflight plus chunked verified transfer, one client and one server sharing the dialect; republishing three assets with one changed moves only the changed bytes, asserted by counting wire bytes
   "5.4": "done",   // L0 media slot over a shared mapping: the consumer borrows the producer's pages (asserted by address equality), a stalled consumer drops rather than blocking the producer, and a generation counter checked before and after a read makes a torn frame unobservable
-  "5.5": "done",   // locality declared in the capability exchange
+  "5.5": "active",  // locality declared in the capability exchange. 8 Nov 2026 (Claude, #105, user decision): active; the old done-when was never executable, the plan now asks for a conformance test of EngineCapability locality over the wire (local engine and mocked remote), back to done when it passes.
   "5.6": "done",   // conformance suite passes over the real transport AND the real engine
   // Phase 6 — Playout service, headless.
   "6.1": "done",   // published library store: republishing a scene keeps its TakeId and issues a new immutable revision (invariant 30)

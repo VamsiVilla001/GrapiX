@@ -1,0 +1,118 @@
+{
+  "laya": {
+    "model": "convaiinnovations/laya-multilingual",
+    "max_len": 8192,
+    "load_s": 16.01,
+    "predict_s": 1.988,
+    "state_tokens": 409,
+    "truncated": false
+  },
+  "jev_model": "jev-1.14.0",
+  "rows": [
+    {
+      "question": "fmt_policy",
+      "type": "choice",
+      "laya": "keep_failing",
+      "jev": "one_format_commit",
+      "agree": false,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "keep_failing",
+        "probabilities": {
+          "one_format_commit": 0.0511,
+          "drop_fmt_from_ci": 0.3153,
+          "format_incrementally": 0.1489,
+          "keep_failing": 0.4848
+        },
+        "confidence": 0.1702,
+        "answer_confidence": 0.4848,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "one_format_commit",
+        "confidence": 0.97,
+        "probabilities": {
+          "one_format_commit": 0.98,
+          "drop_fmt_from_ci": 0,
+          "format_incrementally": 0.02,
+          "keep_failing": 0
+        }
+      }
+    },
+    {
+      "question": "user_decides_format",
+      "type": "noul",
+      "laya": 0.5228,
+      "jev": 0.82,
+      "agree": false,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.5228,
+        "confidence": 0.5228,
+        "answer_confidence": 0.5228,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.82
+      }
+    },
+    {
+      "question": "ci_trigger",
+      "type": "noul",
+      "laya": 0.8823,
+      "jev": 0.52,
+      "agree": false,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.8823,
+        "confidence": 0.8823,
+        "answer_confidence": 0.8823,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.52
+      }
+    },
+    {
+      "question": "allow_attributes",
+      "type": "noul",
+      "laya": 0.6825,
+      "jev": 0.81,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.6825,
+        "confidence": 0.6825,
+        "answer_confidence": 0.6825,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.81
+      }
+    }
+  ],
+  "agreement": 0.25,
+  "laya_base_512": {
+    "model": "convaiinnovations/laya",
+    "max_len": 512,
+    "superseded": "read only the first 512 tokens of this input; see laya-context.json",
+    "answers": {
+      "fmt_policy": "one_format_commit",
+      "user_decides_format": 0.8076,
+      "ci_trigger": 0.9237,
+      "allow_attributes": 0.5634
+    }
+  }
+}

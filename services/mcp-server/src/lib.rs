@@ -260,6 +260,8 @@ impl Server {
     }
 
     /// Discover installed handlers with schemas generated from their inputs.
+    // A refusal carries its field, the given value and the allowed list; the Err variant is large by design.
+    #[allow(clippy::result_large_err)]
     fn list(&self) -> Result<serde_json::Value, (i64, String, Option<StructuredRefusal>)> {
         let listed = self
             .listed_tools()
@@ -278,6 +280,8 @@ impl Server {
     }
 
     /// Dispatch a `tools/call` through the scope gate to its handler.
+    // A refusal carries its field, the given value and the allowed list; the Err variant is large by design.
+    #[allow(clippy::result_large_err)]
     fn call(
         &self,
         params: Option<serde_json::Value>,

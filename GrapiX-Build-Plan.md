@@ -17,7 +17,7 @@ application is operable and automatable before it is clickable.
 
 ---
 
-**254 steps across 19 phases.**
+**255 steps across 19 phases.**
 
 **Product direction — 15 October 2026 (user):** GrapiX combines After
 Effects-style composition authoring with Scene Manager and live broadcast
@@ -47,6 +47,16 @@ Phase 10 and design-system-only portions of earlier rows are historical
 compatibility work, not requirements for creating, saving or browsing graphics.
 Do not introduce new token-ingest, brand-pack confirmation or drift workflows.
 Existing saved metadata remains readable and is not deleted by this change.
+
+**Decisions — 8 November 2026 (user), from the two-classifier plan review
+(`docs/evidence/plan-review-2026-11`).** (1) `5.7`, control-port scope
+enforcement at the transport, is added to Phase 5 and is done before Phase 14
+exposes the port beyond loopback. (2) `5.5`'s done-when is reworded to an
+executable one and the row returns to `active` until that test runs. (3) A
+done-when that cannot be executed as written (one-line intents such as
+"Reduces the Adobe dependency") is rewritten to an executable form, and
+approved by the user, before its phase opens; none of the 68 such rows in
+phases 9 and 12–19 is edited until then. (4) The phase and row order stands.
 
 **Decisions — 16 October 2026 (user).** From the Editor UX/direction and
 Playout workflow reviews (`docs/proposals/GrapiX-Editor-UX-Direction-Review.md`,
@@ -293,8 +303,9 @@ Location-transparent from the first line. Local is an optimisation, not a differ
 | `5.2` | Session, auth, epoch, reconnect and reconciliation | BE | 2.9 | Program survives a control disconnect |
 | `5.3` | Asset plane local: hash preflight, transfer only the difference | BE | 2.7 | Re-publish moves no unchanged bytes |
 | `5.4` | Media plane local: shared memory or handle passing | BE | 3.11 | Frames reach a consumer with no copy |
-| `5.5` | Locality declared in the capability exchange | BE | 1.10 | Consumers adapt without code change |
+| `5.5` | Locality declared in the capability exchange | BE | 1.10 | `EngineCapability` carries locality (local or remote); a conformance test reads it over the wire from a local engine and a mocked remote one, and Playout chooses its asset path by it with no code path per locality. (Reworded 8 Nov 2026, user decision, from "Consumers adapt without code change", which could not be executed.) |
 | `5.6` | Conformance suite passes over the real transport, not just mocks | BE | 1.12 | Same suite, both paths |
+| `5.7` | Control-port scope enforcement: every request checked against the token role's scopes at the transport, before the engine sees it (added 8 Nov 2026 from the done-row review: `server.rs` verified a token's signature and then ignored its claims; only the MCP server enforced scopes) | BE | 5.2, 8.13 | A conformance test sends every control request with an author-scoped token and each is refused by name at the transport; the engine handler is never reached (asserted by trace). Done before Phase 14 exposes the port beyond loopback. |
 
 ## Phase 6 — Playout service
 

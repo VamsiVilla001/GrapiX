@@ -21,7 +21,7 @@ use lyon::tessellation::{BuffersBuilder, FillOptions, FillTessellator, FillVerte
 use swash::zeno::{Command, Point as OutlinePoint};
 use gx_contracts::font::{FontDefinition, FontLoadStatus, FontSource, FontStyle};
 use gx_contracts::scene::{AssetKind, SceneDocument, SceneObject, TextCase, TextDirection, TextLayout};
-use gx_contracts::{ContentHash, Refusal};
+use gx_contracts::Refusal;
 
 use crate::mesh::AssetBytes;
 
@@ -580,6 +580,7 @@ fn finite_non_negative(value: f64) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gx_contracts::ContentHash;
     use gx_contracts::font::{EmbeddingPolicy, FontFaceDefinition, FontFormat};
     use gx_contracts::scene::{
         AssetLibraryItem, ObjectBase, SceneCanvas, SceneTimeline, TextObject,

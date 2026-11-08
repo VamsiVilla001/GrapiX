@@ -1504,7 +1504,6 @@ impl Refusal {
     ///
     /// The match is exhaustive, so a new variant cannot be added without
     /// naming it here, and every consumer inherits that guarantee.
-
     /// One instance of every variant.
     ///
     /// Enumeration a derive cannot provide: the variants carry data, so there

@@ -10,7 +10,9 @@ name: check
 
 on:
   push:
-    branches: [GrapiX-2.0, main]
+    # agent/shared is the branch every agent commits to (user decision,
+    # 8 Nov 2026): it is checked on both platforms on every push.
+    branches: [GrapiX-2.0, main, agent/shared]
   pull_request:
 
 # Cancel a superseded run on the same ref rather than queueing behind it.

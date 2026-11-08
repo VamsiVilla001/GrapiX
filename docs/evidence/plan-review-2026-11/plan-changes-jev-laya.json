@@ -1,0 +1,116 @@
+{
+  "laya": {
+    "model": "convaiinnovations/laya-multilingual",
+    "max_len": 8192,
+    "state_tokens": 629,
+    "truncated": false,
+    "load_s": 27.79,
+    "predict_s": 4.597
+  },
+  "jev_model": "jev-1.14.0",
+  "rows": [
+    {
+      "question": "scope_row_placement",
+      "type": "choice",
+      "laya": "14_x_remote",
+      "jev": "5_7_transport",
+      "agree": false,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "14_x_remote",
+        "probabilities": {
+          "5_7_transport": 0.0274,
+          "14_x_remote": 0.9033,
+          "8_15_mcp": 0.0694
+        },
+        "confidence": 0.6582,
+        "answer_confidence": 0.9033,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "5_7_transport",
+        "confidence": 1,
+        "probabilities": {
+          "5_7_transport": 1,
+          "14_x_remote": 0,
+          "8_15_mcp": 0
+        }
+      }
+    },
+    {
+      "question": "scope_row_urgency",
+      "type": "noul",
+      "laya": 0.974,
+      "jev": 0.91,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.974,
+        "confidence": 0.974,
+        "answer_confidence": 0.974,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.91
+      }
+    },
+    {
+      "question": "done_when_5_5",
+      "type": "choice",
+      "laya": "keep_as_is",
+      "jev": "capability_field",
+      "agree": false,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "keep_as_is",
+        "probabilities": {
+          "capability_field": 0.0167,
+          "no_locality_branches": 0.0101,
+          "keep_as_is": 0.9732
+        },
+        "confidence": 0.8715,
+        "answer_confidence": 0.9732,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "capability_field",
+        "confidence": 0.67,
+        "probabilities": {
+          "capability_field": 0.78,
+          "no_locality_branches": 0.22,
+          "keep_as_is": 0
+        }
+      }
+    },
+    {
+      "question": "reopen_5_5",
+      "type": "noul",
+      "laya": 0.9731,
+      "jev": 0.81,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9731,
+        "confidence": 0.9731,
+        "answer_confidence": 0.9731,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.81
+      }
+    }
+  ],
+  "agreement": 0.5
+}

@@ -1,0 +1,3077 @@
+[
+ {
+  "id": "0.1",
+  "name": "Clean branch; one Cargo workspace, one lockfile",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.16,
+   "evidence_names_execution": 0.89,
+   "silent_substitution_risk": 0.58,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9015,
+   "evidence_names_execution": 0.898,
+   "silent_substitution_risk": 0.8822,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.7219,
+   "evidence_names_execution": 0.7538,
+   "silent_substitution_risk": 0.5206,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "0.2",
+  "name": "Pin toolchains: Rust, Node, wgpu 30 across every crate",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.19,
+   "evidence_names_execution": 0.9,
+   "silent_substitution_risk": 0.87,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9618,
+   "evidence_names_execution": 0.9422,
+   "silent_substitution_risk": 0.9558,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.7359,
+   "evidence_names_execution": 0.6322,
+   "silent_substitution_risk": 0.5747,
+   "weakest": "platform_gap"
+  }
+ },
+ {
+  "id": "0.5",
+  "name": "tracing + OpenTelemetry skeleton",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.02,
+   "evidence_names_execution": 0.79,
+   "silent_substitution_risk": 0.82,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.7943,
+   "evidence_names_execution": 0.8273,
+   "silent_substitution_risk": 0.83,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.5105,
+   "evidence_names_execution": 0.4876,
+   "silent_substitution_risk": 0.6448,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "0.6",
+  "name": "Structured refusal type — code, field, given, allowed, severity",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.48,
+   "evidence_names_execution": 0.92,
+   "silent_substitution_risk": 0.25,
+   "weakest": "none"
+  },
+  "laya": {
+   "done_when_met": 0.8204,
+   "evidence_names_execution": 0.8489,
+   "silent_substitution_risk": 0.9154,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.5723,
+   "evidence_names_execution": 0.6797,
+   "silent_substitution_risk": 0.6686,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "0.7",
+  "name": "RationalRate type (num/den). No float rates anywhere",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.19,
+   "evidence_names_execution": 0.93,
+   "silent_substitution_risk": 0.7,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8789,
+   "evidence_names_execution": 0.7625,
+   "silent_substitution_risk": 0.81,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.7233,
+   "evidence_names_execution": 0.6974,
+   "silent_substitution_risk": 0.7335,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "0.8",
+  "name": "Stable ID and Revision types; if_revision semantics",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.54,
+   "evidence_names_execution": 0.92,
+   "silent_substitution_risk": 0.61,
+   "weakest": "stale"
+  },
+  "laya": {
+   "done_when_met": 0.857,
+   "evidence_names_execution": 0.813,
+   "silent_substitution_risk": 0.7994,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.7656,
+   "evidence_names_execution": 0.6294,
+   "silent_substitution_risk": 0.6572,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "0.9",
+  "name": "Contracts package; Rust is source of truth, TS generated",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": false,
+  "jev": {
+   "done_when_met": 0.09,
+   "evidence_names_execution": 0.95,
+   "silent_substitution_risk": 0.7,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9147,
+   "evidence_names_execution": 0.8026,
+   "silent_substitution_risk": 0.8402,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.789,
+   "evidence_names_execution": 0.7343,
+   "silent_substitution_risk": 0.8165,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "0.10",
+  "name": "Conformance harness scaffold and mock-peer pattern",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": false,
+  "jev": {
+   "done_when_met": 0.16,
+   "evidence_names_execution": 0.83,
+   "silent_substitution_risk": 0.81,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8645,
+   "evidence_names_execution": 0.6107,
+   "silent_substitution_risk": 0.7749,
+   "weakest": "vague_record"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.7945,
+   "evidence_names_execution": 0.4608,
+   "silent_substitution_risk": 0.342,
+   "weakest": "none"
+  }
+ },
+ {
+  "id": "0.11",
+  "name": "Consolidate all project agents into one shared worktree and enforce LLM workspace governance",
+  "track": "PLAT",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.02,
+   "evidence_names_execution": 0.85,
+   "silent_substitution_risk": 0.88,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9528,
+   "evidence_names_execution": 0.8424,
+   "silent_substitution_risk": 0.9274,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.7764,
+   "evidence_names_execution": 0.5348,
+   "silent_substitution_risk": 0.4369,
+   "weakest": "none"
+  }
+ },
+ {
+  "id": "1.1",
+  "name": "Scene document schema",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.24,
+   "evidence_names_execution": 0.84,
+   "silent_substitution_risk": 0.4,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.7297,
+   "evidence_names_execution": 0.8534,
+   "silent_substitution_risk": 0.8217,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6841,
+   "evidence_names_execution": 0.6386,
+   "silent_substitution_risk": 0.4985,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "1.2",
+  "name": "Object type catalogue and full property surface",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.76,
+   "evidence_names_execution": 0.98,
+   "silent_substitution_risk": 0.77,
+   "weakest": "stale"
+  },
+  "laya": {
+   "done_when_met": 0.9186,
+   "evidence_names_execution": 0.825,
+   "silent_substitution_risk": 0.873,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.5074,
+   "evidence_names_execution": 0.5744,
+   "silent_substitution_risk": 0.6035,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "1.3",
+  "name": "Material model; fit and blend enums as the single source of truth",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.11,
+   "evidence_names_execution": 0.8,
+   "silent_substitution_risk": 0.76,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8102,
+   "evidence_names_execution": 0.7483,
+   "silent_substitution_risk": 0.7659,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.597,
+   "evidence_names_execution": 0.6367,
+   "silent_substitution_risk": 0.5984,
+   "weakest": "none"
+  }
+ },
+ {
+  "id": "1.4",
+  "name": "Colour types: linear working space, tagged sources, output transforms",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.29,
+   "evidence_names_execution": 0.79,
+   "silent_substitution_risk": 0.61,
+   "weakest": "none"
+  },
+  "laya": {
+   "done_when_met": 0.7958,
+   "evidence_names_execution": 0.7402,
+   "silent_substitution_risk": 0.8404,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6309,
+   "evidence_names_execution": 0.7855,
+   "silent_substitution_risk": 0.6987,
+   "weakest": "none"
+  }
+ },
+ {
+  "id": "1.5",
+  "name": "Design system token schema",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.04,
+   "evidence_names_execution": 0.81,
+   "silent_substitution_risk": 0.66,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9307,
+   "evidence_names_execution": 0.8402,
+   "silent_substitution_risk": 0.8677,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6266,
+   "evidence_names_execution": 0.6903,
+   "silent_substitution_risk": 0.5909,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "1.6",
+  "name": "Motion token and preset schema: phases, 0–1 time, stagger modes",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.05,
+   "evidence_names_execution": 0.94,
+   "silent_substitution_risk": 0.75,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.7887,
+   "evidence_names_execution": 0.5762,
+   "silent_substitution_risk": 0.732,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6564,
+   "evidence_names_execution": 0.567,
+   "silent_substitution_risk": 0.5896,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "1.7",
+  "name": "Asset addressing: content hash plus project-relative path",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.67,
+   "evidence_names_execution": 0.92,
+   "silent_substitution_risk": 0.44,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.7181,
+   "evidence_names_execution": 0.7639,
+   "silent_substitution_risk": 0.8481,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6384,
+   "evidence_names_execution": 0.6058,
+   "silent_substitution_risk": 0.5815,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "1.8",
+  "name": ".gpxpkg format and manifest",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.05,
+   "evidence_names_execution": 0.92,
+   "silent_substitution_risk": 0.68,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9336,
+   "evidence_names_execution": 0.6695,
+   "silent_substitution_risk": 0.9136,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6259,
+   "evidence_names_execution": 0.7048,
+   "silent_substitution_risk": 0.4752,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "1.9",
+  "name": "Protocol v3 message set — intent-based take, committed frame returned",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.04,
+   "evidence_names_execution": 0.85,
+   "silent_substitution_risk": 0.77,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9051,
+   "evidence_names_execution": 0.7358,
+   "silent_substitution_risk": 0.4529,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.7388,
+   "evidence_names_execution": 0.4985,
+   "silent_substitution_risk": 0.4848,
+   "weakest": "none"
+  }
+ },
+ {
+  "id": "1.10",
+  "name": "Capability: locality, device tier, clock source, reference state",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": false,
+  "jev": {
+   "done_when_met": 0.02,
+   "evidence_names_execution": 0.78,
+   "silent_substitution_risk": 0.84,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8211,
+   "evidence_names_execution": 0.7535,
+   "silent_substitution_risk": 0.4451,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.4167,
+   "evidence_names_execution": 0.3609,
+   "silent_substitution_risk": 0.4072,
+   "weakest": "none"
+  }
+ },
+ {
+  "id": "1.11",
+  "name": "Mock engine, mock playout, mock editor",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.08,
+   "evidence_names_execution": 0.78,
+   "silent_substitution_risk": 0.74,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9107,
+   "evidence_names_execution": 0.7281,
+   "silent_substitution_risk": 0.8291,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.585,
+   "evidence_names_execution": 0.6856,
+   "silent_substitution_risk": 0.6117,
+   "weakest": "platform_gap"
+  }
+ },
+ {
+  "id": "1.12",
+  "name": "Conformance suite green against all three mocks",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.26,
+   "evidence_names_execution": 0.73,
+   "silent_substitution_risk": 0.71,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9246,
+   "evidence_names_execution": 0.751,
+   "silent_substitution_risk": 0.9482,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.8768,
+   "evidence_names_execution": 0.7503,
+   "silent_substitution_risk": 0.7602,
+   "weakest": "none"
+  }
+ },
+ {
+  "id": "2.1",
+  "name": "Atomic write helper: unique temp, fsync, retry on contention, directory fsync",
+  "track": "PLAT",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.16,
+   "evidence_names_execution": 0.89,
+   "silent_substitution_risk": 0.54,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9072,
+   "evidence_names_execution": 0.71,
+   "silent_substitution_risk": 0.8102,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6659,
+   "evidence_names_execution": 0.698,
+   "silent_substitution_risk": 0.609,
+   "weakest": "platform_gap"
+  }
+ },
+ {
+  "id": "2.2",
+  "name": "Filename sanitiser: reserved names, illegal characters, length, NFC",
+  "track": "PLAT",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.08,
+   "evidence_names_execution": 0.69,
+   "silent_substitution_risk": 0.43,
+   "weakest": "platform_gap"
+  },
+  "laya": {
+   "done_when_met": 0.9247,
+   "evidence_names_execution": 0.8244,
+   "silent_substitution_risk": 0.8648,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6497,
+   "evidence_names_execution": 0.7322,
+   "silent_substitution_risk": 0.608,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "2.3",
+  "name": "Case canonicalisation policy: compare insensitively, preserve for display",
+  "track": "PLAT",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.61,
+   "evidence_names_execution": 0.95,
+   "silent_substitution_risk": 0.52,
+   "weakest": "platform_gap"
+  },
+  "laya": {
+   "done_when_met": 0.8477,
+   "evidence_names_execution": 0.7671,
+   "silent_substitution_risk": 0.8174,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6433,
+   "evidence_names_execution": 0.7516,
+   "silent_substitution_risk": 0.7422,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "2.4",
+  "name": "OS directory conventions; the in-repo default removed",
+  "track": "PLAT",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.18,
+   "evidence_names_execution": 0.93,
+   "silent_substitution_risk": 0.61,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8119,
+   "evidence_names_execution": 0.6982,
+   "silent_substitution_risk": 0.8985,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6724,
+   "evidence_names_execution": 0.6374,
+   "silent_substitution_risk": 0.5404,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "2.5",
+  "name": "File watching with debounce, both platforms",
+  "track": "PLAT",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.06,
+   "evidence_names_execution": 0.9,
+   "silent_substitution_risk": 0.75,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8945,
+   "evidence_names_execution": 0.7123,
+   "silent_substitution_risk": 0.8989,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.5004,
+   "evidence_names_execution": 0.673,
+   "silent_substitution_risk": 0.4421,
+   "weakest": "platform_gap"
+  }
+ },
+ {
+  "id": "2.6",
+  "name": "Project store: JSON, backups, autosave ring",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.02,
+   "evidence_names_execution": 0.78,
+   "silent_substitution_risk": 0.68,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8908,
+   "evidence_names_execution": 0.6602,
+   "silent_substitution_risk": 0.8475,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.4947,
+   "evidence_names_execution": 0.6816,
+   "silent_substitution_risk": 0.5561,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "2.7",
+  "name": "Asset store: SHA-256 dedupe, two-address, geometry read from headers",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.02,
+   "evidence_names_execution": 0.69,
+   "silent_substitution_risk": 0.77,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8742,
+   "evidence_names_execution": 0.6792,
+   "silent_substitution_risk": 0.914,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.563,
+   "evidence_names_execution": 0.7686,
+   "silent_substitution_risk": 0.5494,
+   "weakest": "stale"
+  }
+ },
+ {
+  "id": "2.8",
+  "name": "Font subsystem ported across unchanged",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.81,
+   "evidence_names_execution": 0.94,
+   "silent_substitution_risk": 0.29,
+   "weakest": "platform_gap"
+  },
+  "laya": {
+   "done_when_met": 0.9706,
+   "evidence_names_execution": 0.9056,
+   "silent_substitution_risk": 0.9587,
+   "weakest": "vague_record"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6296,
+   "evidence_names_execution": 0.614,
+   "silent_substitution_risk": 0.5833,
+   "weakest": "platform_gap"
+  }
+ },
+ {
+  "id": "2.9",
+  "name": "gx1 HMAC tokens; roles and scopes",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.05,
+   "evidence_names_execution": 0.83,
+   "silent_substitution_risk": 0.79,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9222,
+   "evidence_names_execution": 0.7865,
+   "silent_substitution_risk": 0.8201,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6804,
+   "evidence_names_execution": 0.703,
+   "silent_substitution_risk": 0.6608,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "2.10",
+  "name": "Audit and operations logging, sanitised",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.91,
+   "evidence_names_execution": 0.98,
+   "silent_substitution_risk": 0.53,
+   "weakest": "none"
+  },
+  "laya": {
+   "done_when_met": 0.9289,
+   "evidence_names_execution": 0.7881,
+   "silent_substitution_risk": 0.8153,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6485,
+   "evidence_names_execution": 0.6709,
+   "silent_substitution_risk": 0.6091,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "3.1",
+  "name": "wgpu init; backend selection D3D12 / Metal / Vulkan",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.01,
+   "evidence_names_execution": 0.87,
+   "silent_substitution_risk": 0.87,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9254,
+   "evidence_names_execution": 0.714,
+   "silent_substitution_risk": 0.8927,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.7587,
+   "evidence_names_execution": 0.7461,
+   "silent_substitution_risk": 0.6597,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "3.2",
+  "name": "Device tier negotiation T0–T3",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.06,
+   "evidence_names_execution": 0.91,
+   "silent_substitution_risk": 0.79,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9363,
+   "evidence_names_execution": 0.686,
+   "silent_substitution_risk": 0.8451,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.5563,
+   "evidence_names_execution": 0.5955,
+   "silent_substitution_risk": 0.5449,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "3.3",
+  "name": "Colour pipeline: linear internal, tagged textures, sRGB and Rec.709 output",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.04,
+   "evidence_names_execution": 0.66,
+   "silent_substitution_risk": 0.57,
+   "weakest": "platform_gap"
+  },
+  "laya": {
+   "done_when_met": 0.5942,
+   "evidence_names_execution": 0.4191,
+   "silent_substitution_risk": 0.7912,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.8635,
+   "evidence_names_execution": 0.7017,
+   "silent_substitution_risk": 0.541,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "3.4",
+  "name": "Scene parse to prepared scene",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.61,
+   "evidence_names_execution": 0.94,
+   "silent_substitution_risk": 0.28,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8808,
+   "evidence_names_execution": 0.7636,
+   "silent_substitution_risk": 0.8105,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.8997,
+   "evidence_names_execution": 0.8324,
+   "silent_substitution_risk": 0.847,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "3.5",
+  "name": "PathRasteriser trait; lyon implementation behind it",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.03,
+   "evidence_names_execution": 0.77,
+   "silent_substitution_risk": 0.73,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9139,
+   "evidence_names_execution": 0.8203,
+   "silent_substitution_risk": 0.9082,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.4776,
+   "evidence_names_execution": 0.4845,
+   "silent_substitution_risk": 0.4854,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "3.6",
+  "name": "Text via cosmic-text: shaping, fallback, bidi, OpenType",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.25,
+   "evidence_names_execution": 0.97,
+   "silent_substitution_risk": 0.76,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9415,
+   "evidence_names_execution": 0.8008,
+   "silent_substitution_risk": 0.9466,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.4853,
+   "evidence_names_execution": 0.6117,
+   "silent_substitution_risk": 0.6841,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "3.7",
+  "name": "Meshes, glTF, materials, lights, cameras",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.37,
+   "evidence_names_execution": 0.97,
+   "silent_substitution_risk": 0.36,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9317,
+   "evidence_names_execution": 0.8142,
+   "silent_substitution_risk": 0.8654,
+   "weakest": "vague_record"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6313,
+   "evidence_names_execution": 0.726,
+   "silent_substitution_risk": 0.6687,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "3.8",
+  "name": "ProgramClock: rational rate, absolute deadlines, ClockSource abstraction",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.02,
+   "evidence_names_execution": 0.92,
+   "silent_substitution_risk": 0.79,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9275,
+   "evidence_names_execution": 0.6716,
+   "silent_substitution_risk": 0.8838,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.5692,
+   "evidence_names_execution": 0.5573,
+   "silent_substitution_risk": 0.5957,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "3.9",
+  "name": "Tiling with overscan above the GPU texture limit",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.02,
+   "evidence_names_execution": 0.78,
+   "silent_substitution_risk": 0.72,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8797,
+   "evidence_names_execution": 0.7876,
+   "silent_substitution_risk": 0.7926,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.7757,
+   "evidence_names_execution": 0.6775,
+   "silent_substitution_risk": 0.6858,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "3.10",
+  "name": "OutputAdapter trait; null, virtual, recording",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.02,
+   "evidence_names_execution": 0.71,
+   "silent_substitution_risk": 0.74,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9304,
+   "evidence_names_execution": 0.7709,
+   "silent_substitution_risk": 0.8053,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.5293,
+   "evidence_names_execution": 0.5349,
+   "silent_substitution_risk": 0.519,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "3.11",
+  "name": "Preview and Program frame emission; bounded queue, counted drops",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.03,
+   "evidence_names_execution": 0.81,
+   "silent_substitution_risk": 0.8,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9539,
+   "evidence_names_execution": 0.8354,
+   "silent_substitution_risk": 0.9367,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.5854,
+   "evidence_names_execution": 0.5848,
+   "silent_substitution_risk": 0.5081,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "3.12",
+  "name": "WAL recovery journal; restore starts output-inhibited",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.01,
+   "evidence_names_execution": 0.75,
+   "silent_substitution_risk": 0.8,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9561,
+   "evidence_names_execution": 0.7126,
+   "silent_substitution_risk": 0.9126,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.5341,
+   "evidence_names_execution": 0.4941,
+   "silent_substitution_risk": 0.5612,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "3.13",
+  "name": "Refusal coverage audit — every unsupported case refuses by name",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.39,
+   "evidence_names_execution": 0.95,
+   "silent_substitution_risk": 0.24,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9465,
+   "evidence_names_execution": 0.9176,
+   "silent_substitution_risk": 0.9439,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6813,
+   "evidence_names_execution": 0.5932,
+   "silent_substitution_risk": 0.565,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "3.14",
+  "name": "Pinned EffectCraft render/GPU compatibility spike on Windows (ADR-0003); no production cutover",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.02,
+   "evidence_names_execution": 0.77,
+   "silent_substitution_risk": 0.86,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8933,
+   "evidence_names_execution": 0.8063,
+   "silent_substitution_risk": 0.9189,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.8323,
+   "evidence_names_execution": 0.7679,
+   "silent_substitution_risk": 0.762,
+   "weakest": "none"
+  }
+ },
+ {
+  "id": "3.15",
+  "name": "Project working colour space: compositing follows the project's declared colour space",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.03,
+   "evidence_names_execution": 0.97,
+   "silent_substitution_risk": 0.67,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9598,
+   "evidence_names_execution": 0.9587,
+   "silent_substitution_risk": 0.98,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.8773,
+   "evidence_names_execution": 0.7104,
+   "silent_substitution_risk": 0.7458,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "3.16",
+  "name": "GrapiX-owned GPU compositor: layer stack, transforms, opacity and composition on the GPU",
+  "track": "BE",
+  "evidence_dir": true,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.11,
+   "evidence_names_execution": 0.98,
+   "silent_substitution_risk": 0.67,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.944,
+   "evidence_names_execution": 0.8828,
+   "silent_substitution_risk": 0.9095,
+   "weakest": "vague_record"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.743,
+   "evidence_names_execution": 0.7022,
+   "silent_substitution_risk": 0.5323,
+   "weakest": "none"
+  }
+ },
+ {
+  "id": "3.20",
+  "name": "Full blend-mode set on the GPU",
+  "track": "BE",
+  "evidence_dir": true,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.1,
+   "evidence_names_execution": 0.97,
+   "silent_substitution_risk": 0.51,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9539,
+   "evidence_names_execution": 0.9233,
+   "silent_substitution_risk": 0.9604,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.8595,
+   "evidence_names_execution": 0.6268,
+   "silent_substitution_risk": 0.5174,
+   "weakest": "none"
+  }
+ },
+ {
+  "id": "3.22",
+  "name": "Typed effect registry and the broadcast effect set on the GPU",
+  "track": "BE",
+  "evidence_dir": true,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.04,
+   "evidence_names_execution": 0.96,
+   "silent_substitution_risk": 0.87,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9403,
+   "evidence_names_execution": 0.885,
+   "silent_substitution_risk": 0.958,
+   "weakest": "vague_record"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.7723,
+   "evidence_names_execution": 0.6586,
+   "silent_substitution_risk": 0.6214,
+   "weakest": "none"
+  }
+ },
+ {
+  "id": "4.1",
+  "name": "Reference scene set: colour ramp, safe areas, text, vector, 3D, every rate family",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.02,
+   "evidence_names_execution": 0.64,
+   "silent_substitution_risk": 0.79,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9585,
+   "evidence_names_execution": 0.7723,
+   "silent_substitution_risk": 0.7683,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.5911,
+   "evidence_names_execution": 0.4854,
+   "silent_substitution_risk": 0.5125,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "4.2",
+  "name": "Headless render harness on both platforms",
+  "track": "PLAT",
+  "evidence_dir": false,
+  "has_record": false,
+  "jev": {
+   "done_when_met": 0.13,
+   "evidence_names_execution": 0.83,
+   "silent_substitution_risk": 0.86,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8409,
+   "evidence_names_execution": 0.7246,
+   "silent_substitution_risk": 0.669,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.8289,
+   "evidence_names_execution": 0.4546,
+   "silent_substitution_risk": 0.7559,
+   "weakest": "none"
+  }
+ },
+ {
+  "id": "4.3",
+  "name": "Baseline capture, committed to the repo",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.04,
+   "evidence_names_execution": 0.8,
+   "silent_substitution_risk": 0.81,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9256,
+   "evidence_names_execution": 0.4967,
+   "silent_substitution_risk": 0.5373,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.5969,
+   "evidence_names_execution": 0.4466,
+   "silent_substitution_risk": 0.4105,
+   "weakest": "none"
+  }
+ },
+ {
+  "id": "4.4",
+  "name": "CI gate with a diff threshold that fails the build",
+  "track": "PLAT",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.09,
+   "evidence_names_execution": 0.93,
+   "silent_substitution_risk": 0.83,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.7055,
+   "evidence_names_execution": 0.6197,
+   "silent_substitution_risk": 0.711,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.7768,
+   "evidence_names_execution": 0.7974,
+   "silent_substitution_risk": 0.7145,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "5.1",
+  "name": "Control plane over named pipe and unix socket",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.01,
+   "evidence_names_execution": 0.64,
+   "silent_substitution_risk": 0.86,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.7831,
+   "evidence_names_execution": 0.5881,
+   "silent_substitution_risk": 0.843,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6925,
+   "evidence_names_execution": 0.4641,
+   "silent_substitution_risk": 0.5965,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "5.2",
+  "name": "Session, auth, epoch, reconnect and reconciliation",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": false,
+  "jev": {
+   "done_when_met": 0.02,
+   "evidence_names_execution": 0.75,
+   "silent_substitution_risk": 0.85,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9073,
+   "evidence_names_execution": 0.81,
+   "silent_substitution_risk": 0.819,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.4884,
+   "evidence_names_execution": 0.3073,
+   "silent_substitution_risk": 0.4055,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "5.3",
+  "name": "Asset plane local: hash preflight, transfer only the difference",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.02,
+   "evidence_names_execution": 0.81,
+   "silent_substitution_risk": 0.73,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8787,
+   "evidence_names_execution": 0.7969,
+   "silent_substitution_risk": 0.738,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6147,
+   "evidence_names_execution": 0.3733,
+   "silent_substitution_risk": 0.4761,
+   "weakest": "none"
+  }
+ },
+ {
+  "id": "5.4",
+  "name": "Media plane local: shared memory or handle passing",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.02,
+   "evidence_names_execution": 0.63,
+   "silent_substitution_risk": 0.77,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8563,
+   "evidence_names_execution": 0.8174,
+   "silent_substitution_risk": 0.7816,
+   "weakest": "vague_record"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6064,
+   "evidence_names_execution": 0.4449,
+   "silent_substitution_risk": 0.5428,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "5.5",
+  "name": "Locality declared in the capability exchange",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": false,
+  "jev": {
+   "done_when_met": 0.02,
+   "evidence_names_execution": 0.78,
+   "silent_substitution_risk": 0.84,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8672,
+   "evidence_names_execution": 0.5957,
+   "silent_substitution_risk": 0.3592,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.4662,
+   "evidence_names_execution": 0.3088,
+   "silent_substitution_risk": 0.4316,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "5.6",
+  "name": "Conformance suite passes over the real transport, not just mocks",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.07,
+   "evidence_names_execution": 0.75,
+   "silent_substitution_risk": 0.78,
+   "weakest": "vague_record"
+  },
+  "laya": {
+   "done_when_met": 0.9108,
+   "evidence_names_execution": 0.6824,
+   "silent_substitution_risk": 0.7993,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.5916,
+   "evidence_names_execution": 0.4285,
+   "silent_substitution_risk": 0.3184,
+   "weakest": "none"
+  }
+ },
+ {
+  "id": "6.1",
+  "name": "Published library store; stable Take IDs",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.05,
+   "evidence_names_execution": 0.76,
+   "silent_substitution_risk": 0.86,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9175,
+   "evidence_names_execution": 0.697,
+   "silent_substitution_risk": 0.8503,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.5786,
+   "evidence_names_execution": 0.4154,
+   "silent_substitution_risk": 0.4424,
+   "weakest": "none"
+  }
+ },
+ {
+  "id": "6.2",
+  "name": "Cue, take, continue, out, clear as intent; committed frame returned",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.04,
+   "evidence_names_execution": 0.72,
+   "silent_substitution_risk": 0.65,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9715,
+   "evidence_names_execution": 0.9135,
+   "silent_substitution_risk": 0.9217,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6576,
+   "evidence_names_execution": 0.5528,
+   "silent_substitution_risk": 0.5517,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "6.3",
+  "name": "Revision pinning; refusal on mismatch",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.7,
+   "evidence_names_execution": 0.97,
+   "silent_substitution_risk": 0.37,
+   "weakest": "none"
+  },
+  "laya": {
+   "done_when_met": 0.8409,
+   "evidence_names_execution": 0.725,
+   "silent_substitution_risk": 0.8053,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.587,
+   "evidence_names_execution": 0.5383,
+   "silent_substitution_risk": 0.6193,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "6.4",
+  "name": "Rundown persistence and sequence engine",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.04,
+   "evidence_names_execution": 0.71,
+   "silent_substitution_risk": 0.66,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9372,
+   "evidence_names_execution": 0.8103,
+   "silent_substitution_risk": 0.8664,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.618,
+   "evidence_names_execution": 0.4706,
+   "silent_substitution_risk": 0.5267,
+   "weakest": "none"
+  }
+ },
+ {
+  "id": "6.5",
+  "name": "Output configuration; is_live gated on tier, platform and reference",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.04,
+   "evidence_names_execution": 0.68,
+   "silent_substitution_risk": 0.77,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8698,
+   "evidence_names_execution": 0.7934,
+   "silent_substitution_risk": 0.7796,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.5444,
+   "evidence_names_execution": 0.4918,
+   "silent_substitution_risk": 0.6308,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "6.6",
+  "name": "Automation trigger evaluation; execution explicitly deferred",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.08,
+   "evidence_names_execution": 0.92,
+   "silent_substitution_risk": 0.79,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8614,
+   "evidence_names_execution": 0.7796,
+   "silent_substitution_risk": 0.9038,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.557,
+   "evidence_names_execution": 0.535,
+   "silent_substitution_risk": 0.4419,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "7.1",
+  "name": "Project and scene CRUD",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.71,
+   "evidence_names_execution": 0.95,
+   "silent_substitution_risk": 0.32,
+   "weakest": "none"
+  },
+  "laya": {
+   "done_when_met": 0.9232,
+   "evidence_names_execution": 0.7796,
+   "silent_substitution_risk": 0.9098,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.7211,
+   "evidence_names_execution": 0.7576,
+   "silent_substitution_risk": 0.7007,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "7.2",
+  "name": "Import pipeline: four tiers, compatibility report, source retained",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.5,
+   "evidence_names_execution": 0.97,
+   "silent_substitution_risk": 0.54,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8637,
+   "evidence_names_execution": 0.7825,
+   "silent_substitution_risk": 0.8681,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.682,
+   "evidence_names_execution": 0.6729,
+   "silent_substitution_risk": 0.5361,
+   "weakest": "stale"
+  }
+ },
+ {
+  "id": "7.4",
+  "name": "Scene validator: every unsupported case refused by name",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.61,
+   "evidence_names_execution": 0.96,
+   "silent_substitution_risk": 0.58,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.95,
+   "evidence_names_execution": 0.8308,
+   "silent_substitution_risk": 0.9351,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6498,
+   "evidence_names_execution": 0.6109,
+   "silent_substitution_risk": 0.6266,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "7.5",
+  "name": "Design system enforcement: three severities plus override log (historical compatibility; not required for authoring or publish)",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.03,
+   "evidence_names_execution": 0.79,
+   "silent_substitution_risk": 0.68,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8551,
+   "evidence_names_execution": 0.6738,
+   "silent_substitution_risk": 0.6056,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.5878,
+   "evidence_names_execution": 0.477,
+   "silent_substitution_risk": 0.5351,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "7.6",
+  "name": "Package build, verify, publish; design-system version stamped when present (optional, historical)",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.53,
+   "evidence_names_execution": 0.95,
+   "silent_substitution_risk": 0.63,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8338,
+   "evidence_names_execution": 0.6607,
+   "silent_substitution_risk": 0.6786,
+   "weakest": "unexecuted_clause"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.761,
+   "evidence_names_execution": 0.7374,
+   "silent_substitution_risk": 0.631,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "7.7",
+  "name": "Preflight",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": false,
+  "jev": {
+   "done_when_met": 0.08,
+   "evidence_names_execution": 0.8,
+   "silent_substitution_risk": 0.75,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8849,
+   "evidence_names_execution": 0.7714,
+   "silent_substitution_risk": 0.7811,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.5112,
+   "evidence_names_execution": 0.4444,
+   "silent_substitution_risk": 0.3878,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "8.2",
+  "name": "system.capability — supported enums, tier, versions, build hash",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.13,
+   "evidence_names_execution": 0.93,
+   "silent_substitution_risk": 0.94,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8934,
+   "evidence_names_execution": 0.6395,
+   "silent_substitution_risk": 0.6682,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.4971,
+   "evidence_names_execution": 0.3827,
+   "silent_substitution_risk": 0.4065,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "8.3",
+  "name": "project, scenes, objects",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.07,
+   "evidence_names_execution": 0.91,
+   "silent_substitution_risk": 0.81,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8944,
+   "evidence_names_execution": 0.6583,
+   "silent_substitution_risk": 0.8115,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.5701,
+   "evidence_names_execution": 0.3596,
+   "silent_substitution_risk": 0.4035,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "8.4",
+  "name": "materials, assets, fonts",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.37,
+   "evidence_names_execution": 0.9,
+   "silent_substitution_risk": 0.7,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8444,
+   "evidence_names_execution": 0.6946,
+   "silent_substitution_risk": 0.8068,
+   "weakest": "unexecuted_clause"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.5388,
+   "evidence_names_execution": 0.4869,
+   "silent_substitution_risk": 0.4854,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "8.5",
+  "name": "animation, including apply_preset",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.47,
+   "evidence_names_execution": 0.92,
+   "silent_substitution_risk": 0.25,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9106,
+   "evidence_names_execution": 0.8189,
+   "silent_substitution_risk": 0.8128,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.624,
+   "evidence_names_execution": 0.5996,
+   "silent_substitution_risk": 0.5767,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "8.6",
+  "name": "bindings",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.88,
+   "evidence_names_execution": 0.96,
+   "silent_substitution_risk": 0.42,
+   "weakest": "none"
+  },
+  "laya": {
+   "done_when_met": 0.9289,
+   "evidence_names_execution": 0.8164,
+   "silent_substitution_risk": 0.8772,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.8268,
+   "evidence_names_execution": 0.621,
+   "silent_substitution_risk": 0.5526,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "8.7",
+  "name": "designsystem.* (historical compatibility) and motion.*",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.52,
+   "evidence_names_execution": 0.95,
+   "silent_substitution_risk": 0.62,
+   "weakest": "none"
+  },
+  "laya": {
+   "done_when_met": 0.9064,
+   "evidence_names_execution": 0.7716,
+   "silent_substitution_risk": 0.7599,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6204,
+   "evidence_names_execution": 0.6265,
+   "silent_substitution_risk": 0.6249,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "8.8",
+  "name": "validate.*",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": false,
+  "jev": {
+   "done_when_met": 0.82,
+   "evidence_names_execution": 0.97,
+   "silent_substitution_risk": 0.6,
+   "weakest": "none"
+  },
+  "laya": {
+   "done_when_met": 0.8545,
+   "evidence_names_execution": 0.7067,
+   "silent_substitution_risk": 0.7268,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.4994,
+   "evidence_names_execution": 0.4725,
+   "silent_substitution_risk": 0.6069,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "8.9",
+  "name": "render.preview returning a real frame",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.52,
+   "evidence_names_execution": 0.94,
+   "silent_substitution_risk": 0.74,
+   "weakest": "platform_gap"
+  },
+  "laya": {
+   "done_when_met": 0.9661,
+   "evidence_names_execution": 0.9455,
+   "silent_substitution_risk": 0.9851,
+   "weakest": "vague_record"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6662,
+   "evidence_names_execution": 0.6488,
+   "silent_substitution_risk": 0.676,
+   "weakest": "stale"
+  }
+ },
+ {
+  "id": "8.10",
+  "name": "packages.*",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.8,
+   "evidence_names_execution": 0.95,
+   "silent_substitution_risk": 0.48,
+   "weakest": "none"
+  },
+  "laya": {
+   "done_when_met": 0.9388,
+   "evidence_names_execution": 0.8838,
+   "silent_substitution_risk": 0.9066,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.7267,
+   "evidence_names_execution": 0.5871,
+   "silent_substitution_risk": 0.5964,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "8.11",
+  "name": "playout.* and outputs.*, scope-gated",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.73,
+   "evidence_names_execution": 0.97,
+   "silent_substitution_risk": 0.41,
+   "weakest": "none"
+  },
+  "laya": {
+   "done_when_met": 0.8658,
+   "evidence_names_execution": 0.8515,
+   "silent_substitution_risk": 0.9452,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6022,
+   "evidence_names_execution": 0.6515,
+   "silent_substitution_risk": 0.621,
+   "weakest": "stale"
+  }
+ },
+ {
+  "id": "8.13",
+  "name": "Scope enforcement tests",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.69,
+   "evidence_names_execution": 0.97,
+   "silent_substitution_risk": 0.58,
+   "weakest": "none"
+  },
+  "laya": {
+   "done_when_met": 0.8228,
+   "evidence_names_execution": 0.6894,
+   "silent_substitution_risk": 0.7784,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6788,
+   "evidence_names_execution": 0.6567,
+   "silent_substitution_risk": 0.4972,
+   "weakest": "none"
+  }
+ },
+ {
+  "id": "10.1",
+  "name": "Token ingest from W3C Design Tokens JSON",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": false,
+  "jev": {
+   "done_when_met": 0.8,
+   "evidence_names_execution": 0.97,
+   "silent_substitution_risk": 0.63,
+   "weakest": "none"
+  },
+  "laya": {
+   "done_when_met": 0.9207,
+   "evidence_names_execution": 0.7709,
+   "silent_substitution_risk": 0.8423,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6373,
+   "evidence_names_execution": 0.492,
+   "silent_substitution_risk": 0.4932,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "10.2",
+  "name": "Token ingest from Figma and Claude Design",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": false,
+  "jev": {
+   "done_when_met": 0.48,
+   "evidence_names_execution": 0.95,
+   "silent_substitution_risk": 0.73,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.862,
+   "evidence_names_execution": 0.6234,
+   "silent_substitution_risk": 0.7542,
+   "weakest": "vague_record"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.5979,
+   "evidence_names_execution": 0.4546,
+   "silent_substitution_risk": 0.5017,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "10.3",
+  "name": "Unexpressible report at ingest",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.2,
+   "evidence_names_execution": 0.87,
+   "silent_substitution_risk": 0.65,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8349,
+   "evidence_names_execution": 0.6878,
+   "silent_substitution_risk": 0.7577,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.5271,
+   "evidence_names_execution": 0.5962,
+   "silent_substitution_risk": 0.6186,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "10.4",
+  "name": "Versioned, immutable store with provenance",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.24,
+   "evidence_names_execution": 0.91,
+   "silent_substitution_risk": 0.57,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.852,
+   "evidence_names_execution": 0.8272,
+   "silent_substitution_risk": 0.8502,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.645,
+   "evidence_names_execution": 0.5264,
+   "silent_substitution_risk": 0.5094,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "10.5",
+  "name": "Drift report across published templates",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.24,
+   "evidence_names_execution": 0.94,
+   "silent_substitution_risk": 0.78,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.911,
+   "evidence_names_execution": 0.8077,
+   "silent_substitution_risk": 0.8439,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6917,
+   "evidence_names_execution": 0.6454,
+   "silent_substitution_risk": 0.7173,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "11.4",
+  "name": "Colour management in the browser layer, matching the engine",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.08,
+   "evidence_names_execution": 0.89,
+   "silent_substitution_risk": 0.72,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8563,
+   "evidence_names_execution": 0.6959,
+   "silent_substitution_risk": 0.7681,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.7659,
+   "evidence_names_execution": 0.7534,
+   "silent_substitution_risk": 0.7356,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "11.5",
+  "name": "Dockable workspace",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.06,
+   "evidence_names_execution": 0.8,
+   "silent_substitution_risk": 0.72,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.821,
+   "evidence_names_execution": 0.7189,
+   "silent_substitution_risk": 0.762,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.4518,
+   "evidence_names_execution": 0.5961,
+   "silent_substitution_risk": 0.5341,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "11.6",
+  "name": "Three.js viewport: 2D on an orthographic camera plus 3D",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.33,
+   "evidence_names_execution": 0.89,
+   "silent_substitution_risk": 0.31,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8117,
+   "evidence_names_execution": 0.7338,
+   "silent_substitution_risk": 0.8617,
+   "weakest": "vague_record"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.7258,
+   "evidence_names_execution": 0.6008,
+   "silent_substitution_risk": 0.5967,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "11.7",
+  "name": "Overlay layer: handles, guides, selection, marquee",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.86,
+   "evidence_names_execution": 0.98,
+   "silent_substitution_risk": 0.33,
+   "weakest": "none"
+  },
+  "laya": {
+   "done_when_met": 0.8943,
+   "evidence_names_execution": 0.8203,
+   "silent_substitution_risk": 0.8703,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.7968,
+   "evidence_names_execution": 0.7139,
+   "silent_substitution_risk": 0.6016,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "11.8",
+  "name": "Object manager treegrid",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.76,
+   "evidence_names_execution": 0.96,
+   "silent_substitution_risk": 0.59,
+   "weakest": "none"
+  },
+  "laya": {
+   "done_when_met": 0.8947,
+   "evidence_names_execution": 0.721,
+   "silent_substitution_risk": 0.8461,
+   "weakest": "vague_record"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.5892,
+   "evidence_names_execution": 0.7129,
+   "silent_substitution_risk": 0.6356,
+   "weakest": "stale"
+  }
+ },
+ {
+  "id": "11.9",
+  "name": "Type-aware inspector",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.76,
+   "evidence_names_execution": 0.91,
+   "silent_substitution_risk": 0.55,
+   "weakest": "stale"
+  },
+  "laya": {
+   "done_when_met": 0.8889,
+   "evidence_names_execution": 0.8077,
+   "silent_substitution_risk": 0.9207,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.655,
+   "evidence_names_execution": 0.763,
+   "silent_substitution_risk": 0.6514,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "11.10",
+  "name": "Timeline: virtualised rows, canvas layers, dirty-rect repaint",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.03,
+   "evidence_names_execution": 0.88,
+   "silent_substitution_risk": 0.62,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9083,
+   "evidence_names_execution": 0.7262,
+   "silent_substitution_risk": 0.9291,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.2372,
+   "evidence_names_execution": 0.434,
+   "silent_substitution_risk": 0.3512,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "11.11",
+  "name": "Speed graph and curve editing",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.63,
+   "evidence_names_execution": 0.94,
+   "silent_substitution_risk": 0.5,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8878,
+   "evidence_names_execution": 0.8939,
+   "silent_substitution_risk": 0.933,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.7726,
+   "evidence_names_execution": 0.6313,
+   "silent_substitution_risk": 0.6441,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "11.12",
+  "name": "Material manager",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.33,
+   "evidence_names_execution": 0.8,
+   "silent_substitution_risk": 0.46,
+   "weakest": "stale"
+  },
+  "laya": {
+   "done_when_met": 0.7253,
+   "evidence_names_execution": 0.5437,
+   "silent_substitution_risk": 0.7509,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6473,
+   "evidence_names_execution": 0.6885,
+   "silent_substitution_risk": 0.5999,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "11.13",
+  "name": "Font manager panel",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.67,
+   "evidence_names_execution": 0.91,
+   "silent_substitution_risk": 0.57,
+   "weakest": "platform_gap"
+  },
+  "laya": {
+   "done_when_met": 0.9693,
+   "evidence_names_execution": 0.944,
+   "silent_substitution_risk": 0.9658,
+   "weakest": "vague_record"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6391,
+   "evidence_names_execution": 0.6194,
+   "silent_substitution_risk": 0.5495,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "11.14",
+  "name": "Design system panel; tokens as editor defaults (historical compatibility; not part of the 15 Oct authoring workflow)",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.04,
+   "evidence_names_execution": 0.83,
+   "silent_substitution_risk": 0.64,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.919,
+   "evidence_names_execution": 0.7281,
+   "silent_substitution_risk": 0.6444,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.5782,
+   "evidence_names_execution": 0.5331,
+   "silent_substitution_risk": 0.5841,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "11.15",
+  "name": "Motion preset browser; save selection as preset",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.03,
+   "evidence_names_execution": 0.79,
+   "silent_substitution_risk": 0.47,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.6204,
+   "evidence_names_execution": 0.5065,
+   "silent_substitution_risk": 0.8156,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6607,
+   "evidence_names_execution": 0.6603,
+   "silent_substitution_risk": 0.6909,
+   "weakest": "none"
+  }
+ },
+ {
+  "id": "11.16",
+  "name": "Live conformance indicator (historical compatibility)",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.02,
+   "evidence_names_execution": 0.71,
+   "silent_substitution_risk": 0.81,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9207,
+   "evidence_names_execution": 0.7338,
+   "silent_substitution_risk": 0.743,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6042,
+   "evidence_names_execution": 0.5311,
+   "silent_substitution_risk": 0.6113,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "11.17",
+  "name": "Import UI with tier and substitution report",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.06,
+   "evidence_names_execution": 0.89,
+   "silent_substitution_risk": 0.68,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9364,
+   "evidence_names_execution": 0.8435,
+   "silent_substitution_risk": 0.8931,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.63,
+   "evidence_names_execution": 0.6523,
+   "silent_substitution_risk": 0.6086,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "11.18",
+  "name": "Editor 1.x panel parity in the Editor 2.0 workspace",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.07,
+   "evidence_names_execution": 0.82,
+   "silent_substitution_risk": 0.54,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.6586,
+   "evidence_names_execution": 0.746,
+   "silent_substitution_risk": 0.8243,
+   "weakest": "unexecuted_clause"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.7713,
+   "evidence_names_execution": 0.7052,
+   "silent_substitution_risk": 0.5645,
+   "weakest": "none"
+  }
+ },
+ {
+  "id": "11.19",
+  "name": "Data binding panel integrated with object properties",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.85,
+   "evidence_names_execution": 0.98,
+   "silent_substitution_risk": 0.4,
+   "weakest": "none"
+  },
+  "laya": {
+   "done_when_met": 0.9606,
+   "evidence_names_execution": 0.9117,
+   "silent_substitution_risk": 0.9656,
+   "weakest": "unexecuted_clause"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.7482,
+   "evidence_names_execution": 0.6124,
+   "silent_substitution_risk": 0.5782,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "11.20",
+  "name": "Editable animation contract and service integration",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.08,
+   "evidence_names_execution": 0.8,
+   "silent_substitution_risk": 0.73,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8324,
+   "evidence_names_execution": 0.7901,
+   "silent_substitution_risk": 0.8333,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6783,
+   "evidence_names_execution": 0.6202,
+   "silent_substitution_risk": 0.6091,
+   "weakest": "none"
+  }
+ },
+ {
+  "id": "11.21",
+  "name": "Inspector keyframe diamonds and Auto-Key",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.03,
+   "evidence_names_execution": 0.8,
+   "silent_substitution_risk": 0.68,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8092,
+   "evidence_names_execution": 0.6033,
+   "silent_substitution_risk": 0.8077,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.8328,
+   "evidence_names_execution": 0.7612,
+   "silent_substitution_risk": 0.7381,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "11.22",
+  "name": "Selection-driven timeline and keyframe editing",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.03,
+   "evidence_names_execution": 0.95,
+   "silent_substitution_risk": 0.8,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8862,
+   "evidence_names_execution": 0.8023,
+   "silent_substitution_risk": 0.901,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6939,
+   "evidence_names_execution": 0.7057,
+   "silent_substitution_risk": 0.6244,
+   "weakest": "none"
+  }
+ },
+ {
+  "id": "11.23",
+  "name": "Simple easing, Custom Bezier and starter presets",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.02,
+   "evidence_names_execution": 0.76,
+   "silent_substitution_risk": 0.78,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8765,
+   "evidence_names_execution": 0.8397,
+   "silent_substitution_risk": 0.9362,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.745,
+   "evidence_names_execution": 0.7524,
+   "silent_substitution_risk": 0.6229,
+   "weakest": "none"
+  }
+ },
+ {
+  "id": "11.24",
+  "name": "Spacebar preview and integrated Editor parity verification",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.09,
+   "evidence_names_execution": 0.93,
+   "silent_substitution_risk": 0.6,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9738,
+   "evidence_names_execution": 0.908,
+   "silent_substitution_risk": 0.9655,
+   "weakest": "vague_record"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.7972,
+   "evidence_names_execution": 0.6205,
+   "silent_substitution_risk": 0.5759,
+   "weakest": "stale"
+  }
+ },
+ {
+  "id": "11.25",
+  "name": "Named animation phases on the scene timeline",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.06,
+   "evidence_names_execution": 0.85,
+   "silent_substitution_risk": 0.46,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9472,
+   "evidence_names_execution": 0.9173,
+   "silent_substitution_risk": 0.9549,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.8663,
+   "evidence_names_execution": 0.8211,
+   "silent_substitution_risk": 0.6949,
+   "weakest": "none"
+  }
+ },
+ {
+  "id": "11.26",
+  "name": "Template control contract: declared operator fields",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.15,
+   "evidence_names_execution": 0.95,
+   "silent_substitution_risk": 0.63,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9588,
+   "evidence_names_execution": 0.9229,
+   "silent_substitution_risk": 0.9612,
+   "weakest": "unexecuted_clause"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.821,
+   "evidence_names_execution": 0.6408,
+   "silent_substitution_risk": 0.8435,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "11.27",
+  "name": "Test fill in the Editor: fill a template instance (operator pages are 12.8)",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.04,
+   "evidence_names_execution": 0.91,
+   "silent_substitution_risk": 0.73,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.905,
+   "evidence_names_execution": 0.8061,
+   "silent_substitution_risk": 0.8508,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.7668,
+   "evidence_names_execution": 0.7745,
+   "silent_substitution_risk": 0.6188,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "11.28",
+  "name": "Named text style presets",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.08,
+   "evidence_names_execution": 0.95,
+   "silent_substitution_risk": 0.62,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9456,
+   "evidence_names_execution": 0.9153,
+   "silent_substitution_risk": 0.9516,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.7388,
+   "evidence_names_execution": 0.6571,
+   "silent_substitution_risk": 0.8514,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "11.29",
+  "name": "Multi-scene workspace: scenes as first-class entities",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.18,
+   "evidence_names_execution": 0.88,
+   "silent_substitution_risk": 0.42,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9212,
+   "evidence_names_execution": 0.8241,
+   "silent_substitution_risk": 0.9392,
+   "weakest": "vague_record"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.7913,
+   "evidence_names_execution": 0.7302,
+   "silent_substitution_risk": 0.7409,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "11.36",
+  "name": "Typed editor command model: every authoring mutation is a shared command",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.06,
+   "evidence_names_execution": 0.98,
+   "silent_substitution_risk": 0.93,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.868,
+   "evidence_names_execution": 0.8361,
+   "silent_substitution_risk": 0.8773,
+   "weakest": "vague_record"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6022,
+   "evidence_names_execution": 0.5821,
+   "silent_substitution_risk": 0.5662,
+   "weakest": "none"
+  }
+ },
+ {
+  "id": "11.37",
+  "name": "Undo/redo on the command log",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.28,
+   "evidence_names_execution": 0.97,
+   "silent_substitution_risk": 0.5,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9217,
+   "evidence_names_execution": 0.8712,
+   "silent_substitution_risk": 0.8765,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.8874,
+   "evidence_names_execution": 0.7854,
+   "silent_substitution_risk": 0.8116,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "11.38",
+  "name": "Immutable, content-hashed scene revisions with review state",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.15,
+   "evidence_names_execution": 0.88,
+   "silent_substitution_risk": 0.39,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.8743,
+   "evidence_names_execution": 0.8658,
+   "silent_substitution_risk": 0.9058,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.8907,
+   "evidence_names_execution": 0.665,
+   "silent_substitution_risk": 0.7295,
+   "weakest": "stale"
+  }
+ },
+ {
+  "id": "11.39",
+  "name": "Asset provenance and licence fields",
+  "track": "CON",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.08,
+   "evidence_names_execution": 0.95,
+   "silent_substitution_risk": 0.88,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9163,
+   "evidence_names_execution": 0.9384,
+   "silent_substitution_risk": 0.9582,
+   "weakest": "unexecuted_clause"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.7792,
+   "evidence_names_execution": 0.6276,
+   "silent_substitution_risk": 0.6324,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "11.41",
+  "name": "Headless render entry point in the Render Engine",
+  "track": "BE",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.05,
+   "evidence_names_execution": 0.98,
+   "silent_substitution_risk": 0.74,
+   "weakest": "platform_gap"
+  },
+  "laya": {
+   "done_when_met": 0.9731,
+   "evidence_names_execution": 0.9321,
+   "silent_substitution_risk": 0.9712,
+   "weakest": "unexecuted_clause"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.7848,
+   "evidence_names_execution": 0.6911,
+   "silent_substitution_risk": 0.7256,
+   "weakest": "stale"
+  }
+ },
+ {
+  "id": "11.63",
+  "name": "EffectCraft / After Effects workspace presentation",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.06,
+   "evidence_names_execution": 0.95,
+   "silent_substitution_risk": 0.77,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9139,
+   "evidence_names_execution": 0.778,
+   "silent_substitution_risk": 0.8589,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6361,
+   "evidence_names_execution": 0.5795,
+   "silent_substitution_risk": 0.6208,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "11.64",
+  "name": "Scene Manager: one container, multiple independent graphics",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.05,
+   "evidence_names_execution": 0.95,
+   "silent_substitution_risk": 0.8,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9334,
+   "evidence_names_execution": 0.7598,
+   "silent_substitution_risk": 0.8151,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6507,
+   "evidence_names_execution": 0.6165,
+   "silent_substitution_risk": 0.5306,
+   "weakest": "platform_gap"
+  }
+ },
+ {
+  "id": "12.4",
+  "name": "Transport controls: cue, take, continue, out, clear",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.04,
+   "evidence_names_execution": 0.8,
+   "silent_substitution_risk": 0.71,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9584,
+   "evidence_names_execution": 0.7421,
+   "silent_substitution_risk": 0.8097,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.6138,
+   "evidence_names_execution": 0.4452,
+   "silent_substitution_risk": 0.5582,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "12.6",
+  "name": "Status surface: tier, reference lock, free-run, clock source",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.36,
+   "evidence_names_execution": 0.61,
+   "silent_substitution_risk": 0.4,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.9243,
+   "evidence_names_execution": 0.8624,
+   "silent_substitution_risk": 0.8539,
+   "weakest": "none"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.595,
+   "evidence_names_execution": 0.4768,
+   "silent_substitution_risk": 0.5831,
+   "weakest": "unexecuted_clause"
+  }
+ },
+ {
+  "id": "12.7",
+  "name": "Output configuration with refusal reasons shown",
+  "track": "UI",
+  "evidence_dir": false,
+  "has_record": true,
+  "jev": {
+   "done_when_met": 0.15,
+   "evidence_names_execution": 0.6,
+   "silent_substitution_risk": 0.24,
+   "weakest": "unexecuted_clause"
+  },
+  "laya": {
+   "done_when_met": 0.955,
+   "evidence_names_execution": 0.89,
+   "silent_substitution_risk": 0.9136,
+   "weakest": "unexecuted_clause"
+  },
+  "laya_base_512": {
+   "done_when_met": 0.5141,
+   "evidence_names_execution": 0.5636,
+   "silent_substitution_risk": 0.565,
+   "weakest": "unexecuted_clause"
+  }
+ }
+]

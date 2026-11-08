@@ -98,6 +98,40 @@ the effect pass is not on their frame path; medians are within 1–2% of
 `docs/evidence/3.20`). An effect chain costs one full-layer pass per planned
 pass on the layer's padded texture, not on the stage.
 
+## Acceptance, asked of two classifiers
+
+`jev-laya-comparison.json` (the design questions, re-asked) and
+`jev-laya-acceptance.json` (one yes/no per done-when clause) hold the same
+questions answered by Jev (TypeSafe `jev-1.14.0`, via `@typesafe-ai/sdk`
+0.7.0) and Laya (`laya` 0.4.28, local, CPU), on the user's instruction that
+both run and are compared. Laya is used zero-shot; its card says the
+checkpoints need fine-tuning and ship over-confident, so its answers are a
+second opinion, not a vote. Laya first ran as `convaiinnovations/laya`,
+which reads 512 tokens and had silently read only the first half of both
+inputs (`docs/evidence/review-2026-11/laya-context.json`); the figures
+below are from `convaiinnovations/laya-multilingual` at `max_len=8192`,
+which read them whole. The 512-token answers stay in each file under
+`laya_base_512`.
+
+| Clause | Jev | Laya |
+|---|---|---|
+| Typed contract, TS and JSON Schema, no string keys | 0.97 | 0.94 |
+| Unknown effect refuses by name | 0.95 | 0.94 |
+| All sixteen effects present as GPU kernels | 0.93 | 0.95 |
+| Ported from EffectCraft with attribution (ramp, iris and the pass plan are GrapiX's own) | 0.80 | 0.90 |
+| Matches the CPU reference within 4.4 on DX12 and Vulkan (tie-aware reading) | 0.97 | 0.92 |
+| Every parameter keyframable | 0.95 | 0.94 |
+| **Row done** | **0.87** | **0.97** |
+| Weakest clause | parity | typed contract |
+
+On the design questions the two agree on placement, typing and keyframe
+addressing; Laya picked `fixed_cap` for GPU memory (confidence 0.16) and
+the strict, tie-free reading of 4.4 (0.20) where Jev picked
+`prepare_max_extent` and tie-aware 4.4, the design the user approved. Asked
+the done-when question with a compressed state, Jev answered 0.42; with
+the clause-by-clause evidence above, 0.87. The compressed answer is kept
+in `jev-laya-comparison.json`.
+
 ## Not in this row
 
 Hue/Saturation's per-colour ranges, Levels' and Exposure's individual-channel

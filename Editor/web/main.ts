@@ -830,10 +830,7 @@ function renderSceneState(): void {
   const resolution = resolveSceneBindings(previewInput);
   bindingPreviewIssues = resolution.ok
     ? []
-    : resolution.issues.map(
-        (issue) =>
-          `Binding ${issue.objectId}.${issue.property} refused [${issue.code}]: ${issue.reason}`,
-      );
+    : resolution.issues.map((issue) => `Binding refused: ${describeBindingIssue(issue)}`);
   resolvedScene = resolution.ok ? resolution.document : previewInput;
   const animation = previewSceneAt(resolvedScene, currentFrame, animationSurface);
   previewScene = animation.document;

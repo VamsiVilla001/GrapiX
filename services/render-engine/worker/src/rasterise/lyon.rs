@@ -334,9 +334,9 @@ fn prepare_paint_stroke(
         &format!("paint stroke {}", stroke.id),
         Some(&stroke.color),
     )?;
-    let Some(paint) = paint else {
+    if paint.is_none() {
         return Ok(());
-    };
+    }
     if stroke.points.is_empty() || stroke.size <= 0.0 {
         return Ok(());
     }

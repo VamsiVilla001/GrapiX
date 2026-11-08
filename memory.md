@@ -118,6 +118,82 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-08 — Done-row re-review with Jev and Laya; 0.10 and 4.2 active until CI is green; 0.9 breach fixed (Claude, #104)
+
+**Resume here.** Open in Phase 3: 3.17 (Codex), 3.21 (Claude), then 3.18/3.19. The
+build-plan review (#105) is in `docs/evidence/plan-review-2026-11`; its plan edits
+are in this commit (5.7 added, 5.5 reworded and active). Next code work: 5.5's
+conformance test, then 5.7. The whole-workspace `cargo fmt --all` commit (user-approved
+8 Nov) follows Codex's 3.17 commit and goes in on its own. Pushing `agent/shared`, which
+starts CI, stays with the user; 0.10 and 4.2 return to done on the first green run.
+
+**What.** On the user's instruction every done row (123) was re-reviewed with two
+classifiers: Jev (TypeSafe `jev-1.14.0` via `@typesafe-ai/sdk` 0.7.0, design and
+decisions) and Laya (`laya` 0.4.28, local CPU). Method, scores and the hand
+re-verification of every concrete finding are in `docs/evidence/review-2026-11`.
+No row changed state on a model score; every state change below was approved by
+the user.
+
+- **0.10, 4.2 → active.** Their done-whens say the harness runs in CI, and CI has never
+  run the gate on this tree: `.github/workflows/check.yml` triggered only on
+  `GrapiX-2.0` and `main`, and every run since 11 Sep failed at `cargo fmt --check`.
+  Fixed toward green: `agent/shared` added to the push triggers; every
+  `clippy -D warnings` error across the workspace fixed (mechanical fixes, plus
+  targeted `#[allow]`s with a comment where the lint contradicts the design:
+  `result_large_err` on refusals that carry field, value and allowed list by
+  design, `large_enum_variant` on the publish request set, `type_complexity` in one
+  test, `dead_code` on the transport's held claims). `cargo clippy --workspace
+  --all-targets -- -D warnings` exits 0. Formatting is the separate commit above.
+- **0.9 breach found and fixed in the same commit; row stays done.**
+  `Editor/src/bindings.ts` hand-wrote `BindingIssue` (`{code, objectId, property,
+  path?, reason}`) against the generated `{objectId, property, path, detail}`, and
+  re-implements `gx_contracts::bindings` for the preview with nothing holding the two
+  together. Now the preview reports the generated type (re-exported from
+  `bindings.ts`; `main.ts` prints `detail`), walks a binding map in property-name
+  order as Rust's `BTreeMap` does, and `Shared/contracts/fixtures/binding-resolution.json`
+  (six scenes) is read by `Shared/contracts/tests/binding_fixture.rs` and
+  `Editor/tests/binding-fixture.test.ts`, which must give the same issues, order,
+  wording and resolved values. The fixture's first run caught a second drift: Rust's
+  `is_index` refused single-digit array indices other than `0`, so `teams.1.name`
+  previewed in the Editor and would have refused on air; fixed to the TS grammar
+  `^(0|[1-9][0-9]*)$`. `Editor/tests/tsconfig.json` gained `resolveJsonModule` and a
+  repository-root `rootDir`. Evidence: `docs/evidence/0.9`.
+- **5.2 and 1.10** were marked done at plan adoption with no record; re-verified
+  against named gate tests (`auth_and_reconnect.rs::program_survives_a_reconnect_and_the_epoch_matches`;
+  the dedicated `ProtocolMismatch`, `TierTooLow`, `MultipleClockDomains`,
+  `ReferenceUnlocked` codes under the conformance refusal audit). Stay done.
+- **Control port ignores token scopes** (`Shared/control-transport/src/server.rs`
+  verifies the signature, then any role may Take, Clear or configure outputs; only
+  the MCP server enforces scopes, 8.11/8.13). No code change today; the user added
+  plan row **5.7** (transport scope enforcement, Needs 5.2 and 8.13, before Phase 14).
+- **Build-plan review (#105, `docs/evidence/plan-review-2026-11`).** All 131 open rows
+  and the 16 phases with open rows were put to both models (executable done-when,
+  when to work, Needs right, main risk; order and first row). Jev's `when` matched
+  the mechanical dependency check on 124/131 rows, Laya's on 64; Laya called every
+  phase order fine including a dependency-violating pick, so its ordering carries no
+  weight. User decisions: **5.5 → active** with an executable done-when (a conformance
+  test of `EngineCapability` locality over the wire; the old "consumers adapt without
+  code change" was never executed); the 68 done-whens Jev scored below 0.5 (phases 9,
+  12–19) are rewritten to executable form, with approval, when their phase opens; the
+  order stands. Recorded in the plan's 8 Nov decisions paragraph (255 steps).
+- **Laya context finding.** The base `convaiinnovations/laya` reads 512 tokens and
+  truncates silently; it had read only the first 512 of 83 of the 123 row inputs and
+  of every decision input. Every Laya answer was re-asked of
+  `convaiinnovations/laya-multilingual` at `max_len=8192` (whole inputs). With the
+  whole input Laya rates every done row ≥ 0.5 and opposed three hand-verified
+  findings; Jev's answers (full inputs) are unchanged. Superseded answers stay under
+  `laya_base_512`. Rule for next time: assert `usage.truncated` is false on every
+  Laya call. Jev's "0.97" and similar are confidences, not versions.
+- 60 done rows have no test or source line citing their id
+  (`done-rows-code-citations.json`); locating their verification is the follow-up for #104.
+
+**Executed.** `cargo test -p gx-contracts` (247 + `binding_fixture`); Editor
+`vitest run tests/bindings.test.ts tests/binding-fixture.test.ts` (20); `tsc -p
+Editor/tests/tsconfig.json` and Editor `tsc --build` exit 0; `cargo clippy --workspace
+--all-targets -- -D warnings` exit 0; `npm run check` exit 0 (377 codegen files current, 40 Node, 412 Editor, 772 Rust passed / 0 failed / 25 ignored, conformance 500 passed / 0 failed / 8 skipped). Panchayati
+topic:10 msgs 357-364 carry the lock sequence with Codex (Codex held the gate first for
+its 3.17 commit; this commit followed its UNLOCK).
+
 ## 2026-11-08 — 3.22 done: typed effect registry and the broadcast effect set on the GPU (Claude, #103)
 
 **Decided with Jev** (TypeSafe `jev-1.14.0`, via `@typesafe-ai/sdk`, key from the user's secrets folder; user instruction 8 Nov): per-object effect stack (0.97); one serde-tagged enum with a typed struct per effect and a stable `effectId` (0.92); keyframes address `effects.<effectId>.<path>` through each effect's typed table (0.56); spatial-effect padding sized at prepare from channel extrema (1.00); first increment = contract + pointwise effects (0.96); port kernels only, not EffectCraft's chain (0.96). `jg` classified EffectCraft's effects first: string-keyed ids and parameters, per-frame allocation, CPU fallback — studied, not ported. Answers in `docs/evidence/3.22/jev-*.json`.

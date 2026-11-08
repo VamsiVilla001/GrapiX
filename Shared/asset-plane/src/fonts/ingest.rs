@@ -109,6 +109,8 @@ impl std::error::Error for FontIngestRefusal {}
 
 /// Verify, cache and define a batch of font files. See the module docs for
 /// the all-or-nothing and identity guarantees.
+// A refusal carries its field, the given value and the allowed list; the Err variant is large by design.
+#[allow(clippy::result_large_err)]
 pub fn prepare_font_files(
     store: &mut AssetStore,
     scene: SceneFontLibrary<'_>,
@@ -215,6 +217,8 @@ pub(crate) fn font_asset_item(
 }
 
 /// Cache verified bytes through the store's one write path.
+// A refusal carries its field, the given value and the allowed list; the Err variant is large by design.
+#[allow(clippy::result_large_err)]
 pub(crate) fn store_font_asset(
     store: &mut AssetStore,
     asset: &AssetLibraryItem,
@@ -255,6 +259,8 @@ impl<'s> BatchBuilder<'s> {
     }
 
     /// Record one font and the assets behind its faces.
+    // A refusal carries its field, the given value and the allowed list; the Err variant is large by design.
+    #[allow(clippy::result_large_err)]
     pub(crate) fn add(
         &mut self,
         source: &str,

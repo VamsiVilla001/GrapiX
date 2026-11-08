@@ -47,7 +47,11 @@ pub struct Server<P: EnginePeer> {
     secret: Option<String>,
 }
 
-enum ConnectionAuthorization { Unprotected, Authenticated(Claims) }
+// The verified claims are held for the connection, but no request is checked
+// against their role's scopes here: scopes are enforced by the MCP server
+// (8.11, 8.13), not on the engine's control port. Named as an open finding of
+// the 8 Nov 2026 done-row review; the field stays so enforcement has it.
+enum ConnectionAuthorization { Unprotected, Authenticated(#[allow(dead_code)] Claims) }
 
 impl<P: EnginePeer + Send + 'static> Server<P> {
     /// Bind TCP after policy approval. This keeps every existing caller source

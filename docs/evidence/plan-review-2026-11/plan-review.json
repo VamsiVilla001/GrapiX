@@ -1,0 +1,3114 @@
+{
+ "model_laya": "convaiinnovations/laya-multilingual",
+ "max_len": 8192,
+ "rows": [
+  {
+   "step": "P.1",
+   "phase": "Phase P",
+   "state": "active",
+   "work": "Procure GPU, DeckLink/AJA hardware, NDI SDK access, lab time",
+   "needs": "—",
+   "done_when": "Purchase orders raised and dates confirmed",
+   "jev": {
+    "done_when_executable": 0.54,
+    "when": "external",
+    "needs_correct": 0.29,
+    "risk": "external_gate"
+   },
+   "laya": {
+    "done_when_executable": 0.933,
+    "when": "after_needs",
+    "needs_correct": 0.9404,
+    "risk": "none"
+   },
+   "tokens": 282
+  },
+  {
+   "step": "P.2",
+   "phase": "Phase P",
+   "state": "active",
+   "work": "Licensing decisions: Adobe/AE, FFmpeg LGPL vs GPL, H.264/HEVC/ProRes, font embedding",
+   "needs": "—",
+   "done_when": "Written position per item, owner named",
+   "jev": {
+    "done_when_executable": 0.37,
+    "when": "external",
+    "needs_correct": 0.34,
+    "risk": "external_gate"
+   },
+   "laya": {
+    "done_when_executable": 0.9571,
+    "when": "superseded",
+    "needs_correct": 0.9191,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 293
+  },
+  {
+   "step": "P.3",
+   "phase": "Phase P",
+   "state": "active",
+   "work": "UI research programme (Phase 9) kicked off",
+   "needs": "—",
+   "done_when": "Participants recruited, first sessions booked",
+   "jev": {
+    "done_when_executable": 0.6,
+    "when": "now",
+    "needs_correct": 0.3,
+    "risk": "superseded_by_direction"
+   },
+   "laya": {
+    "done_when_executable": 0.904,
+    "when": "after_needs",
+    "needs_correct": 0.8963,
+    "risk": "none"
+   },
+   "tokens": 274
+  },
+  {
+   "step": "0.3",
+   "phase": "Phase 0",
+   "state": "active",
+   "work": "CI matrix on Windows and macOS from the first commit",
+   "needs": "0.1",
+   "done_when": "Both platforms green on an empty tree",
+   "jev": {
+    "done_when_executable": 0.75,
+    "when": "now",
+    "needs_correct": 0.66,
+    "risk": "external_gate"
+   },
+   "laya": {
+    "done_when_executable": 0.9317,
+    "when": "after_needs",
+    "needs_correct": 0.9624,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 282
+  },
+  {
+   "step": "0.4",
+   "phase": "Phase 0",
+   "state": "active",
+   "work": "Dependency and licence policy; SBOM generated in CI",
+   "needs": "0.3",
+   "done_when": "SBOM artifact on every build",
+   "jev": {
+    "done_when_executable": 0.81,
+    "when": "after_needs",
+    "needs_correct": 0.36,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9652,
+    "when": "after_needs",
+    "needs_correct": 0.9457,
+    "risk": "missing_dependency"
+   },
+   "tokens": 281
+  },
+  {
+   "step": "3.17",
+   "phase": "Phase 3",
+   "state": "active",
+   "work": "GPU 2D drawing: paths, strokes, gradients and images",
+   "needs": "3.5, 3.16",
+   "done_when": "Fills, strokes (joins, caps, dashes), linear and radial gradients and tagged image quads draw on the GPU with anti-aliasing and match their CPU reference within the 4.4 threshold; gradients are no longer refused; lyon-on-GPU and Vello are benchmarked on the reference workloads and the chosen drawing backend is recorded with its measurements",
+   "jev": {
+    "done_when_executable": 0.58,
+    "when": "now",
+    "needs_correct": 0.57,
+    "risk": "scope_too_large"
+   },
+   "laya": {
+    "done_when_executable": 0.9868,
+    "when": "now",
+    "needs_correct": 0.9649,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 387
+  },
+  {
+   "step": "3.18",
+   "phase": "Phase 3",
+   "state": "pending",
+   "work": "GPU text: real glyph outlines from packaged fonts",
+   "needs": "3.6, 3.16, 3.17",
+   "done_when": "Text shaped by cosmic-text from package-owned font bytes only is drawn on the GPU as glyph outlines, replacing advance rectangles; Latin, Telugu, Hindi and mixed-bidi fixtures match reference glyph pixels within the 4.4 threshold; a missing glyph refuses (invariant 66); no installed system font is read",
+   "jev": {
+    "done_when_executable": 0.77,
+    "when": "after_needs",
+    "needs_correct": 0.59,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9509,
+    "when": "after_needs",
+    "needs_correct": 0.9293,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 404
+  },
+  {
+   "step": "3.19",
+   "phase": "Phase 3",
+   "state": "pending",
+   "work": "GPU masks, clip groups, track mattes and trim paths",
+   "needs": "3.16, 3.17",
+   "done_when": "Masks (add, subtract, intersect, difference; feather; expansion), clip groups, alpha and luma mattes and trim start/end/offset render on the GPU and match CPU references; the scene contract's trim values are honoured (they are silently ignored today); an unsupported combination refuses by name",
+   "jev": {
+    "done_when_executable": 0.65,
+    "when": "after_needs",
+    "needs_correct": 0.54,
+    "risk": "scope_too_large"
+   },
+   "laya": {
+    "done_when_executable": 0.9636,
+    "when": "after_needs",
+    "needs_correct": 0.9705,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 380
+  },
+  {
+   "step": "3.21",
+   "phase": "Phase 3",
+   "state": "active",
+   "work": "GPU Program/Preview output: encode, quantise once, bounded asynchronous readback",
+   "needs": "3.11, 3.15, 3.16",
+   "done_when": "Frames leave the GPU through the 3.15 output transforms with exactly one quantisation, via a bounded asynchronous readback ring that never stalls the Program clock; a lower third, a scorebug with about 20 live text fields and a full-screen stats page each render at p99 ≤ 10 ms end to end at 1080p50 and 2160p50 on DX12 on the reference GPU (ADR-0003's proposed target, or the confirmed show target if set first), with the method recorded; a headless render (11.41) issued while Program runs causes no dropped or late Program frame, shown by the engine's frame-timing report over a timed run (invariant 14; moved here from 11.41 by user decision, 16 Oct 2026; the conformance timed run already measures it)",
+   "jev": {
+    "done_when_executable": 0.7,
+    "when": "now",
+    "needs_correct": 0.56,
+    "risk": "external_gate"
+   },
+   "laya": {
+    "done_when_executable": 0.9665,
+    "when": "after_needs",
+    "needs_correct": 0.9455,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 540
+  },
+  {
+   "step": "4.5",
+   "phase": "Phase 4",
+   "state": "active",
+   "work": "Cross-platform pixel equality: Windows versus macOS",
+   "needs": "4.4",
+   "done_when": "Any difference is explained or fixed, not accepted",
+   "jev": {
+    "done_when_executable": 0.14,
+    "when": "now",
+    "needs_correct": 0.35,
+    "risk": "superseded_by_direction"
+   },
+   "laya": {
+    "done_when_executable": 0.7629,
+    "when": "after_needs",
+    "needs_correct": 0.8764,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 291
+  },
+  {
+   "step": "7.3",
+   "phase": "Phase 7",
+   "state": "active",
+   "work": "Import fidelity gate: source reference render versus imported render",
+   "needs": "4.3",
+   "done_when": "Diff stored with the template",
+   "jev": {
+    "done_when_executable": 0.49,
+    "when": "now",
+    "needs_correct": 0.37,
+    "risk": "unclear_done_when"
+   },
+   "laya": {
+    "done_when_executable": 0.6564,
+    "when": "after_needs",
+    "needs_correct": 0.8158,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 282
+  },
+  {
+   "step": "8.1",
+   "phase": "Phase 8",
+   "state": "active",
+   "work": "Tool schema generated from contracts; versioned alongside protocol v3",
+   "needs": "0.9",
+   "done_when": "No hand-written schema",
+   "jev": {
+    "done_when_executable": 0.37,
+    "when": "now",
+    "needs_correct": 0.64,
+    "risk": "none"
+   },
+   "laya": {
+    "done_when_executable": 0.8474,
+    "when": "after_needs",
+    "needs_correct": 0.9307,
+    "risk": "none"
+   },
+   "tokens": 291
+  },
+  {
+   "step": "8.12",
+   "phase": "Phase 8",
+   "state": "active",
+   "work": "if_revision, idempotency keys, batch-as-one-undo",
+   "needs": "0.8",
+   "done_when": "Retry after timeout does not duplicate",
+   "jev": {
+    "done_when_executable": 0.51,
+    "when": "after_needs",
+    "needs_correct": 0.46,
+    "risk": "scope_too_large"
+   },
+   "laya": {
+    "done_when_executable": 0.8526,
+    "when": "after_needs",
+    "needs_correct": 0.9464,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 297
+  },
+  {
+   "step": "8.14",
+   "phase": "Phase 8",
+   "state": "active",
+   "work": "Tiered MCP surface: read, author on draft handles, propose",
+   "needs": "8.13, 11.36, 11.38",
+   "done_when": "Three tiers. **Read:** scenes, assets, bindings, tokens and engine status. **Author:** 11.36 commands only, on a stateless draft handle. **Propose:** submit a changeset to Playout's approval queue (13.7). Targets the MCP 2026-07-28 specification, verified against the official spec and the Rust SDK before coding. A conformance test enumerates every MCP tool and asserts that none reachable by an author- or agent-scoped token can Cue, Take, Continue, Clear or configure outputs, while 8.11's operator-scoped tools stay behind their scopes (invariant 65). An author tool cannot modify a published revision; an unknown schema version is refused (the server fails closed)",
+   "jev": {
+    "done_when_executable": 0.65,
+    "when": "now",
+    "needs_correct": 0.43,
+    "risk": "scope_too_large"
+   },
+   "laya": {
+    "done_when_executable": 0.9527,
+    "when": "after_needs",
+    "needs_correct": 0.9244,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 488
+  },
+  {
+   "step": "9.1",
+   "phase": "Phase 9",
+   "state": "pending",
+   "work": "Artifact teardown of comparable professional tools",
+   "needs": "P.3",
+   "done_when": "Vocabulary of density, chrome and controls",
+   "jev": {
+    "done_when_executable": 0.11,
+    "when": "after_needs",
+    "needs_correct": 0.48,
+    "risk": "unclear_done_when"
+   },
+   "laya": {
+    "done_when_executable": 0.9326,
+    "when": "after_needs",
+    "needs_correct": 0.9218,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 366
+  },
+  {
+   "step": "9.2",
+   "phase": "Phase 9",
+   "state": "pending",
+   "work": "Recruit designers, operators, producers",
+   "needs": "P.3",
+   "done_when": "Segments filled, including macOS-primary designers",
+   "jev": {
+    "done_when_executable": 0.19,
+    "when": "after_needs",
+    "needs_correct": 0.51,
+    "risk": "superseded_by_direction"
+   },
+   "laya": {
+    "done_when_executable": 0.9605,
+    "when": "after_needs",
+    "needs_correct": 0.9579,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 367
+  },
+  {
+   "step": "9.3",
+   "phase": "Phase 9",
+   "state": "pending",
+   "work": "Contextual interviews in the suite and the control room",
+   "needs": "9.2",
+   "done_when": "Not remote. Lighting and viewing distance observed",
+   "jev": {
+    "done_when_executable": 0.35,
+    "when": "after_needs",
+    "needs_correct": 0.71,
+    "risk": "external_gate"
+   },
+   "laya": {
+    "done_when_executable": 0.944,
+    "when": "after_needs",
+    "needs_correct": 0.9555,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 367
+  },
+  {
+   "step": "9.5",
+   "phase": "Phase 9",
+   "state": "pending",
+   "work": "Usability baseline against the previous build",
+   "needs": "9.2",
+   "done_when": "Timed tasks on the 11.63 workspace, including the disconnected-engine task; the results validate 11.5's layout",
+   "jev": {
+    "done_when_executable": 0.27,
+    "when": "after_needs",
+    "needs_correct": 0.4,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9383,
+    "when": "after_needs",
+    "needs_correct": 0.9261,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 386
+  },
+  {
+   "step": "9.7",
+   "phase": "Phase 9",
+   "state": "pending",
+   "work": "Synthesis: validation report and anti-pattern list",
+   "needs": "9.3, 9.5",
+   "done_when": "Density, chrome and type-at-viewing-distance findings against the 11.63 workspace, each with a proposed amendment or a recorded no-change",
+   "jev": {
+    "done_when_executable": 0.25,
+    "when": "after_needs",
+    "needs_correct": 0.48,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9223,
+    "when": "after_needs",
+    "needs_correct": 0.9068,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 410
+  },
+  {
+   "step": "11.1",
+   "phase": "Phase 11",
+   "state": "active",
+   "work": "Tauri 2 shell on both platforms; signed and notarised",
+   "needs": "0.3",
+   "done_when": "Installers produced by CI",
+   "jev": {
+    "done_when_executable": 0.67,
+    "when": "after_needs",
+    "needs_correct": 0.3,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9218,
+    "when": "after_needs",
+    "needs_correct": 0.9111,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 298
+  },
+  {
+   "step": "11.2",
+   "phase": "Phase 11",
+   "state": "active",
+   "work": "WebGPU capability probe on both target OS versions",
+   "needs": "11.1",
+   "done_when": "Result recorded; decides the WASM fallback",
+   "jev": {
+    "done_when_executable": 0.4,
+    "when": "after_needs",
+    "needs_correct": 0.34,
+    "risk": "external_gate"
+   },
+   "laya": {
+    "done_when_executable": 0.8769,
+    "when": "after_needs",
+    "needs_correct": 0.9394,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 301
+  },
+  {
+   "step": "11.3",
+   "phase": "Phase 11",
+   "state": "active",
+   "work": "DPI: fractional scaling, scale change, monitor move",
+   "needs": "11.1",
+   "done_when": "Correct at 100, 125, 150 and 200 per cent",
+   "jev": {
+    "done_when_executable": 0.47,
+    "when": "after_needs",
+    "needs_correct": 0.26,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.8941,
+    "when": "rewrite_first",
+    "needs_correct": 0.9412,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 317
+  },
+  {
+   "step": "11.30",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Save model: Ctrl+S saves in place, Ctrl+Shift+S saves a new version",
+   "needs": "11.29, 11.15",
+   "done_when": "Ctrl+S (Cmd+S on macOS) writes the active scene to its own file or project entry in place, and a saved preset into the project's preset library in place; it never creates a version. Ctrl+Shift+S (Cmd+Shift+S) is the only way to create a new version: the next free numbered copy (`<name>_v002`, `_v003`, …) is written beside the current one, the previous version is left byte-identical, and the session continues in the new version. Neither shortcut fires while a text field has focus; a failed save keeps the unsaved mark and names its reason",
+   "jev": {
+    "done_when_executable": 0.85,
+    "when": "now",
+    "needs_correct": 0.16,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.8995,
+    "when": "after_needs",
+    "needs_correct": 0.8201,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 457
+  },
+  {
+   "step": "11.31",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "One command registry behind every menu, toolbar, shortcut and agent action",
+   "needs": "11.30, 11.36",
+   "done_when": "Every user action is one named command with a label, shortcut, enabled state and refusal reason; the menu bar, toolbar, keyboard shortcuts and the agent surface all dispatch the same command, so a disabled menu item and a refused shortcut give the same named reason; every registry command that changes the document dispatches an 11.36 command; no action is reachable by a shortcut alone; shortcuts never fire while a text field has focus",
+   "jev": {
+    "done_when_executable": 0.5,
+    "when": "after_needs",
+    "needs_correct": 0.29,
+    "risk": "scope_too_large"
+   },
+   "laya": {
+    "done_when_executable": 0.9433,
+    "when": "after_needs",
+    "needs_correct": 0.8633,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 417
+  },
+  {
+   "step": "11.32",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Menu bar and toolbar (After Effects conventions)",
+   "needs": "11.31",
+   "done_when": "A classic in-app menu bar — **File**: New Project, Open Project, Open Recent, Save (Ctrl+S), Save New Version (Ctrl+Shift+S), Save As…, Export package (7.6), Close Scene, Exit; **Edit**: Undo, Redo, Cut, Copy, Paste, Duplicate, Delete (Delete key), Select All; **Composition**; **Layer**; **View**; **Window**; **Help** — plus a slim toolbar of the common commands, identical on Windows and macOS. Exit and Close with unsaved scenes refuse by name until each is saved or explicitly discarded; Delete removes the selection as one undo entry",
+   "jev": {
+    "done_when_executable": 0.65,
+    "when": "after_needs",
+    "needs_correct": 0.58,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9762,
+    "when": "after_needs",
+    "needs_correct": 0.9598,
+    "risk": "missing_dependency"
+   },
+   "tokens": 430
+  },
+  {
+   "step": "11.33",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Window menu: every module reachable; tabbed docks and saved layouts",
+   "needs": "11.5, 11.32",
+   "done_when": "The Window menu lists every Editor module and shows, focuses or hides it; a hidden panel is never lost and reopens where it was; panels stack as tabs inside any dock and drag between docks and tab groups; the user can save named layouts, switch between them and reset to the card-sort default; layouts survive restart",
+   "jev": {
+    "done_when_executable": 0.65,
+    "when": "after_needs",
+    "needs_correct": 0.48,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9738,
+    "when": "now",
+    "needs_correct": 0.9439,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 373
+  },
+  {
+   "step": "11.34",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Floating panel windows",
+   "needs": "11.33",
+   "done_when": "Any panel tears off into its own OS window (e.g. a second monitor) and docks back; the main window stays the only owner of the document, and a floating panel is a projection of the active scene that sends commands through 11.31 — never a second copy of the document; floating windows restore to their monitor and bounds on restart, and fall back on screen when that monitor is gone; closing the main window closes them",
+   "jev": {
+    "done_when_executable": 0.71,
+    "when": "after_needs",
+    "needs_correct": 0.56,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9494,
+    "when": "after_needs",
+    "needs_correct": 0.949,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 380
+  },
+  {
+   "step": "11.35",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Workspace modes",
+   "needs": "11.33",
+   "done_when": "Named workspace modes — at least Design, Animate and Data binding — each a saved layout of panels and docks, switched from the Window menu and toolbar without touching the document, selection or undo history; a mode the user rearranges can be saved over or saved as a new mode, and reset to its default",
+   "jev": {
+    "done_when_executable": 0.66,
+    "when": "after_needs",
+    "needs_correct": 0.68,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9315,
+    "when": "after_needs",
+    "needs_correct": 0.905,
+    "risk": "missing_dependency"
+   },
+   "tokens": 350
+  },
+  {
+   "step": "11.40",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Component registry and project variables",
+   "needs": "11.36, 11.41",
+   "done_when": "Named project variables (colour, font, spacing, motion duration and easing) are referenced by name from objects instead of copied; a registry holds reusable components (scorebug, lower third, player card, bracket, …) with typed slots. Changing a variable updates every bound object, shown by 11.41 headless renders of a fixture scene before and after; deleting a variable still referenced is refused by name; components and variables round-trip through `.gpx` save/load. Design-system tokens are not required (15 Oct amendment)",
+   "jev": {
+    "done_when_executable": 0.72,
+    "when": "now",
+    "needs_correct": 0.46,
+    "risk": "scope_too_large"
+   },
+   "laya": {
+    "done_when_executable": 0.8919,
+    "when": "after_needs",
+    "needs_correct": 0.8871,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 422
+  },
+  {
+   "step": "11.42",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Lint framework and first rules",
+   "needs": "11.36, 11.41",
+   "done_when": "A lint command returns structured findings: severity, rule, object and fix hint. First rules: title/action-safe violation; missing glyph for any bound field or target language; text overflow against a worst-case string fixture (longest player names, CJK, Arabic RTL); required template field left unbound. Each rule has one failing and one passing fixture, run as tests. A missing glyph is a refusal-class finding, never resolved by a silent font fallback (invariant 66). Refusal-class findings block publish (7.6) and preflight (7.7); the rest warn. Findings use the 0.6 refusal structure (condition, cause, fix), so 11.58 renders them unchanged",
+   "jev": {
+    "done_when_executable": 0.77,
+    "when": "now",
+    "needs_correct": 0.36,
+    "risk": "scope_too_large"
+   },
+   "laya": {
+    "done_when_executable": 0.8762,
+    "when": "after_needs",
+    "needs_correct": 0.841,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 459
+  },
+  {
+   "step": "11.43",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Project settings, explicit save and single-file `.gpx` packaging",
+   "needs": "11.18, 11.29, 11.30, 11.36, 11.37, 11.38",
+   "done_when": "Work is saved as a `.gpx` project first. Scene create, rename, duplicate and delete are 11.36 commands, undoable through 11.37; scene settings cover resolution (1080p first), rational frame rate, duration, alpha on/off and background. Unsaved work cannot be published (named refusal); a non-rational frame rate cannot be entered and the attempt is refused. **Explicit save is the only project writer** (decision Q3, 16 Oct 2026): 2.6's autosave ring writes crash-recovery snapshots to a separate recovery folder, never into the project, and they are offered at next launch; 2.6's kill -9 mid-write test still passes",
+   "jev": {
+    "done_when_executable": 0.69,
+    "when": "after_needs",
+    "needs_correct": 0.32,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9436,
+    "when": "after_needs",
+    "needs_correct": 0.9088,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 578
+  },
+  {
+   "step": "11.44",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Viewport: gizmos, rulers, margins and safe guides",
+   "needs": "11.7, 11.36, 11.41, 11.43",
+   "done_when": "Extends 11.6/11.7. Scene cameras plus an editor camera; move, rotate-XYZ and scale gizmos; single and multi selection; After Effects/Photoshop-style rulers and margins configured in the project tab; title/action-safe guides; an empty scene shows nothing. Every gizmo interaction produces 11.36 commands, never direct state writes; Z position and XYZ rotation visibly change the render, shown by 11.41 headless renders of a fixture scene before and after; guide and margin settings round-trip through save/load",
+   "jev": {
+    "done_when_executable": 0.69,
+    "when": "after_needs",
+    "needs_correct": 0.36,
+    "risk": "scope_too_large"
+   },
+   "laya": {
+    "done_when_executable": 0.9717,
+    "when": "after_needs",
+    "needs_correct": 0.9671,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 482
+  },
+  {
+   "step": "11.45",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Object manager on the command model: parenting, groups, order, unique names",
+   "needs": "11.8, 11.36, 11.37, 11.44",
+   "done_when": "Extends 11.8. The object manager is the authoritative hierarchy driving the viewport, inspector and every scene view; parenting, groups, reordering, show/hide and lock are 11.36 commands and all undoable. A test shows the viewport and inspector reflect hierarchy changes made only through the object manager. A duplicate name is refused by name with a suggested free name (`object1`, `object2`, …)",
+   "jev": {
+    "done_when_executable": 0.72,
+    "when": "after_needs",
+    "needs_correct": 0.58,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9654,
+    "when": "after_needs",
+    "needs_correct": 0.912,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 444
+  },
+  {
+   "step": "11.46",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Inspector: per-type property sets, scrub fields, animation stopwatch",
+   "needs": "11.9, 11.21, 11.36, 11.37, 11.45",
+   "done_when": "Extends 11.9/11.21. Each object type in 11.47–11.49 shows exactly its defined property set; numeric fields scrub by dragging and accept negative values, and one scrub is committed as one command, not one per mouse move. Each animatable property carries an After Effects-style stopwatch beside 11.21's current-frame diamond, with no separate Animation tab; toggling it creates a keyframe at the current frame and undo removes it",
+   "jev": {
+    "done_when_executable": 0.66,
+    "when": "after_needs",
+    "needs_correct": 0.55,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9652,
+    "when": "after_needs",
+    "needs_correct": 0.909,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 484
+  },
+  {
+   "step": "11.47",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "2D object library: pen paths, masks, clip groups, trim paths",
+   "needs": "1.2, 11.41, 11.45, 11.46",
+   "done_when": "Text, image quad, shapes, pen-tool paths, masks and clip groups (a clip shape plus a content composition), keyframable paths and trim paths. Each object type has an 11.41 golden-frame test; a clip group clips its content correctly in a golden frame; a trim-path animation renders correctly at three sampled frames. This step owns the layer masks that memory rule 24 recorded as unowned",
+   "jev": {
+    "done_when_executable": 0.75,
+    "when": "after_needs",
+    "needs_correct": 0.47,
+    "risk": "scope_too_large"
+   },
+   "laya": {
+    "done_when_executable": 0.9402,
+    "when": "after_needs",
+    "needs_correct": 0.9037,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 452
+  },
+  {
+   "step": "11.48",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "3D object library: assignable-face primitives, extrusion, nulls",
+   "needs": "3.7, 11.41, 11.45, 11.46",
+   "done_when": "Extends 3.7. Real 3D primitives with assignable faces, extruded text and logos, cameras, lights and null/locator objects. 11.41 golden frames show lights, cameras and Z/XYZ transforms affecting the render; assigning a material to one face affects only that face",
+   "jev": {
+    "done_when_executable": 0.57,
+    "when": "after_needs",
+    "needs_correct": 0.55,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.908,
+    "when": "after_needs",
+    "needs_correct": 0.9206,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 427
+  },
+  {
+   "step": "11.49",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Video layer with alpha",
+   "needs": "11.41, 11.45, 11.46, 16.1",
+   "done_when": "A video layer with alpha, fed by Asset-plane media through 16.1's decoder. A clip with alpha composites correctly in a golden-frame test; a missing media file is a named refusal, never black or a placeholder (invariants 18, 29)",
+   "jev": {
+    "done_when_executable": 0.46,
+    "when": "after_needs",
+    "needs_correct": 0.36,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9668,
+    "when": "after_needs",
+    "needs_correct": 0.95,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 416
+  },
+  {
+   "step": "11.50",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "One physically lit material type and a material library",
+   "needs": "1.3, 11.12, 11.41, 11.48",
+   "done_when": "Supersedes 1.3's split of `MaterialKind` into solid colour, image, PBR and unlit: one physically lit material type replaces them in Rust, generated TS, validator, engine and UI, still consumed by all three from one Rust definition (the custom `shader` kind is unchanged). Scenes authored with the old kinds migrate losslessly; an unlit lower-third fill renders with no pixel change across the migration (invariant 18). One type covers every fixture in the material test set; an XPression-style library assigns materials to objects and faces and round-trips through `.gpx`; Editor viewport and engine golden frames match within 11.41's tolerance, a forward check for 13.6",
+   "jev": {
+    "done_when_executable": 0.59,
+    "when": "after_needs",
+    "needs_correct": 0.39,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9123,
+    "when": "after_needs",
+    "needs_correct": 0.9427,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 506
+  },
+  {
+   "step": "11.51",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Text engine depth: auto-fit, complex scripts, font links",
+   "needs": "3.6, 11.13, 11.28, 11.42, 11.47",
+   "done_when": "Extends 11.13/3.6. OTF, TTF and WOFF files, Adobe font links and CSS embed links resolve through the font manager; tracking, leading and auto-fit/shrink-to-box; complex-script shaping for at least Latin, CJK and Arabic RTL through a HarfBuzz-class shaper. The 11.42 worst-case string fixture renders without overflow or raises an overflow finding; a missing glyph raises a refusal-class finding; Arabic RTL renders correctly in a golden-frame test",
+   "jev": {
+    "done_when_executable": 0.59,
+    "when": "after_needs",
+    "needs_correct": 0.33,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9525,
+    "when": "after_needs",
+    "needs_correct": 0.9697,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 485
+  },
+  {
+   "step": "11.52",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Asset manager: versioned replace and provenance shown",
+   "needs": "2.7, 11.18, 11.39",
+   "done_when": "Extends 2.7 and 11.18's asset panel. A browser for images, video, 3D and fonts; every asset is a hashed, versioned file on the Asset plane, shown with its 11.39 provenance. Importing the same file twice gives one asset; replacing an asset creates a new version and leaves earlier revisions pinned to the old hash. Resuming an interrupted transfer is 14.3's done-when and is not duplicated here",
+   "jev": {
+    "done_when_executable": 0.3,
+    "when": "now",
+    "needs_correct": 0.39,
+    "risk": "scope_too_large"
+   },
+   "laya": {
+    "done_when_executable": 0.9384,
+    "when": "after_needs",
+    "needs_correct": 0.9038,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 444
+  },
+  {
+   "step": "11.53",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Timeline: named stop points and a looping hold",
+   "needs": "11.22, 11.25, 11.36, 11.38",
+   "done_when": "Extends 11.25's phases, which already give In (`in`), Out (`out`) and the held state (`hold`). A hold phase may be marked looping, and named stop points tell Playout's Continue where to pause. Moving or retiming a key is one 11.36 command; values evaluated at sampled frames match the expected curve exactly in rational time; stop points and the loop flag are carried in the published revision and the Playout mock reads them; Continue on the on-air revision advances to the next named stop point exactly once and never loads a new revision (decision Q4)",
+   "jev": {
+    "done_when_executable": 0.57,
+    "when": "now",
+    "needs_correct": 0.57,
+    "risk": "scope_too_large"
+   },
+   "laya": {
+    "done_when_executable": 0.9313,
+    "when": "after_needs",
+    "needs_correct": 0.9133,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 482
+  },
+  {
+   "step": "11.54",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Template field constraints",
+   "needs": "11.26, 11.27, 11.38",
+   "done_when": "Extends 11.26's declared fields with a range, enum, max length and fallback rule per field; Playout forms, data binding (19.7, 19.8) and the template factory (17.4) fill them. The field schema is part of the published revision; a value outside a field's type, range, enum or length is refused by name by both the Playout mock and real Playout; a fallback rule never produces different pixels without a declared state (invariant 18). Each field also carries `liveUpdate`, default false: Update on air accepts only eligible fields and refuses an ineligible one by name with pixels unchanged; eligibility grants no authority, which stays with operator scope and engine-time intent (decision Q4)",
+   "jev": {
+    "done_when_executable": 0.47,
+    "when": "now",
+    "needs_correct": 0.39,
+    "risk": "scope_too_large"
+   },
+   "laya": {
+    "done_when_executable": 0.9388,
+    "when": "after_needs",
+    "needs_correct": 0.9312,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 496
+  },
+  {
+   "step": "11.55",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Logic: conditional triggers, scene transitions, per-scene JS modules",
+   "needs": "6.6, 11.53, 11.54, 16.3, 16.4",
+   "done_when": "Conditional triggers, transitions between scenes and per-scene JS modules, all running inside 16.4's deterministic sandbox. A fixture trigger fires on the expected frame across two runs; a transition between two scenes renders identically across two runs; any banned API inside a module is refused by name",
+   "jev": {
+    "done_when_executable": 0.71,
+    "when": "after_needs",
+    "needs_correct": 0.55,
+    "risk": "scope_too_large"
+   },
+   "laya": {
+    "done_when_executable": 0.9322,
+    "when": "now",
+    "needs_correct": 0.9291,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 423
+  },
+  {
+   "step": "11.56",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Widgets: clock, countdown, counter, round timer",
+   "needs": "11.55, 16.4",
+   "done_when": "Time is derived from the engine frame count and rational rate, never from the wall clock (invariant 62). At 60000/1001 a countdown shows exactly the rationally computed value after N frames; a long-run test shows zero drift; pause and resume are commands",
+   "jev": {
+    "done_when_executable": 0.6,
+    "when": "after_needs",
+    "needs_correct": 0.44,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9687,
+    "when": "after_needs",
+    "needs_correct": 0.9459,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 379
+  },
+  {
+   "step": "11.57",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Hash publish to Playout from the engine-rendered preview",
+   "needs": "7.6, 8.10, 11.38, 11.53, 11.65",
+   "done_when": "Builds on 11.65's engine preview monitor (split 16 Oct 2026, decision Q2) and publishes a hashed revision to Playout. Publishing creates a revision the Playout mock lists by hash; the preview frame and an 11.41 render of the same revision and frame match within its tolerance; a conformance test confirms the Editor cannot Cue, Take, Continue or Clear (invariant 4)",
+   "jev": {
+    "done_when_executable": 0.52,
+    "when": "after_needs",
+    "needs_correct": 0.36,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.904,
+    "when": "after_needs",
+    "needs_correct": 0.8884,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 462
+  },
+  {
+   "step": "11.58",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Console and debugger",
+   "needs": "0.6, 11.36, 11.42",
+   "done_when": "Consoles in the Editor and Playout show every failure with its condition, cause and fix; consoles other than the render engine's run without popping up. Every named refusal code has a console entry with all three parts, and a test enumerates the codes; 11.42 lint findings appear in the console",
+   "jev": {
+    "done_when_executable": 0.55,
+    "when": "after_needs",
+    "needs_correct": 0.39,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9782,
+    "when": "now",
+    "needs_correct": 0.95,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 392
+  },
+  {
+   "step": "11.59",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Importers on 2.0 objects: PSD/AI and After Effects",
+   "needs": "7.2, 11.39, 11.41, 11.47, 11.48, 11.50, 11.51, 11.53",
+   "done_when": "PSD/AI and After Effects importers rebuilt on the 2.0 objects (Figma is Phase 18). After Effects precomps import as live scenes, not flattened clips; every imported asset is stamped with an 11.39 provenance record. A fixture file per importer imports and renders with every asset exact in 11.41 golden-frame tests; any unsupported node type produces a named finding, never a silent drop",
+   "jev": {
+    "done_when_executable": 0.65,
+    "when": "after_needs",
+    "needs_correct": 0.33,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9666,
+    "when": "after_needs",
+    "needs_correct": 0.9543,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 540
+  },
+  {
+   "step": "11.60",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Layer styles: every Photoshop style and its blending options, animatable, on the GPU",
+   "needs": "3.19, 3.22, 11.36",
+   "done_when": "Drop Shadow, Inner Shadow, Outer Glow, Inner Glow, Bevel and Emboss, Satin, Color, Gradient and Pattern Overlay and Stroke, plus fill opacity, knockout, Blend If and several instances of one style, are scene properties with every parameter keyframable, rendered on the GPU in Photoshop's stacking order. Fixture scenes match committed Photoshop reference renders within the 4.4 threshold; the PSD (`lfx2`/`lmfx`) and Figma effect mappings used by 11.59 and 18.4 are specified against them; any style option not yet implemented (for example contours) is a named finding, never dropped",
+   "jev": {
+    "done_when_executable": 0.61,
+    "when": "after_needs",
+    "needs_correct": 0.27,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9362,
+    "when": "after_needs",
+    "needs_correct": 0.9246,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 479
+  },
+  {
+   "step": "11.61",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Text animators: per-glyph range selectors",
+   "needs": "3.18, 11.20, 11.36",
+   "done_when": "Animators with range selectors (characters, characters excluding spaces, words, lines; start, end and offset; shapes; ease high and low; randomise with a seed derived from the object id) animate per-glyph position, scale, rotation, opacity, fill and tracking through 11.20 channels and render on the GPU from per-glyph instance data without per-frame re-shaping; the selector maths is ported from EffectCraft with attribution; the existing stagger presets are expressed through them; two renders of one frame are byte-identical, and a selector the engine cannot evaluate refuses by name",
+   "jev": {
+    "done_when_executable": 0.72,
+    "when": "after_needs",
+    "needs_correct": 0.35,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9462,
+    "when": "after_needs",
+    "needs_correct": 0.9095,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 454
+  },
+  {
+   "step": "11.62",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Effects and layer-style controls in the Editor",
+   "needs": "3.22, 11.46, 11.60",
+   "done_when": "Adding, removing, reordering, enabling and duplicating effects and layer styles on any object are 11.36 commands with one undo each; every parameter shows in the inspector with scrub fields and an animation stopwatch; a refused effect or style shows its refusal code and fix",
+   "jev": {
+    "done_when_executable": 0.56,
+    "when": "after_needs",
+    "needs_correct": 0.51,
+    "risk": "scope_too_large"
+   },
+   "laya": {
+    "done_when_executable": 0.9863,
+    "when": "after_needs",
+    "needs_correct": 0.9556,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 400
+  },
+  {
+   "step": "11.65",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Engine preview monitor in the Editor",
+   "needs": "11.41",
+   "done_when": "The Preview panel shows an engine-rendered frame (11.41) of the active graphic at the playhead, labelled \"Engine\", within 250 ms of an edit on the reference machine (method recorded); the Three.js viewport is labelled \"Draft\"; a disconnected or refusing engine shows a named unavailable state, never a stale frame presented as current; parity with Program is not claimed until 13.6. Verified in the running Tauri Editor. Scheduled ahead of 11.31–11.35 (decision Q2)",
+   "jev": {
+    "done_when_executable": 0.65,
+    "when": "now",
+    "needs_correct": 0.59,
+    "risk": "none"
+   },
+   "laya": {
+    "done_when_executable": 0.9784,
+    "when": "rewrite_first",
+    "needs_correct": 0.9644,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 405
+  },
+  {
+   "step": "11.66",
+   "phase": "Phase 11",
+   "state": "pending",
+   "work": "Glossary label lint",
+   "needs": "11.63, 11.64",
+   "done_when": "Every visible Editor label, agent-surface node and MCP tool description uses only the glossary in `docs/README.md` (Project → Graphic → Layer, viewer \"Composition\"; Take, Page, Playout library; output channel/layer); a test fails on \"New scene\", \"Publish scene\" or any term outside the glossary (decision Q6)",
+   "jev": {
+    "done_when_executable": 0.4,
+    "when": "now",
+    "needs_correct": 0.35,
+    "risk": "unclear_done_when"
+   },
+   "laya": {
+    "done_when_executable": 0.947,
+    "when": "after_needs",
+    "needs_correct": 0.9053,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 376
+  },
+  {
+   "step": "12.1",
+   "phase": "Phase 12",
+   "state": "active",
+   "work": "Tauri 2 shell",
+   "needs": "0.3",
+   "done_when": "Signed on both platforms",
+   "jev": {
+    "done_when_executable": 0.28,
+    "when": "after_needs",
+    "needs_correct": 0.24,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9719,
+    "when": "after_needs",
+    "needs_correct": 0.9648,
+    "risk": "none"
+   },
+   "tokens": 411
+  },
+  {
+   "step": "12.2",
+   "phase": "Phase 12",
+   "state": "pending",
+   "work": "Playout library: published graphics by Take ID",
+   "needs": "6.1",
+   "done_when": "Search, import, fetch, direct recall",
+   "jev": {
+    "done_when_executable": 0.42,
+    "when": "now",
+    "needs_correct": 0.62,
+    "risk": "scope_too_large"
+   },
+   "laya": {
+    "done_when_executable": 0.931,
+    "when": "after_needs",
+    "needs_correct": 0.9202,
+    "risk": "missing_dependency"
+   },
+   "tokens": 416
+  },
+  {
+   "step": "12.3",
+   "phase": "Phase 12",
+   "state": "pending",
+   "work": "Take list and rundown",
+   "needs": "6.4",
+   "done_when": "Persisted cursor, continue behaviour",
+   "jev": {
+    "done_when_executable": 0.29,
+    "when": "now",
+    "needs_correct": 0.47,
+    "risk": "unclear_done_when"
+   },
+   "laya": {
+    "done_when_executable": 0.9048,
+    "when": "rewrite_first",
+    "needs_correct": 0.9076,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 408
+  },
+  {
+   "step": "12.5",
+   "phase": "Phase 12",
+   "state": "pending",
+   "work": "Confidence monitors, fill and key",
+   "needs": "5.4",
+   "done_when": "Native-resolution tier available",
+   "jev": {
+    "done_when_executable": 0.18,
+    "when": "now",
+    "needs_correct": 0.28,
+    "risk": "unclear_done_when"
+   },
+   "laya": {
+    "done_when_executable": 0.9317,
+    "when": "after_needs",
+    "needs_correct": 0.8672,
+    "risk": "none"
+   },
+   "tokens": 412
+  },
+  {
+   "step": "12.8",
+   "phase": "Phase 12",
+   "state": "pending",
+   "work": "Playout operator fill form and pages",
+   "needs": "11.26, 11.54, 12.3",
+   "done_when": "Publish a graphic with text, colour and required fields; open it in Playout without the Editor project; the form is built from the published package alone; fill valid values, get a named refusal for an invalid or missing required value, save and reopen the rundown and reproduce the same page and revision. A page lives in the rundown, pinned to the published revision, hash and field-schema version (decision Q5)",
+   "jev": {
+    "done_when_executable": 0.73,
+    "when": "after_needs",
+    "needs_correct": 0.58,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9556,
+    "when": "after_needs",
+    "needs_correct": 0.9144,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 520
+  },
+  {
+   "step": "12.9",
+   "phase": "Phase 12",
+   "state": "pending",
+   "work": "Lower-third operator workflow acceptance (end to end)",
+   "needs": "11.25, 11.54, 11.57, 12.1, 12.2, 12.3, 12.4, 12.5, 12.8, 12.10",
+   "done_when": "In the running Editor, create a lower third with named In/Hold/Continue/Update/Out phases and typed required fields and publish it. In the running Playout, find it in the library, add it to a persisted rundown page, fill it, pass readiness and show it in Preview with its pinned revision and hash; cue, take to Program, update one live-updatable field, continue through a stop point, run Out and clear its layer, recording each engine-committed frame and comparing Preview to Program under the declared tolerance. Repeated requests and a disconnect/restart before send, after send and after reply cause no duplicate take or clear, and reconnect reconciles from engine status. Removing and restoring a font or asset gives a named readiness refusal. `npm run check` passes. Native-resolution monitor claims name the media transport and hardware; hardware tests wait on 15.1",
+   "jev": {
+    "done_when_executable": 0.43,
+    "when": "after_needs",
+    "needs_correct": 0.28,
+    "risk": "scope_too_large"
+   },
+   "laya": {
+    "done_when_executable": 0.9665,
+    "when": "now",
+    "needs_correct": 0.945,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 752
+  },
+  {
+   "step": "12.10",
+   "phase": "Phase 12",
+   "state": "pending",
+   "work": "Overlay layers with channel/layer targeting on one Program channel",
+   "needs": "1.9, 6.2",
+   "done_when": "Cue, Take, Update, Continue, Out and Clear carry a `channel` and `layer` target; only the Program channel is accepted and any other channel refuses by name; a bug, a lower third and a ticker on separate layers are cued, taken, updated and cleared independently on one output with deterministic z-order and a named refusal on conflict; a targeted clear removes only its layer when the expected page still matches (decision Q8)",
+   "jev": {
+    "done_when_executable": 0.67,
+    "when": "now",
+    "needs_correct": 0.37,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9755,
+    "when": "after_needs",
+    "needs_correct": 0.9494,
+    "risk": "missing_dependency"
+   },
+   "tokens": 533
+  },
+  {
+   "step": "12.11",
+   "phase": "Phase 12",
+   "state": "pending",
+   "work": "As-run record",
+   "needs": "2.9, 2.10, 6.2",
+   "done_when": "Every accepted or refused Cue, Take, Update, Continue, Out and Clear writes one as-run record to the 2.10 JSON Lines audit sink: monotonic sequence, intent id, operator identity and scope (2.9), page, revision, hash, channel/layer target, result and engine-committed frame; replaying a fixture show's records matches the engine's committed events exactly. UI and export follow later (decision Q8)",
+   "jev": {
+    "done_when_executable": 0.69,
+    "when": "now",
+    "needs_correct": 0.63,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9707,
+    "when": "after_needs",
+    "needs_correct": 0.9456,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 540
+  },
+  {
+   "step": "13.1",
+   "phase": "Phase 13",
+   "state": "pending",
+   "work": "Measure viewport interaction latency on the existing stream",
+   "needs": "5.4",
+   "done_when": "Handle-drag round trip recorded on target hardware",
+   "jev": {
+    "done_when_executable": 0.59,
+    "when": "now",
+    "needs_correct": 0.31,
+    "risk": "external_gate"
+   },
+   "laya": {
+    "done_when_executable": 0.8601,
+    "when": "after_needs",
+    "needs_correct": 0.843,
+    "risk": "missing_dependency"
+   },
+   "tokens": 294
+  },
+  {
+   "step": "13.2",
+   "phase": "Phase 13",
+   "state": "pending",
+   "work": "Binary alpha frames",
+   "needs": "13.1",
+   "done_when": "Alpha correct at the viewport edge",
+   "jev": {
+    "done_when_executable": 0.36,
+    "when": "after_needs",
+    "needs_correct": 0.19,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.8585,
+    "when": "after_needs",
+    "needs_correct": 0.8577,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 286
+  },
+  {
+   "step": "13.3",
+   "phase": "Phase 13",
+   "state": "pending",
+   "work": "Picking and bounds metadata from the engine",
+   "needs": "13.2",
+   "done_when": "Hit-testing without a browser renderer",
+   "jev": {
+    "done_when_executable": 0.33,
+    "when": "after_needs",
+    "needs_correct": 0.27,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9321,
+    "when": "after_needs",
+    "needs_correct": 0.8701,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 286
+  },
+  {
+   "step": "13.4",
+   "phase": "Phase 13",
+   "state": "pending",
+   "work": "Adaptive resolution",
+   "needs": "13.2",
+   "done_when": "Degrades resolution before latency",
+   "jev": {
+    "done_when_executable": 0.19,
+    "when": "after_needs",
+    "needs_correct": 0.29,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.8356,
+    "when": "after_needs",
+    "needs_correct": 0.8306,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 279
+  },
+  {
+   "step": "13.5",
+   "phase": "Phase 13",
+   "state": "pending",
+   "work": "Browser reduced to overlays only",
+   "needs": "11.7",
+   "done_when": "Three.js draws no scene content",
+   "jev": {
+    "done_when_executable": 0.55,
+    "when": "now",
+    "needs_correct": 0.31,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.8536,
+    "when": "after_needs",
+    "needs_correct": 0.5533,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 291
+  },
+  {
+   "step": "13.6",
+   "phase": "Phase 13",
+   "state": "pending",
+   "work": "Pixel gate: viewport equals Program",
+   "needs": "4.4",
+   "done_when": "Byte-identical across the reference set",
+   "jev": {
+    "done_when_executable": 0.46,
+    "when": "after_needs",
+    "needs_correct": 0.16,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.8286,
+    "when": "after_needs",
+    "needs_correct": 0.853,
+    "risk": "missing_dependency"
+   },
+   "tokens": 291
+  },
+  {
+   "step": "13.7",
+   "phase": "Phase 13",
+   "state": "pending",
+   "work": "Approval pipeline",
+   "needs": "8.14, 11.41, 11.42, 13.6",
+   "done_when": "Changeset → headless engine render (11.41) → lint and conformance gate (11.42) → named human approval → hash-pinned revision (11.38) loadable by Playout. Only the Admin role may approve. A changeset that fails lint cannot be approved; Playout loads only `approved` revisions; the approval record names the approver and the time and is written to the JSON Lines audit trail (2.10)",
+   "jev": {
+    "done_when_executable": 0.34,
+    "when": "after_needs",
+    "needs_correct": 0.28,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9325,
+    "when": "after_needs",
+    "needs_correct": 0.8887,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 434
+  },
+  {
+   "step": "13.8",
+   "phase": "Phase 13",
+   "state": "pending",
+   "work": "Provenance in use",
+   "needs": "11.39, 13.7",
+   "done_when": "Playout refuses an asset whose licence class is incompatible with the show profile; a per-show AI-usage report is generated; an optional AI-disclosure label element is available. A fixture show profile refuses a fixture asset marked non-commercial; the report lists every model-origin asset used in a show",
+   "jev": {
+    "done_when_executable": 0.59,
+    "when": "after_needs",
+    "needs_correct": 0.5,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9224,
+    "when": "after_needs",
+    "needs_correct": 0.8727,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 351
+  },
+  {
+   "step": "14.1",
+   "phase": "Phase 14",
+   "state": "pending",
+   "work": "QUIC with rustls; mTLS",
+   "needs": "5.1",
+   "done_when": "Certificates and rotation documented",
+   "jev": {
+    "done_when_executable": 0.37,
+    "when": "now",
+    "needs_correct": 0.32,
+    "risk": "scope_too_large"
+   },
+   "laya": {
+    "done_when_executable": 0.7826,
+    "when": "after_needs",
+    "needs_correct": 0.8204,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 281
+  },
+  {
+   "step": "14.2",
+   "phase": "Phase 14",
+   "state": "pending",
+   "work": "Control plane over the remote transport",
+   "needs": "14.1",
+   "done_when": "Same messages, same semantics",
+   "jev": {
+    "done_when_executable": 0.18,
+    "when": "after_needs",
+    "needs_correct": 0.59,
+    "risk": "unclear_done_when"
+   },
+   "laya": {
+    "done_when_executable": 0.8227,
+    "when": "after_needs",
+    "needs_correct": 0.8148,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 281
+  },
+  {
+   "step": "14.3",
+   "phase": "Phase 14",
+   "state": "pending",
+   "work": "Resumable asset transfer",
+   "needs": "5.3",
+   "done_when": "Survives a disconnect mid-package",
+   "jev": {
+    "done_when_executable": 0.46,
+    "when": "now",
+    "needs_correct": 0.52,
+    "risk": "unclear_done_when"
+   },
+   "laya": {
+    "done_when_executable": 0.9172,
+    "when": "after_needs",
+    "needs_correct": 0.905,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 284
+  },
+  {
+   "step": "14.4",
+   "phase": "Phase 14",
+   "state": "pending",
+   "work": "Media codec negotiation by locality and consumer role",
+   "needs": "5.5",
+   "done_when": "Interactive and observational streams differ",
+   "jev": {
+    "done_when_executable": 0.23,
+    "when": "now",
+    "needs_correct": 0.38,
+    "risk": "unclear_done_when"
+   },
+   "laya": {
+    "done_when_executable": 0.9114,
+    "when": "after_needs",
+    "needs_correct": 0.853,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 280
+  },
+  {
+   "step": "14.5",
+   "phase": "Phase 14",
+   "state": "pending",
+   "work": "NVENC encode; VideoToolbox decode on macOS clients",
+   "needs": "14.4",
+   "done_when": "Bandwidth within a LAN budget",
+   "jev": {
+    "done_when_executable": 0.17,
+    "when": "after_needs",
+    "needs_correct": 0.42,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.7907,
+    "when": "after_needs",
+    "needs_correct": 0.8595,
+    "risk": "missing_dependency"
+   },
+   "tokens": 285
+  },
+  {
+   "step": "14.6",
+   "phase": "Phase 14",
+   "state": "pending",
+   "work": "Two engine instances by role: design and program",
+   "needs": "3.2",
+   "done_when": "Design engine structurally cannot go live",
+   "jev": {
+    "done_when_executable": 0.2,
+    "when": "now",
+    "needs_correct": 0.18,
+    "risk": "unclear_done_when"
+   },
+   "laya": {
+    "done_when_executable": 0.8543,
+    "when": "after_needs",
+    "needs_correct": 0.9051,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 284
+  },
+  {
+   "step": "14.7",
+   "phase": "Phase 14",
+   "state": "pending",
+   "work": "Build hash pinned at publish; skew warning in Playout",
+   "needs": "7.6",
+   "done_when": "Version skew is visible, not silent",
+   "jev": {
+    "done_when_executable": 0.36,
+    "when": "now",
+    "needs_correct": 0.36,
+    "risk": "unclear_done_when"
+   },
+   "laya": {
+    "done_when_executable": 0.8295,
+    "when": "after_needs",
+    "needs_correct": 0.8984,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 298
+  },
+  {
+   "step": "14.8",
+   "phase": "Phase 14",
+   "state": "pending",
+   "work": "Conformance suite passes at L1 exactly as at L0",
+   "needs": "5.6",
+   "done_when": "Same suite, remote transport",
+   "jev": {
+    "done_when_executable": 0.39,
+    "when": "after_needs",
+    "needs_correct": 0.45,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.8954,
+    "when": "after_needs",
+    "needs_correct": 0.9261,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 290
+  },
+  {
+   "step": "15.1",
+   "phase": "Phase 15",
+   "state": "pending",
+   "work": "Hardware, SDKs and lab access in hand",
+   "needs": "P.1",
+   "done_when": "Devices on a bench, SDKs licensed",
+   "jev": {
+    "done_when_executable": 0.63,
+    "when": "external",
+    "needs_correct": 0.71,
+    "risk": "external_gate"
+   },
+   "laya": {
+    "done_when_executable": 0.9172,
+    "when": "after_needs",
+    "needs_correct": 0.9529,
+    "risk": "missing_dependency"
+   },
+   "tokens": 300
+  },
+  {
+   "step": "15.2",
+   "phase": "Phase 15",
+   "state": "pending",
+   "work": "DeckLink integration via thin FFI",
+   "needs": "15.1",
+   "done_when": "C++ confined to the boundary",
+   "jev": {
+    "done_when_executable": 0.12,
+    "when": "external",
+    "needs_correct": 0.58,
+    "risk": "external_gate"
+   },
+   "laya": {
+    "done_when_executable": 0.8714,
+    "when": "after_needs",
+    "needs_correct": 0.9137,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 289
+  },
+  {
+   "step": "15.3",
+   "phase": "Phase 15",
+   "state": "pending",
+   "work": "AJA integration",
+   "needs": "15.1",
+   "done_when": "Same wrapper shape",
+   "jev": {
+    "done_when_executable": 0.12,
+    "when": "external",
+    "needs_correct": 0.57,
+    "risk": "external_gate"
+   },
+   "laya": {
+    "done_when_executable": 0.7983,
+    "when": "after_needs",
+    "needs_correct": 0.902,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 282
+  },
+  {
+   "step": "15.4",
+   "phase": "Phase 15",
+   "state": "pending",
+   "work": "Reference input and lock detection",
+   "needs": "15.2",
+   "done_when": "Lock state in capability and status",
+   "jev": {
+    "done_when_executable": 0.36,
+    "when": "external",
+    "needs_correct": 0.48,
+    "risk": "external_gate"
+   },
+   "laya": {
+    "done_when_executable": 0.9031,
+    "when": "after_needs",
+    "needs_correct": 0.851,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 285
+  },
+  {
+   "step": "15.5",
+   "phase": "Phase 15",
+   "state": "pending",
+   "work": "ProgramClock slaved to the card timebase; free-run reported",
+   "needs": "15.4",
+   "done_when": "Cadence never a function of transport",
+   "jev": {
+    "done_when_executable": 0.28,
+    "when": "after_needs",
+    "needs_correct": 0.49,
+    "risk": "external_gate"
+   },
+   "laya": {
+    "done_when_executable": 0.8594,
+    "when": "superseded",
+    "needs_correct": 0.8416,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 293
+  },
+  {
+   "step": "15.6",
+   "phase": "Phase 15",
+   "state": "pending",
+   "work": "Scheduled playback in the card timebase",
+   "needs": "15.5",
+   "done_when": "Frames presented on the reference cadence",
+   "jev": {
+    "done_when_executable": 0.61,
+    "when": "after_needs",
+    "needs_correct": 0.52,
+    "risk": "external_gate"
+   },
+   "laya": {
+    "done_when_executable": 0.936,
+    "when": "after_needs",
+    "needs_correct": 0.92,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 294
+  },
+  {
+   "step": "15.7",
+   "phase": "Phase 15",
+   "state": "pending",
+   "work": "NDI adapter certification against real receivers",
+   "needs": "15.1",
+   "done_when": "Documented certification record",
+   "jev": {
+    "done_when_executable": 0.61,
+    "when": "external",
+    "needs_correct": 0.48,
+    "risk": "external_gate"
+   },
+   "laya": {
+    "done_when_executable": 0.914,
+    "when": "after_needs",
+    "needs_correct": 0.9218,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 286
+  },
+  {
+   "step": "15.8",
+   "phase": "Phase 15",
+   "state": "pending",
+   "work": "SRT and OMT adapters",
+   "needs": "3.10",
+   "done_when": "IP output not tied to one vendor; OMT output passes a receive test",
+   "jev": {
+    "done_when_executable": 0.32,
+    "when": "external",
+    "needs_correct": 0.4,
+    "risk": "external_gate"
+   },
+   "laya": {
+    "done_when_executable": 0.9468,
+    "when": "after_needs",
+    "needs_correct": 0.9322,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 297
+  },
+  {
+   "step": "15.9",
+   "phase": "Phase 15",
+   "state": "pending",
+   "work": "8-hour nightly protocol soak",
+   "needs": "15.6",
+   "done_when": "Runs clean for a sustained period",
+   "jev": {
+    "done_when_executable": 0.14,
+    "when": "external",
+    "needs_correct": 0.35,
+    "risk": "external_gate"
+   },
+   "laya": {
+    "done_when_executable": 0.9274,
+    "when": "after_needs",
+    "needs_correct": 0.9168,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 286
+  },
+  {
+   "step": "15.10",
+   "phase": "Phase 15",
+   "state": "pending",
+   "work": "24-hour hardware release gate",
+   "needs": "15.9",
+   "done_when": "Passes on release-candidate hardware",
+   "jev": {
+    "done_when_executable": 0.41,
+    "when": "external",
+    "needs_correct": 0.36,
+    "risk": "external_gate"
+   },
+   "laya": {
+    "done_when_executable": 0.8925,
+    "when": "after_needs",
+    "needs_correct": 0.9229,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 288
+  },
+  {
+   "step": "15.11",
+   "phase": "Phase 15",
+   "state": "pending",
+   "work": "Device-loss and driver-reset recovery tests",
+   "needs": "3.12",
+   "done_when": "Restores without an unrecovered output interruption",
+   "jev": {
+    "done_when_executable": 0.34,
+    "when": "external",
+    "needs_correct": 0.33,
+    "risk": "external_gate"
+   },
+   "laya": {
+    "done_when_executable": 0.9192,
+    "when": "after_needs",
+    "needs_correct": 0.9284,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 295
+  },
+  {
+   "step": "15.12",
+   "phase": "Phase 15",
+   "state": "pending",
+   "work": "NDI 6.3 metadata: revision, asset IDs and AI-provenance flags",
+   "needs": "15.7, 11.39",
+   "done_when": "Revision and asset IDs plus AI-provenance flags are published as NDI metadata, and a receiver reads them back for a fixture frame",
+   "jev": {
+    "done_when_executable": 0.75,
+    "when": "external",
+    "needs_correct": 0.41,
+    "risk": "external_gate"
+   },
+   "laya": {
+    "done_when_executable": 0.9795,
+    "when": "after_needs",
+    "needs_correct": 0.9345,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 336
+  },
+  {
+   "step": "15.13",
+   "phase": "Phase 15",
+   "state": "pending",
+   "work": "ST 2110 / IPMX output server",
+   "needs": "14.8",
+   "done_when": "NMOS IS-04/05, with genlock and PTP owned by the output server. **Done-when not yet defined:** it must be written against the chosen hardware, and PTP's place under invariant 13 (Timing is a cable, never a software transport) settled by ADR, before this step may start",
+   "jev": {
+    "done_when_executable": 0.18,
+    "when": "external",
+    "needs_correct": 0.18,
+    "risk": "external_gate"
+   },
+   "laya": {
+    "done_when_executable": 0.8756,
+    "when": "after_needs",
+    "needs_correct": 0.8716,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 361
+  },
+  {
+   "step": "16.1",
+   "phase": "Phase 16",
+   "state": "pending",
+   "work": "Video decoder tier: FFmpeg with NVDEC",
+   "needs": "P.2",
+   "done_when": "Licence position settled first",
+   "jev": {
+    "done_when_executable": 0.11,
+    "when": "after_needs",
+    "needs_correct": 0.54,
+    "risk": "external_gate"
+   },
+   "laya": {
+    "done_when_executable": 0.7749,
+    "when": "after_needs",
+    "needs_correct": 0.8171,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 303
+  },
+  {
+   "step": "16.2",
+   "phase": "Phase 16",
+   "state": "pending",
+   "work": "VideoToolbox decode on macOS",
+   "needs": "16.1",
+   "done_when": "One trait, two backends",
+   "jev": {
+    "done_when_executable": 0.16,
+    "when": "after_needs",
+    "needs_correct": 0.4,
+    "risk": "superseded_by_direction"
+   },
+   "laya": {
+    "done_when_executable": 0.8789,
+    "when": "after_needs",
+    "needs_correct": 0.8582,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 283
+  },
+  {
+   "step": "16.3",
+   "phase": "Phase 16",
+   "state": "pending",
+   "work": "Transitions beyond cut, dual-target",
+   "needs": "3.8",
+   "done_when": "Dropped-frame behaviour certified",
+   "jev": {
+    "done_when_executable": 0.2,
+    "when": "now",
+    "needs_correct": 0.35,
+    "risk": "unclear_done_when"
+   },
+   "laya": {
+    "done_when_executable": 0.8959,
+    "when": "after_needs",
+    "needs_correct": 0.9199,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 285
+  },
+  {
+   "step": "16.4",
+   "phase": "Phase 16",
+   "state": "pending",
+   "work": "Script sandbox on rquickjs: deterministic per-scene JS",
+   "needs": "2.9, 11.36, 11.58",
+   "done_when": "CPU and memory bounded, disposable. No wall-clock access (`Date.now`, `performance.now`, timers) and no network (`fetch`, sockets); time comes only from the engine frame number and rational rate, data only through bindings, and typed APIs limit which objects a script may touch (invariant 62). A script calling a banned API is refused by name and the console (11.58) shows it; a fixture script driven only by frame number gives identical output across two runs; a script touching an object outside its declared scope is refused",
+   "jev": {
+    "done_when_executable": 0.55,
+    "when": "after_needs",
+    "needs_correct": 0.37,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.8331,
+    "when": "after_needs",
+    "needs_correct": 0.8733,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 434
+  },
+  {
+   "step": "16.5",
+   "phase": "Phase 16",
+   "state": "pending",
+   "work": "Lottie import path",
+   "needs": "7.2",
+   "done_when": "Reduces the Adobe dependency",
+   "jev": {
+    "done_when_executable": 0.08,
+    "when": "now",
+    "needs_correct": 0.44,
+    "risk": "unclear_done_when"
+   },
+   "laya": {
+    "done_when_executable": 0.7503,
+    "when": "after_needs",
+    "needs_correct": 0.918,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 280
+  },
+  {
+   "step": "16.6",
+   "phase": "Phase 16",
+   "state": "pending",
+   "work": "3D: shadows",
+   "needs": "3.7",
+   "done_when": "Separate branch, own pixel gate",
+   "jev": {
+    "done_when_executable": 0.22,
+    "when": "now",
+    "needs_correct": 0.49,
+    "risk": "unclear_done_when"
+   },
+   "laya": {
+    "done_when_executable": 0.8899,
+    "when": "after_needs",
+    "needs_correct": 0.858,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 282
+  },
+  {
+   "step": "16.7",
+   "phase": "Phase 16",
+   "state": "pending",
+   "work": "3D: transparent depth ordering",
+   "needs": "3.7",
+   "done_when": "Separate branch, own pixel gate",
+   "jev": {
+    "done_when_executable": 0.25,
+    "when": "now",
+    "needs_correct": 0.41,
+    "risk": "unclear_done_when"
+   },
+   "laya": {
+    "done_when_executable": 0.8962,
+    "when": "after_needs",
+    "needs_correct": 0.8386,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 284
+  },
+  {
+   "step": "16.8",
+   "phase": "Phase 16",
+   "state": "pending",
+   "work": "3D: camera parity in Program",
+   "needs": "13.6",
+   "done_when": "Perspective and orthographic match",
+   "jev": {
+    "done_when_executable": 0.36,
+    "when": "after_needs",
+    "needs_correct": 0.41,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.8725,
+    "when": "after_needs",
+    "needs_correct": 0.8123,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 280
+  },
+  {
+   "step": "16.9",
+   "phase": "Phase 16",
+   "state": "pending",
+   "work": "Rasteriser benchmark; Vello evaluated against the gate",
+   "needs": "4.4",
+   "done_when": "Measured on broadcast content, not demos",
+   "jev": {
+    "done_when_executable": 0.24,
+    "when": "after_needs",
+    "needs_correct": 0.25,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.8602,
+    "when": "after_needs",
+    "needs_correct": 0.9155,
+    "risk": "none"
+   },
+   "tokens": 288
+  },
+  {
+   "step": "16.10",
+   "phase": "Phase 16",
+   "state": "pending",
+   "work": "Generative asset adapters",
+   "needs": "11.39, 11.52",
+   "done_when": "Pluggable generators for images, 3D and video loops, baked offline into hashed assets with a licence class; no GPL or non-commercial model is bundled, and region-restricted models are flagged. Every generated asset carries a complete 11.39 provenance record; an adapter whose model licence class is not set is refused; nothing generative runs at Take time (invariant 63)",
+   "jev": {
+    "done_when_executable": 0.39,
+    "when": "after_needs",
+    "needs_correct": 0.56,
+    "risk": "external_gate"
+   },
+   "laya": {
+    "done_when_executable": 0.9175,
+    "when": "after_needs",
+    "needs_correct": 0.9105,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 373
+  },
+  {
+   "step": "16.11",
+   "phase": "Phase 16",
+   "state": "pending",
+   "work": "AI keyer sidecar",
+   "needs": "15.6",
+   "done_when": "Matting runs as a separate supervised process publishing fill+key on the Media plane; the engine uses the latest key that arrives in time and drops late keys (invariant 14). Killing the keyer causes no Program frame drop; the layer goes to its declared \"no key\" state and the console raises an alarm",
+   "jev": {
+    "done_when_executable": 0.6,
+    "when": "after_needs",
+    "needs_correct": 0.34,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9512,
+    "when": "now",
+    "needs_correct": 0.9188,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 339
+  },
+  {
+   "step": "16.12",
+   "phase": "Phase 16",
+   "state": "pending",
+   "work": "Gaussian splat layer",
+   "needs": "11.48, 13.6",
+   "done_when": "`KHR_gaussian_splatting` glTF loads with deterministic sorting. Two runs give identical golden frames; the frame-time budget holds at 1080p",
+   "jev": {
+    "done_when_executable": 0.6,
+    "when": "after_needs",
+    "needs_correct": 0.23,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.7485,
+    "when": "after_needs",
+    "needs_correct": 0.908,
+    "risk": "missing_dependency"
+   },
+   "tokens": 332
+  },
+  {
+   "step": "16.13",
+   "phase": "Phase 16",
+   "state": "pending",
+   "work": "Interchange: OpenUSD/MaterialX import, OpenTimelineIO export",
+   "needs": "11.50, 11.53",
+   "done_when": "OpenUSD/MaterialX import maps onto 11.50's unified material, and sequencer timelines export as OpenTimelineIO. **Done-when not yet defined:** it must be written before this step may start",
+   "jev": {
+    "done_when_executable": 0.22,
+    "when": "rewrite_first",
+    "needs_correct": 0.44,
+    "risk": "unclear_done_when"
+   },
+   "laya": {
+    "done_when_executable": 0.8768,
+    "when": "after_needs",
+    "needs_correct": 0.7317,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 353
+  },
+  {
+   "step": "17.1",
+   "phase": "Phase 17",
+   "state": "pending",
+   "work": "Reproduction test on an already-shipped esports pack",
+   "needs": "8.13",
+   "done_when": "Blind comparison; designer states faster or slower",
+   "jev": {
+    "done_when_executable": 0.22,
+    "when": "now",
+    "needs_correct": 0.21,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9575,
+    "when": "after_needs",
+    "needs_correct": 0.8896,
+    "risk": "none"
+   },
+   "tokens": 297
+  },
+  {
+   "step": "17.2",
+   "phase": "Phase 17",
+   "state": "pending",
+   "work": "Brand constraints from project variables inside the loop",
+   "needs": "11.40",
+   "done_when": "Agent works in the brand-and-renderer overlap, using 11.40 project variables (decision Q7)",
+   "jev": {
+    "done_when_executable": 0.13,
+    "when": "after_needs",
+    "needs_correct": 0.53,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.931,
+    "when": "after_needs",
+    "needs_correct": 0.9363,
+    "risk": "missing_dependency"
+   },
+   "tokens": 315
+  },
+  {
+   "step": "17.3",
+   "phase": "Phase 17",
+   "state": "pending",
+   "work": "Motion preset library authored by a designer",
+   "needs": "11.15",
+   "done_when": "10–15 presets covering the common builds",
+   "jev": {
+    "done_when_executable": 0.41,
+    "when": "now",
+    "needs_correct": 0.39,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.8216,
+    "when": "after_needs",
+    "needs_correct": 0.8875,
+    "risk": "missing_dependency"
+   },
+   "tokens": 302
+  },
+  {
+   "step": "17.4",
+   "phase": "Phase 17",
+   "state": "pending",
+   "work": "Scene assembly agent over MCP: constrained generation",
+   "needs": "8.9, 11.40, 11.54",
+   "done_when": "Batch edits arrive as one undo entry. The agent picks registry components (11.40), fills typed slots (11.54), binds data and adjusts tokens only within allowed ranges; it never invents free-form geometry",
+   "jev": {
+    "done_when_executable": 0.41,
+    "when": "after_needs",
+    "needs_correct": 0.5,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9397,
+    "when": "after_needs",
+    "needs_correct": 0.9542,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 368
+  },
+  {
+   "step": "17.5",
+   "phase": "Phase 17",
+   "state": "pending",
+   "work": "Correction capture from the very first draft",
+   "needs": "7.6",
+   "done_when": "Every generated-versus-shipped diff stored",
+   "jev": {
+    "done_when_executable": 0.31,
+    "when": "now",
+    "needs_correct": 0.14,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9427,
+    "when": "after_needs",
+    "needs_correct": 0.9435,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 310
+  },
+  {
+   "step": "17.6",
+   "phase": "Phase 17",
+   "state": "pending",
+   "work": "Visual critique loop",
+   "needs": "8.9",
+   "done_when": "With-loop beats without-loop in blind ranking",
+   "jev": {
+    "done_when_executable": 0.33,
+    "when": "now",
+    "needs_correct": 0.34,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.8985,
+    "when": "after_needs",
+    "needs_correct": 0.9508,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 295
+  },
+  {
+   "step": "17.7",
+   "phase": "Phase 17",
+   "state": "pending",
+   "work": "Batch generation from a template list",
+   "needs": "17.4, 13.7",
+   "done_when": "A full tournament pack generated as drafts; every variant passes or fails the 13.7 gate deterministically, and no variant reaches Playout without approval",
+   "jev": {
+    "done_when_executable": 0.4,
+    "when": "after_needs",
+    "needs_correct": 0.32,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9678,
+    "when": "now",
+    "needs_correct": 0.9729,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 333
+  },
+  {
+   "step": "17.8",
+   "phase": "Phase 17",
+   "state": "pending",
+   "work": "Zero-edit publish rate reported per class",
+   "needs": "17.7",
+   "done_when": "Reportable metric, per tournament",
+   "jev": {
+    "done_when_executable": 0.24,
+    "when": "after_needs",
+    "needs_correct": 0.38,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9571,
+    "when": "after_needs",
+    "needs_correct": 0.9266,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 296
+  },
+  {
+   "step": "17.9",
+   "phase": "Phase 17",
+   "state": "pending",
+   "work": "Per-class graduation with a named sign-off owner",
+   "needs": "17.8",
+   "done_when": "One class auto-publishing, with an owner",
+   "jev": {
+    "done_when_executable": 0.26,
+    "when": "after_needs",
+    "needs_correct": 0.4,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9002,
+    "when": "after_needs",
+    "needs_correct": 0.8218,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 304
+  },
+  {
+   "step": "18.1",
+   "phase": "Phase 18",
+   "state": "pending",
+   "work": "Figma reference corpus",
+   "needs": "P.3",
+   "done_when": "At least 20 real broadcast files (lower thirds, scorebugs, full-frames, tickers, vertical social), each with Figma's own PNG render at 1× and 2× committed as the reference",
+   "jev": {
+    "done_when_executable": 0.76,
+    "when": "after_needs",
+    "needs_correct": 0.13,
+    "risk": "external_gate"
+   },
+   "laya": {
+    "done_when_executable": 0.9495,
+    "when": "after_needs",
+    "needs_correct": 0.9131,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 484
+  },
+  {
+   "step": "18.2",
+   "phase": "Phase 18",
+   "state": "pending",
+   "work": "Figma REST ingest with the source retained",
+   "needs": "7.2, 11.39",
+   "done_when": "A file key and a token stored in the OS keychain (never in a scene, package or log) fetch the document, components, styles, variables and image fills, with `geometry=paths` and no recursion depth limit; the raw response is stored content-hashed beside the template, so a re-import can be diffed and an offline re-run needs no network; every imported asset carries an 11.39 provenance record",
+   "jev": {
+    "done_when_executable": 0.62,
+    "when": "now",
+    "needs_correct": 0.5,
+    "risk": "external_gate"
+   },
+   "laya": {
+    "done_when_executable": 0.967,
+    "when": "after_needs",
+    "needs_correct": 0.951,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 549
+  },
+  {
+   "step": "18.3",
+   "phase": "Phase 18",
+   "state": "pending",
+   "work": "Scene boundaries: one Figma frame is one scene",
+   "needs": "18.2, 11.29, 11.47",
+   "done_when": "Each top-level frame the user selects becomes exactly one scene. Its resolution is the frame's width × height, its origin is the frame's top-left, and its background is the frame fill. `clipsContent` is honoured as an 11.47 nested clip composition: content outside a clipping frame is kept but clipped, and never widens the scene. Nothing is re-parented across scenes. Nested frames stay nested groups with their own bounds and clipping. Multi-frame import produces N independent scene sessions",
+   "jev": {
+    "done_when_executable": 0.68,
+    "when": "after_needs",
+    "needs_correct": 0.54,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.966,
+    "when": "after_needs",
+    "needs_correct": 0.9749,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 600
+  },
+  {
+   "step": "18.4",
+   "phase": "Phase 18",
+   "state": "pending",
+   "work": "Node and property coverage matrix",
+   "needs": "18.3, 1.2, 1.3",
+   "done_when": "Every Figma node type (frame, group, section, rectangle, ellipse, polygon, star, line, vector, boolean operation, text, component, instance, image fill) and property (per-corner radius, strokes with align/dash/cap/join, solid, linear, radial, angular and diamond gradients, image fill modes and crop, drop and inner shadow, layer and background blur, blend modes, opacity, masks, auto-layout resolved to absolute positions, constraints recorded) has a row in a committed coverage table marked **mapped**, **substituted (named)** or **refused (named)**, and each row has a test. Import never stops on an unsupported node: it becomes a named finding and the walk continues",
+   "jev": {
+    "done_when_executable": 0.61,
+    "when": "after_needs",
+    "needs_correct": 0.37,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9792,
+    "when": "now",
+    "needs_correct": 0.9615,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 626
+  },
+  {
+   "step": "18.5",
+   "phase": "Phase 18",
+   "state": "pending",
+   "work": "Text fidelity",
+   "needs": "18.4, 11.13, 3.6",
+   "done_when": "Per-character style runs, line height, letter spacing, paragraph spacing, alignment, auto-resize modes and text case survive import. Every Figma font is resolved through 11.13 ingest; a font that cannot be resolved blocks the import by name instead of falling back",
+   "jev": {
+    "done_when_executable": 0.6,
+    "when": "after_needs",
+    "needs_correct": 0.4,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.916,
+    "when": "now",
+    "needs_correct": 0.9241,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 527
+  },
+  {
+   "step": "18.6",
+   "phase": "Phase 18",
+   "state": "pending",
+   "work": "Components, instances and variants",
+   "needs": "18.4",
+   "done_when": "Components import once and instances reference them with their overrides applied. Variants are kept as named alternatives, not flattened copies. An instance's override that the engine cannot express is named in the report",
+   "jev": {
+    "done_when_executable": 0.54,
+    "when": "after_needs",
+    "needs_correct": 0.39,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9123,
+    "when": "now",
+    "needs_correct": 0.9352,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 473
+  },
+  {
+   "step": "18.7",
+   "phase": "Phase 18",
+   "state": "pending",
+   "work": "Variables and styles to project variables",
+   "needs": "11.40, 18.2",
+   "done_when": "Figma colour, number and string variables and published styles land as 11.40 project variables with provenance, and imported objects reference them instead of copying their values, so a brand change flows through",
+   "jev": {
+    "done_when_executable": 0.29,
+    "when": "after_needs",
+    "needs_correct": 0.71,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.8915,
+    "when": "after_needs",
+    "needs_correct": 0.9398,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 496
+  },
+  {
+   "step": "18.8",
+   "phase": "Phase 18",
+   "state": "pending",
+   "work": "Fidelity gate on the corpus",
+   "needs": "18.1, 18.4, 7.3, 4.4",
+   "done_when": "Every corpus frame's engine render is diffed against Figma's PNG under the 4.4 threshold and the diff is stored with the template (7.3). A regression fails CI. The target is 100% of corpus frames passing with zero unnamed substitutions",
+   "jev": {
+    "done_when_executable": 0.54,
+    "when": "after_needs",
+    "needs_correct": 0.42,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9484,
+    "when": "after_needs",
+    "needs_correct": 0.8356,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 545
+  },
+  {
+   "step": "18.9",
+   "phase": "Phase 18",
+   "state": "pending",
+   "work": "Re-import updates in place",
+   "needs": "18.3, 11.20, 11.19",
+   "done_when": "Re-importing the same file updates the existing scenes in place, keyed by the Figma node id. Animation channels, phases, bindings and control fields on unchanged nodes are preserved. A deleted node that still carried animation or bindings is reported by name, not dropped silently",
+   "jev": {
+    "done_when_executable": 0.66,
+    "when": "after_needs",
+    "needs_correct": 0.25,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9345,
+    "when": "now",
+    "needs_correct": 0.9445,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 530
+  },
+  {
+   "step": "18.10",
+   "phase": "Phase 18",
+   "state": "pending",
+   "work": "Import UI for Figma",
+   "needs": "18.3, 11.17",
+   "done_when": "Paste a Figma file or frame link, pick frames from thumbnails, see the coverage and substitution report before confirming, and land in one scene tab per frame",
+   "jev": {
+    "done_when_executable": 0.59,
+    "when": "after_needs",
+    "needs_correct": 0.28,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9632,
+    "when": "after_needs",
+    "needs_correct": 0.9483,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 490
+  },
+  {
+   "step": "19.1",
+   "phase": "Phase 19",
+   "state": "pending",
+   "work": "ADR-0004: Data Server boundaries",
+   "needs": "1.9, 5.1",
+   "done_when": "Accepted ADR fixing: process model (desktop app plus headless service mode), transport (reuses the 5.x control plane and gx1 tokens, 2.9), who resolves a binding at take time (Playout, never the engine), how values reach the engine (as data carried with the take intent), revision pinning of data, and failure policy per field (refuse, hold last good, or warn)",
+   "jev": {
+    "done_when_executable": 0.31,
+    "when": "now",
+    "needs_correct": 0.47,
+    "risk": "scope_too_large"
+   },
+   "laya": {
+    "done_when_executable": 0.9417,
+    "when": "after_needs",
+    "needs_correct": 0.9225,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 537
+  },
+  {
+   "step": "19.2",
+   "phase": "Phase 19",
+   "state": "pending",
+   "work": "Data contract",
+   "needs": "19.1",
+   "done_when": "`DataSource`, `DataTable`, `DataRecord` and typed `DataField` values, plus a source revision and timestamp and a staleness state, defined in Rust (`gx-contracts`) with TS generated; round-trips both ways; a schema change is a named event, never silent",
+   "jev": {
+    "done_when_executable": 0.3,
+    "when": "after_needs",
+    "needs_correct": 0.71,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9157,
+    "when": "after_needs",
+    "needs_correct": 0.9281,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 480
+  },
+  {
+   "step": "19.3",
+   "phase": "Phase 19",
+   "state": "pending",
+   "work": "Standalone Data Server app",
+   "needs": "19.2, 11.1",
+   "done_when": "Its own Tauri 2 executable, installable separately from Editor and Playout. It lists sources, their status, last update, error and sample rows, and also runs headless as a service on a playout machine",
+   "jev": {
+    "done_when_executable": 0.56,
+    "when": "after_needs",
+    "needs_correct": 0.23,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9223,
+    "when": "after_needs",
+    "needs_correct": 0.8921,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 485
+  },
+  {
+   "step": "19.4",
+   "phase": "Phase 19",
+   "state": "pending",
+   "work": "Connectors: files and web",
+   "needs": "19.2",
+   "done_when": "CSV, Excel (xlsx), JSON and XML from a file, HTTP (with a poll interval) or WebSocket, RSS/Atom, and manually edited tables. Each connector detects schema drift and names it, and a file watch uses 2.5",
+   "jev": {
+    "done_when_executable": 0.23,
+    "when": "after_needs",
+    "needs_correct": 0.39,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9189,
+    "when": "after_needs",
+    "needs_correct": 0.8753,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 470
+  },
+  {
+   "step": "19.5",
+   "phase": "Phase 19",
+   "state": "pending",
+   "work": "Connectors: databases and sheets",
+   "needs": "19.4",
+   "done_when": "SQL through PostgreSQL, MySQL, SQL Server and ODBC; Google Sheets. Source credentials live in the OS keychain and never appear in scenes, packages, logs or the MCP surface",
+   "jev": {
+    "done_when_executable": 0.49,
+    "when": "after_needs",
+    "needs_correct": 0.28,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.881,
+    "when": "after_needs",
+    "needs_correct": 0.7941,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 458
+  },
+  {
+   "step": "19.6",
+   "phase": "Phase 19",
+   "state": "pending",
+   "work": "Many sources, change propagation and staleness",
+   "needs": "19.4",
+   "done_when": "Multiple sources run concurrently. Subscribers get a snapshot then ordered deltas. The last good value is retained, and staleness past a source's declared limit is surfaced to every subscriber (never silently stale). A deliberately stalled fixture feed produces its declared 19.1 state (hold last good or refuse the update), never a guessed value. Reconnect resumes from a revision without a full reload",
+   "jev": {
+    "done_when_executable": 0.51,
+    "when": "after_needs",
+    "needs_correct": 0.35,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9659,
+    "when": "after_needs",
+    "needs_correct": 0.9468,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 503
+  },
+  {
+   "step": "19.7",
+   "phase": "Phase 19",
+   "state": "pending",
+   "work": "Editor reads the Data Server",
+   "needs": "19.6, 11.19, 8.6",
+   "done_when": "The Data binding panel browses sources, tables and fields from a running server; binding a property to a server field writes a portable reference, not the value; sample data for preview is a pinned snapshot, so a scene previews offline",
+   "jev": {
+    "done_when_executable": 0.59,
+    "when": "after_needs",
+    "needs_correct": 0.36,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.8895,
+    "when": "after_needs",
+    "needs_correct": 0.8109,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 499
+  },
+  {
+   "step": "19.8",
+   "phase": "Phase 19",
+   "state": "pending",
+   "work": "Playout reads the Data Server",
+   "needs": "19.6, 6.2, 6.3",
+   "done_when": "At cue/take, Playout resolves each bound field from the server and sends the values with the intent. The committed frame records the data revision it used. A missing or stale field follows the 19.1 policy and names the field; a feed value whose type does not match the bound field is refused by name. Output is never blocked on a slow source without saying so",
+   "jev": {
+    "done_when_executable": 0.31,
+    "when": "after_needs",
+    "needs_correct": 0.33,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9291,
+    "when": "after_needs",
+    "needs_correct": 0.9164,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 542
+  },
+  {
+   "step": "19.9",
+   "phase": "Phase 19",
+   "state": "pending",
+   "work": "Data Server soak and failure tests",
+   "needs": "19.8",
+   "done_when": "Eight hours with at least 20 sources at mixed update rates, source outages, server restarts and network loss; zero silent staleness and zero takes rendered with unrecorded data",
+   "jev": {
+    "done_when_executable": 0.62,
+    "when": "after_needs",
+    "needs_correct": 0.38,
+    "risk": "missing_dependency"
+   },
+   "laya": {
+    "done_when_executable": 0.9939,
+    "when": "after_needs",
+    "needs_correct": 0.9698,
+    "risk": "unclear_done_when"
+   },
+   "tokens": 460
+  },
+  {
+   "step": "19.10",
+   "phase": "Phase 19",
+   "state": "pending",
+   "work": "Live esports data and an AI suggestion lane",
+   "needs": "19.8, 11.55",
+   "done_when": "Esports feeds (GRID or others) ingest into a typed, timestamped model with deterministic triggers; data reaches the engine only as Control-plane intent. Suggestions need producer confirmation unless their class is pre-approved. Replaying a recorded feed produces the same trigger sequence on every run; a suggestion never changes Program without a confirm action or a pre-approved class",
+   "jev": {
+    "done_when_executable": 0.36,
+    "when": "after_needs",
+    "needs_correct": 0.39,
+    "risk": "scope_too_large"
+   },
+   "laya": {
+    "done_when_executable": 0.9381,
+    "when": "after_needs",
+    "needs_correct": 0.9339,
+    "risk": "superseded_by_direction"
+   },
+   "tokens": 523
+  }
+ ],
+ "phases": [
+  {
+   "phase": "Phase P",
+   "open": [
+    "P.1",
+    "P.2",
+    "P.3"
+   ],
+   "jev": {
+    "order_ok": 0.61,
+    "first_row": "P.1"
+   },
+   "laya": {
+    "order_ok": 0.913,
+    "first_row": "P.1"
+   },
+   "tokens": 389
+  },
+  {
+   "phase": "Phase 0",
+   "open": [
+    "0.3",
+    "0.4"
+   ],
+   "jev": {
+    "order_ok": 0.77,
+    "first_row": "0.3"
+   },
+   "laya": {
+    "order_ok": 0.9545,
+    "first_row": "0.3"
+   },
+   "tokens": 310
+  },
+  {
+   "phase": "Phase 3",
+   "open": [
+    "3.17",
+    "3.18",
+    "3.19",
+    "3.21"
+   ],
+   "jev": {
+    "order_ok": 0.45,
+    "first_row": "3.17"
+   },
+   "laya": {
+    "order_ok": 0.9622,
+    "first_row": "3.19"
+   },
+   "tokens": 835
+  },
+  {
+   "phase": "Phase 4",
+   "open": [
+    "4.5"
+   ],
+   "jev": {
+    "order_ok": 0.86,
+    "first_row": "4.5"
+   },
+   "laya": {
+    "order_ok": 0.7273,
+    "first_row": "4.5"
+   },
+   "tokens": 269
+  },
+  {
+   "phase": "Phase 7",
+   "open": [
+    "7.3"
+   ],
+   "jev": {
+    "order_ok": 0.77,
+    "first_row": "7.3"
+   },
+   "laya": {
+    "order_ok": 0.3099,
+    "first_row": "7.3"
+   },
+   "tokens": 263
+  },
+  {
+   "phase": "Phase 8",
+   "open": [
+    "8.1",
+    "8.12",
+    "8.14"
+   ],
+   "jev": {
+    "order_ok": 0.52,
+    "first_row": "8.1"
+   },
+   "laya": {
+    "order_ok": 0.9213,
+    "first_row": "8.14"
+   },
+   "tokens": 550
+  },
+  {
+   "phase": "Phase 9",
+   "open": [
+    "9.1",
+    "9.2",
+    "9.3",
+    "9.5",
+    "9.7"
+   ],
+   "jev": {
+    "order_ok": 0.39,
+    "first_row": "9.1"
+   },
+   "laya": {
+    "order_ok": 0.8982,
+    "first_row": "9.3"
+   },
+   "tokens": 596
+  },
+  {
+   "phase": "Phase 11",
+   "open": [
+    "11.1",
+    "11.2",
+    "11.3",
+    "11.30",
+    "11.31",
+    "11.32",
+    "11.33",
+    "11.34",
+    "11.35",
+    "11.40",
+    "11.42",
+    "11.43",
+    "11.44",
+    "11.45",
+    "11.46",
+    "11.47",
+    "11.48",
+    "11.49",
+    "11.50",
+    "11.51",
+    "11.52",
+    "11.53",
+    "11.54",
+    "11.55",
+    "11.56",
+    "11.57",
+    "11.58",
+    "11.59",
+    "11.60",
+    "11.61",
+    "11.62",
+    "11.65",
+    "11.66"
+   ],
+   "jev": {
+    "order_ok": 0.15,
+    "first_row": "11.1"
+   },
+   "laya": {
+    "order_ok": 0.9726,
+    "first_row": "11.30"
+   },
+   "tokens": 5329
+  },
+  {
+   "phase": "Phase 12",
+   "open": [
+    "12.1",
+    "12.2",
+    "12.3",
+    "12.5",
+    "12.8",
+    "12.9",
+    "12.10",
+    "12.11"
+   ],
+   "jev": {
+    "order_ok": 0.3,
+    "first_row": "12.1"
+   },
+   "laya": {
+    "order_ok": 0.9344,
+    "first_row": "12.11"
+   },
+   "tokens": 1243
+  },
+  {
+   "phase": "Phase 13",
+   "open": [
+    "13.1",
+    "13.2",
+    "13.3",
+    "13.4",
+    "13.5",
+    "13.6",
+    "13.7",
+    "13.8"
+   ],
+   "jev": {
+    "order_ok": 0.5,
+    "first_row": "13.1"
+   },
+   "laya": {
+    "order_ok": 0.7664,
+    "first_row": "13.7"
+   },
+   "tokens": 770
+  },
+  {
+   "phase": "Phase 14",
+   "open": [
+    "14.1",
+    "14.2",
+    "14.3",
+    "14.4",
+    "14.5",
+    "14.6",
+    "14.7",
+    "14.8"
+   ],
+   "jev": {
+    "order_ok": 0.42,
+    "first_row": "14.1"
+   },
+   "laya": {
+    "order_ok": 0.9124,
+    "first_row": "14.8"
+   },
+   "tokens": 608
+  },
+  {
+   "phase": "Phase 15",
+   "open": [
+    "15.1",
+    "15.2",
+    "15.3",
+    "15.4",
+    "15.5",
+    "15.6",
+    "15.7",
+    "15.8",
+    "15.9",
+    "15.10",
+    "15.11",
+    "15.12",
+    "15.13"
+   ],
+   "jev": {
+    "order_ok": 0.34,
+    "first_row": "15.1"
+   },
+   "laya": {
+    "order_ok": 0.6884,
+    "first_row": "15.1"
+   },
+   "tokens": 977
+  },
+  {
+   "phase": "Phase 16",
+   "open": [
+    "16.1",
+    "16.2",
+    "16.3",
+    "16.4",
+    "16.5",
+    "16.6",
+    "16.7",
+    "16.8",
+    "16.9",
+    "16.10",
+    "16.11",
+    "16.12",
+    "16.13"
+   ],
+   "jev": {
+    "order_ok": 0.25,
+    "first_row": "16.1"
+   },
+   "laya": {
+    "order_ok": 0.7823,
+    "first_row": "16.7"
+   },
+   "tokens": 1188
+  },
+  {
+   "phase": "Phase 17",
+   "open": [
+    "17.1",
+    "17.2",
+    "17.3",
+    "17.4",
+    "17.5",
+    "17.6",
+    "17.7",
+    "17.8",
+    "17.9"
+   ],
+   "jev": {
+    "order_ok": 0.45,
+    "first_row": "17.1"
+   },
+   "laya": {
+    "order_ok": 0.9288,
+    "first_row": "17.9"
+   },
+   "tokens": 795
+  },
+  {
+   "phase": "Phase 18",
+   "open": [
+    "18.1",
+    "18.2",
+    "18.3",
+    "18.4",
+    "18.5",
+    "18.6",
+    "18.7",
+    "18.8",
+    "18.9",
+    "18.10"
+   ],
+   "jev": {
+    "order_ok": 0.65,
+    "first_row": "18.1"
+   },
+   "laya": {
+    "order_ok": 0.934,
+    "first_row": "18.9"
+   },
+   "tokens": 1550
+  },
+  {
+   "phase": "Phase 19",
+   "open": [
+    "19.1",
+    "19.2",
+    "19.3",
+    "19.4",
+    "19.5",
+    "19.6",
+    "19.7",
+    "19.8",
+    "19.9",
+    "19.10"
+   ],
+   "jev": {
+    "order_ok": 0.7,
+    "first_row": "19.1"
+   },
+   "laya": {
+    "order_ok": 0.953,
+    "first_row": "19.9"
+   },
+   "tokens": 1404
+  }
+ ]
+}

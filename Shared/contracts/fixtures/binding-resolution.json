@@ -1,0 +1,234 @@
+{
+  "$comment": "Shared answers for the two binding resolvers (build plan 0.9): gx_contracts::bindings (Rust, engine and MCP) and Editor/src/bindings.ts (the preview). Each case is a scene; `issues` is exactly what binding_issues / sceneBindingIssues must report, in order (objects in document order, properties by name) and wording; `resolved` lists the bound values resolve_scene_bindings / resolveSceneBindings must put on each object when `issues` is empty. A case with issues must refuse resolution on both sides. Read by Shared/contracts/tests/binding_fixture.rs and Editor/tests/binding-fixture.test.ts.",
+  "cases": [
+    {
+      "name": "every bindable kind applies: text, image asset, number, boolean and constrained numbers",
+      "scene": {
+        "id": "binding-fixture",
+        "name": "Binding fixture",
+        "version": 3,
+        "workingColorSpace": "srgb",
+        "canvas": { "width": 1920, "height": 1080, "frameRate": { "num": 50, "den": 1 } },
+        "timeline": { "durationFrames": 1, "channels": [] },
+        "dataContext": {
+          "match": {
+            "headline": "Falcons lead",
+            "home": { "crest": "home-crest" },
+            "position": { "x": 640, "y": 72 },
+            "visible": false,
+            "scale": 2,
+            "fade": 0.5
+          },
+          "teams": [{ "name": "Falcons" }, { "name": "Owls" }]
+        },
+        "assets": [
+          { "assetId": "home-crest", "name": "Home crest", "kind": "image", "path": "home.png", "mimeType": "image/png" },
+          { "assetId": "inter", "name": "Inter", "kind": "font", "path": "fonts/Inter-Regular.ttf" }
+        ],
+        "fonts": [],
+        "materials": [],
+        "objects": [
+          {
+            "type": "text", "id": "headline", "name": "Headline", "x": 10, "y": 20, "width": 600, "height": 90,
+            "text": "Authored headline", "fontId": "inter", "size": 48,
+            "bindings": { "text": "teams.1.name", "x": "match.position.x", "y": "match.position.y" }
+          },
+          {
+            "type": "image", "id": "crest", "name": "Crest", "assetId": "away-crest", "fit": "contain",
+            "bindings": { "assetId": "match.home.crest", "visible": "match.visible" }
+          },
+          {
+            "type": "rect", "id": "bar", "name": "Bar", "width": 100, "height": 50,
+            "bindings": { "scaleX": "match.scale", "width": "match.position.x", "opacity": "match.fade", "zDepth": "match.position.y" }
+          }
+        ]
+      },
+      "issues": [],
+      "resolved": {
+        "headline": { "text": "Owls", "x": 640, "y": 72 },
+        "crest": { "assetId": "home-crest", "visible": false },
+        "bar": { "scaleX": 2, "width": 640, "opacity": 0.5, "zDepth": 72 }
+      }
+    },
+    {
+      "name": "a value of the wrong type is named with the property label and the type found",
+      "scene": {
+        "id": "binding-fixture",
+        "name": "Binding fixture",
+        "version": 3,
+        "workingColorSpace": "srgb",
+        "canvas": { "width": 1920, "height": 1080, "frameRate": { "num": 50, "den": 1 } },
+        "timeline": { "durationFrames": 1, "channels": [] },
+        "dataContext": {
+          "match": { "headline": "Falcons lead", "home": { "crest": "home-crest" }, "position": { "x": 640 }, "empty": null },
+          "teams": [{ "name": "Falcons" }]
+        },
+        "assets": [
+          { "assetId": "home-crest", "name": "Home crest", "kind": "image", "path": "home.png", "mimeType": "image/png" }
+        ],
+        "fonts": [],
+        "materials": [],
+        "objects": [
+          {
+            "type": "text", "id": "headline", "name": "Headline", "text": "Authored headline", "fontId": "inter", "size": 48,
+            "bindings": { "text": "match.position.x", "x": "match.headline" }
+          },
+          {
+            "type": "image", "id": "crest", "name": "Crest", "assetId": "home-crest",
+            "bindings": { "visible": "match.headline" }
+          },
+          {
+            "type": "rect", "id": "bar", "name": "Bar",
+            "bindings": { "x": "match.home", "y": "teams", "opacity": "match.empty" }
+          }
+        ]
+      },
+      "issues": [
+        { "objectId": "headline", "property": "text", "path": "match.position.x", "detail": "match.position.x is number; Text requires string" },
+        { "objectId": "headline", "property": "x", "path": "match.headline", "detail": "match.headline is string; X requires number" },
+        { "objectId": "crest", "property": "visible", "path": "match.headline", "detail": "match.headline is string; Visible requires boolean" },
+        { "objectId": "bar", "property": "opacity", "path": "match.empty", "detail": "match.empty is null; Opacity requires number" },
+        { "objectId": "bar", "property": "x", "path": "match.home", "detail": "match.home is object; X requires number" },
+        { "objectId": "bar", "property": "y", "path": "teams", "detail": "teams is object; Y requires number" }
+      ]
+    },
+    {
+      "name": "an unbindable property and a non-string path are named; the authored value stays",
+      "scene": {
+        "id": "binding-fixture",
+        "name": "Binding fixture",
+        "version": 3,
+        "workingColorSpace": "srgb",
+        "canvas": { "width": 1920, "height": 1080, "frameRate": { "num": 50, "den": 1 } },
+        "timeline": { "durationFrames": 1, "channels": [] },
+        "dataContext": { "match": { "headline": "Falcons lead" } },
+        "assets": [
+          { "assetId": "home-crest", "name": "Home crest", "kind": "image", "path": "home.png", "mimeType": "image/png" }
+        ],
+        "fonts": [],
+        "materials": [],
+        "objects": [
+          {
+            "type": "text", "id": "headline", "name": "Headline", "text": "Authored headline", "fontId": "inter", "size": 48,
+            "bindings": { "text": 42, "madeUp": "match.headline" }
+          },
+          {
+            "type": "image", "id": "crest", "name": "Crest", "assetId": "home-crest",
+            "bindings": { "assetId": true }
+          },
+          {
+            "type": "rect", "id": "bar", "name": "Bar",
+            "bindings": { "text": "match.headline" }
+          }
+        ]
+      },
+      "issues": [
+        { "objectId": "headline", "property": "madeUp", "path": "match.headline", "detail": "madeUp is not a bindable property of text" },
+        { "objectId": "headline", "property": "text", "path": "42", "detail": "text binding on headline must be a string path" },
+        { "objectId": "crest", "property": "assetId", "path": "true", "detail": "assetId binding on crest must be a string path" },
+        { "objectId": "bar", "property": "text", "path": "match.headline", "detail": "text is not a bindable property of rect" }
+      ]
+    },
+    {
+      "name": "paths the grammar refuses or the data cannot walk are named, segment by segment",
+      "scene": {
+        "id": "binding-fixture",
+        "name": "Binding fixture",
+        "version": 3,
+        "workingColorSpace": "srgb",
+        "canvas": { "width": 1920, "height": 1080, "frameRate": { "num": 50, "den": 1 } },
+        "timeline": { "durationFrames": 1, "channels": [] },
+        "dataContext": {
+          "match": { "headline": "Falcons lead", "empty": null },
+          "teams": [{ "name": "Falcons" }, { "name": "Owls" }]
+        },
+        "assets": [],
+        "fonts": [],
+        "materials": [],
+        "objects": [
+          {
+            "type": "rect", "id": "bar", "name": "Bar",
+            "bindings": {
+              "x": "",
+              "y": "match..x",
+              "width": "match.__proto__.x",
+              "height": "nowhere",
+              "opacity": "match.missing",
+              "rotation": "teams.name",
+              "rotationX": "teams.5.name",
+              "rotationY": "match.headline.length",
+              "scaleX": "match.empty.x",
+              "scaleY": "teams.01"
+            }
+          }
+        ]
+      },
+      "issues": [
+        { "objectId": "bar", "property": "height", "path": "nowhere", "detail": "nowhere is absent from the scene data context" },
+        { "objectId": "bar", "property": "opacity", "path": "match.missing", "detail": "match.missing is absent from the scene data context" },
+        { "objectId": "bar", "property": "rotation", "path": "teams.name", "detail": "teams.name addresses array name by a non-index" },
+        { "objectId": "bar", "property": "rotationX", "path": "teams.5.name", "detail": "teams.5.name has no value at index 5" },
+        { "objectId": "bar", "property": "rotationY", "path": "match.headline.length", "detail": "match.headline.length continues through a string value" },
+        { "objectId": "bar", "property": "scaleX", "path": "match.empty.x", "detail": "match.empty.x continues through a object value" },
+        { "objectId": "bar", "property": "scaleY", "path": "teams.01", "detail": "binding path segment \"01\" is invalid" },
+        { "objectId": "bar", "property": "width", "path": "match.__proto__.x", "detail": "binding path segment \"__proto__\" is invalid" },
+        { "objectId": "bar", "property": "x", "path": "", "detail": "binding path is empty" },
+        { "objectId": "bar", "property": "y", "path": "match..x", "detail": "binding path segment \"\" is invalid" }
+      ]
+    },
+    {
+      "name": "numeric ranges: non-zero scale, non-negative size, opacity within 0 and 1",
+      "scene": {
+        "id": "binding-fixture",
+        "name": "Binding fixture",
+        "version": 3,
+        "workingColorSpace": "srgb",
+        "canvas": { "width": 1920, "height": 1080, "frameRate": { "num": 50, "den": 1 } },
+        "timeline": { "durationFrames": 1, "channels": [] },
+        "dataContext": { "match": { "zero": 0, "negative": -1, "scale": 2 } },
+        "assets": [],
+        "fonts": [],
+        "materials": [],
+        "objects": [
+          {
+            "type": "rect", "id": "bar", "name": "Bar",
+            "bindings": { "scaleX": "match.zero", "scaleZ": "match.zero", "width": "match.negative", "height": "match.negative", "opacity": "match.scale" }
+          }
+        ]
+      },
+      "issues": [
+        { "objectId": "bar", "property": "height", "path": "match.negative", "detail": "match.negative must be zero or greater" },
+        { "objectId": "bar", "property": "opacity", "path": "match.scale", "detail": "match.scale must be between 0 and 1" },
+        { "objectId": "bar", "property": "scaleX", "path": "match.zero", "detail": "match.zero must be non-zero" },
+        { "objectId": "bar", "property": "scaleZ", "path": "match.zero", "detail": "match.zero must be non-zero" },
+        { "objectId": "bar", "property": "width", "path": "match.negative", "detail": "match.negative must be zero or greater" }
+      ]
+    },
+    {
+      "name": "an image binding must name an image asset the scene carries",
+      "scene": {
+        "id": "binding-fixture",
+        "name": "Binding fixture",
+        "version": 3,
+        "workingColorSpace": "srgb",
+        "canvas": { "width": 1920, "height": 1080, "frameRate": { "num": 50, "den": 1 } },
+        "timeline": { "durationFrames": 1, "channels": [] },
+        "dataContext": { "match": { "away": "ghost", "font": "inter" } },
+        "assets": [
+          { "assetId": "home-crest", "name": "Home crest", "kind": "image", "path": "home.png", "mimeType": "image/png" },
+          { "assetId": "inter", "name": "Inter", "kind": "font", "path": "fonts/Inter-Regular.ttf" }
+        ],
+        "fonts": [],
+        "materials": [],
+        "objects": [
+          { "type": "image", "id": "crest", "name": "Crest", "assetId": "home-crest", "bindings": { "assetId": "match.away" } },
+          { "type": "image", "id": "badge", "name": "Badge", "assetId": "home-crest", "bindings": { "assetId": "match.font" } }
+        ]
+      },
+      "issues": [
+        { "objectId": "crest", "property": "assetId", "path": "match.away", "detail": "match.away names image asset ghost, which the scene does not carry" },
+        { "objectId": "badge", "property": "assetId", "path": "match.font", "detail": "match.font names image asset inter, which the scene does not carry" }
+      ]
+    }
+  ]
+}

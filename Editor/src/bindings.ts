@@ -5,8 +5,16 @@
 // is named rather than leaving one property stale while applying the rest.
 // That partial-update failure is especially dangerous for broadcast graphics:
 // a name may update while the score beside it remains from the previous take.
+//
+// This is the Editor-side twin of `gx_contracts::bindings`: Rust applies
+// bindings for the engine and the MCP servers; the preview applies them here,
+// without a round trip per keystroke. Both read
+// Shared/contracts/fixtures/binding-resolution.json and must give the same
+// issues, in the same order and wording, and the same resolved values
+// (Editor/tests/binding-fixture.test.ts, Shared/contracts/tests/binding_fixture.rs).
+// `BindingIssue` is the generated contract type; nothing here redeclares it (0.9).
 
-import type { SceneDocument, SceneObject } from "@grapix/contracts";
+import type { BindingIssue, SceneDocument, SceneObject } from "@grapix/contracts";
 
 import type { UiNode } from "./agent-surface";
 
@@ -109,21 +117,7 @@ export function resolveDataPath(data: SceneDocument["dataContext"], path: string
   return { ok: true, value };
 }
 
-export type BindingIssueCode =
-  | "bindingPathNotString"
-  | "bindingPathInvalid"
-  | "bindingPropertyUnsupported"
-  | "bindingTypeMismatch"
-  | "bindingValueOutOfRange"
-  | "bindingAssetUnknown";
-
-export interface BindingIssue {
-  readonly code: BindingIssueCode;
-  readonly objectId: string;
-  readonly property: string;
-  readonly path?: string;
-  readonly reason: string;
-}
+export type { BindingIssue };
 
 export type BindingResolution =
   | { readonly ok: true; readonly document: SceneDocument }
@@ -138,20 +132,18 @@ function valueIssue(
 ): BindingIssue | undefined {
   if (typeof value !== spec.kind || (spec.kind === "number" && !finite(value))) {
     return {
-      code: "bindingTypeMismatch",
       objectId: object.id,
       property: spec.key,
       path,
-      reason: `${path} is ${value === null ? "null" : typeof value}; ${spec.label} requires ${spec.kind}`,
+      detail: `${path} is ${value === null ? "null" : typeof value}; ${spec.label} requires ${spec.kind}`,
     };
   }
   if (spec.accepts && !spec.accepts(value)) {
     return {
-      code: "bindingValueOutOfRange",
       objectId: object.id,
       property: spec.key,
       path,
-      reason: `${path} must be ${spec.constraint ?? "valid for this property"}`,
+      detail: `${path} must be ${spec.constraint ?? "valid for this property"}`,
     };
   }
   if (
@@ -160,52 +152,54 @@ function valueIssue(
     !document.assets.some((asset) => asset.assetId === value && asset.kind === "image")
   ) {
     return {
-      code: "bindingAssetUnknown",
       objectId: object.id,
       property: spec.key,
       path,
-      reason: `${path} names image asset ${String(value)}, which the scene does not carry`,
+      detail: `${path} names image asset ${String(value)}, which the scene does not carry`,
     };
   }
   return undefined;
+}
+
+/** A binding map's entries in the order Rust walks them: by property name. */
+function bindingEntries(object: SceneObject): readonly [string, unknown][] {
+  return Object.entries(object.bindings ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
 /** Resolve every binding into a preview document without mutating authored data. */
 export function resolveSceneBindings(document: SceneDocument): BindingResolution {
   const issues: BindingIssue[] = [];
   const objects = document.objects.map((object) => {
-    const bindings = object.bindings ?? {};
     let resolved: SceneObject = object;
 
-    for (const [property, rawPath] of Object.entries(bindings)) {
+    for (const [property, rawPath] of bindingEntries(object)) {
       if (typeof rawPath !== "string") {
         issues.push({
-          code: "bindingPathNotString",
           objectId: object.id,
           property,
-          reason: `${property} binding on ${object.id} must be a string path`,
+          // The authored value as JSON, as the Rust twin reports it.
+          path: JSON.stringify(rawPath),
+          detail: `${property} binding on ${object.id} must be a string path`,
         });
         continue;
       }
       const spec = specFor(object, property);
       if (!spec) {
         issues.push({
-          code: "bindingPropertyUnsupported",
           objectId: object.id,
           property,
           path: rawPath,
-          reason: `${property} is not a bindable property of ${object.type}`,
+          detail: `${property} is not a bindable property of ${object.type}`,
         });
         continue;
       }
       const found = resolveDataPath(document.dataContext, rawPath);
       if (!found.ok) {
         issues.push({
-          code: "bindingPathInvalid",
           objectId: object.id,
           property,
           path: rawPath,
-          reason: found.reason,
+          detail: found.reason,
         });
         continue;
       }
@@ -588,10 +582,7 @@ export function sceneBindingIssues(document: SceneDocument): readonly BindingIss
 
 /** One line an author can act on: which binding, which path, and why. */
 export function describeBindingIssue(issue: BindingIssue): string {
-  const target = `${issue.objectId}.${issue.property}`;
-  return issue.path === undefined
-    ? `${target}: ${issue.reason}`
-    : `${target} → ${issue.path}: ${issue.reason}`;
+  return `${issue.objectId}.${issue.property} → ${issue.path}: ${issue.detail}`;
 }
 
 

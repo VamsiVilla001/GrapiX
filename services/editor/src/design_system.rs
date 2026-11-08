@@ -27,7 +27,7 @@ use gx_contracts::design_system::{
     MotionTokens, Named, NamedEasing, TokenMapping, UnexpressibleToken, VisualTokens,
 };
 use gx_contracts::Refusal;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
 
 use crate::project::EditorError;

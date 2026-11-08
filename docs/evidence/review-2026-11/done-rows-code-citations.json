@@ -1,0 +1,1727 @@
+{
+ "0.1": {
+  "files": [
+   "Editor/src/camera.ts",
+   "Editor/src/easing-reference.ts",
+   "Editor/src/keyframe-editor.ts",
+   "Editor/src/timeline/clock.ts",
+   "Editor/src/transfer-reference.ts",
+   "Editor/tests/design-system-panel.test.ts",
+   "Editor/tests/inspector.test.ts",
+   "Editor/tests/keyframe-editor.test.ts",
+   "Editor/web/main.ts",
+   "Shared/contracts/src/animation.rs",
+   "Shared/contracts/src/scene.rs",
+   "Shared/contracts/src/text_style.rs"
+  ],
+  "tests": [
+   "a field edit across N objects is one setObjectField naming all N",
+   "validates custom Bezier time controls before sending them to Rust",
+   "bounded_keyframe_values_refuse_without_mutation",
+   "token_references_resolve_when_the_style_is_applied",
+   "figma_variables_and_published_styles_map",
+   "a_source_over_a_transparent_backdrop_is_the_source",
+   "the_after_effects_32_bit_formulas_hold",
+   "dissolve_shows_the_layer_where_the_threshold_is_below_its_alpha",
+   "the_tolerance_admits_boundary_noise_and_refuses_a_rendering_difference",
+   "colour_reference_matches_authored_opacity_and_over_compositing"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.20/README.md",
+   "docs/evidence/3.22/README.md",
+   "docs/evidence/3.22/dx12/effects.json",
+   "docs/evidence/3.22/vulkan/effects.json"
+  ]
+ },
+ "0.2": {
+  "files": [
+   "Editor/src/easing-reference.ts",
+   "Editor/src/timeline/layers.ts",
+   "Editor/src/workspace-layout.ts",
+   "Editor/tests/color-fill.test.ts",
+   "Editor/tests/inspector.test.ts",
+   "Editor/tests/keyframe-editor.test.ts",
+   "Editor/tests/workspace-layout.test.ts",
+   "Shared/contracts/src/color.rs",
+   "Shared/contracts/src/enforce.rs",
+   "Shared/contracts/src/scene.rs",
+   "Shared/contracts/src/text_style.rs",
+   "services/editor/src/design_system.rs"
+  ],
+  "tests": [
+   "lands in the linear working space the engine composites in",
+   "is a real colour, not the grey a missing fill used to read as",
+   "a field edit across N objects is one setObjectField naming all N",
+   "validates custom Bezier time controls before sending them to Rust",
+   "restores panels a stored layout left out entirely",
+   "a_colour_survives_a_change_of_space",
+   "off_scale_spacing_is_a_warning_and_does_not_block",
+   "a_conforming_scene_reports_nothing",
+   "token_references_resolve_when_the_style_is_applied",
+   "a_transparent_source_leaves_the_backdrop_except_for_the_stencils",
+   "dissolve_shows_the_layer_where_the_threshold_is_below_its_alpha",
+   "a_linear_paint_re_expressed_matches_a_direct_conversion"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "0.5": {
+  "files": [
+   "Editor/src/easing-reference.ts",
+   "Editor/src/timeline/easing.ts",
+   "Editor/src/transfer-reference.ts",
+   "Editor/src/viewport.ts",
+   "Editor/tests/color-fill.test.ts",
+   "Editor/tests/design-system-panel.test.ts",
+   "Editor/tests/inspector.test.ts",
+   "Editor/tests/object-manager.test.ts",
+   "Editor/tests/viewport-3d.test.ts",
+   "Editor/tests/viewport.test.ts",
+   "Editor/tests/workspace-layout.test.ts",
+   "Shared/contracts/src/animation.rs"
+  ],
+  "tests": [
+   "names the missing primary conversion",
+   "sRGB and linear are decoded into the same working space the engine uses",
+   "reports a disagreement as Mixed and an agreement as the value",
+   "an agent can tell ",
+   "parses per field kind and refuses rather than clamps",
+   "a Mixed field starts the prompt empty rather than from one object",
+   "visibility, lock, alpha and transform all carry the authored value",
+   "a radius larger than the box is clamped, not ignored",
+   "converts a tagged colour through Three rather than re-deriving the curve",
+   "restores panels a stored layout left out entirely",
+   "custom_bezier_checks_actual_segment_extrema_not_control_bounds",
+   "refused_segment_edits_preserve_keys_and_autokey_base"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.22/README.md"
+  ]
+ },
+ "0.6": {
+  "files": [
+   "Editor/src/easing-reference.ts",
+   "Editor/tests/color-fill.test.ts",
+   "Editor/tests/timeline-editing.test.ts",
+   "Shared/asset-plane/src/fonts/validate.rs",
+   "Shared/contracts/src/color.rs",
+   "Shared/contracts/src/effect.rs",
+   "Shared/contracts/src/lib.rs",
+   "Shared/contracts/src/material.rs",
+   "Shared/contracts/src/validate.rs",
+   "services/render-engine/worker/src/blend.rs",
+   "services/render-engine/worker/src/colour_pipeline.rs",
+   "services/render-engine/worker/src/compositor/effect_tests.rs"
+  ],
+  "tests": [
+   "names the missing primary conversion",
+   "refuses a custom bezier with no control points, before any round trip",
+   "a_colour_survives_a_change_of_space",
+   "a_structured_refusal_serialises_to_the_handoff_shape",
+   "opaque_formulas_match_the_published_definitions",
+   "dissolve_shows_the_layer_where_the_threshold_is_below_its_alpha",
+   "a_linear_paint_re_expressed_matches_a_direct_conversion",
+   "gpu_stage_above_actual_texture_limit_has_no_seam",
+   "gltf_material_elements_colour_only_their_own_triangles"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "0.7": {
+  "files": [
+   "Editor/src/easing-reference.ts",
+   "Shared/contracts/src/text_style.rs",
+   "services/render-engine/worker/src/blend.rs",
+   "services/render-engine/worker/src/compositor/effect_tests.rs",
+   "services/render-engine/worker/src/compositor/tests.rs",
+   "services/render-engine/worker/src/effects.rs",
+   "services/render-engine/worker/src/engine/blend_tests.rs",
+   "services/render-engine/worker/src/engine/effect_tests.rs",
+   "services/render-engine/worker/src/engine/output_tests.rs",
+   "tests/reference-scenes/rate-29-97.json",
+   "tests/reference-scenes/rate-59-94.json",
+   "tools/contract-codegen/src/main.rs"
+  ],
+  "tests": [
+   "token_references_resolve_when_the_style_is_applied",
+   "dissolve_shows_the_layer_where_the_threshold_is_below_its_alpha",
+   "gpu_tiles_match_single_target_at_fractional_distant_origin",
+   "default_parameters_leave_pixels_unchanged"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.22/README.md"
+  ]
+ },
+ "0.8": {
+  "files": [
+   "Editor/src/easing-reference.ts",
+   "Editor/tests/color-fill.test.ts",
+   "Editor/tests/keyframe-editor.test.ts",
+   "Shared/contracts/src/animation.rs",
+   "Shared/contracts/src/color.rs",
+   "Shared/contracts/src/enforce.rs",
+   "Shared/contracts/src/lib.rs",
+   "Shared/contracts/src/scene.rs",
+   "Shared/write-semantics/src/lib.rs",
+   "services/render-engine/worker/src/blend.rs",
+   "services/render-engine/worker/src/compositor/effect_tests.rs",
+   "services/render-engine/worker/src/compositor/tests.rs"
+  ],
+  "tests": [
+   "lands in the linear working space the engine composites in",
+   "is a real colour, not the grey a missing fill used to read as",
+   "reports Mixed across a multi-selection and a partial key state",
+   "validates custom Bezier time controls before sending them to Rust",
+   "a_custom_bezier_solves_its_own_curve_and_may_overshoot",
+   "a_colour_survives_a_change_of_space",
+   "off_scale_spacing_is_a_warning_and_does_not_block",
+   "a_conforming_scene_reports_nothing",
+   "a_write_on_the_current_revision_advances_it",
+   "a_write_on_a_stale_revision_returns_the_current_one",
+   "a_stale_revision_refuses_with_the_current_one",
+   "a_transparent_source_leaves_the_backdrop_except_for_the_stencils"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "0.9": {
+  "files": [
+   "Editor/src/easing-reference.ts",
+   "Editor/src/transfer-reference.ts",
+   "Editor/src/workspace-layout.ts",
+   "Editor/tests/design-system-panel.test.ts",
+   "Editor/tests/workspace-layout.test.ts",
+   "Shared/contracts/src/animation.rs",
+   "Shared/contracts/src/color.rs",
+   "Shared/contracts/src/scene.rs",
+   "services/editor/src/design_system.rs",
+   "services/render-engine/worker/src/blend.rs",
+   "services/render-engine/worker/src/colour_pipeline.rs",
+   "services/render-engine/worker/src/compositor/effect_tests.rs"
+  ],
+  "tests": [
+   "clamps a resize instead of refusing an overshot drag",
+   "working_spaces_convert_through_the_one_transfer_curve",
+   "figma_variables_and_published_styles_map",
+   "opaque_formulas_match_the_published_definitions",
+   "a_source_over_a_transparent_backdrop_is_the_source",
+   "the_after_effects_32_bit_formulas_hold",
+   "a_linear_paint_re_expressed_matches_a_direct_conversion",
+   "gpu_stage_above_actual_texture_limit_has_no_seam",
+   "a_drop_shadow_appears_offset_and_the_layer_stays_on_top",
+   "a_disabled_effect_is_an_identity"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "0.10": {
+  "files": [],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "0.11": {
+  "files": [
+   "services/render-engine/worker/src/blend.rs",
+   "tools/vello-spike/README.md"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "1.1": {
+  "files": [
+   "Editor/tests/font-manager.test.ts",
+   "Editor/tests/font-registration.test.ts",
+   "Editor/tests/keyframe-editor.test.ts",
+   "Shared/asset-plane/src/fonts/container.rs",
+   "Shared/asset-plane/src/fonts/cssgen.rs",
+   "Shared/asset-plane/src/fonts/manager.rs",
+   "Shared/asset-plane/src/fonts/validate.rs",
+   "Shared/contracts/src/font_edit.rs",
+   "Shared/contracts/src/object_edit.rs",
+   "Shared/contracts/src/scene.rs",
+   "Shared/contracts/src/text_style.rs",
+   "Shared/contracts/src/validate.rs"
+  ],
+  "tests": [
+   "offers file and link ingest beside publish, and the licence of each font",
+   "validates custom Bezier time controls before sending them to Rust",
+   "file_font_identity_is_content_derived_and_stable",
+   "applying_a_style_changes_only_its_declared_properties",
+   "post",
+   "an_object_referencing_a_font_the_scene_does_not_carry_refuses"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "1.2": {
+  "files": [
+   "Editor/src/color-transfer.ts",
+   "Editor/src/viewport.ts",
+   "Editor/tests/text-style.test.ts",
+   "Editor/tests/viewport.test.ts",
+   "Shared/contracts/src/authoring.rs",
+   "Shared/contracts/src/color.rs",
+   "Shared/contracts/src/import.rs",
+   "Shared/contracts/src/scene.rs",
+   "services/render-engine/worker/src/engine/effect_tests.rs",
+   "services/render-engine/worker/src/mesh.rs",
+   "services/render-engine/worker/src/prepared.rs",
+   "services/render-engine/worker/src/text.rs"
+  ],
+  "tests": [
+   "scene position converts the top-left authoring origin to centred Y-up",
+   "a_cyclic_hierarchy_is_walked_once_rather_than_for_ever",
+   "every_authorable_kind_is_representable"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "1.3": {
+  "files": [
+   "Shared/contracts/src/lib.rs",
+   "Shared/contracts/src/material.rs",
+   "Shared/contracts/src/scene.rs",
+   "Shared/contracts/src/validate.rs",
+   "Shared/control-plane/src/capability.rs",
+   "services/render-engine/worker/src/compositor/effect_tests.rs",
+   "services/render-engine/worker/src/prepared.rs",
+   "tools/contract-codegen/src/main.rs"
+  ],
+  "tests": [
+   "the_vocabulary_and_the_supported_set_are_different_questions",
+   "a_material_the_engine_cannot_draw_refuses_at_publish"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.20/README.md"
+  ]
+ },
+ "1.4": {
+  "files": [
+   "Editor/src/color-policy.ts",
+   "Editor/src/viewport.ts",
+   "Editor/tests/timeline-editing.test.ts",
+   "Editor/tests/viewport.test.ts",
+   "Shared/contracts/src/animation.rs",
+   "Shared/contracts/src/color.rs",
+   "Shared/contracts/src/command.rs",
+   "Shared/contracts/src/lib.rs",
+   "Shared/contracts/src/scene.rs",
+   "services/render-engine/worker/src/compositor/effect_tests.rs",
+   "services/render-engine/worker/src/prepared.rs",
+   "tools/contract-codegen/src/main.rs"
+  ],
+  "tests": [
+   "refuses a custom bezier with no control points, before any round trip",
+   "a radius larger than the box is clamped, not ignored",
+   "deleting_several_keys_checks_the_final_curve_not_an_intermediate_join"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "1.5": {
+  "files": [
+   "Editor/src/timeline/panel.ts",
+   "Editor/src/timeline/speed-graph.ts",
+   "Editor/tests/bindings.test.ts",
+   "Editor/tests/command-client.test.ts",
+   "Editor/tests/dpi.test.ts",
+   "Editor/tests/viewport.test.ts",
+   "Shared/contracts/src/animation.rs",
+   "Shared/contracts/src/effect.rs",
+   "Shared/contracts/src/lib.rs",
+   "Shared/contracts/src/scene.rs",
+   "conformance/src/refusal_audit.rs",
+   "conformance/src/refusal_audit/command.rs"
+  ],
+  "tests": [
+   "names every other malformed input by code and position",
+   "refuses a frame Rust",
+   "is CSS size times the ratio at the four required scales",
+   "rounds rather than truncating a fractional result",
+   "re-arms after every change, so a second monitor move is still seen",
+   "the document is in scene coordinates; the backing store scales with DPI",
+   "bounded_keyframe_values_refuse_without_mutation",
+   "loaded_animation_rechecks_key_values_and_segment_extrema",
+   "a_distant_stage_point_is_translated_before_narrowing_to_f32"
+  ],
+  "conformance_checks": 2,
+  "evidence_docs": []
+ },
+ "1.6": {
+  "files": [
+   "Editor/src/viewport.ts",
+   "Shared/contracts/src/animation.rs",
+   "Shared/contracts/src/scene.rs",
+   "services/render-engine/worker/src/engine/effect_tests.rs"
+  ],
+  "tests": [
+   "a_custom_bezier_solves_its_own_curve_and_may_overshoot",
+   "every_effect_matches_its_cpu_reference_on_the_gpu"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "1.7": {
+  "files": [
+   "Shared/contracts/src/scene.rs",
+   "tools/contract-codegen/src/main.rs"
+  ],
+  "tests": [
+   "replacing_asset_bytes_keeps_the_binding"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "1.8": {
+  "files": [
+   "Shared/asset-plane/src/package.rs",
+   "Shared/contracts/src/package.rs",
+   "Shared/contracts/src/scene.rs",
+   "services/render-engine/worker/src/compositor/effect_tests.rs",
+   "tools/contract-codegen/src/main.rs"
+  ],
+  "tests": [
+   "a_flattened_float_survives_the_wire_bit_for_bit"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.22/README.md"
+  ]
+ },
+ "1.9": {
+  "files": [],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "1.10": {
+  "files": [],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "1.11": {
+  "files": [
+   "conformance/src/scene_plane.rs"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "1.12": {
+  "files": [
+   "Shared/contracts/src/design_system.rs",
+   "conformance/src/main.rs",
+   "conformance/src/scene_plane.rs"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "2.1": {
+  "files": [
+   "Shared/fs/src/atomic.rs",
+   "Shared/fs/src/lib.rs",
+   "services/editor/src/project.rs"
+  ],
+  "tests": [
+   "every_provenance_field_survives_save_and_reload_byte_for_byte"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "2.2": {
+  "files": [
+   "Editor/src/color-transfer.ts",
+   "Editor/src/viewport.ts",
+   "Shared/contracts/src/animation.rs",
+   "Shared/contracts/src/color.rs",
+   "Shared/contracts/src/effect.rs",
+   "Shared/contracts/src/platform.rs",
+   "Shared/contracts/src/scene.rs"
+  ],
+  "tests": [
+   "the_srgb_curve_is_piecewise_and_continuous_at_its_knee",
+   "parameters_are_addressed_through_the_typed_table",
+   "an_unknown_field_nested_in_a_colour_or_a_path_is_still_found"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "2.3": {
+  "files": [
+   "Shared/contracts/src/package.rs",
+   "Shared/contracts/src/platform.rs",
+   "Shared/fs/src/lib.rs",
+   "tools/vello-spike/README.md"
+  ],
+  "tests": [
+   "a_case_sensitive_volume_resolves_the_same_names_as_an_insensitive_one"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "2.4": {
+  "files": [
+   "Editor/src/color-transfer.ts",
+   "Shared/contracts/src/color.rs",
+   "Shared/contracts/src/platform.rs",
+   "conformance/src/refusal_audit.rs",
+   "services/render-engine/worker/src/effects.rs"
+  ],
+  "tests": [
+   "the_srgb_curve_is_piecewise_and_continuous_at_its_knee",
+   "the_service_roots_exist_on_this_platform"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "2.5": {
+  "files": [
+   "Editor/src/timeline/speed-graph.ts",
+   "Shared/contracts/src/scene.rs",
+   "Shared/fs/src/lib.rs",
+   "Shared/fs/src/watch.rs",
+   "services/render-engine/worker/src/blend.rs",
+   "services/render-engine/worker/src/compositor/effect_tests.rs",
+   "services/render-engine/worker/src/compositor/tests.rs",
+   "services/render-engine/worker/src/engine/blend_tests.rs",
+   "services/render-engine/worker/src/engine/effect_tests.rs",
+   "services/render-engine/worker/src/tiling.rs"
+  ],
+  "tests": [
+   "a_distant_stage_point_is_translated_before_narrowing_to_f32"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.20/README.md",
+   "docs/evidence/3.21/README.md",
+   "docs/evidence/3.22/README.md"
+  ]
+ },
+ "2.6": {
+  "files": [
+   "Shared/project-store/src/lib.rs"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "2.7": {
+  "files": [],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.20/README.md"
+  ]
+ },
+ "2.8": {
+  "files": [],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "2.9": {
+  "files": [
+   "Shared/contracts/src/provenance.rs",
+   "tools/contract-codegen/src/main.rs",
+   "tools/vello-spike/README.md"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "2.10": {
+  "files": [
+   "Shared/telemetry/src/lib.rs"
+  ],
+  "tests": [
+   "audit_and_operations_events_never_write_a_credential"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "3.1": {
+  "files": [],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.21/README.md"
+  ]
+ },
+ "3.2": {
+  "files": [],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.21/README.md"
+  ]
+ },
+ "3.3": {
+  "files": [
+   "Editor/src/viewport.ts",
+   "Editor/tests/color-fill.test.ts",
+   "Shared/contracts/src/color.rs",
+   "services/render-engine/worker/src/colour_pipeline.rs"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.21/README.md"
+  ]
+ },
+ "3.4": {
+  "files": [
+   "Shared/contracts/src/lib.rs",
+   "Shared/contracts/src/scene.rs",
+   "services/render-engine/worker/src/engine.rs",
+   "services/render-engine/worker/src/prepared.rs"
+  ],
+  "tests": [
+   "an_unknown_field_on_an_object_is_refused_and_named"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "3.5": {
+  "files": [
+   "Editor/src/timeline/speed-graph.ts",
+   "Editor/src/viewport.ts",
+   "Shared/contracts/src/scene.rs",
+   "services/render-engine/worker/src/rasterise/mod.rs"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "3.6": {
+  "files": [
+   "Editor/src/viewport.ts",
+   "Shared/contracts/src/lib.rs",
+   "Shared/contracts/src/scene.rs",
+   "services/render-engine/worker/src/prepared.rs",
+   "services/render-engine/worker/src/text.rs"
+  ],
+  "tests": [
+   "an_object_referencing_a_font_the_scene_does_not_carry_refuses"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "3.7": {
+  "files": [
+   "Editor/src/viewport.ts",
+   "Shared/contracts/src/scene.rs",
+   "services/render-engine/worker/src/mesh.rs"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.20/README.md"
+  ]
+ },
+ "3.8": {
+  "files": [],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "3.9": {
+  "files": [
+   "services/render-engine/worker/src/compositor/effect_tests.rs",
+   "services/render-engine/worker/src/engine/effect_tests.rs",
+   "services/render-engine/worker/src/tiling.rs"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "3.10": {
+  "files": [],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "3.11": {
+  "files": [],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "3.12": {
+  "files": [
+   "services/render-engine/worker/src/recovery.rs"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "3.13": {
+  "files": [
+   "Shared/contracts/src/bindings.rs",
+   "Shared/contracts/src/container_paint.rs",
+   "Shared/contracts/src/drawability.rs",
+   "Shared/contracts/src/lib.rs",
+   "Shared/contracts/src/scene.rs",
+   "Shared/contracts/src/validate.rs",
+   "conformance/src/refusal_audit.rs",
+   "conformance/src/refusal_audit/drawability.rs",
+   "services/render-engine/worker/src/mesh.rs",
+   "services/render-engine/worker/src/prepared.rs",
+   "services/render-engine/worker/src/rasterise/lyon.rs",
+   "services/render-engine/worker/src/rasterise/mod.rs"
+  ],
+  "tests": [
+   "a_repaired_hierarchy_refuses_at_publish_by_name",
+   "the_frame_number_advances_the_output",
+   "a_glyph_draws_its_outline_not_its_advance_rectangle"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "3.14": {
+  "files": [
+   "tools/effectcraft-spike/README.md"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.20/README.md"
+  ]
+ },
+ "3.15": {
+  "files": [
+   "Editor/src/color-policy.ts",
+   "Shared/contracts/src/color.rs",
+   "Shared/contracts/src/lib.rs",
+   "Shared/contracts/src/project.rs",
+   "Shared/contracts/src/scene.rs",
+   "conformance/src/refusal_audit.rs",
+   "services/editor/src/command.rs",
+   "services/editor/src/import.rs",
+   "services/editor/src/project.rs",
+   "services/render-engine/worker/src/blend.rs",
+   "services/render-engine/worker/src/colour_pipeline.rs",
+   "services/render-engine/worker/src/compositor/output.rs"
+  ],
+  "tests": [
+   "an_unreadable_file_is_a_store_failure_not_a_refusal",
+   "a_project_saved_before_provenance_upgrades_losslessly",
+   "a_scene_saved_before_working_spaces_upgrades_to_linear_losslessly",
+   "source_over_an_identical_colour_is_unchanged_in_either_space"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.21/README.md"
+  ]
+ },
+ "3.16": {
+  "files": [
+   "Shared/contracts/src/drawability.rs",
+   "conformance/src/refusal_audit/drawability.rs",
+   "services/render-engine/worker/README.md",
+   "services/render-engine/worker/src/colour_pipeline.rs",
+   "services/render-engine/worker/src/compositor/mod.rs",
+   "services/render-engine/worker/src/compositor/scene.rs",
+   "services/render-engine/worker/src/compositor/tests.rs",
+   "services/render-engine/worker/src/engine/gpu_tests.rs",
+   "services/render-engine/worker/src/engine/output_tests.rs",
+   "services/render-engine/worker/src/layer_source.rs",
+   "services/render-engine/worker/src/lib.rs",
+   "services/render-engine/worker/src/prepared.rs"
+  ],
+  "tests": [
+   "hardware",
+   "gpu_tiles_match_single_target_at_fractional_distant_origin",
+   "source_changing_animation_refuses_by_object_and_document_path"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.16/README.md",
+   "docs/evidence/3.20/README.md",
+   "docs/evidence/3.21/README.md",
+   "docs/evidence/3.22/README.md"
+  ]
+ },
+ "3.20": {
+  "files": [
+   "Editor/src/viewport.ts",
+   "Editor/tests/viewport-3d.test.ts",
+   "Shared/contracts/src/material.rs",
+   "Shared/contracts/src/scene.rs",
+   "services/render-engine/worker/README.md",
+   "services/render-engine/worker/THIRD_PARTY_NOTICES.md",
+   "services/render-engine/worker/src/compositor/blend_tests.rs",
+   "services/render-engine/worker/src/compositor/mod.rs",
+   "services/render-engine/worker/src/compositor/tests.rs",
+   "services/render-engine/worker/src/engine/blend_tests.rs",
+   "services/render-engine/worker/src/prepared.rs",
+   "services/render-engine/worker/src/rasterise/mod.rs"
+  ],
+  "tests": [
+   "the_vocabulary_covers_photoshop_and_after_effects_once_each",
+   "a_layer_blend_mode_round_trips_whether_omitted_or_explicitly_normal",
+   "discontinuous",
+   "unsupported_mappings_name_object_and_document_field",
+   "evidence",
+   "dancing_dissolve_changes_each_frame_and_matches_the_cpu_reference",
+   "regression_dx12_32_bit_darken_nan_of_11_october"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.16/README.md",
+   "docs/evidence/3.20/README.md",
+   "docs/evidence/3.22/README.md"
+  ]
+ },
+ "3.22": {
+  "files": [
+   "Editor/src/viewport.ts",
+   "Editor/tests/viewport-3d.test.ts",
+   "Shared/contracts/src/animation.rs",
+   "Shared/contracts/src/drawability.rs",
+   "Shared/contracts/src/effect.rs",
+   "Shared/contracts/src/lib.rs",
+   "Shared/contracts/src/scene.rs",
+   "Shared/contracts/src/validate.rs",
+   "conformance/src/refusal_audit.rs",
+   "services/render-engine/worker/README.md",
+   "services/render-engine/worker/THIRD_PARTY_NOTICES.md",
+   "services/render-engine/worker/src/colour_pipeline.rs"
+  ],
+  "tests": [
+   "names a non-normal blend mode instead of drawing it as normal",
+   "every_parameter_of_every_effect_takes_a_keyframe",
+   "every_effect_parameter_is_keyframable_through_its_typed_table",
+   "close",
+   "effect_json"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.16/README.md",
+   "docs/evidence/3.22/README.md"
+  ]
+ },
+ "4.1": {
+  "files": [
+   "tools/vello-spike/README.md"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.21/README.md"
+  ]
+ },
+ "4.2": {
+  "files": [],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "4.3": {
+  "files": [
+   "services/editor/src/fidelity.rs"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "4.4": {
+  "files": [
+   "services/render-engine/worker/src/engine/blend_tests.rs",
+   "services/render-engine/worker/src/engine/effect_tests.rs",
+   "services/render-engine/worker/src/headless.rs",
+   "tools/check-boundaries.mjs",
+   "tools/vello-spike/README.md"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.20/README.md",
+   "docs/evidence/3.22/README.md",
+   "docs/evidence/3.22/dx12/effects.json",
+   "docs/evidence/3.22/vulkan/effects.json"
+  ]
+ },
+ "5.1": {
+  "files": [],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "5.2": {
+  "files": [
+   "tools/vello-spike/README.md"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "5.3": {
+  "files": [],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.21/README.md"
+  ]
+ },
+ "5.4": {
+  "files": [],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "5.5": {
+  "files": [
+   "tools/vello-spike/README.md"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.21/README.md"
+  ]
+ },
+ "5.6": {
+  "files": [],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "6.1": {
+  "files": [],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.21/README.md"
+  ]
+ },
+ "6.2": {
+  "files": [],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.21/README.md"
+  ]
+ },
+ "6.3": {
+  "files": [
+   "services/playout-mcp/src/lib.rs"
+  ],
+  "tests": [
+   "a_take_against_an_unpublished_revision_refuses_by_name"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "6.4": {
+  "files": [],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "6.5": {
+  "files": [],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "6.6": {
+  "files": [],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.20/README.md",
+   "docs/evidence/3.21/README.md"
+  ]
+ },
+ "7.1": {
+  "files": [
+   "conformance/src/refusal_audit.rs",
+   "services/editor-mcp/src/lib.rs",
+   "services/editor/src/command.rs",
+   "services/editor/src/lib.rs",
+   "services/editor/src/project.rs"
+  ],
+  "tests": [
+   "a_write_into_a_project_that_does_not_exist_refuses_by_name"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "7.2": {
+  "files": [
+   "Editor/src/import-panel.ts",
+   "Editor/web/main.ts",
+   "Shared/contracts/src/command.rs",
+   "Shared/contracts/src/import.rs",
+   "Shared/contracts/src/mcp.rs",
+   "services/editor-mcp/tests/import_surface.rs",
+   "services/editor/src/command.rs",
+   "services/editor/src/import.rs",
+   "services/editor/src/lib.rs",
+   "tools/contract-codegen/src/main.rs"
+  ],
+  "tests": [
+   "a_lossy_object_without_a_reason_is_refused",
+   "an_unretained_source_is_refused",
+   "one_source_drives_every_tier_and_names_each_demotion"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "7.4": {
+  "files": [
+   "Shared/contracts/src/validate.rs",
+   "services/editor/src/lib.rs",
+   "services/render-engine/worker/src/prepared.rs"
+  ],
+  "tests": [
+   "the_editor_validator_and_the_engine_refuse_the_same_scene_for_the_same_reason"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.21/README.md"
+  ]
+ },
+ "7.5": {
+  "files": [
+   "Shared/contracts/src/enforce.rs"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.21/README.md"
+  ]
+ },
+ "7.6": {
+  "files": [
+   "Shared/asset-plane/src/package.rs",
+   "Shared/contracts/src/design_system.rs",
+   "Shared/contracts/src/package.rs",
+   "services/playout-mcp/src/lib.rs",
+   "services/playout-mcp/tests/surface.rs",
+   "services/playout/src/lib.rs"
+  ],
+  "tests": [
+   "a_failed_build_leaves_the_previous_package_byte_identical"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "7.7": {
+  "files": [
+   "Shared/contracts/src/validate.rs"
+  ],
+  "tests": [
+   "an_unresolvable_reference_names_what_it_could_have_been"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "8.2": {
+  "files": [
+   "Shared/contracts/src/mcp.rs",
+   "tools/contract-codegen/src/main.rs"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.21/README.md"
+  ]
+ },
+ "8.3": {
+  "files": [
+   "Shared/contracts/src/mcp.rs",
+   "services/editor-mcp/src/lib.rs"
+  ],
+  "tests": [
+   "a_stored_scene_reads_back_whole"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.22/README.md"
+  ]
+ },
+ "8.4": {
+  "files": [
+   "Shared/contracts/src/mcp.rs",
+   "services/editor-mcp/src/lib.rs"
+  ],
+  "tests": [
+   "material_usage_names_every_object_and_slot_that_binds_it"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "8.5": {
+  "files": [
+   "Shared/contracts/src/mcp.rs",
+   "services/editor-mcp/src/lib.rs",
+   "tools/vello-spike/README.md"
+  ],
+  "tests": [
+   "a_preset_cannot_carry_hand_authored_keyframes"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.21/README.md"
+  ]
+ },
+ "8.6": {
+  "files": [
+   "Shared/contracts/src/mcp.rs",
+   "services/editor-mcp/src/lib.rs",
+   "services/editor-mcp/tests/bindings_surface.rs"
+  ],
+  "tests": [
+   "bindings_schema_names_every_bound_path_and_every_property_that_consumes_it",
+   "the_schema_is_gated_by_the_transport_not_the_handler"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "8.7": {
+  "files": [
+   "Shared/contracts/src/mcp.rs",
+   "services/editor-mcp/src/lib.rs",
+   "services/editor-mcp/tests/design_system_surface.rs",
+   "services/playout-mcp/src/lib.rs"
+  ],
+  "tests": [
+   "an_author_token_cannot_commit_a_brand_pack",
+   "designsystem_commit_is_admin_scoped"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "8.8": {
+  "files": [
+   "Shared/contracts/src/mcp.rs",
+   "services/editor-mcp/src/lib.rs",
+   "services/playout-mcp/tests/surface.rs"
+  ],
+  "tests": [
+   "preflight_returns_structured_refusals_not_prose",
+   "an_author_token_is_refused_at_the_wire_before_the_handler_runs"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "8.9": {
+  "files": [
+   "Shared/contracts/src/mcp.rs",
+   "conformance/src/headless.rs",
+   "conformance/src/main.rs",
+   "services/playout-mcp/src/lib.rs"
+  ],
+  "tests": [
+   "designsystem_commit_is_admin_scoped"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.21/README.md"
+  ]
+ },
+ "8.10": {
+  "files": [
+   "Shared/contracts/src/mcp.rs",
+   "services/playout-mcp/src/lib.rs",
+   "services/playout-mcp/tests/surface.rs"
+  ],
+  "tests": [
+   "base64_matches_rfc_4648_test_vectors",
+   "build_then_inspect_then_publish_returns_a_take_id_and_revision",
+   "an_author_builds_and_publishes_a_package_over_the_wire"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "8.11": {
+  "files": [
+   "Shared/contracts/src/mcp.rs",
+   "services/mcp-server/src/lib.rs",
+   "services/playout-mcp/src/lib.rs"
+  ],
+  "tests": [
+   "an_out_of_scope_call_is_refused_and_the_handler_is_never_reached",
+   "an_author_token_is_refused_on_take_and_configure",
+   "inspecting_a_package_that_does_not_exist_refuses"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "8.13": {
+  "files": [
+   "Shared/contracts/src/mcp.rs",
+   "services/schema-mcp/tests/capability.test.mjs"
+  ],
+  "tests": [
+   "every_tool_has_a_scope_decision",
+   "every_scope_violation_is_covered",
+   "every tool declares the scope it requires"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "10.1": {
+  "files": [
+   "Shared/contracts/src/design_system.rs",
+   "services/editor-mcp/src/lib.rs",
+   "services/editor/src/design_system.rs",
+   "tools/contract-codegen/src/main.rs"
+  ],
+  "tests": [
+   "a_w3c_document_maps_its_values_and_round_trips_without_loss"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "10.2": {
+  "files": [
+   "services/editor/src/design_system.rs",
+   "tools/vello-spike/README.md"
+  ],
+  "tests": [
+   "figma_variables_and_published_styles_map"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "10.3": {
+  "files": [
+   "Shared/contracts/src/design_system.rs",
+   "services/editor-mcp/src/lib.rs",
+   "services/editor-mcp/tests/design_system_surface.rs",
+   "services/editor/src/design_system.rs",
+   "tools/contract-codegen/src/main.rs"
+  ],
+  "tests": [
+   "a_brand_pack_is_imported_reviewed_and_confirmed_over_the_wire",
+   "a_displaced_font_size_is_reported_rather_than_left_claiming_a_mapping",
+   "every_value_the_tokens_cannot_hold_is_named_with_its_value"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "10.4": {
+  "files": [
+   "Shared/contracts/src/design_system.rs",
+   "services/editor-mcp/src/lib.rs",
+   "services/editor/src/design_system.rs",
+   "services/editor/src/project.rs"
+  ],
+  "tests": [
+   "a_draft_becomes_v1_only_when_a_human_confirms_it"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "10.5": {
+  "files": [
+   "Shared/contracts/src/design_system.rs",
+   "services/editor/src/design_system.rs",
+   "services/playout-mcp/src/lib.rs",
+   "services/playout/src/lib.rs"
+  ],
+  "tests": [
+   "the_drift_report_lists_every_template_behind_the_current_version",
+   "the_drift_report_lists_published_templates_behind_the_current_version"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.21/README.md"
+  ]
+ },
+ "11.4": {
+  "files": [
+   "Editor/src/color-transfer.ts",
+   "Editor/src/timeline/easing.ts",
+   "Editor/src/transfer-reference.ts",
+   "Editor/tests/color-fill.test.ts",
+   "Editor/tests/color-transfer.test.ts",
+   "Editor/tests/viewport.test.ts",
+   "Shared/contracts/src/animation.rs",
+   "tools/codegen-check.mjs",
+   "tools/contract-codegen/src/main.rs"
+  ],
+  "tests": [
+   "reports what it cannot reproduce instead of approximating it"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.5": {
+  "files": [
+   "Editor/src/agent-surface.ts",
+   "Editor/src/workspace-layout.ts",
+   "Editor/tests/agent-surface.test.ts",
+   "Editor/tests/workspace-layout.test.ts",
+   "Editor/web/main.ts"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.6": {
+  "files": [
+   "Editor/src/camera.ts",
+   "Editor/src/viewport.ts",
+   "Editor/tests/viewport-3d.test.ts",
+   "Editor/tests/viewport.test.ts"
+  ],
+  "tests": [
+   "the preview surface is sRGB"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.21/README.md"
+  ]
+ },
+ "11.7": {
+  "files": [
+   "Editor/src/overlay.ts",
+   "Editor/src/viewport.ts",
+   "Editor/tests/overlay.test.ts",
+   "Editor/web/main.ts",
+   "tools/vello-spike/README.md"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.20/README.md"
+  ]
+ },
+ "11.8": {
+  "files": [
+   "Editor/src/object-manager.ts",
+   "Editor/tests/object-manager-actions.test.ts",
+   "Editor/tests/object-manager.test.ts"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.9": {
+  "files": [
+   "Editor/src/agent-surface.ts",
+   "Editor/src/inspector.ts",
+   "Editor/tests/agent-surface.test.ts",
+   "Editor/tests/inspector.test.ts",
+   "Editor/web/main.ts",
+   "tools/vello-spike/README.md"
+  ],
+  "tests": [
+   "values that differ report Mixed rather than the first value"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.10": {
+  "files": [
+   "Editor/src/timeline/drawing.ts",
+   "Editor/src/timeline/key-index.ts",
+   "Editor/src/timeline/model.ts",
+   "Editor/src/timeline/panel.ts",
+   "Editor/src/timeline/repaint-plan.ts",
+   "Editor/src/timeline/speed-graph.ts",
+   "Editor/src/timeline/surface.ts",
+   "Editor/src/timeline/viewport.ts",
+   "Editor/tests/timeline-surface.test.ts",
+   "Editor/tests/timeline.test.ts",
+   "Editor/web/main.ts",
+   "Shared/contracts/src/scene.rs"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.11": {
+  "files": [
+   "Editor/src/easing-reference.ts",
+   "Editor/src/timeline/easing.ts",
+   "Editor/src/timeline/panel.ts",
+   "Editor/src/timeline/repaint-plan.ts",
+   "Editor/src/timeline/speed-graph.ts",
+   "Editor/tests/speed-graph.test.ts",
+   "Editor/tests/timeline-surface.test.ts",
+   "Editor/tests/timeline.test.ts",
+   "Editor/web/main.ts",
+   "Shared/contracts/src/animation.rs",
+   "tools/codegen-check.mjs",
+   "tools/contract-codegen/src/main.rs"
+  ],
+  "tests": [
+   "a scrub dirties interaction alone, never static",
+   "a phase edit dirties static, and a scrub still does not"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.12": {
+  "files": [
+   "Editor/src/material-manager.ts",
+   "Editor/tests/asset-managers.test.ts",
+   "Editor/web/main.ts"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.13": {
+  "files": [
+   "Editor/src/font-manager.ts",
+   "Editor/src/font-registration.ts",
+   "Editor/tests/asset-managers.test.ts",
+   "Editor/tests/font-manager.test.ts",
+   "Editor/tests/font-registration.test.ts",
+   "Editor/web/main.ts",
+   "Shared/asset-plane/src/fonts/ingest.rs",
+   "Shared/asset-plane/src/fonts/link.rs",
+   "Shared/contracts/src/command.rs",
+   "Shared/contracts/src/font_edit.rs",
+   "conformance/src/refusal_audit/command.rs",
+   "tools/check-boundaries.mjs"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.14": {
+  "files": [
+   "Editor/src/design-system-panel.ts",
+   "Editor/tests/design-system-panel.test.ts"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.15": {
+  "files": [
+   "Editor/src/motion-preset-browser.ts",
+   "Editor/tests/motion-preset-browser.test.ts",
+   "Editor/web/main.ts",
+   "Shared/contracts/src/animation.rs",
+   "Shared/contracts/src/command.rs",
+   "conformance/src/refusal_audit/command.rs",
+   "services/editor/src/command.rs",
+   "services/editor/src/project.rs"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.16": {
+  "files": [],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.17": {
+  "files": [
+   "Editor/src/agent-surface.ts",
+   "Editor/src/design-system-panel.ts",
+   "Editor/src/import-panel.ts",
+   "Editor/tests/agent-surface.test.ts",
+   "Editor/tests/design-system-panel.test.ts",
+   "Editor/tests/import-panel.test.ts",
+   "Editor/web/main.ts",
+   "services/editor/src/command.rs"
+  ],
+  "tests": [
+   "the chosen token is marked selected"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.18": {
+  "files": [
+   "Editor/src/asset-manager.ts",
+   "Editor/tests/asset-manager.test.ts",
+   "Editor/web/main.ts",
+   "Shared/contracts/src/authoring.rs",
+   "conformance/src/refusal_audit.rs"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.19": {
+  "files": [
+   "Editor/src/bindings.ts",
+   "Editor/tests/bindings.test.ts",
+   "services/editor/src/command.rs"
+  ],
+  "tests": [
+   "bindings_and_the_data_context_survive_save_and_reopen"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.20": {
+  "files": [
+   "Editor/src/timeline/model.ts",
+   "Shared/contracts/src/animation.rs",
+   "conformance/src/refusal_audit.rs",
+   "tools/contract-codegen/src/main.rs"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.21": {
+  "files": [
+   "Editor/src/keyframe-editor.ts",
+   "Editor/tests/keyframe-editor.test.ts",
+   "Editor/web/main.ts",
+   "Shared/contracts/src/animation.rs"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.22": {
+  "files": [
+   "Editor/src/timeline/key-edit.ts",
+   "Editor/src/timeline/model.ts",
+   "Editor/src/timeline/panel.ts",
+   "Editor/tests/timeline-editing.test.ts",
+   "Shared/contracts/src/animation.rs"
+  ],
+  "tests": [
+   "a_preset_landing_on_an_authored_key_refuses_by_name_and_changes_nothing",
+   "a_preset_may_share_a_channel_with_keys_on_other_frames"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.23": {
+  "files": [
+   "Editor/src/timeline/key-edit.ts",
+   "Editor/src/timeline/panel.ts",
+   "Editor/tests/timeline-editing.test.ts",
+   "Editor/web/main.ts",
+   "Shared/contracts/src/design_system.rs"
+  ],
+  "tests": [
+   "returns the keys inside a frame span on the given tracks"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.24": {
+  "files": [
+   "Editor/src/preview-playback.ts",
+   "Editor/tests/preview-playback.test.ts"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.25": {
+  "files": [
+   "Editor/src/timeline/panel.ts",
+   "Editor/src/timeline/phases.ts",
+   "Editor/src/timeline/repaint-plan.ts",
+   "Editor/tests/timeline-phases.test.ts",
+   "Editor/web/main.ts",
+   "Shared/contracts/src/phases.rs",
+   "Shared/contracts/src/scene.rs",
+   "conformance/src/refusal_audit.rs"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.26": {
+  "files": [
+   "Editor/src/control-contract.ts",
+   "Shared/contracts/src/control.rs",
+   "Shared/contracts/src/scene.rs",
+   "tools/contract-codegen/src/main.rs"
+  ],
+  "tests": [
+   "declared_controls_and_text_styles_survive_the_closed_reader"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.27": {
+  "files": [
+   "Editor/src/take-page.ts"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.28": {
+  "files": [
+   "Editor/src/text-style.ts",
+   "Shared/contracts/src/scene.rs",
+   "Shared/contracts/src/text_style.rs",
+   "tools/contract-codegen/src/main.rs"
+  ],
+  "tests": [
+   "a_scene_authored_before_text_styles_parses_with_an_empty_style_list",
+   "declared_controls_and_text_styles_survive_the_closed_reader"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.29": {
+  "files": [
+   "Editor/src/workspace.ts",
+   "Editor/tests/workspace.test.ts",
+   "Editor/web/main.ts",
+   "services/editor/src/command.rs"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.36": {
+  "files": [
+   "Editor/src/command-client.ts",
+   "Editor/src/workspace.ts",
+   "Editor/tests/command-client.test.ts",
+   "Editor/tests/object-manager-actions.test.ts",
+   "Editor/tests/workspace.test.ts",
+   "Editor/web/main.ts",
+   "Shared/contracts/src/bindings.rs",
+   "Shared/contracts/src/command.rs",
+   "Shared/contracts/src/material_edit.rs",
+   "Shared/contracts/src/mcp.rs",
+   "Shared/contracts/src/object_edit.rs",
+   "conformance/src/main.rs"
+  ],
+  "tests": [
+   "tool_names_are_unique_and_grouped_consistently",
+   "every_authoring_write_tool_takes_an_editor_command_payload",
+   "a_preset_writes_keys_resolved_against_the_scenes_own_rate"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.37": {
+  "files": [
+   "Editor/web/main.ts",
+   "Shared/contracts/src/command.rs",
+   "services/editor/src/command.rs"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.38": {
+  "files": [
+   "Editor/web/main.ts",
+   "Shared/asset-plane/src/package.rs",
+   "Shared/contracts/src/lib.rs",
+   "Shared/contracts/src/mcp.rs",
+   "Shared/contracts/src/scene.rs",
+   "Shared/control-plane/src/capability.rs",
+   "Shared/control-plane/src/intent.rs",
+   "conformance/src/main.rs",
+   "conformance/src/refusal_audit.rs",
+   "conformance/src/scene_plane.rs",
+   "services/playout-mcp/src/lib.rs",
+   "services/playout/src/lib.rs"
+  ],
+  "tests": [
+   "a_protocol_mismatch_is_refused_not_negotiated"
+  ],
+  "conformance_checks": 1,
+  "evidence_docs": []
+ },
+ "11.39": {
+  "files": [
+   "Editor/src/asset-manager.ts",
+   "Editor/tests/asset-manager.test.ts",
+   "Editor/web/main.ts",
+   "Shared/asset-plane/src/fonts/ingest.rs",
+   "Shared/asset-plane/src/fonts/link.rs",
+   "Shared/asset-plane/src/import.rs",
+   "Shared/asset-plane/src/package.rs",
+   "Shared/contracts/src/asset_edit.rs",
+   "Shared/contracts/src/command.rs",
+   "Shared/contracts/src/provenance.rs",
+   "Shared/contracts/src/scene.rs",
+   "conformance/src/refusal_audit.rs"
+  ],
+  "tests": [
+   "says when an asset is used by no objects",
+   "a_project_saved_before_provenance_upgrades_losslessly"
+  ],
+  "conformance_checks": 1,
+  "evidence_docs": []
+ },
+ "11.41": {
+  "files": [
+   "Shared/asset-plane/src/publish.rs",
+   "Shared/contracts/src/lib.rs",
+   "Shared/contracts/src/mcp.rs",
+   "Shared/control-plane/src/message.rs",
+   "Shared/control-plane/src/peer.rs",
+   "Shared/control-plane/src/render.rs",
+   "Shared/control-plane/src/status.rs",
+   "conformance/src/headless.rs",
+   "conformance/src/lib.rs",
+   "conformance/src/main.rs",
+   "conformance/src/refusal_audit.rs",
+   "mocks/mock-engine/src/lib.rs"
+  ],
+  "tests": [
+   "an_unknown_program_phase_refuses_by_address"
+  ],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.63": {
+  "files": [
+   "Editor/src/inspector.ts",
+   "Editor/src/timeline/clock.ts",
+   "Editor/src/timeline/layers.ts",
+   "Editor/src/timeline/model.ts",
+   "Editor/src/timeline/panel.ts",
+   "Editor/src/timeline/surface.ts",
+   "Editor/src/workspace-layout.ts"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "11.64": {
+  "files": [
+   "Editor/src/scene-manager.ts",
+   "Editor/tests/scene-manager.test.ts"
+  ],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "12.4": {
+  "files": [],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "12.6": {
+  "files": [],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": []
+ },
+ "12.7": {
+  "files": [],
+  "tests": [],
+  "conformance_checks": 0,
+  "evidence_docs": [
+   "docs/evidence/3.21/README.md"
+  ]
+ }
+}

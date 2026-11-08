@@ -13,6 +13,7 @@
 //! - Program and Preview are exactly the CPU encode of the GPU's own working
 //!   pixels (3.21's one quantisation), and no channel is more than one code
 //!   value from the CPU renderer's frame.
+//!
 //! Together these say every differing code is a rounding-boundary flip. The
 //! count is recorded per mode; a flat test cell whose exact colour sits on a
 //! code boundary flips as a whole, so it can exceed 4.4's 0.1% of pixels.

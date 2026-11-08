@@ -1,0 +1,47 @@
+{
+  "state": {
+    "context": "GrapiX build plan review (Panchayati #105, 8 Nov 2026). Two concrete plan changes came out of the done-row review and need placement and wording before the user approves them. The plan is a table per phase with columns Step, Work, Track, Needs, Done when; the rule is that a done-when must be verifiable by execution.",
+    "finding_scope": "The engine's control port (Shared/control-transport/src/server.rs) verifies a bearer token's signature and then ignores its claims: any valid token, of any role, can send Take, Clear or output configuration straight to the engine over loopback TCP. Role scopes are enforced only in the MCP server (rows 8.11 playout.* scope-gated, 8.13 scope enforcement tests). Phase 5 (Transport, local: 5.1 control plane, 5.2 session/auth/epoch/reconnect done) has no row for enforcing scopes at the transport. Phase 14 (Remote engine) will expose the same port beyond loopback.",
+    "finding_5_5": "Row 5.5 'Locality declared in the capability exchange' (Needs 1.10) has done-when 'Consumers adapt without code change', which cannot be executed as written. What exists: EngineCapability carries a locality field set by the engine; Playout reads it. The row is marked done.",
+    "candidates_scope_row": {
+      "5.7_transport": "New row 5.7 in Phase 5: 'Control-port scope enforcement: every request checked against the token role's scopes at the transport, before the engine sees it'. Track BE. Needs 5.2, 8.13. Done when: 'A conformance test sends every control request with an author-scoped token and each is refused by name at the transport; the engine handler is never reached (asserted by trace)'.",
+      "14_x_remote": "New row in Phase 14 (Remote engine), since loopback plus MCP enforcement is acceptable until the port leaves the machine. Needs 14.1. Done when as above.",
+      "8_15_mcp": "New row 8.15 in Phase 8 beside 8.13: extend scope enforcement tests to cover the engine port directly. Needs 8.13."
+    },
+    "candidates_5_5_done_when": {
+      "capability_field": "'EngineCapability carries locality (local or remote); a conformance test reads it over the wire from a local engine and a mocked remote one and Playout chooses its asset path by it without a code path per locality'.",
+      "no_locality_branches": "'No consumer branches on a hard-coded locality: grep gate forbids it, and the conformance suite runs the same Playout binary against local and remote engines'.",
+      "keep_as_is": "Keep 'Consumers adapt without code change' unchanged."
+    }
+  },
+  "questions": {
+    "scope_row_placement": {
+      "type": "choice",
+      "instructions": "Where should the transport-level scope enforcement row go?",
+      "criteria": {
+        "5_7_transport": "Phase 5 as 5.7, Needs 5.2 and 8.13: enforcement belongs to the transport that owns authentication (memory rule 12: authentication lives in the transport).",
+        "14_x_remote": "Phase 14 with the remote engine, since loopback plus MCP enforcement holds until the port leaves the machine.",
+        "8_15_mcp": "Phase 8 as 8.15, as an extension of the MCP scope tests."
+      }
+    },
+    "scope_row_urgency": {
+      "type": "noul",
+      "instructions": "Should the new row be worked before Phase 14 opens the port beyond loopback?",
+      "criteria": {"true": "Yes, before any remote exposure.", "false": "No, it can wait for Phase 14 itself."}
+    },
+    "done_when_5_5": {
+      "type": "choice",
+      "instructions": "Which done-when should replace 5.5's?",
+      "criteria": {
+        "capability_field": "Verifiable by a conformance test over the wire against a local engine and a mocked remote one.",
+        "no_locality_branches": "A grep gate against hard-coded locality plus the conformance suite run against both localities.",
+        "keep_as_is": "Keep the current wording."
+      }
+    },
+    "reopen_5_5": {
+      "type": "noul",
+      "instructions": "Once 5.5 has an executable done-when, should the row go back to active until that done-when has been executed?",
+      "criteria": {"true": "Yes: a done-when that was never executed means the row is not done.", "false": "No: the existing capability field and Playout read are enough evidence; record and keep done."}
+    }
+  }
+}

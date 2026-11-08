@@ -60,18 +60,22 @@ pub(crate) fn cases() -> Vec<(String, Effect)> {
     push("fill", Effect::Fill(Fill { color: colour(0.9, 0.3, 0.1, 1.0), opacity: 0.7 }));
     push("fill-alpha", Effect::Fill(Fill { color: colour(0.1, 0.8, 0.9, 0.5), opacity: 1.0 }));
     push("tint", Effect::Tint(Tint { map_black_to: colour(0.1, 0.0, 0.3, 1.0), map_white_to: colour(1.0, 0.9, 0.6, 0.8), amount: 0.8 }));
-    let mut lv = Levels::default();
-    lv.rgb = LevelsChannel { input_black: 0.1, input_white: 0.8, gamma: 1.8, output_black: 0.05, output_white: 0.95 };
-    lv.red.gamma = 0.6;
-    lv.alpha.output_white = 0.8;
+    let mut lv = Levels {
+        rgb: LevelsChannel { input_black: 0.1, input_white: 0.8, gamma: 1.8, output_black: 0.05, output_white: 0.95 },
+        red: LevelsChannel { gamma: 0.6, ..Default::default() },
+        alpha: LevelsChannel { output_white: 0.8, ..Default::default() },
+        ..Default::default()
+    };
     push("levels", Effect::Levels(lv.clone()));
     lv.clip_to_output_black = false;
     lv.clip_to_output_white = false;
     push("levels-unclipped", Effect::Levels(lv));
-    let mut cv = Curves::default();
-    cv.rgb = vec![CurvePoint { x: 0.0, y: 0.05 }, CurvePoint { x: 0.3, y: 0.4 }, CurvePoint { x: 0.7, y: 0.65 }, CurvePoint { x: 1.0, y: 0.98 }];
-    cv.green = vec![CurvePoint { x: 0.0, y: 0.0 }, CurvePoint { x: 0.5, y: 0.7 }, CurvePoint { x: 1.0, y: 1.0 }];
-    cv.alpha = vec![CurvePoint { x: 0.0, y: 0.0 }, CurvePoint { x: 1.0, y: 0.9 }];
+    let cv = Curves {
+        rgb: vec![CurvePoint { x: 0.0, y: 0.05 }, CurvePoint { x: 0.3, y: 0.4 }, CurvePoint { x: 0.7, y: 0.65 }, CurvePoint { x: 1.0, y: 0.98 }],
+        green: vec![CurvePoint { x: 0.0, y: 0.0 }, CurvePoint { x: 0.5, y: 0.7 }, CurvePoint { x: 1.0, y: 1.0 }],
+        alpha: vec![CurvePoint { x: 0.0, y: 0.0 }, CurvePoint { x: 1.0, y: 0.9 }],
+        ..Default::default()
+    };
     push("curves", Effect::Curves(cv));
     push("hue-saturation", Effect::HueSaturation(HueSaturation { hue: 75.0, saturation: 0.4, lightness: -0.2, ..Default::default() }));
     push("hue-saturation-down", Effect::HueSaturation(HueSaturation { hue: -200.0, saturation: -0.6, lightness: 0.3, ..Default::default() }));

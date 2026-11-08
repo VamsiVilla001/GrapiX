@@ -306,12 +306,7 @@ fn worker_binary() -> Option<std::path::PathBuf> {
         "gx-render-worker"
     };
     let dir = current.parent()?;
-    for candidate in [dir.join(name), dir.parent()?.join(name)] {
-        if candidate.exists() {
-            return Some(candidate);
-        }
-    }
-    None
+    [dir.join(name), dir.parent()?.join(name)].into_iter().find(|candidate| candidate.exists())
 }
 
 fn free_port() -> u16 {

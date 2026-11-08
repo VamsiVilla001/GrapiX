@@ -271,6 +271,9 @@ fn exchange(engine: SocketAddr, request: &[u8]) -> Result<(TcpStream, Vec<u8>), 
 }
 
 /// One parsed asset-plane request.
+// A request carries the scene document it publishes; the small variants are
+// control messages. The size difference is the message set, not waste.
+#[allow(clippy::large_enum_variant)]
 enum AssetRequest {
     Publish(Result<SceneDocument, PublishRefusal>),
     Fetch(ContentHash),

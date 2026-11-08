@@ -560,6 +560,9 @@ impl MaterialSupport {
 /// unsupported mode cannot be reported as a freehand string, and `allowed`
 /// carries the peer's real list, so the caller — a person or an agent — can
 /// correct it in one step instead of guessing again (0.6's argument).
+// A refusal carries its field, the given value and the allowed list; that
+// is the point of it, so the Err variant is large by design.
+#[allow(clippy::result_large_err)]
 pub fn validate_material(
     material: &MaterialDefinition,
     support: &MaterialSupport,

@@ -493,11 +493,14 @@ fn is_path_segment(segment: &str) -> bool {
             .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_')
 }
 
+/// `0` or a decimal without a leading zero (`^(0|[1-9][0-9]*)$` in the TS twin).
+/// Before 8 Nov 2026 a single digit other than `0` was refused here while the
+/// Editor preview accepted it, so `teams.1.name` previewed and then refused on
+/// air; the shared fixture (`tests/binding_fixture.rs`) now holds both to one rule.
 fn is_index(segment: &str) -> bool {
-    segment == "0"
-        || (segment.len() > 1
-            && !segment.starts_with('0')
-            && segment.bytes().all(|byte| byte.is_ascii_digit()))
+    !segment.is_empty()
+        && segment.bytes().all(|byte| byte.is_ascii_digit())
+        && (segment.len() == 1 || !segment.starts_with('0'))
 }
 
 fn json_type(value: &Value) -> &'static str {

@@ -1,0 +1,250 @@
+{
+  "laya": {
+    "model": "convaiinnovations/laya-multilingual",
+    "max_len": 8192,
+    "load_s": 16.01,
+    "predict_s": 5.887,
+    "state_tokens": 649,
+    "truncated": false
+  },
+  "jev_model": "jev-1.14.0",
+  "rows": [
+    {
+      "question": "placement",
+      "type": "choice",
+      "laya": "object_stack",
+      "jev": "object_stack",
+      "agree": true,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "object_stack",
+        "probabilities": {
+          "object_stack": 0.9577,
+          "adjustment_layers_only": 0.0235,
+          "both_now": 0.0188
+        },
+        "confidence": 0.8139,
+        "answer_confidence": 0.9577,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "object_stack",
+        "confidence": 1,
+        "probabilities": {
+          "object_stack": 1,
+          "adjustment_layers_only": 0,
+          "both_now": 0
+        }
+      }
+    },
+    {
+      "question": "typing",
+      "type": "choice",
+      "laya": "tagged_enum_inline",
+      "jev": "tagged_enum_inline",
+      "agree": true,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "tagged_enum_inline",
+        "probabilities": {
+          "tagged_enum_inline": 0.8205,
+          "kind_plus_params_enum": 0.0334,
+          "registry_table": 0.1461
+        },
+        "confidence": 0.4931,
+        "answer_confidence": 0.8205,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "tagged_enum_inline",
+        "confidence": 1,
+        "probabilities": {
+          "tagged_enum_inline": 1,
+          "kind_plus_params_enum": 0,
+          "registry_table": 0
+        }
+      }
+    },
+    {
+      "question": "keyframe_addressing",
+      "type": "choice",
+      "laya": "stable_id_path",
+      "jev": "stable_id_path",
+      "agree": true,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "stable_id_path",
+        "probabilities": {
+          "stable_id_path": 0.3549,
+          "index_path": 0.3375,
+          "typed_channel_target": 0.3076
+        },
+        "confidence": 0.0016,
+        "answer_confidence": 0.3549,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "stable_id_path",
+        "confidence": 1,
+        "probabilities": {
+          "stable_id_path": 1,
+          "index_path": 0,
+          "typed_channel_target": 0
+        }
+      }
+    },
+    {
+      "question": "gpu_memory",
+      "type": "choice",
+      "laya": "fixed_cap",
+      "jev": "prepare_max_extent",
+      "agree": false,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "fixed_cap",
+        "probabilities": {
+          "prepare_max_extent": 0.2435,
+          "fixed_cap": 0.6095,
+          "pool_per_frame": 0.147
+        },
+        "confidence": 0.1557,
+        "answer_confidence": 0.6095,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "prepare_max_extent",
+        "confidence": 1,
+        "probabilities": {
+          "prepare_max_extent": 1,
+          "fixed_cap": 0,
+          "pool_per_frame": 0
+        }
+      }
+    },
+    {
+      "question": "tie_policy",
+      "type": "choice",
+      "laya": "strict_4_4_tie_free_fixtures",
+      "jev": "tie_aware_4_4",
+      "agree": false,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "strict_4_4_tie_free_fixtures",
+        "probabilities": {
+          "tie_aware_4_4": 0.0629,
+          "strict_4_4_tie_free_fixtures": 0.4503,
+          "report_and_stay_active": 0.0885,
+          "make_reference_bit_exact": 0.3983
+        },
+        "confidence": 0.1961,
+        "answer_confidence": 0.4503,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "tie_aware_4_4",
+        "confidence": 1,
+        "probabilities": {
+          "tie_aware_4_4": 1,
+          "strict_4_4_tie_free_fixtures": 0,
+          "report_and_stay_active": 0,
+          "make_reference_bit_exact": 0
+        }
+      }
+    },
+    {
+      "question": "done_when_met",
+      "type": "noul",
+      "laya": 0.7806,
+      "jev": 0.42,
+      "agree": false,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.7806,
+        "confidence": 0.7806,
+        "answer_confidence": 0.7806,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.42
+      }
+    },
+    {
+      "question": "evidence_quality",
+      "type": "score",
+      "laya": 2.297,
+      "jev": 2.78,
+      "agree": false,
+      "laya_detail": {
+        "type": "score",
+        "score": 2.297,
+        "legend": {
+          "0": "weak: claims without execution",
+          "1": "partial: some clauses executed",
+          "2": "adequate: all clauses executed, some gaps noted",
+          "3": "strong: all clauses executed on both backends with recorded figures"
+        },
+        "probabilities": {
+          "0": 0.0063,
+          "1": 0.181,
+          "2": 0.322,
+          "3": 0.4907
+        },
+        "confidence": 0.2385,
+        "answer_confidence": 0.4907,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "score",
+        "score": 2.78,
+        "confidence": 0.78,
+        "legend": {
+          "0": "weak: claims without execution",
+          "1": "partial: some clauses executed",
+          "2": "adequate: all clauses executed, some gaps noted",
+          "3": "strong: all clauses executed on both backends with recorded figures"
+        },
+        "probabilities": {
+          "0": 0,
+          "1": 0.02,
+          "2": 0.18,
+          "3": 0.8
+        }
+      }
+    }
+  ],
+  "agreement": 0.42857142857142855,
+  "laya_base_512": {
+    "model": "convaiinnovations/laya",
+    "max_len": 512,
+    "superseded": "read only the first 512 tokens of this input; see laya-context.json",
+    "answers": {
+      "placement": "both_now",
+      "typing": "tagged_enum_inline",
+      "keyframe_addressing": "stable_id_path",
+      "gpu_memory": "fixed_cap",
+      "tie_policy": "tie_aware_4_4",
+      "done_when_met": 0.712,
+      "evidence_quality": 2.0299
+    }
+  }
+}

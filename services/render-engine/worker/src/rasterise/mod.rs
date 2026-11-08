@@ -275,7 +275,8 @@ impl RasterSurface {
         mode: gx_contracts::material::BlendMode,
         seed: u32,
     ) {
-        if !(opacity > 0.0) {
+        // NaN as well as zero and below: a layer that cannot be shown.
+        if opacity.is_nan() || opacity <= 0.0 {
             return;
         }
         let dissolve = matches!(

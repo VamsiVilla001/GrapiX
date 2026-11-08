@@ -456,7 +456,7 @@ mod tests {
                 for &da in &alphas {
                     for &c in &colours {
                         for &e in &colours {
-                            let src = [c * sa.max(1e-30).min(1.0), c * 0.5, c, sa];
+                            let src = [c * sa.clamp(1e-30, 1.0), c * 0.5, c, sa];
                             let dst = [e, e * 0.25, e * sa, da];
                             let o = blend_pixel(m, dst, src, 0.37);
                             assert!(o.iter().all(|v| v.is_finite()), "{m:?} {dst:?} {src:?} -> {o:?}");

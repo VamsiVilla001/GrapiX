@@ -13,7 +13,6 @@ use super::output::{Delivered, OutputRing, Submitted};
 use super::{CompositorError, LayerInput, LayerState, PreparedCompositor};
 use crate::gpu::Gpu;
 use crate::prepared::PreparedScene;
-use crate::rasterise::{LyonPathRasteriser, PathRasteriser, PreparedPaths, RasterSurface};
 use crate::rasterizer::Frame;
 use crate::tiling::{Stage, StageOrigin};
 

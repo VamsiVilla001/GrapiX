@@ -55,6 +55,10 @@ use crate::rasterizer::{
 };
 
 /// The render engine. Owns the GPU, the clock and Program.
+/// The newest GPU delivery: the pinned revision it belongs to, and its Program
+/// and Preview frames (3.21).
+type GpuDelivered = ((TakeId, Revision), Arc<Frame>, Arc<Frame>);
+
 pub struct Engine {
     gpu: Gpu,
     clock: ProgramClock,
@@ -83,7 +87,7 @@ pub struct Engine {
     /// delivered, with the pinned scene they belong to. Held between
     /// deliveries, so a frame whose readback has not completed repeats the
     /// last delivered picture instead of waiting.
-    gpu_delivered: Option<((TakeId, Revision), Arc<Frame>, Arc<Frame>)>,
+    gpu_delivered: Option<GpuDelivered>,
     /// The frames last emitted, whatever produced them.
     last_frames: Option<(Arc<Frame>, Arc<Frame>)>,
     /// Recently emitted frames awaiting release by their consumers; once a
@@ -294,7 +298,6 @@ impl Engine {
             // Authored scenes own prepared GPU resources already. Never touch
             // the CPU reference frame at Take, recovery re-arm or Phase.
             self.gpu_clear_frame = self.gpu_prepared.get(&(program.take_id.clone(), program.revision)).map(GpuScene::clear_frame);
-            return;
         } else {
             self.gpu_clear_frame = None;
             self.rasterizer.take(take_key);
@@ -306,15 +309,8 @@ impl Engine {
     /// The scene frame is relative to the engine's committed take frame, never
     /// to wall time. This keeps reconnects and frame-pump catch-up deterministic.
     fn program_scene_frame(&self, engine_frame: u64) -> Option<u64> {
-        let Some(program) = self.program.as_ref() else {
-            return None;
-        };
-        let Some(prepared) = self
-            .prepared
-            .get(&(program.take_id.clone(), program.revision))
-        else {
-            return None;
-        };
+        let program = self.program.as_ref()?;
+        let prepared = self.prepared.get(&(program.take_id.clone(), program.revision))?;
         let elapsed = engine_frame.saturating_sub(program.committed_frame);
         let current_phase = program
             .phase

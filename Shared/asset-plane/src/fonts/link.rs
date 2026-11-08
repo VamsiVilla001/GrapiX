@@ -251,6 +251,8 @@ fn link_provenance(provider: Provider, stylesheet: &str, file_url: &str) -> Asse
 ///
 /// Returns only what the scene lacks; a link ingested before returns its
 /// families as `AlreadyInScene` with the same ids.
+// A refusal carries its field, the given value and the allowed list; the Err variant is large by design.
+#[allow(clippy::result_large_err)]
 pub fn prepare_font_link(
     store: &mut AssetStore,
     fetcher: &dyn FontFetcher,
@@ -467,6 +469,8 @@ pub fn prepare_font_link(
 
 /// A direct source follows the same CDN and redirect policy as CSS sources,
 /// then uses file ingest's metadata, licence, hash and deduplication rules.
+// A refusal carries its field, the given value and the allowed list; the Err variant is large by design.
+#[allow(clippy::result_large_err)]
 fn prepare_direct_font(
     store: &mut AssetStore,
     fetcher: &dyn FontFetcher,
@@ -480,15 +484,15 @@ fn prepare_direct_font(
         source: url.clone(),
         refusal,
     };
-    let FontSource::DirectUrl { url, format } = canonical_link_source(source).map_err(&refuse)?
+    let FontSource::DirectUrl { url, format } = canonical_link_source(source).map_err(refuse)?
     else {
         unreachable!("canonical direct source")
     };
     let provider = Provider::of_font(&url)
         .ok_or_else(|| refuse(Refusal::FontFetchHostNotTrusted { url: url.clone() }))?;
     let bytes =
-        fetch(fetcher, &url, provider.font_hosts(), MAX_FONT_FILE_BYTES).map_err(&refuse)?;
-    let verified = verify_font_file(&bytes).map_err(&refuse)?;
+        fetch(fetcher, &url, provider.font_hosts(), MAX_FONT_FILE_BYTES).map_err(refuse)?;
+    let verified = verify_font_file(&bytes).map_err(refuse)?;
     if format.is_some_and(|expected| expected != verified.format) {
         return Err(refuse(Refusal::InvalidFontData {
             detail: format!(

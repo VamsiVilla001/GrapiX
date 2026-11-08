@@ -459,12 +459,7 @@ fn mock_binary(name: &str) -> Option<std::path::PathBuf> {
         name.to_owned()
     };
     let dir = current.parent()?;
-    for candidate in [dir.join(&file), dir.parent()?.join(&file)] {
-        if candidate.exists() {
-            return Some(candidate);
-        }
-    }
-    None
+    [dir.join(&file), dir.parent()?.join(&file)].into_iter().find(|candidate| candidate.exists())
 }
 
 fn free_port() -> Option<u16> {

@@ -503,6 +503,7 @@ mod tests {
 
     #[test]
     fn every_text_property_the_path_ignores_refuses_by_name() {
+        #[allow(clippy::type_complexity)]
         let cases: Vec<(&str, Box<dyn Fn(&mut TextObject)>)> = vec![
             ("autoFit", Box::new(|t| t.auto_fit = TextAutoFit::Shrink)),
             ("writingMode", Box::new(|t| t.writing_mode = WritingMode::VerticalRl)),

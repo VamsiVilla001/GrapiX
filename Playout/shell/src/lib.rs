@@ -19,6 +19,9 @@
 //! exactly how free-run would come to be rendered quietly on one surface and
 //! loudly on another (invariant 11).
 
+// PlayoutError carries the structured refusal it reports (see its doc).
+#![allow(clippy::result_large_err)]
+
 #![forbid(unsafe_code)]
 
 use std::net::SocketAddr;
@@ -46,6 +49,9 @@ pub const DEFAULT_CONTROL_ENDPOINT: &str = "127.0.0.1:4400";
 /// says which it was (invariant 17).
 #[derive(Debug, Serialize)]
 #[serde(tag = "error", rename_all = "camelCase")]
+// Every command returns one of these to the operator UI, and a refusal carries
+// its structured cause; the size is the point, so the large-Err lint is
+// allowed on each command below rather than boxing the cause.
 pub enum PlayoutError {
     /// The endpoint text is not a socket address.
     InvalidEndpoint { endpoint: String },

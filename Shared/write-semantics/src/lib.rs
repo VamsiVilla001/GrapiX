@@ -260,7 +260,7 @@ mod tests {
     fn a_failed_step_leaves_the_batch_unapplied() {
         // A batch that stopped halfway is the failure. The steps that already
         // ran must be undone before the caller learns anything failed.
-        let mut log: Vec<&str> = Vec::new();
+        let log: Vec<&str> = Vec::new();
         let mut batch = Batch::new();
         batch.step(|| {
             // push onto the log *outside* the closure so the borrow ends

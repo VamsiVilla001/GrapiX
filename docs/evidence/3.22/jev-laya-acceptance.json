@@ -1,0 +1,206 @@
+{
+  "laya": {
+    "model": "convaiinnovations/laya-multilingual",
+    "max_len": 8192,
+    "load_s": 16.01,
+    "predict_s": 7.827,
+    "state_tokens": 834,
+    "truncated": false
+  },
+  "jev_model": "jev-1.14.0",
+  "rows": [
+    {
+      "question": "clause_typed_contract",
+      "type": "noul",
+      "laya": 0.9428,
+      "jev": 0.97,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9428,
+        "confidence": 0.9428,
+        "answer_confidence": 0.9428,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.97
+      }
+    },
+    {
+      "question": "clause_unknown_refuses",
+      "type": "noul",
+      "laya": 0.9434,
+      "jev": 0.95,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9434,
+        "confidence": 0.9434,
+        "answer_confidence": 0.9434,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.95
+      }
+    },
+    {
+      "question": "clause_all_16_present",
+      "type": "noul",
+      "laya": 0.9458,
+      "jev": 0.93,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9458,
+        "confidence": 0.9458,
+        "answer_confidence": 0.9458,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.93
+      }
+    },
+    {
+      "question": "clause_ported_with_attribution",
+      "type": "noul",
+      "laya": 0.9007,
+      "jev": 0.8,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9007,
+        "confidence": 0.9007,
+        "answer_confidence": 0.9007,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.8
+      }
+    },
+    {
+      "question": "clause_parity_dx12_vulkan",
+      "type": "noul",
+      "laya": 0.9234,
+      "jev": 0.97,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9234,
+        "confidence": 0.9234,
+        "answer_confidence": 0.9234,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.97
+      }
+    },
+    {
+      "question": "clause_every_parameter_keyframable",
+      "type": "noul",
+      "laya": 0.9405,
+      "jev": 0.95,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9405,
+        "confidence": 0.9405,
+        "answer_confidence": 0.9405,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.95
+      }
+    },
+    {
+      "question": "row_done",
+      "type": "noul",
+      "laya": 0.969,
+      "jev": 0.87,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.969,
+        "confidence": 0.969,
+        "answer_confidence": 0.969,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.87
+      }
+    },
+    {
+      "question": "weakest_clause",
+      "type": "choice",
+      "laya": "typed_contract",
+      "jev": "parity",
+      "agree": false,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "typed_contract",
+        "probabilities": {
+          "typed_contract": 0.8936,
+          "unknown_refuses": 0.0018,
+          "all_16_present": 0.002,
+          "ported_with_attribution": 0.0005,
+          "parity": 0.1001,
+          "keyframable": 0.0021
+        },
+        "confidence": 0.793,
+        "answer_confidence": 0.8936,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "parity",
+        "confidence": 0.59,
+        "probabilities": {
+          "typed_contract": 0.01,
+          "unknown_refuses": 0.09,
+          "all_16_present": 0.03,
+          "ported_with_attribution": 0.12,
+          "parity": 0.66,
+          "keyframable": 0.09
+        }
+      }
+    }
+  ],
+  "agreement": 0.875,
+  "laya_base_512": {
+    "model": "convaiinnovations/laya",
+    "max_len": 512,
+    "superseded": "read only the first 512 tokens of this input; see laya-context.json",
+    "answers": {
+      "clause_typed_contract": 0.841,
+      "clause_unknown_refuses": 0.7794,
+      "clause_all_16_present": 0.747,
+      "clause_ported_with_attribution": 0.7353,
+      "clause_parity_dx12_vulkan": 0.6304,
+      "clause_every_parameter_keyframable": 0.7892,
+      "row_done": 0.9194,
+      "weakest_clause": "all_16_present"
+    }
+  }
+}

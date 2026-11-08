@@ -435,7 +435,6 @@ pub fn duplicate_object(
 
 /// Rename an object. The name is what the author reads in every panel, so an
 /// empty one is refused rather than stored.
-
 pub fn rename_object(
     scene: &mut SceneDocument,
     object_id: &str,

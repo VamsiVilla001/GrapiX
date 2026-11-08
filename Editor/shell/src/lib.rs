@@ -28,6 +28,10 @@
 //! The shell never imports renderer internals (invariant 3). It speaks the
 //! asset plane's published contract and holds no GPU state.
 
+// EditorError carries the structured refusal or command error it reports to
+// the Editor UI; the large-Err lint would have it boxed for no gain.
+#![allow(clippy::result_large_err)]
+
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeMap;

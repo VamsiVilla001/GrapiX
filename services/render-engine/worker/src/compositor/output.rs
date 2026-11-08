@@ -204,7 +204,7 @@ impl OutputRing {
     ) -> Result<Self, CompositorError> {
         let bytes = u64::from(stage.width) * u64::from(stage.height) * 4;
         let limits = device.limits();
-        if bytes > u64::from(limits.max_storage_buffer_binding_size) || bytes * 2 > limits.max_buffer_size {
+        if bytes > limits.max_storage_buffer_binding_size || bytes * 2 > limits.max_buffer_size {
             return Err(CompositorError::ResourceLimit(format!(
                 "a {}x{} output surface needs {bytes} bytes; the device binds at most {} \
                  (max_storage_buffer_binding_size)",
