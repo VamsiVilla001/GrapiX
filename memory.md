@@ -118,6 +118,16 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-08 — 0.4: SBOM on every build, failing ones included (Claude)
+
+The user chose Laya's answer over Jev's: the SBOM steps and their upload in
+`.github/workflows/check.yml` run with `if: always()`, so a build whose lint, gate or
+pixel gate fails still uploads `sbom-<os>` (before this, a failing run stopped ahead
+of them). 0.4 stays active until a CI run with this config has uploaded the SBOM;
+then it goes to done. Workflow-only change.
+
+**Executed.** `npm run check` exit 0 (377 codegen files current, 43 Node, 412 Editor, 774 Rust passed / 0 failed / 26 ignored, conformance 533 passed / 0 failed / 9 skipped).
+
 ## 2026-11-08 — 5.9 done: published assets reach the engine; first green CI run (Claude)
 
 **Resume here.** Phase 5's only open row is 5.8 (L0 by-path handoff; Needs 5.5, 5.9).

@@ -74,13 +74,19 @@ jobs:
 
       # 0.4: a Software Bill of Materials on every build, so the dependency
       # and licence position is inspectable per artifact rather than asserted.
+      # `always()`: a build whose lint, gate or pixel gate failed still records
+      # what it contained (user decision, 8 Nov 2026). Before this, a failing
+      # run stopped ahead of these steps and uploaded no SBOM.
       - name: Generate SBOM (Rust)
+        if: always()
         run: cargo install cargo-sbom --locked && cargo sbom > sbom-rust.json
 
       - name: Generate SBOM (npm)
+        if: always()
         run: npx --yes @cyclonedx/cyclonedx-npm --output-file sbom-npm.json
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: sbom-${{ matrix.os }}
           path: |
