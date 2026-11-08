@@ -1,0 +1,98 @@
+{
+  "laya": {
+    "model": "convaiinnovations/laya-multilingual",
+    "max_len": 8192,
+    "state_tokens": 433,
+    "truncated": false,
+    "load_s": 25.65,
+    "predict_s": 9.124
+  },
+  "jev_model": "jev-1.14.0",
+  "rows": [
+    {
+      "question": "decklink_test",
+      "type": "choice",
+      "laya": "keep",
+      "jev": "ignore_with_reason",
+      "agree": false,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "keep",
+        "probabilities": {
+          "ignore_with_reason": 0.1143,
+          "env_gate": 0.1497,
+          "delete": 0.2678,
+          "keep": 0.4683
+        },
+        "confidence": 0.1053,
+        "answer_confidence": 0.4683,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "ignore_with_reason",
+        "confidence": 1,
+        "probabilities": {
+          "ignore_with_reason": 1,
+          "env_gate": 0,
+          "delete": 0,
+          "keep": 0
+        }
+      }
+    },
+    {
+      "question": "listener_fix",
+      "type": "choice",
+      "laya": "crate_private_enum",
+      "jev": "pub_opaque",
+      "agree": false,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "crate_private_enum",
+        "probabilities": {
+          "pub_opaque": 0.3168,
+          "allow_lint": 0.3346,
+          "crate_private_enum": 0.3486
+        },
+        "confidence": 0.0007,
+        "answer_confidence": 0.3486,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "pub_opaque",
+        "confidence": 0.89,
+        "probabilities": {
+          "pub_opaque": 0.93,
+          "allow_lint": 0.05,
+          "crate_private_enum": 0.02
+        }
+      }
+    },
+    {
+      "question": "cross_check",
+      "type": "noul",
+      "laya": 0.9772,
+      "jev": 0.92,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9772,
+        "confidence": 0.9772,
+        "answer_confidence": 0.9772,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.92
+      }
+    }
+  ],
+  "agreement": 0.3333333333333333
+}

@@ -22,6 +22,7 @@ use gx_contracts::{
     ClockSource, ContentHash, DeviceTier, Locality, MediaCodec, RationalRate, ReferenceState,
     Refusal, Revision, TakeId, PROTOCOL_VERSION,
 };
+use gx_control_plane::capability::EngineCapability;
 use gx_control_plane::intent::{ClearRequest, CueRequest, TakeAt, TakeRequest};
 use gx_control_plane::message::{ClientRequest, EngineReply, OutputConfig};
 use gx_control_plane::peer::{EnginePeer, FaultInjection};
@@ -29,7 +30,7 @@ use gx_control_plane::sequence::{
     check_kind, Admission, MessageId, MessageKind, Sequence, SequenceTracker,
 };
 use gx_control_plane::status::{clock_summary, Severity};
-use gx_media_plane::{negotiate, ConsumerRole, DropCause, LatestFrameSlot};
+use gx_media_plane::{negotiate, profile_for, ConsumerRole, DropCause, LatestFrameSlot};
 
 /// The result of one conformance check.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -634,6 +635,52 @@ pub fn asset_plane_suite(report: &mut Report) {
 // ---------------------------------------------------------------------------
 // Media plane
 // ---------------------------------------------------------------------------
+
+/// Locality over the wire (5.5): the capability a client reads from a
+/// connected engine declares the locality that engine was started with, and
+/// every consumer's media profile comes from that declared value through
+/// [`profile_for`], with the engine offering each negotiated codec.
+///
+/// `capability` must be what a transport client read from the engine, not a
+/// value the runner already holds: the point is that the declaration crosses
+/// the wire and consumers adapt to it with no code path per locality.
+pub fn locality_suite(capability: &EngineCapability, started_as: Locality, report: &mut Report) {
+    const PLANE: &str = "media";
+    report.record(
+        PLANE,
+        "the locality read over the wire is the one the engine declares",
+        expect(
+            capability.locality == started_as,
+            format!(
+                "5.5: engine started {started_as:?}, client read {:?}",
+                capability.locality
+            ),
+        ),
+    );
+    for (role, check) in [
+        (
+            ConsumerRole::Interactive,
+            "an interactive consumer's media profile follows the declared locality",
+        ),
+        (
+            ConsumerRole::Observational,
+            "an observational consumer's media profile follows the declared locality",
+        ),
+    ] {
+        let profile = profile_for(capability.locality, &capability.media, role);
+        report.record(
+            PLANE,
+            check,
+            expect(
+                profile == Ok(negotiate(capability.locality, role)),
+                format!(
+                    "5.5: {:?} engine offering {:?} gave {role:?} {profile:?}",
+                    capability.locality, capability.media
+                ),
+            ),
+        );
+    }
+}
 
 /// Media plane: drops rather than queues, and negotiates by locality.
 pub fn media_plane_suite(locality: Locality, report: &mut Report) {

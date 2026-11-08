@@ -226,8 +226,11 @@ fn connect_local(path: &Path) -> io::Result<ControlStream> {
         .map(ControlStream::Local)
 }
 
+/// A bound Unix socket, held opaque inside [`ControlListener::Local`]: public
+/// because the enum is, with private fields and methods, as the Windows arm's
+/// `interprocess` listener is.
 #[cfg(unix)]
-struct UnixSocketListener {
+pub struct UnixSocketListener {
     listener: UnixListener,
     path: PathBuf,
 }

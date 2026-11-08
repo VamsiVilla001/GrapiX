@@ -1,0 +1,87 @@
+{
+  "laya": {
+    "model": "convaiinnovations/laya-multilingual",
+    "max_len": 8192,
+    "state_tokens": 531,
+    "truncated": false,
+    "load_s": 12.91,
+    "predict_s": 1.598
+  },
+  "jev_model": "jev-1.14.0",
+  "rows": [
+    {
+      "question": "row_done",
+      "type": "noul",
+      "laya": 0.9504,
+      "jev": 0.77,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9504,
+        "confidence": 0.9504,
+        "answer_confidence": 0.9504,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.77
+      }
+    },
+    {
+      "question": "add_gate",
+      "type": "noul",
+      "laya": 0.9403,
+      "jev": 0.66,
+      "agree": false,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9403,
+        "confidence": 0.9403,
+        "answer_confidence": 0.9403,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.66
+      }
+    },
+    {
+      "question": "weakest",
+      "type": "choice",
+      "laya": "no_branch_clause",
+      "jev": "no_branch_clause",
+      "agree": true,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "no_branch_clause",
+        "probabilities": {
+          "no_branch_clause": 0.9429,
+          "mock_remote": 0.0071,
+          "no_product_consumer": 0.0106,
+          "none": 0.0393
+        },
+        "confidence": 0.8081,
+        "answer_confidence": 0.9429,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "no_branch_clause",
+        "confidence": 0.96,
+        "probabilities": {
+          "no_branch_clause": 0.97,
+          "mock_remote": 0.03,
+          "no_product_consumer": 0,
+          "none": 0
+        }
+      }
+    }
+  ],
+  "agreement": 0.6666666666666666
+}

@@ -17,7 +17,7 @@ application is operable and automatable before it is clickable.
 
 ---
 
-**255 steps across 19 phases.**
+**254 steps across 19 phases.**
 
 **Product direction — 15 October 2026 (user):** GrapiX combines After
 Effects-style composition authoring with Scene Manager and live broadcast
@@ -47,6 +47,13 @@ Phase 10 and design-system-only portions of earlier rows are historical
 compatibility work, not requirements for creating, saving or browsing graphics.
 Do not introduce new token-ingest, brand-pack confirmation or drift workflows.
 Existing saved metadata remains readable and is not deleted by this change.
+
+**Decision — 8 November 2026 (user): Windows only for now.** macOS is out of
+the current scope. Removed: `4.5` (Windows versus macOS pixel equality) and
+`16.2` (VideoToolbox decode on macOS), which nothing depended on. Reworded to
+Windows: `0.3`, `4.2`, `9.2`, `11.1`, `11.30`, `11.32`, `12.1`, `14.5` and the
+Phase 11 UI acceptance note; CI runs on
+`windows-latest` only. macOS work returns as new rows when the user re-adds it.
 
 **Decisions — 8 November 2026 (user), from the two-classifier plan review
 (`docs/evidence/plan-review-2026-11`).** (1) `5.7`, control-port scope
@@ -91,7 +98,7 @@ Blocks literally everything. Nothing else starts until this is green.
 |---|---|---|---|---|
 | `0.1` | Clean branch; one Cargo workspace, one lockfile | CON | — | cargo build at root builds all crates |
 | `0.2` | Pin toolchains: Rust, Node, wgpu 30 across every crate | CON | 0.1 | Versions pinned in-tree, CI enforces |
-| `0.3` | CI matrix on Windows and macOS from the first commit | PLAT | 0.1 | Both platforms green on an empty tree |
+| `0.3` | CI on Windows from the first commit (macOS dropped 8 Nov 2026, user decision) | PLAT | 0.1 | Windows green on an empty tree |
 | `0.4` | Dependency and licence policy; SBOM generated in CI | PLAT | 0.3 | SBOM artifact on every build |
 | `0.5` | tracing + OpenTelemetry skeleton | BE | 0.1 | A span reaches a collector |
 | `0.6` | Structured refusal type — code, field, given, allowed, severity | CON | 0.1 | Serialises identically in Rust and TS |
@@ -285,10 +292,9 @@ The instrument. Built before anything that could change pixels, so there is a ba
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
 | `4.1` | Reference scene set: colour ramp, safe areas, text, vector, 3D, every rate family | BE | 3.13 | Covers each supported fit and blend mode |
-| `4.2` | Headless render harness on both platforms | PLAT | 4.1 | Runs in CI without a display |
+| `4.2` | Headless render harness on Windows (macOS dropped 8 Nov 2026) | PLAT | 4.1 | Runs in CI without a display |
 | `4.3` | Baseline capture, committed to the repo | BE | 4.2 | Reference images versioned |
 | `4.4` | CI gate with a diff threshold that fails the build | PLAT | 4.3 | A deliberate one-pixel change is caught |
-| `4.5` | Cross-platform pixel equality: Windows versus macOS | PLAT | 4.4 | Any difference is explained or fixed, not accepted |
 
 > **Milestone.** There is now an instrument. Nothing after this changes pixels unmeasured.
 
@@ -303,9 +309,10 @@ Location-transparent from the first line. Local is an optimisation, not a differ
 | `5.2` | Session, auth, epoch, reconnect and reconciliation | BE | 2.9 | Program survives a control disconnect |
 | `5.3` | Asset plane local: hash preflight, transfer only the difference | BE | 2.7 | Re-publish moves no unchanged bytes |
 | `5.4` | Media plane local: shared memory or handle passing | BE | 3.11 | Frames reach a consumer with no copy |
-| `5.5` | Locality declared in the capability exchange | BE | 1.10 | `EngineCapability` carries locality (local or remote); a conformance test reads it over the wire from a local engine and a mocked remote one, and Playout chooses its asset path by it with no code path per locality. (Reworded 8 Nov 2026, user decision, from "Consumers adapt without code change", which could not be executed.) |
+| `5.5` | Locality declared in the capability exchange | BE | 1.10 | A conformance test reads `EngineCapability.locality` over the wire from the real local worker and from a LAN mock served over the loopback transport, and every consumer's media profile comes from `gx_media_plane::negotiate` applied to that declared value (through `profile_for`, which refuses a codec the engine does not offer by name); no consumer branches on locality (boundary rule R9); the engine's offered codecs agree with it. (Reworded twice on 8 Nov 2026, user decisions: from "Consumers adapt without code change", which could not be executed, and then from "Playout chooses its asset path by it", which assumed a Playout asset path that does not exist; the asset-path half is `5.8`.) |
 | `5.6` | Conformance suite passes over the real transport, not just mocks | BE | 1.12 | Same suite, both paths |
 | `5.7` | Control-port scope enforcement: every request checked against the token role's scopes at the transport, before the engine sees it (added 8 Nov 2026 from the done-row review: `server.rs` verified a token's signature and then ignored its claims; only the MCP server enforced scopes) | BE | 5.2, 8.13 | A conformance test sends every control request with an author-scoped token and each is refused by name at the transport; the engine handler is never reached (asserted by trace). Done before Phase 14 exposes the port beyond loopback. |
+| `5.8` | L0 asset handoff by local path (ADR-001's co-located asset plane) (added 8 Nov 2026, user decision, split from `5.5`) | BE | 5.3, 5.5 | A co-located engine accepts a published package by local path, re-hashing every asset before use and refusing by name a path outside the package directory or a hash mismatch; the publisher chooses path or chunked upload from the declared locality through one negotiation function; a conformance test publishes the same package both ways and the engine prepares identical scenes. |
 
 ## Phase 6 — Playout service
 
@@ -365,7 +372,7 @@ Deliberately before the UI. The application becomes fully operable and automatab
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
 | `9.1` | Artifact teardown of comparable professional tools | RES | P.3 | Vocabulary of density, chrome and controls |
-| `9.2` | Recruit designers, operators, producers | RES | P.3 | Segments filled, including macOS-primary designers |
+| `9.2` | Recruit designers, operators, producers | RES | P.3 | Segments filled (macOS-primary designers dropped 8 Nov 2026) |
 | `9.3` | Contextual interviews in the suite and the control room | RES | 9.2 | Not remote. Lighting and viewing distance observed |
 | `9.5` | Usability baseline against the previous build | RES | 9.2 | Timed tasks on the 11.63 workspace, including the disconnected-engine task; the results validate 11.5's layout |
 | `9.7` | Synthesis: validation report and anti-pattern list | RES | 9.3, 9.5 | Density, chrome and type-at-viewing-distance findings against the 11.63 workspace, each with a proposed amendment or a recorded no-change |
@@ -388,7 +395,7 @@ Deferred to here on purpose. Everything above is usable without it, and this is 
 
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
-| `11.1` | Tauri 2 shell on both platforms; signed and notarised | UI | 0.3 | Installers produced by CI |
+| `11.1` | Tauri 2 shell on Windows; signed (macOS and notarising dropped 8 Nov 2026) | UI | 0.3 | Installers produced by CI |
 | `11.2` | WebGPU capability probe on both target OS versions | PLAT | 11.1 | Result recorded; decides the WASM fallback |
 | `11.3` | DPI: fractional scaling, scale change, monitor move | UI | 11.1 | Correct at 100, 125, 150 and 200 per cent |
 | `11.4` | Colour management in the browser layer, matching the engine | UI | 3.3 | Colour ramp matches the engine render |
@@ -418,9 +425,9 @@ Deferred to here on purpose. Everything above is usable without it, and this is 
 | `11.27` | Test fill in the Editor: fill a template instance (operator pages are 12.8) | UI | 11.26 | The Editor renders the operator form generated from 11.26's declared fields, fills values against a template, reports a value the field's type refuses rather than coercing it, previews the filled result in the viewport, and saves and reopens named instances without mutating the template they were filled from. Amended 16 Oct 2026 (decision Q5): the panel is renamed Test fill; operator pages and their storage are 12.8's work in Playout. The criteria above were verified earlier and stand for the Editor's test fill |
 | `11.28` | Named text style presets | UI | 11.13 | Font, size, tracking, line height, case and fill/stroke are saved as one named, reusable style; applying a style to a text object sets exactly those properties as one undo entry; a style whose font the scene does not carry refuses by name; styles survive save/reopen |
 | `11.29` | Multi-scene workspace: scenes as first-class entities | UI | 11.18 | A broadcast carries many graphics, so each open scene is a distinct session owning its own document, selection, playhead, collapse state and undo history; one workspace module lists every open scene and switches the active one; viewport, object manager, inspector, timeline, animation and binding panels are children of the active scene and render it alone; switching preserves each scene's own state, an edit or undo in one scene cannot alter another, and closing a scene with unsaved changes refuses by name |
-| `11.30` | Save model: Ctrl+S saves in place, Ctrl+Shift+S saves a new version | UI | 11.29, 11.15 | Ctrl+S (Cmd+S on macOS) writes the active scene to its own file or project entry in place, and a saved preset into the project's preset library in place; it never creates a version. Ctrl+Shift+S (Cmd+Shift+S) is the only way to create a new version: the next free numbered copy (`<name>_v002`, `_v003`, …) is written beside the current one, the previous version is left byte-identical, and the session continues in the new version. Neither shortcut fires while a text field has focus; a failed save keeps the unsaved mark and names its reason |
+| `11.30` | Save model: Ctrl+S saves in place, Ctrl+Shift+S saves a new version | UI | 11.29, 11.15 | Ctrl+S writes the active scene to its own file or project entry in place, and a saved preset into the project's preset library in place; it never creates a version. Ctrl+Shift+S is the only way to create a new version: the next free numbered copy (`<name>_v002`, `_v003`, …) is written beside the current one, the previous version is left byte-identical, and the session continues in the new version. Neither shortcut fires while a text field has focus; a failed save keeps the unsaved mark and names its reason |
 | `11.31` | One command registry behind every menu, toolbar, shortcut and agent action | UI | 11.30, 11.36 | Every user action is one named command with a label, shortcut, enabled state and refusal reason; the menu bar, toolbar, keyboard shortcuts and the agent surface all dispatch the same command, so a disabled menu item and a refused shortcut give the same named reason; every registry command that changes the document dispatches an 11.36 command; no action is reachable by a shortcut alone; shortcuts never fire while a text field has focus |
-| `11.32` | Menu bar and toolbar (After Effects conventions) | UI | 11.31 | A classic in-app menu bar — **File**: New Project, Open Project, Open Recent, Save (Ctrl+S), Save New Version (Ctrl+Shift+S), Save As…, Export package (7.6), Close Scene, Exit; **Edit**: Undo, Redo, Cut, Copy, Paste, Duplicate, Delete (Delete key), Select All; **Composition**; **Layer**; **View**; **Window**; **Help** — plus a slim toolbar of the common commands, identical on Windows and macOS. Exit and Close with unsaved scenes refuse by name until each is saved or explicitly discarded; Delete removes the selection as one undo entry |
+| `11.32` | Menu bar and toolbar (After Effects conventions) | UI | 11.31 | A classic in-app menu bar — **File**: New Project, Open Project, Open Recent, Save (Ctrl+S), Save New Version (Ctrl+Shift+S), Save As…, Export package (7.6), Close Scene, Exit; **Edit**: Undo, Redo, Cut, Copy, Paste, Duplicate, Delete (Delete key), Select All; **Composition**; **Layer**; **View**; **Window**; **Help** — plus a slim toolbar of the common commands. Exit and Close with unsaved scenes refuse by name until each is saved or explicitly discarded; Delete removes the selection as one undo entry |
 | `11.33` | Window menu: every module reachable; tabbed docks and saved layouts | UI | 11.5, 11.32 | The Window menu lists every Editor module and shows, focuses or hides it; a hidden panel is never lost and reopens where it was; panels stack as tabs inside any dock and drag between docks and tab groups; the user can save named layouts, switch between them and reset to the card-sort default; layouts survive restart |
 | `11.34` | Floating panel windows | UI | 11.33 | Any panel tears off into its own OS window (e.g. a second monitor) and docks back; the main window stays the only owner of the document, and a floating panel is a projection of the active scene that sends commands through 11.31 — never a second copy of the document; floating windows restore to their monitor and bounds on restart, and fall back on screen when that monitor is gone; closing the main window closes them |
 | `11.35` | Workspace modes | UI | 11.33 | Named workspace modes — at least Design, Animate and Data binding — each a saved layout of panels and docks, switched from the Window menu and toolbar without touching the document, selection or undo history; a mode the user rearranges can be saved over or saved as a new mode, and reset to its default |
@@ -480,7 +487,7 @@ Deferred to here on purpose. Everything above is usable without it, and this is 
 
 - Preserve Rust-owned contracts and generated TypeScript, validated writes, revision checks, undo transactions, design-system motion tokens and the existing preview/production separation. Reconcile editable scene channels with existing normalized preset channels and easing tokens; extend contracts only where necessary. Human keyframe authoring must not silently widen the agent/MCP surface, which selects and parameterizes presets under ADR Part G.
 
-- Acceptance requires actual Tauri workflows on Windows and macOS: create/open a scene or template, add/select/edit objects, bind data, manage fonts/assets/materials, animate with diamonds and Auto-Key, edit/copy keys, apply easing/presets, preview, undo/redo, save and reopen. Verify animation persistence and evaluated values, report unsupported cases, and retain the 11.10 flat-node-count and 11.11 no-static-repaint gates. Isolated panel projections or headless tests alone do not establish Editor 1.x parity.
+- Acceptance requires actual Tauri workflows on Windows (macOS dropped 8 Nov 2026, user decision): create/open a scene or template, add/select/edit objects, bind data, manage fonts/assets/materials, animate with diamonds and Auto-Key, edit/copy keys, apply easing/presets, preview, undo/redo, save and reopen. Verify animation persistence and evaluated values, report unsupported cases, and retain the 11.10 flat-node-count and 11.11 no-static-repaint gates. Isolated panel projections or headless tests alone do not establish Editor 1.x parity.
 
 ### Phase 11 additions — broadcast CG editor parity (13 September 2026)
 
@@ -583,7 +590,7 @@ Second because the control surface is smaller and the service beneath it is alre
 
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
-| `12.1` | Tauri 2 shell | UI | 0.3 | Signed on both platforms |
+| `12.1` | Tauri 2 shell | UI | 0.3 | Signed on Windows (macOS dropped 8 Nov 2026) |
 | `12.2` | Playout library: published graphics by Take ID | UI | 6.1 | Search, import, fetch, direct recall |
 | `12.3` | Take list and rundown | UI | 6.4 | Persisted cursor, continue behaviour |
 | `12.4` | Transport controls: cue, take, continue, out, clear | UI | 6.2 | Committed frame number shown |
@@ -623,7 +630,7 @@ Deployment change, not an architecture change — if the earlier phases held the
 | `14.2` | Control plane over the remote transport | BE | 14.1 | Same messages, same semantics |
 | `14.3` | Resumable asset transfer | BE | 5.3 | Survives a disconnect mid-package |
 | `14.4` | Media codec negotiation by locality and consumer role | BE | 5.5 | Interactive and observational streams differ |
-| `14.5` | NVENC encode; VideoToolbox decode on macOS clients | BE | 14.4 | Bandwidth within a LAN budget |
+| `14.5` | NVENC encode (VideoToolbox on macOS clients dropped 8 Nov 2026) | BE | 14.4 | Bandwidth within a LAN budget |
 | `14.6` | Two engine instances by role: design and program | BE | 3.2 | Design engine structurally cannot go live |
 | `14.7` | Build hash pinned at publish; skew warning in Playout | BE | 7.6 | Version skew is visible, not silent |
 | `14.8` | Conformance suite passes at L1 exactly as at L0 | BE | 5.6 | Same suite, remote transport |
@@ -658,7 +665,6 @@ Feature work that is not release-blocking. Sequenced after parity and reliabilit
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
 | `16.1` | Video decoder tier: FFmpeg with NVDEC | BE | P.2 | Licence position settled first |
-| `16.2` | VideoToolbox decode on macOS | BE | 16.1 | One trait, two backends |
 | `16.3` | Transitions beyond cut, dual-target | BE | 3.8 | Dropped-frame behaviour certified |
 | `16.4` | Script sandbox on rquickjs: deterministic per-scene JS | BE | 2.9, 11.36, 11.58 | CPU and memory bounded, disposable. No wall-clock access (`Date.now`, `performance.now`, timers) and no network (`fetch`, sockets); time comes only from the engine frame number and rational rate, data only through bindings, and typed APIs limit which objects a script may touch (invariant 62). A script calling a banned API is refused by name and the console (11.58) shows it; a fixture script driven only by frame number gives identical output across two runs; a script touching an object outside its declared scope is refused |
 | `16.5` | Lottie import path | BE | 7.2 | Reduces the Adobe dependency |

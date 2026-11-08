@@ -1,0 +1,107 @@
+{
+  "laya": {
+    "model": "convaiinnovations/laya-multilingual",
+    "max_len": 8192,
+    "state_tokens": 442,
+    "truncated": false,
+    "load_s": 11.88,
+    "predict_s": 1.495
+  },
+  "jev_model": "jev-1.14.0",
+  "rows": [
+    {
+      "question": "api",
+      "type": "choice",
+      "laya": "offered_checked",
+      "jev": "offered_checked",
+      "agree": true,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "offered_checked",
+        "probabilities": {
+          "offered_checked": 0.4104,
+          "negotiate_only": 0.3123,
+          "engine_derives_offer": 0.2773
+        },
+        "confidence": 0.0127,
+        "answer_confidence": 0.4104,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "offered_checked",
+        "confidence": 0.35,
+        "probabilities": {
+          "offered_checked": 0.57,
+          "negotiate_only": 0.34,
+          "engine_derives_offer": 0.09
+        }
+      }
+    },
+    {
+      "question": "refusal",
+      "type": "choice",
+      "laya": "no_refusal",
+      "jev": "new_variant",
+      "agree": false,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "no_refusal",
+        "probabilities": {
+          "new_variant": 0.243,
+          "reuse_transport_unavailable": 0.351,
+          "no_refusal": 0.406
+        },
+        "confidence": 0.0195,
+        "answer_confidence": 0.406,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "new_variant",
+        "confidence": 0.22,
+        "probabilities": {
+          "new_variant": 0.48,
+          "reuse_transport_unavailable": 0.06,
+          "no_refusal": 0.46
+        }
+      }
+    },
+    {
+      "question": "test_shape",
+      "type": "choice",
+      "laya": "unit_tests_only",
+      "jev": "new_suite",
+      "agree": false,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "unit_tests_only",
+        "probabilities": {
+          "new_suite": 0.0897,
+          "extend_media_suite": 0.0909,
+          "unit_tests_only": 0.8194
+        },
+        "confidence": 0.4561,
+        "answer_confidence": 0.8194,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "new_suite",
+        "confidence": 0.68,
+        "probabilities": {
+          "new_suite": 0.79,
+          "extend_media_suite": 0.21,
+          "unit_tests_only": 0
+        }
+      }
+    }
+  ],
+  "agreement": 0.3333333333333333
+}

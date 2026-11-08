@@ -44,6 +44,15 @@ const cases = [
   ["a port 4100 listener outside the control plane is refused", "services/editor/src/api.rs",
     "fn serve() { let listener = TcpListener::bind(\"127.0.0.1:4100\").unwrap(); }",
     /project-api must accept only EditorCommand \(R8\)/],
+  ["a consumer matching on a Locality variant is refused", "services/playout/src/lib.rs",
+    "fn route(cap: &EngineCapability) -> u8 { match cap.locality { Locality::Lan => 1, _ => 0 } }",
+    /branches on a Locality variant.*\(R9, 5\.5\)/],
+  ["declaring a Locality value is not a branch", "Shared/control-transport/src/client.rs",
+    "fn placeholder() -> EngineCapability { EngineCapability { locality: Locality::CoLocated, ..base() } }",
+    /^$/],
+  ["a TypeScript consumer comparing locality is refused", "Editor/src/preview.ts",
+    "export const remote = (cap: { locality: string }) => cap.locality === \"Lan\";",
+    /branches on the engine's locality \(R9, 5\.5\)/],
 ];
 
 for (const [name, path, text, expected] of cases) {

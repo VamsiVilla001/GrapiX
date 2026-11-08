@@ -10,9 +10,9 @@
 
 use gx_conformance::{
     asset_plane_suite, control_plane_delivery_suite, control_plane_fault_suite,
-    control_plane_suite, editor_command_suite, headless_render_suite, media_plane_suite,
-    mock_product_suite, refusal_audit_suite, render_preview_suite, scene_plane_suite,
-    timing_plane_suite, Outcome, Report,
+    control_plane_suite, editor_command_suite, headless_render_suite, locality_suite,
+    media_plane_suite, mock_product_suite, refusal_audit_suite, render_preview_suite,
+    scene_plane_suite, timing_plane_suite, Outcome, Report,
 };
 use gx_contracts::{DeviceTier, Locality, RationalRate};
 use gx_control_plane::peer::EnginePeer;
@@ -50,11 +50,15 @@ fn main() {
     // miniature: if the checks that pass in-process also pass across a
     // transport, the contracts really are transport-independent. When QUIC
     // arrives at L1, this block gains a peer and nothing else changes.
-    run_over_transport(&mut report, None);
+    run_over_transport(&mut report, None, Locality::CoLocated);
     // Again, protected. Every check must behave identically once the
     // credential is accepted: authentication gates the connection, it does not
     // change the protocol.
-    run_over_transport(&mut report, Some(CONFORMANCE_TOKEN));
+    run_over_transport(&mut report, Some(CONFORMANCE_TOKEN), Locality::CoLocated);
+    // A LAN engine behind the same transport: the remote side of 5.5. The
+    // client reads a different declared locality and every consumer adapts
+    // through the same code.
+    run_over_transport(&mut report, None, Locality::Lan);
 
     // The real engine, as a peer. The same control-plane suite that runs
     // against the mock runs against the actual render worker, which is the
@@ -147,8 +151,12 @@ const CONFORMANCE_TOKEN: &str = "conformance-token-0123456789abcd";
 
 /// Start a loopback server carrying a mock, then run the control-plane suite
 /// through a real client against it.
-fn run_over_transport(report: &mut Report, token: Option<&str>) {
-    let mut engine = MockEngine::new().genlocked(RationalRate::P29_97);
+fn run_over_transport(report: &mut Report, token: Option<&str>, locality: Locality) {
+    let mut engine = match locality {
+        Locality::CoLocated => MockEngine::new(),
+        Locality::Lan => MockEngine::new().over_lan(),
+    }
+    .genlocked(RationalRate::P29_97);
     engine.publish(
         gx_contracts::TakeId("conformance/published".into()),
         gx_contracts::Revision(1),
@@ -196,7 +204,7 @@ fn run_over_transport(report: &mut Report, token: Option<&str>) {
     };
 
     report.set_peer(format!(
-        "control-transport client to {bound} (L0, loopback TCP{})",
+        "control-transport client to {bound} (L0, loopback TCP{}; engine declares {locality:?})",
         if token.is_some() {
             ", token required"
         } else {
@@ -204,6 +212,7 @@ fn run_over_transport(report: &mut Report, token: Option<&str>) {
         }
     ));
     control_plane_suite(&mut client, report);
+    locality_suite(&client.capability(), locality, report);
     // No fault suite here: a client cannot reach through the wire to drop a
     // reference, which is exactly the FaultInjection distinction. It skips by
     // being absent rather than by pretending.
@@ -290,6 +299,8 @@ fn run_against_real_engine(report: &mut Report) {
         cap.locality, cap.device_tier, cap.clock
     ));
     control_plane_suite(&mut client, report);
+    // Started without --lan, so the real engine must declare itself co-located.
+    locality_suite(&cap, gx_contracts::Locality::CoLocated, report);
     // No fault suite: a real engine cannot be driven into a reference loss on
     // request, which is the entire reason `FaultInjection` is a separate trait.
     // render.preview over JSON-RPC (8.9), drawn through the headless entry

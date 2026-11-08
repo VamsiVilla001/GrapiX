@@ -68,6 +68,33 @@ pub fn negotiate(locality: Locality, role: ConsumerRole) -> MediaProfile {
     }
 }
 
+/// The media profile a consumer uses with a connected engine (5.5).
+///
+/// Every consumer goes through this rather than reading `locality` itself:
+/// `locality` and `offered` are the engine's capability exchange
+/// (`EngineCapability::locality` and `::media`), the profile is
+/// [`negotiate`]'s answer for that declared locality, and a codec the engine
+/// does not offer is refused by name instead of quietly replaced by one it
+/// does (invariant 18). So no consumer has a code path per locality, and moving
+/// an engine from co-located to LAN is a capability change, not a code change
+/// (invariant 16).
+pub fn profile_for(
+    locality: Locality,
+    offered: &[MediaCodec],
+    role: ConsumerRole,
+) -> Result<MediaProfile, gx_contracts::Refusal> {
+    let profile = negotiate(locality, role);
+    if offered.contains(&profile.codec) {
+        Ok(profile)
+    } else {
+        Err(gx_contracts::Refusal::MediaCodecNotOffered {
+            codec: profile.codec,
+            locality,
+            offered: offered.to_vec(),
+        })
+    }
+}
+
 /// Frames discarded because the consumer could not keep up, counted by cause.
 ///
 /// Counted rather than buffered: a queue here would eventually push back on
@@ -92,6 +119,40 @@ impl DropCounters {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 5.5: the profile follows the declared locality and the offer.
+    #[test]
+    fn profile_for_follows_the_declared_locality() {
+        let local = [MediaCodec::RawShared, MediaCodec::Jpeg];
+        let lan = [MediaCodec::H264, MediaCodec::Jpeg];
+        for (locality, offered) in [(Locality::CoLocated, &local[..]), (Locality::Lan, &lan[..])] {
+            for role in [ConsumerRole::Interactive, ConsumerRole::Observational] {
+                assert_eq!(
+                    profile_for(locality, offered, role),
+                    Ok(negotiate(locality, role))
+                );
+            }
+        }
+    }
+
+    /// An engine that does not offer the negotiated codec is refused by name,
+    /// never answered with the first codec it does offer.
+    #[test]
+    fn an_unoffered_codec_is_refused_not_substituted() {
+        let refused = profile_for(
+            Locality::Lan,
+            &[MediaCodec::Jpeg],
+            ConsumerRole::Interactive,
+        );
+        assert_eq!(
+            refused,
+            Err(gx_contracts::Refusal::MediaCodecNotOffered {
+                codec: MediaCodec::H264,
+                locality: Locality::Lan,
+                offered: vec![MediaCodec::Jpeg],
+            })
+        );
+    }
 
     #[test]
     fn co_located_interactive_does_not_encode() {

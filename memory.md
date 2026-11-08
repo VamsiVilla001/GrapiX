@@ -118,6 +118,45 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-08 — 5.5 done; Windows only (macOS removed from the todo); second CI run fixes (Claude)
+
+**Resume here.** Next: 5.7 (control-port scope enforcement), then 3.21; Codex has
+3.17. 0.10 and 4.2 return to done on the first green CI run (now Windows only).
+
+**5.5 done** (`docs/evidence/5.5`). Reading the code showed no product consumer read
+the engine's locality and Playout moves no assets, so the user reworded 5.5 a second
+time (media profile) and split the asset-path idea into pending row **5.8** (ADR-001
+L0 handoff by path). Built, with each design question put to Jev and Laya first:
+`gx_media_plane::profile_for(locality, offered, role)` (negotiate checked against the
+engine's offered codecs); new `Refusal::MediaCodecNotOffered { codec, locality,
+offered }` (TS regenerated, refusal audit drives it; Laya preferred silently picking
+the first offered codec, which invariant 18 forbids); conformance `locality_suite`
+over the wire for a co-located and a LAN mock behind the loopback transport and the
+real worker; boundary rule **R9**: no consumer branches on a `Locality` variant
+(match arm, ==/!=, matches!, if let) outside contracts, control-plane, media-plane,
+the engine, the mock engine and conformance, and no TS compares to "CoLocated"/"Lan".
+Its first run flagged a placeholder capability (a declaration), so R9 targets branches
+only. Rows 5.7 and 5.8 were also added to `progress.html`'s embedded plan (the
+earlier commit had added 5.7 to the plan file only).
+
+**Windows only (user decision, 8 Nov).** macOS is out of the current scope: rows 4.5
+(Windows vs macOS pixel equality) and 16.2 (VideoToolbox on macOS) removed, nothing
+needed them; 0.3, 4.2, 9.2, 11.1, 11.30, 11.32, 12.1, 14.5 and the Phase 11 UI
+acceptance note reworded to Windows; CI matrix is `windows-latest` only; 254 steps.
+Rule 17 above names macOS for 0.3; read it as Windows.
+
+**Second CI run (42457236582) fixes**, put to Jev and Laya
+(`docs/evidence/review-2026-11/ci-second-run-jev-laya.json`): the DeckLink
+machine-evidence test is `#[ignore]` with its reason (a runner has no Desktop Video;
+it passes here with `--ignored`); `UnixSocketListener` is a public opaque type (macOS
+clippy: private type in a public enum; `cfg(unix)` code had never been compiled by
+either agent). With macOS out of CI the Linux cross-check both models suggested was
+not run; `cfg(unix)` code stays unverified.
+
+**Executed.** media-plane 14 tests; boundary tests 18 and the real tree OK; DeckLink
+`--ignored` 1 pass on this machine; `cargo fmt --check` and clippy `-D warnings` exit
+0; `npm run check` exit 0 (377 codegen files current, 43 Node, 412 Editor, 773 Rust passed / 0 failed / 26 ignored, conformance 522 passed / 0 failed / 9 skipped).
+
 ## 2026-11-08 — First CI run on agent/shared: Rust pinned to 1.89.0 (0.2 breach fixed) (Claude)
 
 The first CI run after the push (42455966236) passed `cargo fmt --check` for the first

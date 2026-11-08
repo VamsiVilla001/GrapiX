@@ -590,6 +590,15 @@ pub enum Refusal {
     /// consumer must be told rather than left watching a frame that never
     /// updates (invariant 13).
     MediaTransportUnavailable { detail: String },
+    /// The engine does not offer the codec its declared locality negotiates
+    /// for this consumer (5.5, ADR-004). The consumer is told by name rather
+    /// than handed whichever codec the engine happens to offer first, which
+    /// would be a silent substitution (invariant 18).
+    MediaCodecNotOffered {
+        codec: MediaCodec,
+        locality: Locality,
+        offered: Vec<MediaCodec>,
+    },
     /// A rundown cursor names a position the rundown does not have.
     RundownCursorOutOfRange { cursor: usize, len: usize },
     /// A rundown entry id that the loaded rundown does not contain.
@@ -1218,6 +1227,14 @@ impl std::fmt::Display for Refusal {
             Refusal::MediaTransportUnavailable { detail } => {
                 write!(f, "media transport unavailable: {detail}")
             }
+            Refusal::MediaCodecNotOffered {
+                codec,
+                locality,
+                offered,
+            } => write!(
+                f,
+                "a {locality:?} engine negotiates {codec:?} for this consumer but offers only {offered:?}"
+            ),
             Refusal::RundownCursorOutOfRange { cursor, len } => write!(
                 f,
                 "rundown cursor {cursor} is outside a rundown of {len} entries"
@@ -1946,6 +1963,11 @@ impl Refusal {
             Self::MediaTransportUnavailable {
                 detail: "audit".into(),
             },
+            Self::MediaCodecNotOffered {
+                codec: MediaCodec::H264,
+                locality: Locality::Lan,
+                offered: vec![MediaCodec::Jpeg],
+            },
             Self::RundownCursorOutOfRange { cursor: 9, len: 2 },
             Self::RundownEntryUnknown {
                 entry_id: "audit".into(),
@@ -2267,6 +2289,7 @@ impl Refusal {
             Self::EmptyAssetTransfer { .. } => "emptyAssetTransfer",
             Self::AssetHashMismatch { .. } => "assetHashMismatch",
             Self::MediaTransportUnavailable { .. } => "mediaTransportUnavailable",
+            Self::MediaCodecNotOffered { .. } => "mediaCodecNotOffered",
             Self::RundownCursorOutOfRange { .. } => "rundownCursorOutOfRange",
             Self::RundownEntryUnknown { .. } => "rundownEntryUnknown",
             Self::AutomationExecutionDeferred { .. } => "automationExecutionDeferred",

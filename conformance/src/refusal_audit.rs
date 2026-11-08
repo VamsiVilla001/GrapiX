@@ -1257,6 +1257,26 @@ fn drive_media_refusals(report: &mut Report) {
             "an unavailable local media mapping was not refused as MediaTransportUnavailable",
         ),
     );
+    // 5.5: a LAN engine that does not offer H.264 cannot serve an interactive
+    // consumer; the consumer is told so by name, not handed JPEG instead.
+    report.record(
+        PLANE,
+        "MediaCodecNotOffered is produced when the engine lacks the negotiated codec",
+        expect(
+            matches!(
+                gx_media_plane::profile_for(
+                    gx_contracts::Locality::Lan,
+                    &[gx_contracts::MediaCodec::Jpeg],
+                    gx_media_plane::ConsumerRole::Interactive,
+                ),
+                Err(Refusal::MediaCodecNotOffered {
+                    codec: gx_contracts::MediaCodec::H264,
+                    ..
+                })
+            ),
+            "an engine lacking the negotiated codec was not refused as MediaCodecNotOffered",
+        ),
+    );
 }
 
 fn drive_asset_refusals(report: &mut Report) {
@@ -1820,6 +1840,7 @@ fn is_driven(variant: &str) -> bool {
             | "UnknownPackageFormatVersion"
             | "UnsafePackagePath"
             | "MediaTransportUnavailable"
+            | "MediaCodecNotOffered"
             | "AssetChunkOutOfOrder"
             | "AssetTransferAlreadyComplete"
             | "EmptyAssetTransfer"

@@ -1,0 +1,85 @@
+{
+  "laya": {
+    "model": "convaiinnovations/laya-multilingual",
+    "max_len": 8192,
+    "state_tokens": 608,
+    "truncated": false,
+    "load_s": 13.48,
+    "predict_s": 2.023
+  },
+  "jev_model": "jev-1.14.0",
+  "rows": [
+    {
+      "question": "choice_5_5",
+      "type": "choice",
+      "laya": "keep_and_wait",
+      "jev": "media_profile",
+      "agree": false,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "keep_and_wait",
+        "probabilities": {
+          "media_profile": 0.0004,
+          "by_path_assets": 0.0008,
+          "keep_and_wait": 0.9988
+        },
+        "confidence": 0.9909,
+        "answer_confidence": 0.9988,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "media_profile",
+        "confidence": 0.97,
+        "probabilities": {
+          "media_profile": 0.98,
+          "by_path_assets": 0.02,
+          "keep_and_wait": 0
+        }
+      }
+    },
+    {
+      "question": "needs_user",
+      "type": "noul",
+      "laya": 0.9615,
+      "jev": 0.68,
+      "agree": false,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9615,
+        "confidence": 0.9615,
+        "answer_confidence": 0.9615,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.68
+      }
+    },
+    {
+      "question": "by_path_needs_row",
+      "type": "noul",
+      "laya": 0.9789,
+      "jev": 0.91,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9789,
+        "confidence": 0.9789,
+        "answer_confidence": 0.9789,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.91
+      }
+    }
+  ],
+  "agreement": 0.3333333333333333
+}

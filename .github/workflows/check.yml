@@ -1,5 +1,5 @@
-# GrapiX CI — build plan 0.3 (matrix on Windows and macOS from the first
-# commit) and 0.4 (SBOM on every build).
+# GrapiX CI — build plan 0.3 (Windows from the first commit; macOS dropped by
+# user decision on 8 Nov 2026) and 0.4 (SBOM on every build).
 #
 # The gate is `npm run check`: boundaries, codegen-staleness, typecheck, TS
 # tests, Rust tests, and the conformance suite. A change is not mergeable
@@ -26,7 +26,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        # Windows only (user decision, 8 Nov 2026): macOS is out of the current
+        # scope. Re-add macos-latest here when it returns.
+        os: [windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

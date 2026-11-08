@@ -264,6 +264,7 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
     "emptyAssetTransfer",
     "assetHashMismatch",
     "mediaTransportUnavailable",
+    "mediaCodecNotOffered",
     "rundownCursorOutOfRange",
     "rundownEntryUnknown",
     "automationExecutionDeferred",

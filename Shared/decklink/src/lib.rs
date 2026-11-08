@@ -170,6 +170,7 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[test]
+    #[ignore = "machine evidence for P.1: needs the Desktop Video runtime installed; run with --ignored on the DeckLink workstation (a CI runner has none)"]
     fn on_this_machine_with_desktop_video_installed_the_probe_finds_it() {
         // Execution evidence for P.1's DeckLink row: the user installed a
         // DeckLink Duo 2 with the Desktop Video runtime on this machine, so
