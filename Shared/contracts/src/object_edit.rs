@@ -157,7 +157,9 @@ pub fn set_object_field(
             }
             Some(font) if !font.enabled => {
                 return Err(Refusal::InvalidFontData {
-                    detail: format!("font {font_id} is switched off; switch it on before text uses it"),
+                    detail: format!(
+                        "font {font_id} is switched off; switch it on before text uses it"
+                    ),
                 })
             }
             Some(_) => {}
@@ -326,7 +328,11 @@ mod tests {
 
     #[test]
     fn inspector_rejects_mixed_kind_and_accepts_opacity_bounds() {
-        let mut scene = new_scene("scene", "Scene", crate::color::WorkingColorSpace::NEW_PROJECT);
+        let mut scene = new_scene(
+            "scene",
+            "Scene",
+            crate::color::WorkingColorSpace::NEW_PROJECT,
+        );
         scene.objects = vec![
             rect("card"),
             SceneObject::Group(GroupObject {
@@ -349,7 +355,11 @@ mod tests {
 
     #[test]
     fn inherited_visibility_and_lock_refuse_child_edits() {
-        let mut scene = new_scene("scene", "Scene", crate::color::WorkingColorSpace::NEW_PROJECT);
+        let mut scene = new_scene(
+            "scene",
+            "Scene",
+            crate::color::WorkingColorSpace::NEW_PROJECT,
+        );
         let mut group = GroupObject {
             base: ObjectBase::new("group", "Group"),
             child_ids: vec!["card".into()],
@@ -379,7 +389,11 @@ mod tests {
             }))
             .unwrap()
         };
-        let mut scene = new_scene("scene", "Scene", crate::color::WorkingColorSpace::NEW_PROJECT);
+        let mut scene = new_scene(
+            "scene",
+            "Scene",
+            crate::color::WorkingColorSpace::NEW_PROJECT,
+        );
         scene.fonts = vec![font("on", true), font("off", false), font("other", true)];
         let text = crate::authoring::create_object(&mut scene, "text", "Title").unwrap();
         let ids = vec![text.clone()];

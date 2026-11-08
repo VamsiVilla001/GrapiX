@@ -105,7 +105,6 @@ pub fn save_text_style(scene: &mut SceneDocument, style: TextStyle) -> Result<()
     Ok(())
 }
 
-
 /// Apply one named style to one text object.
 ///
 /// All lookups and token resolution happen before the object is borrowed for
@@ -224,11 +223,14 @@ fn resolve_number(
             .map(|token| token.value),
         // Visual spacing has numeric values rather than a separate named
         // wrapper. Its canonical token path is therefore `{spacing.<value>}`.
-        "spacing" => reference
-            .name()
-            .parse::<f64>()
-            .ok()
-            .and_then(|name| system.visual.spacing.iter().copied().find(|value| *value == name)),
+        "spacing" => reference.name().parse::<f64>().ok().and_then(|name| {
+            system
+                .visual
+                .spacing
+                .iter()
+                .copied()
+                .find(|value| *value == name)
+        }),
         "minTextSize" if reference.name() == "default" => Some(system.visual.min_text_size),
         _ => None,
     };
@@ -381,7 +383,12 @@ mod tests {
         let second = scene.objects[0].base().fill.clone();
 
         assert_ne!(first, second, "reapplying resolves the current token value");
-        assert_eq!(second, Some(ColorValue::Solid { color: tokens.visual.palette[0].value }));
+        assert_eq!(
+            second,
+            Some(ColorValue::Solid {
+                color: tokens.visual.palette[0].value
+            })
+        );
     }
 
     #[test]
@@ -390,8 +397,13 @@ mod tests {
         scene.objects[0].base_mut().x = 320.0;
         scene.text_styles.push(style());
 
-        apply_text_style(&mut scene, "title", "headline", Some(&system(Rgba::srgb(1.0, 1.0, 1.0, 1.0))))
-            .unwrap();
+        apply_text_style(
+            &mut scene,
+            "title",
+            "headline",
+            Some(&system(Rgba::srgb(1.0, 1.0, 1.0, 1.0))),
+        )
+        .unwrap();
 
         let SceneObject::Text(text) = &scene.objects[0] else {
             panic!("fixture is text");
@@ -454,5 +466,4 @@ mod tests {
             Err(Refusal::TextStyleDuplicate { style_id }) if style_id == "headline"
         ));
     }
-
 }

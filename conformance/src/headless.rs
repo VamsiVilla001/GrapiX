@@ -34,12 +34,19 @@ const WINDOW: Duration = Duration::from_secs(3);
 
 /// A 1080p scene whose card moves across the frame over 100 frames.
 fn animated_scene() -> SceneDocument {
-    let mut scene = new_scene("conformance-headless", "Headless", gx_contracts::color::WorkingColorSpace::NEW_PROJECT);
+    let mut scene = new_scene(
+        "conformance-headless",
+        "Headless",
+        gx_contracts::color::WorkingColorSpace::NEW_PROJECT,
+    );
     scene.timeline.duration_frames = 100;
     let mut card = ObjectBase::new("card", "Card");
     (card.x, card.y, card.width, card.height) = (100.0, 400.0, 320.0, 180.0);
     card.fill = Some(ColorValue::opaque_white());
-    scene.objects.push(SceneObject::Rect(RectObject { base: card, radius: 0.0 }));
+    scene.objects.push(SceneObject::Rect(RectObject {
+        base: card,
+        radius: 0.0,
+    }));
     let key = |frame, value| SceneKeyframe {
         frame,
         value,
@@ -56,11 +63,18 @@ fn animated_scene() -> SceneDocument {
 
 /// A static 1080p scene for Program to hold during the timed run.
 fn program_scene() -> SceneDocument {
-    let mut scene = new_scene("conformance-program", "Program", gx_contracts::color::WorkingColorSpace::NEW_PROJECT);
+    let mut scene = new_scene(
+        "conformance-program",
+        "Program",
+        gx_contracts::color::WorkingColorSpace::NEW_PROJECT,
+    );
     let mut bar = ObjectBase::new("bar", "Bar");
     (bar.x, bar.y, bar.width, bar.height) = (0.0, 900.0, 1920.0, 180.0);
     bar.fill = Some(ColorValue::opaque_white());
-    scene.objects.push(SceneObject::Rect(RectObject { base: bar, radius: 0.0 }));
+    scene.objects.push(SceneObject::Rect(RectObject {
+        base: bar,
+        radius: 0.0,
+    }));
     scene
 }
 
@@ -74,18 +88,34 @@ fn performance(peer: &mut impl EnginePeer) -> Option<PerformanceSummary> {
 /// Run the headless suite against an engine whose asset plane listens on
 /// `asset_plane`. The engine must already hold `conformance/published` as an
 /// identifier-only revision 1 pinned to 64 `a`s, as the worker fixture does.
-pub fn headless_render_suite(engine: &mut impl EnginePeer, asset_plane: SocketAddr, report: &mut Report) {
+pub fn headless_render_suite(
+    engine: &mut impl EnginePeer,
+    asset_plane: SocketAddr,
+    report: &mut Report,
+) {
     let scene = animated_scene();
     let (take_id, revision, pin) = match publish_scene(asset_plane, scene.clone()) {
-        Ok(PublishReply::Published { take_id, revision, content_hash }) => (take_id, revision, content_hash),
+        Ok(PublishReply::Published {
+            take_id,
+            revision,
+            content_hash,
+        }) => (take_id, revision, content_hash),
         other => {
-            report.record(PLANE, "a scene publishes for headless rendering", Outcome::Fail(format!("{other:?}")));
+            report.record(
+                PLANE,
+                "a scene publishes for headless rendering",
+                Outcome::Fail(format!("{other:?}")),
+            );
             return;
         }
     };
 
     let mut mock = MockEngine::new();
-    mock.publish(TakeId("conformance/published".into()), Revision(1), ContentHash("a".repeat(64)));
+    mock.publish(
+        TakeId("conformance/published".into()),
+        Revision(1),
+        ContentHash("a".repeat(64)),
+    );
     let _ = mock.publish_scene(scene);
 
     let render = |take: &TakeId, pin: Option<&ContentHash>, frame| {
@@ -99,12 +129,30 @@ pub fn headless_render_suite(engine: &mut impl EnginePeer, asset_plane: SocketAd
     let identifier = TakeId("conformance/published".into());
     let wrong = ContentHash("b".repeat(64));
     let cases = [
-        ("the engine and the mock render frame 0 to the same image", render(&take_id, Some(&pin), 0)),
-        ("the engine and the mock render frame 50 to the same image", render(&take_id, Some(&pin), 50)),
-        ("the engine and the mock render the last frame to the same image", render(&take_id, Some(&pin), 100)),
-        ("the engine and the mock refuse a frame past the timeline alike", render(&take_id, Some(&pin), 101)),
-        ("the engine and the mock refuse an unpinned render alike", render(&take_id, None, 0)),
-        ("the engine and the mock refuse a wrongly pinned render alike", render(&take_id, Some(&wrong), 0)),
+        (
+            "the engine and the mock render frame 0 to the same image",
+            render(&take_id, Some(&pin), 0),
+        ),
+        (
+            "the engine and the mock render frame 50 to the same image",
+            render(&take_id, Some(&pin), 50),
+        ),
+        (
+            "the engine and the mock render the last frame to the same image",
+            render(&take_id, Some(&pin), 100),
+        ),
+        (
+            "the engine and the mock refuse a frame past the timeline alike",
+            render(&take_id, Some(&pin), 101),
+        ),
+        (
+            "the engine and the mock refuse an unpinned render alike",
+            render(&take_id, None, 0),
+        ),
+        (
+            "the engine and the mock refuse a wrongly pinned render alike",
+            render(&take_id, Some(&wrong), 0),
+        ),
         (
             "the engine and the mock refuse a render of an unknown take alike",
             render(&TakeId("conformance/unknown".into()), Some(&pin), 0),
@@ -121,7 +169,10 @@ pub fn headless_render_suite(engine: &mut impl EnginePeer, asset_plane: SocketAd
         report.record(
             PLANE,
             name,
-            expect(from_engine == from_mock, format!("engine {from_engine:?}, mock {from_mock:?}")),
+            expect(
+                from_engine == from_mock,
+                format!("engine {from_engine:?}, mock {from_mock:?}"),
+            ),
         );
         images.push(from_engine);
     }
@@ -152,16 +203,26 @@ pub fn headless_render_suite(engine: &mut impl EnginePeer, asset_plane: SocketAd
         PLANE,
         "out-of-range, unpinned and identifier-only renders are refused by name",
         expect(
-            matches!(images[3], EngineReply::Refused(Refusal::RenderFrameOutOfRange { frame: 101, .. }))
-                && matches!(images[4], EngineReply::Refused(Refusal::RevisionUnpinned { .. }))
-                && matches!(images[5], EngineReply::Refused(Refusal::RevisionHashMismatch { .. }))
-                && matches!(images[6], EngineReply::Refused(Refusal::UnknownTake { .. }))
-                && matches!(images[7], EngineReply::Refused(Refusal::RenderSceneUnavailable { .. })),
+            matches!(
+                images[3],
+                EngineReply::Refused(Refusal::RenderFrameOutOfRange { frame: 101, .. })
+            ) && matches!(
+                images[4],
+                EngineReply::Refused(Refusal::RevisionUnpinned { .. })
+            ) && matches!(
+                images[5],
+                EngineReply::Refused(Refusal::RevisionHashMismatch { .. })
+            ) && matches!(images[6], EngineReply::Refused(Refusal::UnknownTake { .. }))
+                && matches!(
+                    images[7],
+                    EngineReply::Refused(Refusal::RenderSceneUnavailable { .. })
+                ),
             format!("got {:?}", &images[3..]),
         ),
     );
     let fetched = middle.as_ref().map(|frame| {
-        fetch_bytes(asset_plane, &frame.image).map(|png| (png.len(), gx_render_worker::headless::decode_png(&png)))
+        fetch_bytes(asset_plane, &frame.image)
+            .map(|png| (png.len(), gx_render_worker::headless::decode_png(&png)))
     });
     report.record(
         PLANE,
@@ -173,7 +234,12 @@ pub fn headless_render_suite(engine: &mut impl EnginePeer, asset_plane: SocketAd
                     if *length as u64 == middle.as_ref().map_or(0, |frame| frame.image_bytes)
                         && (pixels.width, pixels.height) == (1920, 1080)
             ),
-            format!("fetched {:?}", fetched.as_ref().map(|result| result.as_ref().map(|(length, _)| *length))),
+            format!(
+                "fetched {:?}",
+                fetched
+                    .as_ref()
+                    .map(|result| result.as_ref().map(|(length, _)| *length))
+            ),
         ),
     );
 
@@ -192,10 +258,17 @@ fn timed_run(
     report: &mut Report,
 ) {
     const NAME: &str = "headless renders while Program runs add no late or missed Program frame";
-    let Ok(PublishReply::Published { take_id: program, revision: program_revision, content_hash }) =
-        publish_scene(asset_plane, program_scene())
+    let Ok(PublishReply::Published {
+        take_id: program,
+        revision: program_revision,
+        content_hash,
+    }) = publish_scene(asset_plane, program_scene())
     else {
-        report.record(PLANE, NAME, Outcome::Fail("the Program scene did not publish".into()));
+        report.record(
+            PLANE,
+            NAME,
+            Outcome::Fail("the Program scene did not publish".into()),
+        );
         return;
     };
     let taken = engine.handle(ClientRequest::Take(TakeRequest {
@@ -205,7 +278,11 @@ fn timed_run(
         at: TakeAt::NextOpportunity,
     }));
     if !matches!(taken, EngineReply::Taken(_)) {
-        report.record(PLANE, NAME, Outcome::Fail(format!("the Program take was {taken:?}")));
+        report.record(
+            PLANE,
+            NAME,
+            Outcome::Fail(format!("the Program take was {taken:?}")),
+        );
         return;
     }
 
@@ -251,7 +328,11 @@ fn timed_run(
             frame: renders % 101,
         }));
         if !matches!(reply, EngineReply::Rendered(_)) {
-            report.record(PLANE, NAME, Outcome::Fail(format!("headless render was {reply:?}")));
+            report.record(
+                PLANE,
+                NAME,
+                Outcome::Fail(format!("headless render was {reply:?}")),
+            );
             return;
         }
         renders += 1;
@@ -287,25 +368,42 @@ pub fn render_preview_suite(control: SocketAddr, asset_plane: SocketAddr, report
     let mut scene = animated_scene();
     scene.id = "conformance-preview".into();
     let (take_id, revision, pin) = match publish_scene(asset_plane, scene) {
-        Ok(PublishReply::Published { take_id, revision, content_hash }) => (take_id, revision, content_hash),
+        Ok(PublishReply::Published {
+            take_id,
+            revision,
+            content_hash,
+        }) => (take_id, revision, content_hash),
         other => {
-            report.record(PLANE, "a scene publishes for render.preview", Outcome::Fail(format!("{other:?}")));
+            report.record(
+                PLANE,
+                "a scene publishes for render.preview",
+                Outcome::Fail(format!("{other:?}")),
+            );
             return;
         }
     };
     let Ok(peer) = gx_control_transport::Client::connect(control) else {
-        report.record(PLANE, "render.preview connects to the engine", Outcome::Fail("no control connection".into()));
+        report.record(
+            PLANE,
+            "render.preview connects to the engine",
+            Outcome::Fail("no control connection".into()),
+        );
         return;
     };
     let tools = std::sync::Arc::new(gx_playout_mcp::ProgramTools {
         playout: parking_lot::Mutex::new(gx_playout::Playout::new(peer)),
         library: parking_lot::Mutex::new(gx_playout::PublishedLibrary::default()),
-        environment: gx_playout::OutputEnvironment { platform_certified: false },
+        environment: gx_playout::OutputEnvironment {
+            platform_certified: false,
+        },
     });
     let mut server = gx_mcp_server::Server::new(vec![gx_contracts::auth::Scope::Author]);
     server.register(
         "render.preview",
-        Box::new(gx_playout_mcp::RenderPreview { tools, images: gx_playout_mcp::AssetPlaneImages(asset_plane) }),
+        Box::new(gx_playout_mcp::RenderPreview {
+            tools,
+            images: gx_playout_mcp::AssetPlaneImages(asset_plane),
+        }),
     );
     let call = |frame: u64| {
         let line = format!(
@@ -318,7 +416,9 @@ pub fn render_preview_suite(control: SocketAddr, asset_plane: SocketAddr, report
             })
         );
         let mut output = Vec::new();
-        server.serve(std::io::Cursor::new(line), &mut output).expect("JSON-RPC round trip");
+        server
+            .serve(std::io::Cursor::new(line), &mut output)
+            .expect("JSON-RPC round trip");
         serde_json::from_slice::<serde_json::Value>(&output).expect("JSON-RPC response parses")
     };
     let image = |reply: &serde_json::Value| -> Option<(u64, ContentHash, Vec<u8>)> {
@@ -328,12 +428,18 @@ pub fn render_preview_suite(control: SocketAddr, asset_plane: SocketAddr, report
         }
         let png = base64_decode(block["data"].as_str()?)?;
         let structured = &reply["result"]["structuredContent"];
-        Some((structured["frame"].as_u64()?, ContentHash(structured["image"].as_str()?.into()), png))
+        Some((
+            structured["frame"].as_u64()?,
+            ContentHash(structured["image"].as_str()?.into()),
+            png,
+        ))
     };
 
     let at_50 = call(50);
     let first = image(&at_50);
-    let served = first.as_ref().map(|(_, hash, _)| fetch_bytes(asset_plane, hash));
+    let served = first
+        .as_ref()
+        .map(|(_, hash, _)| fetch_bytes(asset_plane, hash));
     report.record(
         PLANE,
         "render.preview answers over JSON-RPC with the requested frame as a PNG image block",
@@ -350,7 +456,11 @@ pub fn render_preview_suite(control: SocketAddr, asset_plane: SocketAddr, report
         "render.preview draws the frame asked for, not the latest Preview",
         expect(
             matches!((&first, &start), (Some((50, a, _)), Some((0, b, _))) if a != b),
-            format!("frame 50 {:?}, frame 0 {:?}", first.as_ref().map(|f| &f.1), start.as_ref().map(|f| &f.1)),
+            format!(
+                "frame 50 {:?}, frame 0 {:?}",
+                first.as_ref().map(|f| &f.1),
+                start.as_ref().map(|f| &f.1)
+            ),
         ),
     );
     let past = call(101);

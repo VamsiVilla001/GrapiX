@@ -118,6 +118,19 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-08 — Whole-workspace `cargo fmt --all`, no logic change (Claude)
+
+One-time formatting commit the user approved on 8 Nov after the done-row review
+found CI failing at `cargo fmt --all -- --check` on every run since 11 Sep (so the
+gate never ran in CI). Run after Codex's 3.17 commit (fcc1545) and the review commit
+(60deea4) so nothing was in flight. 107 Rust files reformatted (10,545 insertions, 2,809 deletions; 106 files and most of that is line wrapping: 10,250 / 2,497 with whitespace ignored); `cargo fmt --all -- --check` exits 0
+afterwards and CI enforces it from here on GrapiX-2.0, main and agent/shared.
+Rule for the next session: run `cargo fmt --all` before every commit; rustfmt is
+now part of the gate CI runs.
+
+**Executed.** `cargo clippy --workspace --all-targets -- -D warnings` exit 0;
+`npm run check` exit 0 (377 codegen files current, 40 Node, 412 Editor, 772 Rust passed / 0 failed / 25 ignored, conformance 500 passed / 0 failed / 8 skipped).
+
 ## 2026-11-08 — Done-row re-review with Jev and Laya; 0.10 and 4.2 active until CI is green; 0.9 breach fixed (Claude, #104)
 
 **Resume here.** Open in Phase 3: 3.17 (Codex), 3.21 (Claude), then 3.18/3.19. The

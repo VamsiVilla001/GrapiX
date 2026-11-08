@@ -56,7 +56,11 @@ pub struct PreparedAssetSource {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum AssetDisposition {
     /// Part of this batch's `assets`.
     Added,
@@ -216,7 +220,12 @@ fn classify(file: &AssetFileInput<'_>, identity: &str) -> Result<Classified, Ref
         });
     }
     if bytes.starts_with(b"glTF") {
-        return Ok(found(AssetKind::Model, "models", "glb", "model/gltf-binary"));
+        return Ok(found(
+            AssetKind::Model,
+            "models",
+            "glb",
+            "model/gltf-binary",
+        ));
     }
     if bytes.get(4..8) == Some(b"ftyp") {
         return Ok(if bytes.get(8..12) == Some(b"qt  ") {
@@ -233,7 +242,14 @@ fn classify(file: &AssetFileInput<'_>, identity: &str) -> Result<Classified, Ref
             found(AssetKind::Video, "video", "mkv", "video/x-matroska")
         });
     }
-    let font_magic: [&[u8]; 6] = [b"\x00\x01\x00\x00", b"OTTO", b"true", b"ttcf", b"wOFF", b"wOF2"];
+    let font_magic: [&[u8]; 6] = [
+        b"\x00\x01\x00\x00",
+        b"OTTO",
+        b"true",
+        b"ttcf",
+        b"wOFF",
+        b"wOF2",
+    ];
     if font_magic.iter().any(|magic| bytes.starts_with(magic)) {
         return Err(Refusal::AssetKindNotAddable {
             asset_id: format!("asset_font_{identity}"),
@@ -272,7 +288,8 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .expect("system clock after epoch")
             .as_nanos();
-        let root = std::env::temp_dir().join(format!("gx-asset-import-{}-{nanos}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("gx-asset-import-{}-{nanos}", std::process::id()));
         (AssetStore::at_root(root.clone()), root)
     }
 
@@ -280,27 +297,46 @@ mod tests {
     fn an_import_fills_origin_and_tool_and_the_same_file_twice_is_one_asset() {
         let (mut store, root) = store();
         let logo = png(320, 180);
-        let svg = b"\xef\xbb\xbf  <?xml version=\"1.0\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\"/>";
+        let svg =
+            b"\xef\xbb\xbf  <?xml version=\"1.0\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\"/>";
         let files = [
-            AssetFileInput { file_name: "logo.png".into(), bytes: &logo },
-            AssetFileInput { file_name: "copy-of-logo.png".into(), bytes: &logo },
-            AssetFileInput { file_name: "mark.svg".into(), bytes: svg },
+            AssetFileInput {
+                file_name: "logo.png".into(),
+                bytes: &logo,
+            },
+            AssetFileInput {
+                file_name: "copy-of-logo.png".into(),
+                bytes: &logo,
+            },
+            AssetFileInput {
+                file_name: "mark.svg".into(),
+                bytes: svg,
+            },
         ];
         let batch = prepare_asset_files(&mut store, &[], &files).unwrap();
 
         assert_eq!(batch.assets.len(), 2);
         let image = &batch.assets[0];
-        assert_eq!((image.kind, image.mime_type.as_deref()), (AssetKind::Image, Some("image/png")));
+        assert_eq!(
+            (image.kind, image.mime_type.as_deref()),
+            (AssetKind::Image, Some("image/png"))
+        );
         assert_eq!(image.provenance.origin, Some(AssetOrigin::Human));
         assert_eq!(
-            image.provenance.tool.as_ref().map(|tool| tool.name.as_str()),
+            image
+                .provenance
+                .tool
+                .as_ref()
+                .map(|tool| tool.name.as_str()),
             Some(ASSET_FILE_IMPORT_TOOL)
         );
         assert_eq!(image.provenance.sources, vec!["logo.png".to_string()]);
         assert_eq!(batch.assets[1].kind, AssetKind::Svg);
         assert_eq!(
             batch.sources[1].disposition,
-            AssetDisposition::DuplicateInBatch { first_source: "logo.png".into() }
+            AssetDisposition::DuplicateInBatch {
+                first_source: "logo.png".into()
+            }
         );
         assert!(store.contains(image.checksum.as_ref().unwrap()).unwrap());
 
@@ -308,12 +344,18 @@ mod tests {
         let again = prepare_asset_files(
             &mut store,
             &batch.assets,
-            &[AssetFileInput { file_name: "renamed.png".into(), bytes: &logo }],
+            &[AssetFileInput {
+                file_name: "renamed.png".into(),
+                bytes: &logo,
+            }],
         )
         .unwrap();
         assert!(again.assets.is_empty());
         assert_eq!(again.sources[0].asset_id, image.asset_id);
-        assert_eq!(again.sources[0].disposition, AssetDisposition::AlreadyInScene);
+        assert_eq!(
+            again.sources[0].disposition,
+            AssetDisposition::AlreadyInScene
+        );
         std::fs::remove_dir_all(root).ok();
     }
 
@@ -322,18 +364,37 @@ mod tests {
         let (mut store, root) = store();
         let logo = png(64, 64);
         let files = [
-            AssetFileInput { file_name: "logo.png".into(), bytes: &logo },
-            AssetFileInput { file_name: "notes.png".into(), bytes: b"not an image at all" },
+            AssetFileInput {
+                file_name: "logo.png".into(),
+                bytes: &logo,
+            },
+            AssetFileInput {
+                file_name: "notes.png".into(),
+                bytes: b"not an image at all",
+            },
         ];
         let refused = prepare_asset_files(&mut store, &[], &files).unwrap_err();
         assert_eq!(refused.source, "notes.png");
-        assert_eq!(refused.refusal, Refusal::AssetFormatUnrecognised { file: "notes.png".into() });
+        assert_eq!(
+            refused.refusal,
+            Refusal::AssetFormatUnrecognised {
+                file: "notes.png".into()
+            }
+        );
         assert!(!store.contains(&content_hash(&logo)).unwrap());
 
-        let font = [AssetFileInput { file_name: "Inter.otf".into(), bytes: b"OTTO\x00\x01" }];
+        let font = [AssetFileInput {
+            file_name: "Inter.otf".into(),
+            bytes: b"OTTO\x00\x01",
+        }];
         assert!(matches!(
-            prepare_asset_files(&mut store, &[], &font).unwrap_err().refusal,
-            Refusal::AssetKindNotAddable { kind: AssetKind::Font, .. }
+            prepare_asset_files(&mut store, &[], &font)
+                .unwrap_err()
+                .refusal,
+            Refusal::AssetKindNotAddable {
+                kind: AssetKind::Font,
+                ..
+            }
         ));
         std::fs::remove_dir_all(root).ok();
     }

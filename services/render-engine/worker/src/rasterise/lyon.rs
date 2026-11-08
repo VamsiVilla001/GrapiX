@@ -224,7 +224,13 @@ fn prepare_shape(
             None => path,
             Some(window) => trimmed_stroke(&subpaths, window, object, &to_scene)?,
         };
-        prepare_stroke(object, stroke, &shape.base.stroke, shape.base.stroke_width, output)?;
+        prepare_stroke(
+            object,
+            stroke,
+            &shape.base.stroke,
+            shape.base.stroke_width,
+            output,
+        )?;
     }
     Ok(())
 }
@@ -299,7 +305,9 @@ fn trimmed_stroke(
                 Event::Quadratic { ctrl, to, .. } => {
                     scene.quadratic_bezier_to(map(ctrl)?, map(to)?);
                 }
-                Event::Cubic { ctrl1, ctrl2, to, .. } => {
+                Event::Cubic {
+                    ctrl1, ctrl2, to, ..
+                } => {
                     scene.cubic_bezier_to(map(ctrl1)?, map(ctrl2)?, map(to)?);
                 }
                 Event::End { close, .. } => {
@@ -389,10 +397,7 @@ fn append_bezier(
                 current_vertex.x + out_tangent.x,
                 current_vertex.y + out_tangent.y,
             )?,
-            map(
-                next_vertex.x + in_tangent.x,
-                next_vertex.y + in_tangent.y,
-            )?,
+            map(next_vertex.x + in_tangent.x, next_vertex.y + in_tangent.y)?,
             map(next_vertex.x, next_vertex.y)?,
         );
     }
@@ -573,8 +578,12 @@ pub(crate) fn fill_union(
     let origin = surface.origin();
     let min_x = (f64::from(min_x.floor()) - origin[0]).max(0.0) as u32;
     let min_y = (f64::from(min_y.floor()) - origin[1]).max(0.0) as u32;
-    let max_x = (f64::from(max_x.ceil()) - origin[0]).min(f64::from(surface.width())).max(0.0) as u32;
-    let max_y = (f64::from(max_y.ceil()) - origin[1]).min(f64::from(surface.height())).max(0.0) as u32;
+    let max_x = (f64::from(max_x.ceil()) - origin[0])
+        .min(f64::from(surface.width()))
+        .max(0.0) as u32;
+    let max_y = (f64::from(max_y.ceil()) - origin[1])
+        .min(f64::from(surface.height()))
+        .max(0.0) as u32;
     if min_x >= max_x || min_y >= max_y {
         return;
     }
@@ -585,10 +594,16 @@ pub(crate) fn fill_union(
         if area == 0.0 {
             continue;
         }
-        let x0 = (f64::from(a.x.min(b.x).min(c.x).floor()) - origin[0]).max(f64::from(min_x)) as u32;
-        let y0 = (f64::from(a.y.min(b.y).min(c.y).floor()) - origin[1]).max(f64::from(min_y)) as u32;
-        let x1 = (f64::from(a.x.max(b.x).max(c.x).ceil()) - origin[0]).min(f64::from(max_x)).max(0.0) as u32;
-        let y1 = (f64::from(a.y.max(b.y).max(c.y).ceil()) - origin[1]).min(f64::from(max_y)).max(0.0) as u32;
+        let x0 =
+            (f64::from(a.x.min(b.x).min(c.x).floor()) - origin[0]).max(f64::from(min_x)) as u32;
+        let y0 =
+            (f64::from(a.y.min(b.y).min(c.y).floor()) - origin[1]).max(f64::from(min_y)) as u32;
+        let x1 = (f64::from(a.x.max(b.x).max(c.x).ceil()) - origin[0])
+            .min(f64::from(max_x))
+            .max(0.0) as u32;
+        let y1 = (f64::from(a.y.max(b.y).max(c.y).ceil()) - origin[1])
+            .min(f64::from(max_y))
+            .max(0.0) as u32;
         for y in y0..y1 {
             for x in x0..x1 {
                 let sample_x = (origin[0] + f64::from(x) + 0.5) as f32;

@@ -25,17 +25,19 @@
 
 #![forbid(unsafe_code)]
 
+use gx_contracts::mcp::{ClearArgs, PackageBuild as BuildArgs, PackageRef, ProgramArgs};
+use gx_contracts::Refusal;
 use gx_control_plane::intent::{check_pin, TakeAt};
 use gx_control_plane::message::OutputConfig;
 use gx_control_plane::peer::EnginePeer;
-use gx_contracts::Refusal;
-use gx_contracts::mcp::{PackageBuild as BuildArgs, PackageRef, ProgramArgs, ClearArgs};
 use gx_mcp_server::ToolHandler;
 use gx_playout::{OutputEnvironment, Playout, PublishedLibrary, PublishedScene};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
-fn parse<T: serde::de::DeserializeOwned + Serialize>(args: serde_json::Value) -> Result<T, Refusal> {
+fn parse<T: serde::de::DeserializeOwned + Serialize>(
+    args: serde_json::Value,
+) -> Result<T, Refusal> {
     gx_contracts::command::parse_strict(args).map_err(|error| Refusal::SceneParseFailed {
         detail: format!("arguments do not match the tool's input schema: {error}"),
     })
@@ -83,12 +85,14 @@ impl<P: EnginePeer, I: ImageSource> ToolHandler for RenderPreview<P, I> {
     fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
         let args: gx_contracts::mcp::PreviewRequest = parse(args)?;
         let reply = self.tools.playout.lock().peer_mut().handle(
-            gx_control_plane::message::ClientRequest::Render(gx_control_plane::render::RenderRequest {
-                take_id: args.take_id,
-                revision: args.revision,
-                content_hash: args.content_hash,
-                frame: args.frame,
-            }),
+            gx_control_plane::message::ClientRequest::Render(
+                gx_control_plane::render::RenderRequest {
+                    take_id: args.take_id,
+                    revision: args.revision,
+                    content_hash: args.content_hash,
+                    frame: args.frame,
+                },
+            ),
         );
         let rendered = match reply {
             gx_control_plane::message::EngineReply::Rendered(rendered) => rendered,
@@ -105,7 +109,10 @@ impl<P: EnginePeer, I: ImageSource> ToolHandler for RenderPreview<P, I> {
         let png = self.images.fetch(&rendered.image)?;
         let actual = gx_asset_plane::content_hash(&png);
         if actual != rendered.image {
-            return Err(Refusal::AssetHashMismatch { expected: rendered.image, actual });
+            return Err(Refusal::AssetHashMismatch {
+                expected: rendered.image,
+                actual,
+            });
         }
         let frame = gx_contracts::mcp::PreviewFrame {
             take_id: rendered.take_id,
@@ -294,11 +301,16 @@ impl<P: EnginePeer> ProgramTools<P> {
             .lock()
             .revision(&take_id, revision)
             .cloned()
-            .ok_or_else(|| Refusal::UnknownTake { take_id: take_id.clone() })?;
+            .ok_or_else(|| Refusal::UnknownTake {
+                take_id: take_id.clone(),
+            })?;
         let held = scene
             .content_hash
             .clone()
-            .ok_or_else(|| Refusal::RevisionUnpinned { take_id: take_id.clone(), revision })?;
+            .ok_or_else(|| Refusal::RevisionUnpinned {
+                take_id: take_id.clone(),
+                revision,
+            })?;
         check_pin(&take_id, revision, &held, args.content_hash.as_ref())?;
         Ok(scene)
     }
@@ -499,15 +511,21 @@ mod tests {
     #[test]
     fn render_preview_answers_with_the_requested_frame_as_an_image_block() {
         let (tools, published) = program_tools();
-        let answer = RenderPreview { tools, images: FixedImages(PNG.to_vec()) }
-            .handle(preview_args(&published, 7))
-            .expect("a rendered frame is returned");
+        let answer = RenderPreview {
+            tools,
+            images: FixedImages(PNG.to_vec()),
+        }
+        .handle(preview_args(&published, 7))
+        .expect("a rendered frame is returned");
         assert_eq!(answer["content"][0]["type"], "image");
         assert_eq!(answer["content"][0]["mimeType"], "image/png");
         assert_eq!(answer["content"][0]["data"], base64(PNG));
         let frame: gx_contracts::mcp::PreviewFrame =
             serde_json::from_value(answer["structuredContent"].clone()).unwrap();
-        assert_eq!(frame.frame, 7, "the frame asked for, not whatever Preview showed");
+        assert_eq!(
+            frame.frame, 7,
+            "the frame asked for, not whatever Preview showed"
+        );
         assert_eq!(frame.image, gx_asset_plane::content_hash(PNG));
         assert_eq!(frame.image_bytes, PNG.len() as u64);
     }
@@ -515,21 +533,32 @@ mod tests {
     #[test]
     fn render_preview_passes_the_engines_refusal_through_by_name() {
         let (tools, published) = program_tools();
-        let tool = RenderPreview { tools, images: FixedImages(PNG.to_vec()) };
+        let tool = RenderPreview {
+            tools,
+            images: FixedImages(PNG.to_vec()),
+        };
         assert!(matches!(
             tool.handle(preview_args(&published, 11)),
             Err(Refusal::RenderFrameOutOfRange { frame: 11, .. })
         ));
-        assert!(matches!(
-            tool.handle(serde_json::json!({ "takeId": "x", "revision": 1, "frame": 0, "atFrame": 3 })),
-            Err(Refusal::SceneParseFailed { .. })
-        ), "an unknown argument is refused, never ignored");
+        assert!(
+            matches!(
+                tool.handle(
+                    serde_json::json!({ "takeId": "x", "revision": 1, "frame": 0, "atFrame": 3 })
+                ),
+                Err(Refusal::SceneParseFailed { .. })
+            ),
+            "an unknown argument is refused, never ignored"
+        );
     }
 
     #[test]
     fn render_preview_refuses_an_image_that_does_not_match_its_hash() {
         let (tools, published) = program_tools();
-        let tool = RenderPreview { tools, images: FixedImages(b"substituted".to_vec()) };
+        let tool = RenderPreview {
+            tools,
+            images: FixedImages(b"substituted".to_vec()),
+        };
         assert!(matches!(
             tool.handle(preview_args(&published, 0)),
             Err(Refusal::AssetHashMismatch { .. })
@@ -539,8 +568,13 @@ mod tests {
     #[test]
     fn base64_matches_rfc_4648_test_vectors() {
         for (input, expected) in [
-            ("", ""), ("f", "Zg=="), ("fo", "Zm8="), ("foo", "Zm9v"),
-            ("foob", "Zm9vYg=="), ("fooba", "Zm9vYmE="), ("foobar", "Zm9vYmFy"),
+            ("", ""),
+            ("f", "Zg=="),
+            ("fo", "Zm8="),
+            ("foo", "Zm9v"),
+            ("foob", "Zm9vYg=="),
+            ("fooba", "Zm9vYmE="),
+            ("foobar", "Zm9vYmFy"),
         ] {
             assert_eq!(base64(input.as_bytes()), expected);
         }
@@ -571,7 +605,10 @@ mod tests {
                 height: 1080,
                 frame_rate: gx_contracts::RationalRate::P50,
             },
-            timeline: gx_contracts::scene::SceneTimeline { duration_frames: 1, ..Default::default() },
+            timeline: gx_contracts::scene::SceneTimeline {
+                duration_frames: 1,
+                ..Default::default()
+            },
             data_context: Default::default(),
             assets: Vec::new(),
             fonts: Vec::new(),
@@ -680,16 +717,20 @@ mod tests {
                         duration_frames: 10,
                     })
                 }
-                ClientRequest::Render(request) => EngineReply::Rendered(gx_control_plane::render::RenderedFrame {
-                    take_id: request.take_id,
-                    revision: request.revision,
-                    content_hash: request.content_hash.unwrap_or_else(|| gx_contracts::ContentHash("a".repeat(64))),
-                    frame: request.frame,
-                    width: 1,
-                    height: 1,
-                    image: gx_asset_plane::content_hash(PNG),
-                    image_bytes: PNG.len() as u64,
-                }),
+                ClientRequest::Render(request) => {
+                    EngineReply::Rendered(gx_control_plane::render::RenderedFrame {
+                        take_id: request.take_id,
+                        revision: request.revision,
+                        content_hash: request
+                            .content_hash
+                            .unwrap_or_else(|| gx_contracts::ContentHash("a".repeat(64))),
+                        frame: request.frame,
+                        width: 1,
+                        height: 1,
+                        image: gx_asset_plane::content_hash(PNG),
+                        image_bytes: PNG.len() as u64,
+                    })
+                }
                 other => EngineReply::Refused(Refusal::NotImplemented {
                     what: format!("{other:?}"),
                 }),
@@ -744,7 +785,9 @@ mod tests {
         let other = take
             .handle(serde_json::json!({ "takeId": published.take_id.0, "revision": 1, "contentHash": "f".repeat(64) }))
             .expect_err("a take of other content refuses");
-        assert!(matches!(&other, Refusal::RevisionHashMismatch { expected, .. } if Some(expected) == published.content_hash.as_ref()));
+        assert!(
+            matches!(&other, Refusal::RevisionHashMismatch { expected, .. } if Some(expected) == published.content_hash.as_ref())
+        );
     }
 
     #[test]
@@ -761,7 +804,10 @@ mod tests {
             .handle(serde_json::json!({ "takeId": published.take_id.0, "revision": 1, "review": "approved" }))
             .expect("an operator approves");
         assert_eq!(answer["review"], "approved");
-        assert_eq!(answer["contentHash"], serde_json::json!(published.content_hash));
+        assert_eq!(
+            answer["contentHash"],
+            serde_json::json!(published.content_hash)
+        );
     }
 
     #[test]
@@ -823,7 +869,10 @@ mod tests {
         // An operator pins an exact revision, so a listing that showed only
         // the latest would make a valid pin look unavailable.
         let (tools, published) = program_tools();
-        tools.library.lock().publish("lower-third", serde_json::Value::Null, None);
+        tools
+            .library
+            .lock()
+            .publish("lower-third", serde_json::Value::Null, None);
 
         let answer = PlayoutLibrary(tools)
             .handle(serde_json::Value::Null)
@@ -831,9 +880,17 @@ mod tests {
         let takes = answer["takes"].as_array().unwrap();
         assert_eq!(takes.len(), 1);
         assert_eq!(takes[0]["takeId"], published.take_id.0);
-        let revisions: Vec<_> = takes[0]["revisions"].as_array().unwrap().iter().map(|r| r["revision"].clone()).collect();
+        let revisions: Vec<_> = takes[0]["revisions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["revision"].clone())
+            .collect();
         assert_eq!(revisions, [serde_json::json!(1), serde_json::json!(2)]);
-        assert_eq!(takes[0]["revisions"][0]["contentHash"], serde_json::json!(published.content_hash));
+        assert_eq!(
+            takes[0]["revisions"][0]["contentHash"],
+            serde_json::json!(published.content_hash)
+        );
         assert_eq!(takes[0]["revisions"][0]["review"], "draft");
     }
 
@@ -849,7 +906,10 @@ mod tests {
         assert_eq!(answer["platformCertified"], true);
         assert_eq!(answer["liveAllowed"], false);
         assert_eq!(answer["deviceTier"], "T0");
-        assert_eq!(answer["material"], serde_json::json!(gx_contracts::material::MaterialSupport::none()));
+        assert_eq!(
+            answer["material"],
+            serde_json::json!(gx_contracts::material::MaterialSupport::none())
+        );
     }
 
     #[test]

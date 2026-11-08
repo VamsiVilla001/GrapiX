@@ -43,17 +43,32 @@ const INTER: &[u8] = include_bytes!("../../tests/fixtures/Inter-Regular.ttf");
 fn hardware_engine() -> (Engine, Arc<AtomicU64>) {
     let ticks = Arc::new(AtomicU64::new(0));
     let engine = match std::env::var("GX_GPU_316_BACKEND").as_deref() {
-        Ok("dx12") => Engine::with_gpu(ticks.clone(), Locality::CoLocated, gpu::negotiate_for_test(wgpu::Backends::DX12)),
-        Ok("vulkan") => Engine::with_gpu(ticks.clone(), Locality::CoLocated, gpu::negotiate_for_test(wgpu::Backends::VULKAN)),
+        Ok("dx12") => Engine::with_gpu(
+            ticks.clone(),
+            Locality::CoLocated,
+            gpu::negotiate_for_test(wgpu::Backends::DX12),
+        ),
+        Ok("vulkan") => Engine::with_gpu(
+            ticks.clone(),
+            Locality::CoLocated,
+            gpu::negotiate_for_test(wgpu::Backends::VULKAN),
+        ),
         Err(_) => Engine::new(ticks.clone(), Locality::CoLocated),
         other => panic!("unsupported explicit proof backend: {other:?}"),
     };
-    assert!(engine.gpu.has_hardware(), "3.20 execution proof requires a hardware GPU");
+    assert!(
+        engine.gpu.has_hardware(),
+        "3.20 execution proof requires a hardware GPU"
+    );
     (engine, ticks)
 }
 
 fn wire(mode: BlendMode) -> String {
-    serde_json::to_value(mode).unwrap().as_str().unwrap().to_owned()
+    serde_json::to_value(mode)
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_owned()
 }
 
 fn paint(rgba: [f64; 4]) -> Value {
@@ -61,7 +76,18 @@ fn paint(rgba: [f64; 4]) -> Value {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn shape(kind: &str, id: &str, x: f64, y: f64, w: f64, h: f64, z: i64, rgba: [f64; 4], opacity: f64, mode: BlendMode) -> Value {
+fn shape(
+    kind: &str,
+    id: &str,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    z: i64,
+    rgba: [f64; 4],
+    opacity: f64,
+    mode: BlendMode,
+) -> Value {
     let mut o = json!({ "type": kind, "id": id, "name": id, "x": x, "y": y, "width": w, "height": h,
         "zIndex": z, "opacity": opacity, "fill": paint(rgba) });
     if kind == "rect" {
@@ -73,7 +99,13 @@ fn shape(kind: &str, id: &str, x: f64, y: f64, w: f64, h: f64, z: i64, rgba: [f6
     o
 }
 
-fn scene(name: &str, width: u32, height: u32, space: WorkingColorSpace, objects: Vec<Value>) -> SceneDocument {
+fn scene(
+    name: &str,
+    width: u32,
+    height: u32,
+    space: WorkingColorSpace,
+    objects: Vec<Value>,
+) -> SceneDocument {
     let mut doc: Value = serde_json::from_slice(FIXTURE).unwrap();
     doc["id"] = json!(name);
     doc["canvas"]["width"] = json!(width);
@@ -109,25 +141,73 @@ fn mode_scene(mode: BlendMode, space: WorkingColorSpace) -> SceneDocument {
             }
             let c = PALETTE[(row * 5 + col) as usize % PALETTE.len()];
             let a = if row == 2 { 0.5 } else { 1.0 };
-            objects.push(shape("rect", &format!("bg-{row}-{col}"), f64::from(col * 32), f64::from(row * 32), 32.0, 32.0, z,
-                [c[0], c[1], c[2], a], 1.0, BlendMode::Normal));
+            objects.push(shape(
+                "rect",
+                &format!("bg-{row}-{col}"),
+                f64::from(col * 32),
+                f64::from(row * 32),
+                32.0,
+                32.0,
+                z,
+                [c[0], c[1], c[2], a],
+                1.0,
+                BlendMode::Normal,
+            ));
             z += 1;
         }
     }
-    objects.push(shape("rect", "add", 0.0, 0.0, 80.0, 96.0, z, [0.9, 0.8, 0.7, 1.0], 0.5, BlendMode::Add));
+    objects.push(shape(
+        "rect",
+        "add",
+        0.0,
+        0.0,
+        80.0,
+        96.0,
+        z,
+        [0.9, 0.8, 0.7, 1.0],
+        0.5,
+        BlendMode::Add,
+    ));
     z += 1;
     for j in 0..2u32 {
         for i in 0..4u32 {
             let c = PALETTE[(3 + i * 2 + j) as usize % PALETTE.len()];
             let a = if (i + j) % 2 == 0 { 1.0 } else { 0.6 };
             let opacity = if i % 2 == 0 { 1.0 } else { 0.7 };
-            objects.push(shape("rect", &format!("top-{j}-{i}"), f64::from(5 + 36 * i), f64::from(6 + 44 * j), 30.0, 36.0, z,
-                [c[0], c[1], c[2], a], opacity, mode));
+            objects.push(shape(
+                "rect",
+                &format!("top-{j}-{i}"),
+                f64::from(5 + 36 * i),
+                f64::from(6 + 44 * j),
+                30.0,
+                36.0,
+                z,
+                [c[0], c[1], c[2], a],
+                opacity,
+                mode,
+            ));
             z += 1;
         }
     }
-    objects.push(shape("ellipse", "disc", 96.0, 22.0, 52.0, 52.0, z, [0.2, 0.7, 0.4, 1.0], 0.8, mode));
-    scene(&format!("gpu-320-{}-{}", wire(mode), space.as_str()), 160, 96, space, objects)
+    objects.push(shape(
+        "ellipse",
+        "disc",
+        96.0,
+        22.0,
+        52.0,
+        52.0,
+        z,
+        [0.2, 0.7, 0.4, 1.0],
+        0.8,
+        mode,
+    ));
+    scene(
+        &format!("gpu-320-{}-{}", wire(mode), space.as_str()),
+        160,
+        96,
+        space,
+        objects,
+    )
 }
 
 /// EffectCraft's failing scene shape, at its sizes, for one mode.
@@ -137,20 +217,58 @@ fn nan_scene(mode: BlendMode) -> SceneDocument {
     for row in 0..4u32 {
         for col in 0..6u32 {
             let c = PALETTE[(row * 6 + col) as usize % PALETTE.len()];
-            objects.push(shape("rect", &format!("bg-{row}-{col}"), f64::from(col * 17), f64::from(row * 16), 17.0, 16.0, z,
-                [c[0], c[1], c[2], 1.0], 1.0, BlendMode::Normal));
+            objects.push(shape(
+                "rect",
+                &format!("bg-{row}-{col}"),
+                f64::from(col * 17),
+                f64::from(row * 16),
+                17.0,
+                16.0,
+                z,
+                [c[0], c[1], c[2], 1.0],
+                1.0,
+                BlendMode::Normal,
+            ));
             z += 1;
         }
     }
-    objects.push(shape("rect", "add", 6.0, 4.0, 80.0, 50.0, z, [0.95, 0.9, 0.85, 1.0], 0.5, BlendMode::Add));
+    objects.push(shape(
+        "rect",
+        "add",
+        6.0,
+        4.0,
+        80.0,
+        50.0,
+        z,
+        [0.95, 0.9, 0.85, 1.0],
+        0.5,
+        BlendMode::Add,
+    ));
     z += 1;
-    let mut top = shape("ellipse", "top", 52.3, 29.6, 64.0, 48.0, z, [0.85, 0.35, 0.6, 1.0], 0.7, mode);
+    let mut top = shape(
+        "ellipse",
+        "top",
+        52.3,
+        29.6,
+        64.0,
+        48.0,
+        z,
+        [0.85, 0.35, 0.6, 1.0],
+        0.7,
+        mode,
+    );
     top["rotation"] = json!(17.0);
     top["scaleX"] = json!(1.15);
     top["scaleY"] = json!(0.9);
     top["anchor"] = json!({ "x": 32.0, "y": 24.0 });
     objects.push(top);
-    scene(&format!("gpu-320-nan-{}", wire(mode)), 97, 61, WorkingColorSpace::LinearSrgb, objects)
+    scene(
+        &format!("gpu-320-nan-{}", wire(mode)),
+        97,
+        61,
+        WorkingColorSpace::LinearSrgb,
+        objects,
+    )
 }
 
 fn publish(engine: &mut Engine, doc: SceneDocument) -> (TakeId, Revision, ContentHash) {
@@ -160,7 +278,11 @@ fn publish(engine: &mut Engine, doc: SceneDocument) -> (TakeId, Revision, Conten
         }
     }
     match engine.publish(doc) {
-        PublishReply::Published { take_id, revision, content_hash } => (take_id, revision, content_hash),
+        PublishReply::Published {
+            take_id,
+            revision,
+            content_hash,
+        } => (take_id, revision, content_hash),
         other => panic!("scene must publish: {other:?}"),
     }
 }
@@ -177,10 +299,17 @@ fn take(engine: &mut Engine, pin: &(TakeId, Revision, ContentHash)) {
 
 /// (worst channel delta, differing pixels, total pixels)
 fn difference(actual: &Frame, expected: &Frame) -> (u8, usize, usize) {
-    assert_eq!((actual.width, actual.height), (expected.width, expected.height));
+    assert_eq!(
+        (actual.width, actual.height),
+        (expected.width, expected.height)
+    );
     let mut worst = 0u8;
     let mut differing = 0;
-    for (a, e) in actual.pixels.chunks_exact(4).zip(expected.pixels.chunks_exact(4)) {
+    for (a, e) in actual
+        .pixels
+        .chunks_exact(4)
+        .zip(expected.pixels.chunks_exact(4))
+    {
         let delta = a.iter().zip(e).map(|(a, e)| a.abs_diff(*e)).max().unwrap();
         worst = worst.max(delta);
         differing += usize::from(delta > 0);
@@ -190,7 +319,10 @@ fn difference(actual: &Frame, expected: &Frame) -> (u8, usize, usize) {
 
 /// (worst ULP distance, worst relative difference, differing values) over
 /// every component of the working-space pixels.
-fn working_difference(gpu: &[crate::colour_pipeline::WorkingRgba], cpu: &[crate::colour_pipeline::WorkingRgba]) -> (u32, f32, usize) {
+fn working_difference(
+    gpu: &[crate::colour_pipeline::WorkingRgba],
+    cpu: &[crate::colour_pipeline::WorkingRgba],
+) -> (u32, f32, usize) {
     assert_eq!(gpu.len(), cpu.len());
     let mut ulps = 0u32;
     let mut relative = 0f32;
@@ -201,7 +333,14 @@ fn working_difference(gpu: &[crate::colour_pipeline::WorkingRgba], cpu: &[crate:
                 continue;
             }
             differing += 1;
-            let ordered = |v: f32| { let b = v.to_bits() as i32; if b < 0 { i32::MIN - b } else { b } };
+            let ordered = |v: f32| {
+                let b = v.to_bits() as i32;
+                if b < 0 {
+                    i32::MIN - b
+                } else {
+                    b
+                }
+            };
             ulps = ulps.max(ordered(g).abs_diff(ordered(c)));
             relative = relative.max((g - c).abs() / c.abs().max(1e-3));
         }
@@ -212,7 +351,11 @@ fn working_difference(gpu: &[crate::colour_pipeline::WorkingRgba], cpu: &[crate:
 fn evidence(name: &str, value: &Value) {
     if let Some(dir) = std::env::var_os("GX_GPU_320_EVIDENCE_DIR") {
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(std::path::PathBuf::from(&dir).join(name), serde_json::to_vec_pretty(value).unwrap()).unwrap();
+        std::fs::write(
+            std::path::PathBuf::from(&dir).join(name),
+            serde_json::to_vec_pretty(value).unwrap(),
+        )
+        .unwrap();
     }
 }
 
@@ -232,17 +375,33 @@ fn every_blend_mode_composites_on_the_gpu_and_matches_its_cpu_reference() {
             let program = engine.emit_frame_settled().unwrap().frame;
             let preview = engine.take_preview().unwrap();
             let trace = engine.program_frame_trace().unwrap().clone();
-            assert_eq!(trace.backend, "gpu-compositor", "{mode:?} {space:?} must composite on the GPU");
+            assert_eq!(
+                trace.backend, "gpu-compositor",
+                "{mode:?} {space:?} must composite on the GPU"
+            );
             assert_eq!(trace.work.cpu_full_frame_rasterizations, 0);
             assert_eq!(trace.work.cpu_source_rasterizations, 0);
             assert_eq!(trace.work.gpu_layer_dispatches, layers as u64);
             let cpu = engine.prepared_scene(&pin.0, pin.1).unwrap();
-            let p = difference(&program, &cpu.frame_at(trace.scene_frame, OutputTransform::Rec709).unwrap());
-            let v = difference(&preview, &cpu.frame_at(trace.scene_frame, OutputTransform::Srgb).unwrap());
+            let p = difference(
+                &program,
+                &cpu.frame_at(trace.scene_frame, OutputTransform::Rec709)
+                    .unwrap(),
+            );
+            let v = difference(
+                &preview,
+                &cpu.frame_at(trace.scene_frame, OutputTransform::Srgb)
+                    .unwrap(),
+            );
             // The working-space floats, before either encode.
             let reference = cpu.working_at(trace.scene_frame).unwrap();
             let key = (pin.0.clone(), pin.1);
-            let (_, _, gpu_working) = engine.gpu_prepared.get_mut(&key).unwrap().render_with_working(trace.scene_frame).unwrap();
+            let (_, _, gpu_working) = engine
+                .gpu_prepared
+                .get_mut(&key)
+                .unwrap()
+                .render_with_working(trace.scene_frame)
+                .unwrap();
             let w = working_difference(&gpu_working.pixels, reference.pixels());
             let encoded_exactly = gpu_working.encode(OutputTransform::Rec709) == *program
                 && gpu_working.encode(OutputTransform::Srgb) == *preview;
@@ -255,17 +414,26 @@ fn every_blend_mode_composites_on_the_gpu_and_matches_its_cpu_reference() {
                 "working": { "worstUlps": w.0, "worstRelative": w.1, "differingValues": w.2 } }));
         }
     }
-    evidence("modes.json", &json!({ "adapter": engine.gpu_description(),
+    evidence(
+        "modes.json",
+        &json!({ "adapter": engine.gpu_description(),
         "criterion": "working-space floats within 1e-4 relative (absolute below 1e-3) of the CPU renderer; output bytes exactly the CPU encode of the GPU working pixels; at most one code value from the CPU frame",
-        "rows": rows }));
-    assert!(failures.is_empty(), "modes that do not match their CPU reference: {failures:#?}");
+        "rows": rows }),
+    );
+    assert!(
+        failures.is_empty(),
+        "modes that do not match their CPU reference: {failures:#?}"
+    );
 }
 
 #[test]
 #[ignore = "requires hardware GPU; 3.20 Dancing Dissolve moves per frame on GPU and CPU alike"]
 fn dancing_dissolve_changes_each_frame_and_matches_the_cpu_reference() {
     let (mut engine, ticks) = hardware_engine();
-    let pin = publish(&mut engine, mode_scene(BlendMode::DancingDissolve, WorkingColorSpace::Srgb));
+    let pin = publish(
+        &mut engine,
+        mode_scene(BlendMode::DancingDissolve, WorkingColorSpace::Srgb),
+    );
     take(&mut engine, &pin);
     let mut frames = Vec::new();
     for _ in 0..3 {
@@ -273,12 +441,21 @@ fn dancing_dissolve_changes_each_frame_and_matches_the_cpu_reference() {
         let program = engine.emit_frame_settled().unwrap().frame;
         let scene_frame = engine.program_frame_trace().unwrap().scene_frame;
         let cpu = engine.prepared_scene(&pin.0, pin.1).unwrap();
-        assert!(cpu.has_animation(), "a Dancing Dissolve scene re-evaluates every frame");
-        let d = difference(&program, &cpu.frame_at(scene_frame, OutputTransform::Rec709).unwrap());
+        assert!(
+            cpu.has_animation(),
+            "a Dancing Dissolve scene re-evaluates every frame"
+        );
+        let d = difference(
+            &program,
+            &cpu.frame_at(scene_frame, OutputTransform::Rec709).unwrap(),
+        );
         assert!(d.0 <= 1, "frame {scene_frame}: {d:?}");
         frames.push(program);
     }
-    assert_ne!(frames[0].pixels, frames[1].pixels, "the pattern moves between frames");
+    assert_ne!(
+        frames[0].pixels, frames[1].pixels,
+        "the pattern moves between frames"
+    );
 }
 
 #[test]
@@ -298,7 +475,10 @@ fn no_nan_and_deterministic(mode: BlendMode) {
     let (mut engine, _ticks) = hardware_engine();
     let pin = publish(&mut engine, nan_scene(mode));
     let key = (pin.0.clone(), pin.1);
-    let scene = engine.gpu_prepared.get_mut(&key).expect("the GPU scene is prepared at publish");
+    let scene = engine
+        .gpu_prepared
+        .get_mut(&key)
+        .expect("the GPU scene is prepared at publish");
     let mut first: Option<Vec<u32>> = None;
     let mut over_range = 0usize;
     let mut partial = 0usize;
@@ -317,18 +497,35 @@ fn no_nan_and_deterministic(mode: BlendMode) {
             );
         }
         if run == 0 {
-            over_range = working.pixels.iter().filter(|p| p.r > p.a || p.g > p.a || p.b > p.a).count();
-            partial = working.pixels.iter().filter(|p| p.a > 0.0 && p.a < 1.0).count();
+            over_range = working
+                .pixels
+                .iter()
+                .filter(|p| p.r > p.a || p.g > p.a || p.b > p.a)
+                .count();
+            partial = working
+                .pixels
+                .iter()
+                .filter(|p| p.a > 0.0 && p.a < 1.0)
+                .count();
         }
         match &first {
             None => first = Some(bits),
-            Some(expected) => assert!(*expected == bits, "{mode:?} run {run} differs from run 0: GPU output is not deterministic"),
+            Some(expected) => assert!(
+                *expected == bits,
+                "{mode:?} run {run} differs from run 0: GPU output is not deterministic"
+            ),
         }
     }
-    assert!(over_range > 0, "the scene must carry over-range values into the blend, as EffectCraft's did");
-    evidence(&format!("nan-regression-{}.json", wire(mode)), &json!({
-        "mode": wire(mode), "adapter": engine.gpu_description(), "runs": RUNS,
-        "nonFiniteValues": 0, "bitIdenticalRuns": RUNS,
-        "overRangePixels": over_range, "partialAlphaPixels": partial,
-    }));
+    assert!(
+        over_range > 0,
+        "the scene must carry over-range values into the blend, as EffectCraft's did"
+    );
+    evidence(
+        &format!("nan-regression-{}.json", wire(mode)),
+        &json!({
+            "mode": wire(mode), "adapter": engine.gpu_description(), "runs": RUNS,
+            "nonFiniteValues": 0, "bitIdenticalRuns": RUNS,
+            "overRangePixels": over_range, "partialAlphaPixels": partial,
+        }),
+    );
 }

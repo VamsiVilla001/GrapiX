@@ -64,7 +64,11 @@ impl PreparedPaths {
             // 3.22: an object with effects is drawn at full opacity; its
             // effects run on those pixels and its opacity applies after them
             // (`prepared::compose`), as on the GPU.
-            let opacity = if object.base().effects().is_empty() { resolved.opacity as f32 } else { 1.0 };
+            let opacity = if object.base().effects().is_empty() {
+                resolved.opacity as f32
+            } else {
+                1.0
+            };
             for path in &mut paths[first..] {
                 path.paint = path.paint.scaled(opacity);
             }
@@ -208,7 +212,9 @@ impl RasterSurface {
         }
     }
 
-    pub(crate) fn origin(&self) -> [f64; 2] { self.origin }
+    pub(crate) fn origin(&self) -> [f64; 2] {
+        self.origin
+    }
 
     /// Width in scene pixels.
     pub fn width(&self) -> u32 {
@@ -281,7 +287,8 @@ impl RasterSurface {
         }
         let dissolve = matches!(
             mode,
-            gx_contracts::material::BlendMode::Dissolve | gx_contracts::material::BlendMode::DancingDissolve
+            gx_contracts::material::BlendMode::Dissolve
+                | gx_contracts::material::BlendMode::DancingDissolve
         );
         let (lw, lh) = (layer_width as f32, layer_height as f32);
         let width = self.width as usize;
@@ -290,8 +297,14 @@ impl RasterSurface {
             let sx = rows[0] * x + rows[1] * y + rows[2];
             let sy = rows[4] * x + rows[5] * y + rows[6];
             let s = if sx > -1.0 && sy > -1.0 && sx < lw + 1.0 && sy < lh + 1.0 {
-                let p = crate::effect_chain::sample_bilinear(layer, layer_width, layer_height, sx, sy);
-                WorkingRgba { r: p.r * opacity, g: p.g * opacity, b: p.b * opacity, a: p.a * opacity }
+                let p =
+                    crate::effect_chain::sample_bilinear(layer, layer_width, layer_height, sx, sy);
+                WorkingRgba {
+                    r: p.r * opacity,
+                    g: p.g * opacity,
+                    b: p.b * opacity,
+                    a: p.a * opacity,
+                }
             } else {
                 WorkingRgba::transparent()
             };
@@ -307,11 +320,17 @@ impl RasterSurface {
     /// Blend a same-sized layer onto this surface in `mode` (3.20), every
     /// pixel, through the CPU reference `crate::blend`. `seed` is the layer's
     /// Dissolve seed; the noise key is the stage pixel's integer index.
-    pub(crate) fn blend_layer(&mut self, layer: &RasterSurface, mode: gx_contracts::material::BlendMode, seed: u32) {
+    pub(crate) fn blend_layer(
+        &mut self,
+        layer: &RasterSurface,
+        mode: gx_contracts::material::BlendMode,
+        seed: u32,
+    ) {
         assert_eq!((layer.width, layer.height), (self.width, self.height));
         let dissolve = matches!(
             mode,
-            gx_contracts::material::BlendMode::Dissolve | gx_contracts::material::BlendMode::DancingDissolve
+            gx_contracts::material::BlendMode::Dissolve
+                | gx_contracts::material::BlendMode::DancingDissolve
         );
         let width = self.width as usize;
         for (index, (dst, src)) in self.pixels.iter_mut().zip(&layer.pixels).enumerate() {
@@ -355,9 +374,10 @@ pub(crate) fn solid_paint(
         None | Some(ColorValue::None) => Ok(None),
         // Linear here; `PreparedPaths::prepare` expresses every paint in the
         // scene's working space once its paths are built.
-        Some(ColorValue::Solid { color }) => {
-            Ok(Some(WorkingRgba::from_source(*color, WorkingColorSpace::LinearSrgb)))
-        }
+        Some(ColorValue::Solid { color }) => Ok(Some(WorkingRgba::from_source(
+            *color,
+            WorkingColorSpace::LinearSrgb,
+        ))),
         Some(ColorValue::LinearGradient { .. } | ColorValue::RadialGradient { .. }) => {
             Err(Refusal::UnsupportedPathGradient {
                 object: object.into(),
@@ -370,8 +390,8 @@ pub(crate) fn solid_paint(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gx_contracts::scene::SceneObject;
     use gx_contracts::color::ColorValue;
+    use gx_contracts::scene::SceneObject;
     use gx_contracts::scene::{ObjectBase, RectObject, SceneCanvas, SceneDocument};
     use gx_contracts::RationalRate;
 

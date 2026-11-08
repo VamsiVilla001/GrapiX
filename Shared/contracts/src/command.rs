@@ -17,10 +17,10 @@ use crate::authoring::{self, ObjectDeletion, ObjectDuplication};
 use crate::bindings::{self, BindingIssue};
 use crate::control::{self, ControlField, TakePage};
 use crate::design_system::{self, DesignSystem, DesignSystemCommit, MotionPreset};
+use crate::font::FontDefinition;
 use crate::import::ImportReport;
 use crate::object_edit::{self, ObjectField};
 use crate::phases::{self, TimelinePhase};
-use crate::font::FontDefinition;
 use crate::scene::{AssetLibraryItem, DataContext, SceneDocument};
 use crate::text_style::{self, TextStyle};
 use crate::{asset_edit, font_edit, material_edit, ContentHash, RationalRate, Refusal};
@@ -174,7 +174,9 @@ pub enum HistoryDirection {
 /// reverses only batches tagged with it; an untagged batch belongs to
 /// `Scene`. The surface that issues a gesture names its own module, because
 /// guessing it from edit kinds would misfile a gesture that touches several.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum EditorModule {
     Scene,
@@ -417,25 +419,61 @@ pub struct EditContext<'a> {
 )]
 pub enum EditEffect {
     None,
-    ObjectCreated { object_id: String },
+    ObjectCreated {
+        object_id: String,
+    },
     ObjectDeleted(ObjectDeletion),
     ObjectDuplicated(ObjectDuplication),
-    ObjectsChanged { object_ids: Vec<String> },
-    PresetApplied { duration_frames: u64 },
-    MotionPresetSaved { project: String, preset_id: String, phase: PresetPhase },
-    MaterialsRelinked { changed: Vec<String> },
-    DataContextReplaced { newly_invalid: Vec<BindingIssue> },
-    SessionOpened { session: SessionKey },
-    SessionClosed { session: SessionKey },
-    Stored { origin: SceneOrigin },
-    ProjectCreated { project: String },
-    TakePageSaved { project: String, page_id: String },
-    FontRemoved { font_id: String, asset_ids: Vec<String> },
+    ObjectsChanged {
+        object_ids: Vec<String>,
+    },
+    PresetApplied {
+        duration_frames: u64,
+    },
+    MotionPresetSaved {
+        project: String,
+        preset_id: String,
+        phase: PresetPhase,
+    },
+    MaterialsRelinked {
+        changed: Vec<String>,
+    },
+    DataContextReplaced {
+        newly_invalid: Vec<BindingIssue>,
+    },
+    SessionOpened {
+        session: SessionKey,
+    },
+    SessionClosed {
+        session: SessionKey,
+    },
+    Stored {
+        origin: SceneOrigin,
+    },
+    ProjectCreated {
+        project: String,
+    },
+    TakePageSaved {
+        project: String,
+        page_id: String,
+    },
+    FontRemoved {
+        font_id: String,
+        asset_ids: Vec<String>,
+    },
     /// The font's old files nothing uses any more left with the replace.
-    FontReplaced { font_id: String, asset_ids: Vec<String> },
+    FontReplaced {
+        font_id: String,
+        asset_ids: Vec<String>,
+    },
     /// A session opened from an import (7.2): every substitution, named.
-    Imported { report: ImportReport },
-    DesignSystemConfirmed { project: String, version: u32 },
+    Imported {
+        report: ImportReport,
+    },
+    DesignSystemConfirmed {
+        project: String,
+        version: u32,
+    },
 }
 
 /// A session as the browser sees it. The document flows out only.
@@ -556,9 +594,12 @@ fn apply_edit(
         SceneEdit::ApplyPreset(p) => {
             let preset = design_system::starter_preset(&p.preset_id)
                 .or_else(|| {
-                    ctx
-                        .presets
-                        .and_then(|saved| saved.iter().find(|preset| preset.id == p.preset_id).cloned())
+                    ctx.presets.and_then(|saved| {
+                        saved
+                            .iter()
+                            .find(|preset| preset.id == p.preset_id)
+                            .cloned()
+                    })
                 })
                 .ok_or_else(|| Refusal::MotionPresetUnknown {
                     preset: p.preset_id.clone(),
@@ -702,7 +743,10 @@ fn set_canvas(
     if let Some(rate) = frame_rate {
         canvas.frame_rate = RationalRate::new(rate.num, rate.den)?;
     }
-    for (field, value, slot) in [("canvas.width", width, &mut canvas.width), ("canvas.height", height, &mut canvas.height)] {
+    for (field, value, slot) in [
+        ("canvas.width", width, &mut canvas.width),
+        ("canvas.height", height, &mut canvas.height),
+    ] {
         if let Some(value) = value {
             if value == 0 {
                 return Err(Refusal::ObjectFieldValueInvalid {
@@ -863,7 +907,10 @@ pub mod witness {
                 session,
                 module: Some(EditorModule::Inspector),
             }),
-            EditorCommand::Redo(Redo { session, module: None }),
+            EditorCommand::Redo(Redo {
+                session,
+                module: None,
+            }),
             EditorCommand::SaveScene(SaveScene {
                 session,
                 to: SaveTarget::File {
@@ -927,8 +974,14 @@ pub mod witness {
                 preset_id: "witness-fade".into(),
                 phase: PresetPhase::In,
                 keys: vec![
-                    KeyRef { property: "opacity".into(), frame: 10 },
-                    KeyRef { property: "opacity".into(), frame: 25 },
+                    KeyRef {
+                        property: "opacity".into(),
+                        frame: 10,
+                    },
+                    KeyRef {
+                        property: "opacity".into(),
+                        frame: 25,
+                    },
                 ],
             }),
         ]
@@ -938,7 +991,11 @@ pub mod witness {
     /// [`scene_edits`] batch needs (a rect bound to material `m1`, a text
     /// object, a font, an image asset and numeric data).
     pub fn fixture_scene() -> SceneDocument {
-        let mut scene = scene::new_scene("witness", "Witness", crate::color::WorkingColorSpace::NEW_PROJECT);
+        let mut scene = scene::new_scene(
+            "witness",
+            "Witness",
+            crate::color::WorkingColorSpace::NEW_PROJECT,
+        );
         scene.timeline.duration_frames = 100;
         scene
             .data_context
@@ -1109,7 +1166,7 @@ pub mod witness {
                 preset_id: "fade".into(),
                 phase: PresetPhase::In,
                 at_frame: 10,
-                            duration_ms: None,
+                duration_ms: None,
             }),
             SceneEdit::SetPhase(SetPhase {
                 phase: TimelinePhase {
@@ -1344,7 +1401,11 @@ mod tests {
     };
 
     fn scene_with_card() -> SceneDocument {
-        let mut scene = new_scene("scene", "Scene", crate::color::WorkingColorSpace::NEW_PROJECT);
+        let mut scene = new_scene(
+            "scene",
+            "Scene",
+            crate::color::WorkingColorSpace::NEW_PROJECT,
+        );
         scene.objects.push(SceneObject::Rect(RectObject {
             base: ObjectBase::new("card", "Card"),
             radius: 0.0,
@@ -1390,20 +1451,44 @@ mod tests {
     fn deleting_several_keys_checks_the_final_curve_not_an_intermediate_join() {
         let mut scene = scene_with_card();
         let key = |frame, value| animation::SceneKeyframe {
-            frame, value, easing: animation::SceneEasing::Linear, bezier: None,
+            frame,
+            value,
+            easing: animation::SceneEasing::Linear,
+            bezier: None,
         };
         let mut first = key(0, 0.0);
         first.easing = animation::SceneEasing::CustomBezier;
-        first.bezier = Some(animation::CubicBezier { x1: 0.25, y1: 1.4, x2: 0.75, y2: 1.4 });
+        first.bezier = Some(animation::CubicBezier {
+            x1: 0.25,
+            y1: 1.4,
+            x2: 0.75,
+            y2: 1.4,
+        });
         for key in [first, key(40, 0.5), key(80, 1.0), key(100, 0.5)] {
             animation::set_keyframe(&mut scene, "card", "opacity", key).unwrap();
         }
-        let delete = |frame| SceneEdit::RemoveKeyframe(RemoveKeyframe { object_id: "card".into(), property: "opacity".into(), frame });
+        let delete = |frame| {
+            SceneEdit::RemoveKeyframe(RemoveKeyframe {
+                object_id: "card".into(),
+                property: "opacity".into(),
+                frame,
+            })
+        };
         let before = scene.clone();
-        assert!(matches!(apply_edits(&mut scene, &[delete(40)], &NO_CONTEXT), Err(Refusal::KeyframeValueOutOfDomain { .. })));
+        assert!(matches!(
+            apply_edits(&mut scene, &[delete(40)], &NO_CONTEXT),
+            Err(Refusal::KeyframeValueOutOfDomain { .. })
+        ));
         assert_eq!(scene, before);
         apply_edits(&mut scene, &[delete(40), delete(80)], &NO_CONTEXT).unwrap();
-        assert_eq!(scene.timeline.channels[0].keys.iter().map(|key| key.frame).collect::<Vec<_>>(), [0, 100]);
+        assert_eq!(
+            scene.timeline.channels[0]
+                .keys
+                .iter()
+                .map(|key| key.frame)
+                .collect::<Vec<_>>(),
+            [0, 100]
+        );
         animation::validate_scene_animation(&scene).unwrap();
     }
 
@@ -1697,7 +1782,7 @@ mod tests {
             preset_id: "teleport".into(),
             phase: PresetPhase::In,
             at_frame: 0,
-                    duration_ms: None,
+            duration_ms: None,
         }
         .into();
         assert_eq!(
@@ -1717,7 +1802,7 @@ mod tests {
             preset_id: "fade".into(),
             phase: PresetPhase::In,
             at_frame: 10,
-                    duration_ms: None,
+            duration_ms: None,
         }
         .into();
         let (_, effects) = apply_edits(&mut scene, &[edit], &NO_CONTEXT).unwrap();
@@ -1745,7 +1830,13 @@ mod tests {
             .channels
             .iter()
             .find(|channel| channel.object_id == object && channel.property == "x")
-            .map(|channel| channel.keys.iter().map(|key| (key.frame, key.value)).collect())
+            .map(|channel| {
+                channel
+                    .keys
+                    .iter()
+                    .map(|key| (key.frame, key.value))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -1773,7 +1864,10 @@ mod tests {
         assert_eq!(authored.len(), 2, "{authored:?}");
         let refs: Vec<KeyRef> = authored
             .iter()
-            .map(|(frame, _)| KeyRef { property: "x".into(), frame: *frame })
+            .map(|(frame, _)| KeyRef {
+                property: "x".into(),
+                frame: *frame,
+            })
             .collect();
 
         let phase = capture_motion_phase(&scene, "card", &refs).unwrap();
@@ -1786,24 +1880,36 @@ mod tests {
         assert_eq!(phase.channels[0].keys[0].v, -1.0);
         assert_eq!(phase.channels[0].keys[1].v, 0.0);
 
-        let empty = || MotionPhase { duration: DurationSpec::Ms(0.0), channels: Vec::new() };
+        let empty = || MotionPhase {
+            duration: DurationSpec::Ms(0.0),
+            channels: Vec::new(),
+        };
         let saved = MotionPreset {
             id: "mine".into(),
             applies_to: vec!["rect".into()],
-            phases: MotionPhases { r#in: phase, out: empty(), hold: None, r#continue: Vec::new(), update: None },
+            phases: MotionPhases {
+                r#in: phase,
+                out: empty(),
+                hold: None,
+                r#continue: Vec::new(),
+                update: None,
+            },
             params: Vec::new(),
             stagger: None,
         };
         // A saved preset with no out phase is the unusable one G.6.6 names.
         assert!(saved.validate().is_err());
         let library = [saved];
-        let context = EditContext { presets: Some(&library), ..NO_CONTEXT };
+        let context = EditContext {
+            presets: Some(&library),
+            ..NO_CONTEXT
+        };
         let edit: SceneEdit = ApplyPreset {
             object_id: "wide".into(),
             preset_id: "mine".into(),
             phase: PresetPhase::In,
             at_frame: 100,
-                    duration_ms: None,
+            duration_ms: None,
         }
         .into();
         apply_edits(&mut scene, &[edit], &context).unwrap();
@@ -1818,12 +1924,14 @@ mod tests {
             preset_id: "mine".into(),
             phase: PresetPhase::In,
             at_frame: 0,
-                    duration_ms: None,
+            duration_ms: None,
         }
         .into();
         assert_eq!(
             apply_edits(&mut other, &[edit], &NO_CONTEXT),
-            Err(Refusal::MotionPresetUnknown { preset: "mine".into() })
+            Err(Refusal::MotionPresetUnknown {
+                preset: "mine".into()
+            })
         );
     }
 
@@ -1833,22 +1941,44 @@ mod tests {
 
         let mut scene = scene_with_card();
         slide_in_at(&mut scene, 10);
-        let key = |frame: u64| KeyRef { property: "x".into(), frame };
+        let key = |frame: u64| KeyRef {
+            property: "x".into(),
+            frame,
+        };
         assert_eq!(
             capture_motion_phase(&scene, "card", &[]),
-            Err(Refusal::MotionPresetSelectionEmpty { object: "card".into() })
+            Err(Refusal::MotionPresetSelectionEmpty {
+                object: "card".into()
+            })
         );
         assert_eq!(
             capture_motion_phase(&scene, "card", &[key(10)]),
-            Err(Refusal::MotionPresetSpanZero { object: "card".into(), frame: 10 })
+            Err(Refusal::MotionPresetSpanZero {
+                object: "card".into(),
+                frame: 10
+            })
         );
         assert_eq!(
             capture_motion_phase(&scene, "card", &[key(10), key(11)]),
-            Err(Refusal::KeyframeUnknown { object: "card".into(), property: "x".into(), frame: 11 })
+            Err(Refusal::KeyframeUnknown {
+                object: "card".into(),
+                property: "x".into(),
+                frame: 11
+            })
         );
         assert_eq!(
-            capture_motion_phase(&scene, "card", &[KeyRef { property: "fill".into(), frame: 10 }]),
-            Err(Refusal::AnimationPropertyUnsupported { object: "card".into(), property: "fill".into() })
+            capture_motion_phase(
+                &scene,
+                "card",
+                &[KeyRef {
+                    property: "fill".into(),
+                    frame: 10
+                }]
+            ),
+            Err(Refusal::AnimationPropertyUnsupported {
+                object: "card".into(),
+                property: "fill".into()
+            })
         );
         // The scene is only read: nothing above wrote a channel.
         assert_eq!(x_keys(&scene, "card").len(), 2);
@@ -1869,16 +1999,27 @@ mod tests {
         // Fade declares 80-2000 ms: 600 ms at 50p is 30 frames, not its own 15.
         let mut scene = scene_with_card();
         scene.timeline.duration_frames = 200;
-        let (_, effects) = apply_edits(&mut scene, &[apply(Some(600.0), "fade")], &NO_CONTEXT).unwrap();
-        assert!(matches!(effects[0], EditEffect::PresetApplied { duration_frames: 30 }));
-        let frames: Vec<u64> = scene.timeline.channels[0].keys.iter().map(|key| key.frame).collect();
+        let (_, effects) =
+            apply_edits(&mut scene, &[apply(Some(600.0), "fade")], &NO_CONTEXT).unwrap();
+        assert!(matches!(
+            effects[0],
+            EditEffect::PresetApplied {
+                duration_frames: 30
+            }
+        ));
+        let frames: Vec<u64> = scene.timeline.channels[0]
+            .keys
+            .iter()
+            .map(|key| key.frame)
+            .collect();
         assert_eq!(frames, vec![10, 40]);
 
         // Outside the range, or not finite: refused by name, scene untouched.
         for bad in [10.0, 5000.0, f64::NAN] {
             let mut scene = scene_with_card();
             scene.timeline.duration_frames = 200;
-            let refusal = apply_edits(&mut scene, &[apply(Some(bad), "fade")], &NO_CONTEXT).unwrap_err();
+            let refusal =
+                apply_edits(&mut scene, &[apply(Some(bad), "fade")], &NO_CONTEXT).unwrap_err();
             assert!(
                 matches!(&refusal, Refusal::MotionPresetParamInvalid { preset, param, .. } if preset == "fade" && param == "duration"),
                 "{bad}: {refusal:?}"
@@ -1891,24 +2032,86 @@ mod tests {
     fn set_canvas_changes_the_rate_exactly_and_keeps_every_frame() {
         let mut scene = new_scene("rate", "Rate", crate::color::WorkingColorSpace::NEW_PROJECT);
         let text = authoring::create_object(&mut scene, "rect", "Plate").unwrap();
-        animation::create_keyframe(&mut scene, &text, "x", SceneKeyframe { frame: 48, value: 10.0, easing: Default::default(), bezier: None }).unwrap();
+        animation::create_keyframe(
+            &mut scene,
+            &text,
+            "x",
+            SceneKeyframe {
+                frame: 48,
+                value: 10.0,
+                easing: Default::default(),
+                bezier: None,
+            },
+        )
+        .unwrap();
         let ctx = EditContext::default();
-        let edits = [SceneEdit::SetCanvas(SetCanvas { frame_rate: Some(RationalRate::P29_97), width: None, height: None })];
+        let edits = [SceneEdit::SetCanvas(SetCanvas {
+            frame_rate: Some(RationalRate::P29_97),
+            width: None,
+            height: None,
+        })];
         apply_edits(&mut scene, &edits, &ctx).unwrap();
-        assert_eq!(scene.canvas.frame_rate, RationalRate { num: 30000, den: 1001 }, "the rational is carried exact");
-        assert_eq!(scene.timeline.duration_frames, 250, "frames are canonical: the duration in frames is kept");
-        assert_eq!(scene.timeline.channels[0].keys[0].frame, 48, "a key stays on its frame");
+        assert_eq!(
+            scene.canvas.frame_rate,
+            RationalRate {
+                num: 30000,
+                den: 1001
+            },
+            "the rational is carried exact"
+        );
+        assert_eq!(
+            scene.timeline.duration_frames, 250,
+            "frames are canonical: the duration in frames is kept"
+        );
+        assert_eq!(
+            scene.timeline.channels[0].keys[0].frame, 48,
+            "a key stays on its frame"
+        );
 
-        let edits = [SceneEdit::SetCanvas(SetCanvas { frame_rate: None, width: Some(3840), height: Some(2160) })];
+        let edits = [SceneEdit::SetCanvas(SetCanvas {
+            frame_rate: None,
+            width: Some(3840),
+            height: Some(2160),
+        })];
         apply_edits(&mut scene, &edits, &ctx).unwrap();
         assert_eq!((scene.canvas.width, scene.canvas.height), (3840, 2160));
 
         let before = scene.clone();
-        let refused = |edit: SetCanvas| apply_edits(&mut scene.clone(), &[SceneEdit::SetCanvas(edit)], &ctx).unwrap_err();
-        assert!(matches!(refused(SetCanvas { frame_rate: Some(RationalRate { num: 0, den: 1 }), width: None, height: None }), Refusal::InvalidRate { num: 0, den: 1 }));
-        assert!(matches!(refused(SetCanvas { frame_rate: None, width: Some(0), height: None }), Refusal::ObjectFieldValueInvalid { .. }));
-        assert!(matches!(refused(SetCanvas { frame_rate: Some(RationalRate::P29_97), width: Some(3840), height: None }), Refusal::ObjectFieldUnchanged { .. }));
-        assert!(matches!(refused(SetCanvas { frame_rate: None, width: None, height: None }), Refusal::ObjectFieldUnchanged { .. }));
+        let refused = |edit: SetCanvas| {
+            apply_edits(&mut scene.clone(), &[SceneEdit::SetCanvas(edit)], &ctx).unwrap_err()
+        };
+        assert!(matches!(
+            refused(SetCanvas {
+                frame_rate: Some(RationalRate { num: 0, den: 1 }),
+                width: None,
+                height: None
+            }),
+            Refusal::InvalidRate { num: 0, den: 1 }
+        ));
+        assert!(matches!(
+            refused(SetCanvas {
+                frame_rate: None,
+                width: Some(0),
+                height: None
+            }),
+            Refusal::ObjectFieldValueInvalid { .. }
+        ));
+        assert!(matches!(
+            refused(SetCanvas {
+                frame_rate: Some(RationalRate::P29_97),
+                width: Some(3840),
+                height: None
+            }),
+            Refusal::ObjectFieldUnchanged { .. }
+        ));
+        assert!(matches!(
+            refused(SetCanvas {
+                frame_rate: None,
+                width: None,
+                height: None
+            }),
+            Refusal::ObjectFieldUnchanged { .. }
+        ));
         assert_eq!(scene, before, "a refused canvas edit changes nothing");
     }
 }

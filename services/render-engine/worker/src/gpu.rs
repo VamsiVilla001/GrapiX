@@ -41,7 +41,9 @@ pub fn negotiate() -> Gpu {
 }
 
 #[cfg(test)]
-pub(crate) fn negotiate_for_test(backends: wgpu::Backends) -> Gpu { negotiate_backends(backends) }
+pub(crate) fn negotiate_for_test(backends: wgpu::Backends) -> Gpu {
+    negotiate_backends(backends)
+}
 
 fn negotiate_backends(backends: wgpu::Backends) -> Gpu {
     // wgpu 30 has no `Default` for the descriptor; this is the same set of
@@ -116,7 +118,9 @@ fn tier_for(device_type: wgpu::DeviceType) -> DeviceTier {
 
 impl Gpu {
     pub(crate) fn diagnostic_description(&self) -> Option<String> {
-        self.inner.as_ref().map(|gpu| format!("{} ({:?})", gpu.info.name, gpu.info.backend))
+        self.inner
+            .as_ref()
+            .map(|gpu| format!("{} ({:?})", gpu.info.name, gpu.info.backend))
     }
 
     #[cfg(test)]

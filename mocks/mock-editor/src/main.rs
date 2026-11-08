@@ -148,7 +148,10 @@ fn publish((engine, scene): (SocketAddr, SceneDocument)) -> Result<(), EditorErr
             revision,
             content_hash,
         } => {
-            println!("published {} revision {} hash {}", take_id.0, revision.0, content_hash.0)
+            println!(
+                "published {} revision {} hash {}",
+                take_id.0, revision.0, content_hash.0
+            )
         }
         PublishReply::Refused(PublishRefusal::InvalidPublishRequest { detail }) => {
             return Err(EditorError::PublishRefused(detail))

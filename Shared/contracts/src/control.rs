@@ -150,8 +150,8 @@ pub fn fillable_properties(kind: &str) -> &'static [(&'static str, ControlFieldK
     match kind {
         "text" => TEXT_PROPERTIES,
         "image" => IMAGE_PROPERTIES,
-        "rect" | "ellipse" | "line" | "shape" | "paint" | "mesh" | "light" | "camera"
-        | "layer" | "marker" | "group" => BASE_PROPERTIES,
+        "rect" | "ellipse" | "line" | "shape" | "paint" | "mesh" | "light" | "camera" | "layer"
+        | "marker" | "group" => BASE_PROPERTIES,
         _ => &[],
     }
 }
@@ -168,14 +168,24 @@ fn refuse_duplicate_object_ids(scene: &SceneDocument) -> Result<(), Refusal> {
     Ok(())
 }
 
-fn target<'a>(scene: &'a SceneDocument, object_id: &str, property: &str) -> Result<&'a SceneObject, Refusal> {
+fn target<'a>(
+    scene: &'a SceneDocument,
+    object_id: &str,
+    property: &str,
+) -> Result<&'a SceneObject, Refusal> {
     refuse_duplicate_object_ids(scene)?;
-    let object = scene.objects.iter().find(|object| object.base().id == object_id);
+    let object = scene
+        .objects
+        .iter()
+        .find(|object| object.base().id == object_id);
     match object {
         Some(object)
             if fillable_properties(object.kind())
                 .iter()
-                .any(|(fillable, _)| *fillable == property) => Ok(object),
+                .any(|(fillable, _)| *fillable == property) =>
+        {
+            Ok(object)
+        }
         _ => Err(Refusal::ControlFieldTargetUnknown {
             object_id: object_id.to_owned(),
             property: property.to_owned(),
@@ -205,7 +215,10 @@ fn expected_kind(scene: &SceneDocument, field: &ControlField) -> Result<ControlF
 ///
 /// Validation precedes the append, so a refusal cannot leave a half-authored
 /// control contract on the scene.
-pub fn declare_control_field(scene: &mut SceneDocument, field: ControlField) -> Result<(), Refusal> {
+pub fn declare_control_field(
+    scene: &mut SceneDocument,
+    field: ControlField,
+) -> Result<(), Refusal> {
     let target_kind = expected_kind(scene, &field)?;
     if target_kind != field.kind {
         return Err(Refusal::ControlFieldTargetUnknown {
@@ -222,7 +235,11 @@ pub fn declare_control_field(scene: &mut SceneDocument, field: ControlField) -> 
             });
         }
     }
-    if scene.controls.iter().any(|existing| existing.field_id == field.field_id) {
+    if scene
+        .controls
+        .iter()
+        .any(|existing| existing.field_id == field.field_id)
+    {
         return Err(Refusal::ControlFieldDuplicate {
             field_id: field.field_id,
         });
@@ -281,7 +298,10 @@ pub fn remove_control_field(scene: &mut SceneDocument, field_id: &str) -> Result
 ///
 /// Replacement keeps its address stable: changing `field_id` is not an update
 /// of an existing control and is therefore refused as unknown.
-pub fn replace_control_field(scene: &mut SceneDocument, field: ControlField) -> Result<(), Refusal> {
+pub fn replace_control_field(
+    scene: &mut SceneDocument,
+    field: ControlField,
+) -> Result<(), Refusal> {
     let index = scene
         .controls
         .iter()
@@ -310,7 +330,6 @@ pub fn replace_control_field(scene: &mut SceneDocument, field: ControlField) -> 
     scene.controls[index] = field;
     Ok(())
 }
-
 
 fn set_value(object: &mut SceneObject, property: &str, value: ControlValue) {
     match (property, value) {
@@ -420,8 +439,16 @@ mod tests {
             version: crate::scene::SCENE_SCHEMA_VERSION,
             revision: None,
             active_camera_id: None,
-            canvas: SceneCanvas { width: 1920, height: 1080, frame_rate: RationalRate::P50 },
-            timeline: SceneTimeline { duration_frames: 1, channels: Vec::new(), phases: Vec::new() },
+            canvas: SceneCanvas {
+                width: 1920,
+                height: 1080,
+                frame_rate: RationalRate::P50,
+            },
+            timeline: SceneTimeline {
+                duration_frames: 1,
+                channels: Vec::new(),
+                phases: Vec::new(),
+            },
             data_context: Default::default(),
             assets: Vec::new(),
             fonts: Vec::new(),
@@ -434,41 +461,79 @@ mod tests {
                     text: "Before".into(),
                     font_id: "font".into(),
                     size: 32.0,
-                    layout: Default::default(), auto_fit: Default::default(), writing_mode: Default::default(),
-                    vertical_align: Default::default(), direction: Default::default(), text_case: Default::default(),
-                    decoration: Default::default(), overflow: Default::default(), align: Default::default(),
-                    line_height: None, letter_spacing: 0.0, word_spacing: 0.0, paragraph_spacing: 0.0, text_indent: 0.0,
+                    layout: Default::default(),
+                    auto_fit: Default::default(),
+                    writing_mode: Default::default(),
+                    vertical_align: Default::default(),
+                    direction: Default::default(),
+                    text_case: Default::default(),
+                    decoration: Default::default(),
+                    overflow: Default::default(),
+                    align: Default::default(),
+                    line_height: None,
+                    letter_spacing: 0.0,
+                    word_spacing: 0.0,
+                    paragraph_spacing: 0.0,
+                    text_indent: 0.0,
                 }),
-                SceneObject::Rect(RectObject { base: ObjectBase::new("card", "Card"), radius: 0.0 }),
+                SceneObject::Rect(RectObject {
+                    base: ObjectBase::new("card", "Card"),
+                    radius: 0.0,
+                }),
             ],
         }
     }
 
     fn field(id: &str, property: &str, kind: ControlFieldKind) -> ControlField {
-        ControlField { field_id: id.into(), label: id.into(), object_id: "headline".into(), property: property.into(), kind, default: None }
+        ControlField {
+            field_id: id.into(),
+            label: id.into(),
+            object_id: "headline".into(),
+            property: property.into(),
+            kind,
+            default: None,
+        }
     }
 
     #[test]
     fn non_fillable_property_refuses_by_name_without_declaring_it() {
         let mut document = scene();
-        let refused = declare_control_field(&mut document, field("font", "fontId", ControlFieldKind::Text));
-        assert!(matches!(refused, Err(Refusal::ControlFieldTargetUnknown { object_id, property }) if object_id == "headline" && property == "fontId"));
+        let refused = declare_control_field(
+            &mut document,
+            field("font", "fontId", ControlFieldKind::Text),
+        );
+        assert!(
+            matches!(refused, Err(Refusal::ControlFieldTargetUnknown { object_id, property }) if object_id == "headline" && property == "fontId")
+        );
         assert!(document.controls.is_empty());
     }
 
     #[test]
     fn duplicate_field_id_refuses_without_changing_the_contract() {
         let mut document = scene();
-        declare_control_field(&mut document, field("headline", "text", ControlFieldKind::Text)).unwrap();
-        let refused = declare_control_field(&mut document, field("headline", "x", ControlFieldKind::Number));
-        assert!(matches!(refused, Err(Refusal::ControlFieldDuplicate { field_id }) if field_id == "headline"));
+        declare_control_field(
+            &mut document,
+            field("headline", "text", ControlFieldKind::Text),
+        )
+        .unwrap();
+        let refused = declare_control_field(
+            &mut document,
+            field("headline", "x", ControlFieldKind::Number),
+        );
+        assert!(
+            matches!(refused, Err(Refusal::ControlFieldDuplicate { field_id }) if field_id == "headline")
+        );
         assert_eq!(document.controls.len(), 1);
     }
 
     #[test]
     fn applying_values_returns_a_filled_copy_and_leaves_template_untouched() {
         let mut document = scene();
-        declare_control_field(&mut document, field("headline", "text", ControlFieldKind::Text)).unwrap();
+        declare_control_field(
+            &mut document,
+            field("headline", "text", ControlFieldKind::Text),
+        )
+        .unwrap();
         let values = BTreeMap::from([("headline".into(), ControlValue::Text("After".into()))]);
         let filled = apply_control_values(&document, &values).unwrap();
         assert!(matches!(&document.objects[0], SceneObject::Text(text) if text.text == "Before"));
@@ -478,9 +543,15 @@ mod tests {
     #[test]
     fn wrong_value_type_names_expected_and_actual() {
         let mut document = scene();
-        declare_control_field(&mut document, field("headline", "text", ControlFieldKind::Text)).unwrap();
+        declare_control_field(
+            &mut document,
+            field("headline", "text", ControlFieldKind::Text),
+        )
+        .unwrap();
         let values = BTreeMap::from([("headline".into(), ControlValue::Number(42.0))]);
-        assert!(matches!(apply_control_values(&document, &values), Err(Refusal::ControlValueTypeMismatch { field_id, expected, actual }) if field_id == "headline" && expected == "text" && actual == "number"));
+        assert!(
+            matches!(apply_control_values(&document, &values), Err(Refusal::ControlValueTypeMismatch { field_id, expected, actual }) if field_id == "headline" && expected == "text" && actual == "number")
+        );
     }
 
     #[test]
@@ -489,13 +560,18 @@ mod tests {
         raw.as_object_mut()
             .expect("a scene serializes as an object")
             .remove("controls");
-        let parsed = crate::scene::parse_scene_document(&serde_json::to_vec(&raw).unwrap()).unwrap();
+        let parsed =
+            crate::scene::parse_scene_document(&serde_json::to_vec(&raw).unwrap()).unwrap();
         assert!(parsed.controls.is_empty());
     }
     #[test]
     fn a_take_page_is_pinned_to_its_template_before_values_are_applied() {
         let mut document = scene();
-        declare_control_field(&mut document, field("headline", "text", ControlFieldKind::Text)).unwrap();
+        declare_control_field(
+            &mut document,
+            field("headline", "text", ControlFieldKind::Text),
+        )
+        .unwrap();
         let page = TakePage {
             page_id: "page-1".into(),
             name: "Wrong template".into(),
@@ -521,5 +597,4 @@ mod tests {
             Err(Refusal::ControlFieldDuplicate { field_id }) if field_id == "headline"
         ));
     }
-
 }

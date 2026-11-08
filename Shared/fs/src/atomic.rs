@@ -215,7 +215,10 @@ impl<E: std::fmt::Display> std::fmt::Display for VerifiedWriteError<E> {
         match self {
             Self::Write(source) => write!(f, "{source}"),
             Self::Rejected(source) => {
-                write!(f, "written bytes failed verification, destination unchanged: {source}")
+                write!(
+                    f,
+                    "written bytes failed verification, destination unchanged: {source}"
+                )
             }
         }
     }
@@ -449,10 +452,11 @@ mod tests {
         let path = scratch.file("package.bin");
         write_atomic(&path, b"the previous good package").unwrap();
 
-        let outcome: Result<(), VerifiedWriteError<Rejected>> =
-            write_atomic_verified(&path, |file| file.write_all(b"a corrupt build"), |_| {
-                Err(Rejected("digest mismatch"))
-            });
+        let outcome: Result<(), VerifiedWriteError<Rejected>> = write_atomic_verified(
+            &path,
+            |file| file.write_all(b"a corrupt build"),
+            |_| Err(Rejected("digest mismatch")),
+        );
 
         assert!(matches!(outcome, Err(VerifiedWriteError::Rejected(_))));
         assert_eq!(
@@ -473,13 +477,16 @@ mod tests {
         let path = scratch.file("package.bin");
         write_atomic(&path, b"old").unwrap();
 
-        let outcome: Result<(), VerifiedWriteError<Rejected>> =
-            write_atomic_verified(&path, |file| file.write_all(b"new"), |candidate| {
+        let outcome: Result<(), VerifiedWriteError<Rejected>> = write_atomic_verified(
+            &path,
+            |file| file.write_all(b"new"),
+            |candidate| {
                 // The verifier sees the candidate's real bytes, at a path it
                 // can open, while the destination still holds the old ones.
                 assert_eq!(fs::read(candidate).unwrap(), b"new");
                 Ok(())
-            });
+            },
+        );
 
         assert!(outcome.is_ok());
         assert_eq!(fs::read(&path).unwrap(), b"new");
@@ -491,10 +498,11 @@ mod tests {
         let scratch = Scratch::new("verified-first");
         let path = scratch.file("package.bin");
 
-        let outcome: Result<(), VerifiedWriteError<Rejected>> =
-            write_atomic_verified(&path, |file| file.write_all(b"bad"), |_| {
-                Err(Rejected("digest mismatch"))
-            });
+        let outcome: Result<(), VerifiedWriteError<Rejected>> = write_atomic_verified(
+            &path,
+            |file| file.write_all(b"bad"),
+            |_| Err(Rejected("digest mismatch")),
+        );
 
         assert!(matches!(outcome, Err(VerifiedWriteError::Rejected(_))));
         assert!(!path.exists(), "a failed first build leaves no artefact");

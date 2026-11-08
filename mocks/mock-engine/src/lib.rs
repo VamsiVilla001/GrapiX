@@ -119,7 +119,13 @@ impl MockEngine {
     /// asset-plane publication below is what Editor uses. With no document to
     /// hash, the caller declares the content hash a take must pin.
     pub fn publish(&mut self, take_id: TakeId, revision: Revision, content_hash: ContentHash) {
-        self.published.insert(take_id, HeldRevision { revision, content_hash });
+        self.published.insert(
+            take_id,
+            HeldRevision {
+                revision,
+                content_hash,
+            },
+        );
     }
 
     /// Mark bytes as verified and available to a subsequently taken scene.
@@ -147,14 +153,22 @@ impl MockEngine {
         // The mock retains missing assets so take can exercise the asset
         // blocker, but authored mappings must match the real engine's refusals.
         if let Some(refusal) = gx_contracts::validate::validate_scene_document(
-            &scene, &self.capability().material, &self.assets, false,
-        ).into_iter().next() {
+            &scene,
+            &self.capability().material,
+            &self.assets,
+            false,
+        )
+        .into_iter()
+        .next()
+        {
             return PublishReply::Refused(gx_asset_plane::PublishRefusal::PreparationRefused {
                 cause: refusal.code,
             });
         }
         if let Some(cause) = gx_contracts::drawability::gpu_compositor_animation_refusal(&scene) {
-            return PublishReply::Refused(gx_asset_plane::PublishRefusal::PreparationRefused { cause });
+            return PublishReply::Refused(gx_asset_plane::PublishRefusal::PreparationRefused {
+                cause,
+            });
         }
         let take_id = TakeId(scene.id.clone());
         let revision = self
@@ -238,7 +252,12 @@ impl MockEngine {
 
     /// Check a scene reference against what is published (the shared rule),
     /// then that every asset the pinned scene declares has arrived.
-    fn check_published(&self, take_id: &TakeId, revision: Revision, pin: Option<&ContentHash>) -> Result<(), Refusal> {
+    fn check_published(
+        &self,
+        take_id: &TakeId,
+        revision: Revision,
+        pin: Option<&ContentHash>,
+    ) -> Result<(), Refusal> {
         check_reference(take_id, revision, pin, self.published.get(take_id))?;
         self.published_scene(take_id, revision)
             .into_iter()
@@ -278,7 +297,9 @@ impl MockEngine {
     /// engine refuses and renders the image the engine renders from the same
     /// document and bytes (invariant 45).
     fn render(&self, request: RenderRequest) -> EngineReply {
-        let document = self.documents.get(&(request.take_id.clone(), request.revision));
+        let document = self
+            .documents
+            .get(&(request.take_id.clone(), request.revision));
         let held = self.published.get(&request.take_id);
         let duration = document.map(|document| document.timeline.duration_frames);
         if let Err(refusal) = check_render(&request, held, duration) {
@@ -374,7 +395,9 @@ impl EnginePeer for MockEngine {
             }),
 
             ClientRequest::Cue(req) => {
-                if let Err(refusal) = self.check_published(&req.take_id, req.revision, req.content_hash.as_ref()) {
+                if let Err(refusal) =
+                    self.check_published(&req.take_id, req.revision, req.content_hash.as_ref())
+                {
                     return EngineReply::Refused(refusal);
                 }
                 match self.commit(req.at) {
@@ -395,11 +418,17 @@ impl EnginePeer for MockEngine {
             }
 
             ClientRequest::Take(req) => {
-                if let Err(refusal) = self.check_published(&req.take_id, req.revision, req.content_hash.as_ref()) {
+                if let Err(refusal) =
+                    self.check_published(&req.take_id, req.revision, req.content_hash.as_ref())
+                {
                     return EngineReply::Refused(refusal);
                 }
-                if self.published_scene(&req.take_id, req.revision).is_some() && !self.device_tier.live_capable() {
-                    return EngineReply::Refused(Refusal::TierTooLow { actual: self.device_tier });
+                if self.published_scene(&req.take_id, req.revision).is_some()
+                    && !self.device_tier.live_capable()
+                {
+                    return EngineReply::Refused(Refusal::TierTooLow {
+                        actual: self.device_tier,
+                    });
                 }
                 let in_phase = self
                     .published_scene(&req.take_id, req.revision)
@@ -491,8 +520,8 @@ impl EnginePeer for MockEngine {
             }
 
             ClientRequest::ConfigureOutput(config) => self.configure_output(&config),
-            ClientRequest::Performance => EngineReply::Performance(
-                gx_control_plane::status::PerformanceSummary {
+            ClientRequest::Performance => {
+                EngineReply::Performance(gx_control_plane::status::PerformanceSummary {
                     rate: self.reference.effective_timebase(),
                     device_tier: self.device_tier,
                     frames: Vec::new(),
@@ -501,8 +530,8 @@ impl EnginePeer for MockEngine {
                     total_dropped: 0,
                     total_missed: 0,
                     mean_budget_ratio: None,
-                },
-            ),
+                })
+            }
             ClientRequest::Render(request) => self.render(request),
         }
     }
@@ -574,7 +603,10 @@ mod tests {
             content_hash: None,
             at: TakeAt::NextOpportunity,
         }));
-        assert!(matches!(unpinned, EngineReply::Refused(Refusal::RevisionUnpinned { .. })));
+        assert!(matches!(
+            unpinned,
+            EngineReply::Refused(Refusal::RevisionUnpinned { .. })
+        ));
         let other = ContentHash("b".repeat(64));
         let wrong = e.handle(ClientRequest::Take(TakeRequest {
             take_id: TakeId("lower-third".into()),
@@ -587,7 +619,10 @@ mod tests {
             EngineReply::Refused(Refusal::RevisionHashMismatch { expected, actual, .. })
                 if expected == pin() && actual == other
         ));
-        assert!(e.status().unwrap().program.is_none(), "neither refused take reached Program");
+        assert!(
+            e.status().unwrap().program.is_none(),
+            "neither refused take reached Program"
+        );
     }
 
     #[test]
@@ -828,18 +863,36 @@ mod tests {
         }"#).unwrap();
         for tier in [DeviceTier::T2, DeviceTier::T3] {
             let mut engine = MockEngine::new().with_device_tier(tier);
-            let PublishReply::Published { take_id, revision, content_hash } = engine.publish_scene(scene.clone()) else { panic!("reference scene publishes"); };
+            let PublishReply::Published {
+                take_id,
+                revision,
+                content_hash,
+            } = engine.publish_scene(scene.clone())
+            else {
+                panic!("reference scene publishes");
+            };
             assert!(matches!(engine.handle(ClientRequest::Take(TakeRequest {
                 take_id, revision, content_hash: Some(content_hash), at: TakeAt::NextOpportunity,
             })), EngineReply::Refused(Refusal::TierTooLow { actual }) if actual == tier));
         }
-        scene.timeline.channels.push(gx_contracts::animation::KeyframeChannel {
-            object_id: "card".into(), property: "width".into(),
-            keys: vec![gx_contracts::animation::SceneKeyframe { frame: 0, value: 8.0, easing: Default::default(), bezier: None }],
-        });
+        scene
+            .timeline
+            .channels
+            .push(gx_contracts::animation::KeyframeChannel {
+                object_id: "card".into(),
+                property: "width".into(),
+                keys: vec![gx_contracts::animation::SceneKeyframe {
+                    frame: 0,
+                    value: 8.0,
+                    easing: Default::default(),
+                    bezier: None,
+                }],
+            });
         let expected = gx_contracts::drawability::gpu_compositor_animation_refusal(&scene).unwrap();
-        assert!(matches!(MockEngine::new().publish_scene(scene), PublishReply::Refused(
+        assert!(
+            matches!(MockEngine::new().publish_scene(scene), PublishReply::Refused(
             gx_asset_plane::PublishRefusal::PreparationRefused { cause }
-        ) if cause == expected));
+        ) if cause == expected)
+        );
     }
 }

@@ -95,7 +95,14 @@ impl GpuScene {
             // 3.22: padded by the effect stack's largest reach over every
             // frame, and Box Blur sized to its largest iteration count.
             let (pad, iterations) = crate::effect_chain::layer_extent(doc, index)?;
-            let source = crate::layer_source::prepare_layer_source(doc, scene.effective(), scene.texts(), index, pad, limit)?;
+            let source = crate::layer_source::prepare_layer_source(
+                doc,
+                scene.effective(),
+                scene.texts(),
+                index,
+                pad,
+                limit,
+            )?;
             let (width, height) = (source.surface.width(), source.surface.height());
             let surface = source.surface;
             let origin = source.origin;
@@ -205,9 +212,17 @@ impl GpuScene {
             );
             state.seed = frame_seed(&layer.object_id, layer.blend_mode, scene_frame);
         }
-        for ((plan, layer), ctx) in self.effects.iter_mut().zip(&self.layers).zip(&self.effect_contexts) {
+        for ((plan, layer), ctx) in self
+            .effects
+            .iter_mut()
+            .zip(&self.layers)
+            .zip(&self.effect_contexts)
+        {
             if let Some(plan) = plan {
-                plan.pack(self.evaluated.objects[layer.object_index].base().effects(), ctx);
+                plan.pack(
+                    self.evaluated.objects[layer.object_index].base().effects(),
+                    ctx,
+                );
             }
         }
         self.compositor
@@ -265,12 +280,19 @@ impl GpuScene {
         scene_frame: u64,
     ) -> Result<(Frame, Frame, super::CompositeReference), Refusal> {
         let (program, preview) = self.render(scene_frame)?;
-        let working = self.compositor.readback_working().map_err(compositor_refusal)?;
+        let working = self
+            .compositor
+            .readback_working()
+            .map_err(compositor_refusal)?;
         Ok((program, preview, working))
     }
 }
 
-pub(crate) fn layer_state(anchor: Option<Vec2>, resolved: &ResolvedObject, origin: [f64; 2]) -> LayerState {
+pub(crate) fn layer_state(
+    anchor: Option<Vec2>,
+    resolved: &ResolvedObject,
+    origin: [f64; 2],
+) -> LayerState {
     // A zero-scale object has zero area. Hide it with an invertible identity
     // rather than rejecting a legitimate zero scale or inventing pixels.
     if resolved.scale_x == 0.0 || resolved.scale_y == 0.0 {

@@ -52,7 +52,11 @@ pub struct PackedEffect {
 
 impl PackedEffect {
     pub fn identity() -> Self {
-        Self { kind: IDENTITY, params: [0.0; PARAMS], curve: vec![0.0; CURVE_FLOATS] }
+        Self {
+            kind: IDENTITY,
+            params: [0.0; PARAMS],
+            curve: vec![0.0; CURVE_FLOATS],
+        }
     }
 
     /// Pack one effect instance for this frame, in place (no allocation once
@@ -88,7 +92,13 @@ impl PackedEffect {
             }
             Effect::Levels(e) => {
                 for (i, c) in [e.rgb, e.red, e.green, e.blue, e.alpha].iter().enumerate() {
-                    let LevelsChannel { input_black, input_white, gamma, output_black, output_white } = *c;
+                    let LevelsChannel {
+                        input_black,
+                        input_white,
+                        gamma,
+                        output_black,
+                        output_white,
+                    } = *c;
                     p[i * 5..i * 5 + 5].copy_from_slice(&[
                         input_black as f32,
                         input_white as f32,
@@ -120,8 +130,19 @@ impl PackedEffect {
             Effect::BrightnessContrast(e) => {
                 let (b, c) = (e.brightness as f32, e.contrast as f32);
                 // Legacy gain, and the modern curves' exponents.
-                let k = if c >= 0.0 { 1.0 / (1.0 - c * 0.99) } else { 1.0 + c };
-                p[..6].copy_from_slice(&[b, c, f32::from(u8::from(e.use_legacy)), k, 2f32.powf(-b), 2f32.powf(2.0 * c)]);
+                let k = if c >= 0.0 {
+                    1.0 / (1.0 - c * 0.99)
+                } else {
+                    1.0 + c
+                };
+                p[..6].copy_from_slice(&[
+                    b,
+                    c,
+                    f32::from(u8::from(e.use_legacy)),
+                    k,
+                    2f32.powf(-b),
+                    2f32.powf(2.0 * c),
+                ]);
                 BRIGHTNESS_CONTRAST
             }
             Effect::Exposure(e) => {
@@ -150,12 +171,18 @@ fn fill_curve(points: &[gx_contracts::effect::CurvePoint], out: &mut [f32]) {
     let xs: Vec<f32> = pts.iter().map(|p| p.0).collect();
     let ys: Vec<f32> = pts.iter().map(|p| p.1).collect();
     let n = xs.len();
-    let d: Vec<f32> = (0..n - 1).map(|k| (ys[k + 1] - ys[k]) / (xs[k + 1] - xs[k])).collect();
+    let d: Vec<f32> = (0..n - 1)
+        .map(|k| (ys[k + 1] - ys[k]) / (xs[k + 1] - xs[k]))
+        .collect();
     let mut ms = vec![0.0f32; n];
     ms[0] = d[0];
     ms[n - 1] = d[n - 2];
     for k in 1..n - 1 {
-        ms[k] = if d[k - 1] * d[k] <= 0.0 { 0.0 } else { (d[k - 1] + d[k]) * 0.5 };
+        ms[k] = if d[k - 1] * d[k] <= 0.0 {
+            0.0
+        } else {
+            (d[k - 1] + d[k]) * 0.5
+        };
     }
     for k in 0..n - 1 {
         if d[k].abs() < 1e-12 {
@@ -191,11 +218,21 @@ fn fill_curve(points: &[gx_contracts::effect::CurvePoint], out: &mut [f32]) {
     for (i, slot) in out[..=LUT_N].iter_mut().enumerate() {
         *slot = eval(i as f32 / LUT_N as f32);
     }
-    out[LUT_N + 1..CURVE_BLOCK].copy_from_slice(&[xs[0], ys[0], ms[0], xs[n - 1], ys[n - 1], ms[n - 1]]);
+    out[LUT_N + 1..CURVE_BLOCK].copy_from_slice(&[
+        xs[0],
+        ys[0],
+        ms[0],
+        xs[n - 1],
+        ys[n - 1],
+        ms[n - 1],
+    ]);
 }
 
 fn fill_curves(c: &Curves, out: &mut [f32]) {
-    for (i, points) in [&c.rgb, &c.red, &c.green, &c.blue, &c.alpha].into_iter().enumerate() {
+    for (i, points) in [&c.rgb, &c.red, &c.green, &c.blue, &c.alpha]
+        .into_iter()
+        .enumerate()
+    {
         fill_curve(points, &mut out[i * CURVE_BLOCK..(i + 1) * CURVE_BLOCK]);
     }
 }
@@ -239,7 +276,11 @@ fn rgb_to_hsl(c: [f32; 3]) -> [f32; 3] {
     if d < 1e-7 {
         return [0.0, 0.0, l];
     }
-    let s = if l > 0.5 { d / (2.0 - max - min) } else { d / (max + min) };
+    let s = if l > 0.5 {
+        d / (2.0 - max - min)
+    } else {
+        d / (max + min)
+    };
     let h = if max == c[0] {
         ((c[1] - c[2]) / d + if c[1] < c[2] { 6.0 } else { 0.0 }) / 6.0
     } else if max == c[1] {
@@ -267,18 +308,34 @@ fn hsl_to_rgb([h, s, l]: [f32; 3]) -> [f32; 3] {
     if s <= 0.0 {
         return [l, l, l];
     }
-    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let q = if l < 0.5 {
+        l * (1.0 + s)
+    } else {
+        l + s - l * s
+    };
     let p = 2.0 * l - q;
-    [hsl_channel(p, q, h + 1.0 / 3.0), hsl_channel(p, q, h), hsl_channel(p, q, h - 1.0 / 3.0)]
+    [
+        hsl_channel(p, q, h + 1.0 / 3.0),
+        hsl_channel(p, q, h),
+        hsl_channel(p, q, h - 1.0 / 3.0),
+    ]
 }
 
 /// The sRGB transfer in f32, the same expression the kernel evaluates.
 pub fn srgb_decode(v: f32) -> f32 {
-    if v <= 0.04045 { v / 12.92 } else { powz((v + 0.055) / 1.055, 2.4) }
+    if v <= 0.04045 {
+        v / 12.92
+    } else {
+        powz((v + 0.055) / 1.055, 2.4)
+    }
 }
 
 pub fn srgb_encode(v: f32) -> f32 {
-    if v <= 0.0031308 { v * 12.92 } else { 1.055 * powz(v, 1.0 / 2.4) - 0.055 }
+    if v <= 0.0031308 {
+        v * 12.92
+    } else {
+        1.055 * powz(v, 1.0 / 2.4) - 0.055
+    }
 }
 
 /// `x^y` for x >= 0, exact for y == 1, as the kernel's `powz`.
@@ -301,7 +358,11 @@ fn bc_modern(v: f32, exponent: f32, gain: f32) -> f32 {
         return v;
     }
     let v = powz(v.max(0.0), exponent);
-    if v < 0.5 { 0.5 * powz(2.0 * v, gain) } else { 1.0 - 0.5 * powz((2.0 - 2.0 * v).max(0.0), gain) }
+    if v < 0.5 {
+        0.5 * powz(2.0 * v, gain)
+    } else {
+        1.0 - 0.5 * powz((2.0 - 2.0 * v).max(0.0), gain)
+    }
 }
 
 /// Apply one packed effect to one premultiplied pixel.
@@ -316,13 +377,31 @@ pub fn apply_pixel(e: &PackedEffect, px: WorkingRgba) -> WorkingRgba {
         FILL => {
             // Repaint the colour, keeping coverage.
             let k = p[3];
-            ([c[0] + (p[0] - c[0]) * k, c[1] + (p[1] - c[1]) * k, c[2] + (p[2] - c[2]) * k], a)
+            (
+                [
+                    c[0] + (p[0] - c[0]) * k,
+                    c[1] + (p[1] - c[1]) * k,
+                    c[2] + (p[2] - c[2]) * k,
+                ],
+                a,
+            )
         }
         TINT => {
             let l = rec709_luminance(c).clamp(0.0, 1.0);
-            let t = [p[0] + (p[4] - p[0]) * l, p[1] + (p[5] - p[1]) * l, p[2] + (p[6] - p[2]) * l];
+            let t = [
+                p[0] + (p[4] - p[0]) * l,
+                p[1] + (p[5] - p[1]) * l,
+                p[2] + (p[6] - p[2]) * l,
+            ];
             let k = p[8] * (p[3] + (p[7] - p[3]) * l);
-            ([c[0] + (t[0] - c[0]) * k, c[1] + (t[1] - c[1]) * k, c[2] + (t[2] - c[2]) * k], a)
+            (
+                [
+                    c[0] + (t[0] - c[0]) * k,
+                    c[1] + (t[1] - c[1]) * k,
+                    c[2] + (t[2] - c[2]) * k,
+                ],
+                a,
+            )
         }
         LEVELS => {
             let (cb, cw) = (p[25] > 0.5, p[26] > 0.5);
@@ -337,17 +416,31 @@ pub fn apply_pixel(e: &PackedEffect, px: WorkingRgba) -> WorkingRgba {
         }
         // No hue shift, saturation or lightness change is an identity: the
         // HSL round trip would move a value by its rounding.
-        HUE_SATURATION if p[3] <= 0.5 && p[0].fract() == 0.0 && p[1] == 0.0 && p[2] == 0.0 => (c, a),
+        HUE_SATURATION if p[3] <= 0.5 && p[0].fract() == 0.0 && p[1] == 0.0 && p[2] == 0.0 => {
+            (c, a)
+        }
         HUE_SATURATION => {
             let [h, s, l] = rgb_to_hsl(c);
             let hsl = if p[3] > 0.5 {
                 let cl = p[6];
-                [p[4], p[5], (l + cl * if cl > 0.0 { 1.0 - l } else { l }).clamp(0.0, 1.0)]
+                [
+                    p[4],
+                    p[5],
+                    (l + cl * if cl > 0.0 { 1.0 - l } else { l }).clamp(0.0, 1.0),
+                ]
             } else {
                 let sat = p[1];
-                let s2 = if sat >= 0.0 { s + (1.0 - s) * sat * s.min(1.0) } else { s * (1.0 + sat) };
+                let s2 = if sat >= 0.0 {
+                    s + (1.0 - s) * sat * s.min(1.0)
+                } else {
+                    s * (1.0 + sat)
+                };
                 let light = p[2];
-                let l2 = if light >= 0.0 { l + (1.0 - l) * light } else { l * (1.0 + light) };
+                let l2 = if light >= 0.0 {
+                    l + (1.0 - l) * light
+                } else {
+                    l * (1.0 + light)
+                };
                 let h2 = h + p[0];
                 [h2 - h2.floor(), s2.clamp(0.0, 1.0), l2]
             };
@@ -376,8 +469,17 @@ pub fn apply_pixel(e: &PackedEffect, px: WorkingRgba) -> WorkingRgba {
         }
         _ => (c, a),
     };
-    let out = WorkingRgba { r: bound(c[0] * a), g: bound(c[1] * a), b: bound(c[2] * a), a: bound(a) };
-    if covers(out.a) { out } else { WorkingRgba::transparent() }
+    let out = WorkingRgba {
+        r: bound(c[0] * a),
+        g: bound(c[1] * a),
+        b: bound(c[2] * a),
+        a: bound(a),
+    };
+    if covers(out.a) {
+        out
+    } else {
+        WorkingRgba::transparent()
+    }
 }
 
 /// Apply a packed chain to a surface's pixels, in order.
@@ -405,12 +507,22 @@ mod tests {
     }
 
     fn grey(v: f32, a: f32) -> WorkingRgba {
-        WorkingRgba { r: v * a, g: v * a, b: v * a, a }
+        WorkingRgba {
+            r: v * a,
+            g: v * a,
+            b: v * a,
+            a,
+        }
     }
 
     #[test]
     fn default_parameters_leave_pixels_unchanged() {
-        let px = WorkingRgba { r: 0.3 * 0.7, g: 0.5 * 0.7, b: 0.2 * 0.7, a: 0.7 };
+        let px = WorkingRgba {
+            r: 0.3 * 0.7,
+            g: 0.5 * 0.7,
+            b: 0.2 * 0.7,
+            a: 0.7,
+        };
         for effect in [
             Effect::Levels(Levels::default()),
             Effect::Curves(Curves::default()),
@@ -421,7 +533,11 @@ mod tests {
             for space in [WorkingColorSpace::Srgb, WorkingColorSpace::LinearSrgb] {
                 let o = apply_pixel(&packed(effect.clone(), space), px);
                 for (got, want) in [(o.r, px.r), (o.g, px.g), (o.b, px.b), (o.a, px.a)] {
-                    assert!((got - want).abs() < 2e-5, "{} {space:?}: {o:?} vs {px:?}", effect.name());
+                    assert!(
+                        (got - want).abs() < 2e-5,
+                        "{} {space:?}: {o:?} vs {px:?}",
+                        effect.name()
+                    );
                 }
             }
         }
@@ -429,10 +545,26 @@ mod tests {
 
     #[test]
     fn transparent_pixels_stay_transparent_in_every_effect() {
-        let levels = Levels { alpha: LevelsChannel { output_black: 0.5, ..Default::default() }, ..Default::default() };
-        let fill = Fill { opacity: 1.0, ..Default::default() };
-        for effect in [Effect::Fill(fill), Effect::Tint(Tint::default()), Effect::Levels(levels)] {
-            let o = apply_pixel(&packed(effect, WorkingColorSpace::Srgb), WorkingRgba::transparent());
+        let levels = Levels {
+            alpha: LevelsChannel {
+                output_black: 0.5,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let fill = Fill {
+            opacity: 1.0,
+            ..Default::default()
+        };
+        for effect in [
+            Effect::Fill(fill),
+            Effect::Tint(Tint::default()),
+            Effect::Levels(levels),
+        ] {
+            let o = apply_pixel(
+                &packed(effect, WorkingColorSpace::Srgb),
+                WorkingRgba::transparent(),
+            );
             assert_eq!(o, WorkingRgba::transparent());
         }
     }
@@ -441,7 +573,10 @@ mod tests {
     fn the_published_formulas_hold() {
         let s = WorkingColorSpace::LinearSrgb;
         // Fill at full opacity repaints, keeping coverage.
-        let red = Fill { color: Rgba::new(1.0, 0.0, 0.0, 1.0, SourceColorSpace::Linear), opacity: 1.0 };
+        let red = Fill {
+            color: Rgba::new(1.0, 0.0, 0.0, 1.0, SourceColorSpace::Linear),
+            opacity: 1.0,
+        };
         let o = apply_pixel(&packed(Effect::Fill(red), s), grey(0.5, 0.5));
         assert!((o.r - 0.5).abs() < 1e-6 && o.g.abs() < 1e-6 && (o.a - 0.5).abs() < 1e-6);
         // Levels: input white 0.5 doubles, clipped at 1.
@@ -452,23 +587,42 @@ mod tests {
         let o = apply_pixel(&packed(Effect::Levels(lv), s), grey(0.8, 1.0));
         assert!((o.r - 1.0).abs() < 1e-6);
         // Exposure: +1 stop doubles linear light.
-        let ex = Exposure { exposure: 1.0, ..Default::default() };
+        let ex = Exposure {
+            exposure: 1.0,
+            ..Default::default()
+        };
         let o = apply_pixel(&packed(Effect::Exposure(ex.clone()), s), grey(0.2, 1.0));
         assert!((o.r - 0.4).abs() < 1e-6);
         // ...and in an sRGB project it is still linear light.
-        let o = apply_pixel(&packed(Effect::Exposure(ex), WorkingColorSpace::Srgb), grey(srgb_encode(0.2), 1.0));
+        let o = apply_pixel(
+            &packed(Effect::Exposure(ex), WorkingColorSpace::Srgb),
+            grey(srgb_encode(0.2), 1.0),
+        );
         assert!((srgb_decode(o.r) - 0.4).abs() < 1e-5);
         // Tint maps black to white across luminance.
         let tint = Tint::default();
-        let o = apply_pixel(&packed(Effect::Tint(tint), s), WorkingRgba::opaque(1.0, 0.0, 0.0));
+        let o = apply_pixel(
+            &packed(Effect::Tint(tint), s),
+            WorkingRgba::opaque(1.0, 0.0, 0.0),
+        );
         assert!((o.r - 0.2126).abs() < 1e-5 && (o.g - 0.2126).abs() < 1e-5);
         // Hue/Saturation: -1 saturation is grey at HSL lightness.
-        let hs = HueSaturation { saturation: -1.0, ..Default::default() };
-        let o = apply_pixel(&packed(Effect::HueSaturation(hs), s), WorkingRgba::opaque(1.0, 0.0, 0.0));
+        let hs = HueSaturation {
+            saturation: -1.0,
+            ..Default::default()
+        };
+        let o = apply_pixel(
+            &packed(Effect::HueSaturation(hs), s),
+            WorkingRgba::opaque(1.0, 0.0, 0.0),
+        );
         assert!((o.r - 0.5).abs() < 1e-6 && (o.g - 0.5).abs() < 1e-6);
         // Curves: a point at (0.5, 0.75) lifts mid grey there.
         let cv = Curves {
-            rgb: vec![CurvePoint { x: 0.0, y: 0.0 }, CurvePoint { x: 0.5, y: 0.75 }, CurvePoint { x: 1.0, y: 1.0 }],
+            rgb: vec![
+                CurvePoint { x: 0.0, y: 0.0 },
+                CurvePoint { x: 0.5, y: 0.75 },
+                CurvePoint { x: 1.0, y: 1.0 },
+            ],
             ..Default::default()
         };
         let o = apply_pixel(&packed(Effect::Curves(cv), s), grey(0.5, 1.0));

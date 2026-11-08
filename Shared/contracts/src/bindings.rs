@@ -238,15 +238,19 @@ pub fn resolve_scene_bindings(scene: &SceneDocument) -> Result<SceneDocument, Re
         if bindings.is_empty() {
             continue;
         }
-        let mut wire = serde_json::to_value(&*object).map_err(|error| Refusal::BindingPathInvalid {
-            path: object.base().id.clone(),
-            detail: error.to_string(),
-        })?;
+        let mut wire =
+            serde_json::to_value(&*object).map_err(|error| Refusal::BindingPathInvalid {
+                path: object.base().id.clone(),
+                detail: error.to_string(),
+            })?;
         for (property, raw_path) in &bindings {
             let Some(path) = raw_path.as_str() else {
                 return Err(Refusal::BindingPathInvalid {
                     path: raw_path.to_string(),
-                    detail: format!("{property} binding on {} must be a string path", object.base().id),
+                    detail: format!(
+                        "{property} binding on {} must be a string path",
+                        object.base().id
+                    ),
                 });
             };
             let Some(spec) = spec_for(object, property) else {
@@ -256,8 +260,12 @@ pub fn resolve_scene_bindings(scene: &SceneDocument) -> Result<SceneDocument, Re
                     property: property.clone(),
                 });
             };
-            let value = resolve_path(&scene.data_context, path)
-                .map_err(|detail| Refusal::BindingPathInvalid { path: path.to_owned(), detail })?;
+            let value = resolve_path(&scene.data_context, path).map_err(|detail| {
+                Refusal::BindingPathInvalid {
+                    path: path.to_owned(),
+                    detail,
+                }
+            })?;
             validate_value(scene, object, spec, path, value)?;
             if let Some(fields) = wire.as_object_mut() {
                 fields.insert(property.clone(), value.clone());
@@ -550,7 +558,8 @@ mod tests {
     /// them, and one binding that cannot apply refuses the whole scene.
     #[test]
     fn bindings_apply_all_or_nothing() {
-        let mut scene = crate::scene::new_scene("scene", "Scene", crate::color::WorkingColorSpace::Srgb);
+        let mut scene =
+            crate::scene::new_scene("scene", "Scene", crate::color::WorkingColorSpace::Srgb);
         scene.data_context = serde_json::from_value(serde_json::json!({
             "pos": { "x": 500, "y": 40 },
             "flags": [false],
@@ -565,18 +574,42 @@ mod tests {
         let resolved = resolve_scene_bindings(&scene).expect("both bindings apply");
         assert_eq!(resolved.objects[0].base().x, 500.0);
         assert!(!resolved.objects[0].base().visible);
-        assert_eq!(scene.objects[0].base().x, 0.0, "the authored document is untouched");
+        assert_eq!(
+            scene.objects[0].base().x,
+            0.0,
+            "the authored document is untouched"
+        );
 
         let mut broken = scene.clone();
-        broken.objects[0].base_mut().bindings.as_mut().unwrap().insert("y".into(), serde_json::json!("pos.missing"));
-        assert!(matches!(resolve_scene_bindings(&broken), Err(Refusal::BindingPathInvalid { .. })));
-        broken.objects[0].base_mut().bindings.as_mut().unwrap().insert("y".into(), serde_json::json!("flags.0"));
-        assert!(matches!(resolve_scene_bindings(&broken), Err(Refusal::BindingTypeMismatch { .. })));
+        broken.objects[0]
+            .base_mut()
+            .bindings
+            .as_mut()
+            .unwrap()
+            .insert("y".into(), serde_json::json!("pos.missing"));
+        assert!(matches!(
+            resolve_scene_bindings(&broken),
+            Err(Refusal::BindingPathInvalid { .. })
+        ));
+        broken.objects[0]
+            .base_mut()
+            .bindings
+            .as_mut()
+            .unwrap()
+            .insert("y".into(), serde_json::json!("flags.0"));
+        assert!(matches!(
+            resolve_scene_bindings(&broken),
+            Err(Refusal::BindingTypeMismatch { .. })
+        ));
     }
 
     #[test]
     fn binding_paths_and_numeric_ranges_are_strict() {
-        let mut scene = new_scene("scene", "Scene", crate::color::WorkingColorSpace::NEW_PROJECT);
+        let mut scene = new_scene(
+            "scene",
+            "Scene",
+            crate::color::WorkingColorSpace::NEW_PROJECT,
+        );
         scene.objects.push(rect("card"));
         scene.data_context.insert("score".into(), Value::from(0));
         assert!(matches!(
@@ -593,7 +626,11 @@ mod tests {
 
     #[test]
     fn image_binding_rejects_wrong_asset_kind() {
-        let mut scene = new_scene("scene", "Scene", crate::color::WorkingColorSpace::NEW_PROJECT);
+        let mut scene = new_scene(
+            "scene",
+            "Scene",
+            crate::color::WorkingColorSpace::NEW_PROJECT,
+        );
         scene.objects.push(SceneObject::Image(ImageObject {
             base: ObjectBase::new("logo", "Logo"),
             asset_id: "old".into(),
@@ -610,7 +647,11 @@ mod tests {
 
     #[test]
     fn replacing_data_reports_only_newly_invalid_bindings() {
-        let mut scene = new_scene("scene", "Scene", crate::color::WorkingColorSpace::NEW_PROJECT);
+        let mut scene = new_scene(
+            "scene",
+            "Scene",
+            crate::color::WorkingColorSpace::NEW_PROJECT,
+        );
         scene.objects.push(rect("card"));
         scene.data_context.insert("score".into(), Value::from(1));
         set_binding(&mut scene, "card", "x", Some("score")).unwrap();

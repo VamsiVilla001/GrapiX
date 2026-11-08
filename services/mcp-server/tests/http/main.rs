@@ -32,9 +32,15 @@ impl Drop for StopOnExit {
 /// shipped binaries drive it on their main one; `drive` returns once the
 /// cancelled transport has dropped its last handle to the service.
 fn with_http(server: Server, test: impl FnOnce(SocketAddr) + Send + 'static) {
-    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     let listener = runtime
-        .block_on(tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)))
+        .block_on(tokio::net::TcpListener::bind((
+            std::net::Ipv4Addr::LOCALHOST,
+            0,
+        )))
         .unwrap();
     let addr = listener.local_addr().unwrap();
     let shutdown = CancellationToken::new();
@@ -68,8 +74,14 @@ fn call(id: u64, name: &str, arguments: serde_json::Value, meta: bool) -> serde_
 
 /// The headers SEP-2243 requires of a 2026-07-28 client on every POST: the
 /// revision, the method and, for a tool call, the tool's name.
-fn stateless_headers(method: &'static str, name: &'static str) -> Vec<(&'static str, &'static str)> {
-    let mut headers = vec![("MCP-Protocol-Version", "2026-07-28"), ("Mcp-Method", method)];
+fn stateless_headers(
+    method: &'static str,
+    name: &'static str,
+) -> Vec<(&'static str, &'static str)> {
+    let mut headers = vec![
+        ("MCP-Protocol-Version", "2026-07-28"),
+        ("Mcp-Method", method),
+    ];
     if !name.is_empty() {
         headers.push(("Mcp-Name", name));
     }
@@ -82,13 +94,29 @@ fn a_2026_07_28_client_calls_a_tool_over_http_with_no_handshake() {
     server.register("scenes.create", Box::new(Echo));
     with_http(server, |addr| {
         let headers = stateless_headers("tools/call", "scenes.create");
-        let reply = post_local(addr, &headers, &call(1, "scenes.create", serde_json::json!({ "id": "x" }), true));
+        let reply = post_local(
+            addr,
+            &headers,
+            &call(1, "scenes.create", serde_json::json!({ "id": "x" }), true),
+        );
         assert_eq!(reply.status, 200, "{reply:?}");
-        assert!(reply.header("content-type").is_some_and(|value| value.contains("application/json")), "{reply:?}");
-        assert!(reply.header("mcp-session-id").is_none(), "stateless: no session is issued: {reply:?}");
+        assert!(
+            reply
+                .header("content-type")
+                .is_some_and(|value| value.contains("application/json")),
+            "{reply:?}"
+        );
+        assert!(
+            reply.header("mcp-session-id").is_none(),
+            "stateless: no session is issued: {reply:?}"
+        );
         let body = reply.json();
         assert_eq!(body["id"], 1);
-        assert_eq!(body["result"]["structuredContent"], serde_json::json!({ "id": "x" }), "{body}");
+        assert_eq!(
+            body["result"]["structuredContent"],
+            serde_json::json!({ "id": "x" }),
+            "{body}"
+        );
         assert_eq!(body["result"]["content"][0]["type"], "text", "{body}");
     });
 }
@@ -99,10 +127,18 @@ fn a_refusal_over_http_is_the_structured_json_rpc_error() {
     server.register("playout.take", Box::new(Echo));
     with_http(server, |addr| {
         let headers = stateless_headers("tools/call", "playout.take");
-        let body = post_local(addr, &headers, &call(2, "playout.take", serde_json::json!({}), true)).json();
+        let body = post_local(
+            addr,
+            &headers,
+            &call(2, "playout.take", serde_json::json!({}), true),
+        )
+        .json();
         assert!(body["result"].is_null(), "{body}");
         assert_eq!(body["error"]["code"], -32000, "{body}");
-        assert_eq!(body["error"]["data"]["code"]["refusal"], "unauthenticated", "{body}");
+        assert_eq!(
+            body["error"]["data"]["code"]["refusal"], "unauthenticated",
+            "{body}"
+        );
     });
 }
 
@@ -119,15 +155,25 @@ fn a_2025_06_18_client_negotiates_over_http() {
         });
         let reply = post_local(addr, &[], &initialize);
         assert_eq!(reply.status, 200, "{reply:?}");
-        assert_eq!(reply.json()["result"]["protocolVersion"], "2025-06-18", "{reply:?}");
-        assert!(reply.header("mcp-session-id").is_none(), "stateless: no session is issued: {reply:?}");
+        assert_eq!(
+            reply.json()["result"]["protocolVersion"],
+            "2025-06-18",
+            "{reply:?}"
+        );
+        assert!(
+            reply.header("mcp-session-id").is_none(),
+            "stateless: no session is issued: {reply:?}"
+        );
         let listed = post_local(
             addr,
             &[("MCP-Protocol-Version", "2025-06-18")],
             &serde_json::json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }),
         )
         .json();
-        assert_eq!(listed["result"]["tools"][0]["name"], "system.capability", "{listed}");
+        assert_eq!(
+            listed["result"]["tools"][0]["name"], "system.capability",
+            "{listed}"
+        );
     });
 }
 

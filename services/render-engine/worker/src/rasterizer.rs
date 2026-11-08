@@ -261,10 +261,19 @@ mod tests {
     fn a_prepared_scene_renders_its_pixels_unchanged_at_every_frame() {
         let mut r = SoftwareRasterizer::new();
         let pixels: Vec<u8> = (0..16 * 9 * 4).map(|i| (i % 251) as u8).collect();
-        let prepared = Frame { width: 16, height: 9, pixels: pixels.clone() };
-        r.take_prepared([1, 2, 3, 4], prepared).expect("a small prepared frame takes");
+        let prepared = Frame {
+            width: 16,
+            height: 9,
+            pixels: pixels.clone(),
+        };
+        r.take_prepared([1, 2, 3, 4], prepared)
+            .expect("a small prepared frame takes");
         for frame in [0, 1, 100, 101, 1_000_000] {
-            assert_eq!(r.render(frame).pixels, pixels, "frame {frame} altered the prepared pixels");
+            assert_eq!(
+                r.render(frame).pixels,
+                pixels,
+                "frame {frame} altered the prepared pixels"
+            );
         }
     }
 

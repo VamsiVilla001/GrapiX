@@ -75,7 +75,9 @@ pub struct AssetApproval {
 }
 
 /// Where an asset's bytes came from and under what terms.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetProvenance {
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -45,7 +45,20 @@ use crate::{Refusal, StructuredRefusal};
 /// how layer opacity applies. `alpha-mask` and `inverse-alpha-mask` are After
 /// Effects' Stencil Alpha and Silhouette Alpha under their 1.x names.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Default,
+    Serialize,
+    Deserialize,
+    TS,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum BlendMode {
     #[default]
@@ -282,7 +295,20 @@ impl BlendMode {
 /// enum called `fit`, and `cover` is the one it called `fill`. The names kept
 /// are CSS's, because that is the vocabulary designers hand work over in.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Default,
+    Serialize,
+    Deserialize,
+    TS,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum FitMode {
     /// Fill the box exactly, changing the aspect ratio.
@@ -333,7 +359,19 @@ impl FitMode {
 }
 
 /// Which faces are drawn. Carried from 1.x `MaterialCullMode`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Default,
+    Serialize,
+    Deserialize,
+    TS,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum CullMode {
     None,
@@ -348,7 +386,19 @@ impl CullMode {
 
 /// How alpha is interpreted. Straight and premultiplied are different images,
 /// and guessing between them is a visible halo on every soft edge.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Default,
+    Serialize,
+    Deserialize,
+    TS,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum AlphaMode {
     Opaque,
@@ -367,7 +417,19 @@ impl AlphaMode {
     ];
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Default,
+    Serialize,
+    Deserialize,
+    TS,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum DepthMode {
     Disabled,
@@ -380,7 +442,9 @@ impl DepthMode {
     pub const ALL: [DepthMode; 3] = [DepthMode::Disabled, DepthMode::Read, DepthMode::ReadWrite];
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum TextureWrapMode {
     #[default]
@@ -389,7 +453,9 @@ pub enum TextureWrapMode {
     MirrorRepeat,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum TextureFiltering {
     Nearest,
@@ -402,7 +468,9 @@ pub enum TextureFiltering {
 /// 1.x carried fifteen values here, ten of which its loader rewrote to `pbr`
 /// on the way in — load-only compatibility aliases for a format 2.0 does not
 /// read. Only the kinds that behave differently are carried.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum MaterialKind {
     /// A flat colour or gradient, unlit.
@@ -741,15 +809,29 @@ mod tests {
         assert_eq!(
             first,
             serde_json::json!([
-                "normal", "add", "multiply", "screen", "overlay", "darken",
-                "lighten", "subtract", "alpha-mask", "inverse-alpha-mask"
+                "normal",
+                "add",
+                "multiply",
+                "screen",
+                "overlay",
+                "darken",
+                "lighten",
+                "subtract",
+                "alpha-mask",
+                "inverse-alpha-mask"
             ])
             .as_array()
             .unwrap()
             .clone()
         );
-        assert_eq!(serde_json::to_value(BlendMode::ClassicColorBurn).unwrap(), "classic-color-burn");
-        assert_eq!(serde_json::to_value(BlendMode::LuminescentPremul).unwrap(), "luminescent-premul");
+        assert_eq!(
+            serde_json::to_value(BlendMode::ClassicColorBurn).unwrap(),
+            "classic-color-burn"
+        );
+        assert_eq!(
+            serde_json::to_value(BlendMode::LuminescentPremul).unwrap(),
+            "luminescent-premul"
+        );
     }
 
     #[test]

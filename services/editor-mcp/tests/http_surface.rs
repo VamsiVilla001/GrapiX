@@ -6,7 +6,9 @@ mod support;
 
 use gx_contracts::scene::SceneDocument;
 use gx_editor::Projects;
-use support::{call, initialize_request, post, stateless, tool_reply, HttpProcess, STATELESS_VERSION};
+use support::{
+    call, initialize_request, post, stateless, tool_reply, HttpProcess, STATELESS_VERSION,
+};
 
 fn scratch(label: &str) -> std::path::PathBuf {
     let nanos = std::time::SystemTime::now()
@@ -34,7 +36,9 @@ fn seeded(label: &str) -> std::path::PathBuf {
         ]
     }))
     .expect("the fixture is a scene");
-    projects.write_scene("news", &scene).expect("the fixture is stored");
+    projects
+        .write_scene("news", &scene)
+        .expect("the fixture is stored");
     root
 }
 
@@ -48,7 +52,10 @@ fn stateless_headers(tool: &str) -> Vec<(&'static str, String)> {
 }
 
 fn headers<'a>(owned: &'a [(&'static str, String)]) -> Vec<(&'static str, &'a str)> {
-    owned.iter().map(|(name, value)| (*name, value.as_str())).collect()
+    owned
+        .iter()
+        .map(|(name, value)| (*name, value.as_str()))
+        .collect()
 }
 
 #[test]
@@ -58,11 +65,20 @@ fn a_2026_07_28_client_calls_a_tool_over_http() {
     assert!(server.addr.ip().is_loopback(), "{}", server.addr);
     assert_eq!(server.addr.ip().to_string(), "127.0.0.1");
 
-    let request = stateless(call(1, "bindings.schema", serde_json::json!({ "project": "news", "scene_id": "scorebug" })));
+    let request = stateless(call(
+        1,
+        "bindings.schema",
+        serde_json::json!({ "project": "news", "scene_id": "scorebug" }),
+    ));
     let owned = stateless_headers("bindings.schema");
     let reply = server.post(&headers(&owned), &request);
     assert_eq!(reply.status, 200, "{reply:?}");
-    assert!(reply.header("content-type").is_some_and(|value| value.contains("application/json")), "{reply:?}");
+    assert!(
+        reply
+            .header("content-type")
+            .is_some_and(|value| value.contains("application/json")),
+        "{reply:?}"
+    );
     let reply = tool_reply(reply.json());
     assert!(reply["error"].is_null(), "{reply}");
     assert_eq!(reply["id"], 1);
@@ -89,14 +105,28 @@ fn a_refusal_over_http_is_the_same_structured_error() {
     ));
     let owned = stateless_headers("scenes.edit");
     let reply = server.post(&headers(&owned), &edit).json();
-    assert!(reply["result"].is_null(), "a bad path was accepted: {reply}");
+    assert!(
+        reply["result"].is_null(),
+        "a bad path was accepted: {reply}"
+    );
     assert_eq!(reply["error"]["code"], -32000, "{reply}");
-    assert_eq!(reply["error"]["data"]["code"]["refusal"], "bindingPathInvalid", "{reply}");
+    assert_eq!(
+        reply["error"]["data"]["code"]["refusal"], "bindingPathInvalid",
+        "{reply}"
+    );
 
     // Operator tools stay behind their scope on this transport too.
     let owned = stateless_headers("playout.take");
-    let take = server.post(&headers(&owned), &stateless(call(3, "playout.take", serde_json::json!({})))).json();
-    assert_eq!(take["error"]["data"]["code"]["refusal"], "unauthenticated", "{take}");
+    let take = server
+        .post(
+            &headers(&owned),
+            &stateless(call(3, "playout.take", serde_json::json!({}))),
+        )
+        .json();
+    assert_eq!(
+        take["error"]["data"]["code"]["refusal"], "unauthenticated",
+        "{take}"
+    );
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -106,8 +136,15 @@ fn a_2025_06_18_client_negotiates_over_http() {
     let server = HttpProcess::launch(&root);
     let reply = server.post(&[], &initialize_request("2026-07-28"));
     assert_eq!(reply.status, 200, "{reply:?}");
-    assert_eq!(reply.json()["result"]["protocolVersion"], "2025-06-18", "{reply:?}");
-    assert!(reply.header("mcp-session-id").is_none(), "stateless: no session is issued: {reply:?}");
+    assert_eq!(
+        reply.json()["result"]["protocolVersion"],
+        "2025-06-18",
+        "{reply:?}"
+    );
+    assert!(
+        reply.header("mcp-session-id").is_none(),
+        "stateless: no session is issued: {reply:?}"
+    );
 
     let listed = server
         .post(
@@ -115,8 +152,13 @@ fn a_2025_06_18_client_negotiates_over_http() {
             &serde_json::json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }),
         )
         .json();
-    let tools = listed["result"]["tools"].as_array().unwrap_or_else(|| panic!("{listed}"));
-    assert!(tools.iter().any(|tool| tool["name"] == "bindings.schema"), "{listed}");
+    let tools = listed["result"]["tools"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{listed}"));
+    assert!(
+        tools.iter().any(|tool| tool["name"] == "bindings.schema"),
+        "{listed}"
+    );
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -124,13 +166,20 @@ fn a_2025_06_18_client_negotiates_over_http() {
 fn a_foreign_host_or_any_browser_origin_is_refused() {
     let root = seeded("origin");
     let server = HttpProcess::launch(&root);
-    let request = stateless(serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }));
-    let list = [("MCP-Protocol-Version", STATELESS_VERSION), ("Mcp-Method", "tools/list")];
+    let request =
+        stateless(serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }));
+    let list = [
+        ("MCP-Protocol-Version", STATELESS_VERSION),
+        ("Mcp-Method", "tools/list"),
+    ];
     // DNS rebinding: a page that resolved its own name to 127.0.0.1.
     let rebound = post(server.addr, "attacker.example", &list, &request);
     assert_eq!(rebound.status, 403, "{rebound:?}");
     // A browser page on any origin, even a local one.
-    let browser = server.post(&[list[0], list[1], ("Origin", "http://localhost:5173")], &request);
+    let browser = server.post(
+        &[list[0], list[1], ("Origin", "http://localhost:5173")],
+        &request,
+    );
     assert_eq!(browser.status, 403, "{browser:?}");
     // The same request from a local agent is served.
     let agent = server.post(&list, &request);

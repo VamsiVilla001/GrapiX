@@ -8,16 +8,18 @@
 
 use gx_contracts::animation::{KeyRef, SceneEasing, SceneKeyframe};
 use gx_contracts::command::{
-    parse_command, witness, AddAssets, AddFonts, ApplyPreset, CloseScene, CreateKeyframe, CreateObject,
-    CreateProject, CreateScene, DeleteMaterial, DeleteScene, EditScene, EditorCommand,
-    EditorModule, HistoryDirection, OpenScene, PresetPhase, RelinkMaterial, RemoveFont,
-    ReplaceDataContext, SaveMotionPreset, SaveScene, SaveTakePage, SaveTarget, SceneEdit, SceneSource, SceneTarget,
-    SessionKey, SetBinding, SetObjectField, SetObjectLocked, SetObjectVisible, SetSceneId,
-    SetSceneName, Undo,
+    parse_command, witness, AddAssets, AddFonts, ApplyPreset, CloseScene, CreateKeyframe,
+    CreateObject, CreateProject, CreateScene, DeleteMaterial, DeleteScene, EditScene,
+    EditorCommand, EditorModule, HistoryDirection, OpenScene, PresetPhase, RelinkMaterial,
+    RemoveFont, ReplaceDataContext, SaveMotionPreset, SaveScene, SaveTakePage, SaveTarget,
+    SceneEdit, SceneSource, SceneTarget, SessionKey, SetBinding, SetObjectField, SetObjectLocked,
+    SetObjectVisible, SetSceneId, SetSceneName, Undo,
 };
 use gx_contracts::control::TakePage;
 use gx_contracts::object_edit::ObjectField;
-use gx_contracts::scene::{GroupObject, ImageObject, ObjectBase, RectObject, SceneDocument, SceneObject};
+use gx_contracts::scene::{
+    GroupObject, ImageObject, ObjectBase, RectObject, SceneDocument, SceneObject,
+};
 use gx_contracts::Refusal;
 use gx_editor::command::{CommandError, Workspace};
 use gx_editor::Projects;
@@ -81,7 +83,11 @@ fn refused(result: &Result<impl Sized, CommandError>) -> Option<&Refusal> {
 
 /// Run one edit batch against a session, returning the refusal and whether
 /// the session's document, history depth and dirty flag were left alone.
-fn refuse_edit(workspace: &mut Workspace, session: SessionKey, edits: Vec<SceneEdit>) -> (Option<Refusal>, bool) {
+fn refuse_edit(
+    workspace: &mut Workspace,
+    session: SessionKey,
+    edits: Vec<SceneEdit>,
+) -> (Option<Refusal>, bool) {
     let before = workspace.view(session).ok();
     let result = workspace.execute(EditorCommand::EditScene(EditScene {
         target: SceneTarget::Session { session },
@@ -89,10 +95,17 @@ fn refuse_edit(workspace: &mut Workspace, session: SessionKey, edits: Vec<SceneE
         module: None,
     }));
     let after = workspace.view(session).ok();
-    (refused(&result).cloned(), before.is_some() && before == after)
+    (
+        refused(&result).cloned(),
+        before.is_some() && before == after,
+    )
 }
 
-fn edit(workspace: &mut Workspace, session: SessionKey, edit: SceneEdit) -> (Option<Refusal>, bool) {
+fn edit(
+    workspace: &mut Workspace,
+    session: SessionKey,
+    edit: SceneEdit,
+) -> (Option<Refusal>, bool) {
     refuse_edit(workspace, session, vec![edit])
 }
 
@@ -113,7 +126,8 @@ fn wrote_anything_named(root: &std::path::Path, stem: &str) -> bool {
     };
     entries.flatten().any(|entry| {
         let path = entry.path();
-        path.file_stem().is_some_and(|name| name == stem) || (path.is_dir() && wrote_anything_named(&path, stem))
+        path.file_stem().is_some_and(|name| name == stem)
+            || (path.is_dir() && wrote_anything_named(&path, stem))
     })
 }
 
@@ -161,7 +175,10 @@ pub(super) fn drive_command_refusals(report: &mut Report) {
             path: fixture_path.display().to_string(),
         },
     }));
-    let session = match opened.as_ref().map(|outcome| outcome.session.as_ref().map(|view| view.session)) {
+    let session = match opened
+        .as_ref()
+        .map(|outcome| outcome.session.as_ref().map(|view| view.session))
+    {
         Ok(Some(session)) => session,
         other => {
             report.record(
@@ -182,7 +199,10 @@ pub(super) fn drive_command_refusals(report: &mut Report) {
 
 fn drive_session_refusals(report: &mut Report, workspace: &mut Workspace, session: SessionKey) {
     let absent = SessionKey(session.0 + 1000);
-    let result = workspace.execute(EditorCommand::Undo(Undo { session: absent, module: None }));
+    let result = workspace.execute(EditorCommand::Undo(Undo {
+        session: absent,
+        module: None,
+    }));
     report.record(
         PLANE,
         "SessionUnknown is produced for a command naming no open session",
@@ -192,7 +212,10 @@ fn drive_session_refusals(report: &mut Report, workspace: &mut Workspace, sessio
         ),
     );
 
-    let result = workspace.execute(EditorCommand::Undo(Undo { session, module: None }));
+    let result = workspace.execute(EditorCommand::Undo(Undo {
+        session,
+        module: None,
+    }));
     report.record(
         PLANE,
         "HistoryEmpty is produced for an undo with nothing to undo",
@@ -205,14 +228,21 @@ fn drive_session_refusals(report: &mut Report, workspace: &mut Workspace, sessio
         ),
     );
 
-    let result = workspace.execute(EditorCommand::Undo(Undo { session, module: Some(EditorModule::Timeline) }));
+    let result = workspace.execute(EditorCommand::Undo(Undo {
+        session,
+        module: Some(EditorModule::Timeline),
+    }));
     report.record(
         PLANE,
         "ModuleHistoryEmpty is produced for a module undo with nothing from that module",
         expect(
             matches!(
                 refused(&result),
-                Some(Refusal::ModuleHistoryEmpty { module: EditorModule::Timeline, direction: HistoryDirection::Undo, .. })
+                Some(Refusal::ModuleHistoryEmpty {
+                    module: EditorModule::Timeline,
+                    direction: HistoryDirection::Undo,
+                    ..
+                })
             ),
             format!("expected ModuleHistoryEmpty(timeline) for {session:?}, got {result:?}"),
         ),
@@ -221,7 +251,10 @@ fn drive_session_refusals(report: &mut Report, workspace: &mut Workspace, sessio
     // A history where the timeline's key stands on the object manager's
     // rect, in its own session so the fixture session keeps its state.
     let conflict = match workspace.execute(EditorCommand::OpenScene(OpenScene {
-        source: SceneSource::New { id: "history".into(), name: "History".into() },
+        source: SceneSource::New {
+            id: "history".into(),
+            name: "History".into(),
+        },
     })) {
         Ok(outcome) => outcome.session.map(|view| view.session),
         Err(_) => None,
@@ -238,7 +271,10 @@ fn drive_session_refusals(report: &mut Report, workspace: &mut Workspace, sessio
             .execute(tagged(
                 history,
                 EditorModule::ObjectManager,
-                SceneEdit::CreateObject(CreateObject { kind: "rect".into(), name: "Card".into() }),
+                SceneEdit::CreateObject(CreateObject {
+                    kind: "rect".into(),
+                    name: "Card".into(),
+                }),
             ))
             .and_then(|_| {
                 workspace.execute(tagged(
@@ -247,7 +283,12 @@ fn drive_session_refusals(report: &mut Report, workspace: &mut Workspace, sessio
                     SceneEdit::CreateKeyframe(CreateKeyframe {
                         object_id: "rect-1".into(),
                         property: "x".into(),
-                        keyframe: SceneKeyframe { frame: 0, value: 10.0, easing: SceneEasing::Linear, bezier: None },
+                        keyframe: SceneKeyframe {
+                            frame: 0,
+                            value: 10.0,
+                            easing: SceneEasing::Linear,
+                            bezier: None,
+                        },
                     }),
                 ))
             });
@@ -298,7 +339,12 @@ fn drive_session_refusals(report: &mut Report, workspace: &mut Workspace, sessio
     );
 }
 
-fn drive_object_refusals(report: &mut Report, workspace: &mut Workspace, session: SessionKey, scene: &SceneDocument) {
+fn drive_object_refusals(
+    report: &mut Report,
+    workspace: &mut Workspace,
+    session: SessionKey,
+    scene: &SceneDocument,
+) {
     let field = |ids: &[&str], field: ObjectField| {
         SceneEdit::SetObjectField(SetObjectField {
             object_ids: ids.iter().map(|id| (*id).to_owned()).collect(),
@@ -316,7 +362,11 @@ fn drive_object_refusals(report: &mut Report, workspace: &mut Workspace, session
         ),
     );
 
-    let (refusal, unchanged) = edit(workspace, session, field(&["card", "text"], ObjectField::Radius(4.0)));
+    let (refusal, unchanged) = edit(
+        workspace,
+        session,
+        field(&["card", "text"], ObjectField::Radius(4.0)),
+    );
     report.record(
         PLANE,
         "ObjectFieldNotApplicable is produced for a field one selected kind lacks",
@@ -327,7 +377,11 @@ fn drive_object_refusals(report: &mut Report, workspace: &mut Workspace, session
         ),
     );
 
-    let (refusal, unchanged) = edit(workspace, session, field(&["card"], ObjectField::Opacity(1.5)));
+    let (refusal, unchanged) = edit(
+        workspace,
+        session,
+        field(&["card"], ObjectField::Opacity(1.5)),
+    );
     report.record(
         PLANE,
         "ObjectFieldValueInvalid is produced for an opacity outside 0 to 1",
@@ -407,8 +461,17 @@ fn drive_object_refusals(report: &mut Report, workspace: &mut Workspace, session
     );
 }
 
-fn drive_binding_refusals(report: &mut Report, workspace: &mut Workspace, session: SessionKey, scene: &SceneDocument) {
-    let (refusal, unchanged) = edit(workspace, session, set_binding("card", "text", Some("title")));
+fn drive_binding_refusals(
+    report: &mut Report,
+    workspace: &mut Workspace,
+    session: SessionKey,
+    scene: &SceneDocument,
+) {
+    let (refusal, unchanged) = edit(
+        workspace,
+        session,
+        set_binding("card", "text", Some("title")),
+    );
     report.record(
         PLANE,
         "BindingPropertyUnsupported is produced for binding a property the kind lacks",
@@ -440,7 +503,11 @@ fn drive_binding_refusals(report: &mut Report, workspace: &mut Workspace, sessio
         ),
     );
 
-    let (refusal, unchanged) = edit(workspace, session, set_binding("card", "opacity", Some("tooOpaque")));
+    let (refusal, unchanged) = edit(
+        workspace,
+        session,
+        set_binding("card", "opacity", Some("tooOpaque")),
+    );
     report.record(
         PLANE,
         "BindingValueOutOfRange is produced for an opacity value above 1",
@@ -451,7 +518,11 @@ fn drive_binding_refusals(report: &mut Report, workspace: &mut Workspace, sessio
         ),
     );
 
-    let (refusal, unchanged) = edit(workspace, session, set_binding("logo", "assetId", Some("absentAsset")));
+    let (refusal, unchanged) = edit(
+        workspace,
+        session,
+        set_binding("logo", "assetId", Some("absentAsset")),
+    );
     report.record(
         PLANE,
         "BindingAssetUnknown is produced for an image bound to an asset the scene lacks",
@@ -496,7 +567,11 @@ fn drive_binding_refusals(report: &mut Report, workspace: &mut Workspace, sessio
         edits: vec![set_binding("card", "x", Some("headline"))],
         module: None,
     }));
-    let (refusal, unchanged) = edit(workspace, session, set_binding("card", "x", Some("headline")));
+    let (refusal, unchanged) = edit(
+        workspace,
+        session,
+        set_binding("card", "x", Some("headline")),
+    );
     report.record(
         PLANE,
         "BindingUnchanged is produced for binding a property to the path it already has",
@@ -508,7 +583,10 @@ fn drive_binding_refusals(report: &mut Report, workspace: &mut Workspace, sessio
         ),
     );
 
-    let result = workspace.execute(EditorCommand::CloseScene(CloseScene { session, force: false }));
+    let result = workspace.execute(EditorCommand::CloseScene(CloseScene {
+        session,
+        force: false,
+    }));
     let still_open = workspace.view(session).is_ok();
     report.record(
         PLANE,
@@ -521,7 +599,11 @@ fn drive_binding_refusals(report: &mut Report, workspace: &mut Workspace, sessio
     );
 }
 
-fn drive_material_and_scene_refusals(report: &mut Report, workspace: &mut Workspace, session: SessionKey) {
+fn drive_material_and_scene_refusals(
+    report: &mut Report,
+    workspace: &mut Workspace,
+    session: SessionKey,
+) {
     let delete = |material: &str| {
         SceneEdit::DeleteMaterial(DeleteMaterial {
             material_id: material.into(),
@@ -654,15 +736,26 @@ fn drive_material_and_scene_refusals(report: &mut Report, workspace: &mut Worksp
         SceneEdit::CreateKeyframe(CreateKeyframe {
             object_id: "card".into(),
             property: property.into(),
-            keyframe: SceneKeyframe { frame: 5, value: 10.0, easing: SceneEasing::Linear, bezier: None },
+            keyframe: SceneKeyframe {
+                frame: 5,
+                value: 10.0,
+                easing: SceneEasing::Linear,
+                bezier: None,
+            },
         })
     };
     let (built, _) = refuse_edit(workspace, session, vec![key_at_five("x"), key_at_five("y")]);
     let result = workspace.execute(save_preset(
         "mine",
         vec![
-            KeyRef { property: "x".into(), frame: 5 },
-            KeyRef { property: "y".into(), frame: 5 },
+            KeyRef {
+                property: "x".into(),
+                frame: 5,
+            },
+            KeyRef {
+                property: "y".into(),
+                frame: 5,
+            },
         ],
     ));
     report.record(
@@ -682,7 +775,11 @@ fn drive_material_and_scene_refusals(report: &mut Report, workspace: &mut Worksp
     let add = |fonts: Vec<gx_contracts::font::FontDefinition>, assets| {
         SceneEdit::AddFonts(AddFonts { fonts, assets })
     };
-    let remove = |font: &str| SceneEdit::RemoveFont(RemoveFont { font_id: font.into() });
+    let remove = |font: &str| {
+        SceneEdit::RemoveFont(RemoveFont {
+            font_id: font.into(),
+        })
+    };
 
     let (refusal, unchanged) = edit(workspace, session, remove("font"));
     report.record(
@@ -700,7 +797,8 @@ fn drive_material_and_scene_refusals(report: &mut Report, workspace: &mut Worksp
         PLANE,
         "FontUnknown is produced for removing a font the scene lacks",
         expect(
-            matches!(&refusal, Some(Refusal::FontUnknown { font_id }) if font_id == "no-such-font") && unchanged,
+            matches!(&refusal, Some(Refusal::FontUnknown { font_id }) if font_id == "no-such-font")
+                && unchanged,
             format!("expected no-such-font unknown, got {refusal:?} (unchanged: {unchanged})"),
         ),
     );
@@ -711,23 +809,34 @@ fn drive_material_and_scene_refusals(report: &mut Report, workspace: &mut Worksp
         "FontBatchEmpty is produced for adding no fonts",
         expect(
             matches!(&refusal, Some(Refusal::FontBatchEmpty)) && unchanged,
-            format!("expected an empty font add to refuse, got {refusal:?} (unchanged: {unchanged})"),
+            format!(
+                "expected an empty font add to refuse, got {refusal:?} (unchanged: {unchanged})"
+            ),
         ),
     );
 
-    let (refusal, unchanged) = edit(workspace, session, add(vec![fixture_font.clone()], Vec::new()));
+    let (refusal, unchanged) = edit(
+        workspace,
+        session,
+        add(vec![fixture_font.clone()], Vec::new()),
+    );
     report.record(
         PLANE,
         "FontDuplicate is produced for adding a font id the scene already has",
         expect(
-            matches!(&refusal, Some(Refusal::FontDuplicate { font_id }) if font_id == "font") && unchanged,
+            matches!(&refusal, Some(Refusal::FontDuplicate { font_id }) if font_id == "font")
+                && unchanged,
             format!("expected font duplicate, got {refusal:?} (unchanged: {unchanged})"),
         ),
     );
 
     let mut fresh_font = fixture_font;
     fresh_font.font_id = "fresh-font".into();
-    let (refusal, unchanged) = edit(workspace, session, add(vec![fresh_font], vec![fixture_asset]));
+    let (refusal, unchanged) = edit(
+        workspace,
+        session,
+        add(vec![fresh_font], vec![fixture_asset]),
+    );
     report.record(
         PLANE,
         "SceneAssetDuplicate is produced for adding an asset id the library already has",
@@ -738,20 +847,32 @@ fn drive_material_and_scene_refusals(report: &mut Report, workspace: &mut Worksp
     );
 
     // Imported assets enter only through addAssets (11.39); fonts never do.
-    let (refusal, unchanged) = edit(workspace, session, SceneEdit::AddAssets(AddAssets { assets: Vec::new() }));
+    let (refusal, unchanged) = edit(
+        workspace,
+        session,
+        SceneEdit::AddAssets(AddAssets { assets: Vec::new() }),
+    );
     report.record(
         PLANE,
         "AssetBatchEmpty is produced for adding no assets",
         expect(
             matches!(&refusal, Some(Refusal::AssetBatchEmpty)) && unchanged,
-            format!("expected an empty asset add to refuse, got {refusal:?} (unchanged: {unchanged})"),
+            format!(
+                "expected an empty asset add to refuse, got {refusal:?} (unchanged: {unchanged})"
+            ),
         ),
     );
 
     let mut font_asset = witness::fixture_scene().assets[0].clone();
     font_asset.asset_id = "font-bytes".into();
     font_asset.kind = gx_contracts::scene::AssetKind::Font;
-    let (refusal, unchanged) = edit(workspace, session, SceneEdit::AddAssets(AddAssets { assets: vec![font_asset] }));
+    let (refusal, unchanged) = edit(
+        workspace,
+        session,
+        SceneEdit::AddAssets(AddAssets {
+            assets: vec![font_asset],
+        }),
+    );
     report.record(
         PLANE,
         "AssetKindNotAddable is produced for adding a font asset without its font",
@@ -762,7 +883,11 @@ fn drive_material_and_scene_refusals(report: &mut Report, workspace: &mut Worksp
         ),
     );
 
-    let (refusal, unchanged) = edit(workspace, session, SceneEdit::SetSceneName(SetSceneName { name: "   ".into() }));
+    let (refusal, unchanged) = edit(
+        workspace,
+        session,
+        SceneEdit::SetSceneName(SetSceneName { name: "   ".into() }),
+    );
     report.record(
         PLANE,
         "SceneNameEmpty is produced for renaming a scene to blank",
@@ -772,13 +897,22 @@ fn drive_material_and_scene_refusals(report: &mut Report, workspace: &mut Worksp
         ),
     );
 
-    let (refusal, unchanged) = edit(workspace, session, SceneEdit::SetSceneId(SetSceneId { id: "../escape".into() }));
+    let (refusal, unchanged) = edit(
+        workspace,
+        session,
+        SceneEdit::SetSceneId(SetSceneId {
+            id: "../escape".into(),
+        }),
+    );
     report.record(
         PLANE,
         "SceneIdInvalid is produced for a scene id that is not a canonical filename",
         expect(
-            matches!(&refusal, Some(Refusal::SceneIdInvalid { id }) if id == "../escape") && unchanged,
-            format!("expected ../escape to be an invalid id, got {refusal:?} (unchanged: {unchanged})"),
+            matches!(&refusal, Some(Refusal::SceneIdInvalid { id }) if id == "../escape")
+                && unchanged,
+            format!(
+                "expected ../escape to be an invalid id, got {refusal:?} (unchanged: {unchanged})"
+            ),
         ),
     );
 }
@@ -869,7 +1003,10 @@ fn drive_store_refusals(report: &mut Report, workspace: &mut Workspace, scratch:
             scene_id: STORED.into(),
         },
     }));
-    let bound = match opened.as_ref().map(|outcome| outcome.session.as_ref().map(|view| view.session)) {
+    let bound = match opened
+        .as_ref()
+        .map(|outcome| outcome.session.as_ref().map(|view| view.session))
+    {
         Ok(Some(bound)) => bound,
         other => {
             report.record(
@@ -880,7 +1017,13 @@ fn drive_store_refusals(report: &mut Report, workspace: &mut Workspace, scratch:
             return;
         }
     };
-    let (refusal, unchanged) = edit(workspace, bound, SceneEdit::SetSceneId(SetSceneId { id: "renamed".into() }));
+    let (refusal, unchanged) = edit(
+        workspace,
+        bound,
+        SceneEdit::SetSceneId(SetSceneId {
+            id: "renamed".into(),
+        }),
+    );
     report.record(
         PLANE,
         "SceneIdBound is produced for changing the id of a stored scene in place",

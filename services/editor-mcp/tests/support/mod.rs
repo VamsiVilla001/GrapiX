@@ -81,23 +81,37 @@ pub fn initialize_request(version: &str) -> serde_json::Value {
 /// to the tool's value. A refusal (a JSON-RPC error) is returned as it came.
 pub fn tool_reply(mut reply: serde_json::Value) -> serde_json::Value {
     if reply.get("result").is_none() {
-        assert!(reply["error"].is_object(), "a reply is a result or an error: {reply}");
+        assert!(
+            reply["error"].is_object(),
+            "a reply is a result or an error: {reply}"
+        );
         return reply;
     }
     let result = reply["result"].take();
-    assert_ne!(result["isError"], true, "a tool value is not an error result: {result}");
+    assert_ne!(
+        result["isError"], true,
+        "a tool value is not an error result: {result}"
+    );
     let structured = result
         .get("structuredContent")
         .cloned()
         .unwrap_or_else(|| panic!("a tool value travels as structuredContent: {result}"));
-    let content = result["content"].as_array().expect("a tool result has content");
+    let content = result["content"]
+        .as_array()
+        .expect("a tool result has content");
     let text = content
         .iter()
         .find(|block| block["type"] == "text")
         .and_then(|block| block["text"].as_str())
-        .unwrap_or_else(|| panic!("a client reading only content gets the value as text: {result}"));
-    let parsed: serde_json::Value = serde_json::from_str(text).expect("the text block is the value as JSON");
-    assert_eq!(parsed, structured, "the text block and structuredContent carry the same value");
+        .unwrap_or_else(|| {
+            panic!("a client reading only content gets the value as text: {result}")
+        });
+    let parsed: serde_json::Value =
+        serde_json::from_str(text).expect("the text block is the value as JSON");
+    assert_eq!(
+        parsed, structured,
+        "the text block and structuredContent carry the same value"
+    );
     reply["result"] = structured;
     reply
 }
@@ -131,15 +145,23 @@ impl Session {
                 }
             }
         });
-        Self { child, input, lines }
+        Self {
+            child,
+            input,
+            lines,
+        }
     }
 
     /// Launch and complete the 2025-06-18 handshake.
     pub fn start(root: &Path) -> Self {
         let mut session = Self::launch(root);
         let reply = session.request(&initialize_request(HANDSHAKE_VERSION));
-        assert_eq!(reply["result"]["protocolVersion"], HANDSHAKE_VERSION, "{reply}");
-        session.send(&serde_json::json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
+        assert_eq!(
+            reply["result"]["protocolVersion"], HANDSHAKE_VERSION,
+            "{reply}"
+        );
+        session
+            .send(&serde_json::json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
         session
     }
 
@@ -156,10 +178,10 @@ impl Session {
 
     /// The next line the server writes, if one arrives within `wait`.
     pub fn next_reply(&mut self, wait: Duration) -> Option<serde_json::Value> {
-        self.lines
-            .recv_timeout(wait)
-            .ok()
-            .map(|line| serde_json::from_str(&line).unwrap_or_else(|_| panic!("stdout carries only JSON-RPC: {line}")))
+        self.lines.recv_timeout(wait).ok().map(|line| {
+            serde_json::from_str(&line)
+                .unwrap_or_else(|_| panic!("stdout carries only JSON-RPC: {line}"))
+        })
     }
 
     /// Send a request and wait for its reply.
@@ -168,7 +190,10 @@ impl Session {
         let reply = self
             .next_reply(REPLY_TIMEOUT)
             .unwrap_or_else(|| panic!("no reply to {message}"));
-        assert_eq!(reply["id"], message["id"], "the reply answers the request sent");
+        assert_eq!(
+            reply["id"], message["id"],
+            "the reply answers the request sent"
+        );
         reply
     }
 
@@ -187,7 +212,10 @@ impl Session {
         }
         assert!(status.success(), "{stderr}");
         let trailing: Vec<String> = self.lines.try_iter().collect();
-        assert!(trailing.is_empty(), "no output after the last reply: {trailing:?}");
+        assert!(
+            trailing.is_empty(),
+            "no output after the last reply: {trailing:?}"
+        );
     }
 }
 
@@ -238,7 +266,10 @@ impl HttpProcess {
             let line = announced
                 .recv_timeout(REPLY_TIMEOUT)
                 .expect("the server announces its address on stderr");
-            if let Some(url) = line.split_whitespace().find(|word| word.starts_with("http://")) {
+            if let Some(url) = line
+                .split_whitespace()
+                .find(|word| word.starts_with("http://"))
+            {
                 let authority = url
                     .trim_start_matches("http://")
                     .split('/')

@@ -121,8 +121,9 @@ impl PreparedScene {
         validate_phases(&document.timeline)?;
         validate_control_fields(&document)?;
         validate_text_styles(&document)?;
-        if let Some(refusal) =
-            validate_scene_document(&document, support, available, true).into_iter().next()
+        if let Some(refusal) = validate_scene_document(&document, support, available, true)
+            .into_iter()
+            .next()
         {
             return Err(refusal.code);
         }
@@ -143,12 +144,26 @@ impl PreparedScene {
                 continue;
             }
             let (pad, iterations) = crate::effect_chain::layer_extent(&resolved, index)?;
-            let source = crate::layer_source::prepare_layer_source(&resolved, &resolution.effective, &texts, index, pad, u32::MAX)?;
+            let source = crate::layer_source::prepare_layer_source(
+                &resolved,
+                &resolution.effective,
+                &texts,
+                index,
+                pad,
+                u32::MAX,
+            )?;
             effect_layers.push(Some(EffectLayer { source, iterations }));
         }
         let static_frame = OnceLock::new();
         if build_reference {
-            let _ = static_frame.set(compose(&resolved, &resolution.effective, &paths, &texts, 0, &effect_layers)?);
+            let _ = static_frame.set(compose(
+                &resolved,
+                &resolution.effective,
+                &paths,
+                &texts,
+                0,
+                &effect_layers,
+            )?);
         }
         let by_id = resolution
             .effective
@@ -176,7 +191,9 @@ impl PreparedScene {
         &self.document
     }
 
-    pub(crate) fn resolved_document(&self) -> &SceneDocument { &self.resolved }
+    pub(crate) fn resolved_document(&self) -> &SceneDocument {
+        &self.resolved
+    }
 
     /// Every object's effective state, in the document's source order.
     pub fn effective(&self) -> &[ResolvedObject] {
@@ -208,10 +225,19 @@ impl PreparedScene {
     /// Encode the static frame for one explicit output transform. It was
     /// composed once at publish, in draw order across object kinds.
     pub fn frame(&self, output: OutputTransform) -> Frame {
-        self.static_frame.get_or_init(|| {
-            compose(&self.resolved, &self.effective, &self.paths, &self.texts, 0, &self.effect_layers)
+        self.static_frame
+            .get_or_init(|| {
+                compose(
+                    &self.resolved,
+                    &self.effective,
+                    &self.paths,
+                    &self.texts,
+                    0,
+                    &self.effect_layers,
+                )
                 .expect("semantically prepared static reference remains drawable")
-        }).encode(output, self.document.working_color_space)
+            })
+            .encode(output, self.document.working_color_space)
     }
     /// Whether Program must evaluate this scene for each output frame.
     pub fn has_animation(&self) -> bool {
@@ -260,17 +286,19 @@ impl PreparedScene {
         let mut evaluated = self.resolved.clone();
         for channel in &self.resolved.timeline.channels {
             if let Some(value) = evaluate_channel(channel, scene_frame)? {
-                set_base_property(
-                    &mut evaluated,
-                    &channel.object_id,
-                    &channel.property,
-                    value,
-                )?;
+                set_base_property(&mut evaluated, &channel.object_id, &channel.property, value)?;
             }
         }
         let resolution = resolve_hierarchy(&evaluated.objects);
         let paths = PreparedPaths::prepare(&evaluated, &resolution.effective)?;
-        let surface = compose(&evaluated, &resolution.effective, &paths, &self.texts, scene_frame, &self.effect_layers)?;
+        let surface = compose(
+            &evaluated,
+            &resolution.effective,
+            &paths,
+            &self.texts,
+            scene_frame,
+            &self.effect_layers,
+        )?;
         Ok(surface.encode(output, self.document.working_color_space))
     }
 
@@ -295,7 +323,14 @@ impl PreparedScene {
         }
         let resolution = resolve_hierarchy(&evaluated.objects);
         let paths = PreparedPaths::prepare(&evaluated, &resolution.effective)?;
-        compose(&evaluated, &resolution.effective, &paths, &self.texts, scene_frame, &self.effect_layers)
+        compose(
+            &evaluated,
+            &resolution.effective,
+            &paths,
+            &self.texts,
+            scene_frame,
+            &self.effect_layers,
+        )
     }
 
     /// Glyph runs shaped from packaged fonts only.
@@ -357,7 +392,10 @@ fn compose(
                 continue;
             }
             let source = &layer.source;
-            let (w, h) = (source.surface.width() as usize, source.surface.height() as usize);
+            let (w, h) = (
+                source.surface.width() as usize,
+                source.surface.height() as usize,
+            );
             let ctx = crate::effect_chain::EffectContext {
                 origin: source.origin,
                 size: [object.base().width, object.base().height],
@@ -366,10 +404,19 @@ fn compose(
             let mut plan = crate::effect_chain::EffectPlan::layout(effects, &layer.iterations);
             plan.pack(effects, &ctx);
             let pixels = plan.run(source.surface.pixels(), w, h, &ctx);
-            let state = crate::compositor::scene::layer_state(object.base().anchor, resolved, source.origin);
-            let rows = crate::compositor::layer_rows(surface.width(), surface.height(), state).map_err(|e| {
-                crate::compositor::scene::mapping_refusal(id, &format!("objects[{index}]"), &e.to_string())
-            })?;
+            let state = crate::compositor::scene::layer_state(
+                object.base().anchor,
+                resolved,
+                source.origin,
+            );
+            let rows = crate::compositor::layer_rows(surface.width(), surface.height(), state)
+                .map_err(|e| {
+                    crate::compositor::scene::mapping_refusal(
+                        id,
+                        &format!("objects[{index}]"),
+                        &e.to_string(),
+                    )
+                })?;
             let seed = crate::blend::dissolve_seed(id, mode, scene_frame);
             surface.warp_blend(&pixels, w, h, &rows, state.opacity, mode, seed);
             continue;
@@ -405,7 +452,11 @@ fn compose(
                 crate::effects::apply_chain(&chain, layer.pixels_mut());
                 layer.scale(opacity);
             }
-            surface.blend_layer(&layer, mode, crate::blend::dissolve_seed(id, mode, scene_frame));
+            surface.blend_layer(
+                &layer,
+                mode,
+                crate::blend::dissolve_seed(id, mode, scene_frame),
+            );
             continue;
         }
         if let Some(object_paths) = by_object.get(id) {
@@ -422,9 +473,8 @@ fn compose(
 mod tests {
     use super::*;
     use gx_contracts::animation::{KeyframeChannel, SceneEasing, SceneKeyframe};
-    use gx_contracts::control::{ControlField, ControlFieldKind};
-    use gx_contracts::text_style::{StyleNumber, TextStyle};
     use gx_contracts::color::ColorValue;
+    use gx_contracts::control::{ControlField, ControlFieldKind};
     use gx_contracts::font::{
         EmbeddingPolicy, FontDefinition, FontFaceDefinition, FontFormat, FontLoadStatus,
         FontSource, FontStyle,
@@ -434,6 +484,7 @@ mod tests {
         AssetAvailability, AssetKind, AssetLibraryItem, GroupObject, ImageObject, ObjectBase,
         RectObject, SceneCanvas, SceneDocument, SceneTimeline, TextObject,
     };
+    use gx_contracts::text_style::{StyleNumber, TextStyle};
     use gx_contracts::{RationalRate, Revision};
 
     fn document(objects: Vec<SceneObject>) -> SceneDocument {
@@ -449,7 +500,10 @@ mod tests {
                 height: 1080,
                 frame_rate: RationalRate::P50,
             },
-            timeline: SceneTimeline { duration_frames: 100, ..Default::default() },
+            timeline: SceneTimeline {
+                duration_frames: 100,
+                ..Default::default()
+            },
             data_context: serde_json::Map::new(),
             assets: Vec::new(),
             fonts: Vec::new(),
@@ -546,12 +600,25 @@ mod tests {
                 &MaterialSupport::fixed_function(),
             )
             .expect("two rectangles prepare");
-            for (output, expected) in [(OutputTransform::Srgb, preview), (OutputTransform::Rec709, program)] {
+            for (output, expected) in [
+                (OutputTransform::Srgb, preview),
+                (OutputTransform::Rec709, program),
+            ] {
                 let frame = prepared.frame(output);
-                let covered: Vec<&[u8]> = frame.pixels.chunks(4).filter(|pixel| pixel[3] == 255).collect();
-                assert!(covered.len() >= 10_000, "{space:?}: only {} covered pixels", covered.len());
+                let covered: Vec<&[u8]> = frame
+                    .pixels
+                    .chunks(4)
+                    .filter(|pixel| pixel[3] == 255)
+                    .collect();
                 assert!(
-                    covered.iter().all(|pixel| pixel[..3].iter().all(|c| c.abs_diff(expected) <= 1)),
+                    covered.len() >= 10_000,
+                    "{space:?}: only {} covered pixels",
+                    covered.len()
+                );
+                assert!(
+                    covered
+                        .iter()
+                        .all(|pixel| pixel[..3].iter().all(|c| c.abs_diff(expected) <= 1)),
                     "{space:?} {output:?}: expected {expected}, first covered pixel {:?}",
                     covered[0]
                 );
@@ -574,11 +641,23 @@ mod tests {
             SceneObject::Rect(RectObject { base, radius: 0.0 })
         };
         let white = || rect_with("white", Rgba::srgb(1.0, 1.0, 1.0, 1.0), 1.0);
-        let mut group = GroupObject { base: ObjectBase::new("g", "g"), child_ids: vec!["child".into()] };
+        let mut group = GroupObject {
+            base: ObjectBase::new("g", "g"),
+            child_ids: vec!["child".into()],
+        };
         group.base.opacity = 0.5;
-        for (space, expected) in [(WorkingColorSpace::Srgb, 128_u8), (WorkingColorSpace::LinearSrgb, 188)] {
+        for (space, expected) in [
+            (WorkingColorSpace::Srgb, 128_u8),
+            (WorkingColorSpace::LinearSrgb, 188),
+        ] {
             for (case, objects) in [
-                ("own opacity", vec![white(), rect_with("black", Rgba::srgb(0.0, 0.0, 0.0, 1.0), 0.5)]),
+                (
+                    "own opacity",
+                    vec![
+                        white(),
+                        rect_with("black", Rgba::srgb(0.0, 0.0, 0.0, 1.0), 0.5),
+                    ],
+                ),
                 (
                     "parent opacity",
                     vec![
@@ -598,10 +677,20 @@ mod tests {
                 )
                 .expect("the rectangles prepare");
                 let frame = prepared.frame(OutputTransform::Srgb);
-                let covered: Vec<&[u8]> = frame.pixels.chunks(4).filter(|pixel| pixel[3] == 255).collect();
-                assert!(covered.len() >= 10_000, "{space:?} {case}: {} covered pixels", covered.len());
+                let covered: Vec<&[u8]> = frame
+                    .pixels
+                    .chunks(4)
+                    .filter(|pixel| pixel[3] == 255)
+                    .collect();
                 assert!(
-                    covered.iter().all(|pixel| pixel[..3].iter().all(|c| c.abs_diff(expected) <= 1)),
+                    covered.len() >= 10_000,
+                    "{space:?} {case}: {} covered pixels",
+                    covered.len()
+                );
+                assert!(
+                    covered
+                        .iter()
+                        .all(|pixel| pixel[..3].iter().all(|c| c.abs_diff(expected) <= 1)),
                     "{space:?} {case}: expected {expected}, first covered pixel {:?}",
                     covered[0]
                 );
@@ -616,31 +705,34 @@ mod tests {
         use gx_contracts::color::Rgba;
         use gx_contracts::scene::{BezierPath, FillRule, ShapeObject, Vec2};
         let v = |x: f64, y: f64| Vec2 { x, y };
-        let shape = |vertices: Vec<Vec2>, closed: bool, scale_x: f64, trim: Option<(f64, f64, f64)>| {
-            let mut base = ObjectBase::new("shape", "shape");
-            base.x = 100.0;
-            base.y = 100.0;
-            base.scale_x = scale_x;
-            base.stroke = Some(ColorValue::Solid { color: Rgba::srgb(1.0, 1.0, 1.0, 1.0) });
-            base.stroke_width = 10.0;
-            let count = vertices.len();
-            SceneObject::Shape(ShapeObject {
-                base,
-                path: BezierPath {
-                    closed,
-                    vertices,
-                    in_tangents: vec![v(0.0, 0.0); count],
-                    out_tangents: vec![v(0.0, 0.0); count],
-                },
-                compound_paths: None,
-                fill_enabled: false,
-                stroke_enabled: true,
-                fill_rule: FillRule::Nonzero,
-                trim_start: trim.map(|t| t.0),
-                trim_end: trim.map(|t| t.1),
-                trim_offset: trim.map(|t| t.2),
-            })
-        };
+        let shape =
+            |vertices: Vec<Vec2>, closed: bool, scale_x: f64, trim: Option<(f64, f64, f64)>| {
+                let mut base = ObjectBase::new("shape", "shape");
+                base.x = 100.0;
+                base.y = 100.0;
+                base.scale_x = scale_x;
+                base.stroke = Some(ColorValue::Solid {
+                    color: Rgba::srgb(1.0, 1.0, 1.0, 1.0),
+                });
+                base.stroke_width = 10.0;
+                let count = vertices.len();
+                SceneObject::Shape(ShapeObject {
+                    base,
+                    path: BezierPath {
+                        closed,
+                        vertices,
+                        in_tangents: vec![v(0.0, 0.0); count],
+                        out_tangents: vec![v(0.0, 0.0); count],
+                    },
+                    compound_paths: None,
+                    fill_enabled: false,
+                    stroke_enabled: true,
+                    fill_rule: FillRule::Nonzero,
+                    trim_start: trim.map(|t| t.0),
+                    trim_end: trim.map(|t| t.1),
+                    trim_offset: trim.map(|t| t.2),
+                })
+            };
         let lit = |object: SceneObject| -> usize {
             let prepared = PreparedScene::prepare(
                 document(vec![object]),
@@ -649,25 +741,43 @@ mod tests {
                 &MaterialSupport::fixed_function(),
             )
             .expect("the shape prepares");
-            prepared.frame(OutputTransform::Srgb).pixels.chunks(4).filter(|pixel| pixel[3] >= 128).count()
+            prepared
+                .frame(OutputTransform::Srgb)
+                .pixels
+                .chunks(4)
+                .filter(|pixel| pixel[3] >= 128)
+                .count()
         };
         let line = || vec![v(0.0, 0.0), v(360.0, 0.0)];
         let whole = lit(shape(line(), false, 1.0, None));
-        assert!((3500..=3700).contains(&whole), "the whole stroke lit {whole}");
+        assert!(
+            (3500..=3700).contains(&whole),
+            "the whole stroke lit {whole}"
+        );
         let half = lit(shape(line(), false, 1.0, Some((0.0, 50.0, 0.0))));
         assert!((1700..=1900).contains(&half), "0-50 lit {half}");
         let middle = lit(shape(line(), false, 1.0, Some((25.0, 75.0, 0.0))));
         assert!((1700..=1900).contains(&middle), "25-75 lit {middle}");
         let swapped = lit(shape(line(), false, 1.0, Some((75.0, 25.0, 0.0))));
-        assert_eq!(middle, swapped, "a start after the end draws the same window");
-        assert_eq!(lit(shape(line(), false, 1.0, Some((40.0, 40.0, 0.0)))), 0, "an empty window draws nothing");
+        assert_eq!(
+            middle, swapped,
+            "a start after the end draws the same window"
+        );
+        assert_eq!(
+            lit(shape(line(), false, 1.0, Some((40.0, 40.0, 0.0)))),
+            0,
+            "an empty window draws nothing"
+        );
 
         // Turned past the end, the window wraps to the beginning.
         let square = || vec![v(0.0, 0.0), v(200.0, 0.0), v(200.0, 200.0), v(0.0, 200.0)];
         let full_square = lit(shape(square(), true, 1.0, None));
         let wrapped = lit(shape(square(), true, 1.0, Some((0.0, 50.0, 75.0))));
         let ratio = wrapped as f64 / full_square as f64;
-        assert!((ratio - 0.5).abs() < 0.05, "a wrapped half lit {wrapped} of {full_square}");
+        assert!(
+            (ratio - 0.5).abs() < 0.05,
+            "a wrapped half lit {wrapped} of {full_square}"
+        );
 
         // Measured in the shape's own coordinates: an L whose legs are equal
         // locally, scaled 3x horizontally. Half its local length is exactly
@@ -676,10 +786,15 @@ mod tests {
         let ell = || vec![v(0.0, 0.0), v(100.0, 0.0), v(100.0, 100.0)];
         let scaled = PreparedScene::prepare(
             document(vec![shape(ell(), false, 3.0, Some((0.0, 50.0, 0.0)))]),
-            &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function(),
+            &HashSet::new(),
+            &AssetBytes::new(),
+            &MaterialSupport::fixed_function(),
         );
-        assert!(matches!(scaled, Err(Refusal::ScenePropertyNotDrawable { property, .. })
-            if property == "scaled strokeWidth"), "a scaled stroke must not keep its unscaled width");
+        assert!(
+            matches!(scaled, Err(Refusal::ScenePropertyNotDrawable { property, .. })
+            if property == "scaled strokeWidth"),
+            "a scaled stroke must not keep its unscaled width"
+        );
     }
 
     /// 3.13: a binding applies on air. A rect bound to `pos.x` = 900 draws
@@ -690,17 +805,32 @@ mod tests {
         let mut base = ObjectBase::new("bar", "bar");
         base.width = 50.0;
         base.height = 50.0;
-        base.fill = Some(ColorValue::Solid { color: Rgba::srgb(1.0, 1.0, 1.0, 1.0) });
-        base.bindings = Some(serde_json::Map::from_iter([("x".to_string(), serde_json::json!("pos.x"))]));
+        base.fill = Some(ColorValue::Solid {
+            color: Rgba::srgb(1.0, 1.0, 1.0, 1.0),
+        });
+        base.bindings = Some(serde_json::Map::from_iter([(
+            "x".to_string(),
+            serde_json::json!("pos.x"),
+        )]));
         let mut scene = document(vec![SceneObject::Rect(RectObject { base, radius: 0.0 })]);
-        scene.data_context = serde_json::from_value(serde_json::json!({ "pos": { "x": 900 } })).unwrap();
-        let prepared = PreparedScene::prepare(scene, &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function())
-            .expect("the bound scene prepares");
+        scene.data_context =
+            serde_json::from_value(serde_json::json!({ "pos": { "x": 900 } })).unwrap();
+        let prepared = PreparedScene::prepare(
+            scene,
+            &HashSet::new(),
+            &AssetBytes::new(),
+            &MaterialSupport::fixed_function(),
+        )
+        .expect("the bound scene prepares");
         let frame = prepared.frame(OutputTransform::Srgb);
         let lit_at = |x: usize, y: usize| frame.pixels[(y * frame.width as usize + x) * 4 + 3] > 0;
         assert!(lit_at(920, 20), "the rect draws at its bound x");
         assert!(!lit_at(20, 20), "and not at its authored x");
-        assert_eq!(prepared.document().objects[0].base().x, 0.0, "the authored document is kept");
+        assert_eq!(
+            prepared.document().objects[0].base().x,
+            0.0,
+            "the authored document is kept"
+        );
     }
 
     /// 3.13: objects compose in draw order across kinds. A rect after a text
@@ -732,7 +862,9 @@ mod tests {
         text.y = 100.0;
         text.width = 600.0;
         text.height = 300.0;
-        text.fill = Some(ColorValue::Solid { color: Rgba::srgb(1.0, 1.0, 1.0, 1.0) });
+        text.fill = Some(ColorValue::Solid {
+            color: Rgba::srgb(1.0, 1.0, 1.0, 1.0),
+        });
         let caption = SceneObject::Text(TextObject {
             base: text,
             text: "I".into(),
@@ -760,7 +892,9 @@ mod tests {
             base.width = 1000.0;
             base.height = 600.0;
             base.z_index = z_index;
-            base.fill = Some(ColorValue::Solid { color: Rgba::srgb(1.0, 0.0, 0.0, 1.0) });
+            base.fill = Some(ColorValue::Solid {
+                color: Rgba::srgb(1.0, 0.0, 0.0, 1.0),
+            });
             SceneObject::Rect(RectObject { base, radius: 0.0 })
         };
         let white_pixels = |objects: Vec<SceneObject>| {
@@ -780,9 +914,19 @@ mod tests {
                 .filter(|pixel| pixel[0] > 200 && pixel[1] > 200 && pixel[2] > 200)
                 .count()
         };
-        assert!(white_pixels(vec![caption.clone()]) > 1000, "the caption draws on its own");
-        assert_eq!(white_pixels(vec![caption.clone(), cover(0)]), 0, "a rect after the text covers it");
-        assert!(white_pixels(vec![caption, cover(-1)]) > 1000, "a lower z-index draws beneath");
+        assert!(
+            white_pixels(vec![caption.clone()]) > 1000,
+            "the caption draws on its own"
+        );
+        assert_eq!(
+            white_pixels(vec![caption.clone(), cover(0)]),
+            0,
+            "a rect after the text covers it"
+        );
+        assert!(
+            white_pixels(vec![caption, cover(-1)]) > 1000,
+            "a lower z-index draws beneath"
+        );
     }
 
     /// 3.13: a shape is the union of its triangles. A semi-transparent stroke
@@ -796,7 +940,9 @@ mod tests {
         let mut base = ObjectBase::new("zigzag", "zigzag");
         base.x = 100.0;
         base.y = 100.0;
-        base.stroke = Some(ColorValue::Solid { color: Rgba::srgb(1.0, 1.0, 1.0, 0.5) });
+        base.stroke = Some(ColorValue::Solid {
+            color: Rgba::srgb(1.0, 1.0, 1.0, 0.5),
+        });
         base.stroke_width = 24.0;
         let zigzag = SceneObject::Shape(ShapeObject {
             base,
@@ -828,7 +974,11 @@ mod tests {
             .map(|pixel| pixel[3])
             .filter(|alpha| *alpha > 0)
             .collect();
-        assert_eq!(alphas.len(), 1, "lit pixels carry several alphas: {alphas:?}");
+        assert_eq!(
+            alphas.len(),
+            1,
+            "lit pixels carry several alphas: {alphas:?}"
+        );
     }
 
     #[test]
@@ -841,7 +991,12 @@ mod tests {
         parent.base.x = 100.0;
         let objects = vec![SceneObject::Group(parent), rect("r")];
 
-        let prepared = PreparedScene::prepare(document(objects), &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function())
+        let prepared = PreparedScene::prepare(
+            document(objects),
+            &HashSet::new(),
+            &AssetBytes::new(),
+            &MaterialSupport::fixed_function(),
+        )
         .expect("a scene with no assets prepares");
 
         assert_eq!(prepared.effective().len(), 2);
@@ -865,14 +1020,25 @@ mod tests {
             assets: vec![logo_asset("deadbeef")],
             ..document(vec![rect("bg")])
         };
-        match PreparedScene::prepare(scene.clone(), &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function()) {
+        match PreparedScene::prepare(
+            scene.clone(),
+            &HashSet::new(),
+            &AssetBytes::new(),
+            &MaterialSupport::fixed_function(),
+        ) {
             Err(Refusal::AssetMissing { hash }) => assert_eq!(hash.0, "deadbeef"),
             other => panic!("a missing asset must refuse by name, got {other:?}"),
         }
 
         let available = HashSet::from([ContentHash("deadbeef".into())]);
         assert!(
-            PreparedScene::prepare(scene, &available, &AssetBytes::new(), &MaterialSupport::fixed_function()).is_ok(),
+            PreparedScene::prepare(
+                scene,
+                &available,
+                &AssetBytes::new(),
+                &MaterialSupport::fixed_function()
+            )
+            .is_ok(),
             "the same scene prepares once the bytes are held"
         );
     }
@@ -889,7 +1055,12 @@ mod tests {
             size: 72.0,
             ..text_defaults()
         });
-        match PreparedScene::prepare(document(vec![text]), &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function()) {
+        match PreparedScene::prepare(
+            document(vec![text]),
+            &HashSet::new(),
+            &AssetBytes::new(),
+            &MaterialSupport::fixed_function(),
+        ) {
             Err(Refusal::SceneFontUnknown { font_id, object }) => {
                 assert_eq!(font_id, "font_absent");
                 assert_eq!(object, "title");
@@ -915,13 +1086,9 @@ mod tests {
         let scene = document(vec![text]);
         let support = MaterialSupport::fixed_function();
 
-        let engine = PreparedScene::prepare(
-            scene.clone(),
-            &HashSet::new(),
-            &AssetBytes::new(),
-            &support,
-        )
-        .expect_err("the engine refuses an unresolvable font");
+        let engine =
+            PreparedScene::prepare(scene.clone(), &HashSet::new(), &AssetBytes::new(), &support)
+                .expect_err("the engine refuses an unresolvable font");
 
         let editor = gx_contracts::validate::validate_scene_document(
             &scene,
@@ -943,12 +1110,17 @@ mod tests {
     /// light with nothing to light and a painted container.
     #[test]
     fn the_validator_and_the_engine_refuse_undrawable_scenes_identically() {
-        let not_drawable = |object: &str, property: &str, owner: &str| Refusal::ScenePropertyNotDrawable {
-            object: object.into(),
-            property: property.into(),
-            owner: owner.into(),
+        let not_drawable =
+            |object: &str, property: &str, owner: &str| Refusal::ScenePropertyNotDrawable {
+                object: object.into(),
+                property: property.into(),
+                owner: owner.into(),
+            };
+        let solid = || {
+            Some(ColorValue::Solid {
+                color: gx_contracts::color::Rgba::srgb(1.0, 1.0, 1.0, 1.0),
+            })
         };
-        let solid = || Some(ColorValue::Solid { color: gx_contracts::color::Rgba::srgb(1.0, 1.0, 1.0, 1.0) });
 
         let mut gradient = rect("gradient");
         gradient.base_mut().fill = Some(ColorValue::LinearGradient {
@@ -962,7 +1134,10 @@ mod tests {
             coordinate_mode: Default::default(),
         });
 
-        let mut parent = GroupObject { base: ObjectBase::new("parent", "parent"), child_ids: vec!["sheared".into()] };
+        let mut parent = GroupObject {
+            base: ObjectBase::new("parent", "parent"),
+            child_ids: vec!["sheared".into()],
+        };
         parent.base.scale_x = 2.0;
         let mut sheared = rect("sheared");
         sheared.base_mut().rotation = 30.0;
@@ -992,31 +1167,65 @@ mod tests {
         }))
         .expect("a minimal light parses");
 
-        let mut painted_group = GroupObject { base: ObjectBase::new("painted", "painted"), child_ids: Vec::new() };
+        let mut painted_group = GroupObject {
+            base: ObjectBase::new("painted", "painted"),
+            child_ids: Vec::new(),
+        };
         painted_group.base.fill = solid();
         let painted_group = SceneObject::Group(painted_group);
 
         let cases = [
             (
                 document(vec![gradient]),
-                Refusal::UnsupportedPathGradient { object: "gradient".into(), paint: "fill".into() },
+                Refusal::UnsupportedPathGradient {
+                    object: "gradient".into(),
+                    paint: "fill".into(),
+                },
             ),
             (
                 document(vec![SceneObject::Group(parent), sheared]),
-                not_drawable("sheared", "rotation under a non-uniformly scaled parent", "3.16"),
+                not_drawable(
+                    "sheared",
+                    "rotation under a non-uniformly scaled parent",
+                    "3.16",
+                ),
             ),
             (text_scene, not_drawable("title", "decoration", "3.18")),
-            (document(vec![faded]), not_drawable("faded", "opacity", "3.13")),
-            (document(vec![stroked]), not_drawable("stroked", "scaled strokeWidth", "3.17")),
-            (document(vec![rect("lit"), light]), Refusal::LightHasNoResponsiveMaterial { light_id: "key".into() }),
-            (document(vec![painted_group]), not_drawable("painted", "fill", "3.13")),
+            (
+                document(vec![faded]),
+                not_drawable("faded", "opacity", "3.13"),
+            ),
+            (
+                document(vec![stroked]),
+                not_drawable("stroked", "scaled strokeWidth", "3.17"),
+            ),
+            (
+                document(vec![rect("lit"), light]),
+                Refusal::LightHasNoResponsiveMaterial {
+                    light_id: "key".into(),
+                },
+            ),
+            (
+                document(vec![painted_group]),
+                not_drawable("painted", "fill", "3.13"),
+            ),
         ];
         let support = MaterialSupport::fixed_function();
         for (scene, expected) in cases {
-            let editor = gx_contracts::validate::validate_scene_document(&scene, &support, &HashSet::new(), true);
-            let engine = PreparedScene::prepare(scene, &HashSet::new(), &AssetBytes::new(), &support)
-                .expect_err("the engine refuses what it cannot draw");
-            assert_eq!(editor.first().map(|refusal| &refusal.code), Some(&expected), "validator");
+            let editor = gx_contracts::validate::validate_scene_document(
+                &scene,
+                &support,
+                &HashSet::new(),
+                true,
+            );
+            let engine =
+                PreparedScene::prepare(scene, &HashSet::new(), &AssetBytes::new(), &support)
+                    .expect_err("the engine refuses what it cannot draw");
+            assert_eq!(
+                editor.first().map(|refusal| &refusal.code),
+                Some(&expected),
+                "validator"
+            );
             assert_eq!(engine, expected, "engine");
         }
     }
@@ -1028,7 +1237,12 @@ mod tests {
             asset_id: "asset_absent".into(),
             fit: Default::default(),
         });
-        match PreparedScene::prepare(document(vec![image]), &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function()) {
+        match PreparedScene::prepare(
+            document(vec![image]),
+            &HashSet::new(),
+            &AssetBytes::new(),
+            &MaterialSupport::fixed_function(),
+        ) {
             Err(Refusal::SceneAssetUnknown { asset_id, object }) => {
                 assert_eq!(asset_id, "asset_absent");
                 assert_eq!(object, "logo");
@@ -1096,7 +1310,12 @@ mod tests {
             base: ObjectBase::new("g", "g"),
             child_ids: vec!["ghost".into()],
         });
-        let refused = PreparedScene::prepare(document(vec![group, rect("r")]), &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function());
+        let refused = PreparedScene::prepare(
+            document(vec![group, rect("r")]),
+            &HashSet::new(),
+            &AssetBytes::new(),
+            &MaterialSupport::fixed_function(),
+        );
         assert!(
             matches!(&refused, Err(Refusal::SceneHierarchyInvalid { parent, child, problem }) if parent == "g" && child == "ghost" && problem == "missingChild"),
             "{:?}",
@@ -1198,26 +1417,61 @@ mod tests {
             let mut base = ObjectBase::new(id, id);
             base.width = 12.0;
             base.height = 12.0;
-            base.fill = Some(ColorValue::Solid { color: Rgba::srgb(shade, shade, shade, 1.0) });
+            base.fill = Some(ColorValue::Solid {
+                color: Rgba::srgb(shade, shade, shade, 1.0),
+            });
             SceneObject::Rect(RectObject { base, radius: 0.0 })
         };
-        for (space, expected) in [(WorkingColorSpace::Srgb, 128_u8), (WorkingColorSpace::LinearSrgb, 188)] {
+        for (space, expected) in [
+            (WorkingColorSpace::Srgb, 128_u8),
+            (WorkingColorSpace::LinearSrgb, 188),
+        ] {
             let mut scene = document(vec![rectangle("white", 1.0), rectangle("black", 0.0)]);
             scene.working_color_space = space;
             scene.canvas.width = 16;
             scene.canvas.height = 16;
-            scene.timeline.channels = vec![KeyframeChannel { object_id: "black".into(), property: "opacity".into(), keys: vec![
-                SceneKeyframe { frame: 0, value: 0.0, easing: SceneEasing::Linear, bezier: None },
-                SceneKeyframe { frame: 100, value: 1.0, easing: SceneEasing::Linear, bezier: None },
-            ] }];
-            let prepared = PreparedScene::prepare(scene.clone(), &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function()).unwrap();
+            scene.timeline.channels = vec![KeyframeChannel {
+                object_id: "black".into(),
+                property: "opacity".into(),
+                keys: vec![
+                    SceneKeyframe {
+                        frame: 0,
+                        value: 0.0,
+                        easing: SceneEasing::Linear,
+                        bezier: None,
+                    },
+                    SceneKeyframe {
+                        frame: 100,
+                        value: 1.0,
+                        easing: SceneEasing::Linear,
+                        bezier: None,
+                    },
+                ],
+            }];
+            let prepared = PreparedScene::prepare(
+                scene.clone(),
+                &HashSet::new(),
+                &AssetBytes::new(),
+                &MaterialSupport::fixed_function(),
+            )
+            .unwrap();
             let frame = prepared.frame_at(50, OutputTransform::Srgb).unwrap();
             let pixel = &frame.pixels[(5 * 16 + 5) * 4..][..4];
-            assert!(pixel[..3].iter().all(|c| c.abs_diff(expected) <= 1), "{space:?}: {pixel:?}");
+            assert!(
+                pixel[..3].iter().all(|c| c.abs_diff(expected) <= 1),
+                "{space:?}: {pixel:?}"
+            );
             scene.timeline.channels[0].keys[0].easing = SceneEasing::CustomBezier;
-            scene.timeline.channels[0].keys[0].bezier = Some(CubicBezier { x1: 0.25, y1: 1.4, x2: 0.75, y2: 1.4 });
-            assert!(matches!(PreparedScene::prepare(scene, &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function()),
-                Err(Refusal::KeyframeValueOutOfDomain { object, property, frame: 0, .. }) if object == "black" && property == "opacity"));
+            scene.timeline.channels[0].keys[0].bezier = Some(CubicBezier {
+                x1: 0.25,
+                y1: 1.4,
+                x2: 0.75,
+                y2: 1.4,
+            });
+            assert!(
+                matches!(PreparedScene::prepare(scene, &HashSet::new(), &AssetBytes::new(), &MaterialSupport::fixed_function()),
+                Err(Refusal::KeyframeValueOutOfDomain { object, property, frame: 0, .. }) if object == "black" && property == "opacity")
+            );
         }
     }
 

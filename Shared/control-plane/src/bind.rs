@@ -63,14 +63,18 @@ pub enum ControlWriteHalf {
 impl ControlListener {
     pub fn accept(&self) -> io::Result<ControlStream> {
         match self {
-            Self::Tcp(listener) => listener.accept().map(|(stream, _)| ControlStream::Tcp(stream)),
+            Self::Tcp(listener) => listener
+                .accept()
+                .map(|(stream, _)| ControlStream::Tcp(stream)),
             #[cfg(windows)]
             Self::Local(listener) => {
                 use interprocess::local_socket::traits::Listener as _;
                 listener.accept().map(ControlStream::Local)
             }
             #[cfg(unix)]
-            Self::Local(listener) => listener.accept().map(|(stream, _)| ControlStream::Local(stream)),
+            Self::Local(listener) => listener
+                .accept()
+                .map(|(stream, _)| ControlStream::Local(stream)),
         }
     }
 }
@@ -90,15 +94,24 @@ impl ControlStream {
 
     pub fn split(self) -> io::Result<(ControlReadHalf, ControlWriteHalf)> {
         match self {
-            Self::Tcp(stream) => Ok((ControlReadHalf::Tcp(stream.try_clone()?), ControlWriteHalf::Tcp(stream))),
+            Self::Tcp(stream) => Ok((
+                ControlReadHalf::Tcp(stream.try_clone()?),
+                ControlWriteHalf::Tcp(stream),
+            )),
             #[cfg(windows)]
             Self::Local(stream) => {
                 use interprocess::local_socket::traits::Stream as _;
                 let (reader, writer) = stream.split();
-                Ok((ControlReadHalf::Local(reader), ControlWriteHalf::Local(writer)))
+                Ok((
+                    ControlReadHalf::Local(reader),
+                    ControlWriteHalf::Local(writer),
+                ))
             }
             #[cfg(unix)]
-            Self::Local(stream) => Ok((ControlReadHalf::Local(stream.try_clone()?), ControlWriteHalf::Local(stream))),
+            Self::Local(stream) => Ok((
+                ControlReadHalf::Local(stream.try_clone()?),
+                ControlWriteHalf::Local(stream),
+            )),
         }
     }
 }
@@ -161,7 +174,10 @@ pub fn bind_listener(addr: SocketAddr, token: Option<&str>) -> Result<TcpListene
 }
 
 /// Bind a control-plane endpoint after policy approval.
-pub fn bind_endpoint(endpoint: &Endpoint, token: Option<&str>) -> Result<ControlListener, BindRefusal> {
+pub fn bind_endpoint(
+    endpoint: &Endpoint,
+    token: Option<&str>,
+) -> Result<ControlListener, BindRefusal> {
     check_endpoint(endpoint, token)?;
     match endpoint {
         Endpoint::Tcp(addr) => platform_bind(*addr).map(ControlListener::Tcp),
@@ -181,7 +197,9 @@ pub fn connect_endpoint(endpoint: &Endpoint) -> io::Result<ControlStream> {
 #[cfg(windows)]
 fn bind_local(path: &Path) -> Result<ControlListener, BindRefusal> {
     use interprocess::local_socket::{prelude::*, GenericFilePath, ListenerOptions};
-    use interprocess::os::windows::{local_socket::ListenerOptionsExt, security_descriptor::SecurityDescriptor};
+    use interprocess::os::windows::{
+        local_socket::ListenerOptionsExt, security_descriptor::SecurityDescriptor,
+    };
 
     // Owner Rights binds this pipe to the account that created it. A permissive
     // inherited DACL would make a tokenless L0 pipe callable by another local
@@ -189,7 +207,9 @@ fn bind_local(path: &Path) -> Result<ControlListener, BindRefusal> {
     let sddl = widestring::U16CString::from_str("D:P(A;;GA;;;OW)")
         .expect("the fixed owner-only SDDL contains no NUL");
     let descriptor = SecurityDescriptor::deserialize(sddl.as_ucstr()).map_err(BindRefusal::Io)?;
-    let name = path.to_fs_name::<GenericFilePath>().map_err(BindRefusal::Io)?;
+    let name = path
+        .to_fs_name::<GenericFilePath>()
+        .map_err(BindRefusal::Io)?;
     ListenerOptions::new()
         .name(name)
         .security_descriptor(descriptor)
@@ -201,7 +221,9 @@ fn bind_local(path: &Path) -> Result<ControlListener, BindRefusal> {
 #[cfg(windows)]
 fn connect_local(path: &Path) -> io::Result<ControlStream> {
     use interprocess::local_socket::{prelude::*, GenericFilePath, Stream};
-    path.to_fs_name::<GenericFilePath>().and_then(Stream::connect).map(ControlStream::Local)
+    path.to_fs_name::<GenericFilePath>()
+        .and_then(Stream::connect)
+        .map(ControlStream::Local)
 }
 
 #[cfg(unix)]
@@ -223,7 +245,10 @@ impl Drop for UnixSocketListener {
         // The path was created only after the private-parent policy accepted it.
         // Checking that it is still a socket avoids deleting a replacement file
         // if an operator has repaired the directory while the server was down.
-        if std::fs::symlink_metadata(&self.path).map(|m| m.file_type().is_socket()).unwrap_or(false) {
+        if std::fs::symlink_metadata(&self.path)
+            .map(|m| m.file_type().is_socket())
+            .unwrap_or(false)
+        {
             let _ = std::fs::remove_file(&self.path);
         }
     }
@@ -234,31 +259,45 @@ fn bind_local(path: &Path) -> Result<ControlListener, BindRefusal> {
     match UnixListener::bind(path) {
         Ok(listener) => secure_unix_listener(listener, path),
         Err(error) if error.kind() == io::ErrorKind::AddrInUse => match UnixStream::connect(path) {
-            Ok(_) => Err(BindRefusal::LocalEndpointOccupied { path: path.to_path_buf() }),
+            Ok(_) => Err(BindRefusal::LocalEndpointOccupied {
+                path: path.to_path_buf(),
+            }),
             Err(connect_error) if connect_error.kind() == io::ErrorKind::ConnectionRefused => {
                 let metadata = std::fs::symlink_metadata(path).map_err(BindRefusal::Io)?;
                 if !metadata.file_type().is_socket() {
-                    return Err(BindRefusal::StaleLocalEndpointNotSocket { path: path.to_path_buf() });
+                    return Err(BindRefusal::StaleLocalEndpointNotSocket {
+                        path: path.to_path_buf(),
+                    });
                 }
                 // A refused connect proves this socket has no listener. We only
                 // remove that proven corpse, never whatever merely occupies the path.
                 std::fs::remove_file(path).map_err(BindRefusal::Io)?;
-                UnixListener::bind(path).map_err(BindRefusal::Io).and_then(|l| secure_unix_listener(l, path))
+                UnixListener::bind(path)
+                    .map_err(BindRefusal::Io)
+                    .and_then(|l| secure_unix_listener(l, path))
             }
-            Err(_) => Err(BindRefusal::StaleLocalEndpointUnverified { path: path.to_path_buf() }),
+            Err(_) => Err(BindRefusal::StaleLocalEndpointUnverified {
+                path: path.to_path_buf(),
+            }),
         },
         Err(error) => Err(BindRefusal::Io(error)),
     }
 }
 
 #[cfg(unix)]
-fn secure_unix_listener(listener: UnixListener, path: &Path) -> Result<ControlListener, BindRefusal> {
+fn secure_unix_listener(
+    listener: UnixListener,
+    path: &Path,
+) -> Result<ControlListener, BindRefusal> {
     if let Err(error) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
         drop(listener);
         let _ = std::fs::remove_file(path);
         return Err(BindRefusal::Io(error));
     }
-    Ok(ControlListener::Local(UnixSocketListener { listener, path: path.to_path_buf() }))
+    Ok(ControlListener::Local(UnixSocketListener {
+        listener,
+        path: path.to_path_buf(),
+    }))
 }
 
 #[cfg(unix)]
@@ -267,10 +306,15 @@ fn connect_local(path: &Path) -> io::Result<ControlStream> {
 }
 
 #[cfg(not(any(windows, unix)))]
-fn bind_local(_: &Path) -> Result<ControlListener, BindRefusal> { Err(BindRefusal::UnsupportedLocalPlatform) }
+fn bind_local(_: &Path) -> Result<ControlListener, BindRefusal> {
+    Err(BindRefusal::UnsupportedLocalPlatform)
+}
 #[cfg(not(any(windows, unix)))]
 fn connect_local(_: &Path) -> io::Result<ControlStream> {
-    Err(io::Error::new(io::ErrorKind::Unsupported, "local control transport requires Windows or Unix"))
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "local control transport requires Windows or Unix",
+    ))
 }
 
 #[cfg(windows)]
@@ -281,14 +325,19 @@ fn platform_bind(addr: SocketAddr) -> Result<TcpListener, BindRefusal> {
     for _ in 0..ATTEMPTS {
         match TcpListener::bind(addr) {
             Ok(listener) => return Ok(listener),
-            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => { last = Some(e); std::thread::sleep(INTERVAL); }
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+                last = Some(e);
+                std::thread::sleep(INTERVAL);
+            }
             Err(e) => return Err(BindRefusal::Io(e)),
         }
     }
     Err(BindRefusal::Io(last.expect("at least one attempt ran")))
 }
 #[cfg(not(windows))]
-fn platform_bind(addr: SocketAddr) -> Result<TcpListener, BindRefusal> { TcpListener::bind(addr).map_err(BindRefusal::Io) }
+fn platform_bind(addr: SocketAddr) -> Result<TcpListener, BindRefusal> {
+    TcpListener::bind(addr).map_err(BindRefusal::Io)
+}
 
 /// Why a bind was refused.
 #[derive(Debug)]
@@ -308,30 +357,66 @@ pub enum BindRefusal {
 impl std::fmt::Display for BindRefusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NonLoopbackWithoutToken { addr } => write!(f, "refusing to bind {addr}: a non-loopback control plane requires a token"),
-            Self::TokenTooWeak { length, minimum } => write!(f, "token is {length} bytes, minimum is {minimum}"),
+            Self::NonLoopbackWithoutToken { addr } => write!(
+                f,
+                "refusing to bind {addr}: a non-loopback control plane requires a token"
+            ),
+            Self::TokenTooWeak { length, minimum } => {
+                write!(f, "token is {length} bytes, minimum is {minimum}")
+            }
             Self::PortReserved { port, reason } => write!(f, "port {port} is reserved: {reason}"),
-            Self::InvalidLocalEndpoint { detail } => write!(f, "invalid local control endpoint: {detail}"),
-            Self::LocalParentNotPrivate { path } => write!(f, "local socket parent is not owner-private: {}", path.display()),
-            Self::LocalEndpointOccupied { path } => write!(f, "local control endpoint is occupied: {}", path.display()),
-            Self::StaleLocalEndpointNotSocket { path } => write!(f, "stale local endpoint is not a socket: {}", path.display()),
-            Self::StaleLocalEndpointUnverified { path } => write!(f, "could not prove local endpoint stale before cleanup: {}", path.display()),
-            Self::UnsupportedLocalPlatform => write!(f, "local control transport is unsupported on this platform"),
+            Self::InvalidLocalEndpoint { detail } => {
+                write!(f, "invalid local control endpoint: {detail}")
+            }
+            Self::LocalParentNotPrivate { path } => write!(
+                f,
+                "local socket parent is not owner-private: {}",
+                path.display()
+            ),
+            Self::LocalEndpointOccupied { path } => {
+                write!(f, "local control endpoint is occupied: {}", path.display())
+            }
+            Self::StaleLocalEndpointNotSocket { path } => write!(
+                f,
+                "stale local endpoint is not a socket: {}",
+                path.display()
+            ),
+            Self::StaleLocalEndpointUnverified { path } => write!(
+                f,
+                "could not prove local endpoint stale before cleanup: {}",
+                path.display()
+            ),
+            Self::UnsupportedLocalPlatform => {
+                write!(f, "local control transport is unsupported on this platform")
+            }
             Self::Io(error) => write!(f, "could not bind: {error}"),
         }
     }
 }
 impl std::error::Error for BindRefusal {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { if let Self::Io(error) = self { Some(error) } else { None } }
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        if let Self::Io(error) = self {
+            Some(error)
+        } else {
+            None
+        }
+    }
 }
 
 pub const MINIMUM_TOKEN_BYTES: usize = 32;
 pub const ENGINE_CONTROL_PORT: u16 = 4400;
-const RESERVED: &[(u16, &str)] = &[(4200, "belonged to the retired v2 daemon"), (4100, "project API"), (4300, "playout-control")];
+const RESERVED: &[(u16, &str)] = &[
+    (4200, "belonged to the retired v2 daemon"),
+    (4100, "project API"),
+    (4300, "playout-control"),
+];
 
 /// Decide whether the engine may listen at an endpoint.
 pub fn check_endpoint(endpoint: &Endpoint, token: Option<&str>) -> Result<(), BindRefusal> {
-    match endpoint { Endpoint::Tcp(addr) => check_bind(*addr, token), Endpoint::Local(path) => check_local_bind(path, token) }
+    match endpoint {
+        Endpoint::Tcp(addr) => check_bind(*addr, token),
+        Endpoint::Local(path) => check_local_bind(path, token),
+    }
 }
 
 /// Decide whether the engine may listen at a local endpoint.
@@ -341,18 +426,28 @@ pub fn check_local_bind(path: &Path, token: Option<&str>) -> Result<(), BindRefu
     {
         let path = path.to_string_lossy();
         if !path.starts_with(r"\\.\pipe\") || path.len() == r"\\.\pipe\".len() {
-            return Err(BindRefusal::InvalidLocalEndpoint { detail: "Windows local endpoints must be non-empty \\.\\pipe\\ names".to_string() });
+            return Err(BindRefusal::InvalidLocalEndpoint {
+                detail: "Windows local endpoints must be non-empty \\.\\pipe\\ names".to_string(),
+            });
         }
     }
     #[cfg(unix)]
     {
         if !path.is_absolute() {
-            return Err(BindRefusal::InvalidLocalEndpoint { detail: "Unix local endpoints must be absolute paths".to_string() });
+            return Err(BindRefusal::InvalidLocalEndpoint {
+                detail: "Unix local endpoints must be absolute paths".to_string(),
+            });
         }
-        let parent = path.parent().ok_or_else(|| BindRefusal::InvalidLocalEndpoint { detail: "Unix local endpoint has no parent directory".to_string() })?;
+        let parent = path
+            .parent()
+            .ok_or_else(|| BindRefusal::InvalidLocalEndpoint {
+                detail: "Unix local endpoint has no parent directory".to_string(),
+            })?;
         let metadata = std::fs::metadata(parent).map_err(BindRefusal::Io)?;
         if !metadata.is_dir() || metadata.permissions().mode() & 0o077 != 0 {
-            return Err(BindRefusal::LocalParentNotPrivate { path: parent.to_path_buf() });
+            return Err(BindRefusal::LocalParentNotPrivate {
+                path: parent.to_path_buf(),
+            });
         }
     }
     Ok(())
@@ -361,32 +456,107 @@ pub fn check_local_bind(path: &Path, token: Option<&str>) -> Result<(), BindRefu
 /// Decide whether the engine may listen at a TCP address.
 pub fn check_bind(addr: SocketAddr, token: Option<&str>) -> Result<(), BindRefusal> {
     if let Some((port, reason)) = RESERVED.iter().find(|(port, _)| *port == addr.port()) {
-        return Err(BindRefusal::PortReserved { port: *port, reason });
+        return Err(BindRefusal::PortReserved {
+            port: *port,
+            reason,
+        });
     }
     check_token(token)?;
-    if token.is_some() || is_loopback(addr.ip()) { Ok(()) } else { Err(BindRefusal::NonLoopbackWithoutToken { addr }) }
+    if token.is_some() || is_loopback(addr.ip()) {
+        Ok(())
+    } else {
+        Err(BindRefusal::NonLoopbackWithoutToken { addr })
+    }
 }
 fn check_token(token: Option<&str>) -> Result<(), BindRefusal> {
     if let Some(token) = token {
-        if token.len() < MINIMUM_TOKEN_BYTES { return Err(BindRefusal::TokenTooWeak { length: token.len(), minimum: MINIMUM_TOKEN_BYTES }); }
+        if token.len() < MINIMUM_TOKEN_BYTES {
+            return Err(BindRefusal::TokenTooWeak {
+                length: token.len(),
+                minimum: MINIMUM_TOKEN_BYTES,
+            });
+        }
     }
     Ok(())
 }
-fn is_loopback(ip: IpAddr) -> bool { match ip { IpAddr::V4(v4) => v4.is_loopback(), IpAddr::V6(v6) => v6.is_loopback() } }
+fn is_loopback(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => v4.is_loopback(),
+        IpAddr::V6(v6) => v6.is_loopback(),
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::net::{Ipv4Addr, Ipv6Addr};
-    fn addr(ip: &str, port: u16) -> SocketAddr { SocketAddr::new(ip.parse().unwrap(), port) }
+    fn addr(ip: &str, port: u16) -> SocketAddr {
+        SocketAddr::new(ip.parse().unwrap(), port)
+    }
     const GOOD_TOKEN: &str = "0123456789abcdef0123456789abcdef";
-    #[test] fn loopback_needs_no_token() { assert!(check_bind(addr("127.0.0.1", ENGINE_CONTROL_PORT), None).is_ok()); assert!(check_bind(addr("::1", ENGINE_CONTROL_PORT), None).is_ok()); }
-    #[test] fn a_network_address_without_a_token_is_refused() { let endpoint = addr("192.168.1.50", ENGINE_CONTROL_PORT); assert!(matches!(check_bind(endpoint, None), Err(BindRefusal::NonLoopbackWithoutToken { addr }) if addr == endpoint)); }
-    #[test] fn an_unspecified_address_is_not_loopback() { for ip in ["0.0.0.0", "::"] { assert!(check_bind(addr(ip, ENGINE_CONTROL_PORT), None).is_err()); } assert!(!is_loopback(IpAddr::V4(Ipv4Addr::UNSPECIFIED))); assert!(!is_loopback(IpAddr::V6(Ipv6Addr::UNSPECIFIED))); }
-    #[test] fn a_token_permits_a_network_bind() { assert!(check_bind(addr("10.0.0.4", ENGINE_CONTROL_PORT), Some(GOOD_TOKEN)).is_ok()); }
-    #[test] fn a_short_token_is_refused_rather_than_padded() { assert!(matches!(check_bind(addr("10.0.0.4", ENGINE_CONTROL_PORT), Some("secret")), Err(BindRefusal::TokenTooWeak { length: 6, minimum: MINIMUM_TOKEN_BYTES }))); assert!(check_bind(addr("127.0.0.1", ENGINE_CONTROL_PORT), Some("")).is_err()); }
-    #[test] fn burned_and_borrowed_ports_are_refused() { for (port, _) in RESERVED { assert!(matches!(check_bind(addr("127.0.0.1", *port), None), Err(BindRefusal::PortReserved { .. }))); } }
-    #[test] fn the_engine_port_is_the_one_the_invariant_names() { assert_eq!(ENGINE_CONTROL_PORT, 4400); }
-    #[cfg(windows)] #[test] fn a_local_pipe_requires_a_local_pipe_name() { assert!(matches!(check_local_bind(Path::new(r"\\remote-host\pipe\grapix"), None), Err(BindRefusal::InvalidLocalEndpoint { .. }))); assert!(check_local_bind(Path::new(r"\\.\pipe\grapix-test"), None).is_ok()); }
-    #[cfg(unix)] #[test] fn a_local_socket_requires_an_owner_private_parent() { assert!(matches!(check_local_bind(Path::new("grapix.sock"), None), Err(BindRefusal::InvalidLocalEndpoint { .. }))); }
+    #[test]
+    fn loopback_needs_no_token() {
+        assert!(check_bind(addr("127.0.0.1", ENGINE_CONTROL_PORT), None).is_ok());
+        assert!(check_bind(addr("::1", ENGINE_CONTROL_PORT), None).is_ok());
+    }
+    #[test]
+    fn a_network_address_without_a_token_is_refused() {
+        let endpoint = addr("192.168.1.50", ENGINE_CONTROL_PORT);
+        assert!(
+            matches!(check_bind(endpoint, None), Err(BindRefusal::NonLoopbackWithoutToken { addr }) if addr == endpoint)
+        );
+    }
+    #[test]
+    fn an_unspecified_address_is_not_loopback() {
+        for ip in ["0.0.0.0", "::"] {
+            assert!(check_bind(addr(ip, ENGINE_CONTROL_PORT), None).is_err());
+        }
+        assert!(!is_loopback(IpAddr::V4(Ipv4Addr::UNSPECIFIED)));
+        assert!(!is_loopback(IpAddr::V6(Ipv6Addr::UNSPECIFIED)));
+    }
+    #[test]
+    fn a_token_permits_a_network_bind() {
+        assert!(check_bind(addr("10.0.0.4", ENGINE_CONTROL_PORT), Some(GOOD_TOKEN)).is_ok());
+    }
+    #[test]
+    fn a_short_token_is_refused_rather_than_padded() {
+        assert!(matches!(
+            check_bind(addr("10.0.0.4", ENGINE_CONTROL_PORT), Some("secret")),
+            Err(BindRefusal::TokenTooWeak {
+                length: 6,
+                minimum: MINIMUM_TOKEN_BYTES
+            })
+        ));
+        assert!(check_bind(addr("127.0.0.1", ENGINE_CONTROL_PORT), Some("")).is_err());
+    }
+    #[test]
+    fn burned_and_borrowed_ports_are_refused() {
+        for (port, _) in RESERVED {
+            assert!(matches!(
+                check_bind(addr("127.0.0.1", *port), None),
+                Err(BindRefusal::PortReserved { .. })
+            ));
+        }
+    }
+    #[test]
+    fn the_engine_port_is_the_one_the_invariant_names() {
+        assert_eq!(ENGINE_CONTROL_PORT, 4400);
+    }
+    #[cfg(windows)]
+    #[test]
+    fn a_local_pipe_requires_a_local_pipe_name() {
+        assert!(matches!(
+            check_local_bind(Path::new(r"\\remote-host\pipe\grapix"), None),
+            Err(BindRefusal::InvalidLocalEndpoint { .. })
+        ));
+        assert!(check_local_bind(Path::new(r"\\.\pipe\grapix-test"), None).is_ok());
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_local_socket_requires_an_owner_private_parent() {
+        assert!(matches!(
+            check_local_bind(Path::new("grapix.sock"), None),
+            Err(BindRefusal::InvalidLocalEndpoint { .. })
+        ));
+    }
 }

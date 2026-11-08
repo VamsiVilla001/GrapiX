@@ -31,7 +31,6 @@
 // EditorError carries the structured refusal or command error it reports to
 // the Editor UI; the large-Err lint would have it boxed for no gain.
 #![allow(clippy::result_large_err)]
-
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeMap;
@@ -44,16 +43,20 @@ use gx_asset_plane::fonts::ingest::{
 use gx_asset_plane::fonts::link::{prepare_font_link, UreqFontFetcher};
 use gx_asset_plane::fonts::manager::LinkedSource;
 use gx_asset_plane::import::{prepare_asset_files, AssetFileInput, PreparedAssetBatch};
-use gx_asset_plane::{content_hash, publish_scene, AssetStore, PublishClientError, PublishRefusal, PublishReply};
+use gx_asset_plane::{
+    content_hash, publish_scene, AssetStore, PublishClientError, PublishRefusal, PublishReply,
+};
 use gx_contracts::animation::{animation_surface, validate_scene_animation, AnimationSurface};
 use gx_contracts::command::{
-    parse_command, CommandOutcome, EditorCommand, SaveScene, SaveTarget, OpenScene, SceneSource,
+    parse_command, CommandOutcome, EditorCommand, OpenScene, SaveScene, SaveTarget, SceneSource,
     SceneTarget, SessionKey, SessionView,
 };
-use gx_contracts::control::{apply_control_values, fillable_properties, ControlFieldKind, ControlValue, TakePage};
+use gx_contracts::control::{
+    apply_control_values, fillable_properties, ControlFieldKind, ControlValue, TakePage,
+};
 use gx_contracts::design_system::{starter_presets, MotionPreset};
-use gx_contracts::platform::service_data_root;
 use gx_contracts::font::EmbeddingPolicy;
+use gx_contracts::platform::service_data_root;
 use gx_contracts::scene::{AssetLibraryItem, SceneDocument};
 use gx_contracts::{ContentHash, Refusal, Revision, TakeId};
 use gx_editor::{CommandError, Projects, Workspace};
@@ -88,14 +91,19 @@ impl ShellState {
     }
 
     fn workspace(&self) -> MutexGuard<'_, Workspace> {
-        self.workspace.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.workspace
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn with_asset_store<T>(
         &self,
         run: impl FnOnce(&mut AssetStore) -> Result<T, EditorError>,
     ) -> Result<T, EditorError> {
-        let mut store = self.assets.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut store = self
+            .assets
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if store.is_none() {
             *store = Some(AssetStore::new().map_err(|error| EditorError::AssetCache {
                 detail: error.to_string(),
@@ -145,7 +153,9 @@ impl std::fmt::Display for EditorError {
         match self {
             Self::ReadScene { path, detail } => write!(f, "cannot read {path}: {detail}"),
             Self::WriteScene { path, detail } => write!(f, "cannot write {path}: {detail}"),
-            Self::InvalidEndpoint { endpoint } => write!(f, "{endpoint} is not a host:port address"),
+            Self::InvalidEndpoint { endpoint } => {
+                write!(f, "{endpoint} is not a host:port address")
+            }
             Self::Unreachable { endpoint, detail } => {
                 write!(f, "cannot reach the asset plane at {endpoint}: {detail}")
             }
@@ -181,7 +191,9 @@ fn ingest_refused(refusal: FontIngestRefusal) -> EditorError {
 fn project_error(error: gx_editor::project::EditorError) -> EditorError {
     match error {
         gx_editor::project::EditorError::Refused(cause) => refused(cause),
-        error => EditorError::ProjectFailed { detail: error.to_string() },
+        error => EditorError::ProjectFailed {
+            detail: error.to_string(),
+        },
     }
 }
 
@@ -196,8 +208,13 @@ enum SceneFile {
 
 fn scene_file(command: &EditorCommand) -> Option<SceneFile> {
     match command {
-        EditorCommand::OpenScene(OpenScene { source: SceneSource::File { .. } }) => Some(SceneFile::Read),
-        EditorCommand::SaveScene(SaveScene { to: SaveTarget::File { .. }, .. }) => Some(SceneFile::Write),
+        EditorCommand::OpenScene(OpenScene {
+            source: SceneSource::File { .. },
+        }) => Some(SceneFile::Read),
+        EditorCommand::SaveScene(SaveScene {
+            to: SaveTarget::File { .. },
+            ..
+        }) => Some(SceneFile::Write),
         _ => None,
     }
 }
@@ -206,22 +223,31 @@ fn command_error(error: CommandError, file: Option<SceneFile>) -> EditorError {
     use gx_editor::project::EditorError as Store;
     match (error, file) {
         (CommandError::Refused(cause), _) => refused(cause),
-        (CommandError::Store(Store::Io { path, source }), Some(SceneFile::Read)) => EditorError::ReadScene {
-            path: path.display().to_string(),
-            detail: source.to_string(),
-        },
-        (CommandError::Store(Store::Io { path, source }), Some(SceneFile::Write)) => EditorError::WriteScene {
-            path: path.display().to_string(),
-            detail: source.to_string(),
-        },
+        (CommandError::Store(Store::Io { path, source }), Some(SceneFile::Read)) => {
+            EditorError::ReadScene {
+                path: path.display().to_string(),
+                detail: source.to_string(),
+            }
+        }
+        (CommandError::Store(Store::Io { path, source }), Some(SceneFile::Write)) => {
+            EditorError::WriteScene {
+                path: path.display().to_string(),
+                detail: source.to_string(),
+            }
+        }
         (CommandError::Store(error), _) => project_error(error),
     }
 }
 
 /// Run one parsed command against the workspace.
-pub fn execute(workspace: &mut Workspace, command: EditorCommand) -> Result<CommandOutcome, EditorError> {
+pub fn execute(
+    workspace: &mut Workspace,
+    command: EditorCommand,
+) -> Result<CommandOutcome, EditorError> {
     let file = scene_file(&command);
-    workspace.execute(command).map_err(|error| command_error(error, file))
+    workspace
+        .execute(command)
+        .map_err(|error| command_error(error, file))
 }
 
 /// What a successful publication produced.
@@ -262,12 +288,16 @@ pub fn publish(endpoint: &str, scene: SceneDocument) -> Result<PublishResult, Ed
         }
         Ok(PublishReply::Refused(
             PublishRefusal::SceneRefused { cause } | PublishRefusal::PreparationRefused { cause },
-        )) => Err(EditorError::PublishRefused { detail: cause.to_string() }),
+        )) => Err(EditorError::PublishRefused {
+            detail: cause.to_string(),
+        }),
         Err(PublishClientError::Connect(source)) => Err(EditorError::Unreachable {
             endpoint: endpoint.to_owned(),
             detail: source.to_string(),
         }),
-        Err(other) => Err(EditorError::Protocol { detail: other.to_string() }),
+        Err(other) => Err(EditorError::Protocol {
+            detail: other.to_string(),
+        }),
     }
 }
 
@@ -281,7 +311,9 @@ pub fn take_page_preview(
     target: &SceneTarget,
     values: &BTreeMap<String, ControlValue>,
 ) -> Result<SceneDocument, EditorError> {
-    let template = workspace.document(target).map_err(|error| command_error(error, None))?;
+    let template = workspace
+        .document(target)
+        .map_err(|error| command_error(error, None))?;
     apply_control_values(&template, values).map_err(refused)
 }
 
@@ -370,14 +402,21 @@ pub fn scene_catalog(store: &Projects, project: &str) -> Result<ProjectSceneCata
 /// One stored scene, refused by name if publish would refuse its animation —
 /// the same check `OpenScene` runs, so a read cannot preview a curve the
 /// engine would reject.
-pub fn scene_read(store: &Projects, project: &str, scene_id: &str) -> Result<SceneDocument, EditorError> {
+pub fn scene_read(
+    store: &Projects,
+    project: &str,
+    scene_id: &str,
+) -> Result<SceneDocument, EditorError> {
     let scene = store.read_scene(project, scene_id).map_err(project_error)?;
     validate_scene_animation(&scene).map_err(refused)?;
     Ok(scene)
 }
 
 /// The saved template instances in a project, unreadable ones named.
-pub fn take_page_catalog(store: &Projects, project: &str) -> Result<ProjectTakePageCatalog, EditorError> {
+pub fn take_page_catalog(
+    store: &Projects,
+    project: &str,
+) -> Result<ProjectTakePageCatalog, EditorError> {
     let ids = store.list_take_pages(project).map_err(project_error)?;
     let mut pages = Vec::with_capacity(ids.len());
     for page_id in ids {
@@ -412,7 +451,10 @@ pub fn take_page_catalog(store: &Projects, project: &str) -> Result<ProjectTakeP
 /// The one authoring mutator. Strictly parsed: an unknown field anywhere in
 /// the command refuses by its dotted path rather than being ignored.
 #[tauri::command]
-fn cmd_execute(state: tauri::State<'_, ShellState>, command: serde_json::Value) -> Result<CommandOutcome, EditorError> {
+fn cmd_execute(
+    state: tauri::State<'_, ShellState>,
+    command: serde_json::Value,
+) -> Result<CommandOutcome, EditorError> {
     let command = parse_command(command).map_err(refused)?;
     execute(&mut state.workspace(), command)
 }
@@ -422,13 +464,19 @@ fn cmd_execute(state: tauri::State<'_, ShellState>, command: serde_json::Value) 
 /// asset resolves when it is saved into a project; then the session opens
 /// with the report as an `Imported` effect.
 #[tauri::command]
-fn cmd_import_file(state: tauri::State<'_, ShellState>, path: String, id: String) -> Result<CommandOutcome, EditorError> {
+fn cmd_import_file(
+    state: tauri::State<'_, ShellState>,
+    path: String,
+    id: String,
+) -> Result<CommandOutcome, EditorError> {
     let bytes = std::fs::read(&path).map_err(|error| EditorError::ReadFile {
         path: path.clone(),
         detail: error.to_string(),
     })?;
     let svg = String::from_utf8(bytes).map_err(|_| {
-        refused(Refusal::SceneParseFailed { detail: format!("{path} is not UTF-8 text, so it is not an SVG document") })
+        refused(Refusal::SceneParseFailed {
+            detail: format!("{path} is not UTF-8 text, so it is not an SVG document"),
+        })
     })?;
     let source_name = std::path::Path::new(&path)
         .file_name()
@@ -436,23 +484,41 @@ fn cmd_import_file(state: tauri::State<'_, ShellState>, path: String, id: String
     state.with_asset_store(|store| {
         store
             .promote_verified(&content_hash(svg.as_bytes()), svg.as_bytes())
-            .map_err(|error| EditorError::AssetCache { detail: error.to_string() })
+            .map_err(|error| EditorError::AssetCache {
+                detail: error.to_string(),
+            })
     })?;
     execute(
         &mut state.workspace(),
-        EditorCommand::OpenScene(OpenScene { source: SceneSource::ImportSvg { id, source_name, svg } }),
+        EditorCommand::OpenScene(OpenScene {
+            source: SceneSource::ImportSvg {
+                id,
+                source_name,
+                svg,
+            },
+        }),
     )
 }
 
 #[tauri::command]
-fn cmd_session_view(state: tauri::State<'_, ShellState>, session: SessionKey) -> Result<SessionView, EditorError> {
-    state.workspace().view(session).map_err(|error| command_error(error, None))
+fn cmd_session_view(
+    state: tauri::State<'_, ShellState>,
+    session: SessionKey,
+) -> Result<SessionView, EditorError> {
+    state
+        .workspace()
+        .view(session)
+        .map_err(|error| command_error(error, None))
 }
 
 /// Publish the document a target names. The document is cloned under the
 /// lock and published after it is released: no network IO under the mutex.
 #[tauri::command]
-fn cmd_publish(state: tauri::State<'_, ShellState>, endpoint: String, target: SceneTarget) -> Result<PublishResult, EditorError> {
+fn cmd_publish(
+    state: tauri::State<'_, ShellState>,
+    endpoint: String,
+    target: SceneTarget,
+) -> Result<PublishResult, EditorError> {
     let scene = state
         .workspace()
         .document(&target)
@@ -502,7 +568,11 @@ fn cmd_starter_presets() -> Vec<MotionPreset> {
 fn cmd_motion_presets(project: Option<String>) -> Result<Vec<MotionPreset>, EditorError> {
     let mut presets = starter_presets();
     if let Some(project) = project {
-        presets.extend(projects()?.motion_presets(&project).map_err(project_error)?);
+        presets.extend(
+            projects()?
+                .motion_presets(&project)
+                .map_err(project_error)?,
+        );
     }
     Ok(presets)
 }
@@ -535,7 +605,9 @@ fn cmd_take_page_list(project: String) -> Result<ProjectTakePageCatalog, EditorE
 /// Reopen one saved instance exactly as its operator values were saved.
 #[tauri::command]
 fn cmd_take_page_read(project: String, page_id: String) -> Result<TakePage, EditorError> {
-    projects()?.read_take_page(&project, &page_id).map_err(project_error)
+    projects()?
+        .read_take_page(&project, &page_id)
+        .map_err(project_error)
 }
 
 /// Verify font files the author picked and cache their bytes by content hash.
@@ -581,7 +653,9 @@ fn cmd_font_prepare_files(
         fonts: &scene.fonts,
         assets: &scene.assets,
     };
-    state.with_asset_store(|store| prepare_font_files(store, library, &inputs).map_err(ingest_refused))
+    state.with_asset_store(|store| {
+        prepare_font_files(store, library, &inputs).map_err(ingest_refused)
+    })
 }
 
 /// Download a Google, Bunny or Adobe Fonts link into the asset cache
@@ -645,9 +719,11 @@ fn cmd_asset_prepare_files(
         })
         .collect();
     state.with_asset_store(|store| {
-        prepare_asset_files(store, &scene.assets, &inputs).map_err(|refusal| EditorError::CommandRefused {
-            detail: refusal.to_string(),
-            cause: refusal.refusal,
+        prepare_asset_files(store, &scene.assets, &inputs).map_err(|refusal| {
+            EditorError::CommandRefused {
+                detail: refusal.to_string(),
+                cause: refusal.refusal,
+            }
         })
     })
 }
@@ -670,12 +746,20 @@ fn cmd_font_bytes(
     state: tauri::State<'_, ShellState>,
     checksum: ContentHash,
 ) -> Result<tauri::ipc::Response, EditorError> {
-    let valid = checksum.0.len() == 64 && checksum.0.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+    let valid = checksum.0.len() == 64
+        && checksum
+            .0
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
     if !valid {
         return Err(refused(Refusal::AssetMissing { hash: checksum }));
     }
     let path = state.with_asset_store(|store| Ok(store.cache_path(&checksum)))?;
-    let bytes = std::fs::read(&path).map_err(|_| refused(Refusal::AssetMissing { hash: checksum.clone() }))?;
+    let bytes = std::fs::read(&path).map_err(|_| {
+        refused(Refusal::AssetMissing {
+            hash: checksum.clone(),
+        })
+    })?;
     if content_hash(&bytes) != checksum {
         return Err(refused(Refusal::AssetHashMismatch {
             expected: checksum,
@@ -716,7 +800,11 @@ fn cmd_project_assets_adopt(
     items: Vec<AssetLibraryItem>,
 ) -> Result<AdoptReport, EditorError> {
     let projects = projects()?;
-    let mut report = AdoptReport { adopted: Vec::new(), already_present: Vec::new(), missing: Vec::new() };
+    let mut report = AdoptReport {
+        adopted: Vec::new(),
+        already_present: Vec::new(),
+        missing: Vec::new(),
+    };
     for item in &items {
         let Some(hash) = item.checksum.clone() else {
             report.missing.push(AdoptMissing {
@@ -725,8 +813,13 @@ fn cmd_project_assets_adopt(
             });
             continue;
         };
-        if let Some(bytes) = projects.read_asset(&project, &hash).map_err(project_error)? {
-            projects.adopt_asset(&project, item, &bytes).map_err(project_error)?;
+        if let Some(bytes) = projects
+            .read_asset(&project, &hash)
+            .map_err(project_error)?
+        {
+            projects
+                .adopt_asset(&project, item, &bytes)
+                .map_err(project_error)?;
             report.already_present.push(item.asset_id.clone());
             continue;
         }
@@ -736,7 +829,9 @@ fn cmd_project_assets_adopt(
             .and_then(|path| std::fs::read(path).ok());
         match cached {
             Some(bytes) if content_hash(&bytes) == hash => {
-                projects.adopt_asset(&project, item, &bytes).map_err(project_error)?;
+                projects
+                    .adopt_asset(&project, item, &bytes)
+                    .map_err(project_error)?;
                 report.adopted.push(item.asset_id.clone());
             }
             Some(_) => report.missing.push(AdoptMissing {
@@ -745,7 +840,9 @@ fn cmd_project_assets_adopt(
             }),
             None => report.missing.push(AdoptMissing {
                 asset_id: item.asset_id.clone(),
-                reason: "the bytes are in neither the project nor the import cache; re-import the file".into(),
+                reason:
+                    "the bytes are in neither the project nor the import cache; re-import the file"
+                        .into(),
             }),
         }
     }
@@ -769,17 +866,28 @@ fn cmd_asset_bytes(
     project: Option<String>,
     checksum: ContentHash,
 ) -> Result<tauri::ipc::Response, EditorError> {
-    let valid = checksum.0.len() == 64 && checksum.0.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+    let valid = checksum.0.len() == 64
+        && checksum
+            .0
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
     if !valid {
         return Err(refused(Refusal::AssetMissing { hash: checksum }));
     }
     if let Some(project) = project {
-        if let Some(bytes) = projects()?.read_asset(&project, &checksum).map_err(project_error)? {
+        if let Some(bytes) = projects()?
+            .read_asset(&project, &checksum)
+            .map_err(project_error)?
+        {
             return Ok(tauri::ipc::Response::new(bytes));
         }
     }
     let path = state.with_asset_store(|store| Ok(store.cache_path(&checksum)))?;
-    let bytes = std::fs::read(&path).map_err(|_| refused(Refusal::AssetMissing { hash: checksum.clone() }))?;
+    let bytes = std::fs::read(&path).map_err(|_| {
+        refused(Refusal::AssetMissing {
+            hash: checksum.clone(),
+        })
+    })?;
     if content_hash(&bytes) != checksum {
         return Err(refused(Refusal::AssetHashMismatch {
             expected: checksum,
@@ -869,7 +977,10 @@ mod tests {
                 .duration_since(std::time::UNIX_EPOCH)
                 .expect("system clock after epoch")
                 .as_nanos();
-            let path = std::env::temp_dir().join(format!("gx-editor-shell-{label}-{}-{nanos}", std::process::id()));
+            let path = std::env::temp_dir().join(format!(
+                "gx-editor-shell-{label}-{}-{nanos}",
+                std::process::id()
+            ));
             std::fs::create_dir_all(&path).expect("scratch directory");
             Self(path)
         }
@@ -882,7 +993,10 @@ mod tests {
     }
 
     /// Parse and run a command exactly as `cmd_execute` does.
-    fn invoke(workspace: &mut Workspace, command: serde_json::Value) -> Result<CommandOutcome, EditorError> {
+    fn invoke(
+        workspace: &mut Workspace,
+        command: serde_json::Value,
+    ) -> Result<CommandOutcome, EditorError> {
         execute(workspace, parse_command(command).map_err(refused)?)
     }
 
@@ -915,10 +1029,21 @@ mod tests {
     #[test]
     fn a_workspace_refusal_reaches_the_web_layer_with_its_cause() {
         let mut workspace = Workspace::new(None);
-        let error = invoke(&mut workspace, serde_json::json!({ "command": "undo", "session": 9 }))
-            .expect_err("no such session");
+        let error = invoke(
+            &mut workspace,
+            serde_json::json!({ "command": "undo", "session": 9 }),
+        )
+        .expect_err("no such session");
         assert!(
-            matches!(error, EditorError::CommandRefused { cause: Refusal::SessionUnknown { session: SessionKey(9) }, .. }),
+            matches!(
+                error,
+                EditorError::CommandRefused {
+                    cause: Refusal::SessionUnknown {
+                        session: SessionKey(9)
+                    },
+                    ..
+                }
+            ),
             "got {error:?}"
         );
     }
@@ -933,17 +1058,31 @@ mod tests {
             serde_json::json!({ "command": "openScene", "source": { "source": "file", "path": missing } }),
         )
         .expect_err("a missing file cannot open");
-        assert!(matches!(&error, EditorError::ReadScene { path, .. } if path == &missing), "got {error:?}");
+        assert!(
+            matches!(&error, EditorError::ReadScene { path, .. } if path == &missing),
+            "got {error:?}"
+        );
 
         let session = open_new(&mut workspace);
-        let unwritable = scratch.0.join("no-such-dir").join("scene.json").display().to_string();
+        let unwritable = scratch
+            .0
+            .join("no-such-dir")
+            .join("scene.json")
+            .display()
+            .to_string();
         let error = invoke(
             &mut workspace,
             serde_json::json!({ "command": "saveScene", "session": session.0, "to": { "to": "file", "path": unwritable } }),
         )
         .expect_err("a file in a missing directory cannot be written");
-        assert!(matches!(&error, EditorError::WriteScene { path, .. } if path == &unwritable), "got {error:?}");
-        assert!(workspace.view(session).unwrap().path.is_none(), "a failed save records no path");
+        assert!(
+            matches!(&error, EditorError::WriteScene { path, .. } if path == &unwritable),
+            "got {error:?}"
+        );
+        assert!(
+            workspace.view(session).unwrap().path.is_none(),
+            "a failed save records no path"
+        );
     }
 
     #[test]
@@ -960,16 +1099,25 @@ mod tests {
                 &mut workspace,
                 EditorCommand::EditScene(EditScene {
                     target: SceneTarget::Session { session },
-                    edits: vec![SceneEdit::CreateObject(CreateObject { kind: kind.into(), name: "X".into() })],
+                    edits: vec![SceneEdit::CreateObject(CreateObject {
+                        kind: kind.into(),
+                        name: "X".into(),
+                    })],
                     module: None,
                 }),
             );
             // `text` is the one creatable kind with a scene-level
             // prerequisite; a blank scene carries no fonts.
             if kind == "text" {
-                assert!(matches!(outcome, Err(EditorError::CommandRefused { .. })), "text needs a font");
+                assert!(
+                    matches!(outcome, Err(EditorError::CommandRefused { .. })),
+                    "text needs a font"
+                );
             } else {
-                assert!(outcome.is_ok(), "menu offers {kind} but the contract refuses it: {outcome:?}");
+                assert!(
+                    outcome.is_ok(),
+                    "menu offers {kind} but the contract refuses it: {outcome:?}"
+                );
             }
         }
     }
@@ -983,7 +1131,10 @@ mod tests {
             EditorCommand::EditScene(EditScene {
                 target: SceneTarget::Session { session },
                 edits: vec![
-                    SceneEdit::CreateObject(CreateObject { kind: "rect".into(), name: "Background".into() }),
+                    SceneEdit::CreateObject(CreateObject {
+                        kind: "rect".into(),
+                        name: "Background".into(),
+                    }),
                     SceneEdit::DeclareControl(DeclareControl {
                         field: ControlField {
                             field_id: "offset".into(),
@@ -1009,14 +1160,27 @@ mod tests {
         )
         .expect_err("text must not be coerced into a numeric control");
         assert!(
-            error.to_string().contains("offset requires number, not text"),
+            error
+                .to_string()
+                .contains("offset requires number, not text"),
             "the operator needs Rust's named type mismatch: {error}"
         );
 
-        let filled = take_page_preview(&workspace, &target, &BTreeMap::from([("offset".into(), ControlValue::Number(42.0))]))
-            .expect("a matching value fills a copy");
-        assert_ne!(filled, original.document, "the returned preview is the filled copy");
-        assert_eq!(workspace.view(session).unwrap(), original, "a preview cannot edit the template or its history");
+        let filled = take_page_preview(
+            &workspace,
+            &target,
+            &BTreeMap::from([("offset".into(), ControlValue::Number(42.0))]),
+        )
+        .expect("a matching value fills a copy");
+        assert_ne!(
+            filled, original.document,
+            "the returned preview is the filled copy"
+        );
+        assert_eq!(
+            workspace.view(session).unwrap(),
+            original,
+            "a preview cannot edit the template or its history"
+        );
     }
 
     #[test]
@@ -1024,7 +1188,8 @@ mod tests {
         let scratch = Scratch::new("catalog");
         let store = Projects::at_root(&scratch.0);
         store.create_project("news").expect("create project");
-        std::fs::write(scratch.0.join("news/scenes/bad.json"), b"{ not-json").expect("write corrupt scene");
+        std::fs::write(scratch.0.join("news/scenes/bad.json"), b"{ not-json")
+            .expect("write corrupt scene");
 
         let catalog = scene_catalog(&store, "news").expect("list scene catalog");
         assert_eq!(catalog.scenes.len(), 1);
@@ -1036,11 +1201,17 @@ mod tests {
 
         assert!(matches!(
             scene_catalog(&store, "../news"),
-            Err(EditorError::CommandRefused { cause: Refusal::ProjectNameInvalid { .. }, .. })
+            Err(EditorError::CommandRefused {
+                cause: Refusal::ProjectNameInvalid { .. },
+                ..
+            })
         ));
         assert!(matches!(
             scene_read(&store, "news", "../escape"),
-            Err(EditorError::CommandRefused { cause: Refusal::SceneIdInvalid { .. }, .. })
+            Err(EditorError::CommandRefused {
+                cause: Refusal::SceneIdInvalid { .. },
+                ..
+            })
         ));
     }
 
@@ -1049,21 +1220,52 @@ mod tests {
         let scratch = Scratch::new("catalog-no-design-system");
         let store = Projects::at_root(&scratch.0);
         store.create_project("broadcast").unwrap();
-        store.write_scene("broadcast", &gx_contracts::scene::new_scene("score", "Score", gx_contracts::color::WorkingColorSpace::NEW_PROJECT)).unwrap();
-        store.write_scene("broadcast", &gx_contracts::scene::new_scene("lower-third", "Lower third", gx_contracts::color::WorkingColorSpace::NEW_PROJECT)).unwrap();
+        store
+            .write_scene(
+                "broadcast",
+                &gx_contracts::scene::new_scene(
+                    "score",
+                    "Score",
+                    gx_contracts::color::WorkingColorSpace::NEW_PROJECT,
+                ),
+            )
+            .unwrap();
+        store
+            .write_scene(
+                "broadcast",
+                &gx_contracts::scene::new_scene(
+                    "lower-third",
+                    "Lower third",
+                    gx_contracts::color::WorkingColorSpace::NEW_PROJECT,
+                ),
+            )
+            .unwrap();
         // Legacy metadata must neither gate navigation nor be modified.
         let legacy = scratch.0.join("broadcast/design-system");
         std::fs::write(&legacy, b"legacy metadata, not a directory").unwrap();
         let catalog = scene_catalog(&store, "broadcast").unwrap();
         assert_eq!(catalog.scenes.len(), 2);
-        assert!(catalog.scenes.iter().all(|graphic| graphic.unavailable_reason.is_none()));
-        assert_eq!(std::fs::read(&legacy).unwrap(), b"legacy metadata, not a directory");
+        assert!(catalog
+            .scenes
+            .iter()
+            .all(|graphic| graphic.unavailable_reason.is_none()));
+        assert_eq!(
+            std::fs::read(&legacy).unwrap(),
+            b"legacy metadata, not a directory"
+        );
     }
 
     #[test]
     fn an_unparseable_endpoint_is_refused_before_any_socket_opens() {
-        let error = publish("not-an-address", gx_contracts::scene::new_scene("demo", "Demo", gx_contracts::color::WorkingColorSpace::NEW_PROJECT))
-            .expect_err("a malformed endpoint cannot be dialled");
+        let error = publish(
+            "not-an-address",
+            gx_contracts::scene::new_scene(
+                "demo",
+                "Demo",
+                gx_contracts::color::WorkingColorSpace::NEW_PROJECT,
+            ),
+        )
+        .expect_err("a malformed endpoint cannot be dialled");
         assert!(matches!(error, EditorError::InvalidEndpoint { .. }));
     }
 }

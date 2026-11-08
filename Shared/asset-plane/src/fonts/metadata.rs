@@ -37,7 +37,10 @@ pub fn inspect_font(bytes: &[u8]) -> Result<InspectedFont, Refusal> {
 /// PostScript names), so the declared family stands in when the file names
 /// none; a file's own name is still preferred when it has one. The tables are
 /// parsed exactly as for any font: unreadable bytes refuse as before.
-pub fn inspect_declared_font(bytes: &[u8], declared_family: &str) -> Result<InspectedFont, Refusal> {
+pub fn inspect_declared_font(
+    bytes: &[u8],
+    declared_family: &str,
+) -> Result<InspectedFont, Refusal> {
     inspect(bytes, Some(declared_family))
 }
 
@@ -222,7 +225,13 @@ pub(crate) mod tests {
         assert_eq!(inspected.family, "new-science-mono");
         assert_eq!(inspected.display_name, "new-science-mono");
         // The file's own name wins when it has one.
-        assert_eq!(inspect_declared_font(named, "kit-family").unwrap().family, "Inter");
-        assert!(matches!(inspect_declared_font(&blank, "  "), Err(Refusal::InvalidFontData { .. })));
+        assert_eq!(
+            inspect_declared_font(named, "kit-family").unwrap().family,
+            "Inter"
+        );
+        assert!(matches!(
+            inspect_declared_font(&blank, "  "),
+            Err(Refusal::InvalidFontData { .. })
+        ));
     }
 }

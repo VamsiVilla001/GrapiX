@@ -189,10 +189,7 @@ impl TilePlan {
                 };
                 let left = x.saturating_sub(FILTER_RADIUS);
                 let top = y.saturating_sub(FILTER_RADIUS);
-                let right = core
-                    .right()
-                    .saturating_add(FILTER_RADIUS)
-                    .min(stage.width);
+                let right = core.right().saturating_add(FILTER_RADIUS).min(stage.width);
                 let bottom = core
                     .bottom()
                     .saturating_add(FILTER_RADIUS)
@@ -244,12 +241,17 @@ impl TilePlan {
                         x: self.stage.origin.x + f64::from(tile.core.x + x),
                         y: self.stage.origin.y + f64::from(tile.core.y + y),
                     };
-                    let destination = pixel_offset(self.stage.width, tile.core.x + x, tile.core.y + y);
+                    let destination =
+                        pixel_offset(self.stage.width, tile.core.x + x, tile.core.y + y);
                     pixels[destination..destination + 4].copy_from_slice(&source(point));
                 }
             }
         }
-        Ok(Frame { width: self.stage.width, height: self.stage.height, pixels })
+        Ok(Frame {
+            width: self.stage.width,
+            height: self.stage.height,
+            pixels,
+        })
     }
 
     /// Render a filtered stage by materializing every tile target and cropping

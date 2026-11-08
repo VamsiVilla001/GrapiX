@@ -55,7 +55,10 @@ fn scratch(label: &str) -> std::path::PathBuf {
 
 fn server_with(projects: &Projects, scopes: Vec<Scope>) -> Server {
     let mut server = Server::new(scopes);
-    server.register("bindings.schema", Box::new(BindingsSchema(projects.clone())));
+    server.register(
+        "bindings.schema",
+        Box::new(BindingsSchema(projects.clone())),
+    );
     server
 }
 
@@ -92,7 +95,9 @@ fn an_agent_discovers_a_scenes_data_schema_over_the_wire() {
     let projects = Projects::at_root(&root);
     projects.create_project("news").expect("a project exists");
     let seeded: SceneDocument = serde_json::from_value(scene()).expect("the fixture is a scene");
-    projects.write_scene("news", &seeded).expect("the fixture is stored");
+    projects
+        .write_scene("news", &seeded)
+        .expect("the fixture is stored");
     let server = server_with(&projects, vec![Scope::Author]);
 
     let replies = drive(
@@ -103,13 +108,19 @@ fn an_agent_discovers_a_scenes_data_schema_over_the_wire() {
             serde_json::json!({ "project": "news", "scene_id": "scorebug" }),
         )],
     );
-    assert!(replies[0]["error"].is_null(), "unexpected refusal: {}", replies[0]);
+    assert!(
+        replies[0]["error"].is_null(),
+        "unexpected refusal: {}",
+        replies[0]
+    );
     let schema = &replies[0]["result"];
 
     assert_eq!(schema["sceneId"], "scorebug");
     assert_eq!(schema["dataContext"], scene()["dataContext"]);
     assert_eq!(
-        schema["dataContext"]["match"]["alpha"].as_f64().map(f64::to_bits),
+        schema["dataContext"]["match"]["alpha"]
+            .as_f64()
+            .map(f64::to_bits),
         Some((48.0_f64 / 255.0).to_bits()),
         "the data context crosses the wire bit for bit"
     );
@@ -158,7 +169,11 @@ fn the_schema_is_gated_by_the_transport_not_the_handler() {
             serde_json::json!({ "project": "news", "scene_id": "scorebug" }),
         )],
     );
-    assert!(replies[0]["result"].is_null(), "an unscoped caller got a result: {}", replies[0]);
+    assert!(
+        replies[0]["result"].is_null(),
+        "an unscoped caller got a result: {}",
+        replies[0]
+    );
     assert!(!replies[0]["error"].is_null());
     std::fs::remove_dir_all(root).expect("clean up");
 }
@@ -175,8 +190,16 @@ fn the_shipped_editor_mcp_discovers_bindings_and_refuses_bad_paths_by_name() {
     let projects = Projects::at_root(&root);
     projects.create_project("news").expect("a project exists");
     let seeded: SceneDocument = serde_json::from_value(scene()).expect("the fixture is a scene");
-    projects.write_scene("news", &seeded).expect("the fixture is stored");
-    let schema_call = |id: u64| call(id, "bindings.schema", serde_json::json!({ "project": "news", "scene_id": "scorebug" }));
+    projects
+        .write_scene("news", &seeded)
+        .expect("the fixture is stored");
+    let schema_call = |id: u64| {
+        call(
+            id,
+            "bindings.schema",
+            serde_json::json!({ "project": "news", "scene_id": "scorebug" }),
+        )
+    };
     let edit = |id: u64, edits: serde_json::Value| {
         call(
             id,
@@ -190,20 +213,34 @@ fn the_shipped_editor_mcp_discovers_bindings_and_refuses_bad_paths_by_name() {
         &[
             schema_call(1),
             // A path the data context lacks: refused by name, nothing written.
-            edit(2, serde_json::json!([{ "edit": "setBinding", "objectId": "referee", "property": "y", "path": "match.away.score" }])),
+            edit(
+                2,
+                serde_json::json!([{ "edit": "setBinding", "objectId": "referee", "property": "y", "path": "match.away.score" }]),
+            ),
             // A second consumer of an existing field.
-            edit(3, serde_json::json!([{ "edit": "setBinding", "objectId": "referee", "property": "y", "path": "match.home.score" }])),
+            edit(
+                3,
+                serde_json::json!([{ "edit": "setBinding", "objectId": "referee", "property": "y", "path": "match.home.score" }]),
+            ),
         ],
     );
 
     let schema = &replies[0]["result"];
     assert!(replies[0]["error"].is_null(), "{}", replies[0]);
-    assert_eq!(schema["fields"]["match.home.score"], serde_json::json!([{ "object": "bar", "property": "x", "expects": "number" }]));
+    assert_eq!(
+        schema["fields"]["match.home.score"],
+        serde_json::json!([{ "object": "bar", "property": "x", "expects": "number" }])
+    );
     let invalid: Vec<(&str, &str)> = schema["invalid"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|issue| (issue["property"].as_str().unwrap(), issue["reason"].as_str().unwrap()))
+        .map(|issue| {
+            (
+                issue["property"].as_str().unwrap(),
+                issue["reason"].as_str().unwrap(),
+            )
+        })
         .collect();
     assert_eq!(
         invalid,
@@ -214,10 +251,26 @@ fn the_shipped_editor_mcp_discovers_bindings_and_refuses_bad_paths_by_name() {
     );
 
     let refused = &replies[1];
-    assert!(refused["result"].is_null(), "a bad path was accepted: {refused}");
-    assert_eq!(refused["error"]["data"]["code"]["refusal"], "bindingPathInvalid", "{refused}");
-    assert!(refused["error"]["message"].as_str().unwrap().contains("match.away.score"), "{refused}");
-    assert!(replies[2]["error"].is_null(), "the valid binding was refused: {}", replies[2]);
+    assert!(
+        refused["result"].is_null(),
+        "a bad path was accepted: {refused}"
+    );
+    assert_eq!(
+        refused["error"]["data"]["code"]["refusal"], "bindingPathInvalid",
+        "{refused}"
+    );
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("match.away.score"),
+        "{refused}"
+    );
+    assert!(
+        replies[2]["error"].is_null(),
+        "the valid binding was refused: {}",
+        replies[2]
+    );
 
     // A new process reads the project store: the written binding is there and
     // the refused one is not.
@@ -231,6 +284,11 @@ fn the_shipped_editor_mcp_discovers_bindings_and_refuses_bad_paths_by_name() {
         ])
     );
     assert!(schema["fields"].get("match.away.score").is_none());
-    assert_eq!(schema["invalid"].as_array().map(Vec::len), Some(1), "only the unresolved x remains: {}", schema["invalid"]);
+    assert_eq!(
+        schema["invalid"].as_array().map(Vec::len),
+        Some(1),
+        "only the unresolved x remains: {}",
+        schema["invalid"]
+    );
     std::fs::remove_dir_all(root).expect("clean up");
 }

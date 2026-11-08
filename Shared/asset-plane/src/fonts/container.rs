@@ -55,7 +55,10 @@ pub fn verify_font_file(bytes: &[u8]) -> Result<VerifiedFontFile, Refusal> {
 /// As [`verify_font_file`], for a face a stylesheet declares: the
 /// `@font-face` family names the face when the file names none (Adobe Fonts
 /// kits). See `metadata::inspect_declared_font`.
-pub fn verify_declared_font_file(bytes: &[u8], declared_family: &str) -> Result<VerifiedFontFile, Refusal> {
+pub fn verify_declared_font_file(
+    bytes: &[u8],
+    declared_family: &str,
+) -> Result<VerifiedFontFile, Refusal> {
     verify(bytes, Some(declared_family))
 }
 
@@ -86,17 +89,18 @@ fn unwrap_transport(bytes: &[u8], format: FontFormat) -> Result<Vec<u8>, Refusal
     if let FontData::Woff2(woff2) = &data {
         if woff2.flavor() == TTCF_MAGIC {
             return Err(Refusal::InvalidFontData {
-                detail: "WOFF2 font collections are not accepted; supply one face per file"
-                    .into(),
+                detail: "WOFF2 font collections are not accepted; supply one face per file".into(),
             });
         }
     }
     let provider = data
         .table_provider(0)
         .map_err(|e| refuse("tables could not be decoded", &e))?;
-    let tags = provider.table_tags().ok_or_else(|| Refusal::InvalidFontData {
-        detail: format!("{label} container lists no tables"),
-    })?;
+    let tags = provider
+        .table_tags()
+        .ok_or_else(|| Refusal::InvalidFontData {
+            detail: format!("{label} container lists no tables"),
+        })?;
     allsorts::subset::whole_font(&provider, &tags)
         .map_err(|e| refuse("could not be rebuilt as sfnt", &e))
 }

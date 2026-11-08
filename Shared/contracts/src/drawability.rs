@@ -41,14 +41,24 @@ pub fn refuse_what_the_software_path_cannot_draw(document: &SceneDocument) -> Re
 /// path. Engine and mock publication use this one rule; CPU reference renders
 /// remain available independently. No width/height animation is silently frozen.
 pub fn gpu_compositor_animation_refusal(document: &SceneDocument) -> Option<Refusal> {
-    document.timeline.channels.iter().enumerate().find_map(|(index, channel)| {
-        if channel.keys.is_empty() || !matches!(channel.property.as_str(), "width" | "height") { return None; }
-        Some(Refusal::ScenePropertyNotDrawable {
-            object: channel.object_id.clone(),
-            property: format!("timeline.channels[{index}].property: animated {} needs a GPU source backend", channel.property),
-            owner: "3.17/3.18".into(),
+    document
+        .timeline
+        .channels
+        .iter()
+        .enumerate()
+        .find_map(|(index, channel)| {
+            if channel.keys.is_empty() || !matches!(channel.property.as_str(), "width" | "height") {
+                return None;
+            }
+            Some(Refusal::ScenePropertyNotDrawable {
+                object: channel.object_id.clone(),
+                property: format!(
+                    "timeline.channels[{index}].property: animated {} needs a GPU source backend",
+                    channel.property
+                ),
+                owner: "3.17/3.18".into(),
+            })
         })
-    })
 }
 
 /// Every authored kind or property the software path cannot draw, each with
@@ -56,7 +66,11 @@ pub fn gpu_compositor_animation_refusal(document: &SceneDocument) -> Option<Refu
 pub fn drawability_refusals(document: &SceneDocument) -> Vec<StructuredRefusal> {
     let mut found = Found::default();
     if let Some(camera) = &document.active_camera_id {
-        found.push(property(&document.id, "activeCameraId", "11.48"), "activeCameraId", serde_json::json!(camera));
+        found.push(
+            property(&document.id, "activeCameraId", "11.48"),
+            "activeCameraId",
+            serde_json::json!(camera),
+        );
     }
     let by_id: HashMap<&str, &SceneObject> = document
         .objects
@@ -66,13 +80,16 @@ pub fn drawability_refusals(document: &SceneDocument) -> Vec<StructuredRefusal> 
     let mut parents: HashMap<&str, &str> = HashMap::new();
     for object in &document.objects {
         for child in object.child_ids() {
-            parents.entry(child.as_str()).or_insert(object.base().id.as_str());
+            parents
+                .entry(child.as_str())
+                .or_insert(object.base().id.as_str());
         }
     }
     let resolution = crate::scene::resolve_hierarchy(&document.objects);
     let scaled_by_channel = |object: &str| {
         document.timeline.channels.iter().any(|channel| {
-            channel.object_id == object && !channel.keys.is_empty()
+            channel.object_id == object
+                && !channel.keys.is_empty()
                 && matches!(channel.property.as_str(), "scaleX" | "scaleY")
         })
     };
@@ -86,31 +103,57 @@ pub fn drawability_refusals(document: &SceneDocument) -> Vec<StructuredRefusal> 
         // meaningless, so those are reported alone.
         let mut finite = true;
         for (name, value) in [
-            ("x", base.x), ("y", base.y), ("width", base.width), ("height", base.height),
-            ("rotation", base.rotation), ("rotationX", base.rotation_x),
-            ("rotationY", base.rotation_y), ("scaleX", base.scale_x),
-            ("scaleY", base.scale_y), ("scaleZ", base.scale_z),
-            ("zDepth", base.z_depth), ("opacity", base.opacity),
+            ("x", base.x),
+            ("y", base.y),
+            ("width", base.width),
+            ("height", base.height),
+            ("rotation", base.rotation),
+            ("rotationX", base.rotation_x),
+            ("rotationY", base.rotation_y),
+            ("scaleX", base.scale_x),
+            ("scaleY", base.scale_y),
+            ("scaleZ", base.scale_z),
+            ("zDepth", base.z_depth),
+            ("opacity", base.opacity),
             ("strokeWidth", base.stroke_width),
         ] {
             if !value.is_finite() {
                 finite = false;
-                found.push(property(id, name, "3.13"), at(name), serde_json::json!(value.to_string()));
+                found.push(
+                    property(id, name, "3.13"),
+                    at(name),
+                    serde_json::json!(value.to_string()),
+                );
             }
         }
         if !finite {
             continue;
         }
         if !(0.0..=1.0).contains(&base.opacity) {
-            found.push(property(id, "opacity", "3.13"), at("opacity"), serde_json::json!(base.opacity));
+            found.push(
+                property(id, "opacity", "3.13"),
+                at("opacity"),
+                serde_json::json!(base.opacity),
+            );
         }
-        if let Some((field, value)) = [("width", base.width), ("height", base.height), ("strokeWidth", base.stroke_width)]
-            .into_iter()
-            .find(|(_, value)| *value < 0.0)
+        if let Some((field, value)) = [
+            ("width", base.width),
+            ("height", base.height),
+            ("strokeWidth", base.stroke_width),
+        ]
+        .into_iter()
+        .find(|(_, value)| *value < 0.0)
         {
-            found.push(property(id, "negative dimensions or strokeWidth", "3.13"), at(field), serde_json::json!(value));
+            found.push(
+                property(id, "negative dimensions or strokeWidth", "3.13"),
+                at(field),
+                serde_json::json!(value),
+            );
         }
-        if let Some(anchor) = base.anchor.filter(|anchor| !anchor.x.is_finite() || !anchor.y.is_finite()) {
+        if let Some(anchor) = base
+            .anchor
+            .filter(|anchor| !anchor.x.is_finite() || !anchor.y.is_finite())
+        {
             found.push(
                 property(id, "anchor", "3.13"),
                 at("anchor"),
@@ -131,17 +174,29 @@ pub fn drawability_refusals(document: &SceneDocument) -> Vec<StructuredRefusal> 
         }
         match object {
             SceneObject::Rect(rect) if !rect.radius.is_finite() || rect.radius < 0.0 => {
-                found.push(property(id, "radius", "3.13"), at("radius"), serde_json::json!(rect.radius.to_string()));
+                found.push(
+                    property(id, "radius", "3.13"),
+                    at("radius"),
+                    serde_json::json!(rect.radius.to_string()),
+                );
             }
             SceneObject::Text(text) => text_properties(text, &at, &mut found),
             SceneObject::Line(line) if paints(&line.base.fill) => {
-                found.push(property(id, "fill", "3.17"), at("fill"), serde_json::to_value(&line.base.fill).unwrap_or_default());
+                found.push(
+                    property(id, "fill", "3.17"),
+                    at("fill"),
+                    serde_json::to_value(&line.base.fill).unwrap_or_default(),
+                );
             }
             _ => {}
         }
         // 3.22: every declared effect is drawn, on the GPU and by the CPU
         // reference; none refuses here.
-        if base.material_slots.as_ref().is_some_and(|slots| !slots.is_empty()) {
+        if base
+            .material_slots
+            .as_ref()
+            .is_some_and(|slots| !slots.is_empty())
+        {
             found.push(
                 property(id, "materialSlots", "11.50"),
                 at("materialSlots"),
@@ -155,11 +210,19 @@ pub fn drawability_refusals(document: &SceneDocument) -> Vec<StructuredRefusal> 
             ("zDepth", base.z_depth != 0.0, base.z_depth),
         ] {
             if set {
-                found.push(property(id, name, "11.48"), at(name), serde_json::json!(value));
+                found.push(
+                    property(id, name, "11.48"),
+                    at(name),
+                    serde_json::json!(value),
+                );
             }
         }
         if !base.layer_id.is_empty() {
-            found.push(property(id, "layerId", "3.16"), at("layerId"), serde_json::json!(base.layer_id));
+            found.push(
+                property(id, "layerId", "3.16"),
+                at("layerId"),
+                serde_json::json!(base.layer_id),
+            );
         }
         let ancestors = chain(id, &parents);
         if shears(id, &parents, &by_id) {
@@ -169,14 +232,21 @@ pub fn drawability_refusals(document: &SceneDocument) -> Vec<StructuredRefusal> 
                 serde_json::json!(base.rotation),
             );
         } else if ancestors.iter().enumerate().any(|(position, ancestor)| {
-            let rotates = by_id.get(ancestor).is_some_and(|o| o.base().rotation.rem_euclid(360.0) != 0.0)
+            let rotates = by_id
+                .get(ancestor)
+                .is_some_and(|o| o.base().rotation.rem_euclid(360.0) != 0.0)
                 || document.timeline.channels.iter().any(|channel| {
-                    channel.object_id == *ancestor && channel.property == "rotation" && !channel.keys.is_empty()
+                    channel.object_id == *ancestor
+                        && channel.property == "rotation"
+                        && !channel.keys.is_empty()
                 });
-            rotates && ancestors[position + 1..].iter().any(|parent| {
-                by_id.get(parent).is_some_and(|o| o.base().scale_x != o.base().scale_y)
-                    || scaled_by_channel(parent)
-            })
+            rotates
+                && ancestors[position + 1..].iter().any(|parent| {
+                    by_id
+                        .get(parent)
+                        .is_some_and(|o| o.base().scale_x != o.base().scale_y)
+                        || scaled_by_channel(parent)
+                })
         }) {
             found.push(
                 property(id, "animated rotation under a scaled parent", "3.16"),
@@ -188,7 +258,8 @@ pub fn drawability_refusals(document: &SceneDocument) -> Vec<StructuredRefusal> 
         // width therefore cannot follow a scaled object or parent yet.
         if has_stroke(object) {
             let transform = &resolution.effective[index];
-            if transform.scale_x.abs() != 1.0 || transform.scale_y.abs() != 1.0
+            if transform.scale_x.abs() != 1.0
+                || transform.scale_y.abs() != 1.0
                 || ancestors.iter().any(|ancestor| scaled_by_channel(ancestor))
             {
                 found.push(
@@ -206,28 +277,42 @@ pub fn drawability_refusals(document: &SceneDocument) -> Vec<StructuredRefusal> 
             }
             for (path_index, path) in shape.compound_paths.iter().flatten().enumerate() {
                 if let Err(refusal) = bezier_arrays_match(id, path) {
-                    found.push(refusal, at(&format!("compoundPaths[{path_index}]")), serde_json::Value::Null);
+                    found.push(
+                        refusal,
+                        at(&format!("compoundPaths[{path_index}]")),
+                        serde_json::Value::Null,
+                    );
                 }
             }
         }
     }
 
     if let Some((index, refusal)) = unlit_light(document) {
-        found.push(refusal, format!("objects[{index}].type"), serde_json::json!("light"));
+        found.push(
+            refusal,
+            format!("objects[{index}].type"),
+            serde_json::json!("light"),
+        );
     }
 
     for (index, channel) in document.timeline.channels.iter().enumerate() {
         let owner = match channel.property.as_str() {
             "rotationX" | "rotationY" | "scaleZ" | "zDepth" => Some("11.48"),
             "width" | "height" => match by_id.get(channel.object_id.as_str()) {
-                Some(SceneObject::Text(text)) if text.layout == TextLayout::Paragraph => Some("11.51"),
+                Some(SceneObject::Text(text)) if text.layout == TextLayout::Paragraph => {
+                    Some("11.51")
+                }
                 _ => None,
             },
             _ => None,
         };
         if let Some(owner) = owner {
             found.push(
-                property(&channel.object_id, &format!("animated {}", channel.property), owner),
+                property(
+                    &channel.object_id,
+                    &format!("animated {}", channel.property),
+                    owner,
+                ),
                 format!("timeline.channels[{index}].property"),
                 serde_json::json!(channel.property),
             );
@@ -240,7 +325,9 @@ pub fn drawability_refusals(document: &SceneDocument) -> Vec<StructuredRefusal> 
 /// shape to draw. The single check, shared by the validator and the
 /// tessellator.
 pub fn bezier_arrays_match(object: &str, path: &BezierPath) -> Result<(), Refusal> {
-    if path.vertices.len() != path.in_tangents.len() || path.vertices.len() != path.out_tangents.len() {
+    if path.vertices.len() != path.in_tangents.len()
+        || path.vertices.len() != path.out_tangents.len()
+    {
         return Err(Refusal::VectorTessellationFailed {
             object: object.into(),
             detail: "Bezier vertices and tangent arrays differ in length".into(),
@@ -262,10 +349,14 @@ pub fn light_without_responsive_material(document: &SceneDocument) -> Result<(),
 
 /// The first light, by document index, when no mesh binds a PBR material.
 fn unlit_light(document: &SceneDocument) -> Option<(usize, Refusal)> {
-    let (index, light) = document.objects.iter().enumerate().find_map(|(index, object)| match object {
-        SceneObject::Light(light) => Some((index, light)),
-        _ => None,
-    })?;
+    let (index, light) = document
+        .objects
+        .iter()
+        .enumerate()
+        .find_map(|(index, object)| match object {
+            SceneObject::Light(light) => Some((index, light)),
+            _ => None,
+        })?;
     let pbr: HashSet<&str> = document
         .materials
         .iter()
@@ -275,10 +366,19 @@ fn unlit_light(document: &SceneDocument) -> Option<(usize, Refusal)> {
     let responds = document.objects.iter().any(|object| {
         matches!(object, SceneObject::Mesh(_))
             && object.base().material_slots.as_ref().is_some_and(|slots| {
-                slots.values().any(|binding| pbr.contains(binding.material_id.as_str()))
+                slots
+                    .values()
+                    .any(|binding| pbr.contains(binding.material_id.as_str()))
             })
     });
-    (!responds).then(|| (index, Refusal::LightHasNoResponsiveMaterial { light_id: light.base.id.clone() }))
+    (!responds).then(|| {
+        (
+            index,
+            Refusal::LightHasNoResponsiveMaterial {
+                light_id: light.base.id.clone(),
+            },
+        )
+    })
 }
 
 /// Collected refusals. Each check fires at most once per object, and a
@@ -290,8 +390,14 @@ pub(crate) struct Found {
 }
 
 impl Found {
-    pub(crate) fn push(&mut self, refusal: Refusal, field: impl Into<String>, given: serde_json::Value) {
-        self.refusals.push(StructuredRefusal::error(refusal).at(field, given));
+    pub(crate) fn push(
+        &mut self,
+        refusal: Refusal,
+        field: impl Into<String>,
+        given: serde_json::Value,
+    ) {
+        self.refusals
+            .push(StructuredRefusal::error(refusal).at(field, given));
     }
 }
 
@@ -300,12 +406,20 @@ fn text_properties(text: &TextObject, at: &dyn Fn(&str) -> String, found: &mut F
     let bounded = |value: f64| value.is_finite() && value.abs() <= f64::from(f32::MAX);
     let size_valid = bounded(text.size) && text.size > 0.0;
     if !size_valid {
-        found.push(property(id, "size", "3.13"), at("size"), serde_json::json!(text.size.to_string()));
+        found.push(
+            property(id, "size", "3.13"),
+            at("size"),
+            serde_json::json!(text.size.to_string()),
+        );
     }
     if let Some(height) = text.line_height {
         // The line advance is lineHeight × size, so it must fit too.
         if !bounded(height) || height <= 0.0 || (size_valid && !bounded(height * text.size)) {
-            found.push(property(id, "lineHeight", "3.13"), at("lineHeight"), serde_json::json!(height.to_string()));
+            found.push(
+                property(id, "lineHeight", "3.13"),
+                at("lineHeight"),
+                serde_json::json!(height.to_string()),
+            );
         }
     }
     if !bounded(text.letter_spacing) {
@@ -316,21 +430,77 @@ fn text_properties(text: &TextObject, at: &dyn Fn(&str) -> String, found: &mut F
         );
     }
     for (name, field, set, owner) in [
-        ("autoFit", "autoFit", text.auto_fit != TextAutoFit::None, "11.51"),
-        ("writingMode", "writingMode", text.writing_mode != WritingMode::HorizontalTb, "11.51"),
-        ("verticalAlign", "verticalAlign", text.vertical_align != VerticalAlign::Top, "3.18"),
-        ("decoration", "decoration", text.decoration.underline || text.decoration.strikethrough, "3.18"),
-        ("overflow", "overflow", text.overflow != TextOverflow::Visible, "3.18"),
-        ("textCase", "textCase", text.text_case == TextCase::SmallCaps, "11.51"),
-        ("wordSpacing", "wordSpacing", text.word_spacing != 0.0, "11.51"),
-        ("paragraphSpacing", "paragraphSpacing", text.paragraph_spacing != 0.0, "11.51"),
+        (
+            "autoFit",
+            "autoFit",
+            text.auto_fit != TextAutoFit::None,
+            "11.51",
+        ),
+        (
+            "writingMode",
+            "writingMode",
+            text.writing_mode != WritingMode::HorizontalTb,
+            "11.51",
+        ),
+        (
+            "verticalAlign",
+            "verticalAlign",
+            text.vertical_align != VerticalAlign::Top,
+            "3.18",
+        ),
+        (
+            "decoration",
+            "decoration",
+            text.decoration.underline || text.decoration.strikethrough,
+            "3.18",
+        ),
+        (
+            "overflow",
+            "overflow",
+            text.overflow != TextOverflow::Visible,
+            "3.18",
+        ),
+        (
+            "textCase",
+            "textCase",
+            text.text_case == TextCase::SmallCaps,
+            "11.51",
+        ),
+        (
+            "wordSpacing",
+            "wordSpacing",
+            text.word_spacing != 0.0,
+            "11.51",
+        ),
+        (
+            "paragraphSpacing",
+            "paragraphSpacing",
+            text.paragraph_spacing != 0.0,
+            "11.51",
+        ),
         ("textIndent", "textIndent", text.text_indent != 0.0, "11.51"),
-        ("stroke", "stroke", paints(&text.base.stroke) && text.base.stroke_width > 0.0, "3.18"),
-        ("point text align", "align", text.layout == TextLayout::Point && text.align != TextAlign::Left, "3.18"),
+        (
+            "stroke",
+            "stroke",
+            paints(&text.base.stroke) && text.base.stroke_width > 0.0,
+            "3.18",
+        ),
+        (
+            "point text align",
+            "align",
+            text.layout == TextLayout::Point && text.align != TextAlign::Left,
+            "3.18",
+        ),
     ] {
         if set {
-            let given = serde_json::to_value(text).ok().and_then(|value| value.get(field).cloned());
-            found.push(property(id, name, owner), at(field), given.unwrap_or_default());
+            let given = serde_json::to_value(text)
+                .ok()
+                .and_then(|value| value.get(field).cloned());
+            found.push(
+                property(id, name, owner),
+                at(field),
+                given.unwrap_or_default(),
+            );
         }
     }
 }
@@ -352,7 +522,10 @@ fn gradients(object: &SceneObject, at: &dyn Fn(&str) -> String, found: &mut Foun
     if let Some(paint) = fill {
         if let Some(kind) = gradient_kind(&base.fill) {
             found.push(
-                Refusal::UnsupportedPathGradient { object: base.id.clone(), paint: paint.into() },
+                Refusal::UnsupportedPathGradient {
+                    object: base.id.clone(),
+                    paint: paint.into(),
+                },
                 at("fill.type"),
                 serde_json::json!(kind),
             );
@@ -361,7 +534,10 @@ fn gradients(object: &SceneObject, at: &dyn Fn(&str) -> String, found: &mut Foun
     if stroke {
         if let Some(kind) = gradient_kind(&base.stroke) {
             found.push(
-                Refusal::UnsupportedPathGradient { object: base.id.clone(), paint: "stroke".into() },
+                Refusal::UnsupportedPathGradient {
+                    object: base.id.clone(),
+                    paint: "stroke".into(),
+                },
                 at("stroke.type"),
                 serde_json::json!(kind),
             );
@@ -392,7 +568,9 @@ fn shears(id: &str, parents: &HashMap<&str, &str>, by_id: &HashMap<&str, &SceneO
     }
     let mut non_uniform_above = false;
     for id in chain.into_iter().rev() {
-        let Some(object) = by_id.get(id) else { return false };
+        let Some(object) = by_id.get(id) else {
+            return false;
+        };
         let base = object.base();
         if non_uniform_above && base.rotation.rem_euclid(360.0) != 0.0 {
             return true;
@@ -420,14 +598,20 @@ fn has_stroke(object: &SceneObject) -> bool {
 fn chain<'a>(id: &'a str, parents: &HashMap<&'a str, &'a str>) -> Vec<&'a str> {
     let mut result = vec![id];
     while let Some(parent) = parents.get(result.last().unwrap()) {
-        if result.contains(parent) { break; }
+        if result.contains(parent) {
+            break;
+        }
         result.push(parent);
     }
     result
 }
 
 fn kind(object: &str, kind: &str, owner: &str) -> Refusal {
-    Refusal::ObjectKindNotDrawable { object: object.into(), kind: kind.into(), owner: owner.into() }
+    Refusal::ObjectKindNotDrawable {
+        object: object.into(),
+        kind: kind.into(),
+        owner: owner.into(),
+    }
 }
 
 fn property(object: &str, property: &str, owner: &str) -> Refusal {
@@ -451,14 +635,24 @@ mod tests {
 
     fn document(objects: Vec<SceneObject>) -> SceneDocument {
         let mut scene = crate::scene::new_scene("scene", "Scene", WorkingColorSpace::Srgb);
-        scene.canvas = SceneCanvas { width: 1920, height: 1080, frame_rate: RationalRate::P50 };
-        scene.timeline = SceneTimeline { duration_frames: 10, ..Default::default() };
+        scene.canvas = SceneCanvas {
+            width: 1920,
+            height: 1080,
+            frame_rate: RationalRate::P50,
+        };
+        scene.timeline = SceneTimeline {
+            duration_frames: 10,
+            ..Default::default()
+        };
         scene.objects = objects;
         scene
     }
 
     fn rect(id: &str) -> SceneObject {
-        SceneObject::Rect(RectObject { base: ObjectBase::new(id, id), radius: 0.0 })
+        SceneObject::Rect(RectObject {
+            base: ObjectBase::new(id, id),
+            radius: 0.0,
+        })
     }
 
     fn text(id: &str) -> TextObject {
@@ -506,41 +700,70 @@ mod tests {
         #[allow(clippy::type_complexity)]
         let cases: Vec<(&str, Box<dyn Fn(&mut TextObject)>)> = vec![
             ("autoFit", Box::new(|t| t.auto_fit = TextAutoFit::Shrink)),
-            ("writingMode", Box::new(|t| t.writing_mode = WritingMode::VerticalRl)),
-            ("verticalAlign", Box::new(|t| t.vertical_align = VerticalAlign::Middle)),
+            (
+                "writingMode",
+                Box::new(|t| t.writing_mode = WritingMode::VerticalRl),
+            ),
+            (
+                "verticalAlign",
+                Box::new(|t| t.vertical_align = VerticalAlign::Middle),
+            ),
             ("decoration", Box::new(|t| t.decoration.underline = true)),
             ("overflow", Box::new(|t| t.overflow = TextOverflow::Clip)),
             ("textCase", Box::new(|t| t.text_case = TextCase::SmallCaps)),
             ("wordSpacing", Box::new(|t| t.word_spacing = 4.0)),
             ("paragraphSpacing", Box::new(|t| t.paragraph_spacing = 4.0)),
             ("textIndent", Box::new(|t| t.text_indent = 12.0)),
-            ("point text align", Box::new(|t| t.align = TextAlign::Center)),
-            ("stroke", Box::new(|t| {
-                t.base.stroke = Some(ColorValue::Solid { color: Rgba::srgb(1.0, 0.0, 0.0, 1.0) });
-                t.base.stroke_width = 2.0;
-            })),
+            (
+                "point text align",
+                Box::new(|t| t.align = TextAlign::Center),
+            ),
+            (
+                "stroke",
+                Box::new(|t| {
+                    t.base.stroke = Some(ColorValue::Solid {
+                        color: Rgba::srgb(1.0, 0.0, 0.0, 1.0),
+                    });
+                    t.base.stroke_width = 2.0;
+                }),
+            ),
         ];
         for (name, set) in cases {
             let mut object = text("t");
             set(&mut object);
-            assert_eq!(property_of(refused(vec![SceneObject::Text(object)])).as_deref(), Some(name));
+            assert_eq!(
+                property_of(refused(vec![SceneObject::Text(object)])).as_deref(),
+                Some(name)
+            );
         }
     }
 
     #[test]
     fn three_d_layer_and_material_properties_on_2d_objects_refuse() {
         for (name, set) in [
-            ("rotationX", Box::new(|b: &mut ObjectBase| b.rotation_x = 10.0) as Box<dyn Fn(&mut ObjectBase)>),
-            ("rotationY", Box::new(|b: &mut ObjectBase| b.rotation_y = 10.0)),
+            (
+                "rotationX",
+                Box::new(|b: &mut ObjectBase| b.rotation_x = 10.0) as Box<dyn Fn(&mut ObjectBase)>,
+            ),
+            (
+                "rotationY",
+                Box::new(|b: &mut ObjectBase| b.rotation_y = 10.0),
+            ),
             ("scaleZ", Box::new(|b: &mut ObjectBase| b.scale_z = 2.0)),
             ("zDepth", Box::new(|b: &mut ObjectBase| b.z_depth = 5.0)),
-            ("layerId", Box::new(|b: &mut ObjectBase| b.layer_id = "layer".into())),
-            ("materialSlots", Box::new(|b: &mut ObjectBase| {
-                b.material_slots = Some(std::collections::BTreeMap::from([(
-                    "fill".to_string(),
-                    crate::material::MaterialBinding::new("m"),
-                )]));
-            })),
+            (
+                "layerId",
+                Box::new(|b: &mut ObjectBase| b.layer_id = "layer".into()),
+            ),
+            (
+                "materialSlots",
+                Box::new(|b: &mut ObjectBase| {
+                    b.material_slots = Some(std::collections::BTreeMap::from([(
+                        "fill".to_string(),
+                        crate::material::MaterialBinding::new("m"),
+                    )]));
+                }),
+            ),
         ] {
             let mut base = ObjectBase::new("r", "r");
             set(&mut base);
@@ -551,11 +774,20 @@ mod tests {
 
     #[test]
     fn a_rotation_under_a_non_uniform_parent_refuses_but_the_reverse_draws() {
-        let mut group = GroupObject { base: ObjectBase::new("g", "g"), child_ids: vec!["r".into()] };
+        let mut group = GroupObject {
+            base: ObjectBase::new("g", "g"),
+            child_ids: vec!["r".into()],
+        };
         group.base.scale_x = 2.0;
         let mut child = ObjectBase::new("r", "r");
         child.rotation = 30.0;
-        let sheared = vec![SceneObject::Group(group.clone()), SceneObject::Rect(RectObject { base: child.clone(), radius: 0.0 })];
+        let sheared = vec![
+            SceneObject::Group(group.clone()),
+            SceneObject::Rect(RectObject {
+                base: child.clone(),
+                radius: 0.0,
+            }),
+        ];
         assert_eq!(
             property_of(refused(sheared)).as_deref(),
             Some("rotation under a non-uniformly scaled parent")
@@ -566,7 +798,13 @@ mod tests {
         group.base.rotation = 30.0;
         child.rotation = 0.0;
         child.scale_x = 2.0;
-        let exact = vec![SceneObject::Group(group), SceneObject::Rect(RectObject { base: child, radius: 0.0 })];
+        let exact = vec![
+            SceneObject::Group(group),
+            SceneObject::Rect(RectObject {
+                base: child,
+                radius: 0.0,
+            }),
+        ];
         assert_eq!(refused(exact), None);
     }
 
@@ -586,53 +824,90 @@ mod tests {
 
     fn animated(object_id: &str, property: &str) -> KeyframeChannel {
         KeyframeChannel {
-            object_id: object_id.into(), property: property.into(),
+            object_id: object_id.into(),
+            property: property.into(),
             keys: vec![crate::animation::SceneKeyframe {
-                frame: 1, value: 30.0, easing: Default::default(), bezier: None,
+                frame: 1,
+                value: 30.0,
+                easing: Default::default(),
+                bezier: None,
             }],
         }
     }
 
     #[test]
     fn animation_cannot_introduce_a_shear_after_publish() {
-        let mut group = GroupObject { base: ObjectBase::new("g", "g"), child_ids: vec!["r".into()] };
+        let mut group = GroupObject {
+            base: ObjectBase::new("g", "g"),
+            child_ids: vec!["r".into()],
+        };
         group.base.scale_x = 2.0;
         let mut scene = document(vec![SceneObject::Group(group), rect("r")]);
         scene.timeline.channels.push(animated("r", "rotation"));
-        assert_eq!(property_of(refuse_what_the_software_path_cannot_draw(&scene).err()).as_deref(),
-            Some("animated rotation under a scaled parent"));
+        assert_eq!(
+            property_of(refuse_what_the_software_path_cannot_draw(&scene).err()).as_deref(),
+            Some("animated rotation under a scaled parent")
+        );
         scene.objects[0].base_mut().scale_x = 1.0;
-        assert!(refuse_what_the_software_path_cannot_draw(&scene).is_ok(), "rotation under uniform scale draws");
+        assert!(
+            refuse_what_the_software_path_cannot_draw(&scene).is_ok(),
+            "rotation under uniform scale draws"
+        );
         scene.timeline.channels.push(animated("g", "scaleX"));
-        assert_eq!(property_of(refuse_what_the_software_path_cannot_draw(&scene).err()).as_deref(),
-            Some("animated rotation under a scaled parent"));
+        assert_eq!(
+            property_of(refuse_what_the_software_path_cannot_draw(&scene).err()).as_deref(),
+            Some("animated rotation under a scaled parent")
+        );
     }
 
     #[test]
     fn strokes_cannot_silently_keep_their_width_under_scale() {
         let mut object = rect("r");
-        object.base_mut().stroke = Some(ColorValue::Solid { color: Rgba::srgb(1.0, 1.0, 1.0, 1.0) });
+        object.base_mut().stroke = Some(ColorValue::Solid {
+            color: Rgba::srgb(1.0, 1.0, 1.0, 1.0),
+        });
         object.base_mut().stroke_width = 10.0;
         object.base_mut().scale_x = 2.0;
-        assert_eq!(property_of(refused(vec![object.clone()])).as_deref(), Some("scaled strokeWidth"));
+        assert_eq!(
+            property_of(refused(vec![object.clone()])).as_deref(),
+            Some("scaled strokeWidth")
+        );
         object.base_mut().scale_x = 1.0;
         let mut scene = document(vec![object]);
         assert!(refuse_what_the_software_path_cannot_draw(&scene).is_ok());
         scene.timeline.channels.push(animated("r", "scaleY"));
-        assert_eq!(property_of(refuse_what_the_software_path_cannot_draw(&scene).err()).as_deref(), Some("scaled strokeWidth"));
+        assert_eq!(
+            property_of(refuse_what_the_software_path_cannot_draw(&scene).err()).as_deref(),
+            Some("scaled strokeWidth")
+        );
     }
 
     #[test]
     fn invalid_text_metrics_and_opacity_refuse_instead_of_being_clamped() {
         for (name, edit) in [
-            ("size", Box::new(|t: &mut TextObject| t.size = 0.0) as Box<dyn Fn(&mut TextObject)>),
-            ("lineHeight", Box::new(|t: &mut TextObject| t.line_height = Some(-1.0))),
-            ("letterSpacing", Box::new(|t: &mut TextObject| t.letter_spacing = f64::INFINITY)),
-            ("opacity", Box::new(|t: &mut TextObject| t.base.opacity = 2.0)),
+            (
+                "size",
+                Box::new(|t: &mut TextObject| t.size = 0.0) as Box<dyn Fn(&mut TextObject)>,
+            ),
+            (
+                "lineHeight",
+                Box::new(|t: &mut TextObject| t.line_height = Some(-1.0)),
+            ),
+            (
+                "letterSpacing",
+                Box::new(|t: &mut TextObject| t.letter_spacing = f64::INFINITY),
+            ),
+            (
+                "opacity",
+                Box::new(|t: &mut TextObject| t.base.opacity = 2.0),
+            ),
         ] {
             let mut object = text("t");
             edit(&mut object);
-            assert_eq!(property_of(refused(vec![SceneObject::Text(object)])).as_deref(), Some(name));
+            assert_eq!(
+                property_of(refused(vec![SceneObject::Text(object)])).as_deref(),
+                Some(name)
+            );
         }
     }
 
@@ -656,21 +931,30 @@ mod tests {
         fill.base_mut().visible = false;
         assert_eq!(
             refused(vec![fill]),
-            Some(Refusal::UnsupportedPathGradient { object: "r".into(), paint: "fill".into() })
+            Some(Refusal::UnsupportedPathGradient {
+                object: "r".into(),
+                paint: "fill".into()
+            })
         );
 
         let mut stroke = rect("r");
         stroke.base_mut().stroke = Some(gradient());
         assert_eq!(
             refused(vec![stroke]),
-            Some(Refusal::UnsupportedPathGradient { object: "r".into(), paint: "stroke".into() })
+            Some(Refusal::UnsupportedPathGradient {
+                object: "r".into(),
+                paint: "stroke".into()
+            })
         );
 
         let mut title = text("t");
         title.base.fill = Some(gradient());
         assert_eq!(
             refused(vec![SceneObject::Text(title)]),
-            Some(Refusal::UnsupportedPathGradient { object: "t".into(), paint: "text fill".into() })
+            Some(Refusal::UnsupportedPathGradient {
+                object: "t".into(),
+                paint: "text fill".into()
+            })
         );
 
         // A shape whose fill is disabled never paints it, so it cannot refuse.
@@ -701,9 +985,18 @@ mod tests {
 
     #[test]
     fn a_path_whose_tangents_do_not_match_its_vertices_refuses() {
-        assert_eq!(refused(vec![SceneObject::Shape(shape(vec![Vec2 { x: 0.0, y: 0.0 }; 2]))]), None);
         assert_eq!(
-            refused(vec![SceneObject::Shape(shape(vec![Vec2 { x: 0.0, y: 0.0 }]))]),
+            refused(vec![SceneObject::Shape(shape(vec![
+                Vec2 { x: 0.0, y: 0.0 };
+                2
+            ]))]),
+            None
+        );
+        assert_eq!(
+            refused(vec![SceneObject::Shape(shape(vec![Vec2 {
+                x: 0.0,
+                y: 0.0
+            }]))]),
             Some(Refusal::VectorTessellationFailed {
                 object: "s".into(),
                 detail: "Bezier vertices and tangent arrays differ in length".into(),
@@ -718,8 +1011,18 @@ mod tests {
         object.word_spacing = 4.0;
         object.base.opacity = 2.0;
         let found = drawability_refusals(&document(vec![rect("r"), SceneObject::Text(object)]));
-        let fields: Vec<_> = found.iter().map(|refusal| refusal.field.as_deref().unwrap_or("")).collect();
-        assert_eq!(fields, ["objects[1].opacity", "objects[1].decoration", "objects[1].wordSpacing"]);
+        let fields: Vec<_> = found
+            .iter()
+            .map(|refusal| refusal.field.as_deref().unwrap_or(""))
+            .collect();
+        assert_eq!(
+            fields,
+            [
+                "objects[1].opacity",
+                "objects[1].decoration",
+                "objects[1].wordSpacing"
+            ]
+        );
         assert_eq!(found[0].given, serde_json::json!(2.0));
     }
 
@@ -746,12 +1049,17 @@ mod tests {
         let scene = document(vec![rect("r"), light("key"), light("fill")]);
         assert_eq!(
             light_without_responsive_material(&scene),
-            Err(Refusal::LightHasNoResponsiveMaterial { light_id: "key".into() })
+            Err(Refusal::LightHasNoResponsiveMaterial {
+                light_id: "key".into()
+            })
         );
         let found = drawability_refusals(&scene);
         assert_eq!(found.len(), 1, "{found:?}");
         assert_eq!(found[0].field.as_deref(), Some("objects[1].type"));
-        assert!(light_without_responsive_material(&document(vec![rect("r")])).is_ok(), "no light, no rule");
+        assert!(
+            light_without_responsive_material(&document(vec![rect("r")])).is_ok(),
+            "no light, no rule"
+        );
     }
 
     #[test]
@@ -762,17 +1070,30 @@ mod tests {
             "type": "mesh", "id": "m", "name": "m", "meshKind": "cube", "depth": 1.0
         }))
         .expect("a minimal mesh parses");
-        mesh.base_mut().material_slots =
-            Some(std::collections::BTreeMap::from([("object".to_string(), MaterialBinding::new("lit"))]));
+        mesh.base_mut().material_slots = Some(std::collections::BTreeMap::from([(
+            "object".to_string(),
+            MaterialBinding::new("lit"),
+        )]));
         scene.objects.push(mesh);
         scene.materials.push(MaterialDefinition {
-            material_id: "lit".into(), name: "lit".into(), kind: MaterialKind::Pbr,
-            color: ColorValue::opaque_white(), opacity: 1.0, blend_mode: Default::default(),
-            alpha_mode: Default::default(), cull_mode: Default::default(), depth_mode: Default::default(),
-            double_sided: false, textures: Vec::new(), shader_id: None,
+            material_id: "lit".into(),
+            name: "lit".into(),
+            kind: MaterialKind::Pbr,
+            color: ColorValue::opaque_white(),
+            opacity: 1.0,
+            blend_mode: Default::default(),
+            alpha_mode: Default::default(),
+            cull_mode: Default::default(),
+            depth_mode: Default::default(),
+            double_sided: false,
+            textures: Vec::new(),
+            shader_id: None,
         });
         assert!(light_without_responsive_material(&scene).is_ok());
         scene.materials[0].kind = MaterialKind::Unlit;
-        assert!(light_without_responsive_material(&scene).is_err(), "unlit material does not respond");
+        assert!(
+            light_without_responsive_material(&scene).is_err(),
+            "unlit material does not respond"
+        );
     }
 }

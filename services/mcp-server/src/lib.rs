@@ -168,15 +168,15 @@ impl Server {
 
     /// Register a handler for one tool. The tool must exist in the registry.
     pub fn register(&mut self, tool: &'static str, handler: Box<dyn ToolHandler>) {
-        assert!(ToolRegistry::get(tool).is_some(), "unregistered MCP tool {tool}");
+        assert!(
+            ToolRegistry::get(tool).is_some(),
+            "unregistered MCP tool {tool}"
+        );
         self.handlers.insert(tool, handler);
     }
 
     /// The handler for one tool, if the caller may reach it.
-    fn authorised_handler(
-        &self,
-        name: &str,
-    ) -> Result<&dyn ToolHandler, Refusal> {
+    fn authorised_handler(&self, name: &str) -> Result<&dyn ToolHandler, Refusal> {
         // The gate runs before the lookup, so an out-of-scope call to a tool
         // that exists and one that does not are indistinguishable — a caller
         // probing for what exists learns nothing it was not told.
@@ -214,11 +214,7 @@ impl Server {
             // which is the discovery failure this surface exists to prevent.
             "tools/list" => self.list(),
             "tools/call" => self.call(request.params),
-            other => Err((
-                METHOD_NOT_FOUND,
-                format!("no method {other}"),
-                None,
-            )),
+            other => Err((METHOD_NOT_FOUND, format!("no method {other}"), None)),
         };
 
         Some(match result {
@@ -263,9 +259,13 @@ impl Server {
     // A refusal carries its field, the given value and the allowed list; the Err variant is large by design.
     #[allow(clippy::result_large_err)]
     fn list(&self) -> Result<serde_json::Value, (i64, String, Option<StructuredRefusal>)> {
-        let listed = self
-            .listed_tools()
-            .map_err(|refusal| (REFUSED, refusal.to_string(), Some(StructuredRefusal::error(refusal))))?;
+        let listed = self.listed_tools().map_err(|refusal| {
+            (
+                REFUSED,
+                refusal.to_string(),
+                Some(StructuredRefusal::error(refusal)),
+            )
+        })?;
         let tools: Vec<serde_json::Value> = listed
             .into_iter()
             .map(|tool| {
@@ -286,11 +286,7 @@ impl Server {
         &self,
         params: Option<serde_json::Value>,
     ) -> Result<serde_json::Value, (i64, String, Option<StructuredRefusal>)> {
-        let params = params.ok_or((
-            INVALID_PARAMS,
-            "tools/call needs params".to_string(),
-            None,
-        ))?;
+        let params = params.ok_or((INVALID_PARAMS, "tools/call needs params".to_string(), None))?;
         let name = params
             .get("name")
             .and_then(serde_json::Value::as_str)
@@ -427,8 +423,8 @@ mod tests {
         let mut server = Server::new(vec![Scope::Author]);
         server.register("playout.take", Box::new(Echo));
 
-        let reply = call(&server, "playout.take", serde_json::Value::Null)
-            .expect("a refusal is a reply");
+        let reply =
+            call(&server, "playout.take", serde_json::Value::Null).expect("a refusal is a reply");
         let error = reply.error.expect("a refusal carries an error");
         assert_eq!(error.code, REFUSED);
         assert!(matches!(
@@ -488,15 +484,21 @@ mod tests {
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../../Shared/generated-ts/schemas/mcp")
                 .join(format!("{name}.schema.json"));
-            let stored: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
-            assert_eq!(tool["inputSchema"], stored, "stale generated MCP schema for {name}");
+            let stored: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+            assert_eq!(
+                tool["inputSchema"], stored,
+                "stale generated MCP schema for {name}"
+            );
         }
     }
 
     #[test]
     fn tools_list_only_advertises_installed_handlers() {
         let server = Server::new(Vec::new());
-        let reply = server.handle(request(1, "tools/list", serde_json::Value::Null)).unwrap();
+        let reply = server
+            .handle(request(1, "tools/list", serde_json::Value::Null))
+            .unwrap();
         let tools = reply.result.unwrap()["tools"].as_array().unwrap().clone();
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["name"], "system.capability");
@@ -521,8 +523,7 @@ mod tests {
         server
             .serve(b"not json\n".as_slice(), &mut out)
             .expect("a bad line is an error reply, not a crash");
-        let reply: serde_json::Value =
-            serde_json::from_slice(&out).expect("the reply is JSON");
+        let reply: serde_json::Value = serde_json::from_slice(&out).expect("the reply is JSON");
         assert_eq!(reply["error"]["code"], PARSE_ERROR);
     }
 }

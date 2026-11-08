@@ -356,8 +356,7 @@ pub fn duplicate_object(
 
     // Reserve every new id before copying, so a group and its children cannot
     // be handed the same generated id.
-    let mut taken: BTreeSet<String> =
-        scene.objects.iter().map(|o| o.base().id.clone()).collect();
+    let mut taken: BTreeSet<String> = scene.objects.iter().map(|o| o.base().id.clone()).collect();
     let mut remap: HashMap<String, String> = HashMap::new();
     for source in &sources {
         let Some(object) = find_object(scene, source) else {
@@ -497,7 +496,6 @@ fn child_ids_mut(object: &mut SceneObject) -> Option<&mut Vec<String>> {
         _ => None,
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -748,7 +746,11 @@ mod tests {
             rename_object(&mut s, "rect-1", "\t"),
             Err(Refusal::SceneObjectNameEmpty)
         ));
-        assert_eq!(s.objects[0].base().name, "Lower third", "refused, unchanged");
+        assert_eq!(
+            s.objects[0].base().name,
+            "Lower third",
+            "refused, unchanged"
+        );
         assert!(matches!(
             rename_object(&mut s, "nope", "X"),
             Err(Refusal::SceneObjectUnknown { .. })

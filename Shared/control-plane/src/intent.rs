@@ -147,7 +147,6 @@ pub struct PhaseCommitted {
     pub committed: TakeCommitted,
 }
 
-
 /// What the engine actually committed to.
 ///
 /// This is the half of the exchange that makes intent-based control honest:

@@ -81,7 +81,11 @@ pub struct PreparedFontSource {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum FontDisposition {
     /// Part of this batch's `fonts`.
     Added,
@@ -507,7 +511,11 @@ mod tests {
         let refusal = prepare_font_files(
             &mut store,
             EMPTY,
-            &[input("Unlicensed.ttf", UNLICENSED, EmbeddingPolicy::Package)],
+            &[input(
+                "Unlicensed.ttf",
+                UNLICENSED,
+                EmbeddingPolicy::Package,
+            )],
         )
         .unwrap_err();
         assert_eq!(refusal.source, "Unlicensed.ttf");
@@ -522,10 +530,17 @@ mod tests {
         let restricted = prepare_font_files(
             &mut store,
             EMPTY,
-            &[input("Unlicensed.ttf", UNLICENSED, EmbeddingPolicy::Restricted)],
+            &[input(
+                "Unlicensed.ttf",
+                UNLICENSED,
+                EmbeddingPolicy::Restricted,
+            )],
         )
         .unwrap();
-        assert_eq!(restricted.fonts[0].embedding_policy, EmbeddingPolicy::Restricted);
+        assert_eq!(
+            restricted.fonts[0].embedding_policy,
+            EmbeddingPolicy::Restricted
+        );
         assert_eq!(restricted.fonts[0].license, None);
 
         // A declared licence wins over the naming table's.

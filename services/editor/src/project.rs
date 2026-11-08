@@ -30,14 +30,20 @@ pub enum EditorError {
     Refused(Refusal),
     /// The filesystem did not cooperate. Distinct from a refusal: nothing was
     /// decided, the operation simply could not be carried out.
-    Io { path: PathBuf, source: std::io::Error },
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
     /// A durable write did not complete.
     Write(gx_fs::AtomicWriteError),
     /// A document could not be serialised.
     Serialize(serde_json::Error),
     /// A file on disk did not parse. Carries the file, so a library listing
     /// with one bad record says which one.
-    Parse { path: PathBuf, source: serde_json::Error },
+    Parse {
+        path: PathBuf,
+        source: serde_json::Error,
+    },
 }
 
 impl std::fmt::Display for EditorError {
@@ -115,7 +121,8 @@ impl Projects {
     }
 
     fn take_page_path(&self, project: &str, page_id: &str) -> PathBuf {
-        self.take_pages_directory(project).join(format!("{page_id}.json"))
+        self.take_pages_directory(project)
+            .join(format!("{page_id}.json"))
     }
 
     fn assets_directory(&self, project: &str) -> PathBuf {
@@ -127,11 +134,13 @@ impl Projects {
     }
 
     fn motion_preset_path(&self, project: &str, preset_id: &str) -> PathBuf {
-        self.motion_presets_directory(project).join(format!("{preset_id}.json"))
+        self.motion_presets_directory(project)
+            .join(format!("{preset_id}.json"))
     }
 
     fn scene_path(&self, project: &str, scene_id: &str) -> PathBuf {
-        self.scenes_directory(project).join(format!("{scene_id}.json"))
+        self.scenes_directory(project)
+            .join(format!("{scene_id}.json"))
     }
 
     /// Whether a project exists. The question every write asks first. A name
@@ -242,7 +251,9 @@ impl Projects {
     /// never rewrite the authored scene it references.
     pub fn write_take_page(&self, project: &str, page: &TakePage) -> Result<(), EditorError> {
         self.require_project(project)?;
-        require_component(&page.page_id, |page_id| Refusal::TakePageIdInvalid { page_id })?;
+        require_component(&page.page_id, |page_id| Refusal::TakePageIdInvalid {
+            page_id,
+        })?;
         let directory = self.take_pages_directory(project);
         std::fs::create_dir_all(&directory).map_err(|source| EditorError::Io {
             path: directory,
@@ -277,7 +288,12 @@ impl Projects {
                 })
                 .collect::<Vec<_>>(),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-            Err(source) => return Err(EditorError::Io { path: directory, source }),
+            Err(source) => {
+                return Err(EditorError::Io {
+                    path: directory,
+                    source,
+                })
+            }
         };
         ids.sort();
         Ok(ids)
@@ -286,9 +302,15 @@ impl Projects {
     /// Save one motion preset into the project's library, replacing the file
     /// of the same id (11.15). Saved in place, never versioned: a design-system
     /// version stays immutable and this is the working library beside it.
-    pub fn write_motion_preset(&self, project: &str, preset: &MotionPreset) -> Result<(), EditorError> {
+    pub fn write_motion_preset(
+        &self,
+        project: &str,
+        preset: &MotionPreset,
+    ) -> Result<(), EditorError> {
         self.require_project(project)?;
-        require_component(&preset.id, |preset_id| Refusal::MotionPresetIdInvalid { preset_id })?;
+        require_component(&preset.id, |preset_id| Refusal::MotionPresetIdInvalid {
+            preset_id,
+        })?;
         let directory = self.motion_presets_directory(project);
         std::fs::create_dir_all(&directory).map_err(|source| EditorError::Io {
             path: directory,
@@ -300,12 +322,20 @@ impl Projects {
     }
 
     /// One saved preset, or `None` when the library has no such id.
-    pub fn read_motion_preset(&self, project: &str, preset_id: &str) -> Result<Option<MotionPreset>, EditorError> {
+    pub fn read_motion_preset(
+        &self,
+        project: &str,
+        preset_id: &str,
+    ) -> Result<Option<MotionPreset>, EditorError> {
         self.require_project(project)?;
-        require_component(preset_id, |preset_id| Refusal::MotionPresetIdInvalid { preset_id })?;
+        require_component(preset_id, |preset_id| Refusal::MotionPresetIdInvalid {
+            preset_id,
+        })?;
         let path = self.motion_preset_path(project, preset_id);
         match std::fs::read(&path) {
-            Ok(bytes) => serde_json::from_slice(&bytes).map(Some).map_err(EditorError::Serialize),
+            Ok(bytes) => serde_json::from_slice(&bytes)
+                .map(Some)
+                .map_err(EditorError::Serialize),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(source) => Err(EditorError::Io { path, source }),
         }
@@ -317,7 +347,9 @@ impl Projects {
         self.require_project(project)?;
         let mut paths = directory_paths(&self.motion_presets_directory(project))?
             .into_iter()
-            .filter(|path| path.extension().and_then(|extension| extension.to_str()) == Some("json"))
+            .filter(|path| {
+                path.extension().and_then(|extension| extension.to_str()) == Some("json")
+            })
             .collect::<Vec<_>>();
         paths.sort();
         paths.iter().map(|path| read_json(path)).collect()
@@ -332,12 +364,21 @@ impl Projects {
     /// text); the extension is chosen from a closed set so the folder stays
     /// readable in a file browser. The bytes are re-hashed first: bytes that
     /// are not the asset's address are refused, never filed under it.
-    pub fn adopt_asset(&self, project: &str, item: &AssetLibraryItem, bytes: &[u8]) -> Result<(), EditorError> {
+    pub fn adopt_asset(
+        &self,
+        project: &str,
+        item: &AssetLibraryItem,
+        bytes: &[u8],
+    ) -> Result<(), EditorError> {
         self.require_project(project)?;
         let hash = asset_hash(item)?;
         let actual = gx_asset_plane::content_hash(bytes);
         if actual != hash {
-            return Err(Refusal::AssetHashMismatch { expected: hash, actual }.into());
+            return Err(Refusal::AssetHashMismatch {
+                expected: hash,
+                actual,
+            }
+            .into());
         }
         let directory = self.assets_directory(project);
         std::fs::create_dir_all(&directory).map_err(|source| EditorError::Io {
@@ -345,9 +386,11 @@ impl Projects {
             source,
         })?;
         let extension = asset_extension(item);
-        gx_fs::write_atomic(&directory.join(format!("{}.{extension}", hash.0)), bytes).map_err(EditorError::Write)?;
+        gx_fs::write_atomic(&directory.join(format!("{}.{extension}", hash.0)), bytes)
+            .map_err(EditorError::Write)?;
         let record = serde_json::to_vec_pretty(item).map_err(EditorError::Serialize)?;
-        gx_fs::write_atomic(&directory.join(format!("{}.json", hash.0)), &record).map_err(EditorError::Write)
+        gx_fs::write_atomic(&directory.join(format!("{}.json", hash.0)), &record)
+            .map_err(EditorError::Write)
     }
 
     /// Whether the project already holds the bytes for this content address.
@@ -358,14 +401,22 @@ impl Projects {
     /// The verified bytes of a project asset, or `None` when the project does
     /// not hold them. A file whose bytes no longer match its name is an error
     /// naming the hash, never served.
-    pub fn read_asset(&self, project: &str, hash: &ContentHash) -> Result<Option<Vec<u8>>, EditorError> {
+    pub fn read_asset(
+        &self,
+        project: &str,
+        hash: &ContentHash,
+    ) -> Result<Option<Vec<u8>>, EditorError> {
         let Some(path) = self.asset_file(project, hash)? else {
             return Ok(None);
         };
         let bytes = std::fs::read(&path).map_err(|source| EditorError::Io { path, source })?;
         let actual = gx_asset_plane::content_hash(&bytes);
         if &actual != hash {
-            return Err(Refusal::AssetHashMismatch { expected: hash.clone(), actual }.into());
+            return Err(Refusal::AssetHashMismatch {
+                expected: hash.clone(),
+                actual,
+            }
+            .into());
         }
         Ok(Some(bytes))
     }
@@ -377,28 +428,40 @@ impl Projects {
         self.require_project(project)?;
         let mut paths = directory_paths(&self.assets_directory(project))?
             .into_iter()
-            .filter(|path| path.extension().and_then(|extension| extension.to_str()) == Some("json"))
+            .filter(|path| {
+                path.extension().and_then(|extension| extension.to_str()) == Some("json")
+            })
             .collect::<Vec<_>>();
         paths.sort();
         let mut items = paths
             .iter()
             .map(|path| read_json::<AssetLibraryItem>(path))
             .collect::<Result<Vec<_>, _>>()?;
-        items.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.asset_id.cmp(&b.asset_id)));
+        items.sort_by(|a, b| {
+            a.name
+                .cmp(&b.name)
+                .then_with(|| a.asset_id.cmp(&b.asset_id))
+        });
         Ok(items)
     }
 
     /// The file holding a content address, found by its hash prefix so the
     /// extension never has to be known to look it up.
-    fn asset_file(&self, project: &str, hash: &ContentHash) -> Result<Option<PathBuf>, EditorError> {
+    fn asset_file(
+        &self,
+        project: &str,
+        hash: &ContentHash,
+    ) -> Result<Option<PathBuf>, EditorError> {
         self.require_project(project)?;
         require_hash(hash)?;
         let prefix = format!("{}.", hash.0);
-        Ok(directory_paths(&self.assets_directory(project))?.into_iter().find(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with(&prefix) && !name.ends_with(".json"))
-        }))
+        Ok(directory_paths(&self.assets_directory(project))?
+            .into_iter()
+            .find(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with(&prefix) && !name.ends_with(".json"))
+            }))
     }
 
     /// The projects that exist, in directory order.
@@ -510,7 +573,12 @@ impl Projects {
 /// A content address is 64 lowercase hex digits; anything else could name a
 /// path outside the project's asset folder.
 fn require_hash(hash: &ContentHash) -> Result<(), EditorError> {
-    if hash.0.len() == 64 && hash.0.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')) {
+    if hash.0.len() == 64
+        && hash
+            .0
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    {
         Ok(())
     } else {
         Err(Refusal::AssetMissing { hash: hash.clone() }.into())
@@ -533,10 +601,12 @@ fn directory_paths(directory: &Path) -> Result<Vec<PathBuf>, EditorError> {
     };
     entries
         .map(|entry| {
-            entry.map(|entry| entry.path()).map_err(|source| EditorError::Io {
-                path: directory.to_path_buf(),
-                source,
-            })
+            entry
+                .map(|entry| entry.path())
+                .map_err(|source| EditorError::Io {
+                    path: directory.to_path_buf(),
+                    source,
+                })
         })
         .collect()
 }
@@ -567,7 +637,10 @@ fn asset_extension(item: &AssetLibraryItem) -> String {
     std::path::Path::new(&item.path)
         .extension()
         .and_then(|extension| extension.to_str())
-        .filter(|extension| (1..=5).contains(&extension.len()) && extension.bytes().all(|byte| byte.is_ascii_alphanumeric()))
+        .filter(|extension| {
+            (1..=5).contains(&extension.len())
+                && extension.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        })
         .map_or_else(|| "bin".to_owned(), str::to_ascii_lowercase)
 }
 
@@ -585,7 +658,9 @@ fn require_component(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gx_contracts::provenance::{AssetApproval, AssetOrigin, AssetProvenance, LicenseClass, ProvenanceTool};
+    use gx_contracts::provenance::{
+        AssetApproval, AssetOrigin, AssetProvenance, LicenseClass, ProvenanceTool,
+    };
     use gx_contracts::scene::{AssetKind, AssetLibraryItem, SceneCanvas, SceneTimeline};
     use gx_contracts::{RationalRate, Revision};
 
@@ -612,7 +687,10 @@ mod tests {
                 height: 1080,
                 frame_rate: RationalRate::P50,
             },
-            timeline: SceneTimeline { duration_frames: 1, ..Default::default() },
+            timeline: SceneTimeline {
+                duration_frames: 1,
+                ..Default::default()
+            },
             data_context: Default::default(),
             assets: Vec::new(),
             fonts: Vec::new(),
@@ -654,7 +732,9 @@ mod tests {
         let root = scratch("create-then-write");
         let projects = Projects::at_root(&root);
 
-        projects.create_project("news").expect("a project is created");
+        projects
+            .create_project("news")
+            .expect("a project is created");
         projects
             .write_scene("news", &scene("lower-third"))
             .expect("the same write now succeeds");
@@ -731,7 +811,10 @@ mod tests {
             projects.create_project("../outside2"),
             Err(EditorError::Refused(Refusal::ProjectNameInvalid { project })) if project == "../outside2"
         ));
-        assert!(!root.join("outside2").exists(), "the refused create wrote nothing");
+        assert!(
+            !root.join("outside2").exists(),
+            "the refused create wrote nothing"
+        );
         // The directory exists, so only the name check stands between this
         // write and a file outside the store.
         assert!(matches!(
@@ -746,7 +829,10 @@ mod tests {
             projects.delete_scene("news", "a/b").err(),
         ] {
             assert!(
-                matches!(outcome, Some(EditorError::Refused(Refusal::SceneIdInvalid { .. }))),
+                matches!(
+                    outcome,
+                    Some(EditorError::Refused(Refusal::SceneIdInvalid { .. }))
+                ),
                 "a scene id is one filename, never a path: {outcome:?}"
             );
         }
@@ -764,7 +850,11 @@ mod tests {
             projects.read_take_page("news", "../page"),
             Err(EditorError::Refused(Refusal::TakePageIdInvalid { .. }))
         ));
-        assert!(!root.join("outside").join("scenes").join("escape.json").exists());
+        assert!(!root
+            .join("outside")
+            .join("scenes")
+            .join("escape.json")
+            .exists());
 
         std::fs::remove_dir_all(root).expect("clean up");
     }
@@ -784,12 +874,17 @@ mod tests {
         let path = root.join("legacy").join("scenes").join("witness.json");
         std::fs::write(&path, FIXTURE).unwrap();
 
-        let upgraded = projects.read_scene("legacy", "witness").expect("a version 1 scene reads");
+        let upgraded = projects
+            .read_scene("legacy", "witness")
+            .expect("a version 1 scene reads");
         let original: serde_json::Value = serde_json::from_slice(FIXTURE).unwrap();
         assert_eq!(original["version"], 1, "the fixture predates 11.39");
         assert_eq!(upgraded.version, gx_contracts::scene::SCENE_SCHEMA_VERSION);
         assert_eq!(upgraded.assets.len(), 3);
-        assert!(upgraded.assets.iter().all(|asset| asset.provenance == AssetProvenance::default()));
+        assert!(upgraded
+            .assets
+            .iter()
+            .all(|asset| asset.provenance == AssetProvenance::default()));
 
         // Take away exactly what the upgrade adds; what remains is the
         // original, value for value.
@@ -800,7 +895,10 @@ mod tests {
         }
         assert_eq!(upgraded.working_color_space, WorkingColorSpace::BEFORE_3_15);
         after.as_object_mut().unwrap().remove("workingColorSpace");
-        assert_eq!(after, original, "the upgrade changed something the document stated");
+        assert_eq!(
+            after, original,
+            "the upgrade changed something the document stated"
+        );
 
         projects.write_scene("legacy", &upgraded).unwrap();
         let saved = std::fs::read(&path).unwrap();
@@ -816,7 +914,10 @@ mod tests {
         std::fs::write(&path, serde_json::to_vec(&newer).unwrap()).unwrap();
         assert!(matches!(
             projects.read_scene("legacy", "witness"),
-            Err(EditorError::Refused(Refusal::SceneSchemaUnsupported { actual: 4, supported: 3 }))
+            Err(EditorError::Refused(Refusal::SceneSchemaUnsupported {
+                actual: 4,
+                supported: 3
+            }))
         ));
 
         std::fs::remove_dir_all(root).expect("clean up");
@@ -836,11 +937,16 @@ mod tests {
         let projects = Projects::at_root(&root);
         projects.create_project("legacy").unwrap();
         std::fs::remove_file(root.join("legacy").join(PROJECT_SETTINGS_FILE)).unwrap();
-        assert_eq!(projects.settings("legacy").unwrap(), ProjectSettings::before_3_15());
+        assert_eq!(
+            projects.settings("legacy").unwrap(),
+            ProjectSettings::before_3_15()
+        );
         let path = root.join("legacy").join("scenes").join("witness.json");
         std::fs::write(&path, FIXTURE).unwrap();
 
-        let upgraded = projects.read_scene("legacy", "witness").expect("a version 2 scene reads");
+        let upgraded = projects
+            .read_scene("legacy", "witness")
+            .expect("a version 2 scene reads");
         let original: serde_json::Value = serde_json::from_slice(FIXTURE).unwrap();
         assert_eq!(original["version"], 2, "the fixture predates 3.15");
         assert!(original.get("workingColorSpace").is_none());
@@ -850,7 +956,10 @@ mod tests {
         let mut after = serde_json::to_value(&upgraded).unwrap();
         after["version"] = original["version"].clone();
         after.as_object_mut().unwrap().remove("workingColorSpace");
-        assert_eq!(after, original, "the upgrade changed something the document stated");
+        assert_eq!(
+            after, original,
+            "the upgrade changed something the document stated"
+        );
 
         projects.write_scene("legacy", &upgraded).unwrap();
         let saved = std::fs::read(&path).unwrap();
@@ -860,7 +969,11 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), saved);
 
         projects.create_project("design").unwrap();
-        std::fs::write(root.join("design").join("scenes").join("witness.json"), FIXTURE).unwrap();
+        std::fs::write(
+            root.join("design").join("scenes").join("witness.json"),
+            FIXTURE,
+        )
+        .unwrap();
         assert!(matches!(
             projects.read_scene("design", "witness"),
             Err(EditorError::Refused(Refusal::SceneWorkingSpaceMismatch {
@@ -886,26 +999,39 @@ mod tests {
             serde_json::from_slice::<serde_json::Value>(&file).unwrap(),
             serde_json::json!({ "workingColorSpace": "srgb" })
         );
-        assert_eq!(projects.settings("show").unwrap().working_color_space, WorkingColorSpace::Srgb);
+        assert_eq!(
+            projects.settings("show").unwrap().working_color_space,
+            WorkingColorSpace::Srgb
+        );
 
         let mut linear = scene("linear");
         linear.working_color_space = WorkingColorSpace::LinearSrgb;
         assert!(matches!(
             projects.write_scene("show", &linear),
-            Err(EditorError::Refused(Refusal::SceneWorkingSpaceMismatch { .. }))
+            Err(EditorError::Refused(
+                Refusal::SceneWorkingSpaceMismatch { .. }
+            ))
         ));
         assert!(
-            !root.join("show").join("scenes").join("linear.json").exists(),
+            !root
+                .join("show")
+                .join("scenes")
+                .join("linear.json")
+                .exists(),
             "a refused scene is not written"
         );
 
         projects
             .create_project_with(
                 "physical",
-                ProjectSettings { working_color_space: WorkingColorSpace::LinearSrgb },
+                ProjectSettings {
+                    working_color_space: WorkingColorSpace::LinearSrgb,
+                },
             )
             .unwrap();
-        projects.write_scene("physical", &linear).expect("a linear scene belongs in a linear project");
+        projects
+            .write_scene("physical", &linear)
+            .expect("a linear scene belongs in a linear project");
         assert_eq!(projects.read_scene("physical", "linear").unwrap(), linear);
 
         assert!(
@@ -940,7 +1066,10 @@ mod tests {
             provider: Some("Model vendor".into()),
             license_class: Some(LicenseClass::NonCommercial),
             prompt_hash: Some(gx_contracts::ContentHash("b".repeat(64))),
-            sources: vec!["https://example.com/reference.png".into(), "asset_images_0123".into()],
+            sources: vec![
+                "https://example.com/reference.png".into(),
+                "asset_images_0123".into(),
+            ],
             approval: Some(AssetApproval {
                 user: "producer@example.com".into(),
                 at: "2026-10-04T09:30:00Z".into(),
@@ -973,8 +1102,20 @@ mod tests {
 
         let written: serde_json::Value = serde_json::from_slice(&saved).unwrap();
         let record = &written["assets"][0]["provenance"];
-        for field in ["origin", "tool", "provider", "licenseClass", "promptHash", "sources", "approval", "c2paManifest"] {
-            assert!(record.get(field).is_some(), "the saved record names {field}");
+        for field in [
+            "origin",
+            "tool",
+            "provider",
+            "licenseClass",
+            "promptHash",
+            "sources",
+            "approval",
+            "c2paManifest",
+        ] {
+            assert!(
+                record.get(field).is_some(),
+                "the saved record names {field}"
+            );
         }
 
         std::fs::remove_dir_all(root).expect("clean up");
@@ -1010,15 +1151,26 @@ mod tests {
         projects.adopt_asset("news", &item, &bytes).unwrap();
 
         // Named by hash with the library path's extension; the record sits beside it.
-        let file = root.join("news").join("assets").join(format!("{}.png", hash.0));
+        let file = root
+            .join("news")
+            .join("assets")
+            .join(format!("{}.png", hash.0));
         assert_eq!(std::fs::read(&file).unwrap(), bytes);
         assert!(projects.has_asset("news", &hash).unwrap());
-        assert_eq!(projects.read_asset("news", &hash).unwrap(), Some(bytes.clone()));
+        assert_eq!(
+            projects.read_asset("news", &hash).unwrap(),
+            Some(bytes.clone())
+        );
         assert_eq!(projects.project_assets("news").unwrap(), vec![item.clone()]);
 
         // Adopting the same asset again is the same file, not a second copy.
         projects.adopt_asset("news", &item, &bytes).unwrap();
-        assert_eq!(std::fs::read_dir(root.join("news").join("assets")).unwrap().count(), 2);
+        assert_eq!(
+            std::fs::read_dir(root.join("news").join("assets"))
+                .unwrap()
+                .count(),
+            2
+        );
 
         // A file that no longer matches its name is refused, never served.
         std::fs::write(&file, b"tampered").unwrap();
@@ -1067,7 +1219,11 @@ mod tests {
         let mut odd = asset_item("Odd", "assets/images/x.not_an_extension", b"odd");
         projects.adopt_asset("news", &odd, b"odd").unwrap();
         let hash = odd.checksum.take().unwrap();
-        assert!(root.join("news").join("assets").join(format!("{}.bin", hash.0)).exists());
+        assert!(root
+            .join("news")
+            .join("assets")
+            .join(format!("{}.bin", hash.0))
+            .exists());
         std::fs::remove_dir_all(root).expect("clean up");
     }
 
@@ -1082,7 +1238,9 @@ mod tests {
         let assets = root.join("news").join("assets");
         std::fs::write(assets.join("broken.json"), b"{ not json").unwrap();
         let error = projects.project_assets("news").unwrap_err();
-        assert!(matches!(&error, EditorError::Parse { path, .. } if path == &assets.join("broken.json")));
+        assert!(
+            matches!(&error, EditorError::Parse { path, .. } if path == &assets.join("broken.json"))
+        );
         assert!(error.to_string().contains("broken.json"), "{error}");
 
         let presets = root.join("news").join("motion-presets");

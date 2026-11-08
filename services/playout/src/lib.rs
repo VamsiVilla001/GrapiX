@@ -123,11 +123,18 @@ impl PublishedLibrary {
     /// immutable; only its review state changes. This is an operator action:
     /// it is reachable from the Playout operator surface and from no agent
     /// tool (invariant 65).
-    pub fn set_review(&mut self, take_id: &TakeId, revision: Revision, review: ReviewState) -> Result<&PublishedScene, Refusal> {
+    pub fn set_review(
+        &mut self,
+        take_id: &TakeId,
+        revision: Revision,
+        review: ReviewState,
+    ) -> Result<&PublishedScene, Refusal> {
         let scene = self
             .revisions
             .get_mut(&(take_id.clone(), revision))
-            .ok_or_else(|| Refusal::UnknownTake { take_id: take_id.clone() })?;
+            .ok_or_else(|| Refusal::UnknownTake {
+                take_id: take_id.clone(),
+            })?;
         scene.review = review;
         Ok(scene)
     }
@@ -255,13 +262,20 @@ where
 /// The hash a revision pins, or the refusal for a revision that has none.
 /// Playout never sends an unpinned cue or take (invariant 61).
 fn pinned(scene: &PublishedScene) -> Result<ContentHash, Refusal> {
-    scene.content_hash.clone().ok_or_else(|| Refusal::RevisionUnpinned {
-        take_id: scene.take_id.clone(),
-        revision: scene.revision,
-    })
+    scene
+        .content_hash
+        .clone()
+        .ok_or_else(|| Refusal::RevisionUnpinned {
+            take_id: scene.take_id.clone(),
+            revision: scene.revision,
+        })
 }
 
-fn committed_reply<F>(reply: EngineReply, operation: &str, committed: F) -> Result<TakeCommitted, Refusal>
+fn committed_reply<F>(
+    reply: EngineReply,
+    operation: &str,
+    committed: F,
+) -> Result<TakeCommitted, Refusal>
 where
     F: FnOnce(&EngineReply) -> Option<TakeCommitted>,
 {
@@ -343,23 +357,42 @@ impl Rundown {
 /// Errors while reading or durably replacing a rundown file.
 #[derive(Debug)]
 pub enum RundownStoreError {
-    Refused { refusal: Refusal },
-    Read { path: PathBuf, source: std::io::Error },
-    Decode { path: PathBuf, source: serde_json::Error },
-    Encode { source: serde_json::Error },
-    Write { path: PathBuf, source: gx_fs::AtomicWriteError },
+    Refused {
+        refusal: Refusal,
+    },
+    Read {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    Decode {
+        path: PathBuf,
+        source: serde_json::Error,
+    },
+    Encode {
+        source: serde_json::Error,
+    },
+    Write {
+        path: PathBuf,
+        source: gx_fs::AtomicWriteError,
+    },
 }
 
 impl fmt::Display for RundownStoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Refused { refusal } => write!(f, "rundown sequence refused: {refusal}"),
-            Self::Read { path, source } => write!(f, "cannot read rundown {}: {source}", path.display()),
-            Self::Decode { path, source } => write!(f, "cannot decode rundown {}: {source}", path.display()),
+            Self::Read { path, source } => {
+                write!(f, "cannot read rundown {}: {source}", path.display())
+            }
+            Self::Decode { path, source } => {
+                write!(f, "cannot decode rundown {}: {source}", path.display())
+            }
             Self::Encode { source } => write!(f, "cannot encode rundown: {source}"),
-            Self::Write { path, source } => write!(f, "cannot save rundown {}: {source}", path.display()),
-    }
+            Self::Write { path, source } => {
+                write!(f, "cannot save rundown {}: {source}", path.display())
+            }
         }
+    }
 }
 
 impl std::error::Error for RundownStoreError {
@@ -397,10 +430,11 @@ impl RundownStore {
             path: path.clone(),
             source,
         })?;
-        let rundown = serde_json::from_slice(&bytes).map_err(|source| RundownStoreError::Decode {
-            path: path.clone(),
-            source,
-        })?;
+        let rundown =
+            serde_json::from_slice(&bytes).map_err(|source| RundownStoreError::Decode {
+                path: path.clone(),
+                source,
+            })?;
         Ok(Self { path, rundown })
     }
 
@@ -425,8 +459,8 @@ impl RundownStore {
     }
 
     fn persist(&self, rundown: &Rundown) -> Result<(), RundownStoreError> {
-        let bytes =
-            serde_json::to_vec_pretty(rundown).map_err(|source| RundownStoreError::Encode { source })?;
+        let bytes = serde_json::to_vec_pretty(rundown)
+            .map_err(|source| RundownStoreError::Encode { source })?;
         gx_fs::write_atomic(&self.path, &bytes).map_err(|source| RundownStoreError::Write {
             path: self.path.clone(),
             source,
@@ -476,9 +510,9 @@ mod tests {
         ClockSource, DeviceTier, Epoch, Locality, RationalRate, ReferenceState, PROTOCOL_VERSION,
     };
     use gx_control_plane::capability::EngineCapability;
+    use gx_control_plane::intent::{check_reference, HeldRevision};
     use gx_control_plane::message::EngineEvent;
     use gx_control_plane::status::{EngineStatus, ProgramState};
-    use gx_control_plane::intent::{check_reference, HeldRevision};
 
     #[derive(Debug)]
     struct TestPeer {
@@ -513,7 +547,10 @@ mod tests {
                 scene.take_id.clone(),
                 HeldRevision {
                     revision: scene.revision,
-                    content_hash: scene.content_hash.clone().expect("a library revision carries its hash"),
+                    content_hash: scene
+                        .content_hash
+                        .clone()
+                        .expect("a library revision carries its hash"),
                 },
             );
         }
@@ -527,7 +564,12 @@ mod tests {
         }
 
         /// The shared rule, as every real peer applies it.
-        fn check(&self, take_id: &TakeId, revision: Revision, pin: Option<&ContentHash>) -> Result<(), Refusal> {
+        fn check(
+            &self,
+            take_id: &TakeId,
+            revision: Revision,
+            pin: Option<&ContentHash>,
+        ) -> Result<(), Refusal> {
             check_reference(take_id, revision, pin, self.published.get(take_id))
         }
     }
@@ -551,11 +593,19 @@ mod tests {
                     program: self.program.clone(),
                     degradations: Vec::new(),
                 }),
-                ClientRequest::Cue(request) => match self.check(&request.take_id, request.revision, request.content_hash.as_ref()) {
+                ClientRequest::Cue(request) => match self.check(
+                    &request.take_id,
+                    request.revision,
+                    request.content_hash.as_ref(),
+                ) {
                     Ok(()) => EngineReply::Cued(Self::committed()),
                     Err(refusal) => EngineReply::Refused(refusal),
                 },
-                ClientRequest::Take(request) => match self.check(&request.take_id, request.revision, request.content_hash.as_ref()) {
+                ClientRequest::Take(request) => match self.check(
+                    &request.take_id,
+                    request.revision,
+                    request.content_hash.as_ref(),
+                ) {
                     Ok(()) => {
                         let committed = Self::committed();
                         self.program = Some(ProgramState {
@@ -608,8 +658,15 @@ mod tests {
         let document = serde_json::json!({"id": "lt", "name": "Lower third"});
         let first = library.publish("lt", document.clone(), None);
         let second = library.publish("lt", document, None);
-        let changed = library.publish("lt", serde_json::json!({"id": "lt", "name": "Lower third 2"}), None);
-        assert_eq!((first.revision, second.revision), (Revision(1), Revision(2)));
+        let changed = library.publish(
+            "lt",
+            serde_json::json!({"id": "lt", "name": "Lower third 2"}),
+            None,
+        );
+        assert_eq!(
+            (first.revision, second.revision),
+            (Revision(1), Revision(2))
+        );
         assert_eq!(first.content_hash, second.content_hash);
         assert_ne!(first.content_hash, changed.content_hash);
         assert_eq!(first.review, ReviewState::Draft);
@@ -623,9 +680,15 @@ mod tests {
         playout.peer_mut().publish(&scene("scene/old", 1));
         assert!(matches!(
             playout.take(&unpinned, TakeAt::NextOpportunity),
-            Err(Refusal::RevisionUnpinned { revision: Revision(1), .. })
+            Err(Refusal::RevisionUnpinned {
+                revision: Revision(1),
+                ..
+            })
         ));
-        assert!(playout.peer().requests.is_empty(), "nothing unpinned reaches the engine");
+        assert!(
+            playout.peer().requests.is_empty(),
+            "nothing unpinned reaches the engine"
+        );
     }
 
     #[test]
@@ -633,13 +696,24 @@ mod tests {
         let mut library = PublishedLibrary::default();
         let published = library.publish("lt", serde_json::json!({"id": "lt"}), None);
         let reviewed = library
-            .set_review(&published.take_id, published.revision, ReviewState::Approved)
+            .set_review(
+                &published.take_id,
+                published.revision,
+                ReviewState::Approved,
+            )
             .unwrap()
             .clone();
         assert_eq!(reviewed.review, ReviewState::Approved);
-        assert_eq!((reviewed.document, reviewed.content_hash), (published.document, published.content_hash));
+        assert_eq!(
+            (reviewed.document, reviewed.content_hash),
+            (published.document, published.content_hash)
+        );
         assert!(matches!(
-            library.set_review(&TakeId("missing".into()), Revision(1), ReviewState::Proposed),
+            library.set_review(
+                &TakeId("missing".into()),
+                Revision(1),
+                ReviewState::Proposed
+            ),
             Err(Refusal::UnknownTake { .. })
         ));
     }
@@ -660,7 +734,10 @@ mod tests {
         assert_eq!(first.take_id, second.take_id);
         assert_eq!(first.revision, Revision(1));
         assert_eq!(second.revision, Revision(2));
-        assert_eq!(library.revision(&first.take_id, first.revision), Some(&first));
+        assert_eq!(
+            library.revision(&first.take_id, first.revision),
+            Some(&first)
+        );
     }
 
     #[test]
@@ -707,7 +784,9 @@ mod tests {
         peer.publish(&published);
         let mut playout = Playout::new(peer);
 
-        let cued = playout.cue(&published, TakeAt::Frame { frame: 12 }).unwrap();
+        let cued = playout
+            .cue(&published, TakeAt::Frame { frame: 12 })
+            .unwrap();
         let taken = playout.take(&published, TakeAt::NextOpportunity).unwrap();
         let cleared = playout.clear(TakeAt::NextOpportunity).unwrap();
 
@@ -715,9 +794,17 @@ mod tests {
         assert!(matches!(
             playout.peer().requests.as_slice(),
             [
-                ClientRequest::Cue(CueRequest { at: TakeAt::Frame { frame: 12 }, .. }),
-                ClientRequest::Take(TakeRequest { at: TakeAt::NextOpportunity, .. }),
-                ClientRequest::Clear(ClearRequest { at: TakeAt::NextOpportunity }),
+                ClientRequest::Cue(CueRequest {
+                    at: TakeAt::Frame { frame: 12 },
+                    ..
+                }),
+                ClientRequest::Take(TakeRequest {
+                    at: TakeAt::NextOpportunity,
+                    ..
+                }),
+                ClientRequest::Clear(ClearRequest {
+                    at: TakeAt::NextOpportunity
+                }),
             ]
         ));
         let wire = serde_json::to_string(&playout.peer().requests).unwrap();
@@ -737,7 +824,10 @@ mod tests {
 
         assert!(matches!(
             refusal,
-            Refusal::RevisionMismatch { expected: Revision(2), actual: Revision(1) }
+            Refusal::RevisionMismatch {
+                expected: Revision(2),
+                actual: Revision(1)
+            }
         ));
         assert_eq!(
             playout.peer().program,
@@ -807,7 +897,9 @@ mod tests {
 
         assert!(matches!(
             refusal,
-            Refusal::TierTooLow { actual: DeviceTier::T2 }
+            Refusal::TierTooLow {
+                actual: DeviceTier::T2
+            }
         ));
         assert!(playout.peer().requests.is_empty());
     }

@@ -188,11 +188,14 @@ pub struct OutputConfig {
 /// Unknown input names fail closed; the exhaustive registry test catches an
 /// added tool whose input has not been connected here.
 pub fn input_schema(input: &str) -> Result<serde_json::Value, Refusal> {
-    use crate::command::{ConfirmDesignSystem, CreateProject, CreateScene, DeleteScene, EditScene, ImportScene};
+    use crate::command::{
+        ConfirmDesignSystem, CreateProject, CreateScene, DeleteScene, EditScene, ImportScene,
+    };
     macro_rules! schema {
         ($ty:ty) => {
             schemars::generate::SchemaSettings::draft2020_12()
-                .into_generator().into_root_schema_for::<$ty>()
+                .into_generator()
+                .into_root_schema_for::<$ty>()
         };
     }
     let schema = match input {
@@ -213,9 +216,11 @@ pub fn input_schema(input: &str) -> Result<serde_json::Value, Refusal> {
         "ClearArgs" => schema!(ClearArgs),
         "ReviewRequest" => schema!(crate::ReviewRequest),
         "OutputConfig" => schema!(OutputConfig),
-        other => return Err(Refusal::NotImplemented {
-            what: format!("no generated MCP input schema for {other}"),
-        }),
+        other => {
+            return Err(Refusal::NotImplemented {
+                what: format!("no generated MCP input schema for {other}"),
+            })
+        }
     };
     let mut value = serde_json::to_value(schema).map_err(|error| Refusal::TransportFailed {
         detail: format!("generating MCP schema for {input}: {error}"),
@@ -573,7 +578,7 @@ pub fn capability_surface() -> CapabilitySurface {
 mod tests {
     use super::*;
 
-#[test]
+    #[test]
     fn the_motion_phase_list_matches_the_struct_it_describes() {
         // MOTION_PHASES is the one vocabulary here that is stated rather than
         // derived, because `MotionPhases` is a struct and its phases are field
@@ -595,8 +600,12 @@ mod tests {
         };
 
         let json = serde_json::to_value(&phases).expect("phases serialise");
-        let keys: std::collections::BTreeSet<&str> =
-            json.as_object().expect("an object").keys().map(String::as_str).collect();
+        let keys: std::collections::BTreeSet<&str> = json
+            .as_object()
+            .expect("an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
         let declared: std::collections::BTreeSet<&str> = MOTION_PHASES.iter().copied().collect();
 
         assert_eq!(
@@ -839,13 +848,20 @@ mod tests {
                 .iter()
                 .find(|tool| tool.name == *name)
                 .unwrap_or_else(|| panic!("R5 exempts {name}, which is not declared"));
-            assert_eq!(tool.effect, ToolEffect::Write, "{name} is exempt but not a write");
+            assert_eq!(
+                tool.effect,
+                ToolEffect::Write,
+                "{name} is exempt but not a write"
+            );
             assert!(
                 !AUTHORING_GROUPS.contains(&tool.group),
                 "{name} sits in authoring group {} and cannot be exempt",
                 tool.group
             );
-            assert!(!reason.trim().is_empty(), "{name} is exempt without a reason");
+            assert!(
+                !reason.trim().is_empty(),
+                "{name} is exempt without a reason"
+            );
         }
     }
 
@@ -861,10 +877,21 @@ mod tests {
                 .unwrap_or_else(|| panic!("{name} is declared"))
                 .required_scope
         };
-        for name in ["project.create", "scenes.create", "scenes.delete", "scenes.edit"] {
+        for name in [
+            "project.create",
+            "scenes.create",
+            "scenes.delete",
+            "scenes.edit",
+        ] {
             assert_eq!(scope_of(name), Some(Scope::Author), "{name}");
         }
-        assert_eq!(scope_of("designsystem.commit"), Some(Scope::ConfigureOutput));
-        assert_eq!(scope_of("designsystem.import"), Some(Scope::ConfigureOutput));
+        assert_eq!(
+            scope_of("designsystem.commit"),
+            Some(Scope::ConfigureOutput)
+        );
+        assert_eq!(
+            scope_of("designsystem.import"),
+            Some(Scope::ConfigureOutput)
+        );
     }
 }

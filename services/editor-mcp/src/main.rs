@@ -15,9 +15,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut http: Option<u16> = None;
     while let Some(flag) = args.next() {
         match (flag.to_str(), args.next()) {
-            (Some("--root"), Some(folder)) if root.is_none() => root = Some(std::path::PathBuf::from(folder)),
+            (Some("--root"), Some(folder)) if root.is_none() => {
+                root = Some(std::path::PathBuf::from(folder))
+            }
             (Some("--http"), Some(port)) if http.is_none() => {
-                http = Some(port.to_str().and_then(|port| port.parse().ok()).ok_or(USAGE)?);
+                http = Some(
+                    port.to_str()
+                        .and_then(|port| port.parse().ok())
+                        .ok_or(USAGE)?,
+                );
             }
             _ => return Err(USAGE.into()),
         }
@@ -26,7 +32,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let server = gx_editor_mcp::server(projects);
     match http {
         Some(port) => server.serve_http(port, |addr| {
-            eprintln!("gx-editor-mcp listening on http://{addr}{}", gx_mcp_server::HTTP_PATH);
+            eprintln!(
+                "gx-editor-mcp listening on http://{addr}{}",
+                gx_mcp_server::HTTP_PATH
+            );
         })?,
         None => server.serve_stdio()?,
     }

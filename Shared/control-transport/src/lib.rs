@@ -17,27 +17,29 @@ pub mod server;
 
 pub use auth::{Claims, ClaimsError, Token, TokenError};
 pub use client::{Client, Reconciliation, REQUEST_TIMEOUT};
-pub use server::{ServeError, Server};
 pub use gx_control_plane::bind::Endpoint;
+pub use server::{ServeError, Server};
 
 #[cfg(test)]
 mod tests {
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     #[cfg(windows)]
     use std::io::{Read, Write};
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     #[cfg(windows)]
     use std::path::PathBuf;
     #[cfg(windows)]
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use gx_contracts::{DeviceTier, RationalRate, ReferenceState, Refusal, Revision, TakeId};
-    use gx_control_plane::intent::{ClearRequest, TakeAt, TakeRequest};
-    use gx_control_plane::message::{ClientRequest, EngineEvent, EngineReply, Envelope, OutputConfig};
-    use gx_control_plane::peer::{EnginePeer, FaultInjection};
     #[cfg(windows)]
     use gx_control_plane::bind::connect_endpoint;
     #[cfg(windows)]
     use gx_control_plane::framing::{decode_body, decode_length, encode, LENGTH_PREFIX};
+    use gx_control_plane::intent::{ClearRequest, TakeAt, TakeRequest};
+    use gx_control_plane::message::{
+        ClientRequest, EngineEvent, EngineReply, Envelope, OutputConfig,
+    };
+    use gx_control_plane::peer::{EnginePeer, FaultInjection};
     #[cfg(windows)]
     use gx_control_plane::sequence::{MessageId, Sequence};
     use gx_mock_engine::MockEngine;
@@ -70,10 +72,19 @@ mod tests {
     #[test]
     fn a_take_crosses_the_wire_and_returns_a_committed_frame() {
         let mut engine = MockEngine::new();
-        engine.publish(TakeId("lower-third".into()), Revision(4), gx_contracts::ContentHash("a".repeat(64)));
+        engine.publish(
+            TakeId("lower-third".into()),
+            Revision(4),
+            gx_contracts::ContentHash("a".repeat(64)),
+        );
         let mut client = connected(engine);
 
-        let reply = client.handle(ClientRequest::Take(TakeRequest { take_id: TakeId("lower-third".into()), revision: Revision(4), content_hash: Some(gx_contracts::ContentHash("a".repeat(64))), at: TakeAt::NextOpportunity }));
+        let reply = client.handle(ClientRequest::Take(TakeRequest {
+            take_id: TakeId("lower-third".into()),
+            revision: Revision(4),
+            content_hash: Some(gx_contracts::ContentHash("a".repeat(64))),
+            at: TakeAt::NextOpportunity,
+        }));
 
         match reply {
             EngineReply::Taken(committed) => {
@@ -91,7 +102,12 @@ mod tests {
     #[test]
     fn a_refusal_crosses_the_wire_intact() {
         let mut client = connected(MockEngine::new());
-        let reply = client.handle(ClientRequest::Take(TakeRequest { take_id: TakeId("never-published".into()), revision: Revision(1), content_hash: Some(gx_contracts::ContentHash("a".repeat(64))), at: TakeAt::NextOpportunity }));
+        let reply = client.handle(ClientRequest::Take(TakeRequest {
+            take_id: TakeId("never-published".into()),
+            revision: Revision(1),
+            content_hash: Some(gx_contracts::ContentHash("a".repeat(64))),
+            at: TakeAt::NextOpportunity,
+        }));
         assert!(
             matches!(reply, EngineReply::Refused(Refusal::UnknownTake { .. })),
             "a refusal must survive serialisation with its reason, got {reply:?}"
@@ -104,7 +120,11 @@ mod tests {
         // client separates them by id prefix, which is invariant 34 doing real
         // work rather than sitting in a doc comment.
         let mut engine = MockEngine::new().genlocked(RationalRate::P50);
-        engine.publish(TakeId("t".into()), Revision(1), gx_contracts::ContentHash("a".repeat(64)));
+        engine.publish(
+            TakeId("t".into()),
+            Revision(1),
+            gx_contracts::ContentHash("a".repeat(64)),
+        );
         engine.set_reference(ReferenceState::Unlocked);
         let mut client = connected(engine);
 
@@ -130,7 +150,11 @@ mod tests {
     #[test]
     fn many_requests_keep_their_order_and_pairing() {
         let mut engine = MockEngine::new();
-        engine.publish(TakeId("t".into()), Revision(1), gx_contracts::ContentHash("a".repeat(64)));
+        engine.publish(
+            TakeId("t".into()),
+            Revision(1),
+            gx_contracts::ContentHash("a".repeat(64)),
+        );
         let mut client = connected(engine);
 
         // Each clear commits to a frame; the frames must not go backwards, and
@@ -195,7 +219,11 @@ mod tests {
         // One engine, many clients (ADR: Editor and Playout both connect). A
         // take through one client must be visible to the other.
         let mut engine = MockEngine::new();
-        engine.publish(TakeId("t".into()), Revision(1), gx_contracts::ContentHash("a".repeat(64)));
+        engine.publish(
+            TakeId("t".into()),
+            Revision(1),
+            gx_contracts::ContentHash("a".repeat(64)),
+        );
         let server = Server::bind(loopback(), None, engine).expect("bind");
         let addr = server.local_addr().unwrap();
         server.serve_in_background();
@@ -203,7 +231,12 @@ mod tests {
         let mut a = Client::connect(addr).expect("client a");
         let mut b = Client::connect(addr).expect("client b");
 
-        a.handle(ClientRequest::Take(TakeRequest { take_id: TakeId("t".into()), revision: Revision(1), content_hash: Some(gx_contracts::ContentHash("a".repeat(64))), at: TakeAt::NextOpportunity }));
+        a.handle(ClientRequest::Take(TakeRequest {
+            take_id: TakeId("t".into()),
+            revision: Revision(1),
+            content_hash: Some(gx_contracts::ContentHash("a".repeat(64))),
+            at: TakeAt::NextOpportunity,
+        }));
 
         let seen_by_b = b.status().expect("status via b");
         assert!(
@@ -239,7 +272,8 @@ mod tests {
             let len = decode_length(prefix).expect("valid reply length");
             let mut body = vec![0; len];
             stream.read_exact(&mut body).expect("read reply body");
-            let envelope: Envelope<serde_json::Value> = decode_body(&body).expect("decode envelope");
+            let envelope: Envelope<serde_json::Value> =
+                decode_body(&body).expect("decode envelope");
             if envelope.id.is_reply() {
                 return Envelope::new(
                     envelope.id,
@@ -255,12 +289,19 @@ mod tests {
     fn named_pipe_round_trip_acknowledges_duplicates_and_closes_on_a_gap() {
         let pipe = local_pipe();
         let mut engine = MockEngine::new();
-        engine.publish(TakeId("pipe-take".into()), Revision(1), gx_contracts::ContentHash("a".repeat(64)));
+        engine.publish(
+            TakeId("pipe-take".into()),
+            Revision(1),
+            gx_contracts::ContentHash("a".repeat(64)),
+        );
         let server = Server::bind_local(&pipe, None, engine).expect("bind owner-only named pipe");
         server.serve_in_background();
 
         let mut client = Client::connect_local(&pipe).expect("connect local client");
-        assert!(matches!(client.handle(ClientRequest::Status), EngineReply::Status(_)));
+        assert!(matches!(
+            client.handle(ClientRequest::Status),
+            EngineReply::Status(_)
+        ));
         drop(client);
 
         let endpoint = Endpoint::Local(pipe);
@@ -268,7 +309,12 @@ mod tests {
         let take = Envelope::new(
             MessageId("req.take".into()),
             Sequence(1),
-            ClientRequest::Take(TakeRequest { take_id: TakeId("pipe-take".into()), revision: Revision(1), content_hash: Some(gx_contracts::ContentHash("a".repeat(64))), at: TakeAt::NextOpportunity }),
+            ClientRequest::Take(TakeRequest {
+                take_id: TakeId("pipe-take".into()),
+                revision: Revision(1),
+                content_hash: Some(gx_contracts::ContentHash("a".repeat(64))),
+                at: TakeAt::NextOpportunity,
+            }),
         );
         write_envelope(&mut raw, &take);
         let first = read_reply(&mut raw);
@@ -276,10 +322,19 @@ mod tests {
 
         write_envelope(&mut raw, &take);
         let duplicate = read_reply(&mut raw);
-        assert_eq!(duplicate.seq, first.seq, "a duplicate must receive its recorded acknowledgement");
-        assert!(matches!(duplicate.payload, EngineReply::Taken(ref committed) if committed.frame == 1));
+        assert_eq!(
+            duplicate.seq, first.seq,
+            "a duplicate must receive its recorded acknowledgement"
+        );
+        assert!(
+            matches!(duplicate.payload, EngineReply::Taken(ref committed) if committed.frame == 1)
+        );
 
-        let status = Envelope::new(MessageId("req.status".into()), Sequence(2), ClientRequest::Status);
+        let status = Envelope::new(
+            MessageId("req.status".into()),
+            Sequence(2),
+            ClientRequest::Status,
+        );
         write_envelope(&mut raw, &status);
         let status = read_reply(&mut raw);
         assert!(
@@ -288,7 +343,11 @@ mod tests {
             "a duplicate take must leave only its original Program commit"
         );
 
-        let gap = Envelope::new(MessageId("req.gap".into()), Sequence(4), ClientRequest::Status);
+        let gap = Envelope::new(
+            MessageId("req.gap".into()),
+            Sequence(4),
+            ClientRequest::Status,
+        );
         write_envelope(&mut raw, &gap);
         let mut byte = [0u8; 1];
         assert!(

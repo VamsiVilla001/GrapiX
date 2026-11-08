@@ -94,7 +94,9 @@ pub fn import_svg(
         let source_id = element
             .attribute("id")
             .unwrap_or_else(|| format!("node-{index}"));
-        let source_name_attr = element.attribute("inkscape:label").unwrap_or_else(|| source_id.clone());
+        let source_name_attr = element
+            .attribute("inkscape:label")
+            .unwrap_or_else(|| source_id.clone());
 
         match element.tag.as_str() {
             // A rectangle has a first-class equivalent, so nothing is lost.
@@ -220,7 +222,10 @@ pub fn import_svg(
             height: 1080,
             frame_rate: RationalRate::P50,
         },
-        timeline: SceneTimeline { duration_frames: 1, ..Default::default() },
+        timeline: SceneTimeline {
+            duration_frames: 1,
+            ..Default::default()
+        },
         data_context: Default::default(),
         // The source itself, retained with the graphic (7.2).
         assets: vec![source_asset(source_name, bytes)],
@@ -269,7 +274,9 @@ impl std::fmt::Display for ImportFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotUtf8 => f.write_str("the source is not valid UTF-8, so it is not SVG"),
-            Self::Malformed(detail) => write!(f, "the source is not a whole SVG document: {detail}"),
+            Self::Malformed(detail) => {
+                write!(f, "the source is not a whole SVG document: {detail}")
+            }
             Self::UnexplainedLoss(detail) => {
                 write!(f, "the import produced an unexplained loss: {detail}")
             }
@@ -323,7 +330,9 @@ fn elements(text: &str) -> Result<Vec<Element>, ImportFailure> {
             continue;
         }
         let Some(end) = text[i..].find('>').map(|offset| i + offset) else {
-            return Err(ImportFailure::Malformed(format!("the tag opened at byte {i} is never closed")));
+            return Err(ImportFailure::Malformed(format!(
+                "the tag opened at byte {i} is never closed"
+            )));
         };
         let inner = &text[i + 1..end];
         let self_closing = inner.ends_with('/');
@@ -343,10 +352,12 @@ fn elements(text: &str) -> Result<Vec<Element>, ImportFailure> {
         i = end + 1;
     }
     match root {
-        None => Err(ImportFailure::Malformed("there is no <svg> root element".into())),
-        Some(false) if !text.contains("</svg>") => {
-            Err(ImportFailure::Malformed("the <svg> root is never closed, so the file is cut short".into()))
-        }
+        None => Err(ImportFailure::Malformed(
+            "there is no <svg> root element".into(),
+        )),
+        Some(false) if !text.contains("</svg>") => Err(ImportFailure::Malformed(
+            "the <svg> root is never closed, so the file is cut short".into(),
+        )),
         Some(_) => Ok(found),
     }
 }
@@ -494,10 +505,16 @@ mod tests {
             ("<rect id=\"a\"/>", "no <svg> root"),
         ] {
             let error = import_svg("cut.svg", svg.as_bytes(), "cut").expect_err(svg);
-            assert!(matches!(&error, ImportFailure::Malformed(_)), "{svg}: {error:?}");
+            assert!(
+                matches!(&error, ImportFailure::Malformed(_)),
+                "{svg}: {error:?}"
+            );
             assert!(error.to_string().contains(says), "{svg}: {error}");
         }
-        assert!(import_svg("empty.svg", b"<svg/>", "empty").is_ok(), "an empty but whole document imports");
+        assert!(
+            import_svg("empty.svg", b"<svg/>", "empty").is_ok(),
+            "an empty but whole document imports"
+        );
     }
 
     #[test]

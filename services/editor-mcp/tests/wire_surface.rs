@@ -24,9 +24,15 @@ fn initialize_negotiates_every_revision_down_to_2025_06_18() {
     for asked in ["2025-06-18", "2025-11-25", "2026-07-28", "2024-11-05"] {
         let mut session = Session::launch(&root);
         let reply = session.request(&initialize_request(asked));
-        assert_eq!(reply["result"]["protocolVersion"], "2025-06-18", "asked {asked}: {reply}");
+        assert_eq!(
+            reply["result"]["protocolVersion"], "2025-06-18",
+            "asked {asked}: {reply}"
+        );
         assert_eq!(reply["result"]["serverInfo"]["name"], "gx-mcp-server");
-        assert!(reply["result"]["capabilities"]["tools"].is_object(), "{reply}");
+        assert!(
+            reply["result"]["capabilities"]["tools"].is_object(),
+            "{reply}"
+        );
         session.finish();
     }
     let _ = std::fs::remove_dir_all(root);
@@ -39,18 +45,33 @@ fn a_2026_07_28_client_calls_tools_with_no_handshake() {
     projects.create_project("news").expect("a project exists");
     let mut session = Session::launch(&root);
 
-    let listed = session.request(&stateless(serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" })));
-    let tools = listed["result"]["tools"].as_array().unwrap_or_else(|| panic!("{listed}"));
-    assert!(tools.iter().any(|tool| tool["name"] == "project.list"), "{listed}");
+    let listed = session.request(&stateless(
+        serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }),
+    ));
+    let tools = listed["result"]["tools"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{listed}"));
+    assert!(
+        tools.iter().any(|tool| tool["name"] == "project.list"),
+        "{listed}"
+    );
 
-    let reply = tool_reply(session.request(&stateless(call(2, "project.list", serde_json::json!({})))));
+    let reply =
+        tool_reply(session.request(&stateless(call(2, "project.list", serde_json::json!({})))));
     assert!(reply["error"].is_null(), "{reply}");
-    assert_eq!(reply["result"], serde_json::json!({ "projects": ["news"] }), "{reply}");
+    assert_eq!(
+        reply["result"],
+        serde_json::json!({ "projects": ["news"] }),
+        "{reply}"
+    );
 
     // A refusal is the same structured error on the stateless revision.
     let refused = session.request(&stateless(call(3, "playout.take", serde_json::json!({}))));
     assert_eq!(refused["error"]["code"], -32000, "{refused}");
-    assert_eq!(refused["error"]["data"]["code"]["refusal"], "unauthenticated", "{refused}");
+    assert_eq!(
+        refused["error"]["data"]["code"]["refusal"], "unauthenticated",
+        "{refused}"
+    );
     session.finish();
     let _ = std::fs::remove_dir_all(root);
 }
@@ -64,7 +85,10 @@ fn a_request_with_neither_handshake_nor_meta_is_refused_by_name() {
     let reply = session.request(&call(1, "project.list", serde_json::json!({})));
     assert_eq!(reply["error"]["code"], -32602, "{reply}");
     let message = reply["error"]["message"].as_str().unwrap();
-    assert!(message.contains("io.modelcontextprotocol/protocolVersion"), "{message}");
+    assert!(
+        message.contains("io.modelcontextprotocol/protocolVersion"),
+        "{message}"
+    );
     let reply = session.request(&initialize_request("2025-06-18"));
     assert_eq!(reply["result"]["protocolVersion"], "2025-06-18", "{reply}");
     session.finish();
@@ -80,9 +104,15 @@ fn a_line_that_is_not_json_rpc_gets_no_reply_on_the_shipped_wire() {
     let root = scratch("garbage");
     let mut session = Session::start(&root);
     session.send_line("not json");
-    assert!(session.next_reply(Duration::from_millis(500)).is_none(), "an unparseable line is dropped");
+    assert!(
+        session.next_reply(Duration::from_millis(500)).is_none(),
+        "an unparseable line is dropped"
+    );
     let reply = session.call(&call(1, "project.list", serde_json::json!({})));
-    assert!(reply["error"].is_null(), "the session still answers: {reply}");
+    assert!(
+        reply["error"].is_null(),
+        "the session still answers: {reply}"
+    );
     session.finish();
     let _ = std::fs::remove_dir_all(root);
 }

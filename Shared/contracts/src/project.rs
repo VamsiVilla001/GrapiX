@@ -27,13 +27,17 @@ pub struct ProjectSettings {
 impl ProjectSettings {
     /// What a newly created project declares.
     pub const fn new_project() -> Self {
-        Self { working_color_space: WorkingColorSpace::NEW_PROJECT }
+        Self {
+            working_color_space: WorkingColorSpace::NEW_PROJECT,
+        }
     }
 
     /// What a project created before 3.15 meant. Such a project has no
     /// settings file; every scene in it composited in linear light.
     pub const fn before_3_15() -> Self {
-        Self { working_color_space: WorkingColorSpace::BEFORE_3_15 }
+        Self {
+            working_color_space: WorkingColorSpace::BEFORE_3_15,
+        }
     }
 }
 
@@ -46,7 +50,10 @@ mod tests {
         let settings = ProjectSettings::new_project();
         let wire = serde_json::to_value(settings).unwrap();
         assert_eq!(wire, serde_json::json!({ "workingColorSpace": "srgb" }));
-        assert_eq!(serde_json::from_value::<ProjectSettings>(wire).unwrap(), settings);
+        assert_eq!(
+            serde_json::from_value::<ProjectSettings>(wire).unwrap(),
+            settings
+        );
         assert_eq!(
             ProjectSettings::before_3_15().working_color_space,
             WorkingColorSpace::LinearSrgb

@@ -14,7 +14,9 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 use gx_contracts::Refusal;
-use gx_control_plane::bind::{bind_endpoint, BindRefusal, ControlListener, ControlStream, Endpoint};
+use gx_control_plane::bind::{
+    bind_endpoint, BindRefusal, ControlListener, ControlStream, Endpoint,
+};
 use gx_control_plane::framing::{decode_body, decode_length, encode, LENGTH_PREFIX};
 use gx_control_plane::message::{ClientRequest, EngineReply, Envelope};
 use gx_control_plane::peer::EnginePeer;
@@ -29,7 +31,10 @@ pub enum ServeError {
 }
 impl std::fmt::Display for ServeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self { Self::Refused(refusal) => write!(f, "{refusal}"), Self::Io(error) => write!(f, "{error}") }
+        match self {
+            Self::Refused(refusal) => write!(f, "{refusal}"),
+            Self::Io(error) => write!(f, "{error}"),
+        }
     }
 }
 impl std::error::Error for ServeError {}
@@ -51,7 +56,10 @@ pub struct Server<P: EnginePeer> {
 // against their role's scopes here: scopes are enforced by the MCP server
 // (8.11, 8.13), not on the engine's control port. Named as an open finding of
 // the 8 Nov 2026 done-row review; the field stays so enforcement has it.
-enum ConnectionAuthorization { Unprotected, Authenticated(#[allow(dead_code)] Claims) }
+enum ConnectionAuthorization {
+    Unprotected,
+    Authenticated(#[allow(dead_code)] Claims),
+}
 
 impl<P: EnginePeer + Send + 'static> Server<P> {
     /// Bind TCP after policy approval. This keeps every existing caller source
@@ -61,18 +69,35 @@ impl<P: EnginePeer + Send + 'static> Server<P> {
     }
 
     /// Bind named-pipe IPC on Windows or a Unix-domain socket on Unix.
-    pub fn bind_local(path: impl AsRef<Path>, secret: Option<&str>, peer: P) -> Result<Self, ServeError> {
+    pub fn bind_local(
+        path: impl AsRef<Path>,
+        secret: Option<&str>,
+        peer: P,
+    ) -> Result<Self, ServeError> {
         Self::bind_endpoint(Endpoint::Local(path.as_ref().to_path_buf()), secret, peer)
     }
 
     /// Bind a caller-selected endpoint through the one control-plane policy.
-    pub fn bind_endpoint(endpoint: Endpoint, secret: Option<&str>, peer: P) -> Result<Self, ServeError> {
+    pub fn bind_endpoint(
+        endpoint: Endpoint,
+        secret: Option<&str>,
+        peer: P,
+    ) -> Result<Self, ServeError> {
         let listener = bind_endpoint(&endpoint, secret).map_err(ServeError::Refused)?;
-        Ok(Self { listener, endpoint, peer: Arc::new(Mutex::new(peer)), secret: secret.map(str::to_owned) })
+        Ok(Self {
+            listener,
+            endpoint,
+            peer: Arc::new(Mutex::new(peer)),
+            secret: secret.map(str::to_owned),
+        })
     }
 
-    pub fn engine(&self) -> Arc<Mutex<P>> { Arc::clone(&self.peer) }
-    pub fn endpoint(&self) -> &Endpoint { &self.endpoint }
+    pub fn engine(&self) -> Arc<Mutex<P>> {
+        Arc::clone(&self.peer)
+    }
+    pub fn endpoint(&self) -> &Endpoint {
+        &self.endpoint
+    }
 
     /// The TCP address actually bound. Local endpoints have no port and name
     /// that mismatch instead of inventing one for compatibility.
@@ -80,7 +105,10 @@ impl<P: EnginePeer + Send + 'static> Server<P> {
         match &self.listener {
             ControlListener::Tcp(listener) => listener.local_addr(),
             #[cfg(any(windows, unix))]
-            ControlListener::Local(_) => Err(io::Error::new(io::ErrorKind::Unsupported, "a local control endpoint has no TCP address")),
+            ControlListener::Local(_) => Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "a local control endpoint has no TCP address",
+            )),
         }
     }
 
@@ -99,26 +127,41 @@ impl<P: EnginePeer + Send + 'static> Server<P> {
                         }
                     });
                 }
-                Err(error) if is_transient(&error) => eprintln!("accept failed, continuing: {error}"),
-                Err(error) => { eprintln!("listener stopping: {error}"); return; }
+                Err(error) if is_transient(&error) => {
+                    eprintln!("accept failed, continuing: {error}")
+                }
+                Err(error) => {
+                    eprintln!("listener stopping: {error}");
+                    return;
+                }
             }
         }
     }
 
-    pub fn serve_in_background(self) -> JoinHandle<()> { thread::spawn(move || self.serve()) }
+    pub fn serve_in_background(self) -> JoinHandle<()> {
+        thread::spawn(move || self.serve())
+    }
 }
 
 /// A failed accept may be retried only if one connection attempt failed; a
 /// persistent listener failure must stop rather than consume a core (invariant 50).
 fn is_transient(error: &io::Error) -> bool {
-    matches!(error.kind(), io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock | io::ErrorKind::ConnectionAborted | io::ErrorKind::ConnectionReset | io::ErrorKind::TimedOut)
+    matches!(
+        error.kind(),
+        io::ErrorKind::Interrupted
+            | io::ErrorKind::WouldBlock
+            | io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::ConnectionReset
+            | io::ErrorKind::TimedOut
+    )
 }
 
 /// Read a whole validated frame before decoding it (invariant 51).
 fn read_frame(stream: &mut ControlStream) -> io::Result<Vec<u8>> {
     let mut prefix = [0u8; LENGTH_PREFIX];
     stream.read_exact(&mut prefix)?;
-    let length = decode_length(prefix).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let length =
+        decode_length(prefix).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     let mut body = vec![0u8; length];
     stream.read_exact(&mut body)?;
     Ok(body)
@@ -129,7 +172,8 @@ fn write_bytes(stream: &mut ControlStream, frame: &[u8]) -> io::Result<()> {
 }
 
 fn write_frame<T: serde::Serialize>(stream: &mut ControlStream, message: &T) -> io::Result<()> {
-    let frame = encode(message).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let frame =
+        encode(message).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     write_bytes(stream, &frame)
 }
 
@@ -144,7 +188,9 @@ fn handle_connection<P: EnginePeer>(
     // request. Sequence handling happens first; only then can a retransmission
     // receive its original reply without re-executing its intent (invariant 33).
     let mut acknowledgements = HashMap::<Sequence, Vec<u8>>::new();
-    let mut authentication = secret.is_none().then_some(ConnectionAuthorization::Unprotected);
+    let mut authentication = secret
+        .is_none()
+        .then_some(ConnectionAuthorization::Unprotected);
 
     loop {
         let body = match read_frame(&mut stream) {
@@ -152,32 +198,52 @@ fn handle_connection<P: EnginePeer>(
             Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => return Ok(()),
             Err(error) => return Err(error),
         };
-        let envelope: Envelope<ClientRequest> = decode_body(&body).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        let envelope: Envelope<ClientRequest> = decode_body(&body)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         match inbound.admit(envelope.seq) {
             Admission::Accepted => {}
             // A duplicate must receive the acknowledgement it lost, while its
             // intent must not run twice (invariant 49).
             Admission::Duplicate => {
                 let acknowledgement = acknowledgements.get(&envelope.seq).ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidData, "duplicate has no recorded acknowledgement")
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "duplicate has no recorded acknowledgement",
+                    )
                 })?;
                 write_bytes(&mut stream, acknowledgement)?;
                 continue;
             }
-            Admission::Gap { expected, got } => return Err(io::Error::new(io::ErrorKind::InvalidData, format!("sequence gap: expected {}, got {}", expected.0, got.0))),
+            Admission::Gap { expected, got } => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("sequence gap: expected {}, got {}", expected.0, got.0),
+                ))
+            }
         }
 
         let (reply, events) = match envelope.payload {
             ClientRequest::Authenticate { token: presented } => {
-                let verified = secret.as_deref().map_or(Ok(ConnectionAuthorization::Unprotected), |secret| {
-                    Token::parse(presented).and_then(|token| token.verify(secret)).map(ConnectionAuthorization::Authenticated)
-                });
+                let verified =
+                    secret
+                        .as_deref()
+                        .map_or(Ok(ConnectionAuthorization::Unprotected), |secret| {
+                            Token::parse(presented)
+                                .and_then(|token| token.verify(secret))
+                                .map(ConnectionAuthorization::Authenticated)
+                        });
                 match verified {
-                    Ok(authorization) => { authentication = Some(authorization); (EngineReply::Authenticated, Vec::new()) }
+                    Ok(authorization) => {
+                        authentication = Some(authorization);
+                        (EngineReply::Authenticated, Vec::new())
+                    }
                     Err(_) => (EngineReply::Refused(Refusal::Unauthenticated), Vec::new()),
                 }
             }
-            request if authentication.is_none() => { let _ = request; (EngineReply::Refused(Refusal::Unauthenticated), Vec::new()) }
+            request if authentication.is_none() => {
+                let _ = request;
+                (EngineReply::Refused(Refusal::Unauthenticated), Vec::new())
+            }
             request => {
                 // The engine is held only to validate and to drain events. A
                 // render's work runs after the lock is released, so Program's
@@ -191,7 +257,8 @@ fn handle_connection<P: EnginePeer>(
         };
 
         let next = || Sequence(outbound.fetch_add(1, Ordering::Relaxed) + 1);
-        let reply_envelope = Envelope::new(MessageId(format!("reply.{}", envelope.id.0)), next(), reply);
+        let reply_envelope =
+            Envelope::new(MessageId(format!("reply.{}", envelope.id.0)), next(), reply);
         let reply_frame = encode(&reply_envelope)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         acknowledgements.insert(envelope.seq, reply_frame.clone());

@@ -34,7 +34,11 @@ fn loopback() -> SocketAddr {
 /// rests on nothing.
 fn protected() -> (SocketAddr, Arc<Mutex<MockEngine>>) {
     let mut engine = MockEngine::new().genlocked(RationalRate::P29_97);
-    engine.publish(TakeId("t".into()), Revision(1), gx_contracts::ContentHash("a".repeat(64)));
+    engine.publish(
+        TakeId("t".into()),
+        Revision(1),
+        gx_contracts::ContentHash("a".repeat(64)),
+    );
     let server = Server::bind(loopback(), Some(TOKEN), engine).expect("bind loopback");
     let addr = server.local_addr().expect("local addr");
     let engine = server.engine();
@@ -58,7 +62,12 @@ fn credential(secret: &str) -> Token {
 }
 
 fn take() -> ClientRequest {
-    ClientRequest::Take(TakeRequest { take_id: TakeId("t".into()), revision: Revision(1), content_hash: Some(gx_contracts::ContentHash("a".repeat(64))), at: TakeAt::NextOpportunity })
+    ClientRequest::Take(TakeRequest {
+        take_id: TakeId("t".into()),
+        revision: Revision(1),
+        content_hash: Some(gx_contracts::ContentHash("a".repeat(64))),
+        at: TakeAt::NextOpportunity,
+    })
 }
 
 #[test]
@@ -193,7 +202,11 @@ fn a_restarted_engine_is_detected_by_epoch_not_by_revision() {
     {
         let mut engine = engine.lock().unwrap();
         engine.restart();
-        engine.publish(TakeId("t".into()), Revision(1), gx_contracts::ContentHash("a".repeat(64))); // same id, same revision
+        engine.publish(
+            TakeId("t".into()),
+            Revision(1),
+            gx_contracts::ContentHash("a".repeat(64)),
+        ); // same id, same revision
     }
 
     let reconciled = client.reconnect().expect("reconnect");

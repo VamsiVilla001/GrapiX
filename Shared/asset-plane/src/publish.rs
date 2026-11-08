@@ -85,7 +85,11 @@ pub trait AssetPublishPeer: Send + 'static {
 /// The asset-plane reply to one fetch. `Bytes` is followed on the stream by
 /// exactly `byteLen` raw bytes, so an image is never inflated into JSON.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "reply", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "reply",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum FetchReply {
     Bytes { hash: ContentHash, byte_len: u64 },
     Refused { cause: Refusal },
@@ -150,7 +154,9 @@ pub enum PublishClientError {
     Connect(io::Error),
     Transport(io::Error),
     /// The reply frame exceeded the plane's bound, so it was not read.
-    ReplyTooLarge { bytes: usize },
+    ReplyTooLarge {
+        bytes: usize,
+    },
     /// A reply arrived but is not a `PublishReply`.
     Malformed(serde_json::Error),
 }
@@ -228,7 +234,9 @@ pub fn fetch_bytes(engine: SocketAddr, hash: &ContentHash) -> Result<Vec<u8>, Fe
         FetchReply::Refused { cause } => return Err(FetchError::Refused(cause)),
     };
     if byte_len > MAX_PUBLISH_FRAME_BYTES {
-        return Err(FetchError::Client(PublishClientError::ReplyTooLarge { bytes: byte_len }));
+        return Err(FetchError::Client(PublishClientError::ReplyTooLarge {
+            bytes: byte_len,
+        }));
     }
     let mut bytes = vec![0; byte_len];
     stream
@@ -247,7 +255,10 @@ pub fn fetch_bytes(engine: SocketAddr, hash: &ContentHash) -> Result<Vec<u8>, Fe
 /// Send one framed request and read one framed reply header, bounded before
 /// it is allocated: a peer cannot make this side reserve memory by claiming a
 /// large frame.
-fn exchange(engine: SocketAddr, request: &[u8]) -> Result<(TcpStream, Vec<u8>), PublishClientError> {
+fn exchange(
+    engine: SocketAddr,
+    request: &[u8],
+) -> Result<(TcpStream, Vec<u8>), PublishClientError> {
     let mut stream = TcpStream::connect(engine).map_err(PublishClientError::Connect)?;
     stream
         .write_all(&(request.len() as u32).to_be_bytes())
@@ -297,7 +308,10 @@ fn handle_publish<P: AssetPublishPeer>(
         stream.read_exact(&mut bytes)?;
         parse_request(&bytes)
     };
-    let locked = || peer.lock().map_err(|_| io::Error::other("asset publish peer mutex poisoned"));
+    let locked = || {
+        peer.lock()
+            .map_err(|_| io::Error::other("asset publish peer mutex poisoned"))
+    };
     match request {
         AssetRequest::Publish(scene) => {
             let reply = match scene {
@@ -340,13 +354,18 @@ fn write_header<T: Serialize>(stream: &mut TcpStream, header: &T) -> io::Result<
 }
 
 fn parse_request(bytes: &[u8]) -> AssetRequest {
-    let invalid = |detail: String| AssetRequest::Publish(Err(PublishRefusal::InvalidPublishRequest { detail }));
-    let mut request = match serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(bytes) {
-        Ok(request) => request,
-        Err(error) => return invalid(error.to_string()),
+    let invalid = |detail: String| {
+        AssetRequest::Publish(Err(PublishRefusal::InvalidPublishRequest { detail }))
     };
+    let mut request =
+        match serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(bytes) {
+            Ok(request) => request,
+            Err(error) => return invalid(error.to_string()),
+        };
     if request.len() != 1 {
-        return invalid("an asset-plane request must contain exactly one of `scene` or `fetch`".to_string());
+        return invalid(
+            "an asset-plane request must contain exactly one of `scene` or `fetch`".to_string(),
+        );
     }
     if let Some(fetch) = request.remove("fetch") {
         #[derive(Deserialize)]
@@ -360,7 +379,9 @@ fn parse_request(bytes: &[u8]) -> AssetRequest {
         };
     }
     let Some(scene) = request.remove("scene") else {
-        return invalid("an asset-plane request must contain exactly one of `scene` or `fetch`".to_string());
+        return invalid(
+            "an asset-plane request must contain exactly one of `scene` or `fetch`".to_string(),
+        );
     };
     AssetRequest::Publish(
         serde_json::to_vec(&scene)

@@ -52,7 +52,11 @@ fn an_svg_is_imported_with_every_tier_named_and_its_source_kept() {
     projects.create_project("news").expect("a project exists");
 
     let replies = shipped_session(&root, &[call(1, "scenes.import", import_args("brand"))]);
-    assert!(replies[0]["error"].is_null(), "unexpected refusal: {}", replies[0]);
+    assert!(
+        replies[0]["error"].is_null(),
+        "unexpected refusal: {}",
+        replies[0]
+    );
     let outcome = &replies[0]["result"];
     assert_eq!(
         outcome["effects"][0],
@@ -66,7 +70,12 @@ fn an_svg_is_imported_with_every_tier_named_and_its_source_kept() {
     let entries = report["entries"].as_array().expect("report entries");
     let tiers: Vec<(&str, &str)> = entries
         .iter()
-        .map(|entry| (entry["sourceId"].as_str().unwrap(), entry["tier"].as_str().unwrap()))
+        .map(|entry| {
+            (
+                entry["sourceId"].as_str().unwrap(),
+                entry["tier"].as_str().unwrap(),
+            )
+        })
         .collect();
     assert_eq!(
         tiers,
@@ -79,31 +88,60 @@ fn an_svg_is_imported_with_every_tier_named_and_its_source_kept() {
     );
     for entry in &entries[1..] {
         let substitutions = entry["substitutions"].as_array().expect("substitutions");
-        assert!(!substitutions.is_empty(), "{} lost a tier without a reason", entry["sourceId"]);
+        assert!(
+            !substitutions.is_empty(),
+            "{} lost a tier without a reason",
+            entry["sourceId"]
+        );
         for substitution in substitutions {
-            assert!(substitution["reason"].as_str().is_some_and(|reason| !reason.is_empty()), "{substitution}");
+            assert!(
+                substitution["reason"]
+                    .as_str()
+                    .is_some_and(|reason| !reason.is_empty()),
+                "{substitution}"
+            );
         }
     }
 
     // The scene is stored, and a second process reads the same document.
-    let stored = projects.read_scene("news", "brand").expect("the import is stored");
+    let stored = projects
+        .read_scene("news", "brand")
+        .expect("the import is stored");
     assert_eq!(stored.name, "brand", "named after its source file");
-    let ids: Vec<&str> = stored.objects.iter().map(|object| object.base().id.as_str()).collect();
+    let ids: Vec<&str> = stored
+        .objects
+        .iter()
+        .map(|object| object.base().id.as_str())
+        .collect();
     // The embedded raster is not imported; the report says so and names no object.
     assert_eq!(ids, vec!["background", "lower-third", "swoosh"]);
     assert!(entries[3]["objectId"].is_null(), "{}", entries[3]);
-    let again = shipped_session(&root, &[call(2, "scenes.get", serde_json::json!({ "project": "news", "scene_id": "brand" }))]);
+    let again = shipped_session(
+        &root,
+        &[call(
+            2,
+            "scenes.get",
+            serde_json::json!({ "project": "news", "scene_id": "brand" }),
+        )],
+    );
     assert_eq!(again[0]["result"], serde_json::to_value(&stored).unwrap());
 
     // The source bytes are in the project under the report's hash.
-    let hash: ContentHash = serde_json::from_value(report["sourceHash"].clone()).expect("a source hash");
+    let hash: ContentHash =
+        serde_json::from_value(report["sourceHash"].clone()).expect("a source hash");
     assert_eq!(
-        projects.read_asset("news", &hash).expect("the project reads its assets").as_deref(),
+        projects
+            .read_asset("news", &hash)
+            .expect("the project reads its assets")
+            .as_deref(),
         Some(EVERY_TIER.as_bytes()),
         "the source is retained byte for byte"
     );
     assert!(
-        stored.assets.iter().any(|item| item.checksum.as_ref() == Some(&hash)),
+        stored
+            .assets
+            .iter()
+            .any(|item| item.checksum.as_ref() == Some(&hash)),
         "the scene's library names its source"
     );
     let _ = std::fs::remove_dir_all(root);
@@ -115,7 +153,12 @@ fn an_import_never_overwrites_and_never_half_lands() {
     let projects = Projects::at_root(&root);
     projects.create_project("news").expect("a project exists");
     projects
-        .create_project_with("linear", ProjectSettings { working_color_space: WorkingColorSpace::LinearSrgb })
+        .create_project_with(
+            "linear",
+            ProjectSettings {
+                working_color_space: WorkingColorSpace::LinearSrgb,
+            },
+        )
         .expect("a linear project exists");
 
     let not_svg = serde_json::json!({
@@ -133,16 +176,43 @@ fn an_import_never_overwrites_and_never_half_lands() {
         ],
     );
     assert!(replies[0]["error"].is_null(), "{}", replies[0]);
-    let code = |reply: &serde_json::Value| reply["error"]["data"]["code"]["refusal"].as_str().map(str::to_owned);
-    assert_eq!(code(&replies[1]).as_deref(), Some("sceneAlreadyExists"), "{}", replies[1]);
-    assert_eq!(code(&replies[2]).as_deref(), Some("sceneParseFailed"), "{}", replies[2]);
-    assert_eq!(code(&replies[3]).as_deref(), Some("sceneWorkingSpaceMismatch"), "{}", replies[3]);
+    let code = |reply: &serde_json::Value| {
+        reply["error"]["data"]["code"]["refusal"]
+            .as_str()
+            .map(str::to_owned)
+    };
+    assert_eq!(
+        code(&replies[1]).as_deref(),
+        Some("sceneAlreadyExists"),
+        "{}",
+        replies[1]
+    );
+    assert_eq!(
+        code(&replies[2]).as_deref(),
+        Some("sceneParseFailed"),
+        "{}",
+        replies[2]
+    );
+    assert_eq!(
+        code(&replies[3]).as_deref(),
+        Some("sceneWorkingSpaceMismatch"),
+        "{}",
+        replies[3]
+    );
 
     // Nothing from a refused import is left behind.
-    assert_eq!(projects.list_scenes("news").unwrap(), vec!["brand".to_owned()]);
+    assert_eq!(
+        projects.list_scenes("news").unwrap(),
+        vec!["brand".to_owned()]
+    );
     assert!(projects.list_scenes("linear").unwrap().is_empty());
     let hash: ContentHash =
-        serde_json::from_value(replies[0]["result"]["effects"][1]["report"]["sourceHash"].clone()).expect("a source hash");
-    assert_eq!(projects.read_asset("linear", &hash).unwrap(), None, "no source adopted for a refused import");
+        serde_json::from_value(replies[0]["result"]["effects"][1]["report"]["sourceHash"].clone())
+            .expect("a source hash");
+    assert_eq!(
+        projects.read_asset("linear", &hash).unwrap(),
+        None,
+        "no source adopted for a refused import"
+    );
     let _ = std::fs::remove_dir_all(root);
 }

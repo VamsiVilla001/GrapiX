@@ -6,29 +6,29 @@
 #![forbid(unsafe_code)]
 
 pub mod animation;
-pub mod command;
-pub mod object_edit;
-pub mod bindings;
-pub mod material_edit;
-pub mod font_edit;
 pub mod asset_edit;
-pub mod authoring;
-pub mod control;
 pub mod auth;
+pub mod authoring;
+pub mod bindings;
 pub mod color;
+pub mod command;
 mod container_paint;
+pub mod control;
 pub mod design_system;
 pub mod drawability;
 pub mod effect;
 pub mod enforce;
 pub mod font;
+pub mod font_edit;
 pub mod import;
 pub mod material;
+pub mod material_edit;
 pub mod mcp;
+pub mod object_edit;
 pub mod package;
+pub mod phases;
 pub mod platform;
 pub mod project;
-pub mod phases;
 pub mod provenance;
 pub mod scene;
 pub mod text_style;
@@ -44,7 +44,19 @@ use ts_rs::TS;
 pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Stable identity of a published scene. Survives every republish.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    TS,
+    schemars::JsonSchema,
+)]
 pub struct TakeId(pub String);
 
 impl std::fmt::Display for TakeId {
@@ -54,7 +66,19 @@ impl std::fmt::Display for TakeId {
 }
 
 /// Content address of asset bytes: SHA-256, lowercase hex.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    TS,
+    schemars::JsonSchema,
+)]
 pub struct ContentHash(pub String);
 
 impl std::fmt::Display for ContentHash {
@@ -65,7 +89,20 @@ impl std::fmt::Display for ContentHash {
 
 /// Publish revision. Exact-match only: a take against a stale revision is
 /// refused, never coerced (invariant 17).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    TS,
+    schemars::JsonSchema,
+)]
 pub struct Revision(pub u64);
 
 impl Revision {
@@ -97,7 +134,9 @@ impl Revision {
 /// Where a published revision stands in review (11.38). Every publish starts
 /// as `Draft`. Only a human operator moves it on: no agent-scoped surface can
 /// set it (invariant 65), so an agent's draft never approves itself.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum ReviewState {
     #[default]
@@ -791,7 +830,10 @@ pub enum Refusal {
     /// A data-context replacement equals the current context.
     DataContextUnchanged,
     /// A material cannot be deleted while objects still use it.
-    MaterialInUse { material: String, users: Vec<String> },
+    MaterialInUse {
+        material: String,
+        users: Vec<String>,
+    },
     /// A relink names the same material on both sides.
     MaterialRelinkSameMaterial { material: String },
     /// A relink source material has no users, so the relink would change
@@ -813,7 +855,11 @@ pub enum Refusal {
     /// A preset parameter the caller set is not one the preset declares, or
     /// is outside its declared range (G.6.4): the preset is never retimed past
     /// what its designer allowed.
-    MotionPresetParamInvalid { preset: String, param: String, detail: String },
+    MotionPresetParamInvalid {
+        preset: String,
+        param: String,
+        detail: String,
+    },
     /// An `addFonts` edit carries no fonts. An empty add would only make an
     /// undo entry that changes nothing.
     FontBatchEmpty,
@@ -848,25 +894,45 @@ pub enum Refusal {
     /// A shape's Trim Paths value is outside its domain (3.13): start and end
     /// are percentages in 0–100 and every value is finite. Clamping it would
     /// draw a window nobody authored. `value` is the authored number as text.
-    ShapeTrimInvalid { object: String, field: String, value: String },
+    ShapeTrimInvalid {
+        object: String,
+        field: String,
+        value: String,
+    },
     /// The scene's hierarchy needed repairing to resolve (3.13): a group
     /// names a missing child or itself, a child is claimed by two parents, or
     /// parents form a cycle. The resolver still resolves it deterministically
     /// so the Editor can keep working, but publishing it would put on air a
     /// parent choice nobody made.
-    SceneHierarchyInvalid { parent: String, child: String, problem: String },
+    SceneHierarchyInvalid {
+        parent: String,
+        child: String,
+        problem: String,
+    },
     /// An object kind the engine cannot draw yet (3.13). Drawing nothing, or
     /// a wrong approximation, would put something other than the authored
     /// graphic on air. `owner` is the build-plan step that will draw it.
-    ObjectKindNotDrawable { object: String, kind: String, owner: String },
+    ObjectKindNotDrawable {
+        object: String,
+        kind: String,
+        owner: String,
+    },
     /// An authored property, set to something other than its default, that
     /// the engine cannot draw yet (3.13). Ignoring it would draw a different
     /// graphic from the one authored. `owner` is the step that will draw it.
-    ScenePropertyNotDrawable { object: String, property: String, owner: String },
+    ScenePropertyNotDrawable {
+        object: String,
+        property: String,
+        owner: String,
+    },
     /// An entry in an object's effect stack is malformed (3.22): an empty,
     /// dotted or repeated `effectId`, a parameter outside its domain, or a
     /// curve with fewer than two points. Drawing it would mean guessing.
-    EffectInvalid { object: String, effect_id: String, detail: String },
+    EffectInvalid {
+        object: String,
+        effect_id: String,
+        detail: String,
+    },
     /// A project's settings file exists but is not a settings document this
     /// build reads. Reading it as if absent would compose every scene in the
     /// wrong space.
@@ -1516,7 +1582,7 @@ impl Refusal {
     /// against the exhaustive `code_name` match: a variant missing here has no
     /// driver and no limitation, and fails that check.
     pub fn all_variants() -> Vec<Self> {
-    vec![
+        vec![
             Self::RevisionMismatch {
                 expected: Revision(1),
                 actual: Revision(0),
@@ -1776,8 +1842,11 @@ impl Refusal {
                 duration_frames: 1,
             },
             Self::KeyframeValueOutOfDomain {
-                object: "audit".into(), property: "opacity".into(), frame: 0,
-                value: "1.5".into(), allowed: "0..=1".into(),
+                object: "audit".into(),
+                property: "opacity".into(),
+                frame: 0,
+                value: "1.5".into(),
+                allowed: "0..=1".into(),
             },
             Self::DuplicateKeyframeFrame {
                 object: "audit".into(),
@@ -1887,11 +1956,23 @@ impl Refusal {
             },
             Self::EditBatchEmpty,
             Self::EditTargetsEmpty,
-            Self::CommandUnknownField { path: "audit".into() },
-            Self::SessionUnknown { session: command::SessionKey(1) },
-            Self::SessionHasUnsavedChanges { session: command::SessionKey(1), name: "audit".into() },
-            Self::SessionUnbound { session: command::SessionKey(1) },
-            Self::HistoryEmpty { session: command::SessionKey(1), direction: command::HistoryDirection::Undo },
+            Self::CommandUnknownField {
+                path: "audit".into(),
+            },
+            Self::SessionUnknown {
+                session: command::SessionKey(1),
+            },
+            Self::SessionHasUnsavedChanges {
+                session: command::SessionKey(1),
+                name: "audit".into(),
+            },
+            Self::SessionUnbound {
+                session: command::SessionKey(1),
+            },
+            Self::HistoryEmpty {
+                session: command::SessionKey(1),
+                direction: command::HistoryDirection::Undo,
+            },
             Self::ModuleHistoryEmpty {
                 session: command::SessionKey(1),
                 direction: command::HistoryDirection::Undo,
@@ -1902,60 +1983,181 @@ impl Refusal {
                 direction: command::HistoryDirection::Undo,
                 detail: "audit".into(),
             },
-            Self::SceneAlreadyExists { project: "audit".into(), scene_id: "audit".into() },
+            Self::SceneAlreadyExists {
+                project: "audit".into(),
+                scene_id: "audit".into(),
+            },
             Self::ProjectAlreadyExists {
                 project: "audit".into(),
             },
-            Self::SceneNotStored { project: "audit".into(), scene_id: "audit".into() },
+            Self::SceneNotStored {
+                project: "audit".into(),
+                scene_id: "audit".into(),
+            },
             Self::SceneIdInvalid { id: "audit".into() },
-            Self::ProjectNameInvalid { project: "audit".into() },
-            Self::TakePageIdInvalid { page_id: "audit".into() },
-            Self::SceneIdBound { project: "audit".into(), scene_id: "audit".into() },
+            Self::ProjectNameInvalid {
+                project: "audit".into(),
+            },
+            Self::TakePageIdInvalid {
+                page_id: "audit".into(),
+            },
+            Self::SceneIdBound {
+                project: "audit".into(),
+                scene_id: "audit".into(),
+            },
             Self::SceneNameEmpty,
-            Self::ObjectFieldNotApplicable { field: "audit".into(), kinds: vec![] },
-            Self::ObjectFieldValueInvalid { field: "audit".into(), detail: "audit".into() },
-            Self::ObjectFieldUnchanged { field: "audit".into() },
-            Self::ObjectHiddenByParent { object: "audit".into(), parent: "audit".into() },
-            Self::ObjectLocked { object: "audit".into(), owner: "audit".into() },
-            Self::BindingPropertyUnsupported { object: "audit".into(), kind: "audit".into(), property: "audit".into() },
-            Self::BindingPathInvalid { path: "audit".into(), detail: "audit".into() },
-            Self::BindingTypeMismatch { object: "audit".into(), property: "audit".into(), path: "audit".into(), expected: "audit".into() },
-            Self::BindingNotBound { object: "audit".into(), property: "audit".into() },
-            Self::BindingValueOutOfRange { object: "audit".into(), property: "audit".into(), path: "audit".into(), constraint: "audit".into() },
-            Self::BindingAssetUnknown { object: "audit".into(), path: "audit".into(), asset: "audit".into() },
-            Self::BindingUnchanged { object: "audit".into(), property: "audit".into(), path: "audit".into() },
+            Self::ObjectFieldNotApplicable {
+                field: "audit".into(),
+                kinds: vec![],
+            },
+            Self::ObjectFieldValueInvalid {
+                field: "audit".into(),
+                detail: "audit".into(),
+            },
+            Self::ObjectFieldUnchanged {
+                field: "audit".into(),
+            },
+            Self::ObjectHiddenByParent {
+                object: "audit".into(),
+                parent: "audit".into(),
+            },
+            Self::ObjectLocked {
+                object: "audit".into(),
+                owner: "audit".into(),
+            },
+            Self::BindingPropertyUnsupported {
+                object: "audit".into(),
+                kind: "audit".into(),
+                property: "audit".into(),
+            },
+            Self::BindingPathInvalid {
+                path: "audit".into(),
+                detail: "audit".into(),
+            },
+            Self::BindingTypeMismatch {
+                object: "audit".into(),
+                property: "audit".into(),
+                path: "audit".into(),
+                expected: "audit".into(),
+            },
+            Self::BindingNotBound {
+                object: "audit".into(),
+                property: "audit".into(),
+            },
+            Self::BindingValueOutOfRange {
+                object: "audit".into(),
+                property: "audit".into(),
+                path: "audit".into(),
+                constraint: "audit".into(),
+            },
+            Self::BindingAssetUnknown {
+                object: "audit".into(),
+                path: "audit".into(),
+                asset: "audit".into(),
+            },
+            Self::BindingUnchanged {
+                object: "audit".into(),
+                property: "audit".into(),
+                path: "audit".into(),
+            },
             Self::DataContextUnchanged,
-            Self::MaterialInUse { material: "audit".into(), users: vec![] },
-            Self::MaterialRelinkSameMaterial { material: "audit".into() },
-            Self::MaterialRelinkNoUsers { material: "audit".into() },
-            Self::MaterialUnknown { material: "audit".into() },
-            Self::MotionPresetUnknown { preset: "audit".into() },
-            Self::MotionPresetIdInvalid { preset_id: "audit".into() },
-            Self::MotionPresetSelectionEmpty { object: "audit".into() },
-            Self::MotionPresetSpanZero { object: "audit".into(), frame: 0 },
-            Self::MotionPresetParamInvalid { preset: "audit".into(), param: "audit".into(), detail: "audit".into() },
+            Self::MaterialInUse {
+                material: "audit".into(),
+                users: vec![],
+            },
+            Self::MaterialRelinkSameMaterial {
+                material: "audit".into(),
+            },
+            Self::MaterialRelinkNoUsers {
+                material: "audit".into(),
+            },
+            Self::MaterialUnknown {
+                material: "audit".into(),
+            },
+            Self::MotionPresetUnknown {
+                preset: "audit".into(),
+            },
+            Self::MotionPresetIdInvalid {
+                preset_id: "audit".into(),
+            },
+            Self::MotionPresetSelectionEmpty {
+                object: "audit".into(),
+            },
+            Self::MotionPresetSpanZero {
+                object: "audit".into(),
+                frame: 0,
+            },
+            Self::MotionPresetParamInvalid {
+                preset: "audit".into(),
+                param: "audit".into(),
+                detail: "audit".into(),
+            },
             Self::FontBatchEmpty,
-            Self::FontDuplicate { font_id: "audit".into() },
-            Self::SceneAssetDuplicate { asset_id: "audit".into() },
-            Self::FontUnknown { font_id: "audit".into() },
-            Self::FontInUse { font_id: "audit".into(), objects: vec![], text_styles: vec![] },
-            Self::SceneSchemaUnsupported { actual: 99, supported: 2 },
+            Self::FontDuplicate {
+                font_id: "audit".into(),
+            },
+            Self::SceneAssetDuplicate {
+                asset_id: "audit".into(),
+            },
+            Self::FontUnknown {
+                font_id: "audit".into(),
+            },
+            Self::FontInUse {
+                font_id: "audit".into(),
+                objects: vec![],
+                text_styles: vec![],
+            },
+            Self::SceneSchemaUnsupported {
+                actual: 99,
+                supported: 2,
+            },
             Self::SceneWorkingSpaceMismatch {
                 project: "audit".into(),
                 scene_id: "audit".into(),
                 scene: crate::color::WorkingColorSpace::LinearSrgb,
                 project_space: crate::color::WorkingColorSpace::Srgb,
             },
-            Self::ProjectSettingsInvalid { project: "audit".into(), detail: "audit".into() },
-            Self::ShapeTrimInvalid { object: "audit".into(), field: "trimStart".into(), value: "140".into() },
-            Self::SceneHierarchyInvalid { parent: "audit".into(), child: "audit".into(), problem: "cycle".into() },
-            Self::ObjectKindNotDrawable { object: "audit".into(), kind: "image".into(), owner: "3.17".into() },
-            Self::ScenePropertyNotDrawable { object: "audit".into(), property: "decoration".into(), owner: "3.18".into() },
-            Self::EffectInvalid { object: "audit".into(), effect_id: "audit".into(), detail: "audit".into() },
+            Self::ProjectSettingsInvalid {
+                project: "audit".into(),
+                detail: "audit".into(),
+            },
+            Self::ShapeTrimInvalid {
+                object: "audit".into(),
+                field: "trimStart".into(),
+                value: "140".into(),
+            },
+            Self::SceneHierarchyInvalid {
+                parent: "audit".into(),
+                child: "audit".into(),
+                problem: "cycle".into(),
+            },
+            Self::ObjectKindNotDrawable {
+                object: "audit".into(),
+                kind: "image".into(),
+                owner: "3.17".into(),
+            },
+            Self::ScenePropertyNotDrawable {
+                object: "audit".into(),
+                property: "decoration".into(),
+                owner: "3.18".into(),
+            },
+            Self::EffectInvalid {
+                object: "audit".into(),
+                effect_id: "audit".into(),
+                detail: "audit".into(),
+            },
             Self::AssetBatchEmpty,
-            Self::AssetKindNotAddable { asset_id: "audit".into(), kind: crate::scene::AssetKind::Font },
-            Self::AssetFormatUnrecognised { file: "audit".into() },
-            Self::RenderSceneUnavailable { take_id: TakeId("audit".into()), revision: Revision(1) },
+            Self::AssetKindNotAddable {
+                asset_id: "audit".into(),
+                kind: crate::scene::AssetKind::Font,
+            },
+            Self::AssetFormatUnrecognised {
+                file: "audit".into(),
+            },
+            Self::RenderSceneUnavailable {
+                take_id: TakeId("audit".into()),
+                revision: Revision(1),
+            },
             Self::RenderFrameOutOfRange {
                 take_id: TakeId("audit".into()),
                 revision: Revision(1),
@@ -2346,7 +2548,11 @@ mod tests {
         for refusal in &variants {
             let wire = serde_json::to_value(refusal).unwrap();
             assert_eq!(wire["refusal"], refusal.code_name(), "{refusal:?}");
-            assert!(seen.insert(refusal.code_name()), "{} listed twice", refusal.code_name());
+            assert!(
+                seen.insert(refusal.code_name()),
+                "{} listed twice",
+                refusal.code_name()
+            );
             let back: Refusal = serde_json::from_value(wire).unwrap();
             assert_eq!(&back, refusal);
         }

@@ -181,7 +181,11 @@ fn a_brand_pack_is_imported_reviewed_and_confirmed_over_the_wire() {
     let after = drive(
         &server,
         &[
-            call(4, "designsystem.get", serde_json::json!({ "project": "news" })),
+            call(
+                4,
+                "designsystem.get",
+                serde_json::json!({ "project": "news" }),
+            ),
             call(
                 5,
                 "designsystem.list_versions",

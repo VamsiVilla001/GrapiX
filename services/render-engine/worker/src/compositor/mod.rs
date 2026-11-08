@@ -19,12 +19,12 @@ use crate::colour_pipeline::WorkingRgba;
 use crate::gpu::Gpu;
 use crate::rasterizer::Frame;
 use crate::tiling::{Stage, Tile, TileError, TilePlan};
-pub mod output;
-pub mod scene;
 #[cfg(test)]
 mod blend_tests;
 #[cfg(test)]
 pub(crate) mod effect_tests;
+pub mod output;
+pub mod scene;
 
 /// An object's placement from local pixel coordinates into f64 stage space:
 /// x' = a*x + c*y + tx; y' = b*x + d*y + ty.
@@ -152,7 +152,9 @@ impl Layer {
     /// What the composite pass samples: the effect chain's output, or the
     /// source itself.
     fn sampled(&self) -> &wgpu::TextureView {
-        self.chain.as_ref().map_or(&self.view, |chain| &chain.output)
+        self.chain
+            .as_ref()
+            .map_or(&self.view, |chain| &chain.output)
     }
 }
 
@@ -274,11 +276,9 @@ impl PreparedCompositor {
         let mut uniform_scratch = Vec::with_capacity(uniform_count);
         for tile in plan.tiles() {
             for input in inputs {
-                let geometry = uniforms(stage, *tile, input.state).map_err(
-                    |(field, detail)| {
-                        mapping(&input.object_id, &input.document_path, field, detail)
-                    },
-                )?;
+                let geometry = uniforms(stage, *tile, input.state).map_err(|(field, detail)| {
+                    mapping(&input.object_id, &input.document_path, field, detail)
+                })?;
                 let mode = crate::blend::mode_index(input.blend_mode);
                 uniform_scratch.push(pack_uniform(&geometry, key(mode, *tile, input.state)));
             }
@@ -337,7 +337,10 @@ impl PreparedCompositor {
         let composite_pipeline = pipeline("composite");
         // 3.22: one effect pipeline for every layer's steps, built only when
         // some layer has effects.
-        let effect_pipeline = inputs.iter().any(|input| input.effects.is_some()).then(|| effect_pipelines(device));
+        let effect_pipeline = inputs
+            .iter()
+            .any(|input| input.effects.is_some())
+            .then(|| effect_pipelines(device));
         let layers: Vec<Layer> = inputs
             .iter()
             .map(|input| {
@@ -536,10 +539,13 @@ impl PreparedCompositor {
         }
         if let Some(effects) = effects {
             for (layer, plan) in self.layers.iter().zip(effects) {
-                let (Some(chain), Some(plan)) = (&layer.chain, plan) else { continue };
+                let (Some(chain), Some(plan)) = (&layer.chain, plan) else {
+                    continue;
+                };
                 for (step, pass) in chain.steps.iter().zip(&plan.passes) {
                     let effect = &pass.packed;
-                    self.queue.write_buffer(&step.uniform, 0, &effect_uniform(effect));
+                    self.queue
+                        .write_buffer(&step.uniform, 0, &effect_uniform(effect));
                     if effect.kind == crate::effects::CURVES {
                         write_curve(&mut self.curve_scratch, effect);
                         self.queue.write_buffer(&step.curve, 0, &self.curve_scratch);
@@ -568,7 +574,11 @@ impl PreparedCompositor {
                         pass.dispatch_workgroups(chain.width.max(chain.height).div_ceil(64), 1, 1);
                     } else {
                         pass.set_pipeline(&pipelines.pixel);
-                        pass.dispatch_workgroups(chain.width.div_ceil(16), chain.height.div_ceil(16), 1);
+                        pass.dispatch_workgroups(
+                            chain.width.div_ceil(16),
+                            chain.height.div_ceil(16),
+                            1,
+                        );
                     }
                     effect_dispatches += 1;
                 }
@@ -781,11 +791,19 @@ fn float_texture(
 /// A layer's inverse-affine rows on a stage of `width` x `height` with its
 /// origin at 0, as the composite pass receives them for a tile at the stage
 /// origin: the CPU reference warps with exactly these (3.22).
-pub(crate) fn layer_rows(width: u32, height: u32, state: LayerState) -> Result<[f32; 12], CompositorError> {
+pub(crate) fn layer_rows(
+    width: u32,
+    height: u32,
+    state: LayerState,
+) -> Result<[f32; 12], CompositorError> {
     let stage = Stage::new(width, height, crate::tiling::StageOrigin { x: 0.0, y: 0.0 })?;
     let plan = TilePlan::new(stage, width.max(height).max(64) + 64)?;
     let tile = plan.tiles()[0];
-    assert_eq!((tile.render_bounds.x, tile.render_bounds.y), (0, 0), "one tile at the stage origin");
+    assert_eq!(
+        (tile.render_bounds.x, tile.render_bounds.y),
+        (0, 0),
+        "one tile at the stage origin"
+    );
     uniforms(stage, tile, state).map_err(|(field, detail)| CompositorError::Mapping {
         object_id: String::new(),
         document_path: field.into(),
@@ -888,7 +906,11 @@ fn effect_pipelines(device: &wgpu::Device) -> EffectPipelines {
     };
     let pixel = pipeline("effect_step");
     let line = pipeline("effect_line");
-    EffectPipelines { layout, pixel, line }
+    EffectPipelines {
+        layout,
+        pixel,
+        line,
+    }
 }
 
 /// Build one layer's effect chain at prepare (3.22): a step per planned pass.
@@ -944,11 +966,26 @@ fn effect_chain(
             label: Some("gx-effect-step"),
             layout: &pipelines.layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(src) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&views[dst]) },
-                wgpu::BindGroupEntry { binding: 2, resource: uniform.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: curve.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(aux) },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(src),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&views[dst]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: uniform.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: curve.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(aux),
+                },
             ],
         });
         if !pass.writes_aux() {
@@ -962,8 +999,15 @@ fn effect_chain(
         });
     }
     crate::render_work::gpu_build();
-    let output = targets[current.expect("a plan ends on a target")].create_view(&Default::default());
-    EffectChain { width: input.width, height: input.height, steps, _targets: targets, output }
+    let output =
+        targets[current.expect("a plan ends on a target")].create_view(&Default::default());
+    EffectChain {
+        width: input.width,
+        height: input.height,
+        steps,
+        _targets: targets,
+        output,
+    }
 }
 
 /// The effect shader: generated mode constants and the blend guards, then the

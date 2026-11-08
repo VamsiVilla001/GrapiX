@@ -153,8 +153,11 @@ fn request_with_object(id: &str, object: &str) -> Vec<u8> {
 }
 
 pub fn scene_plane_suite(report: &mut Report) {
-    let server = match Server::bind(loopback(0), None, MockEngine::new().genlocked(RationalRate::P50))
-    {
+    let server = match Server::bind(
+        loopback(0),
+        None,
+        MockEngine::new().genlocked(RationalRate::P50),
+    ) {
         Ok(server) => server,
         Err(error) => {
             report.skip_unavailable(format!("cannot bind a control plane: {error}"));
@@ -202,7 +205,9 @@ pub fn scene_plane_suite(report: &mut Report) {
     let authored = populated_scene("conformance/round-trip", None);
     let published = publish_scene(asset, authored.clone());
     let stored = match &published {
-        Ok(PublishReply::Published { take_id, revision, .. }) => peer
+        Ok(PublishReply::Published {
+            take_id, revision, ..
+        }) => peer
             .lock()
             .ok()
             .and_then(|engine| engine.published_scene(take_id, *revision).cloned()),
@@ -393,8 +398,13 @@ pub fn scene_plane_suite(report: &mut Report) {
         PLANE,
         "an unpinned take is refused by name and leaves Program unchanged",
         expect(
-            matches!(&unpinned, EngineReply::Refused(Refusal::RevisionUnpinned { revision: Revision(2), .. }))
-                && program_before == program_after,
+            matches!(
+                &unpinned,
+                EngineReply::Refused(Refusal::RevisionUnpinned {
+                    revision: Revision(2),
+                    ..
+                })
+            ) && program_before == program_after,
             format!("expected RevisionUnpinned, got {unpinned:?}"),
         ),
     );
@@ -459,7 +469,9 @@ fn mock_binary(name: &str) -> Option<std::path::PathBuf> {
         name.to_owned()
     };
     let dir = current.parent()?;
-    [dir.join(&file), dir.parent()?.join(&file)].into_iter().find(|candidate| candidate.exists())
+    [dir.join(&file), dir.parent()?.join(&file)]
+        .into_iter()
+        .find(|candidate| candidate.exists())
 }
 
 fn free_port() -> Option<u16> {
@@ -575,8 +587,14 @@ pub fn mock_product_suite(report: &mut Report) {
         "the mock Editor publishes an authored document with no real peer",
         match &published {
             Some(run) => expect(
-                run.ok && run.stdout.contains("published conformance/interop revision 1"),
-                format!("editor exited ok={} out={:?} err={:?}", run.ok, run.stdout, run.stderr),
+                run.ok
+                    && run
+                        .stdout
+                        .contains("published conformance/interop revision 1"),
+                format!(
+                    "editor exited ok={} out={:?} err={:?}",
+                    run.ok, run.stdout, run.stderr
+                ),
             ),
             None => Outcome::Skip("the mock editor could not be run".into()),
         },
@@ -594,27 +612,44 @@ pub fn mock_product_suite(report: &mut Report) {
     // The Playout mock refuses to load a revision it has not pinned, or has
     // pinned to other content, by name and with a non-zero exit (invariant
     // 61). Neither reaches Program; the pinned take below is the first one.
-    let unpinned = run_mock(&playout_binary, &["--engine", &control_endpoint, "--take", "conformance/interop:1"]);
+    let unpinned = run_mock(
+        &playout_binary,
+        &[
+            "--engine",
+            &control_endpoint,
+            "--take",
+            "conformance/interop:1",
+        ],
+    );
     report.record(
         PLANE,
         "the mock Playout's unpinned take is refused by name",
         match &unpinned {
             Some(run) => expect(
                 !run.ok && run.stderr.contains("[revisionUnpinned]"),
-                format!("expected revisionUnpinned and a non-zero exit, got ok={} err={:?}", run.ok, run.stderr),
+                format!(
+                    "expected revisionUnpinned and a non-zero exit, got ok={} err={:?}",
+                    run.ok, run.stderr
+                ),
             ),
             None => Outcome::Skip("the mock playout could not be run".into()),
         },
     );
     let other_content = format!("conformance/interop:1:{}", "0".repeat(64));
-    let wrong = run_mock(&playout_binary, &["--engine", &control_endpoint, "--take", &other_content]);
+    let wrong = run_mock(
+        &playout_binary,
+        &["--engine", &control_endpoint, "--take", &other_content],
+    );
     report.record(
         PLANE,
         "the mock Playout's take of an unknown hash is refused by name",
         match &wrong {
             Some(run) => expect(
                 !run.ok && run.stderr.contains("[revisionHashMismatch]"),
-                format!("expected revisionHashMismatch and a non-zero exit, got ok={} err={:?}", run.ok, run.stderr),
+                format!(
+                    "expected revisionHashMismatch and a non-zero exit, got ok={} err={:?}",
+                    run.ok, run.stderr
+                ),
             ),
             None => Outcome::Skip("the mock playout could not be run".into()),
         },
@@ -622,14 +657,20 @@ pub fn mock_product_suite(report: &mut Report) {
 
     // Playout takes the revision the Editor just created, by its hash. Two
     // products, one engine, and neither knows about the other.
-    let taken = run_mock(&playout_binary, &["--engine", &control_endpoint, "--take", &pinned]);
+    let taken = run_mock(
+        &playout_binary,
+        &["--engine", &control_endpoint, "--take", &pinned],
+    );
     report.record(
         PLANE,
         "the mock Playout takes the revision the mock Editor published",
         match &taken {
             Some(run) => expect(
                 hash.len() == 64 && run.ok && run.stdout.contains("take committed at frame"),
-                format!("playout exited ok={} out={:?} err={:?} (hash {hash:?})", run.ok, run.stdout, run.stderr),
+                format!(
+                    "playout exited ok={} out={:?} err={:?} (hash {hash:?})",
+                    run.ok, run.stdout, run.stderr
+                ),
             ),
             None => Outcome::Skip("the mock playout could not be run".into()),
         },
@@ -639,14 +680,20 @@ pub fn mock_product_suite(report: &mut Report) {
     // revision that was never published is refused by name, with a non-zero
     // exit so a script cannot mistake it for success.
     let stale_pin = format!("conformance/interop:2:{hash}");
-    let stale = run_mock(&playout_binary, &["--engine", &control_endpoint, "--take", &stale_pin]);
+    let stale = run_mock(
+        &playout_binary,
+        &["--engine", &control_endpoint, "--take", &stale_pin],
+    );
     report.record(
         PLANE,
         "a take of an unpublished revision refuses across the process boundary",
         match &stale {
             Some(run) => expect(
                 !run.ok && run.stderr.contains("[revisionMismatch]"),
-                format!("expected a named refusal and non-zero exit, got ok={} err={:?}", run.ok, run.stderr),
+                format!(
+                    "expected a named refusal and non-zero exit, got ok={} err={:?}",
+                    run.ok, run.stderr
+                ),
             ),
             None => Outcome::Skip("the mock playout could not be run".into()),
         },

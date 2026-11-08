@@ -15,13 +15,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use cosmic_text::{fontdb, Align, Attrs, Buffer, Family, FontSystem, Metrics, Shaping, SwashCache};
+use gx_contracts::font::{FontDefinition, FontLoadStatus, FontSource, FontStyle};
+use gx_contracts::scene::{
+    AssetKind, SceneDocument, SceneObject, TextCase, TextDirection, TextLayout,
+};
+use gx_contracts::Refusal;
 use lyon::math::point;
 use lyon::path::Path;
 use lyon::tessellation::{BuffersBuilder, FillOptions, FillTessellator, FillVertex, VertexBuffers};
 use swash::zeno::{Command, Point as OutlinePoint};
-use gx_contracts::font::{FontDefinition, FontLoadStatus, FontSource, FontStyle};
-use gx_contracts::scene::{AssetKind, SceneDocument, SceneObject, TextCase, TextDirection, TextLayout};
-use gx_contracts::Refusal;
 
 use crate::mesh::AssetBytes;
 
@@ -98,28 +100,25 @@ fn rasterise_selected(
         .iter()
         .filter(|text_object| only.is_none_or(|id| text_object.object_id == id))
     {
-        let Some(resolved) = effective
-            .iter()
-            .find(|r| r.id == text_object.object_id)
-        else {
+        let Some(resolved) = effective.iter().find(|r| r.id == text_object.object_id) else {
             continue;
         };
         if !resolved.visible || resolved.opacity <= 0.0 {
             continue;
         }
 
-        let authored = document
-            .objects
-            .iter()
-            .find_map(|o| match o {
-                SceneObject::Text(t) if t.base.id == text_object.object_id => Some(t),
-                _ => None,
-            });
+        let authored = document.objects.iter().find_map(|o| match o {
+            SceneObject::Text(t) if t.base.id == text_object.object_id => Some(t),
+            _ => None,
+        });
         let Some(text) = authored else { continue };
 
         let fill = match &text.base.fill {
             Some(gx_contracts::color::ColorValue::Solid { color }) => {
-                crate::colour_pipeline::WorkingRgba::from_source(*color, document.working_color_space)
+                crate::colour_pipeline::WorkingRgba::from_source(
+                    *color,
+                    document.working_color_space,
+                )
             }
             Some(gx_contracts::color::ColorValue::LinearGradient { .. })
             | Some(gx_contracts::color::ColorValue::RadialGradient { .. }) => {
@@ -134,7 +133,11 @@ fn rasterise_selected(
         };
 
         // 3.22: with effects, opacity applies after them (`prepared::compose`).
-        let opacity = if text.base.effects().is_empty() { resolved.opacity as f32 } else { 1.0 };
+        let opacity = if text.base.effects().is_empty() {
+            resolved.opacity as f32
+        } else {
+            1.0
+        };
         if opacity <= 0.0 {
             continue;
         }
@@ -160,7 +163,12 @@ fn rasterise_selected(
                         detail: "a glyph triangle indexes past its vertices".into(),
                     });
                 };
-                let at = crate::rasterise::transform(&text.base.anchor, resolved, f64::from(x), f64::from(y))?;
+                let at = crate::rasterise::transform(
+                    &text.base.anchor,
+                    resolved,
+                    f64::from(x),
+                    f64::from(y),
+                )?;
                 *corner = crate::rasterise::PathVertex { x: at.x, y: at.y };
             }
             triangles.push(corners);
@@ -249,11 +257,13 @@ fn shape_object(
     let line_height = match text.line_height {
         Some(multiple) => finite_positive(multiple * text.size, font_size),
         // Absent means the font's own metrics (the contract), not 1.2 × size.
-        None => font_line_height(&mut font_system, &primary_family, font_size).ok_or_else(|| {
-            Refusal::FontMissing {
-                font_id: text.font_id.clone(),
-            }
-        })?,
+        None => {
+            font_line_height(&mut font_system, &primary_family, font_size).ok_or_else(|| {
+                Refusal::FontMissing {
+                    font_id: text.font_id.clone(),
+                }
+            })?
+        }
     };
     let mut buffer = Buffer::new(&mut font_system, Metrics::new(font_size, line_height));
     let (width, height) = match text.layout {
@@ -401,7 +411,10 @@ fn outline_path(commands: &[Command], pen_x: f32, pen_y: f32) -> Path {
 /// line height.
 fn font_line_height(font_system: &mut FontSystem, family: &str, size: f32) -> Option<f32> {
     let families = [fontdb::Family::Name(family)];
-    let query = fontdb::Query { families: &families, ..fontdb::Query::default() };
+    let query = fontdb::Query {
+        families: &families,
+        ..fontdb::Query::default()
+    };
     let id = font_system.db().query(&query)?;
     let font = font_system.get_font(id, fontdb::Weight::NORMAL)?;
     let metrics = font.as_swash().metrics(&[]);
@@ -425,7 +438,10 @@ fn load_definition(
         });
     }
     for face in &definition.faces {
-        if face.status.is_some_and(|status| status != FontLoadStatus::Ready) {
+        if face
+            .status
+            .is_some_and(|status| status != FontLoadStatus::Ready)
+        {
             return Err(Refusal::FontMissing {
                 font_id: definition.font_id.clone(),
             });
@@ -435,25 +451,31 @@ fn load_definition(
                 font_id: definition.font_id.clone(),
             });
         };
-        let asset = document.asset(asset_id).ok_or_else(|| Refusal::SceneAssetUnknown {
-            asset_id: asset_id.clone(),
-            object: definition.font_id.clone(),
-        })?;
+        let asset = document
+            .asset(asset_id)
+            .ok_or_else(|| Refusal::SceneAssetUnknown {
+                asset_id: asset_id.clone(),
+                object: definition.font_id.clone(),
+            })?;
         if asset.kind != AssetKind::Font {
             return Err(Refusal::FontMissing {
                 font_id: definition.font_id.clone(),
             });
         }
-        let hash = asset.checksum.as_ref().ok_or_else(|| Refusal::FontMissing {
-            font_id: definition.font_id.clone(),
-        })?;
-        let bytes = asset_bytes.get(hash).ok_or_else(|| Refusal::AssetMissing {
-            hash: hash.clone(),
-        })?;
+        let hash = asset
+            .checksum
+            .as_ref()
+            .ok_or_else(|| Refusal::FontMissing {
+                font_id: definition.font_id.clone(),
+            })?;
+        let bytes = asset_bytes
+            .get(hash)
+            .ok_or_else(|| Refusal::AssetMissing { hash: hash.clone() })?;
         // WOFF/WOFF2 are delivery wrappers; fontdb reads only sfnt. The
         // container module is the one decoder the ingest path also verified
         // with, so a font that ingested is a font that loads here.
-        let sfnt: Arc<Vec<u8>> = Arc::new(gx_asset_plane::fonts::container::sfnt_bytes(bytes)?.into_owned());
+        let sfnt: Arc<Vec<u8>> =
+            Arc::new(gx_asset_plane::fonts::container::sfnt_bytes(bytes)?.into_owned());
         let mut ids: Vec<fontdb::ID> = database
             .load_font_source(fontdb::Source::Binary(sfnt.clone()))
             .into_iter()
@@ -461,12 +483,17 @@ fn load_definition(
         if ids.is_empty() {
             // fontdb refuses a face that names no family; the bytes must
             // still be a font before the declaration may name them.
-            gx_asset_plane::fonts::metadata::inspect_declared_font(&sfnt, &face.family).map_err(|_| {
-                Refusal::InvalidFontData {
+            gx_asset_plane::fonts::metadata::inspect_declared_font(&sfnt, &face.family).map_err(
+                |_| Refusal::InvalidFontData {
                     detail: format!("font {} contains no readable face", face.face_id),
-                }
-            })?;
-            ids.push(declared_face(database, None, fontdb::Source::Binary(sfnt.clone()), face)?);
+                },
+            )?;
+            ids.push(declared_face(
+                database,
+                None,
+                fontdb::Source::Binary(sfnt.clone()),
+                face,
+            )?);
         }
         for id in ids {
             let named = database
@@ -478,7 +505,10 @@ fn load_definition(
                 Some(family) => (id, family),
                 None => {
                     let source = fontdb::Source::Binary(sfnt.clone());
-                    (declared_face(database, Some(id), source, face)?, face.family.trim().to_owned())
+                    (
+                        declared_face(database, Some(id), source, face)?,
+                        face.family.trim().to_owned(),
+                    )
                 }
             };
             if is_primary && primary_family.is_none() {
@@ -580,11 +610,11 @@ fn finite_non_negative(value: f64) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gx_contracts::ContentHash;
     use gx_contracts::font::{EmbeddingPolicy, FontFaceDefinition, FontFormat};
     use gx_contracts::scene::{
         AssetLibraryItem, ObjectBase, SceneCanvas, SceneTimeline, TextObject,
     };
+    use gx_contracts::ContentHash;
     use gx_contracts::{RationalRate, Revision};
 
     const INTER: &[u8] = include_bytes!("../tests/fixtures/Inter-Regular.ttf");
@@ -678,7 +708,10 @@ mod tests {
                 height: 1080,
                 frame_rate: RationalRate::P50,
             },
-            timeline: SceneTimeline { duration_frames: 1, ..Default::default() },
+            timeline: SceneTimeline {
+                duration_frames: 1,
+                ..Default::default()
+            },
             data_context: Default::default(),
             assets,
             fonts,
@@ -711,17 +744,33 @@ mod tests {
         ]);
         let prepared = prepare_texts(&document, &bytes).expect("declared fonts shape");
         let text = &prepared.objects[0];
-        assert!(text.glyphs.iter().any(|glyph| glyph.source_end - glyph.source_start > 1), "OpenType ligature was not formed");
-        assert!(text.glyphs.iter().any(|glyph| glyph.bidi_level % 2 == 1), "RTL run was not resolved");
-        assert!(text.glyphs.iter().any(|glyph| glyph.face_id == "hebrew-regular"), "declared Hebrew fallback was not used");
+        assert!(
+            text.glyphs
+                .iter()
+                .any(|glyph| glyph.source_end - glyph.source_start > 1),
+            "OpenType ligature was not formed"
+        );
+        assert!(
+            text.glyphs.iter().any(|glyph| glyph.bidi_level % 2 == 1),
+            "RTL run was not resolved"
+        );
+        assert!(
+            text.glyphs
+                .iter()
+                .any(|glyph| glyph.face_id == "hebrew-regular"),
+            "declared Hebrew fallback was not used"
+        );
     }
 
     fn lit_area(document: &SceneDocument, assets: &AssetBytes) -> (usize, [f32; 4]) {
         let prepared = prepare_texts(document, assets).expect("the text shapes");
         let resolution = gx_contracts::scene::resolve_hierarchy(&document.objects);
-        let mut surface =
-            crate::rasterise::RasterSurface::transparent(document.canvas.width, document.canvas.height);
-        rasterise_texts(&prepared, document, &resolution.effective, &mut surface).expect("the text draws");
+        let mut surface = crate::rasterise::RasterSurface::transparent(
+            document.canvas.width,
+            document.canvas.height,
+        );
+        rasterise_texts(&prepared, document, &resolution.effective, &mut surface)
+            .expect("the text draws");
         let width = surface.width() as usize;
         let mut bounds = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
         let mut count = 0;
@@ -729,14 +778,27 @@ mod tests {
             if pixel.a > 0.5 {
                 count += 1;
                 let (x, y) = ((index % width) as f32, (index / width) as f32);
-                bounds = [bounds[0].min(x), bounds[1].min(y), bounds[2].max(x), bounds[3].max(y)];
+                bounds = [
+                    bounds[0].min(x),
+                    bounds[1].min(y),
+                    bounds[2].max(x),
+                    bounds[3].max(y),
+                ];
             }
         }
         (count, bounds)
     }
 
-    fn white_text(value: &str, size: f64, edit: impl Fn(&mut TextObject)) -> (SceneDocument, AssetBytes) {
-        let mut document = scene(value, "inter", vec![font("inter", "Inter", "inter", Vec::new())]);
+    fn white_text(
+        value: &str,
+        size: f64,
+        edit: impl Fn(&mut TextObject),
+    ) -> (SceneDocument, AssetBytes) {
+        let mut document = scene(
+            value,
+            "inter",
+            vec![font("inter", "Inter", "inter", Vec::new())],
+        );
         for object in &mut document.objects {
             if let SceneObject::Text(text) = object {
                 text.size = size;
@@ -748,7 +810,10 @@ mod tests {
                 edit(text);
             }
         }
-        (document, AssetBytes::from([(ContentHash("inter".into()), INTER.to_vec())]))
+        (
+            document,
+            AssetBytes::from([(ContentHash("inter".into()), INTER.to_vec())]),
+        )
     }
 
     /// 3.13: text draws as real glyph outlines, not advance rectangles. An
@@ -761,7 +826,11 @@ mod tests {
         let (count, [x0, y0, x1, y1]) = lit_area(&document, &assets);
         assert!((1500..=4500).contains(&count), "an I lit {count} pixels");
         assert!((10.0..=30.0).contains(&(x1 - x0)), "stem width {}", x1 - x0);
-        assert!((130.0..=160.0).contains(&(y1 - y0)), "cap height {}", y1 - y0);
+        assert!(
+            (130.0..=160.0).contains(&(y1 - y0)),
+            "cap height {}",
+            y1 - y0
+        );
     }
 
     /// 3.13: text takes the object's rotation like any shape; a quarter turn
@@ -770,9 +839,20 @@ mod tests {
     fn text_rotates_with_its_object() {
         let (document, assets) = white_text("I", 200.0, |text| text.base.rotation = 90.0);
         let (count, [x0, y0, x1, y1]) = lit_area(&document, &assets);
-        assert!((1500..=4500).contains(&count), "a rotated I lit {count} pixels");
-        assert!((130.0..=160.0).contains(&(x1 - x0)), "rotated width {}", x1 - x0);
-        assert!((10.0..=30.0).contains(&(y1 - y0)), "rotated height {}", y1 - y0);
+        assert!(
+            (1500..=4500).contains(&count),
+            "a rotated I lit {count} pixels"
+        );
+        assert!(
+            (130.0..=160.0).contains(&(x1 - x0)),
+            "rotated width {}",
+            x1 - x0
+        );
+        assert!(
+            (10.0..=30.0).contains(&(y1 - y0)),
+            "rotated height {}",
+            y1 - y0
+        );
     }
 
     /// Letter spacing is drawn: 100 thousandths of an em at 100 px adds about
@@ -780,7 +860,8 @@ mod tests {
     #[test]
     fn letter_spacing_widens_the_run_by_the_tracking() {
         let shaped = |tracking: f64| {
-            let (document, assets) = white_text("ABCD", 100.0, |text| text.letter_spacing = tracking);
+            let (document, assets) =
+                white_text("ABCD", 100.0, |text| text.letter_spacing = tracking);
             prepare_texts(&document, &assets).expect("shapes").objects[0].width
         };
         let added = shaped(100.0) - shaped(0.0);
@@ -791,14 +872,24 @@ mod tests {
     /// from the font file rather than through the font system.
     #[test]
     fn an_absent_line_height_follows_the_fonts_metrics() {
-        let metrics = swash::FontRef::from_index(INTER, 0).expect("Inter parses").metrics(&[]);
-        let expected = (metrics.ascent + metrics.descent + metrics.leading) / f32::from(metrics.units_per_em) * 100.0;
+        let metrics = swash::FontRef::from_index(INTER, 0)
+            .expect("Inter parses")
+            .metrics(&[]);
+        let expected = (metrics.ascent + metrics.descent + metrics.leading)
+            / f32::from(metrics.units_per_em)
+            * 100.0;
         let (document, assets) = white_text("A\nB", 100.0, |_| {});
         let height = prepare_texts(&document, &assets).expect("shapes").objects[0].height;
-        assert!((height - 2.0 * expected).abs() <= 1.0, "two lines {height}, metrics line {expected}");
+        assert!(
+            (height - 2.0 * expected).abs() <= 1.0,
+            "two lines {height}, metrics line {expected}"
+        );
         let (document, assets) = white_text("A\nB", 100.0, |text| text.line_height = Some(1.5));
         let height = prepare_texts(&document, &assets).expect("shapes").objects[0].height;
-        assert!((height - 300.0).abs() <= 1.0, "two lines at 1.5 gave {height}");
+        assert!(
+            (height - 300.0).abs() <= 1.0,
+            "two lines at 1.5 gave {height}"
+        );
     }
 
     /// An sfnt whose family names (IDs 1 and 16) are present but empty, as
@@ -841,33 +932,51 @@ mod tests {
     /// under its declared family, and the text's own font draws it.
     #[test]
     fn faces_whose_files_name_no_family_shape_under_their_declared_family() {
-        const LATIN: &[u8] = include_bytes!("../../../../Shared/asset-plane/tests/fixtures/fonts/inter-latin.ttf");
+        const LATIN: &[u8] =
+            include_bytes!("../../../../Shared/asset-plane/tests/fixtures/fonts/inter-latin.ttf");
         let mut bold = font("alpha", "Alpha", "alpha", vec!["Beta".into()]);
         bold.faces[0].weight = 700;
         let fonts = vec![bold, font("beta", "Beta", "beta", Vec::new())];
         let bytes = AssetBytes::from([
-            (ContentHash("alpha".into()), with_weight_class(&blank_family_names(INTER), 700)),
+            (
+                ContentHash("alpha".into()),
+                with_weight_class(&blank_family_names(INTER), 700),
+            ),
             (ContentHash("beta".into()), blank_family_names(LATIN)),
         ]);
-        let prepared = prepare_texts(&scene("Office", "alpha", fonts), &bytes).expect("the faces shape");
+        let prepared =
+            prepare_texts(&scene("Office", "alpha", fonts), &bytes).expect("the faces shape");
         let glyphs = &prepared.objects[0].glyphs;
         assert!(!glyphs.is_empty() && glyphs.iter().all(|g| g.glyph_id != 0));
         let faces: Vec<&str> = glyphs.iter().map(|g| g.face_id.as_str()).collect();
-        assert!(faces.iter().all(|f| *f == "alpha-regular"), "drawn in {faces:?}, not the text's own font");
+        assert!(
+            faces.iter().all(|f| *f == "alpha-regular"),
+            "drawn in {faces:?}, not the text's own font"
+        );
     }
 
     #[test]
     fn a_woff2_asset_shapes_exactly_like_its_sfnt_original() {
-        const TTF: &[u8] = include_bytes!("../../../../Shared/asset-plane/tests/fixtures/fonts/inter-latin.ttf");
-        const WOFF2: &[u8] = include_bytes!("../../../../Shared/asset-plane/tests/fixtures/fonts/inter-latin.woff2");
+        const TTF: &[u8] =
+            include_bytes!("../../../../Shared/asset-plane/tests/fixtures/fonts/inter-latin.ttf");
+        const WOFF2: &[u8] =
+            include_bytes!("../../../../Shared/asset-plane/tests/fixtures/fonts/inter-latin.woff2");
         let shaped = |bytes: &[u8]| {
-            let document = scene("Office 2026", "inter", vec![font("inter", "Inter", "inter", Vec::new())]);
+            let document = scene(
+                "Office 2026",
+                "inter",
+                vec![font("inter", "Inter", "inter", Vec::new())],
+            );
             let assets = AssetBytes::from([(ContentHash("inter".into()), bytes.to_vec())]);
             prepare_texts(&document, &assets).expect("the font shapes")
         };
         let (from_ttf, from_woff2) = (shaped(TTF), shaped(WOFF2));
         let glyphs = |prepared: &PreparedTexts| {
-            prepared.objects[0].glyphs.iter().map(|g| (g.glyph_id, g.x.to_bits())).collect::<Vec<_>>()
+            prepared.objects[0]
+                .glyphs
+                .iter()
+                .map(|g| (g.glyph_id, g.x.to_bits()))
+                .collect::<Vec<_>>()
         };
         assert!(!from_ttf.objects[0].glyphs.is_empty());
         assert_eq!(glyphs(&from_ttf), glyphs(&from_woff2));

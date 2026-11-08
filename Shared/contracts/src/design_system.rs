@@ -272,14 +272,20 @@ impl MotionPreset {
             detail,
         };
         let range = self.params.iter().find_map(|param| match param {
-            PresetParam::Duration { name, min, max, .. } if name == "duration" => Some((*min, *max)),
+            PresetParam::Duration { name, min, max, .. } if name == "duration" => {
+                Some((*min, *max))
+            }
             _ => None,
         });
         let Some((min, max)) = range else {
-            return Err(invalid("the preset declares no duration parameter".to_owned()));
+            return Err(invalid(
+                "the preset declares no duration parameter".to_owned(),
+            ));
         };
         if !milliseconds.is_finite() || milliseconds < min || milliseconds > max {
-            return Err(invalid(format!("{milliseconds} ms is outside the declared range {min}-{max} ms")));
+            return Err(invalid(format!(
+                "{milliseconds} ms is outside the declared range {min}-{max} ms"
+            )));
         }
         Ok(MotionPhase {
             duration: DurationSpec::Ms(milliseconds),
@@ -613,8 +619,16 @@ pub fn starter_presets() -> Vec<MotionPreset> {
                     vec![channel(
                         "opacity",
                         vec![
-                            MotionKey { t: 0.0, v: 0.0, out: ease_out() },
-                            MotionKey { t: 1.0, v: 1.0, out: None },
+                            MotionKey {
+                                t: 0.0,
+                                v: 0.0,
+                                out: ease_out(),
+                            },
+                            MotionKey {
+                                t: 1.0,
+                                v: 1.0,
+                                out: None,
+                            },
                         ],
                     )],
                 ),
@@ -623,8 +637,16 @@ pub fn starter_presets() -> Vec<MotionPreset> {
                     vec![channel(
                         "opacity",
                         vec![
-                            MotionKey { t: 0.0, v: 1.0, out: ease_in() },
-                            MotionKey { t: 1.0, v: 0.0, out: None },
+                            MotionKey {
+                                t: 0.0,
+                                v: 1.0,
+                                out: ease_in(),
+                            },
+                            MotionKey {
+                                t: 1.0,
+                                v: 0.0,
+                                out: None,
+                            },
                         ],
                     )],
                 ),
@@ -646,8 +668,16 @@ pub fn starter_presets() -> Vec<MotionPreset> {
                         vec![
                             // One object-width to the left, arriving on its
                             // authored position.
-                            MotionKey { t: 0.0, v: -1.0, out: ease_out() },
-                            MotionKey { t: 1.0, v: 0.0, out: None },
+                            MotionKey {
+                                t: 0.0,
+                                v: -1.0,
+                                out: ease_out(),
+                            },
+                            MotionKey {
+                                t: 1.0,
+                                v: 0.0,
+                                out: None,
+                            },
                         ],
                     )],
                 ),
@@ -656,8 +686,16 @@ pub fn starter_presets() -> Vec<MotionPreset> {
                     vec![channel(
                         "position.x",
                         vec![
-                            MotionKey { t: 0.0, v: 0.0, out: ease_in() },
-                            MotionKey { t: 1.0, v: -1.0, out: None },
+                            MotionKey {
+                                t: 0.0,
+                                v: 0.0,
+                                out: ease_in(),
+                            },
+                            MotionKey {
+                                t: 1.0,
+                                v: -1.0,
+                                out: None,
+                            },
                         ],
                     )],
                 ),
@@ -678,15 +716,31 @@ pub fn starter_presets() -> Vec<MotionPreset> {
                         channel(
                             "scale.x",
                             vec![
-                                MotionKey { t: 0.0, v: 0.0, out: ease_out() },
-                                MotionKey { t: 1.0, v: 1.0, out: None },
+                                MotionKey {
+                                    t: 0.0,
+                                    v: 0.0,
+                                    out: ease_out(),
+                                },
+                                MotionKey {
+                                    t: 1.0,
+                                    v: 1.0,
+                                    out: None,
+                                },
                             ],
                         ),
                         channel(
                             "scale.y",
                             vec![
-                                MotionKey { t: 0.0, v: 0.0, out: ease_out() },
-                                MotionKey { t: 1.0, v: 1.0, out: None },
+                                MotionKey {
+                                    t: 0.0,
+                                    v: 0.0,
+                                    out: ease_out(),
+                                },
+                                MotionKey {
+                                    t: 1.0,
+                                    v: 1.0,
+                                    out: None,
+                                },
                             ],
                         ),
                     ],
@@ -697,15 +751,31 @@ pub fn starter_presets() -> Vec<MotionPreset> {
                         channel(
                             "scale.x",
                             vec![
-                                MotionKey { t: 0.0, v: 1.0, out: ease_in() },
-                                MotionKey { t: 1.0, v: 0.0, out: None },
+                                MotionKey {
+                                    t: 0.0,
+                                    v: 1.0,
+                                    out: ease_in(),
+                                },
+                                MotionKey {
+                                    t: 1.0,
+                                    v: 0.0,
+                                    out: None,
+                                },
                             ],
                         ),
                         channel(
                             "scale.y",
                             vec![
-                                MotionKey { t: 0.0, v: 1.0, out: ease_in() },
-                                MotionKey { t: 1.0, v: 0.0, out: None },
+                                MotionKey {
+                                    t: 0.0,
+                                    v: 1.0,
+                                    out: ease_in(),
+                                },
+                                MotionKey {
+                                    t: 1.0,
+                                    v: 0.0,
+                                    out: None,
+                                },
                             ],
                         ),
                     ],
@@ -730,17 +800,41 @@ pub fn starter_presets() -> Vec<MotionPreset> {
                         channel(
                             "scale.x",
                             vec![
-                                MotionKey { t: 0.0, v: 0.0, out: ease_out() },
-                                MotionKey { t: 0.65, v: 1.12, out: ease_in_out() },
-                                MotionKey { t: 1.0, v: 1.0, out: None },
+                                MotionKey {
+                                    t: 0.0,
+                                    v: 0.0,
+                                    out: ease_out(),
+                                },
+                                MotionKey {
+                                    t: 0.65,
+                                    v: 1.12,
+                                    out: ease_in_out(),
+                                },
+                                MotionKey {
+                                    t: 1.0,
+                                    v: 1.0,
+                                    out: None,
+                                },
                             ],
                         ),
                         channel(
                             "scale.y",
                             vec![
-                                MotionKey { t: 0.0, v: 0.0, out: ease_out() },
-                                MotionKey { t: 0.65, v: 1.12, out: ease_in_out() },
-                                MotionKey { t: 1.0, v: 1.0, out: None },
+                                MotionKey {
+                                    t: 0.0,
+                                    v: 0.0,
+                                    out: ease_out(),
+                                },
+                                MotionKey {
+                                    t: 0.65,
+                                    v: 1.12,
+                                    out: ease_in_out(),
+                                },
+                                MotionKey {
+                                    t: 1.0,
+                                    v: 1.0,
+                                    out: None,
+                                },
                             ],
                         ),
                     ],
@@ -751,15 +845,31 @@ pub fn starter_presets() -> Vec<MotionPreset> {
                         channel(
                             "scale.x",
                             vec![
-                                MotionKey { t: 0.0, v: 1.0, out: ease_in() },
-                                MotionKey { t: 1.0, v: 0.0, out: None },
+                                MotionKey {
+                                    t: 0.0,
+                                    v: 1.0,
+                                    out: ease_in(),
+                                },
+                                MotionKey {
+                                    t: 1.0,
+                                    v: 0.0,
+                                    out: None,
+                                },
                             ],
                         ),
                         channel(
                             "scale.y",
                             vec![
-                                MotionKey { t: 0.0, v: 1.0, out: ease_in() },
-                                MotionKey { t: 1.0, v: 0.0, out: None },
+                                MotionKey {
+                                    t: 0.0,
+                                    v: 1.0,
+                                    out: ease_in(),
+                                },
+                                MotionKey {
+                                    t: 1.0,
+                                    v: 0.0,
+                                    out: None,
+                                },
                             ],
                         ),
                     ],
@@ -781,7 +891,6 @@ pub fn starter_presets() -> Vec<MotionPreset> {
 pub fn starter_preset(id: &str) -> Option<MotionPreset> {
     starter_presets().into_iter().find(|preset| preset.id == id)
 }
-
 
 /// Object kinds a transform or opacity preset can drive: everything that
 /// draws. Containers are excluded because their transform reaches their

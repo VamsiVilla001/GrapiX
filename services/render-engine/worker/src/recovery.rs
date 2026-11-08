@@ -101,7 +101,8 @@ impl RecoveryState {
                     ),
                 });
             }
-            if self.published.get(&scene.take_id).map(|held| held.revision) != Some(scene.revision) {
+            if self.published.get(&scene.take_id).map(|held| held.revision) != Some(scene.revision)
+            {
                 return Err(RecoveryError::InvalidState {
                     detail: format!(
                         "prepared scene {}/{} is not the published revision",
@@ -111,7 +112,10 @@ impl RecoveryState {
             }
             // The bytes behind a pinned hash must still be those bytes: a
             // journal that disagrees would let a pin load different content.
-            let pinned = self.published.get(&scene.take_id).map(|held| &held.content_hash);
+            let pinned = self
+                .published
+                .get(&scene.take_id)
+                .map(|held| &held.content_hash);
             if pinned != Some(&scene.document.content_hash()) {
                 return Err(RecoveryError::InvalidState {
                     detail: format!(
@@ -124,7 +128,9 @@ impl RecoveryState {
 
         for (name, state) in [("cued", &self.cued), ("program", &self.program)] {
             if let Some(state) = state {
-                if self.published.get(&state.take_id).map(|held| held.revision) != Some(state.revision) {
+                if self.published.get(&state.take_id).map(|held| held.revision)
+                    != Some(state.revision)
+                {
                     return Err(RecoveryError::InvalidState {
                         detail: format!(
                             "{name} state {}/{} is not a published revision",

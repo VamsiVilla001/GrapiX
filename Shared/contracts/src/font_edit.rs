@@ -151,10 +151,14 @@ pub fn update_font(
         for family in families {
             let family = family.trim();
             if family.is_empty() {
-                return Err(invalid(format!("font {font_id} lists a blank fallback family")));
+                return Err(invalid(format!(
+                    "font {font_id} lists a blank fallback family"
+                )));
             }
             if !seen.insert(family.to_lowercase()) {
-                return Err(invalid(format!("font {font_id} lists fallback {family} twice")));
+                return Err(invalid(format!(
+                    "font {font_id} lists fallback {family} twice"
+                )));
             }
         }
         updated.fallback_families = families.iter().map(|f| f.trim().to_owned()).collect();
@@ -202,7 +206,10 @@ pub fn replace_font(
         });
     }
     if replacement.embedding_policy == EmbeddingPolicy::Package
-        && replacement.license.as_deref().is_none_or(|l| l.trim().is_empty())
+        && replacement
+            .license
+            .as_deref()
+            .is_none_or(|l| l.trim().is_empty())
     {
         return Err(Refusal::FontEmbeddingRefused {
             font_id: font_id.to_owned(),
@@ -211,8 +218,11 @@ pub fn replace_font(
 
     // An asset already in the scene may be offered again only as the very same
     // record; a different record under that id would rewrite another font's file.
-    let mut known: HashMap<&str, &AssetLibraryItem> =
-        scene.assets.iter().map(|a| (a.asset_id.as_str(), a)).collect();
+    let mut known: HashMap<&str, &AssetLibraryItem> = scene
+        .assets
+        .iter()
+        .map(|a| (a.asset_id.as_str(), a))
+        .collect();
     let mut adding = Vec::new();
     for asset in assets {
         match known.get(asset.asset_id.as_str()) {
@@ -230,7 +240,10 @@ pub fn replace_font(
     }
     for face in &replacement.faces {
         if let FontSource::File { asset_id, .. } = &face.source {
-            if !known.get(asset_id.as_str()).is_some_and(|a| a.kind == AssetKind::Font) {
+            if !known
+                .get(asset_id.as_str())
+                .is_some_and(|a| a.kind == AssetKind::Font)
+            {
                 return Err(Refusal::SceneAssetUnknown {
                     asset_id: asset_id.clone(),
                     object: font_id.to_owned(),
@@ -261,7 +274,9 @@ pub fn replace_font(
             orphaned.push(id.to_owned());
         }
     }
-    scene.assets.retain(|asset| !orphaned.contains(&asset.asset_id));
+    scene
+        .assets
+        .retain(|asset| !orphaned.contains(&asset.asset_id));
     Ok(orphaned)
 }
 
@@ -347,19 +362,32 @@ mod tests {
     }
 
     fn scene() -> SceneDocument {
-        crate::scene::new_scene("fonts", "Fonts", crate::color::WorkingColorSpace::NEW_PROJECT)
+        crate::scene::new_scene(
+            "fonts",
+            "Fonts",
+            crate::color::WorkingColorSpace::NEW_PROJECT,
+        )
     }
 
     #[test]
     fn a_batch_adds_every_font_and_asset_or_nothing() {
         let mut s = scene();
-        add_fonts(&mut s, &[font("a", &["x"]), font("b", &["y"])], &[asset("x"), asset("y")]).unwrap();
+        add_fonts(
+            &mut s,
+            &[font("a", &["x"]), font("b", &["y"])],
+            &[asset("x"), asset("y")],
+        )
+        .unwrap();
         assert_eq!(s.fonts.len(), 2);
         assert_eq!(s.assets.len(), 2);
 
         // One bad member refuses the whole batch and leaves the scene as it was.
         let before = s.clone();
-        let refused = add_fonts(&mut s, &[font("c", &["z"]), font("a", &["x"])], &[asset("z")]);
+        let refused = add_fonts(
+            &mut s,
+            &[font("c", &["z"]), font("a", &["x"])],
+            &[asset("z")],
+        );
         assert!(matches!(refused, Err(Refusal::FontDuplicate { font_id }) if font_id == "a"));
         assert_eq!(s, before);
     }
@@ -367,7 +395,10 @@ mod tests {
     #[test]
     fn add_refuses_empty_duplicate_unbacked_and_unlicensed() {
         let mut s = scene();
-        assert!(matches!(add_fonts(&mut s, &[], &[asset("x")]), Err(Refusal::FontBatchEmpty)));
+        assert!(matches!(
+            add_fonts(&mut s, &[], &[asset("x")]),
+            Err(Refusal::FontBatchEmpty)
+        ));
         assert!(matches!(
             add_fonts(&mut s, &[font("a", &["x"])], &[asset("x"), asset("x")]),
             Err(Refusal::SceneAssetDuplicate { asset_id }) if asset_id == "x"
@@ -411,9 +442,23 @@ mod tests {
         )
         .unwrap();
         assert_eq!(remove_font(&mut s, "a").unwrap(), vec!["own".to_string()]);
-        assert_eq!(s.fonts.iter().map(|f| f.font_id.as_str()).collect::<Vec<_>>(), ["b"]);
-        assert_eq!(s.assets.iter().map(|a| a.asset_id.as_str()).collect::<Vec<_>>(), ["shared"]);
-        assert!(matches!(remove_font(&mut s, "a"), Err(Refusal::FontUnknown { font_id }) if font_id == "a"));
+        assert_eq!(
+            s.fonts
+                .iter()
+                .map(|f| f.font_id.as_str())
+                .collect::<Vec<_>>(),
+            ["b"]
+        );
+        assert_eq!(
+            s.assets
+                .iter()
+                .map(|a| a.asset_id.as_str())
+                .collect::<Vec<_>>(),
+            ["shared"]
+        );
+        assert!(
+            matches!(remove_font(&mut s, "a"), Err(Refusal::FontUnknown { font_id }) if font_id == "a")
+        );
     }
 
     fn in_use(s: &mut SceneDocument, font_id: &str) -> String {
@@ -434,7 +479,11 @@ mod tests {
         assert_eq!(a.display_name, "Brand Sans");
         assert_eq!(a.fallback_families, ["Helvetica", "Arial"]);
         assert!(a.enabled);
-        assert_eq!(a.faces, font("a", &["x"]).faces, "faces are not the update's to change");
+        assert_eq!(
+            a.faces,
+            font("a", &["x"]).faces,
+            "faces are not the update's to change"
+        );
         update_font(&mut s, "a", None, None, Some(false)).unwrap();
         assert!(!s.fonts[0].enabled);
     }
@@ -452,14 +501,23 @@ mod tests {
             update_font(&mut s, "nope", None, None, Some(true)),
             Err(Refusal::FontUnknown { font_id }) if font_id == "nope"
         ));
-        assert_eq!(detail(update_font(&mut s, "a", Some("  "), None, None)), "font a needs a display name");
+        assert_eq!(
+            detail(update_font(&mut s, "a", Some("  "), None, None)),
+            "font a needs a display name"
+        );
         let repeated = ["Arial".to_string(), "arial".to_string()];
         assert_eq!(
             detail(update_font(&mut s, "a", None, Some(&repeated), None)),
             "font a lists fallback arial twice"
         );
         assert_eq!(
-            detail(update_font(&mut s, "a", None, Some(&[" ".to_string()]), None)),
+            detail(update_font(
+                &mut s,
+                "a",
+                None,
+                Some(&[" ".to_string()]),
+                None
+            )),
             "font a lists a blank fallback family"
         );
         let thirteen: Vec<String> = (0..13).map(|i| format!("F{i}")).collect();
@@ -467,7 +525,10 @@ mod tests {
             detail(update_font(&mut s, "a", None, Some(&thirteen), None)),
             "font a lists 13 fallback families; at most 12"
         );
-        assert_eq!(detail(update_font(&mut s, "a", None, None, None)), "updateFont for a changes nothing");
+        assert_eq!(
+            detail(update_font(&mut s, "a", None, None, None)),
+            "updateFont for a changes nothing"
+        );
         assert_eq!(
             detail(update_font(&mut s, "a", Some("a"), None, Some(true))),
             "updateFont for a changes nothing"
@@ -485,7 +546,10 @@ mod tests {
             update_font(&mut s, "a", Some("Renamed"), None, Some(false)),
             Err(Refusal::FontInUse { objects, .. }) if objects == [text.clone()]
         ));
-        assert_eq!(s, before, "a refused update changes nothing, not even the name");
+        assert_eq!(
+            s, before,
+            "a refused update changes nothing, not even the name"
+        );
         update_font(&mut s, "a", Some("Renamed"), None, None).unwrap();
         assert_eq!(s.fonts[0].display_name, "Renamed");
     }
@@ -500,12 +564,23 @@ mod tests {
         )
         .unwrap();
         let text = in_use(&mut s, "a");
-        update_font(&mut s, "a", Some("Brand"), Some(&["Arial".to_string()]), None).unwrap();
+        update_font(
+            &mut s,
+            "a",
+            Some("Brand"),
+            Some(&["Arial".to_string()]),
+            None,
+        )
+        .unwrap();
 
         let mut replacement = font("from-file", &["y"]);
         replacement.family = "Brand Sans".into();
         let removed = replace_font(&mut s, "a", &replacement, &[asset("y")]).unwrap();
-        assert_eq!(removed, ["x"], "the old file nothing uses leaves; the shared one stays");
+        assert_eq!(
+            removed,
+            ["x"],
+            "the old file nothing uses leaves; the shared one stays"
+        );
 
         let a = s.fonts.iter().find(|f| f.font_id == "a").unwrap();
         assert_eq!(a.display_name, "Brand");
@@ -513,21 +588,38 @@ mod tests {
         assert!(a.enabled);
         assert_eq!(a.family, "Brand Sans");
         assert_eq!(a.faces, replacement.faces);
-        assert_eq!(s.assets.iter().map(|x| x.asset_id.as_str()).collect::<Vec<_>>(), ["shared", "y"]);
+        assert_eq!(
+            s.assets
+                .iter()
+                .map(|x| x.asset_id.as_str())
+                .collect::<Vec<_>>(),
+            ["shared", "y"]
+        );
         let still = s.objects.iter().find(|o| o.base().id == text).unwrap();
-        assert!(matches!(still, SceneObject::Text(t) if t.font_id == "a"), "the text stays on the font");
+        assert!(
+            matches!(still, SceneObject::Text(t) if t.font_id == "a"),
+            "the text stays on the font"
+        );
     }
 
     #[test]
     fn replace_refuses_as_add_refuses_and_changes_nothing_when_refused() {
         let mut s = scene();
-        add_fonts(&mut s, &[font("a", &["x"]), font("b", &["z"])], &[asset("x"), asset("z")]).unwrap();
+        add_fonts(
+            &mut s,
+            &[font("a", &["x"]), font("b", &["z"])],
+            &[asset("x"), asset("z")],
+        )
+        .unwrap();
         let before = s.clone();
         assert!(matches!(
             replace_font(&mut s, "nope", &font("n", &["y"]), &[asset("y")]),
             Err(Refusal::FontUnknown { .. })
         ));
-        assert!(matches!(replace_font(&mut s, "a", &font("n", &[]), &[]), Err(Refusal::InvalidFontData { .. })));
+        assert!(matches!(
+            replace_font(&mut s, "a", &font("n", &[]), &[]),
+            Err(Refusal::InvalidFontData { .. })
+        ));
         let mut unlicensed = font("n", &["y"]);
         unlicensed.license = None;
         assert!(matches!(
@@ -545,10 +637,19 @@ mod tests {
             replace_font(&mut s, "a", &font("n", &["z"]), &[clash]),
             Err(Refusal::SceneAssetDuplicate { asset_id }) if asset_id == "z"
         ));
-        assert!(matches!(replace_font(&mut s, "a", &font("a", &["x"]), &[]), Err(Refusal::InvalidFontData { .. })));
+        assert!(matches!(
+            replace_font(&mut s, "a", &font("a", &["x"]), &[]),
+            Err(Refusal::InvalidFontData { .. })
+        ));
         assert_eq!(s, before);
         // The very same record already in the scene may be named again.
         replace_font(&mut s, "a", &font("n", &["z"]), &[asset("z")]).unwrap();
-        assert_eq!(s.assets.iter().map(|x| x.asset_id.as_str()).collect::<Vec<_>>(), ["z"]);
+        assert_eq!(
+            s.assets
+                .iter()
+                .map(|x| x.asset_id.as_str())
+                .collect::<Vec<_>>(),
+            ["z"]
+        );
     }
 }

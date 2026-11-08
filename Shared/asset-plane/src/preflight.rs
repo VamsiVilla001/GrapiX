@@ -14,7 +14,10 @@ use std::thread::{self, JoinHandle};
 use gx_contracts::{ContentHash, Refusal};
 use serde::{Deserialize, Serialize};
 
-use crate::{content_hash, AssetStore, PreflightRequest, PreflightResponse, Transfer, MAX_PUBLISH_FRAME_BYTES};
+use crate::{
+    content_hash, AssetStore, PreflightRequest, PreflightResponse, Transfer,
+    MAX_PUBLISH_FRAME_BYTES,
+};
 
 /// Chunk payloads stay small enough that their JSON representation remains
 /// comfortably below the plane frame bound, which is checked before allocation
@@ -26,10 +29,19 @@ pub const MAX_ASSET_FRAME_BYTES: usize = MAX_PUBLISH_FRAME_BYTES;
 
 /// One request in the local asset transfer dialect.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "request", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "request",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum AssetTransferRequest {
-    Preflight { hashes: Vec<ContentHash> },
-    Begin { hash: ContentHash, total_chunks: u32 },
+    Preflight {
+        hashes: Vec<ContentHash>,
+    },
+    Begin {
+        hash: ContentHash,
+        total_chunks: u32,
+    },
     Chunk {
         hash: ContentHash,
         index: u32,
@@ -39,7 +51,11 @@ pub enum AssetTransferRequest {
 
 /// One reply in the local asset transfer dialect.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "reply", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "reply",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum AssetTransferReply {
     Preflight { missing: Vec<ContentHash> },
     Started { hash: ContentHash, resume_from: u32 },
@@ -152,28 +168,29 @@ impl AssetTransferClient {
         }
     }
 
-    pub fn transfer(
-        &mut self,
-        asset: &AssetBytes,
-    ) -> Result<(), AssetTransferClientError> {
+    pub fn transfer(&mut self, asset: &AssetBytes) -> Result<(), AssetTransferClientError> {
         let chunks = asset.bytes.len() / ASSET_TRANSFER_CHUNK_BYTES
             + usize::from(asset.bytes.len() % ASSET_TRANSFER_CHUNK_BYTES != 0);
-        let total_chunks = u32::try_from(chunks).map_err(|_| AssetTransferClientError::RequestTooLarge {
-            bytes: asset.bytes.len(),
-        })?;
+        let total_chunks =
+            u32::try_from(chunks).map_err(|_| AssetTransferClientError::RequestTooLarge {
+                bytes: asset.bytes.len(),
+            })?;
         match self.request(AssetTransferRequest::Begin {
             hash: asset.hash.clone(),
             total_chunks,
         })? {
             AssetTransferReply::Started { .. } => {}
-            AssetTransferReply::Refused { cause } => return Err(AssetTransferClientError::Refused(cause)),
+            AssetTransferReply::Refused { cause } => {
+                return Err(AssetTransferClientError::Refused(cause))
+            }
             reply => return Err(AssetTransferClientError::UnexpectedReply { reply }),
         }
 
         for (index, bytes) in asset.bytes.chunks(ASSET_TRANSFER_CHUNK_BYTES).enumerate() {
-            let index = u32::try_from(index).map_err(|_| AssetTransferClientError::RequestTooLarge {
-                bytes: asset.bytes.len(),
-            })?;
+            let index =
+                u32::try_from(index).map_err(|_| AssetTransferClientError::RequestTooLarge {
+                    bytes: asset.bytes.len(),
+                })?;
             let bytes = bytes.to_vec();
             let byte_count = bytes.len() as u64;
             match self.request(AssetTransferRequest::Chunk {
@@ -231,7 +248,9 @@ impl AssetTransferClient {
         write_frame(&mut self.stream, &request).map_err(AssetTransferClientError::Transport)?;
         read_frame(&mut self.stream)
             .map_err(AssetTransferClientError::Transport)?
-            .ok_or_else(|| AssetTransferClientError::Transport(io::Error::from(io::ErrorKind::UnexpectedEof)))
+            .ok_or_else(|| {
+                AssetTransferClientError::Transport(io::Error::from(io::ErrorKind::UnexpectedEof))
+            })
     }
 }
 
@@ -260,9 +279,13 @@ impl std::fmt::Display for AssetTransferClientError {
         match self {
             Self::Connect(source) => write!(f, "cannot reach the asset plane: {source}"),
             Self::Transport(source) => write!(f, "asset-plane transport failed: {source}"),
-            Self::RequestTooLarge { bytes } => write!(f, "asset-plane request frame is {bytes} bytes"),
+            Self::RequestTooLarge { bytes } => {
+                write!(f, "asset-plane request frame is {bytes} bytes")
+            }
             Self::Refused(cause) => write!(f, "asset-plane request refused: {cause}"),
-            Self::UnexpectedReply { reply } => write!(f, "asset-plane received unexpected reply: {reply:?}"),
+            Self::UnexpectedReply { reply } => {
+                write!(f, "asset-plane received unexpected reply: {reply:?}")
+            }
         }
     }
 }
@@ -341,7 +364,10 @@ fn handle_request(
         AssetTransferRequest::Chunk { hash, index, bytes } => {
             let complete = {
                 let active_transfer = active.as_mut().ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidData, "asset chunk arrived before begin")
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "asset chunk arrived before begin",
+                    )
                 })?;
                 if active_transfer.transfer.hash() != &hash {
                     return Err(io::Error::new(
@@ -363,7 +389,9 @@ fn handle_request(
                 });
             }
 
-            let mut completed = active.take().expect("completed transfer must remain active");
+            let mut completed = active
+                .take()
+                .expect("completed transfer must remain active");
             let actual = content_hash(&completed.bytes);
             if let Err(cause) = completed.transfer.verify(&actual) {
                 return Ok(AssetTransferReply::Refused { cause });
@@ -383,7 +411,10 @@ fn write_frame<W: Write, T: Serialize>(stream: &mut W, value: &T) -> io::Result<
     if bytes.len() > MAX_ASSET_FRAME_BYTES {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("asset frame is {} bytes; maximum is {MAX_ASSET_FRAME_BYTES}", bytes.len()),
+            format!(
+                "asset frame is {} bytes; maximum is {MAX_ASSET_FRAME_BYTES}",
+                bytes.len()
+            ),
         ));
     }
     let length = u32::try_from(bytes.len())
@@ -439,11 +470,9 @@ mod tests {
     fn server() -> (SocketAddr, AssetTransferMetrics, PathBuf) {
         let directory = temporary_directory();
         let store = Arc::new(Mutex::new(AssetStore::at_root(directory.clone())));
-        let server = AssetTransferServer::bind(
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
-            store,
-        )
-        .expect("asset transfer server must bind");
+        let server =
+            AssetTransferServer::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0), store)
+                .expect("asset transfer server must bind");
         let address = server.local_addr().expect("bound listener has an address");
         let metrics = server.metrics();
         server.serve_in_background();
@@ -466,11 +495,8 @@ mod tests {
 
         let changed = AssetBytes::from_bytes(b"charlie-v2".to_vec());
         let before = metrics.received_asset_bytes();
-        let second = publish_assets(
-            address,
-            &[unchanged_a, unchanged_b, changed.clone()],
-        )
-        .expect("the second publication must transfer its preflight difference");
+        let second = publish_assets(address, &[unchanged_a, unchanged_b, changed.clone()])
+            .expect("the second publication must transfer its preflight difference");
         assert_eq!(second.missing, vec![changed.hash.clone()]);
         assert_eq!(second.transferred_bytes, changed.bytes.len() as u64);
         assert_eq!(
@@ -494,7 +520,11 @@ mod tests {
         assert_eq!(
             client
                 .preflight(PreflightRequest {
-                    hashes: vec![present.hash.clone(), absent.hash.clone(), absent.hash.clone()],
+                    hashes: vec![
+                        present.hash.clone(),
+                        absent.hash.clone(),
+                        absent.hash.clone()
+                    ],
                 })
                 .expect("preflight must reply"),
             PreflightResponse {

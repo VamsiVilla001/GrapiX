@@ -10,19 +10,33 @@
 use std::path::{Path, PathBuf};
 
 use gx_asset_plane::fonts::ingest::{FontDisposition, PreparedFontBatch, PreparedFontSource};
-use gx_asset_plane::import::{AssetDisposition, AssetImportRefusal, PreparedAssetBatch, PreparedAssetSource};
-use gx_contracts::provenance::{AssetApproval, AssetOrigin, AssetProvenance, LicenseClass, ProvenanceTool};
+use gx_asset_plane::import::{
+    AssetDisposition, AssetImportRefusal, PreparedAssetBatch, PreparedAssetSource,
+};
 use gx_asset_plane::{AssetRef, PreflightRequest, PreflightResponse, TransferState};
 use gx_contracts::animation::{
-    ease_at, easing_control_points, AnimationSurface, CubicBezier, KeyRef, KeyframeChannel, SceneEasing,
-    SceneKeyframe,
+    ease_at, easing_control_points, AnimationSurface, CubicBezier, KeyRef, KeyframeChannel,
+    SceneEasing, SceneKeyframe,
 };
 use gx_contracts::auth::{Role, Scope};
-use gx_contracts::control::{ControlField, ControlFieldKind, ControlValue, TakePage};
+use gx_contracts::authoring::{ObjectDeletion, ObjectDuplication};
+use gx_contracts::bindings::BindingIssue;
 use gx_contracts::color::{
     rec709_decode, rec709_encode, srgb_decode, srgb_encode, ColorValue, GradientCoordinateMode,
     GradientSpread, GradientStop, OutputTransform, Rgba, SourceColorSpace, WorkingColorSpace,
 };
+use gx_contracts::command::{
+    ApplyPreset, ApplyTextStyle, CloseScene, CommandOutcome, ConfirmDesignSystem, CreateKeyframe,
+    CreateObject, CreateProject, CreateScene, DeclareControl, DeleteMaterial, DeleteObject,
+    DeleteScene, DuplicateObject, DuplicateScene, EditEffect, EditProperty, EditScene,
+    EditorCommand, HistoryDirection, MoveKeyframe, OpenScene, PresetPhase, Redo, RelinkAsset,
+    RelinkMaterial, RemoveControl, RemoveKeyframe, RemovePhase, RenameObject, ReplaceControl,
+    ReplaceDataContext, SaveMotionPreset, SaveScene, SaveTakePage, SaveTarget, SaveTextStyle,
+    SceneEdit, SceneOrigin, SceneSource, SceneTarget, SessionKey, SessionView, SetBinding,
+    SetObjectField, SetObjectLocked, SetObjectVisible, SetPhase, SetSceneId, SetSceneName, Undo,
+    UpdateKeyframe,
+};
+use gx_contracts::control::{ControlField, ControlFieldKind, ControlValue, TakePage};
 use gx_contracts::design_system::{
     DesignSystem, DesignSystemCommit, DesignSystemDraft, DesignSystemImport, DesignSystemSource,
     DesignSystemSourceKind, DesignSystemVersion, DesignSystemVersions, DraftVisualTokens,
@@ -34,18 +48,21 @@ use gx_contracts::font::{
     EmbeddingPolicy, FontDefinition, FontFaceDefinition, FontFormat, FontLoadStatus, FontSource,
     FontStyle,
 };
+use gx_contracts::import::{ImportEntry, ImportReport, ImportTier, Substitution};
 use gx_contracts::material::{
     AlphaMode, BlendMode, CullMode, DepthMode, FitMode, MaterialBinding, MaterialDefinition,
     MaterialKind, MaterialSupport, MaterialTextureSlot, TextureFiltering, TextureWrapMode,
 };
 use gx_contracts::mcp::{
-    CapabilitySurface, EnumSurface, PreviewFrame, PreviewRequest, ScopeDenial, ToolDescriptor, ToolEffect,
-    EmptyArgs, ProjectRef, SceneRef, PackageBuild, PackageBuildSource, PackageRef, ProgramArgs, ClearArgs,
+    CapabilitySurface, ClearArgs, EmptyArgs, EnumSurface, PackageBuild, PackageBuildSource,
+    PackageRef, PreviewFrame, PreviewRequest, ProgramArgs, ProjectRef, SceneRef, ScopeDenial,
+    ToolDescriptor, ToolEffect,
 };
-use gx_contracts::import::{ImportEntry, ImportReport, ImportTier, Substitution};
+use gx_contracts::object_edit::ObjectField;
 use gx_contracts::package::{PackageFileEntry, PackageManifest};
-use gx_contracts::authoring::{ObjectDeletion, ObjectDuplication};
-use gx_contracts::text_style::{StyleColor, StyleNumber, TextStyle};
+use gx_contracts::provenance::{
+    AssetApproval, AssetOrigin, AssetProvenance, LicenseClass, ProvenanceTool,
+};
 use gx_contracts::scene::{
     AssetAvailability, AssetKind, AssetLibraryItem, BezierPath, BrushBlendMode, BrushPoint,
     CameraKind, CameraObject, EllipseObject, FillRule, GroupObject, HierarchyChildren,
@@ -56,18 +73,7 @@ use gx_contracts::scene::{
     SlabProperties, TextAlign, TextAutoFit, TextCase, TextDecoration, TextDirection, TextLayout,
     TextObject, TextOverflow, Vec2, Vec3, VerticalAlign, WritingMode,
 };
-use gx_contracts::bindings::BindingIssue;
-use gx_contracts::command::{
-    ApplyPreset, ApplyTextStyle, CloseScene, CommandOutcome, ConfirmDesignSystem, CreateKeyframe,
-    CreateObject, CreateProject, CreateScene, DeclareControl, DeleteMaterial, DeleteObject,
-    DeleteScene, DuplicateObject, DuplicateScene, EditEffect, EditProperty, EditScene,
-    EditorCommand, HistoryDirection, MoveKeyframe, OpenScene, PresetPhase, Redo, RemoveControl, RemoveKeyframe, RemovePhase,
-    ReplaceControl, ReplaceDataContext, RelinkAsset, RelinkMaterial, RenameObject, SaveScene,
-    SaveMotionPreset, SaveTakePage, SaveTarget, SaveTextStyle, SceneEdit, SceneOrigin, SceneSource, SceneTarget, SessionKey,
-    SessionView, SetBinding, SetObjectField, SetObjectLocked, SetObjectVisible, SetPhase,
-    SetSceneId, SetSceneName, Undo, UpdateKeyframe,
-};
-use gx_contracts::object_edit::ObjectField;
+use gx_contracts::text_style::{StyleColor, StyleNumber, TextStyle};
 use gx_contracts::{
     ClockSource, ContentHash, DeviceTier, Epoch, Locality, MediaCodec, PublishedRevision,
     RationalRate, ReferenceState, Refusal, RefusalSeverity, ReviewRequest, ReviewState, Revision,
@@ -391,13 +397,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for tool in gx_contracts::mcp::ToolRegistry::all() {
         let schema = gx_contracts::mcp::input_schema(tool.input)?;
         let mut fields = vec![("$comment".to_owned(), schema["$comment"].clone())];
-        fields.extend(schema.as_object().unwrap().iter()
-            .filter(|(name, _)| name.as_str() != "$comment")
-            .map(|(name, value)| (name.clone(), value.clone())));
-        std::fs::write(mcp_schemas.join(format!("{}.schema.json", tool.name)),
-            format_schema_document(fields)?)?;
+        fields.extend(
+            schema
+                .as_object()
+                .unwrap()
+                .iter()
+                .filter(|(name, _)| name.as_str() != "$comment")
+                .map(|(name, value)| (name.clone(), value.clone())),
+        );
+        std::fs::write(
+            mcp_schemas.join(format!("{}.schema.json", tool.name)),
+            format_schema_document(fields)?,
+        )?;
     }
-    export_all!(&out, EmptyArgs, ProjectRef, SceneRef, PackageBuild, PackageBuildSource, PackageRef, ProgramArgs, ClearArgs);
+    export_all!(
+        &out,
+        EmptyArgs,
+        ProjectRef,
+        SceneRef,
+        PackageBuild,
+        PackageBuildSource,
+        PackageRef,
+        ProgramArgs,
+        ClearArgs
+    );
     write_capability_surface(&out)?;
     write_barrel(&out)?;
     write_transfer_reference(&workspace_root())?;
@@ -422,7 +445,8 @@ fn normalize_typescript_whitespace(dir: &Path) -> std::io::Result<()> {
                 .lines()
                 .map(str::trim_end)
                 .collect::<Vec<_>>()
-                .join("\n") + "\n";
+                .join("\n")
+                + "\n";
             if text != normalized {
                 std::fs::write(&path, normalized)?;
             }
@@ -520,7 +544,10 @@ fn write_payload_schemas(
     emit(&mut write);
     result?;
 
-    let mut expected: Vec<_> = expected_names.iter().map(|name| (*name).to_owned()).collect();
+    let mut expected: Vec<_> = expected_names
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect();
     expected.sort_unstable();
     emitted.sort_unstable();
     if emitted != expected {
@@ -552,7 +579,9 @@ fn write_schema(
             .as_object_mut()
         {
             Some(properties) => properties,
-            None => return Err(format!("payload schema for {title} has non-object properties").into()),
+            None => {
+                return Err(format!("payload schema for {title} has non-object properties").into())
+            }
         };
         properties.insert(
             tag_name.to_owned(),
@@ -573,7 +602,10 @@ fn write_schema(
         {
             required.push(serde_json::Value::String(tag_name.to_owned()));
         }
-        object.insert("additionalProperties".to_owned(), serde_json::Value::Bool(false));
+        object.insert(
+            "additionalProperties".to_owned(),
+            serde_json::Value::Bool(false),
+        );
     }
 
     object.remove("$schema");
@@ -584,7 +616,10 @@ fn write_schema(
         .unwrap_or_else(|| serde_json::Value::String(title.to_owned()));
 
     let mut fields = vec![
-        ("$comment".to_owned(), serde_json::Value::String(GENERATED_SCHEMA_COMMENT.to_owned())),
+        (
+            "$comment".to_owned(),
+            serde_json::Value::String(GENERATED_SCHEMA_COMMENT.to_owned()),
+        ),
         ("$schema".to_owned(), schema),
         ("$id".to_owned(), serde_json::Value::String(id.to_owned())),
         ("title".to_owned(), title),
@@ -897,7 +932,11 @@ mod schema_tests {
             assert_eq!(schema["type"], "object", "{}", tool.name);
             let validator = jsonschema::validator_for(&schema).unwrap();
             assert!(!validator.is_valid(&serde_json::json!([])), "{}", tool.name);
-            assert!(!validator.is_valid(&serde_json::json!({"unexpected": true})), "{}", tool.name);
+            assert!(
+                !validator.is_valid(&serde_json::json!({"unexpected": true})),
+                "{}",
+                tool.name
+            );
         }
     }
 
@@ -907,7 +946,11 @@ mod schema_tests {
         let validator = jsonschema::validator_for(&schema).unwrap();
         let args = gx_contracts::mcp::PackageBuild {
             output: "news.gpxpkg".into(),
-            scene: gx_contracts::scene::new_scene("score", "Score", gx_contracts::color::WorkingColorSpace::NEW_PROJECT),
+            scene: gx_contracts::scene::new_scene(
+                "score",
+                "Score",
+                gx_contracts::color::WorkingColorSpace::NEW_PROJECT,
+            ),
             sources: Vec::new(),
             design_system_version: None,
         };
@@ -926,7 +969,9 @@ mod schema_tests {
         // The generated header must land inside the 200-character window the
         // boundary guard reads (R7), whatever serde_json's key order is.
         assert!(
-            text.starts_with(&format!("{{\n  \"$comment\": \"{GENERATED_SCHEMA_COMMENT}\"")),
+            text.starts_with(&format!(
+                "{{\n  \"$comment\": \"{GENERATED_SCHEMA_COMMENT}\""
+            )),
             "{} does not open with its generated $comment",
             path.display()
         );
@@ -935,7 +980,10 @@ mod schema_tests {
     }
 
     fn payload_name(names: &[&'static str], payloads: &[&'static str], name: &str) -> &'static str {
-        let index = names.iter().position(|candidate| *candidate == name).unwrap();
+        let index = names
+            .iter()
+            .position(|candidate| *candidate == name)
+            .unwrap();
         payloads[index]
     }
 
@@ -964,10 +1012,25 @@ mod schema_tests {
 
         for command in gx_contracts::command::witness::every_command(&root.join("witness")) {
             let value = serde_json::to_value(&command).unwrap();
-            assert!(command_umbrella.is_valid(&value), "EditorCommand rejected {}", command.name());
-            let payload = payload_name(EditorCommand::NAMES, EditorCommand::PAYLOAD_NAMES, command.name());
-            let schema = validator(&schemas.join("commands").join(format!("{payload}.schema.json")));
-            assert!(schema.is_valid(&value), "commands/{payload} rejected its witness");
+            assert!(
+                command_umbrella.is_valid(&value),
+                "EditorCommand rejected {}",
+                command.name()
+            );
+            let payload = payload_name(
+                EditorCommand::NAMES,
+                EditorCommand::PAYLOAD_NAMES,
+                command.name(),
+            );
+            let schema = validator(
+                &schemas
+                    .join("commands")
+                    .join(format!("{payload}.schema.json")),
+            );
+            assert!(
+                schema.is_valid(&value),
+                "commands/{payload} rejected its witness"
+            );
             assert!(
                 !schema.is_valid(&with_unexpected_key(&value)),
                 "commands/{payload} accepted an unknown top-level key"
@@ -977,10 +1040,22 @@ mod schema_tests {
             if let EditorCommand::EditScene(edit) = command {
                 for scene_edit in edit.edits {
                     let value = serde_json::to_value(&scene_edit).unwrap();
-                    assert!(edit_umbrella.is_valid(&value), "SceneEdit rejected {}", scene_edit.name());
-                    let payload = payload_name(SceneEdit::NAMES, SceneEdit::PAYLOAD_NAMES, scene_edit.name());
-                    let schema = validator(&schemas.join("edits").join(format!("{payload}.schema.json")));
-                    assert!(schema.is_valid(&value), "edits/{payload} rejected its witness");
+                    assert!(
+                        edit_umbrella.is_valid(&value),
+                        "SceneEdit rejected {}",
+                        scene_edit.name()
+                    );
+                    let payload = payload_name(
+                        SceneEdit::NAMES,
+                        SceneEdit::PAYLOAD_NAMES,
+                        scene_edit.name(),
+                    );
+                    let schema =
+                        validator(&schemas.join("edits").join(format!("{payload}.schema.json")));
+                    assert!(
+                        schema.is_valid(&value),
+                        "edits/{payload} rejected its witness"
+                    );
                     assert!(
                         !schema.is_valid(&with_unexpected_key(&value)),
                         "edits/{payload} accepted an unknown top-level key"
@@ -991,8 +1066,14 @@ mod schema_tests {
         }
 
         // Every emitted per-command file was exercised by a witness.
-        assert_eq!(commands_seen, EditorCommand::PAYLOAD_NAMES.iter().copied().collect());
-        assert_eq!(edits_seen, SceneEdit::PAYLOAD_NAMES.iter().copied().collect());
+        assert_eq!(
+            commands_seen,
+            EditorCommand::PAYLOAD_NAMES.iter().copied().collect()
+        );
+        assert_eq!(
+            edits_seen,
+            SceneEdit::PAYLOAD_NAMES.iter().copied().collect()
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 }

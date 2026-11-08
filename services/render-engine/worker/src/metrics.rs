@@ -282,7 +282,11 @@ mod tests {
             missed_before: 2,
         });
         assert_eq!(metrics.total_dropped(), 3, "a drop is a fact, not noise");
-        assert_eq!(metrics.total_missed(), 2, "a frame the loop never reached is counted");
+        assert_eq!(
+            metrics.total_missed(),
+            2,
+            "a frame the loop never reached is counted"
+        );
     }
 
     #[test]

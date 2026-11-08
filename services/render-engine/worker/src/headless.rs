@@ -149,7 +149,9 @@ impl ImageTolerance {
     pub fn admits(&self, differing_pixels: u64, total_pixels: u64, max_channel_delta: u8) -> bool {
         max_channel_delta <= self.max_channel_delta
             && differing_pixels.saturating_mul(1_000_000)
-                <= self.max_differing_pixels_per_million.saturating_mul(total_pixels)
+                <= self
+                    .max_differing_pixels_per_million
+                    .saturating_mul(total_pixels)
     }
 }
 
@@ -171,7 +173,11 @@ pub fn encode_png(frame: &Frame) -> Vec<u8> {
     header.extend_from_slice(&[8, 6, 0, 0, 0]);
     let mut png = PNG_SIGNATURE.to_vec();
     write_chunk(&mut png, b"IHDR", &header);
-    write_chunk(&mut png, b"IDAT", &miniz_oxide::deflate::compress_to_vec_zlib(&raw, DEFLATE_LEVEL));
+    write_chunk(
+        &mut png,
+        b"IDAT",
+        &miniz_oxide::deflate::compress_to_vec_zlib(&raw, DEFLATE_LEVEL),
+    );
     write_chunk(&mut png, b"IEND", &[]);
     png
 }
@@ -182,14 +188,21 @@ pub fn decode_png(png: &[u8]) -> Result<Frame, Refusal> {
     let refuse = |what: &str| Refusal::NotImplemented {
         what: format!("headless image decode: {what}"),
     };
-    let body = png.strip_prefix(&PNG_SIGNATURE[..]).ok_or_else(|| refuse("not a PNG"))?;
+    let body = png
+        .strip_prefix(&PNG_SIGNATURE[..])
+        .ok_or_else(|| refuse("not a PNG"))?;
     let (mut cursor, mut size, mut compressed) = (0usize, None, Vec::new());
     while cursor + 12 <= body.len() {
-        let length = u32::from_be_bytes(body[cursor..cursor + 4].try_into().expect("four bytes")) as usize;
+        let length =
+            u32::from_be_bytes(body[cursor..cursor + 4].try_into().expect("four bytes")) as usize;
         let kind = &body[cursor + 4..cursor + 8];
         let end = cursor + 8 + length;
-        let data = body.get(cursor + 8..end).ok_or_else(|| refuse("truncated chunk"))?;
-        let stored = body.get(end..end + 4).ok_or_else(|| refuse("truncated CRC"))?;
+        let data = body
+            .get(cursor + 8..end)
+            .ok_or_else(|| refuse("truncated chunk"))?;
+        let stored = body
+            .get(end..end + 4)
+            .ok_or_else(|| refuse("truncated CRC"))?;
         if crc32(&body[cursor + 4..end]).to_be_bytes() != stored {
             return Err(refuse("chunk CRC mismatch"));
         }
@@ -206,7 +219,8 @@ pub fn decode_png(png: &[u8]) -> Result<Frame, Refusal> {
         cursor = end + 4;
     }
     let (width, height) = size.ok_or_else(|| refuse("no IHDR"))?;
-    let raw = miniz_oxide::inflate::decompress_to_vec_zlib(&compressed).map_err(|_| refuse("IDAT does not inflate"))?;
+    let raw = miniz_oxide::inflate::decompress_to_vec_zlib(&compressed)
+        .map_err(|_| refuse("IDAT does not inflate"))?;
     let row = width as usize * 4;
     if raw.len() != (row + 1) * height as usize {
         return Err(refuse("IDAT length does not match the image size"));
@@ -218,7 +232,11 @@ pub fn decode_png(png: &[u8]) -> Result<Frame, Refusal> {
         }
         pixels.extend_from_slice(&line[1..]);
     }
-    Ok(Frame { width, height, pixels })
+    Ok(Frame {
+        width,
+        height,
+        pixels,
+    })
 }
 
 fn write_chunk(png: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
@@ -235,7 +253,11 @@ fn crc32(bytes: &[u8]) -> u32 {
     for &byte in bytes {
         crc ^= u32::from(byte);
         for _ in 0..8 {
-            crc = if crc & 1 == 1 { 0xedb8_8320 ^ (crc >> 1) } else { crc >> 1 };
+            crc = if crc & 1 == 1 {
+                0xedb8_8320 ^ (crc >> 1)
+            } else {
+                crc >> 1
+            };
         }
     }
     !crc
@@ -249,9 +271,18 @@ mod tests {
     fn the_tolerance_admits_boundary_noise_and_refuses_a_rendering_difference() {
         let total = 1920 * 1080;
         assert!(CROSS_MACHINE_TOLERANCE.admits(0, total, 0));
-        assert!(CROSS_MACHINE_TOLERANCE.admits(2_073, total, 1), "0.1% of pixels by one code value");
-        assert!(!CROSS_MACHINE_TOLERANCE.admits(2_074, total, 1), "more than 0.1% of pixels");
-        assert!(!CROSS_MACHINE_TOLERANCE.admits(1, total, 2), "one pixel off by two code values");
+        assert!(
+            CROSS_MACHINE_TOLERANCE.admits(2_073, total, 1),
+            "0.1% of pixels by one code value"
+        );
+        assert!(
+            !CROSS_MACHINE_TOLERANCE.admits(2_074, total, 1),
+            "more than 0.1% of pixels"
+        );
+        assert!(
+            !CROSS_MACHINE_TOLERANCE.admits(1, total, 2),
+            "one pixel off by two code values"
+        );
     }
 
     #[test]

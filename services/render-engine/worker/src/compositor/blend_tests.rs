@@ -27,7 +27,11 @@ fn hardware() -> Gpu {
         Err(_) => crate::gpu::negotiate(),
         other => panic!("unsupported explicit proof backend: {other:?}"),
     };
-    assert!(gpu.has_hardware(), "3.20 proof requires a hardware GPU, got {:?}", gpu.tier());
+    assert!(
+        gpu.has_hardware(),
+        "3.20 proof requires a hardware GPU, got {:?}",
+        gpu.tier()
+    );
     gpu
 }
 
@@ -53,12 +57,23 @@ fn cases() -> Vec<([f32; 4], [f32; 4], f32, bool)> {
         state ^= state << 17;
         (state >> 40) as f32 / 16_777_216.0
     };
-    let special_alpha = [0.0, f32::from_bits(1), 1e-39, f32::MIN_POSITIVE, 1e-30, 1e-7, 1.0];
+    let special_alpha = [
+        0.0,
+        f32::from_bits(1),
+        1e-39,
+        f32::MIN_POSITIVE,
+        1e-30,
+        1e-7,
+        1.0,
+    ];
     let mut out = Vec::new();
     for i in 0..4096 {
         let pick = |next: &mut dyn FnMut() -> f32, i: usize| -> f32 {
             match i % 4 {
-                0 => special_alpha[(next() * special_alpha.len() as f32) as usize % special_alpha.len()],
+                0 => {
+                    special_alpha
+                        [(next() * special_alpha.len() as f32) as usize % special_alpha.len()]
+                }
                 _ => next(),
             }
         };
@@ -69,12 +84,18 @@ fn cases() -> Vec<([f32; 4], [f32; 4], f32, bool)> {
             1 => 1e20,
             _ => 1.0,
         };
-        let straight = |next: &mut dyn FnMut() -> f32| [next() * scale, next() * scale, next() * scale];
+        let straight =
+            |next: &mut dyn FnMut() -> f32| [next() * scale, next() * scale, next() * scale];
         let s = straight(&mut next);
         let d = straight(&mut next);
         let noise = next();
         let compared = scale <= 4.0;
-        out.push(([d[0] * da, d[1] * da, d[2] * da, da], [s[0] * sa, s[1] * sa, s[2] * sa, sa], noise, compared));
+        out.push((
+            [d[0] * da, d[1] * da, d[2] * da, da],
+            [s[0] * sa, s[1] * sa, s[2] * sa, sa],
+            noise,
+            compared,
+        ));
     }
     out
 }
@@ -92,7 +113,10 @@ fn close(gpu: f32, cpu: f32) -> bool {
 }
 
 fn discontinuous(mode: BlendMode) -> bool {
-    matches!(mode, BlendMode::HardMix | BlendMode::DarkerColor | BlendMode::LighterColor)
+    matches!(
+        mode,
+        BlendMode::HardMix | BlendMode::DarkerColor | BlendMode::LighterColor
+    )
 }
 
 #[test]
@@ -125,7 +149,10 @@ fn gpu_blend_kernel_equals_the_cpu_reference_for_every_mode() {
             words.extend_from_slice(src);
             words.extend_from_slice(&[*noise, f32::from_bits(mode_index(mode)), 0.0, 0.0]);
         }
-        let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_bits().to_le_bytes()).collect();
+        let bytes: Vec<u8> = words
+            .iter()
+            .flat_map(|w| w.to_bits().to_le_bytes())
+            .collect();
         let input = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("cases"),
             contents: &bytes,
@@ -148,8 +175,14 @@ fn gpu_blend_kernel_equals_the_cpu_reference_for_every_mode() {
             label: None,
             layout: &pipeline.get_bind_group_layout(0),
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: input.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: output.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: input.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: output.as_entire_binding(),
+                },
             ],
         });
         let mut encoder = device.create_command_encoder(&Default::default());
@@ -193,12 +226,25 @@ fn gpu_blend_kernel_equals_the_cpu_reference_for_every_mode() {
                 first.get_or_insert((i, *dst, *src, cpu, [gpu[0], gpu[1], gpu[2], gpu[3]]));
             }
         }
-        let allowed = if discontinuous(mode) { compared / 200 } else { 0 };
+        let allowed = if discontinuous(mode) {
+            compared / 200
+        } else {
+            0
+        };
         if mismatched > allowed {
-            failures.push(format!("{mode:?}: {mismatched} of {compared} differ; first {first:?}"));
+            failures.push(format!(
+                "{mode:?}: {mismatched} of {compared} differ; first {first:?}"
+            ));
         }
         report.push(format!("{mode:?}: {mismatched}/{compared}"));
     }
-    eprintln!("3.20 kernel gate on {:?}: {}", gpu.diagnostic_description(), report.join(", "));
-    assert!(failures.is_empty(), "GPU blend results that differ from the CPU reference: {failures:#?}");
+    eprintln!(
+        "3.20 kernel gate on {:?}: {}",
+        gpu.diagnostic_description(),
+        report.join(", ")
+    );
+    assert!(
+        failures.is_empty(),
+        "GPU blend results that differ from the CPU reference: {failures:#?}"
+    );
 }

@@ -31,9 +31,7 @@ use crate::{ContentHash, RefusalSeverity};
 /// `Native > Container > Flattened > Rasterized`. The comparison is the point
 /// — "nothing fell below `Flattened`" is a sentence an import gate can
 /// assert, and it is only expressible if the ladder is ordered.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum ImportTier {
     /// Became pixels. Vector scalability and editability are gone. That is a
@@ -105,10 +103,7 @@ pub enum ImportReportError {
     /// This is the done-when of 7.2 made checkable: "every substitution named
     /// in the report" is only true if a lossy outcome cannot exist without
     /// one.
-    UnexplainedLoss {
-        source_id: String,
-        tier: ImportTier,
-    },
+    UnexplainedLoss { source_id: String, tier: ImportTier },
     /// The source was not retained, so the import cannot be re-run or audited.
     SourceNotRetained,
 }

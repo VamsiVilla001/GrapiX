@@ -36,16 +36,16 @@ use std::borrow::Cow;
 use std::path::PathBuf;
 
 use gx_contracts::animation::validate_scene_animation;
+use gx_contracts::animation::{capture_motion_phase, KeyRef};
 use gx_contracts::command::{
     apply_edits, CommandOutcome, EditContext, EditEffect, EditorCommand, EditorModule,
-    HistoryDirection, PresetPhase, SaveTarget, SceneEdit, SceneOrigin, SceneSource, SceneTarget, SessionKey,
-    SessionView,
+    HistoryDirection, PresetPhase, SaveTarget, SceneEdit, SceneOrigin, SceneSource, SceneTarget,
+    SessionKey, SessionView,
 };
 use gx_contracts::control::TakePage;
-use gx_contracts::animation::{capture_motion_phase, KeyRef};
 use gx_contracts::design_system::{
-    starter_preset, DesignSystem, DesignSystemCommit, DurationSpec, MotionPhase, MotionPhases, MotionPreset,
-    PresetParam,
+    starter_preset, DesignSystem, DesignSystemCommit, DurationSpec, MotionPhase, MotionPhases,
+    MotionPreset, PresetParam,
 };
 use gx_contracts::scene::{new_scene, parse_scene_document, SceneDocument};
 use gx_contracts::Refusal;
@@ -142,7 +142,12 @@ struct Session {
 }
 
 impl Session {
-    fn open(key: SessionKey, document: SceneDocument, origin: Option<SceneOrigin>, path: Option<String>) -> Self {
+    fn open(
+        key: SessionKey,
+        document: SceneDocument,
+        origin: Option<SceneOrigin>,
+        path: Option<String>,
+    ) -> Self {
         Self {
             key,
             base: document.clone(),
@@ -225,7 +230,11 @@ impl Session {
     }
 
     /// Flip one entry and replay; on a refusal, flip it back and refuse.
-    fn toggle_and_replay(&mut self, index: usize, direction: HistoryDirection) -> Result<(), Refusal> {
+    fn toggle_and_replay(
+        &mut self,
+        index: usize,
+        direction: HistoryDirection,
+    ) -> Result<(), Refusal> {
         self.log[index].active = !self.log[index].active;
         match self.replay() {
             Ok(document) => {
@@ -281,9 +290,15 @@ impl Workspace {
         match command {
             EditorCommand::OpenScene(p) => self.open(p.source),
             EditorCommand::CloseScene(p) => self.close(p.session, p.force),
-            EditorCommand::EditScene(p) => self.edit(p.target, &p.edits, p.module.unwrap_or(EditorModule::Scene)),
-            EditorCommand::Undo(p) => self.step_history(p.session, HistoryDirection::Undo, p.module),
-            EditorCommand::Redo(p) => self.step_history(p.session, HistoryDirection::Redo, p.module),
+            EditorCommand::EditScene(p) => {
+                self.edit(p.target, &p.edits, p.module.unwrap_or(EditorModule::Scene))
+            }
+            EditorCommand::Undo(p) => {
+                self.step_history(p.session, HistoryDirection::Undo, p.module)
+            }
+            EditorCommand::Redo(p) => {
+                self.step_history(p.session, HistoryDirection::Redo, p.module)
+            }
             EditorCommand::SaveScene(p) => self.save(p.session, p.to),
             EditorCommand::CreateProject(p) => self.create_project(p.project),
             EditorCommand::CreateScene(p) => self.create_scene(p.project, p.scene_id, p.name),
@@ -292,10 +307,17 @@ impl Workspace {
             }
             EditorCommand::DeleteScene(p) => self.delete_scene(p.project, p.scene_id),
             EditorCommand::SaveTakePage(p) => self.save_take_page(p.project, p.page),
-            EditorCommand::ConfirmDesignSystem(p) => self.confirm_design_system(p.project, p.commit),
-            EditorCommand::SaveMotionPreset(p) => {
-                self.save_motion_preset(p.project, p.target, p.object_id, p.preset_id, p.phase, p.keys)
+            EditorCommand::ConfirmDesignSystem(p) => {
+                self.confirm_design_system(p.project, p.commit)
             }
+            EditorCommand::SaveMotionPreset(p) => self.save_motion_preset(
+                p.project,
+                p.target,
+                p.object_id,
+                p.preset_id,
+                p.phase,
+                p.keys,
+            ),
             EditorCommand::ImportScene(p) => {
                 let outcome = import_into_project(
                     self.projects()?,
@@ -308,8 +330,15 @@ impl Workspace {
                 Ok(CommandOutcome {
                     session: None,
                     effects: vec![
-                        EditEffect::Stored { origin: SceneOrigin { project: p.project, scene_id: p.scene_id } },
-                        EditEffect::Imported { report: outcome.report },
+                        EditEffect::Stored {
+                            origin: SceneOrigin {
+                                project: p.project,
+                                scene_id: p.scene_id,
+                            },
+                        },
+                        EditEffect::Imported {
+                            report: outcome.report,
+                        },
                     ],
                 })
             }
@@ -320,7 +349,9 @@ impl Workspace {
     /// What publish and take-page preview read.
     pub fn document(&self, target: &SceneTarget) -> Result<Cow<'_, SceneDocument>, CommandError> {
         match target {
-            SceneTarget::Session { session } => Ok(Cow::Borrowed(&self.session(*session)?.document)),
+            SceneTarget::Session { session } => {
+                Ok(Cow::Borrowed(&self.session(*session)?.document))
+            }
             SceneTarget::Stored { project, scene_id } => {
                 Ok(Cow::Owned(self.projects()?.read_scene(project, scene_id)?))
             }
@@ -362,16 +393,35 @@ impl Workspace {
     /// divergent histories and no answer to which wins on save.
     fn open(&mut self, source: SceneSource) -> Result<CommandOutcome, CommandError> {
         let (document, origin, path) = match source {
-            SceneSource::New { id, name } => (new_scene(&id, &name, gx_contracts::color::WorkingColorSpace::NEW_PROJECT), None, None),
+            SceneSource::New { id, name } => (
+                new_scene(
+                    &id,
+                    &name,
+                    gx_contracts::color::WorkingColorSpace::NEW_PROJECT,
+                ),
+                None,
+                None,
+            ),
             SceneSource::File { path } => (read_scene_file(&path)?, None, Some(path)),
-            SceneSource::ImportSvg { id, source_name, svg } => {
+            SceneSource::ImportSvg {
+                id,
+                source_name,
+                svg,
+            } => {
                 let outcome = import_svg_document(&source_name, svg.as_bytes(), &id)?;
                 let key = self.open_document(outcome.scene, None, None);
                 return Ok(CommandOutcome {
-                    session: Some(self.sessions.last().expect("the session was just opened").view()),
+                    session: Some(
+                        self.sessions
+                            .last()
+                            .expect("the session was just opened")
+                            .view(),
+                    ),
                     effects: vec![
                         EditEffect::SessionOpened { session: key },
-                        EditEffect::Imported { report: outcome.report },
+                        EditEffect::Imported {
+                            report: outcome.report,
+                        },
                     ],
                 });
             }
@@ -384,10 +434,14 @@ impl Workspace {
                 {
                     return Ok(CommandOutcome {
                         session: Some(existing.view()),
-                        effects: vec![EditEffect::SessionOpened { session: existing.key }],
+                        effects: vec![EditEffect::SessionOpened {
+                            session: existing.key,
+                        }],
                     });
                 }
-                let document = self.projects()?.read_scene(&origin.project, &origin.scene_id)?;
+                let document = self
+                    .projects()?
+                    .read_scene(&origin.project, &origin.scene_id)?;
                 // Parsing checks shape; publish also checks animation, and a
                 // key it would refuse is refused here by name rather than
                 // previewed as some other curve.
@@ -397,19 +451,30 @@ impl Workspace {
         };
         let key = self.open_document(document, origin, path);
         Ok(CommandOutcome {
-            session: Some(self.sessions.last().expect("the session was just opened").view()),
+            session: Some(
+                self.sessions
+                    .last()
+                    .expect("the session was just opened")
+                    .view(),
+            ),
             effects: vec![EditEffect::SessionOpened { session: key }],
         })
     }
 
     /// Install a document as a new session and return its key.
-    fn open_document(&mut self, document: SceneDocument, origin: Option<SceneOrigin>, path: Option<String>) -> SessionKey {
+    fn open_document(
+        &mut self,
+        document: SceneDocument,
+        origin: Option<SceneOrigin>,
+        path: Option<String>,
+    ) -> SessionKey {
         let key = SessionKey(self.next_key);
         self.next_key = self
             .next_key
             .checked_add(1)
             .expect("fewer than u32::MAX sessions are opened in one Editor run");
-        self.sessions.push(Session::open(key, document, origin, path));
+        self.sessions
+            .push(Session::open(key, document, origin, path));
         key
     }
 
@@ -433,7 +498,12 @@ impl Workspace {
         })
     }
 
-    fn edit(&mut self, target: SceneTarget, edits: &[SceneEdit], module: EditorModule) -> Result<CommandOutcome, CommandError> {
+    fn edit(
+        &mut self,
+        target: SceneTarget,
+        edits: &[SceneEdit],
+        module: EditorModule,
+    ) -> Result<CommandOutcome, CommandError> {
         match target {
             SceneTarget::Session { session: key } => {
                 let index = self.index(key)?;
@@ -459,7 +529,9 @@ impl Workspace {
             }
             SceneTarget::Stored { project, scene_id } => {
                 let origin = SceneOrigin { project, scene_id };
-                let mut document = self.projects()?.read_scene(&origin.project, &origin.scene_id)?;
+                let mut document = self
+                    .projects()?
+                    .read_scene(&origin.project, &origin.scene_id)?;
                 let design_system = self.design_system_for(Some(&origin), edits)?;
                 let presets = self.presets_for(Some(&origin), edits)?;
                 let context = EditContext {
@@ -472,7 +544,10 @@ impl Workspace {
                     self.projects()?.write_scene(&origin.project, &document)?;
                     effects.push(EditEffect::Stored { origin });
                 }
-                Ok(CommandOutcome { session: None, effects })
+                Ok(CommandOutcome {
+                    session: None,
+                    effects,
+                })
             }
         }
     }
@@ -490,7 +565,10 @@ impl Workspace {
         let Some(origin) = origin else {
             return Ok(None);
         };
-        if !edits.iter().any(|edit| matches!(edit, SceneEdit::ApplyTextStyle(_))) {
+        if !edits
+            .iter()
+            .any(|edit| matches!(edit, SceneEdit::ApplyTextStyle(_)))
+        {
             return Ok(None);
         }
         let store = self.projects()?.design_system(&origin.project)?;
@@ -511,7 +589,10 @@ impl Workspace {
         let Some(origin) = origin else {
             return Ok(None);
         };
-        if !edits.iter().any(|edit| matches!(edit, SceneEdit::ApplyPreset(_))) {
+        if !edits
+            .iter()
+            .any(|edit| matches!(edit, SceneEdit::ApplyPreset(_)))
+        {
             return Ok(None);
         }
         Ok(Some(self.projects()?.motion_presets(&origin.project)?))
@@ -526,8 +607,15 @@ impl Workspace {
         let session = self.session_mut(key)?;
         let in_scope = |entry: &LogEntry| module.is_none_or(|module| entry.module == module);
         let empty = || match module {
-            Some(module) => Refusal::ModuleHistoryEmpty { session: key, direction, module },
-            None => Refusal::HistoryEmpty { session: key, direction },
+            Some(module) => Refusal::ModuleHistoryEmpty {
+                session: key,
+                direction,
+                module,
+            },
+            None => Refusal::HistoryEmpty {
+                session: key,
+                direction,
+            },
         };
         match direction {
             HistoryDirection::Undo => {
@@ -543,7 +631,12 @@ impl Workspace {
                 let position = session
                     .redo
                     .iter()
-                    .rposition(|seq| session.log.iter().any(|entry| entry.seq == *seq && in_scope(entry)))
+                    .rposition(|seq| {
+                        session
+                            .log
+                            .iter()
+                            .any(|entry| entry.seq == *seq && in_scope(entry))
+                    })
                     .ok_or_else(empty)?;
                 let seq = session.redo[position];
                 let index = session
@@ -637,7 +730,12 @@ impl Workspace {
         })
     }
 
-    fn create_scene(&self, project: String, scene_id: String, name: String) -> Result<CommandOutcome, CommandError> {
+    fn create_scene(
+        &self,
+        project: String,
+        scene_id: String,
+        name: String,
+    ) -> Result<CommandOutcome, CommandError> {
         let projects = self.projects()?;
         // 3.15: a scene composites in its project's declared space.
         let space = projects.settings(&project)?.working_color_space;
@@ -697,7 +795,11 @@ impl Workspace {
     /// those changes could have been saved over. Otherwise the session stays
     /// open, unbound — the document remains, outside the project — and the
     /// outcome carries its new view.
-    fn delete_scene(&mut self, project: String, scene_id: String) -> Result<CommandOutcome, CommandError> {
+    fn delete_scene(
+        &mut self,
+        project: String,
+        scene_id: String,
+    ) -> Result<CommandOutcome, CommandError> {
         let origin = SceneOrigin { project, scene_id };
         let bound = self
             .sessions
@@ -736,7 +838,11 @@ impl Workspace {
 
     /// Save a filled take page beside, never inside, its template: filling
     /// one must not rewrite the authored scene it references.
-    fn save_take_page(&self, project: String, page: TakePage) -> Result<CommandOutcome, CommandError> {
+    fn save_take_page(
+        &self,
+        project: String,
+        page: TakePage,
+    ) -> Result<CommandOutcome, CommandError> {
         let projects = self.projects()?;
         if !scene_exists(projects, &project, &page.scene_id)? {
             return Err(Refusal::SceneNotStored {
@@ -772,7 +878,9 @@ impl Workspace {
         keys: Vec<KeyRef>,
     ) -> Result<CommandOutcome, CommandError> {
         let projects = self.projects()?;
-        if starter_preset(&preset_id).is_some() || !gx_contracts::platform::is_canonical_filename(&preset_id) {
+        if starter_preset(&preset_id).is_some()
+            || !gx_contracts::platform::is_canonical_filename(&preset_id)
+        {
             return Err(Refusal::MotionPresetIdInvalid { preset_id }.into());
         }
         let document = self.document(&target)?;
@@ -782,16 +890,29 @@ impl Workspace {
             .iter()
             .find(|object| object.base().id == object_id)
             .map(|object| object.kind().to_owned())
-            .ok_or_else(|| Refusal::SceneObjectUnknown { object_id: object_id.clone() })?;
+            .ok_or_else(|| Refusal::SceneObjectUnknown {
+                object_id: object_id.clone(),
+            })?;
 
-        let empty = || MotionPhase { duration: DurationSpec::Ms(0.0), channels: Vec::new() };
-        let mut preset = projects.read_motion_preset(&project, &preset_id)?.unwrap_or_else(|| MotionPreset {
-            id: preset_id.clone(),
-            applies_to: Vec::new(),
-            phases: MotionPhases { r#in: empty(), out: empty(), hold: None, r#continue: Vec::new(), update: None },
-            params: Vec::new(),
-            stagger: None,
-        });
+        let empty = || MotionPhase {
+            duration: DurationSpec::Ms(0.0),
+            channels: Vec::new(),
+        };
+        let mut preset = projects
+            .read_motion_preset(&project, &preset_id)?
+            .unwrap_or_else(|| MotionPreset {
+                id: preset_id.clone(),
+                applies_to: Vec::new(),
+                phases: MotionPhases {
+                    r#in: empty(),
+                    out: empty(),
+                    hold: None,
+                    r#continue: Vec::new(),
+                    update: None,
+                },
+                params: Vec::new(),
+                stagger: None,
+            });
         match phase {
             PresetPhase::In => preset.phases.r#in = captured,
             PresetPhase::Out => preset.phases.out = captured,
@@ -815,14 +936,22 @@ impl Workspace {
         projects.write_motion_preset(&project, &preset)?;
         Ok(CommandOutcome {
             session: None,
-            effects: vec![EditEffect::MotionPresetSaved { project, preset_id, phase }],
+            effects: vec![EditEffect::MotionPresetSaved {
+                project,
+                preset_id,
+                phase,
+            }],
         })
     }
 
     /// Confirm a draft as the next immutable version. `confirmed_by` is
     /// passed straight through: a confirmation invented here would satisfy
     /// the store's check while defeating its point.
-    fn confirm_design_system(&self, project: String, commit: DesignSystemCommit) -> Result<CommandOutcome, CommandError> {
+    fn confirm_design_system(
+        &self,
+        project: String,
+        commit: DesignSystemCommit,
+    ) -> Result<CommandOutcome, CommandError> {
         let store = self.projects()?.design_system(&project)?;
         let system = store.confirm(&commit.draft, &commit.confirmed_by)?;
         Ok(CommandOutcome {
@@ -836,7 +965,10 @@ impl Workspace {
 }
 
 fn scene_exists(projects: &Projects, project: &str, scene_id: &str) -> Result<bool, CommandError> {
-    Ok(projects.list_scenes(project)?.iter().any(|id| id == scene_id))
+    Ok(projects
+        .list_scenes(project)?
+        .iter()
+        .any(|id| id == scene_id))
 }
 
 /// A stored scene needs a name an author can find it by.
@@ -864,7 +996,9 @@ pub(crate) fn import_svg_document(
     // disk: the same strict reader, so no import can produce a document the
     // engine later refuses.
     let bytes = serde_json::to_vec(&outcome.scene).map_err(|error| {
-        CommandError::Refused(Refusal::SceneParseFailed { detail: error.to_string() })
+        CommandError::Refused(Refusal::SceneParseFailed {
+            detail: error.to_string(),
+        })
     })?;
     parse_scene_document(&bytes).map_err(CommandError::Refused)?;
     Ok(outcome)
@@ -884,7 +1018,11 @@ pub fn import_into_project(
 ) -> Result<crate::import::ImportOutcome, CommandError> {
     let declared = projects.settings(project)?.working_color_space;
     if scene_exists(projects, project, scene_id)? {
-        return Err(Refusal::SceneAlreadyExists { project: project.to_owned(), scene_id: scene_id.to_owned() }.into());
+        return Err(Refusal::SceneAlreadyExists {
+            project: project.to_owned(),
+            scene_id: scene_id.to_owned(),
+        }
+        .into());
     }
     let mut outcome = import_svg_document(source_name, svg.as_bytes(), scene_id)?;
     if let Some(name) = name {
@@ -942,7 +1080,8 @@ fn read_scene_file(path: &str) -> Result<SceneDocument, CommandError> {
 /// Write an authored document to a file. Pretty-printed because people edit
 /// and diff these; the wire form is produced fresh at publish.
 fn write_scene_file(path: &str, document: &SceneDocument) -> Result<(), CommandError> {
-    let bytes = serde_json::to_vec_pretty(document).map_err(|error| CommandError::Store(EditorError::Serialize(error)))?;
+    let bytes = serde_json::to_vec_pretty(document)
+        .map_err(|error| CommandError::Store(EditorError::Serialize(error)))?;
     std::fs::write(path, bytes).map_err(|source| {
         CommandError::Store(EditorError::Io {
             path: PathBuf::from(path),
@@ -963,11 +1102,11 @@ mod tests {
     use gx_contracts::command::{
         CloseScene, ConfirmDesignSystem, CreateKeyframe, CreateObject, CreateProject, CreateScene,
         DeclareControl, DeleteScene, DuplicateScene, EditScene, OpenScene, Redo, RenameObject,
-        SaveMotionPreset, SaveScene, SaveTakePage, SetBinding, SetObjectField, SetObjectLocked, SetObjectVisible,
-        SetSceneId, SetSceneName, Undo,
+        SaveMotionPreset, SaveScene, SaveTakePage, SetBinding, SetObjectField, SetObjectLocked,
+        SetObjectVisible, SetSceneId, SetSceneName, Undo,
     };
-    use gx_contracts::object_edit::ObjectField;
     use gx_contracts::control::{ControlField, ControlFieldKind, ControlValue};
+    use gx_contracts::object_edit::ObjectField;
     use gx_contracts::scene::{
         AssetKind, AssetLibraryItem, ImageObject, ObjectBase, RectObject, SceneObject,
     };
@@ -1012,7 +1151,12 @@ mod tests {
     fn with_store(label: &str) -> (Scratch, Workspace) {
         let scratch = Scratch::new(label);
         let mut workspace = Workspace::new(Some(scratch.projects()));
-        run(&mut workspace, EditorCommand::CreateProject(CreateProject { project: "news".into() }));
+        run(
+            &mut workspace,
+            EditorCommand::CreateProject(CreateProject {
+                project: "news".into(),
+            }),
+        );
         run(
             &mut workspace,
             EditorCommand::CreateScene(CreateScene {
@@ -1046,20 +1190,39 @@ mod tests {
     }
 
     fn open_new(workspace: &mut Workspace, id: &str, name: &str) -> SessionKey {
-        open(workspace, SceneSource::New { id: id.into(), name: name.into() })
+        open(
+            workspace,
+            SceneSource::New {
+                id: id.into(),
+                name: name.into(),
+            },
+        )
     }
 
     fn open_stored(workspace: &mut Workspace, scene_id: &str) -> SessionKey {
-        open(workspace, SceneSource::Project { project: "news".into(), scene_id: scene_id.into() })
+        open(
+            workspace,
+            SceneSource::Project {
+                project: "news".into(),
+                scene_id: scene_id.into(),
+            },
+        )
     }
 
     fn edit(session: SessionKey, edits: Vec<SceneEdit>) -> EditorCommand {
-        EditorCommand::EditScene(EditScene { target: SceneTarget::Session { session }, edits, module: None })
+        EditorCommand::EditScene(EditScene {
+            target: SceneTarget::Session { session },
+            edits,
+            module: None,
+        })
     }
 
     fn stored_edit(scene_id: &str, edits: Vec<SceneEdit>) -> EditorCommand {
         EditorCommand::EditScene(EditScene {
-            target: SceneTarget::Stored { project: "news".into(), scene_id: scene_id.into() },
+            target: SceneTarget::Stored {
+                project: "news".into(),
+                scene_id: scene_id.into(),
+            },
             edits,
             module: None,
         })
@@ -1070,11 +1233,17 @@ mod tests {
     }
 
     fn undo(session: SessionKey) -> EditorCommand {
-        EditorCommand::Undo(Undo { session, module: None })
+        EditorCommand::Undo(Undo {
+            session,
+            module: None,
+        })
     }
 
     fn redo(session: SessionKey) -> EditorCommand {
-        EditorCommand::Redo(Redo { session, module: None })
+        EditorCommand::Redo(Redo {
+            session,
+            module: None,
+        })
     }
 
     fn close(session: SessionKey, force: bool) -> EditorCommand {
@@ -1086,12 +1255,19 @@ mod tests {
     }
 
     fn name_of(workspace: &Workspace, session: SessionKey) -> String {
-        workspace.view(session).expect("the session is open").document.name
+        workspace
+            .view(session)
+            .expect("the session is open")
+            .document
+            .name
     }
 
     fn stored_scene(workspace: &Workspace, scene_id: &str) -> SceneDocument {
         workspace
-            .document(&SceneTarget::Stored { project: "news".into(), scene_id: scene_id.into() })
+            .document(&SceneTarget::Stored {
+                project: "news".into(),
+                scene_id: scene_id.into(),
+            })
             .expect("the stored scene reads")
             .into_owned()
     }
@@ -1110,12 +1286,17 @@ mod tests {
 
     #[test]
     fn an_svg_import_opens_an_unbound_session_with_its_report() {
-        let svg = r#"<svg><rect id="bar" x="1" y="2" width="30" height="40"/><g id="group"/></svg>"#;
+        let svg =
+            r#"<svg><rect id="bar" x="1" y="2" width="30" height="40"/><g id="group"/></svg>"#;
         let mut workspace = Workspace::new(None);
         let outcome = run(
             &mut workspace,
             EditorCommand::OpenScene(OpenScene {
-                source: SceneSource::ImportSvg { id: "brand".into(), source_name: "Brand Pack.svg".into(), svg: svg.into() },
+                source: SceneSource::ImportSvg {
+                    id: "brand".into(),
+                    source_name: "Brand Pack.svg".into(),
+                    svg: svg.into(),
+                },
             }),
         );
         let view = outcome.session.expect("an import opens a session");
@@ -1131,7 +1312,13 @@ mod tests {
             .expect("the report travels with the session");
         assert_eq!(report.entries.len(), 2);
         assert_eq!(report.source_name, "Brand Pack.svg");
-        assert!(view.document.assets.iter().any(|item| item.checksum == report.source_hash), "source retained");
+        assert!(
+            view.document
+                .assets
+                .iter()
+                .any(|item| item.checksum == report.source_hash),
+            "source retained"
+        );
     }
 
     #[test]
@@ -1139,16 +1326,27 @@ mod tests {
         let mut workspace = Workspace::new(None);
         let error = workspace
             .execute(EditorCommand::OpenScene(OpenScene {
-                source: SceneSource::ImportSvg { id: "cut".into(), source_name: "cut.svg".into(), svg: "<svg><rect".into() },
+                source: SceneSource::ImportSvg {
+                    id: "cut".into(),
+                    source_name: "cut.svg".into(),
+                    svg: "<svg><rect".into(),
+                },
             }))
             .expect_err("a truncated SVG refuses");
         match error {
             CommandError::Refused(Refusal::SceneParseFailed { detail }) => {
-                assert!(detail.contains("cut.svg") && detail.contains("never closed"), "{detail}");
+                assert!(
+                    detail.contains("cut.svg") && detail.contains("never closed"),
+                    "{detail}"
+                );
             }
             other => panic!("expected a parse refusal, got {other:?}"),
         }
-        assert_eq!(open_new(&mut workspace, "next", "Next"), SessionKey(1), "no session was opened");
+        assert_eq!(
+            open_new(&mut workspace, "next", "Next"),
+            SessionKey(1),
+            "no session was opened"
+        );
     }
 
     // --- sessions (workspace.test.ts) -------------------------------------
@@ -1173,7 +1371,10 @@ mod tests {
         let b = open_new(&mut workspace, "b", "b");
         run(&mut workspace, edit(a, vec![rename_scene("A edited")]));
         run(&mut workspace, edit(b, vec![rename_scene("B edited")]));
-        run(&mut workspace, edit(b, vec![rename_scene("B edited twice")]));
+        run(
+            &mut workspace,
+            edit(b, vec![rename_scene("B edited twice")]),
+        );
 
         // Undoing in B must not reach A, and reverses exactly one gesture.
         run(&mut workspace, undo(b));
@@ -1182,7 +1383,11 @@ mod tests {
 
         run(&mut workspace, undo(a));
         assert_eq!(name_of(&workspace, a), "a");
-        assert_eq!(name_of(&workspace, b), "B edited", "B is untouched by A's undo");
+        assert_eq!(
+            name_of(&workspace, b),
+            "B edited",
+            "B is untouched by A's undo"
+        );
 
         run(&mut workspace, redo(a));
         assert_eq!(name_of(&workspace, a), "A edited");
@@ -1195,7 +1400,11 @@ mod tests {
         let b = open_new(&mut workspace, "b", "b");
         let before = workspace.view(b).unwrap();
         run(&mut workspace, edit(a, vec![rename_scene("changed")]));
-        assert_eq!(workspace.view(b).unwrap(), before, "document, history and marks all unchanged");
+        assert_eq!(
+            workspace.view(b).unwrap(),
+            before,
+            "document, history and marks all unchanged"
+        );
     }
 
     #[test]
@@ -1209,7 +1418,10 @@ mod tests {
         ));
         assert!(matches!(
             refusal(&mut workspace, redo(session)),
-            Refusal::HistoryEmpty { direction: HistoryDirection::Redo, .. }
+            Refusal::HistoryEmpty {
+                direction: HistoryDirection::Redo,
+                ..
+            }
         ));
         assert_eq!(workspace.view(session).unwrap(), before);
     }
@@ -1220,7 +1432,10 @@ mod tests {
         let busy = open_new(&mut workspace, "a", "a");
         let quiet = open_new(&mut workspace, "b", "b");
         for index in 0..MAX_HISTORY + 50 {
-            run(&mut workspace, edit(busy, vec![rename_scene(&format!("edit {index}"))]));
+            run(
+                &mut workspace,
+                edit(busy, vec![rename_scene(&format!("edit {index}"))]),
+            );
         }
         run(&mut workspace, edit(quiet, vec![rename_scene("one")]));
         assert_eq!(workspace.view(busy).unwrap().undo_depth, MAX_HISTORY as u32);
@@ -1232,7 +1447,10 @@ mod tests {
         // The oldest 50 gestures fell off; the oldest kept before-image is
         // the document after edit 49.
         assert_eq!(name_of(&workspace, busy), "edit 49");
-        assert!(matches!(refusal(&mut workspace, undo(busy)), Refusal::HistoryEmpty { .. }));
+        assert!(matches!(
+            refusal(&mut workspace, undo(busy)),
+            Refusal::HistoryEmpty { .. }
+        ));
     }
 
     #[test]
@@ -1246,7 +1464,10 @@ mod tests {
         assert_eq!(workspace.view(session).unwrap().redo_depth, 0);
         assert!(matches!(
             refusal(&mut workspace, redo(session)),
-            Refusal::HistoryEmpty { direction: HistoryDirection::Redo, .. }
+            Refusal::HistoryEmpty {
+                direction: HistoryDirection::Redo,
+                ..
+            }
         ));
     }
 
@@ -1269,13 +1490,23 @@ mod tests {
             edit(
                 session,
                 vec![
-                    SceneEdit::CreateObject(CreateObject { kind: "rect".into(), name: "Bar".into() }),
-                    SceneEdit::RenameObject(RenameObject { object_id: "missing".into(), name: "Nope".into() }),
+                    SceneEdit::CreateObject(CreateObject {
+                        kind: "rect".into(),
+                        name: "Bar".into(),
+                    }),
+                    SceneEdit::RenameObject(RenameObject {
+                        object_id: "missing".into(),
+                        name: "Nope".into(),
+                    }),
                 ],
             ),
         );
         assert!(matches!(refused, Refusal::SceneObjectUnknown { .. }));
-        assert_eq!(workspace.view(session).unwrap(), before, "the created rect did not land either");
+        assert_eq!(
+            workspace.view(session).unwrap(),
+            before,
+            "the created rect did not land either"
+        );
     }
 
     // --- history on the command log (11.37) ---------------------------------
@@ -1290,16 +1521,28 @@ mod tests {
 
     fn content_hash(workspace: &Workspace, session: SessionKey) -> String {
         use sha2::{Digest, Sha256};
-        let document = workspace.view(session).expect("the session is open").document;
-        format!("{:x}", Sha256::digest(serde_json::to_vec(&document).expect("a document serialises")))
+        let document = workspace
+            .view(session)
+            .expect("the session is open")
+            .document;
+        format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(&document).expect("a document serialises"))
+        )
     }
 
     fn create_rect(name: &str) -> SceneEdit {
-        SceneEdit::CreateObject(CreateObject { kind: "rect".into(), name: name.into() })
+        SceneEdit::CreateObject(CreateObject {
+            kind: "rect".into(),
+            name: name.into(),
+        })
     }
 
     fn set_field(object: &str, field: ObjectField) -> SceneEdit {
-        SceneEdit::SetObjectField(SetObjectField { object_ids: vec![object.into()], field })
+        SceneEdit::SetObjectField(SetObjectField {
+            object_ids: vec![object.into()],
+            field,
+        })
     }
 
     #[test]
@@ -1308,22 +1551,38 @@ mod tests {
         let session = open_new(&mut workspace, "a", "a");
         let original = content_hash(&workspace, session);
         let commands = vec![
-            tagged(session, EditorModule::ObjectManager, vec![create_rect("Card")]),
-            tagged(session, EditorModule::Inspector, vec![set_field("rect-1", ObjectField::X(120.0))]),
+            tagged(
+                session,
+                EditorModule::ObjectManager,
+                vec![create_rect("Card")],
+            ),
+            tagged(
+                session,
+                EditorModule::Inspector,
+                vec![set_field("rect-1", ObjectField::X(120.0))],
+            ),
             tagged(
                 session,
                 EditorModule::Timeline,
                 vec![SceneEdit::CreateKeyframe(CreateKeyframe {
                     object_id: "rect-1".into(),
                     property: "x".into(),
-                    keyframe: SceneKeyframe { frame: 0, value: 120.0, easing: SceneEasing::Linear, bezier: None },
+                    keyframe: SceneKeyframe {
+                        frame: 0,
+                        value: 120.0,
+                        easing: SceneEasing::Linear,
+                        bezier: None,
+                    },
                 })],
             ),
             tagged(session, EditorModule::Scene, vec![rename_scene("Edited")]),
             tagged(
                 session,
                 EditorModule::ObjectManager,
-                vec![SceneEdit::SetObjectVisible(SetObjectVisible { object_id: "rect-1".into(), visible: false })],
+                vec![SceneEdit::SetObjectVisible(SetObjectVisible {
+                    object_id: "rect-1".into(),
+                    visible: false,
+                })],
             ),
         ];
         let count = commands.len();
@@ -1336,20 +1595,34 @@ mod tests {
         for _ in 0..count {
             run(&mut workspace, undo(session));
         }
-        assert_eq!(content_hash(&workspace, session), original, "every undo replays back to the base");
+        assert_eq!(
+            content_hash(&workspace, session),
+            original,
+            "every undo replays back to the base"
+        );
         for _ in 0..count {
             run(&mut workspace, redo(session));
         }
-        assert_eq!(content_hash(&workspace, session), edited, "every redo replays forward to the edit");
+        assert_eq!(
+            content_hash(&workspace, session),
+            edited,
+            "every redo replays forward to the edit"
+        );
     }
 
     #[test]
     fn a_module_undo_reverses_only_that_modules_commands_in_an_interleaved_history() {
         let setup = vec![create_rect("Card")];
         let inspector_x = vec![set_field("rect-1", ObjectField::X(100.0))];
-        let hide = vec![SceneEdit::SetObjectVisible(SetObjectVisible { object_id: "rect-1".into(), visible: false })];
+        let hide = vec![SceneEdit::SetObjectVisible(SetObjectVisible {
+            object_id: "rect-1".into(),
+            visible: false,
+        })];
         let inspector_y = vec![set_field("rect-1", ObjectField::Y(50.0))];
-        let lock = vec![SceneEdit::SetObjectLocked(SetObjectLocked { object_id: "rect-1".into(), locked: true })];
+        let lock = vec![SceneEdit::SetObjectLocked(SetObjectLocked {
+            object_id: "rect-1".into(),
+            locked: true,
+        })];
 
         let mut workspace = Workspace::new(None);
         let session = open_new(&mut workspace, "a", "a");
@@ -1362,7 +1635,12 @@ mod tests {
         ] {
             run(&mut workspace, tagged(session, module, edits));
         }
-        let module_undo = |session| EditorCommand::Undo(Undo { session, module: Some(EditorModule::Inspector) });
+        let module_undo = |session| {
+            EditorCommand::Undo(Undo {
+                session,
+                module: Some(EditorModule::Inspector),
+            })
+        };
         run(&mut workspace, module_undo(session));
         run(&mut workspace, module_undo(session));
 
@@ -1372,20 +1650,38 @@ mod tests {
         for edits in [setup, hide, lock] {
             run(&mut expected, edit(other, edits));
         }
-        assert_eq!(content_hash(&workspace, session), content_hash(&expected, other));
+        assert_eq!(
+            content_hash(&workspace, session),
+            content_hash(&expected, other)
+        );
 
         // Nothing of the inspector's is left to undo, and the object
         // manager's two commands are still the project-level history.
         assert!(matches!(
             refusal(&mut workspace, module_undo(session)),
-            Refusal::ModuleHistoryEmpty { module: EditorModule::Inspector, direction: HistoryDirection::Undo, .. }
+            Refusal::ModuleHistoryEmpty {
+                module: EditorModule::Inspector,
+                direction: HistoryDirection::Undo,
+                ..
+            }
         ));
         assert_eq!(workspace.view(session).unwrap().undo_depth, 3);
 
         // A module redo brings back that module's latest undone command.
-        run(&mut workspace, EditorCommand::Redo(Redo { session, module: Some(EditorModule::Inspector) }));
+        run(
+            &mut workspace,
+            EditorCommand::Redo(Redo {
+                session,
+                module: Some(EditorModule::Inspector),
+            }),
+        );
         let document = workspace.view(session).unwrap().document;
-        let card = document.objects.iter().find(|object| object.base().id == "rect-1").unwrap().base();
+        let card = document
+            .objects
+            .iter()
+            .find(|object| object.base().id == "rect-1")
+            .unwrap()
+            .base();
         assert_eq!((card.x, card.visible, card.locked), (100.0, false, true));
     }
 
@@ -1393,7 +1689,14 @@ mod tests {
     fn an_undo_that_would_break_a_later_command_refuses_and_changes_nothing() {
         let mut workspace = Workspace::new(None);
         let session = open_new(&mut workspace, "a", "a");
-        run(&mut workspace, tagged(session, EditorModule::ObjectManager, vec![create_rect("Card")]));
+        run(
+            &mut workspace,
+            tagged(
+                session,
+                EditorModule::ObjectManager,
+                vec![create_rect("Card")],
+            ),
+        );
         run(
             &mut workspace,
             tagged(
@@ -1402,14 +1705,22 @@ mod tests {
                 vec![SceneEdit::CreateKeyframe(CreateKeyframe {
                     object_id: "rect-1".into(),
                     property: "x".into(),
-                    keyframe: SceneKeyframe { frame: 0, value: 10.0, easing: SceneEasing::Linear, bezier: None },
+                    keyframe: SceneKeyframe {
+                        frame: 0,
+                        value: 10.0,
+                        easing: SceneEasing::Linear,
+                        bezier: None,
+                    },
                 })],
             ),
         );
         let before = workspace.view(session).unwrap();
         let refused = refusal(
             &mut workspace,
-            EditorCommand::Undo(Undo { session, module: Some(EditorModule::ObjectManager) }),
+            EditorCommand::Undo(Undo {
+                session,
+                module: Some(EditorModule::ObjectManager),
+            }),
         );
         assert!(
             matches!(&refused, Refusal::HistoryConflict { direction: HistoryDirection::Undo, detail, .. } if detail.starts_with("[sceneObjectUnknown]")),
@@ -1434,7 +1745,11 @@ mod tests {
         let again = open_stored(&mut workspace, "b");
         assert_eq!(again, first);
         assert_eq!(workspace.sessions.len(), 2);
-        assert_eq!(name_of(&workspace, again), "B edited", "the open edits were not replaced by the stored copy");
+        assert_eq!(
+            name_of(&workspace, again),
+            "B edited",
+            "the open edits were not replaced by the stored copy"
+        );
     }
 
     #[test]
@@ -1442,7 +1757,10 @@ mod tests {
         let scratch = Scratch::new("close");
         let mut workspace = Workspace::new(None);
         let session = open_new(&mut workspace, "lower-third", "Lower third");
-        run(&mut workspace, edit(session, vec![rename_scene("Lower third v2")]));
+        run(
+            &mut workspace,
+            edit(session, vec![rename_scene("Lower third v2")]),
+        );
 
         match refusal(&mut workspace, close(session, false)) {
             Refusal::SessionHasUnsavedChanges { session: key, name } => {
@@ -1450,10 +1768,21 @@ mod tests {
             }
             other => panic!("expected SessionHasUnsavedChanges, got {other:?}"),
         }
-        assert!(workspace.view(session).is_ok(), "the refused close kept the scene open");
+        assert!(
+            workspace.view(session).is_ok(),
+            "the refused close kept the scene open"
+        );
 
         // Saving clears the block.
-        run(&mut workspace, save(session, SaveTarget::File { path: scratch.file("lower-third.json") }));
+        run(
+            &mut workspace,
+            save(
+                session,
+                SaveTarget::File {
+                    path: scratch.file("lower-third.json"),
+                },
+            ),
+        );
         run(&mut workspace, close(session, false));
 
         // So does explicit confirmation.
@@ -1464,7 +1793,10 @@ mod tests {
             workspace.view(other),
             Err(CommandError::Refused(Refusal::SessionUnknown { .. }))
         ));
-        assert!(matches!(refusal(&mut workspace, close(other, true)), Refusal::SessionUnknown { .. }));
+        assert!(matches!(
+            refusal(&mut workspace, close(other, true)),
+            Refusal::SessionUnknown { .. }
+        ));
     }
 
     #[test]
@@ -1473,10 +1805,14 @@ mod tests {
         let mut workspace = Workspace::new(None);
         assert!(matches!(
             refusal(&mut workspace, edit(SessionKey(7), vec![rename_scene("x")])),
-            Refusal::SessionUnknown { session: SessionKey(7) }
+            Refusal::SessionUnknown {
+                session: SessionKey(7)
+            }
         ));
         assert!(matches!(
-            workspace.document(&SceneTarget::Session { session: SessionKey(7) }),
+            workspace.document(&SceneTarget::Session {
+                session: SessionKey(7)
+            }),
             Err(CommandError::Refused(Refusal::SessionUnknown { .. }))
         ));
     }
@@ -1488,9 +1824,15 @@ mod tests {
         let (_scratch, mut workspace) = with_store("marks");
         let unbound = open_new(&mut workspace, "a", "A");
         let bound = open_stored(&mut workspace, "b");
-        run(&mut workspace, edit(unbound, vec![rename_scene("A edited")]));
+        run(
+            &mut workspace,
+            edit(unbound, vec![rename_scene("A edited")]),
+        );
         run(&mut workspace, edit(bound, vec![rename_scene("B edited")]));
-        let (unbound, bound) = (workspace.view(unbound).unwrap(), workspace.view(bound).unwrap());
+        let (unbound, bound) = (
+            workspace.view(unbound).unwrap(),
+            workspace.view(bound).unwrap(),
+        );
         assert_eq!((unbound.dirty, unbound.project_dirty), (true, false));
         assert_eq!((bound.dirty, bound.project_dirty), (true, true));
     }
@@ -1501,10 +1843,24 @@ mod tests {
         let mut workspace = Workspace::new(None);
         let session = open_new(&mut workspace, "a", "a");
         run(&mut workspace, edit(session, vec![rename_scene("edited")]));
-        run(&mut workspace, save(session, SaveTarget::File { path: scratch.file("a.json") }));
+        run(
+            &mut workspace,
+            save(
+                session,
+                SaveTarget::File {
+                    path: scratch.file("a.json"),
+                },
+            ),
+        );
         run(&mut workspace, undo(session));
-        assert!(workspace.view(session).unwrap().dirty, "an undo after a save is unsaved work");
-        assert!(matches!(refusal(&mut workspace, close(session, false)), Refusal::SessionHasUnsavedChanges { .. }));
+        assert!(
+            workspace.view(session).unwrap().dirty,
+            "an undo after a save is unsaved work"
+        );
+        assert!(matches!(
+            refusal(&mut workspace, close(session, false)),
+            Refusal::SessionHasUnsavedChanges { .. }
+        ));
     }
 
     #[test]
@@ -1513,9 +1869,12 @@ mod tests {
         let bound = open_stored(&mut workspace, "b");
         run(&mut workspace, edit(bound, vec![rename_scene("B edited")]));
         let path = scratch.file("b.json");
-        let view = run(&mut workspace, save(bound, SaveTarget::File { path: path.clone() }))
-            .session
-            .expect("a save reports its session");
+        let view = run(
+            &mut workspace,
+            save(bound, SaveTarget::File { path: path.clone() }),
+        )
+        .session
+        .expect("a save reports its session");
         assert_eq!(view.path.as_deref(), Some(path.as_str()));
         assert_eq!((view.dirty, view.project_dirty), (false, true));
         // The project still holds the old graphic.
@@ -1532,9 +1891,20 @@ mod tests {
             Refusal::SessionUnbound { session: key } if key == session
         ));
 
-        let outcome = run(&mut workspace, save(session, SaveTarget::Project { project: "news".into() }));
+        let outcome = run(
+            &mut workspace,
+            save(
+                session,
+                SaveTarget::Project {
+                    project: "news".into(),
+                },
+            ),
+        );
         let view = outcome.session.expect("a save reports its session");
-        let origin = SceneOrigin { project: "news".into(), scene_id: "untitled".into() };
+        let origin = SceneOrigin {
+            project: "news".into(),
+            scene_id: "untitled".into(),
+        };
         assert_eq!(view.origin.as_ref(), Some(&origin));
         assert_eq!((view.dirty, view.project_dirty), (false, false));
         assert_eq!(outcome.effects, vec![EditEffect::Stored { origin }]);
@@ -1542,16 +1912,35 @@ mod tests {
 
         // Create never overwrites; a bound scene's id is stable.
         assert!(matches!(
-            refusal(&mut workspace, save(session, SaveTarget::Project { project: "news".into() })),
+            refusal(
+                &mut workspace,
+                save(
+                    session,
+                    SaveTarget::Project {
+                        project: "news".into()
+                    }
+                )
+            ),
             Refusal::SceneAlreadyExists { .. }
         ));
         assert!(matches!(
-            refusal(&mut workspace, edit(session, vec![SceneEdit::SetSceneId(SetSceneId { id: "renamed".into() })])),
+            refusal(
+                &mut workspace,
+                edit(
+                    session,
+                    vec![SceneEdit::SetSceneId(SetSceneId {
+                        id: "renamed".into()
+                    })]
+                )
+            ),
             Refusal::SceneIdBound { .. }
         ));
 
         // Update writes the bound copy.
-        run(&mut workspace, edit(session, vec![rename_scene("Strap v2")]));
+        run(
+            &mut workspace,
+            edit(session, vec![rename_scene("Strap v2")]),
+        );
         run(&mut workspace, save(session, SaveTarget::Origin));
         assert_eq!(stored_scene(&workspace, "untitled").name, "Strap v2");
         assert!(!workspace.view(session).unwrap().project_dirty);
@@ -1578,7 +1967,10 @@ mod tests {
         let mut workspace = Workspace::new(None);
         let authored = open_new(&mut workspace, "demo", "Demo");
         let path = scratch.file("scene.json");
-        run(&mut workspace, save(authored, SaveTarget::File { path: path.clone() }));
+        run(
+            &mut workspace,
+            save(authored, SaveTarget::File { path: path.clone() }),
+        );
         let reopened = open(&mut workspace, SceneSource::File { path: path.clone() });
         let view = workspace.view(reopened).unwrap();
         assert_eq!(view.document, workspace.view(authored).unwrap().document);
@@ -1590,13 +1982,26 @@ mod tests {
     fn a_file_with_an_unknown_field_refuses_by_name_rather_than_opening() {
         let scratch = Scratch::new("unknown-field");
         let path = scratch.file("scene.json");
-        let mut document = serde_json::to_value(new_scene("demo", "Demo", gx_contracts::color::WorkingColorSpace::NEW_PROJECT)).unwrap();
+        let mut document = serde_json::to_value(new_scene(
+            "demo",
+            "Demo",
+            gx_contracts::color::WorkingColorSpace::NEW_PROJECT,
+        ))
+        .unwrap();
         document["notAField"] = serde_json::json!(true);
         std::fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
 
         let mut workspace = Workspace::new(None);
-        let refused = refusal(&mut workspace, EditorCommand::OpenScene(OpenScene { source: SceneSource::File { path } }));
-        assert!(refused.to_string().contains("notAField"), "the refusal names the field: {refused}");
+        let refused = refusal(
+            &mut workspace,
+            EditorCommand::OpenScene(OpenScene {
+                source: SceneSource::File { path },
+            }),
+        );
+        assert!(
+            refused.to_string().contains("notAField"),
+            "the refusal names the field: {refused}"
+        );
         assert!(workspace.sessions.is_empty());
     }
 
@@ -1609,16 +2014,34 @@ mod tests {
             object_id: "card".into(),
             property: "x".into(),
             keys: vec![
-                SceneKeyframe { frame: 0, value: 0.0, easing: SceneEasing::CustomBezier, bezier: None },
-                SceneKeyframe { frame: 50, value: 100.0, easing: SceneEasing::Linear, bezier: None },
+                SceneKeyframe {
+                    frame: 0,
+                    value: 0.0,
+                    easing: SceneEasing::CustomBezier,
+                    bezier: None,
+                },
+                SceneKeyframe {
+                    frame: 50,
+                    value: 100.0,
+                    easing: SceneEasing::Linear,
+                    bezier: None,
+                },
             ],
         });
         std::fs::write(&path, serde_json::to_vec(&scene).unwrap()).unwrap();
 
         let mut workspace = Workspace::new(None);
-        let refused = refusal(&mut workspace, EditorCommand::OpenScene(OpenScene { source: SceneSource::File { path } }));
+        let refused = refusal(
+            &mut workspace,
+            EditorCommand::OpenScene(OpenScene {
+                source: SceneSource::File { path },
+            }),
+        );
         let text = refused.to_string();
-        assert!(text.contains("card") && text.contains("custom-bezier"), "names the object and easing: {text}");
+        assert!(
+            text.contains("card") && text.contains("custom-bezier"),
+            "names the object and easing: {text}"
+        );
     }
 
     #[test]
@@ -1626,9 +2049,16 @@ mod tests {
         let scratch = Scratch::new("unreadable");
         let mut workspace = Workspace::new(None);
         let error = workspace
-            .execute(EditorCommand::OpenScene(OpenScene { source: SceneSource::File { path: scratch.file("absent.json") } }))
+            .execute(EditorCommand::OpenScene(OpenScene {
+                source: SceneSource::File {
+                    path: scratch.file("absent.json"),
+                },
+            }))
             .expect_err("a missing file cannot open");
-        assert!(matches!(error, CommandError::Store(EditorError::Io { .. })), "{error:?}");
+        assert!(
+            matches!(error, CommandError::Store(EditorError::Io { .. })),
+            "{error:?}"
+        );
     }
 
     // --- projects and scenes (shell project tests) --------------------------
@@ -1640,11 +2070,17 @@ mod tests {
         let (scratch, mut workspace) = with_store("working-space");
         let projects = scratch.projects();
         assert_eq!(
-            projects.read_scene("news", "b").unwrap().working_color_space,
+            projects
+                .read_scene("news", "b")
+                .unwrap()
+                .working_color_space,
             gx_contracts::color::WorkingColorSpace::Srgb
         );
         std::fs::remove_file(
-            projects.root().join("news").join(gx_contracts::project::PROJECT_SETTINGS_FILE),
+            projects
+                .root()
+                .join("news")
+                .join(gx_contracts::project::PROJECT_SETTINGS_FILE),
         )
         .unwrap();
         run(
@@ -1656,7 +2092,10 @@ mod tests {
             }),
         );
         assert_eq!(
-            projects.read_scene("news", "legacy").unwrap().working_color_space,
+            projects
+                .read_scene("news", "legacy")
+                .unwrap()
+                .working_color_space,
             gx_contracts::color::WorkingColorSpace::LinearSrgb
         );
     }
@@ -1669,7 +2108,12 @@ mod tests {
             Refusal::ProjectAlreadyExists { project } if project == "news"
         ));
         assert!(matches!(
-            refusal(&mut workspace, EditorCommand::CreateProject(CreateProject { project: "../escape".into() })),
+            refusal(
+                &mut workspace,
+                EditorCommand::CreateProject(CreateProject {
+                    project: "../escape".into()
+                })
+            ),
             Refusal::ProjectNameInvalid { .. }
         ));
         let create = |scene_id: &str, name: &str| {
@@ -1679,27 +2123,53 @@ mod tests {
                 name: name.into(),
             })
         };
-        assert!(matches!(refusal(&mut workspace, create("b", "Again")), Refusal::SceneAlreadyExists { .. }));
-        assert!(matches!(refusal(&mut workspace, create("../escape", "Escape")), Refusal::SceneIdInvalid { .. }));
-        assert!(matches!(refusal(&mut workspace, create("c", "   ")), Refusal::SceneNameEmpty));
+        assert!(matches!(
+            refusal(&mut workspace, create("b", "Again")),
+            Refusal::SceneAlreadyExists { .. }
+        ));
+        assert!(matches!(
+            refusal(&mut workspace, create("../escape", "Escape")),
+            Refusal::SceneIdInvalid { .. }
+        ));
+        assert!(matches!(
+            refusal(&mut workspace, create("c", "   ")),
+            Refusal::SceneNameEmpty
+        ));
         assert!(matches!(
             refusal(
                 &mut workspace,
-                EditorCommand::CreateScene(CreateScene { project: "nope".into(), scene_id: "c".into(), name: "C".into() })
+                EditorCommand::CreateScene(CreateScene {
+                    project: "nope".into(),
+                    scene_id: "c".into(),
+                    name: "C".into()
+                })
             ),
             Refusal::ProjectNotFound { .. }
         ));
 
-        let delete = || EditorCommand::DeleteScene(DeleteScene { project: "news".into(), scene_id: "b".into() });
+        let delete = || {
+            EditorCommand::DeleteScene(DeleteScene {
+                project: "news".into(),
+                scene_id: "b".into(),
+            })
+        };
         run(&mut workspace, delete());
-        assert!(matches!(refusal(&mut workspace, delete()), Refusal::SceneNotStored { .. }));
+        assert!(matches!(
+            refusal(&mut workspace, delete()),
+            Refusal::SceneNotStored { .. }
+        ));
     }
 
     #[test]
     fn project_commands_without_a_store_refuse_by_name() {
         let mut workspace = Workspace::new(None);
         assert!(matches!(
-            refusal(&mut workspace, EditorCommand::CreateProject(CreateProject { project: "news".into() })),
+            refusal(
+                &mut workspace,
+                EditorCommand::CreateProject(CreateProject {
+                    project: "news".into()
+                })
+            ),
             Refusal::PlatformDirectoryUnavailable { .. }
         ));
     }
@@ -1721,11 +2191,21 @@ mod tests {
         };
         run(&mut workspace, duplicate("lower-third-copy"));
         let copy = stored_scene(&workspace, "lower-third-copy");
-        assert_eq!((copy.id.as_str(), copy.name.as_str(), copy.revision), ("lower-third-copy", "Lower third copy", None));
+        assert_eq!(
+            (copy.id.as_str(), copy.name.as_str(), copy.revision),
+            ("lower-third-copy", "Lower third copy", None)
+        );
         assert_eq!(copy.objects, published.objects);
-        assert_eq!(stored_scene(&workspace, "lower-third"), published, "the source is untouched");
+        assert_eq!(
+            stored_scene(&workspace, "lower-third"),
+            published,
+            "the source is untouched"
+        );
 
-        assert!(matches!(refusal(&mut workspace, duplicate("b")), Refusal::SceneAlreadyExists { .. }));
+        assert!(matches!(
+            refusal(&mut workspace, duplicate("b")),
+            Refusal::SceneAlreadyExists { .. }
+        ));
         assert!(matches!(
             refusal(
                 &mut workspace,
@@ -1744,8 +2224,16 @@ mod tests {
     fn deleting_a_scene_open_with_unsaved_project_changes_is_refused_then_unbinds_it() {
         let (scratch, mut workspace) = with_store("delete-open");
         let session = open_stored(&mut workspace, "b");
-        run(&mut workspace, edit(session, vec![rename_scene("B edited")]));
-        let delete = || EditorCommand::DeleteScene(DeleteScene { project: "news".into(), scene_id: "b".into() });
+        run(
+            &mut workspace,
+            edit(session, vec![rename_scene("B edited")]),
+        );
+        let delete = || {
+            EditorCommand::DeleteScene(DeleteScene {
+                project: "news".into(),
+                scene_id: "b".into(),
+            })
+        };
         assert!(matches!(
             refusal(&mut workspace, delete()),
             Refusal::SessionHasUnsavedChanges { session: key, .. } if key == session
@@ -1755,18 +2243,30 @@ mod tests {
         run(&mut workspace, save(session, SaveTarget::Origin));
         let outcome = run(&mut workspace, delete());
         let view = outcome.session.expect("the bound session is reported");
-        assert_eq!((view.session, view.origin, view.project_dirty), (session, None, false));
-        assert_eq!(view.document.name, "B edited", "the document remains open outside the project");
+        assert_eq!(
+            (view.session, view.origin, view.project_dirty),
+            (session, None, false)
+        );
+        assert_eq!(
+            view.document.name, "B edited",
+            "the document remains open outside the project"
+        );
         assert!(scratch.projects().list_scenes("news").unwrap().is_empty());
     }
 
     #[test]
     fn a_stored_edit_writes_the_store_atomically_and_opens_nothing() {
         let (_scratch, mut workspace) = with_store("stored-edit");
-        let outcome = run(&mut workspace, stored_edit("b", vec![rename_scene("B via MCP")]));
+        let outcome = run(
+            &mut workspace,
+            stored_edit("b", vec![rename_scene("B via MCP")]),
+        );
         assert_eq!(outcome.session, None);
         assert!(outcome.effects.contains(&EditEffect::Stored {
-            origin: SceneOrigin { project: "news".into(), scene_id: "b".into() }
+            origin: SceneOrigin {
+                project: "news".into(),
+                scene_id: "b".into()
+            }
         }));
         assert_eq!(stored_scene(&workspace, "b").name, "B via MCP");
         assert!(workspace.sessions.is_empty());
@@ -1777,20 +2277,31 @@ mod tests {
                 "b",
                 vec![
                     rename_scene("never lands"),
-                    SceneEdit::RenameObject(RenameObject { object_id: "missing".into(), name: "x".into() }),
+                    SceneEdit::RenameObject(RenameObject {
+                        object_id: "missing".into(),
+                        name: "x".into(),
+                    }),
                 ],
             ),
         );
         assert!(matches!(refused, Refusal::SceneObjectUnknown { .. }));
         assert_eq!(stored_scene(&workspace, "b").name, "B via MCP");
         assert!(matches!(
-            refusal(&mut workspace, stored_edit("b", vec![SceneEdit::SetSceneId(SetSceneId { id: "c".into() })])),
+            refusal(
+                &mut workspace,
+                stored_edit(
+                    "b",
+                    vec![SceneEdit::SetSceneId(SetSceneId { id: "c".into() })]
+                )
+            ),
             Refusal::SceneIdBound { .. }
         ));
     }
 
     /// The bindings of every object, by id.
-    fn bindings_by_object(scene: &SceneDocument) -> BTreeMap<String, Option<serde_json::Map<String, serde_json::Value>>> {
+    fn bindings_by_object(
+        scene: &SceneDocument,
+    ) -> BTreeMap<String, Option<serde_json::Map<String, serde_json::Value>>> {
         scene
             .objects
             .iter()
@@ -1806,7 +2317,11 @@ mod tests {
     }
 
     fn bound_scene() -> SceneDocument {
-        let mut scene = new_scene("scorebug", "Scorebug", gx_contracts::color::WorkingColorSpace::NEW_PROJECT);
+        let mut scene = new_scene(
+            "scorebug",
+            "Scorebug",
+            gx_contracts::color::WorkingColorSpace::NEW_PROJECT,
+        );
         // A non-dyadic float: 48/255 has no exact binary representation, so a
         // reader that is merely ULP-accurate returns a different number.
         scene.data_context = serde_json::json!({
@@ -1835,8 +2350,14 @@ mod tests {
         let mut bar = ObjectBase::new("bar", "Bar");
         bar.width = 640.0;
         bar.height = 72.0;
-        bar.bindings = Some(binding_map(&[("x", "match.home.x"), ("visible", "flags.0")]));
-        scene.objects.push(SceneObject::Rect(RectObject { base: bar, radius: 4.0 }));
+        bar.bindings = Some(binding_map(&[
+            ("x", "match.home.x"),
+            ("visible", "flags.0"),
+        ]));
+        scene.objects.push(SceneObject::Rect(RectObject {
+            base: bar,
+            radius: 4.0,
+        }));
         let mut logo = ObjectBase::new("logo", "Logo");
         logo.width = 64.0;
         logo.height = 64.0;
@@ -1866,7 +2387,15 @@ mod tests {
         let file = scratch.file("scorebug.json");
         std::fs::write(&file, serde_json::to_vec(&authored).unwrap()).unwrap();
         let session = open(&mut workspace, SceneSource::File { path: file });
-        run(&mut workspace, save(session, SaveTarget::Project { project: "news".into() }));
+        run(
+            &mut workspace,
+            save(
+                session,
+                SaveTarget::Project {
+                    project: "news".into(),
+                },
+            ),
+        );
 
         let reopen = || {
             let mut fresh = Workspace::new(Some(scratch.projects()));
@@ -1874,26 +2403,52 @@ mod tests {
             fresh.view(key).unwrap().document
         };
         let reopened = reopen();
-        assert_eq!(reopened, authored, "the whole bound document survives save/reopen");
         assert_eq!(
-            reopened.data_context["match"]["alpha"].as_f64().map(f64::to_bits),
+            reopened, authored,
+            "the whole bound document survives save/reopen"
+        );
+        assert_eq!(
+            reopened.data_context["match"]["alpha"]
+                .as_f64()
+                .map(f64::to_bits),
             Some((48.0_f64 / 255.0).to_bits()),
             "a non-dyadic data-context float reopens bit for bit"
         );
 
         // Re-point one binding and remove another, as one gesture.
-        run(&mut workspace, edit(session, vec![bind("bar", "x", Some("match.away.x")), bind("bar", "visible", None)]));
+        run(
+            &mut workspace,
+            edit(
+                session,
+                vec![
+                    bind("bar", "x", Some("match.away.x")),
+                    bind("bar", "visible", None),
+                ],
+            ),
+        );
         run(&mut workspace, save(session, SaveTarget::Origin));
         assert_eq!(
             bindings_by_object(&reopen()),
             BTreeMap::from([
-                ("bar".to_owned(), Some(binding_map(&[("x", "match.away.x")]))),
-                ("logo".to_owned(), Some(binding_map(&[("assetId", "match.home.logo")]))),
+                (
+                    "bar".to_owned(),
+                    Some(binding_map(&[("x", "match.away.x")]))
+                ),
+                (
+                    "logo".to_owned(),
+                    Some(binding_map(&[("assetId", "match.home.logo")]))
+                ),
             ])
         );
 
         // Remove every binding. Absent means absent: not `null`, not `{}`.
-        run(&mut workspace, edit(session, vec![bind("bar", "x", None), bind("logo", "assetId", None)]));
+        run(
+            &mut workspace,
+            edit(
+                session,
+                vec![bind("bar", "x", None), bind("logo", "assetId", None)],
+            ),
+        );
         run(&mut workspace, save(session, SaveTarget::Origin));
         assert!(bindings_by_object(&reopen()).values().all(Option::is_none));
         let raw: serde_json::Value = serde_json::from_slice(
@@ -1901,7 +2456,10 @@ mod tests {
         )
         .unwrap();
         for object in raw["objects"].as_array().expect("objects on disk") {
-            assert!(object.get("bindings").is_none(), "an unbound object carries no bindings key: {object}");
+            assert!(
+                object.get("bindings").is_none(),
+                "an unbound object carries no bindings key: {object}"
+            );
         }
     }
 
@@ -1915,7 +2473,10 @@ mod tests {
             stored_edit(
                 "b",
                 vec![
-                    SceneEdit::CreateObject(CreateObject { kind: "rect".into(), name: "Background".into() }),
+                    SceneEdit::CreateObject(CreateObject {
+                        kind: "rect".into(),
+                        name: "Background".into(),
+                    }),
                     SceneEdit::DeclareControl(DeclareControl {
                         field: ControlField {
                             field_id: "offset".into(),
@@ -1936,16 +2497,37 @@ mod tests {
             scene_id: scene_id.into(),
             values: BTreeMap::from([("offset".into(), ControlValue::Number(6.0))]),
         };
-        let save_page = |page: TakePage| EditorCommand::SaveTakePage(SaveTakePage { project: "news".into(), page });
+        let save_page = |page: TakePage| {
+            EditorCommand::SaveTakePage(SaveTakePage {
+                project: "news".into(),
+                page,
+            })
+        };
 
-        assert!(matches!(refusal(&mut workspace, save_page(page("absent"))), Refusal::SceneNotStored { .. }));
+        assert!(matches!(
+            refusal(&mut workspace, save_page(page("absent"))),
+            Refusal::SceneNotStored { .. }
+        ));
         let outcome = run(&mut workspace, save_page(page("b")));
         assert_eq!(
             outcome.effects,
-            vec![EditEffect::TakePageSaved { project: "news".into(), page_id: "headlines-at-six".into() }]
+            vec![EditEffect::TakePageSaved {
+                project: "news".into(),
+                page_id: "headlines-at-six".into()
+            }]
         );
-        assert_eq!(scratch.projects().read_take_page("news", "headlines-at-six").unwrap(), page("b"));
-        assert_eq!(stored_scene(&workspace, "b"), template, "saving a page must not overwrite its template");
+        assert_eq!(
+            scratch
+                .projects()
+                .read_take_page("news", "headlines-at-six")
+                .unwrap(),
+            page("b")
+        );
+        assert_eq!(
+            stored_scene(&workspace, "b"),
+            template,
+            "saving a page must not overwrite its template"
+        );
     }
 
     // --- motion presets (11.15) ---------------------------------------------
@@ -1969,20 +2551,35 @@ mod tests {
             stored_edit(
                 "b",
                 vec![
-                    SceneEdit::CreateObject(CreateObject { kind: "rect".into(), name: "One".into() }),
-                    SceneEdit::CreateObject(CreateObject { kind: "rect".into(), name: "Two".into() }),
+                    SceneEdit::CreateObject(CreateObject {
+                        kind: "rect".into(),
+                        name: "One".into(),
+                    }),
+                    SceneEdit::CreateObject(CreateObject {
+                        kind: "rect".into(),
+                        name: "Two".into(),
+                    }),
                     apply("rect-1", "slide", PresetPhase::In, 10),
                     apply("rect-1", "slide", PresetPhase::Out, 80),
                 ],
             ),
         );
         let keys = |frames: [u64; 2]| -> Vec<KeyRef> {
-            frames.iter().map(|frame| KeyRef { property: "x".into(), frame: *frame }).collect()
+            frames
+                .iter()
+                .map(|frame| KeyRef {
+                    property: "x".into(),
+                    frame: *frame,
+                })
+                .collect()
         };
         let save = |phase: PresetPhase, frames: [u64; 2], id: &str| {
             EditorCommand::SaveMotionPreset(SaveMotionPreset {
                 project: "news".into(),
-                target: SceneTarget::Stored { project: "news".into(), scene_id: "b".into() },
+                target: SceneTarget::Stored {
+                    project: "news".into(),
+                    scene_id: "b".into(),
+                },
                 object_id: "rect-1".into(),
                 preset_id: id.into(),
                 phase,
@@ -1994,13 +2591,19 @@ mod tests {
         // A starter id is refused, never shadowed.
         assert_eq!(
             refusal(&mut workspace, save(PresetPhase::In, [10, 30], "slide")),
-            Refusal::MotionPresetIdInvalid { preset_id: "slide".into() }
+            Refusal::MotionPresetIdInvalid {
+                preset_id: "slide".into()
+            }
         );
         assert!(matches!(
             refusal(&mut workspace, save(PresetPhase::In, [10, 30], "../escape")),
             Refusal::MotionPresetIdInvalid { .. }
         ));
-        assert!(scratch.projects().motion_presets("news").unwrap().is_empty());
+        assert!(scratch
+            .projects()
+            .motion_presets("news")
+            .unwrap()
+            .is_empty());
 
         // The first phase saved leaves the preset unusable by name; saving the
         // out phase completes it.
@@ -2013,20 +2616,46 @@ mod tests {
                 phase: PresetPhase::In,
             }]
         );
-        let first = scratch.projects().read_motion_preset("news", "my-slide").unwrap().unwrap();
+        let first = scratch
+            .projects()
+            .read_motion_preset("news", "my-slide")
+            .unwrap()
+            .unwrap();
         assert!(first.validate().is_err(), "no out phase yet");
         assert_eq!(first.applies_to, vec!["rect".to_owned()]);
         run(&mut workspace, save(PresetPhase::Out, [80, 96], "my-slide"));
-        let saved = scratch.projects().read_motion_preset("news", "my-slide").unwrap().unwrap();
+        let saved = scratch
+            .projects()
+            .read_motion_preset("news", "my-slide")
+            .unwrap()
+            .unwrap();
         assert!(saved.validate().is_ok());
         assert_eq!(saved.phases.out.channels.len(), 1);
-        assert_eq!(stored_scene(&workspace, "b"), before, "saving a preset only reads the scene");
+        assert_eq!(
+            stored_scene(&workspace, "b"),
+            before,
+            "saving a preset only reads the scene"
+        );
 
         // The saved preset applies from a session bound to the project, as
         // one undoable gesture, and survives redo (the replay keeps its library).
-        let session = open(&mut workspace, SceneSource::Project { project: "news".into(), scene_id: "b".into() });
-        let applied = run(&mut workspace, edit(session, vec![apply("rect-2", "my-slide", PresetPhase::In, 0)]));
-        assert!(matches!(applied.effects[0], EditEffect::PresetApplied { duration_frames } if duration_frames > 0));
+        let session = open(
+            &mut workspace,
+            SceneSource::Project {
+                project: "news".into(),
+                scene_id: "b".into(),
+            },
+        );
+        let applied = run(
+            &mut workspace,
+            edit(
+                session,
+                vec![apply("rect-2", "my-slide", PresetPhase::In, 0)],
+            ),
+        );
+        assert!(
+            matches!(applied.effects[0], EditEffect::PresetApplied { duration_frames } if duration_frames > 0)
+        );
         let keyed = |workspace: &Workspace| {
             workspace
                 .document(&SceneTarget::Session { session })
@@ -2046,7 +2675,13 @@ mod tests {
 
         // An unsaved project id is still unknown.
         assert!(matches!(
-            refusal(&mut workspace, edit(session, vec![apply("rect-2", "nobody-saved-this", PresetPhase::In, 0)])),
+            refusal(
+                &mut workspace,
+                edit(
+                    session,
+                    vec![apply("rect-2", "nobody-saved-this", PresetPhase::In, 0)]
+                )
+            ),
             Refusal::MotionPresetUnknown { .. }
         ));
     }
@@ -2063,14 +2698,23 @@ mod tests {
         let confirm = |confirmed_by: &str| {
             EditorCommand::ConfirmDesignSystem(ConfirmDesignSystem {
                 project: "news".into(),
-                commit: DesignSystemCommit { draft: draft.clone(), confirmed_by: confirmed_by.into() },
+                commit: DesignSystemCommit {
+                    draft: draft.clone(),
+                    confirmed_by: confirmed_by.into(),
+                },
             })
         };
-        assert!(workspace.execute(confirm("   ")).is_err(), "nobody confirmed it, so it is not confirmed");
+        assert!(
+            workspace.execute(confirm("   ")).is_err(),
+            "nobody confirmed it, so it is not confirmed"
+        );
         for version in [1, 2] {
             assert_eq!(
                 run(&mut workspace, confirm("head-of-design")).effects,
-                vec![EditEffect::DesignSystemConfirmed { project: "news".into(), version }]
+                vec![EditEffect::DesignSystemConfirmed {
+                    project: "news".into(),
+                    version
+                }]
             );
         }
     }

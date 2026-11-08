@@ -73,7 +73,13 @@ pub fn ingest_w3c(name: &str, bytes: &[u8]) -> Result<DesignSystemDraft, Refusal
     let (document, text) = read_source(bytes)?;
     let mut builder = DraftBuilder::default();
     walk_w3c(&document, &mut Vec::new(), None, &mut builder);
-    Ok(builder.finish(name, DesignSystemSourceKind::W3c, bytes, text, String::new()))
+    Ok(builder.finish(
+        name,
+        DesignSystemSourceKind::W3c,
+        bytes,
+        text,
+        String::new(),
+    ))
 }
 
 fn walk_w3c(
@@ -296,10 +302,7 @@ impl DraftBuilder {
         // Figma names groups with `/`. The token name is the last segment
         // under either convention, so a Figma variable does not end up named
         // `brand/primary` while its W3C equivalent is named `primary`.
-        let leaf = source_path
-            .rsplit(['.', '/'])
-            .next()
-            .unwrap_or(source_path);
+        let leaf = source_path.rsplit(['.', '/']).next().unwrap_or(source_path);
 
         match declared_type {
             Some("color") => match colour_from(value) {
@@ -310,7 +313,9 @@ impl DraftBuilder {
                     });
                     self.map(source_path, &format!("visual.palette.{leaf}"));
                 }
-                Err(reason) => out_unexpressible(self, source_path, "color", &reason, value.clone()),
+                Err(reason) => {
+                    out_unexpressible(self, source_path, "color", &reason, value.clone())
+                }
             },
             Some("dimension") => match dimension_px(value) {
                 Ok(px) => {
@@ -439,7 +444,8 @@ impl DraftBuilder {
         self.duration.sort_by(|a, b| a.name.cmp(&b.name));
         self.stagger.sort_by(|a, b| a.name.cmp(&b.name));
         self.easing.sort_by_key(easing_name);
-        self.mappings.sort_by(|a, b| a.source_path.cmp(&b.source_path));
+        self.mappings
+            .sort_by(|a, b| a.source_path.cmp(&b.source_path));
         self.unexpressible
             .sort_by(|a, b| a.source_path.cmp(&b.source_path));
 
@@ -1027,7 +1033,10 @@ mod tests {
             .iter()
             .find(|token| token.name == "primary")
             .expect("the primary colour mapped");
-        assert_eq!(primary.value.space, gx_contracts::color::SourceColorSpace::Srgb);
+        assert_eq!(
+            primary.value.space,
+            gx_contracts::color::SourceColorSpace::Srgb
+        );
 
         // 1rem is 16px, so `loose` collapses onto `base` rather than becoming
         // a second, wrongly-scaled step.
@@ -1358,8 +1367,12 @@ mod tests {
             }
         });
 
-        let draft = ingest_claude_design("Brand", &bytes_of(&document)).expect("the export ingests");
-        assert_eq!(draft.brief, "Confident, never loud. Motion supports hierarchy.");
+        let draft =
+            ingest_claude_design("Brand", &bytes_of(&document)).expect("the export ingests");
+        assert_eq!(
+            draft.brief,
+            "Confident, never loud. Motion supports hierarchy."
+        );
         assert_eq!(draft.visual.palette.len(), 1);
         assert_eq!(draft.source.kind, DesignSystemSourceKind::ClaudeDesign);
     }
@@ -1434,7 +1447,11 @@ mod tests {
         // A half-built version left behind by a crash must not be counted.
         // The candidate name is deliberately outside the `v<n>` shape.
         std::fs::create_dir_all(store.root().join(".v2-candidate")).unwrap();
-        std::fs::write(store.root().join(".v2-candidate").join("tokens.json"), b"{}").unwrap();
+        std::fs::write(
+            store.root().join(".v2-candidate").join("tokens.json"),
+            b"{}",
+        )
+        .unwrap();
         assert_eq!(
             store.current_version().unwrap(),
             Some(1),
@@ -1443,7 +1460,9 @@ mod tests {
 
         // And the next confirm still takes the next number rather than
         // colliding with the wreckage.
-        let second = store.confirm(&confirmable_draft(), "head-of-design").unwrap();
+        let second = store
+            .confirm(&confirmable_draft(), "head-of-design")
+            .unwrap();
         assert_eq!(second.version, 2);
 
         std::fs::remove_dir_all(root).expect("clean up");
@@ -1488,7 +1507,10 @@ mod tests {
         let error = store
             .confirm(&draft, "head-of-design")
             .expect_err("a missing floor is refused rather than defaulted");
-        assert!(error.to_string().contains("minimum text size"), "got {error}");
+        assert!(
+            error.to_string().contains("minimum text size"),
+            "got {error}"
+        );
 
         std::fs::remove_dir_all(root).expect("clean up");
     }
@@ -1510,10 +1532,7 @@ mod tests {
         assert_eq!(second.version, 2);
 
         let v1 = store.load(1).expect("v1 still reads");
-        assert_eq!(
-            v1, first,
-            "confirming v2 must not have edited v1 in place"
-        );
+        assert_eq!(v1, first, "confirming v2 must not have edited v1 in place");
         assert_eq!(store.versions().unwrap(), vec![1, 2]);
 
         std::fs::remove_dir_all(root).expect("clean up");
@@ -1559,10 +1578,7 @@ mod tests {
         assert_eq!(report.unstamped.len(), 1);
         assert_eq!(report.unstamped[0].template_id, "legacy-ticker");
         assert!(
-            !report
-                .behind
-                .iter()
-                .any(|entry| entry.template_id == "bug"),
+            !report.behind.iter().any(|entry| entry.template_id == "bug"),
             "a template on the current version is not drift"
         );
     }

@@ -329,7 +329,9 @@ pub struct GradientStop {
 }
 
 /// What a gradient does outside its 0–1 span. CSS's own names.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum GradientSpread {
     #[default]
@@ -341,7 +343,9 @@ pub enum GradientSpread {
 /// Whether a gradient's coordinates are the object's or the scene's. An
 /// object-space gradient follows its object; a scene-space one stays put
 /// while the object moves through it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum GradientCoordinateMode {
     #[default]
@@ -611,15 +615,27 @@ mod tests {
         for linear in [0.0, 0.001, 0.0031308, 0.0404, 0.214, 0.5, 0.9, 1.0] {
             for space in [WorkingColorSpace::Srgb, WorkingColorSpace::LinearSrgb] {
                 let back = space.to_linear(space.from_linear(linear));
-                assert!((back - linear).abs() < 1e-12, "{space:?} round trip of {linear}");
+                assert!(
+                    (back - linear).abs() < 1e-12,
+                    "{space:?} round trip of {linear}"
+                );
             }
         }
         assert_eq!(WorkingColorSpace::Srgb.from_linear(0.5), srgb_encode(0.5));
         assert_eq!(WorkingColorSpace::LinearSrgb.from_linear(0.5), 0.5);
-        assert_eq!(serde_json::to_value(WorkingColorSpace::Srgb).unwrap(), "srgb");
-        assert_eq!(serde_json::to_value(WorkingColorSpace::LinearSrgb).unwrap(), "linear-srgb");
+        assert_eq!(
+            serde_json::to_value(WorkingColorSpace::Srgb).unwrap(),
+            "srgb"
+        );
+        assert_eq!(
+            serde_json::to_value(WorkingColorSpace::LinearSrgb).unwrap(),
+            "linear-srgb"
+        );
         assert_eq!(WorkingColorSpace::NEW_PROJECT, WorkingColorSpace::Srgb);
-        assert_eq!(WorkingColorSpace::BEFORE_3_15, WorkingColorSpace::LinearSrgb);
+        assert_eq!(
+            WorkingColorSpace::BEFORE_3_15,
+            WorkingColorSpace::LinearSrgb
+        );
         for space in [WorkingColorSpace::Srgb, WorkingColorSpace::LinearSrgb] {
             assert_eq!(serde_json::to_value(space).unwrap(), space.as_str());
         }

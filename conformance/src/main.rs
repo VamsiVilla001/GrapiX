@@ -10,9 +10,9 @@
 
 use gx_conformance::{
     asset_plane_suite, control_plane_delivery_suite, control_plane_fault_suite,
-    control_plane_suite, editor_command_suite, headless_render_suite, media_plane_suite, render_preview_suite,
-    mock_product_suite, refusal_audit_suite, scene_plane_suite, timing_plane_suite, Outcome,
-    Report,
+    control_plane_suite, editor_command_suite, headless_render_suite, media_plane_suite,
+    mock_product_suite, refusal_audit_suite, render_preview_suite, scene_plane_suite,
+    timing_plane_suite, Outcome, Report,
 };
 use gx_contracts::{DeviceTier, Locality, RationalRate};
 use gx_control_plane::peer::EnginePeer;
@@ -149,7 +149,11 @@ const CONFORMANCE_TOKEN: &str = "conformance-token-0123456789abcd";
 /// through a real client against it.
 fn run_over_transport(report: &mut Report, token: Option<&str>) {
     let mut engine = MockEngine::new().genlocked(RationalRate::P29_97);
-    engine.publish(gx_contracts::TakeId("conformance/published".into()), gx_contracts::Revision(1), gx_contracts::ContentHash("a".repeat(64)));
+    engine.publish(
+        gx_contracts::TakeId("conformance/published".into()),
+        gx_contracts::Revision(1),
+        gx_contracts::ContentHash("a".repeat(64)),
+    );
 
     // Port 0: the OS picks a free port, so this never collides with a real
     // engine or a second run.
@@ -306,7 +310,9 @@ fn worker_binary() -> Option<std::path::PathBuf> {
         "gx-render-worker"
     };
     let dir = current.parent()?;
-    [dir.join(name), dir.parent()?.join(name)].into_iter().find(|candidate| candidate.exists())
+    [dir.join(name), dir.parent()?.join(name)]
+        .into_iter()
+        .find(|candidate| candidate.exists())
 }
 
 fn free_port() -> u16 {

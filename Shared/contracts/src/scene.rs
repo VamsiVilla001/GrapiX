@@ -43,8 +43,8 @@ use ts_rs::TS;
 
 use crate::color::{ColorValue, Rgba, WorkingColorSpace};
 use crate::font::FontDefinition;
-use crate::provenance::AssetProvenance;
 use crate::material::{BlendMode, CullMode, FitMode, MaterialBinding};
+use crate::provenance::AssetProvenance;
 use crate::{ContentHash, RationalRate, Refusal, Revision};
 
 // ---------------------------------------------------------------------------
@@ -337,7 +337,9 @@ impl ObjectBase {
 }
 
 /// Point text grows from its origin; paragraph text wraps inside the base box.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum TextLayout {
     #[default]
@@ -346,7 +348,9 @@ pub enum TextLayout {
 }
 
 /// What to do when shaped text does not fit its box. Never silently clipped.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum TextAutoFit {
     #[default]
@@ -356,7 +360,9 @@ pub enum TextAutoFit {
 }
 
 /// CSS `writing-mode` values, which is what the shaper (3.6) consumes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum WritingMode {
     #[default]
@@ -365,7 +371,9 @@ pub enum WritingMode {
     VerticalLr,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum VerticalAlign {
     #[default]
@@ -376,7 +384,9 @@ pub enum VerticalAlign {
 
 /// Base direction. `Auto` resolves from the first strong character, which is
 /// what makes bidi text (3.6) correct without the author declaring it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum TextDirection {
     #[default]
@@ -389,7 +399,9 @@ pub enum TextDirection {
 /// characters stay as they are, so a data binding can replace the text and
 /// the case still applies, and switching it off returns the author's own
 /// capitalisation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum TextCase {
     #[default]
@@ -400,7 +412,9 @@ pub enum TextCase {
     SmallCaps,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum TextOverflow {
     #[default]
@@ -409,7 +423,9 @@ pub enum TextOverflow {
     Clip,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum TextAlign {
     #[default]
@@ -420,7 +436,9 @@ pub enum TextAlign {
 
 /// Underline and strikethrough: drawn from the font's metrics rather than
 /// shaped, so they are object state and not part of the font definition.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub struct TextDecoration {
     #[serde(default)]
@@ -595,7 +613,9 @@ pub struct ShapeObject {
     pub trim_offset: Option<f64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum FillRule {
     #[default]
@@ -1498,7 +1518,10 @@ pub fn new_scene(id: &str, name: &str, working_color_space: WorkingColorSpace) -
         // New authoring graphics start with a five-second timeline at P50.
         // A zero-frame default prevented scrubbing, key creation and playback.
         // Loaded documents retain their authored duration, including zero.
-        timeline: SceneTimeline { duration_frames: 250, ..SceneTimeline::default() },
+        timeline: SceneTimeline {
+            duration_frames: 250,
+            ..SceneTimeline::default()
+        },
         data_context: Default::default(),
         assets: Vec::new(),
         fonts: Vec::new(),
@@ -1564,7 +1587,9 @@ impl SceneDocument {
     /// This document's revision content address: [`scene_content_hash`] over
     /// its JSON form.
     pub fn content_hash(&self) -> ContentHash {
-        scene_content_hash(&serde_json::to_value(self).expect("a scene document serialises to JSON"))
+        scene_content_hash(
+            &serde_json::to_value(self).expect("a scene document serialises to JSON"),
+        )
     }
 
     /// Look up an asset by its stable id.
@@ -1680,8 +1705,14 @@ fn upgrade_scene_json(raw: &mut serde_json::Value) -> Result<(), Refusal> {
         });
     }
     if version == 1 {
-        if let Some(assets) = raw.get_mut("assets").and_then(serde_json::Value::as_array_mut) {
-            for asset in assets.iter_mut().filter_map(serde_json::Value::as_object_mut) {
+        if let Some(assets) = raw
+            .get_mut("assets")
+            .and_then(serde_json::Value::as_array_mut)
+        {
+            for asset in assets
+                .iter_mut()
+                .filter_map(serde_json::Value::as_object_mut)
+            {
                 asset
                     .entry("provenance")
                     .or_insert_with(|| serde_json::json!({ "sources": [] }));
@@ -1690,8 +1721,7 @@ fn upgrade_scene_json(raw: &mut serde_json::Value) -> Result<(), Refusal> {
     }
     if let Some(document) = raw.as_object_mut() {
         document.entry("workingColorSpace").or_insert_with(|| {
-            serde_json::to_value(WorkingColorSpace::BEFORE_3_15)
-                .expect("a unit enum serialises")
+            serde_json::to_value(WorkingColorSpace::BEFORE_3_15).expect("a unit enum serialises")
         });
     }
     raw["version"] = serde_json::Value::from(SCENE_SCHEMA_VERSION);
@@ -1773,15 +1803,27 @@ mod parse_tests {
         // was refused as an unknown field.
         for (fragment, expected) in [
             ("", crate::material::BlendMode::Normal),
-            (r#","blendMode":"normal""#, crate::material::BlendMode::Normal),
-            (r#","blendMode":"overlay""#, crate::material::BlendMode::Overlay),
+            (
+                r#","blendMode":"normal""#,
+                crate::material::BlendMode::Normal,
+            ),
+            (
+                r#","blendMode":"overlay""#,
+                crate::material::BlendMode::Overlay,
+            ),
         ] {
-            let json = authored(&format!(r#"{{"type":"rect","id":"bg","name":"bg"{fragment}}}"#), "");
+            let json = authored(
+                &format!(r#"{{"type":"rect","id":"bg","name":"bg"{fragment}}}"#),
+                "",
+            );
             let document = parse_scene_document(json.as_bytes())
                 .unwrap_or_else(|refusal| panic!("{fragment:?} must parse: {refusal:?}"));
             assert_eq!(document.objects[0].base().blend_mode(), expected);
             let wire = serde_json::to_value(&document).unwrap();
-            assert_eq!(wire["objects"][0].get("blendMode").is_some(), !fragment.is_empty());
+            assert_eq!(
+                wire["objects"][0].get("blendMode").is_some(),
+                !fragment.is_empty()
+            );
         }
     }
 
@@ -1904,7 +1946,10 @@ mod parse_tests {
                 height: 1080,
                 frame_rate: RationalRate::P50,
             },
-            timeline: SceneTimeline { duration_frames: 100, ..Default::default() },
+            timeline: SceneTimeline {
+                duration_frames: 100,
+                ..Default::default()
+            },
             data_context: serde_json::Map::new(),
             assets: vec![],
             fonts: vec![],
@@ -1924,18 +1969,30 @@ mod tests {
 
     #[test]
     fn new_graphics_have_time_to_author_but_loaded_durations_are_not_guessed() {
-        let mut graphic = new_scene("score", "Score", crate::color::WorkingColorSpace::NEW_PROJECT);
+        let mut graphic = new_scene(
+            "score",
+            "Score",
+            crate::color::WorkingColorSpace::NEW_PROJECT,
+        );
         assert_eq!(graphic.canvas.frame_rate, RationalRate::P50);
         assert_eq!(graphic.timeline.duration_frames, 250);
         graphic.timeline.duration_frames = 0;
         let loaded = parse_scene_document(&serde_json::to_vec(&graphic).unwrap()).unwrap();
-        assert_eq!(loaded.timeline.duration_frames, 0, "loading preserves an authored static duration");
+        assert_eq!(
+            loaded.timeline.duration_frames, 0,
+            "loading preserves an authored static duration"
+        );
     }
 
     #[test]
     fn the_same_content_hashes_alike_and_one_changed_property_does_not() {
-        let scene = new_scene("lower-third", "Lower third", crate::color::WorkingColorSpace::NEW_PROJECT);
-        let as_json = |scene: &SceneDocument| serde_json::to_value(scene).expect("a scene serialises");
+        let scene = new_scene(
+            "lower-third",
+            "Lower third",
+            crate::color::WorkingColorSpace::NEW_PROJECT,
+        );
+        let as_json =
+            |scene: &SceneDocument| serde_json::to_value(scene).expect("a scene serialises");
         let first = scene_content_hash(&as_json(&scene));
 
         // A second publish of the same content: only the receiver-assigned
@@ -2183,7 +2240,10 @@ mod tests {
                 height: 1080,
                 frame_rate: RationalRate::P50,
             },
-            timeline: SceneTimeline { duration_frames: 250, ..Default::default() },
+            timeline: SceneTimeline {
+                duration_frames: 250,
+                ..Default::default()
+            },
             data_context: serde_json::Map::new(),
             assets: vec![AssetLibraryItem {
                 asset_id: "asset_logo".into(),

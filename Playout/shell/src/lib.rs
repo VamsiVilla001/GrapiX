@@ -21,7 +21,6 @@
 
 // PlayoutError carries the structured refusal it reports (see its doc).
 #![allow(clippy::result_large_err)]
-
 #![forbid(unsafe_code)]
 
 use std::net::SocketAddr;
@@ -134,9 +133,11 @@ pub fn connect(
     endpoint: &str,
     token: Option<String>,
 ) -> Result<OperatorView, PlayoutError> {
-    let address: SocketAddr = endpoint.parse().map_err(|_| PlayoutError::InvalidEndpoint {
-        endpoint: endpoint.to_owned(),
-    })?;
+    let address: SocketAddr = endpoint
+        .parse()
+        .map_err(|_| PlayoutError::InvalidEndpoint {
+            endpoint: endpoint.to_owned(),
+        })?;
     let client = match token {
         Some(secret) => {
             let token = Token::parse(secret).map_err(|refusal| PlayoutError::InvalidToken {
@@ -261,7 +262,6 @@ pub fn phase(
     })
 }
 
-
 /// What an output configuration actually became.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -326,7 +326,13 @@ fn cmd_cue(
     content_hash: Option<String>,
     frame: Option<u64>,
 ) -> Result<TakeCommitted, PlayoutError> {
-    cue(&state, TakeId(take_id), Revision(revision), content_hash.map(ContentHash), scheduled(frame))
+    cue(
+        &state,
+        TakeId(take_id),
+        Revision(revision),
+        content_hash.map(ContentHash),
+        scheduled(frame),
+    )
 }
 
 #[tauri::command]
@@ -337,7 +343,13 @@ fn cmd_take(
     content_hash: Option<String>,
     frame: Option<u64>,
 ) -> Result<TakeCommitted, PlayoutError> {
-    take(&state, TakeId(take_id), Revision(revision), content_hash.map(ContentHash), scheduled(frame))
+    take(
+        &state,
+        TakeId(take_id),
+        Revision(revision),
+        content_hash.map(ContentHash),
+        scheduled(frame),
+    )
 }
 
 #[tauri::command]
@@ -355,7 +367,6 @@ fn cmd_phase(
 ) -> Result<PhaseCommitted, PlayoutError> {
     self::phase(&state, phase, scheduled(frame))
 }
-
 
 #[tauri::command]
 fn cmd_configure_output(
@@ -417,8 +428,14 @@ mod tests {
         let state = Connection::default();
         // A command with nowhere to go must say so. Silently queuing it would
         // mean an operator pressing take and getting no answer at all.
-        let error = take(&state, TakeId("demo".into()), Revision(1), None, TakeAt::NextOpportunity)
-            .expect_err("no connection means no take");
+        let error = take(
+            &state,
+            TakeId("demo".into()),
+            Revision(1),
+            None,
+            TakeAt::NextOpportunity,
+        )
+        .expect_err("no connection means no take");
         assert!(matches!(error, PlayoutError::NotConnected));
     }
 

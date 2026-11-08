@@ -83,7 +83,10 @@ pub fn prepare_layer_source(
     }
     if let Some(text) = texts.objects.iter().find(|t| t.object_id == id) {
         for &[x, y] in &text.vertices {
-            point(f64::from((f64::from(x) + phase[0]) as f32), f64::from((f64::from(y) + phase[1]) as f32));
+            point(
+                f64::from((f64::from(x) + phase[0]) as f32),
+                f64::from((f64::from(y) + phase[1]) as f32),
+            );
         }
     }
     let b = bounds.unwrap_or([0.0, 0.0, 0.0, 0.0]);
@@ -91,7 +94,11 @@ pub fn prepare_layer_source(
     let origin = [b[0].floor() - 1.0 - pad, b[1].floor() - 1.0 - pad];
     let width = b[2].ceil() - origin[0] + 1.0 + pad;
     let height = b[3].ceil() - origin[1] + 1.0 + pad;
-    if !width.is_finite() || !height.is_finite() || width > f64::from(limit) || height > f64::from(limit) {
+    if !width.is_finite()
+        || !height.is_finite()
+        || width > f64::from(limit)
+        || height > f64::from(limit)
+    {
         return Err(crate::compositor::scene::mapping_refusal(
             &id,
             &path,
@@ -106,5 +113,8 @@ pub fn prepare_layer_source(
     if matches!(object, SceneObject::Text(_)) {
         crate::text::rasterise_text(texts, &id, &local, &local_effective, &mut surface)?;
     }
-    Ok(LayerSource { surface, origin: [origin[0] - phase[0], origin[1] - phase[1]] })
+    Ok(LayerSource {
+        surface,
+        origin: [origin[0] - phase[0], origin[1] - phase[1]],
+    })
 }

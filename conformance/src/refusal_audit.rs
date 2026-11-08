@@ -5,8 +5,13 @@
 //! compile-exhaustive register for contract variants outside `EnginePeer`.
 //! Those routes are printed as limitations, never hidden as permanent skips.
 
+use gx_asset_plane::Transfer;
 use gx_contracts::color::ColorValue;
 use gx_contracts::color::Rgba;
+use gx_contracts::control::{
+    apply_control_values, apply_take_page, declare_control_field, remove_control_field,
+    ControlField, ControlFieldKind, ControlValue, TakePage,
+};
 use gx_contracts::font::{check_font_face_url, FontSource};
 use gx_contracts::material::{
     validate_material, BlendMode, FitMode, MaterialDefinition, MaterialKind, MaterialSupport,
@@ -14,10 +19,6 @@ use gx_contracts::material::{
 };
 use gx_contracts::package::{package_path_components, PackageFileEntry, PackageManifest};
 use gx_contracts::scene::parse_scene_document;
-use gx_contracts::control::{
-    apply_control_values, apply_take_page, declare_control_field, remove_control_field,
-    ControlField, ControlFieldKind, ControlValue, TakePage,
-};
 use gx_contracts::text_style::{
     apply_text_style, validate_text_styles, StyleColor, StyleNumber, TextStyle,
 };
@@ -29,10 +30,11 @@ use gx_control_plane::capability::{check_clock_domain, check_protocol, live_allo
 use gx_control_plane::intent::{resolve_intent, ClockState, Lead, TakeAt, TakeRequest};
 use gx_control_plane::message::{ClientRequest, EngineReply, OutputConfig};
 use gx_control_plane::peer::{EnginePeer, FaultInjection};
-use gx_asset_plane::Transfer;
-use gx_mock_engine::MockEngine;
 use gx_media_plane::LocalMediaTransport;
-use gx_playout::{evaluate_automation, AutomationTrigger, Playout, PublishedScene, Rundown, RundownEntry};
+use gx_mock_engine::MockEngine;
+use gx_playout::{
+    evaluate_automation, AutomationTrigger, Playout, PublishedScene, Rundown, RundownEntry,
+};
 
 use crate::{expect, Report};
 
@@ -139,7 +141,11 @@ fn drive_control_refusals(report: &mut Report) {
     );
 
     let mut peer = MockEngine::new().genlocked(RationalRate::P50);
-    peer.publish(TakeId("audit/published".into()), Revision(2), gx_contracts::ContentHash("a".repeat(64)));
+    peer.publish(
+        TakeId("audit/published".into()),
+        Revision(2),
+        gx_contracts::ContentHash("a".repeat(64)),
+    );
     report.record(
         PLANE,
         "RevisionMismatch is produced for a stale published take",
@@ -185,16 +191,31 @@ fn drive_control_refusals(report: &mut Report) {
             frame,
         })
     };
-    let unavailable = peer.handle(render("audit/published", Revision(2), ContentHash("a".repeat(64)), 0));
+    let unavailable = peer.handle(render(
+        "audit/published",
+        Revision(2),
+        ContentHash("a".repeat(64)),
+        0,
+    ));
     report.record(
         PLANE,
         "RenderSceneUnavailable is produced for rendering an identifier-only revision",
         expect(
-            matches!(&unavailable, EngineReply::Refused(Refusal::RenderSceneUnavailable { revision: Revision(2), .. })),
+            matches!(
+                &unavailable,
+                EngineReply::Refused(Refusal::RenderSceneUnavailable {
+                    revision: Revision(2),
+                    ..
+                })
+            ),
             format!("expected RenderSceneUnavailable, got {unavailable:?}"),
         ),
     );
-    let mut short = gx_contracts::scene::new_scene("audit-render", "Audit render", gx_contracts::color::WorkingColorSpace::NEW_PROJECT);
+    let mut short = gx_contracts::scene::new_scene(
+        "audit-render",
+        "Audit render",
+        gx_contracts::color::WorkingColorSpace::NEW_PROJECT,
+    );
     short.timeline.duration_frames = 10;
     let short_pin = short.content_hash();
     let _ = peer.publish_scene(short);
@@ -203,7 +224,14 @@ fn drive_control_refusals(report: &mut Report) {
         PLANE,
         "RenderFrameOutOfRange is produced for rendering past a scene's timeline",
         expect(
-            matches!(&past_end, EngineReply::Refused(Refusal::RenderFrameOutOfRange { frame: 11, duration_frames: 10, .. })),
+            matches!(
+                &past_end,
+                EngineReply::Refused(Refusal::RenderFrameOutOfRange {
+                    frame: 11,
+                    duration_frames: 10,
+                    ..
+                })
+            ),
             format!("expected RenderFrameOutOfRange, got {past_end:?}"),
         ),
     );
@@ -328,13 +356,17 @@ fn drive_contract_refusals(report: &mut Report) {
             format!("expected schema 99 refused by version, got {newer:?}"),
         ),
     );
-    let mut cache = gx_asset_plane::AssetStore::at_root(
-        std::env::temp_dir().join(format!("gx-conformance-asset-import-{}", std::process::id())),
-    );
+    let mut cache = gx_asset_plane::AssetStore::at_root(std::env::temp_dir().join(format!(
+        "gx-conformance-asset-import-{}",
+        std::process::id()
+    )));
     let unrecognised = gx_asset_plane::import::prepare_asset_files(
         &mut cache,
         &[],
-        &[gx_asset_plane::import::AssetFileInput { file_name: "notes.png".into(), bytes: b"plain text, not an image" }],
+        &[gx_asset_plane::import::AssetFileInput {
+            file_name: "notes.png".into(),
+            bytes: b"plain text, not an image",
+        }],
     );
     report.record(
         PLANE,
@@ -467,7 +499,9 @@ fn drive_text_style_refusals(report: &mut Report) {
 /// Editor shell calls. A declaration or fill that cannot be applied is named,
 /// never retained as an operator field that does nothing.
 fn drive_control_contract_refusals(report: &mut Report) {
-    use gx_contracts::scene::{ObjectBase, RectObject, SceneCanvas, SceneDocument, SceneObject, SceneTimeline};
+    use gx_contracts::scene::{
+        ObjectBase, RectObject, SceneCanvas, SceneDocument, SceneObject, SceneTimeline,
+    };
 
     let scene = || SceneDocument {
         working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
@@ -476,8 +510,16 @@ fn drive_control_contract_refusals(report: &mut Report) {
         version: gx_contracts::scene::SCENE_SCHEMA_VERSION,
         revision: None,
         active_camera_id: None,
-        canvas: SceneCanvas { width: 16, height: 16, frame_rate: RationalRate::P50 },
-        timeline: SceneTimeline { duration_frames: 1, channels: Vec::new(), phases: Vec::new() },
+        canvas: SceneCanvas {
+            width: 16,
+            height: 16,
+            frame_rate: RationalRate::P50,
+        },
+        timeline: SceneTimeline {
+            duration_frames: 1,
+            channels: Vec::new(),
+            phases: Vec::new(),
+        },
         data_context: Default::default(),
         assets: Vec::new(),
         fonts: Vec::new(),
@@ -604,7 +646,10 @@ fn drive_editor_refusals(report: &mut Report) {
             height: 16,
             frame_rate: RationalRate::P50,
         },
-        timeline: gx_contracts::scene::SceneTimeline { duration_frames: 1, ..Default::default() },
+        timeline: gx_contracts::scene::SceneTimeline {
+            duration_frames: 1,
+            ..Default::default()
+        },
         data_context: Default::default(),
         assets: Vec::new(),
         fonts: Vec::new(),
@@ -621,7 +666,9 @@ fn drive_editor_refusals(report: &mut Report) {
         expect(
             matches!(
                 outcome,
-                Err(gx_editor::EditorError::Refused(Refusal::ProjectNotFound { .. }))
+                Err(gx_editor::EditorError::Refused(
+                    Refusal::ProjectNotFound { .. }
+                ))
             ) && !root.join("no-such-project").exists(),
             "a write into a missing project was not refused by name, or created one anyway",
         ),
@@ -639,13 +686,19 @@ fn drive_editor_refusals(report: &mut Report) {
             created.is_ok()
                 && matches!(
                     mismatch,
-                    Err(gx_editor::EditorError::Refused(Refusal::SceneWorkingSpaceMismatch {
-                        scene: gx_contracts::color::WorkingColorSpace::LinearSrgb,
-                        project_space: gx_contracts::color::WorkingColorSpace::Srgb,
-                        ..
-                    }))
+                    Err(gx_editor::EditorError::Refused(
+                        Refusal::SceneWorkingSpaceMismatch {
+                            scene: gx_contracts::color::WorkingColorSpace::LinearSrgb,
+                            project_space: gx_contracts::color::WorkingColorSpace::Srgb,
+                            ..
+                        }
+                    ))
                 )
-                && !root.join("audit-space").join("scenes").join("audit.json").exists(),
+                && !root
+                    .join("audit-space")
+                    .join("scenes")
+                    .join("audit.json")
+                    .exists(),
             "a linear scene was written into an sRGB project, or refused under another name",
         ),
     );
@@ -663,7 +716,9 @@ fn drive_editor_refusals(report: &mut Report) {
             corrupted.is_ok()
                 && matches!(
                     projects.settings("audit-space"),
-                    Err(gx_editor::EditorError::Refused(Refusal::ProjectSettingsInvalid { .. }))
+                    Err(gx_editor::EditorError::Refused(
+                        Refusal::ProjectSettingsInvalid { .. }
+                    ))
                 ),
             "an unreadable project settings file was not refused by name",
         ),
@@ -682,7 +737,9 @@ fn drive_animation_refusals(report: &mut Report) {
         create_keyframe, move_keyframe, set_keyframe, validate_scene_animation, SceneEasing,
         SceneKeyframe,
     };
-    use gx_contracts::scene::{ObjectBase, RectObject, SceneCanvas, SceneDocument, SceneObject, SceneTimeline};
+    use gx_contracts::scene::{
+        ObjectBase, RectObject, SceneCanvas, SceneDocument, SceneObject, SceneTimeline,
+    };
 
     let scene_with = |objects: Vec<SceneObject>| SceneDocument {
         working_color_space: gx_contracts::color::WorkingColorSpace::LinearSrgb,
@@ -835,8 +892,10 @@ fn drive_animation_refusals(report: &mut Report) {
         PLANE,
         "DuplicateKeyframeFrame is produced for a preset landing on an authored key",
         expect(
-            matches!(refused, Err(Refusal::DuplicateKeyframeFrame { frame: 20, .. }))
-                && preset_collision == before,
+            matches!(
+                refused,
+                Err(Refusal::DuplicateKeyframeFrame { frame: 20, .. })
+            ) && preset_collision == before,
             "a preset overwrote an authored key or mutated the scene before refusing",
         ),
     );
@@ -926,7 +985,11 @@ fn drive_animation_refusals(report: &mut Report) {
         expect(
             matches!(
                 validate_scene_animation(&unordered),
-                Err(Refusal::AnimationKeyOrderInvalid { previous: 20, frame: 0, .. })
+                Err(Refusal::AnimationKeyOrderInvalid {
+                    previous: 20,
+                    frame: 0,
+                    ..
+                })
             ),
             "a channel whose keys move backwards was not refused by name",
         ),
@@ -941,7 +1004,9 @@ fn drive_animation_refusals(report: &mut Report) {
 /// phase wrong is refused by its own name — an author who inverted a span is
 /// told that, not that the span is out of range.
 fn drive_timeline_phase_refusals(report: &mut Report) {
-    use gx_contracts::phases::{remove_phase, set_phase, validate_phases, PhaseKind, TimelinePhase};
+    use gx_contracts::phases::{
+        remove_phase, set_phase, validate_phases, PhaseKind, TimelinePhase,
+    };
     use gx_contracts::scene::SceneTimeline;
 
     let span = |kind: PhaseKind, start_frame: u64, end_frame: u64| TimelinePhase {
@@ -1156,7 +1221,10 @@ fn drive_playout_refusals(report: &mut Report) {
     let mut other = scene.clone();
     other.content_hash = Some(ContentHash("d".repeat(64)));
     let other_result = playout.take(&other, TakeAt::NextOpportunity);
-    let program_clear = playout.peer_mut().status().is_some_and(|status| status.program.is_none());
+    let program_clear = playout
+        .peer_mut()
+        .status()
+        .is_some_and(|status| status.program.is_none());
     report.record(
         PLANE,
         "RevisionUnpinned is produced by Playout for a rundown entry with no content hash",
@@ -1191,7 +1259,6 @@ fn drive_media_refusals(report: &mut Report) {
     );
 }
 
-
 fn drive_asset_refusals(report: &mut Report) {
     let hash = ContentHash("audit-asset".into());
     let mut out_of_order = Transfer::new(hash.clone(), 2).expect("non-empty transfer must start");
@@ -1222,7 +1289,9 @@ fn drive_asset_refusals(report: &mut Report) {
         ),
     );
     let mut complete = Transfer::new(hash.clone(), 1).expect("one-chunk transfer must start");
-    complete.accept_chunk(0).expect("the first chunk must arrive");
+    complete
+        .accept_chunk(0)
+        .expect("the first chunk must arrive");
     report.record(
         PLANE,
         "AssetTransferAlreadyComplete is produced for a post-completion chunk",
@@ -1235,7 +1304,9 @@ fn drive_asset_refusals(report: &mut Report) {
         ),
     );
     let mut mismatch = Transfer::new(hash.clone(), 1).expect("one-chunk transfer must start");
-    mismatch.accept_chunk(0).expect("the first chunk must arrive");
+    mismatch
+        .accept_chunk(0)
+        .expect("the first chunk must arrive");
     report.record(
         PLANE,
         "AssetHashMismatch is produced for bytes under the wrong content address",
@@ -1275,8 +1346,16 @@ fn drive_material_refusals(report: &mut Report) {
     let support = |cull: bool, alpha: bool| MaterialSupport {
         blend_modes: BlendMode::ALL.to_vec(),
         fit_modes: FitMode::ALL.to_vec(),
-        cull_modes: if cull { CullMode::ALL.to_vec() } else { Vec::new() },
-        alpha_modes: if alpha { AlphaMode::ALL.to_vec() } else { Vec::new() },
+        cull_modes: if cull {
+            CullMode::ALL.to_vec()
+        } else {
+            Vec::new()
+        },
+        alpha_modes: if alpha {
+            AlphaMode::ALL.to_vec()
+        } else {
+            Vec::new()
+        },
         depth_modes: Vec::new(),
     };
     let cull_refused = CullMode::ALL.iter().all(|&mode| {
@@ -1284,19 +1363,40 @@ fn drive_material_refusals(report: &mut Report) {
         material.cull_mode = mode;
         matches!(validate_material(&material, &support(false, false)), Err(refusal) if matches!(refusal.code, Refusal::UnsupportedCullMode { mode: refused } if refused == mode))
     });
-    report.record(PLANE, "UnsupportedCullMode is produced for every cull mode a peer does not declare", expect(cull_refused, "a cull mode the peer does not declare was not refused as itself"));
+    report.record(
+        PLANE,
+        "UnsupportedCullMode is produced for every cull mode a peer does not declare",
+        expect(
+            cull_refused,
+            "a cull mode the peer does not declare was not refused as itself",
+        ),
+    );
     let alpha_refused = AlphaMode::ALL.iter().all(|&mode| {
         let mut material = material_with_blend(BlendMode::Normal);
         material.alpha_mode = mode;
         matches!(validate_material(&material, &support(true, false)), Err(refusal) if matches!(refusal.code, Refusal::UnsupportedAlphaMode { mode: refused } if refused == mode))
     });
-    report.record(PLANE, "UnsupportedAlphaMode is produced for every alpha mode a peer does not declare", expect(alpha_refused, "an alpha mode the peer does not declare was not refused as itself"));
+    report.record(
+        PLANE,
+        "UnsupportedAlphaMode is produced for every alpha mode a peer does not declare",
+        expect(
+            alpha_refused,
+            "an alpha mode the peer does not declare was not refused as itself",
+        ),
+    );
     let depth_refused = DepthMode::ALL.iter().all(|&mode| {
         let mut material = material_with_blend(BlendMode::Normal);
         material.depth_mode = mode;
         matches!(validate_material(&material, &support(true, true)), Err(refusal) if matches!(refusal.code, Refusal::UnsupportedDepthMode { mode: refused } if refused == mode))
     });
-    report.record(PLANE, "UnsupportedDepthMode is produced for every depth mode a peer does not declare", expect(depth_refused, "a depth mode the peer does not declare was not refused as itself"));
+    report.record(
+        PLANE,
+        "UnsupportedDepthMode is produced for every depth mode a peer does not declare",
+        expect(
+            depth_refused,
+            "a depth mode the peer does not declare was not refused as itself",
+        ),
+    );
 
     // The software path fills glyphs with a solid colour only; a gradient text
     // fill is refused at validation rather than flattened at frame time.
@@ -1315,55 +1415,102 @@ fn drive_material_refusals(report: &mut Report) {
             });
         }
     }
-    let draws_everything = MaterialSupport { depth_modes: DepthMode::ALL.to_vec(), ..support(true, true) };
-    let found = gx_contracts::validate::validate_scene_document(&scene, &draws_everything, &Default::default(), false);
+    let draws_everything = MaterialSupport {
+        depth_modes: DepthMode::ALL.to_vec(),
+        ..support(true, true)
+    };
+    let found = gx_contracts::validate::validate_scene_document(
+        &scene,
+        &draws_everything,
+        &Default::default(),
+        false,
+    );
     report.record(PLANE, "UnsupportedPathGradient is produced for a gradient text fill", expect(found.iter().any(|refusal| matches!(&refusal.code, Refusal::UnsupportedPathGradient { object, .. } if object == "text")), format!("a gradient text fill was not refused as UnsupportedPathGradient: {found:?}")));
 
     // 3.13: a Trim Paths value outside its domain refuses at validation rather
     // than being clamped into a window nobody authored.
     let mut trimmed = gx_contracts::command::witness::fixture_scene();
-    trimmed.objects.push(gx_contracts::scene::SceneObject::Shape(gx_contracts::scene::ShapeObject {
-        base: gx_contracts::scene::ObjectBase::new("trimmed", "trimmed"),
-        path: gx_contracts::scene::BezierPath {
-            closed: false,
-            vertices: vec![gx_contracts::scene::Vec2 { x: 0.0, y: 0.0 }, gx_contracts::scene::Vec2 { x: 10.0, y: 0.0 }],
-            in_tangents: vec![gx_contracts::scene::Vec2 { x: 0.0, y: 0.0 }; 2],
-            out_tangents: vec![gx_contracts::scene::Vec2 { x: 0.0, y: 0.0 }; 2],
-        },
-        compound_paths: None,
-        fill_enabled: false,
-        stroke_enabled: true,
-        fill_rule: Default::default(),
-        trim_start: Some(140.0),
-        trim_end: None,
-        trim_offset: None,
-    }));
-    let found = gx_contracts::validate::validate_scene_document(&trimmed, &draws_everything, &Default::default(), false);
+    trimmed
+        .objects
+        .push(gx_contracts::scene::SceneObject::Shape(
+            gx_contracts::scene::ShapeObject {
+                base: gx_contracts::scene::ObjectBase::new("trimmed", "trimmed"),
+                path: gx_contracts::scene::BezierPath {
+                    closed: false,
+                    vertices: vec![
+                        gx_contracts::scene::Vec2 { x: 0.0, y: 0.0 },
+                        gx_contracts::scene::Vec2 { x: 10.0, y: 0.0 },
+                    ],
+                    in_tangents: vec![gx_contracts::scene::Vec2 { x: 0.0, y: 0.0 }; 2],
+                    out_tangents: vec![gx_contracts::scene::Vec2 { x: 0.0, y: 0.0 }; 2],
+                },
+                compound_paths: None,
+                fill_enabled: false,
+                stroke_enabled: true,
+                fill_rule: Default::default(),
+                trim_start: Some(140.0),
+                trim_end: None,
+                trim_offset: None,
+            },
+        ));
+    let found = gx_contracts::validate::validate_scene_document(
+        &trimmed,
+        &draws_everything,
+        &Default::default(),
+        false,
+    );
     report.record(PLANE, "ShapeTrimInvalid is produced for a trim value outside 0-100", expect(found.iter().any(|refusal| matches!(&refusal.code, Refusal::ShapeTrimInvalid { object, field, .. } if object == "trimmed" && field == "trimStart")), format!("an out-of-range trim was not refused as ShapeTrimInvalid: {found:?}")));
 
     // 3.22: a malformed effect stack refuses by object and effect.
     let mut doubled = gx_contracts::command::witness::fixture_scene();
-    let tint = gx_contracts::effect::EffectInstance::new("wash", gx_contracts::effect::Effect::Tint(Default::default()));
+    let tint = gx_contracts::effect::EffectInstance::new(
+        "wash",
+        gx_contracts::effect::Effect::Tint(Default::default()),
+    );
     doubled.objects[0].base_mut().effects = Some(vec![tint.clone(), tint]);
     let doubled_id = doubled.objects[0].base().id.clone();
-    let found = gx_contracts::validate::validate_scene_document(&doubled, &draws_everything, &Default::default(), false);
+    let found = gx_contracts::validate::validate_scene_document(
+        &doubled,
+        &draws_everything,
+        &Default::default(),
+        false,
+    );
     report.record(PLANE, "EffectInvalid is produced for an effect id used twice on one object", expect(found.iter().any(|refusal| matches!(&refusal.code, Refusal::EffectInvalid { object, effect_id, .. } if *object == doubled_id && effect_id == "wash")), format!("a repeated effectId was not refused as EffectInvalid: {found:?}")));
 
     // 3.13: a hierarchy the resolver had to repair refuses at validation.
     let mut orphaned = gx_contracts::command::witness::fixture_scene();
-    orphaned.objects.push(gx_contracts::scene::SceneObject::Group(gx_contracts::scene::GroupObject {
-        base: gx_contracts::scene::ObjectBase::new("orphaning", "orphaning"),
-        child_ids: vec!["ghost".into()],
-    }));
-    let found = gx_contracts::validate::validate_scene_document(&orphaned, &draws_everything, &Default::default(), false);
+    orphaned
+        .objects
+        .push(gx_contracts::scene::SceneObject::Group(
+            gx_contracts::scene::GroupObject {
+                base: gx_contracts::scene::ObjectBase::new("orphaning", "orphaning"),
+                child_ids: vec!["ghost".into()],
+            },
+        ));
+    let found = gx_contracts::validate::validate_scene_document(
+        &orphaned,
+        &draws_everything,
+        &Default::default(),
+        false,
+    );
     report.record(PLANE, "SceneHierarchyInvalid is produced for a group naming a missing child", expect(found.iter().any(|refusal| matches!(&refusal.code, Refusal::SceneHierarchyInvalid { parent, child, .. } if parent == "orphaning" && child == "ghost")), format!("a missing child was not refused as SceneHierarchyInvalid: {found:?}")));
 
     // 3.13: what the engine cannot draw refuses by name at publish, driven
     // through the real engine's preparation in-process.
     let prepare = |object: gx_contracts::scene::SceneObject| {
-        let mut scene = gx_contracts::scene::new_scene("audit", "Audit", gx_contracts::color::WorkingColorSpace::Srgb);
+        let mut scene = gx_contracts::scene::new_scene(
+            "audit",
+            "Audit",
+            gx_contracts::color::WorkingColorSpace::Srgb,
+        );
         scene.objects.push(object);
-        gx_render_worker::PreparedScene::prepare(scene, &Default::default(), &Default::default(), &MaterialSupport::none()).err()
+        gx_render_worker::PreparedScene::prepare(
+            scene,
+            &Default::default(),
+            &Default::default(),
+            &MaterialSupport::none(),
+        )
+        .err()
     };
     let paint = gx_contracts::scene::SceneObject::Paint(gx_contracts::scene::PaintObject {
         base: gx_contracts::scene::ObjectBase::new("brush", "brush"),
@@ -1374,7 +1521,12 @@ fn drive_material_refusals(report: &mut Report) {
     report.record(PLANE, "ObjectKindNotDrawable is produced for a kind the engine cannot draw", expect(matches!(&kind, Some(Refusal::ObjectKindNotDrawable { object, kind, .. }) if object == "brush" && kind == "paint"), format!("a paint object was not refused as ObjectKindNotDrawable: {kind:?}")));
     let mut tilted = gx_contracts::scene::ObjectBase::new("tilted", "tilted");
     tilted.rotation_x = 15.0;
-    let property = prepare(gx_contracts::scene::SceneObject::Rect(gx_contracts::scene::RectObject { base: tilted, radius: 0.0 }));
+    let property = prepare(gx_contracts::scene::SceneObject::Rect(
+        gx_contracts::scene::RectObject {
+            base: tilted,
+            radius: 0.0,
+        },
+    ));
     report.record(PLANE, "ScenePropertyNotDrawable is produced for a property the engine cannot draw", expect(matches!(&property, Some(Refusal::ScenePropertyNotDrawable { object, property, .. }) if object == "tilted" && property == "rotationX"), format!("a rotationX on a rect was not refused as ScenePropertyNotDrawable: {property:?}")));
 }
 
@@ -1385,7 +1537,14 @@ fn drive_software_pixel_refusals(report: &mut Report) {
     use gx_contracts::scene::{new_scene, SceneObject};
     use gx_render_worker::PreparedScene;
 
-    let prepare = |scene| PreparedScene::prepare(scene, &Default::default(), &Default::default(), &MaterialSupport::none());
+    let prepare = |scene| {
+        PreparedScene::prepare(
+            scene,
+            &Default::default(),
+            &Default::default(),
+            &MaterialSupport::none(),
+        )
+    };
     let mut stroke = new_scene("trim-audit", "Trim audit", WorkingColorSpace::Srgb);
     stroke.canvas.width = 160;
     stroke.canvas.height = 80;
@@ -1399,12 +1558,30 @@ fn drive_software_pixel_refusals(report: &mut Report) {
         "fillEnabled": false, "strokeEnabled": true, "fillRule": "nonzero"
     })).expect("the trim witness parses"));
     let full = prepare(stroke.clone());
-    if let SceneObject::Shape(shape) = &mut stroke.objects[0] { shape.trim_end = Some(50.0); }
+    if let SceneObject::Shape(shape) = &mut stroke.objects[0] {
+        shape.trim_end = Some(50.0);
+    }
     let half = prepare(stroke);
-    let lit = |scene: &PreparedScene| scene.frame(OutputTransform::Srgb).pixels.chunks_exact(4).filter(|pixel| pixel[3] != 0).count();
-    report.record(PLANE, "Trim Paths 50% draws half the stroke instead of silently drawing it whole", expect(
-        matches!((&full, &half), (Ok(full), Ok(half)) if lit(full) == 1000 && lit(half) == 500),
-        format!("trim witnesses: full={:?}, half={:?}", full.as_ref().map(lit), half.as_ref().map(lit))));
+    let lit = |scene: &PreparedScene| {
+        scene
+            .frame(OutputTransform::Srgb)
+            .pixels
+            .chunks_exact(4)
+            .filter(|pixel| pixel[3] != 0)
+            .count()
+    };
+    report.record(
+        PLANE,
+        "Trim Paths 50% draws half the stroke instead of silently drawing it whole",
+        expect(
+            matches!((&full, &half), (Ok(full), Ok(half)) if lit(full) == 1000 && lit(half) == 500),
+            format!(
+                "trim witnesses: full={:?}, half={:?}",
+                full.as_ref().map(lit),
+                half.as_ref().map(lit)
+            ),
+        ),
+    );
 
     for space in [WorkingColorSpace::Srgb, WorkingColorSpace::LinearSrgb] {
         let mut scene = new_scene("opacity-audit", "Opacity audit", space);
@@ -1420,36 +1597,76 @@ fn drive_software_pixel_refusals(report: &mut Report) {
         for output in [OutputTransform::Srgb, OutputTransform::Rec709] {
             // Independent reference formula: 50% black over white in the
             // declared space, followed by the output's transfer function.
-            let linear: f64 = if space == WorkingColorSpace::Srgb { ((0.5_f64 + 0.055) / 1.055).powf(2.4) } else { 0.5 };
+            let linear: f64 = if space == WorkingColorSpace::Srgb {
+                ((0.5_f64 + 0.055) / 1.055).powf(2.4)
+            } else {
+                0.5
+            };
             let encoded = match output {
                 OutputTransform::Srgb => 1.055 * linear.powf(1.0 / 2.4) - 0.055,
-                OutputTransform::Rec709 => if linear < 0.018 { 4.5 * linear } else { 1.099 * linear.powf(0.45) - 0.099 },
+                OutputTransform::Rec709 => {
+                    if linear < 0.018 {
+                        4.5 * linear
+                    } else {
+                        1.099 * linear.powf(0.45) - 0.099
+                    }
+                }
             };
             let expected = (encoded * 255.0).round() as u8;
-            let matches = prepared.as_ref().is_ok_and(|scene| scene.frame(output).pixels.chunks_exact(4)
-                .all(|pixel| pixel[3] == 255 && pixel[..3].iter().all(|channel| channel.abs_diff(expected) <= 1)));
+            let matches = prepared.as_ref().is_ok_and(|scene| {
+                scene.frame(output).pixels.chunks_exact(4).all(|pixel| {
+                    pixel[3] == 255
+                        && pixel[..3]
+                            .iter()
+                            .all(|channel| channel.abs_diff(expected) <= 1)
+                })
+            });
             let name = match (space, output) {
-                (WorkingColorSpace::Srgb, OutputTransform::Srgb) => "Vector opacity draws the independent sRGB/Preview reference",
-                (WorkingColorSpace::Srgb, OutputTransform::Rec709) => "Vector opacity draws the independent sRGB/Program reference",
-                (WorkingColorSpace::LinearSrgb, OutputTransform::Srgb) => "Vector opacity draws the independent linear/Preview reference",
-                (WorkingColorSpace::LinearSrgb, OutputTransform::Rec709) => "Vector opacity draws the independent linear/Program reference",
+                (WorkingColorSpace::Srgb, OutputTransform::Srgb) => {
+                    "Vector opacity draws the independent sRGB/Preview reference"
+                }
+                (WorkingColorSpace::Srgb, OutputTransform::Rec709) => {
+                    "Vector opacity draws the independent sRGB/Program reference"
+                }
+                (WorkingColorSpace::LinearSrgb, OutputTransform::Srgb) => {
+                    "Vector opacity draws the independent linear/Preview reference"
+                }
+                (WorkingColorSpace::LinearSrgb, OutputTransform::Rec709) => {
+                    "Vector opacity draws the independent linear/Program reference"
+                }
             };
-            report.record(PLANE, name,
-                expect(matches, format!("expected {expected}, prepare error {:?}", prepared.as_ref().err())));
+            report.record(
+                PLANE,
+                name,
+                expect(
+                    matches,
+                    format!(
+                        "expected {expected}, prepare error {:?}",
+                        prepared.as_ref().err()
+                    ),
+                ),
+            );
         }
     }
 
     let mut scene = new_scene("mesh-audit", "Mesh audit", WorkingColorSpace::Srgb);
-    scene.objects.push(serde_json::from_value(serde_json::json!({
-        "type": "mesh", "id": "model", "name": "Model", "meshKind": "model", "depth": 20,
-        "modelAssetId": "model"
-    })).expect("the model witness parses"));
+    scene.objects.push(
+        serde_json::from_value(serde_json::json!({
+            "type": "mesh", "id": "model", "name": "Model", "meshKind": "model", "depth": 20,
+            "modelAssetId": "model"
+        }))
+        .expect("the model witness parses"),
+    );
     let hash = ContentHash("unloadable-model".into());
     scene.assets.push(serde_json::from_value(serde_json::json!({
         "assetId": "model", "name": "Model", "kind": "model", "path": "model.gltf", "checksum": hash
     })).expect("the model asset parses"));
-    let model = PreparedScene::prepare(scene, &std::collections::HashSet::from([hash.clone()]),
-        &std::collections::HashMap::from([(hash, b"unloadable glTF".to_vec())]), &MaterialSupport::none());
+    let model = PreparedScene::prepare(
+        scene,
+        &std::collections::HashSet::from([hash.clone()]),
+        &std::collections::HashMap::from([(hash, b"unloadable glTF".to_vec())]),
+        &MaterialSupport::none(),
+    );
     report.record(PLANE, "An unloadable glTF refuses by object name at prepare instead of drawing nothing", expect(
         matches!(&model, Err(Refusal::ObjectKindNotDrawable { object, kind, .. }) if object == "model" && kind == "mesh"),
         format!("model prepare result: {:?}", model.err())));

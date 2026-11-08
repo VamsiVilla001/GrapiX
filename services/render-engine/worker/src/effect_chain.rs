@@ -90,7 +90,11 @@ pub struct PlannedPass {
 
 impl PlannedPass {
     pub fn entry(&self) -> Entry {
-        if matches!(self.role, Role::Box { .. }) { Entry::Line } else { Entry::Pixel }
+        if matches!(self.role, Role::Box { .. }) {
+            Entry::Line
+        } else {
+            Entry::Pixel
+        }
     }
 
     /// A save pass writes the auxiliary target and leaves the current one.
@@ -124,10 +128,15 @@ pub fn box_radii(sigma: f64, n: usize) -> Vec<usize> {
         wl -= 1;
     }
     let wu = wl + 2;
-    let m_ideal = (12.0 * sigma * sigma - (n as i64 * wl * wl) as f64 - 4.0 * n as f64 * wl as f64 - 3.0 * n as f64)
+    let m_ideal = (12.0 * sigma * sigma
+        - (n as i64 * wl * wl) as f64
+        - 4.0 * n as f64 * wl as f64
+        - 3.0 * n as f64)
         / (-4.0 * wl as f64 - 4.0);
     let m = m_ideal.round() as i64;
-    (0..n as i64).map(|i| (((if i < m { wl } else { wu }) - 1) / 2).max(0) as usize).collect()
+    (0..n as i64)
+        .map(|i| (((if i < m { wl } else { wu }) - 1) / 2).max(0) as usize)
+        .collect()
 }
 
 fn gaussian_reach(sigma_x: f64, sigma_y: f64) -> u32 {
@@ -153,7 +162,9 @@ pub fn reach(effect: &Effect) -> u32 {
             let s = (e.radius * 0.5).max(0.5);
             gaussian_reach(s * kx, s * ky) + 1
         }
-        Effect::DropShadow(e) => e.distance.ceil() as u32 + 2 + gaussian_reach(e.softness * 0.5, e.softness * 0.5),
+        Effect::DropShadow(e) => {
+            e.distance.ceil() as u32 + 2 + gaussian_reach(e.softness * 0.5, e.softness * 0.5)
+        }
         _ => 0,
     }
 }
@@ -169,9 +180,18 @@ pub fn layer_extent(doc: &SceneDocument, index: usize) -> Result<(u32, Vec<usize
         .timeline
         .channels
         .iter()
-        .filter(|c| c.object_id == id && c.property.starts_with(gx_contracts::effect::EFFECT_PROPERTY_PREFIX) && !c.keys.is_empty())
+        .filter(|c| {
+            c.object_id == id
+                && c.property
+                    .starts_with(gx_contracts::effect::EFFECT_PROPERTY_PREFIX)
+                && !c.keys.is_empty()
+        })
         .collect();
-    let frames = if channels.is_empty() { 0 } else { doc.timeline.duration_frames };
+    let frames = if channels.is_empty() {
+        0
+    } else {
+        doc.timeline.duration_frames
+    };
     let mut pad = 0u32;
     let mut iterations = vec![1usize; base.len()];
     for frame in 0..=frames {
@@ -201,7 +221,13 @@ impl EffectPlan {
     /// largest iteration count over the animation.
     pub fn layout(effects: &[EffectInstance], iterations: &[usize]) -> Self {
         let mut passes = Vec::new();
-        let mut push = |effect: usize, role: Role| passes.push(PlannedPass { effect, role, packed: PackedEffect::identity() });
+        let mut push = |effect: usize, role: Role| {
+            passes.push(PlannedPass {
+                effect,
+                role,
+                packed: PackedEffect::identity(),
+            })
+        };
         for (i, instance) in effects.iter().enumerate() {
             let blur = |push: &mut dyn FnMut(usize, Role), n: usize| {
                 for horizontal in [true, false] {
@@ -212,7 +238,9 @@ impl EffectPlan {
             };
             match &instance.effect {
                 Effect::GaussianBlur(_) => blur(&mut push, 3),
-                Effect::BoxBlur(_) => blur(&mut push, iterations.get(i).copied().unwrap_or(1).max(1)),
+                Effect::BoxBlur(_) => {
+                    blur(&mut push, iterations.get(i).copied().unwrap_or(1).max(1))
+                }
                 Effect::DirectionalBlur(_) => push(i, Role::Directional),
                 Effect::Glow(_) => {
                     push(i, Role::Save);
@@ -241,7 +269,13 @@ impl EffectPlan {
     }
 
     /// Run the plan on a layer-space buffer (the CPU reference).
-    pub fn run(&self, pixels: &[WorkingRgba], width: usize, height: usize, ctx: &EffectContext) -> Vec<WorkingRgba> {
+    pub fn run(
+        &self,
+        pixels: &[WorkingRgba],
+        width: usize,
+        height: usize,
+        ctx: &EffectContext,
+    ) -> Vec<WorkingRgba> {
         let mut cur = pixels.to_vec();
         let mut aux = vec![WorkingRgba::transparent(); pixels.len()];
         for pass in &self.passes {
@@ -274,13 +308,22 @@ fn pack_pass(out: &mut PackedEffect, role: Role, instance: &EffectInstance, ctx:
         p[0] = radius as f32;
         p[1] = f32::from(u8::from(repeat));
         p[2] = f32::from(u8::from(horizontal));
-        if radius == 0 { IDENTITY } else { BOX }
+        if radius == 0 {
+            IDENTITY
+        } else {
+            BOX
+        }
     };
     out.kind = match (role, &instance.effect) {
         (Role::Pixel, Effect::GradientRamp(e)) => {
             p[..4].copy_from_slice(&colour(e.start_color, ctx.space));
             p[4..8].copy_from_slice(&colour(e.end_color, ctx.space));
-            p[8..12].copy_from_slice(&[e.start.x as f32, e.start.y as f32, e.end.x as f32, e.end.y as f32]);
+            p[8..12].copy_from_slice(&[
+                e.start.x as f32,
+                e.start.y as f32,
+                e.end.x as f32,
+                e.end.y as f32,
+            ]);
             p[12] = f32::from(u8::from(e.shape == RampShape::Radial));
             p[13] = e.blend_with_original as f32;
             RAMP
@@ -298,18 +341,33 @@ fn pack_pass(out: &mut PackedEffect, role: Role, instance: &EffectInstance, ctx:
             LINEAR_WIPE
         }
         (Role::Pixel, Effect::RadialWipe(e)) => {
-            let edge = if e.direction == WipeDirection::Both { e.completion * 180.0 } else { e.completion * 360.0 };
+            let edge = if e.direction == WipeDirection::Both {
+                e.completion * 180.0
+            } else {
+                e.completion * 360.0
+            };
             let dir = match e.direction {
                 WipeDirection::Clockwise => 0.0,
                 WipeDirection::Counterclockwise => 1.0,
                 WipeDirection::Both => 2.0,
             };
-            p[..6].copy_from_slice(&[e.center.x as f32, e.center.y as f32, e.start_angle as f32, edge as f32, e.feather.max(0.01) as f32, dir]);
+            p[..6].copy_from_slice(&[
+                e.center.x as f32,
+                e.center.y as f32,
+                e.start_angle as f32,
+                edge as f32,
+                e.feather.max(0.01) as f32,
+                dir,
+            ]);
             RADIAL_WIPE
         }
         (Role::Pixel, Effect::IrisWipe(e)) => {
             let n = e.points.round().clamp(6.0, 32.0);
-            let inner = if e.use_inner_radius { e.inner_radius } else { e.outer_radius * (std::f64::consts::PI / n).cos() };
+            let inner = if e.use_inner_radius {
+                e.inner_radius
+            } else {
+                e.outer_radius * (std::f64::consts::PI / n).cos()
+            };
             p[..7].copy_from_slice(&[
                 e.center.x as f32,
                 e.center.y as f32,
@@ -338,7 +396,12 @@ fn pack_pass(out: &mut PackedEffect, role: Role, instance: &EffectInstance, ctx:
             let (kx, ky) = blur_dims(e.dimensions);
             let it = e.iterations.round().clamp(1.0, 50.0) as usize;
             let r = (e.radius.round().max(0.0) * if horizontal { kx } else { ky }) as usize;
-            box_pass(p, if index < it { r } else { 0 }, e.repeat_edge_pixels, horizontal)
+            box_pass(
+                p,
+                if index < it { r } else { 0 },
+                e.repeat_edge_pixels,
+                horizontal,
+            )
         }
         (Role::Box { horizontal, index }, Effect::Glow(e)) => {
             let (kx, ky) = blur_dims(e.dimensions);
@@ -354,7 +417,12 @@ fn pack_pass(out: &mut PackedEffect, role: Role, instance: &EffectInstance, ctx:
             } else {
                 let a = e.direction.to_radians();
                 let n = (e.length.ceil() as usize * 2 + 1).clamp(3, 257);
-                p[..4].copy_from_slice(&[a.sin() as f32, -a.cos() as f32, e.length as f32, n as f32]);
+                p[..4].copy_from_slice(&[
+                    a.sin() as f32,
+                    -a.cos() as f32,
+                    e.length as f32,
+                    n as f32,
+                ]);
                 DIRECTIONAL
             }
         }
@@ -370,7 +438,11 @@ fn pack_pass(out: &mut PackedEffect, role: Role, instance: &EffectInstance, ctx:
         (Role::ShadowMake, Effect::DropShadow(e)) => {
             let a = e.direction.to_radians();
             p[..4].copy_from_slice(&colour(e.color, ctx.space));
-            p[4..7].copy_from_slice(&[e.opacity as f32, (a.sin() * e.distance) as f32, (-a.cos() * e.distance) as f32]);
+            p[4..7].copy_from_slice(&[
+                e.opacity as f32,
+                (a.sin() * e.distance) as f32,
+                (-a.cos() * e.distance) as f32,
+            ]);
             SHADOW_MAKE
         }
         (Role::ShadowCombine, Effect::DropShadow(e)) => {
@@ -388,7 +460,9 @@ const PI: f32 = std::f32::consts::PI;
 
 fn fx_atan(z: f32) -> f32 {
     let z2 = z * z;
-    z * (0.999_977_26 + z2 * (-0.332_623_47 + z2 * (0.193_543_46 + z2 * (-0.116_432_87 + z2 * (0.052_653_32 + z2 * -0.011_721_2)))))
+    z * (0.999_977_26
+        + z2 * (-0.332_623_47
+            + z2 * (0.193_543_46 + z2 * (-0.116_432_87 + z2 * (0.052_653_32 + z2 * -0.011_721_2)))))
 }
 
 /// atan2, polynomial, max error about 1e-5 rad.
@@ -397,9 +471,17 @@ pub fn fx_atan2(y: f32, x: f32) -> f32 {
     if ax == 0.0 && ay == 0.0 {
         return 0.0;
     }
-    let a = if ax >= ay { fx_atan(ay / ax) } else { PI * 0.5 - fx_atan(ax / ay) };
+    let a = if ax >= ay {
+        fx_atan(ay / ax)
+    } else {
+        PI * 0.5 - fx_atan(ax / ay)
+    };
     let a = if x < 0.0 { PI - a } else { a };
-    if y < 0.0 { -a } else { a }
+    if y < 0.0 {
+        -a
+    } else {
+        a
+    }
 }
 
 /// sin, reduced to |r| <= pi/2, then a Taylor series to x^11.
@@ -407,8 +489,16 @@ pub fn fx_sin(x: f32) -> f32 {
     let k = (x / PI + 0.5).floor();
     let r = x - k * PI;
     let r2 = r * r;
-    let s = r * (1.0 + r2 * (-1.0 / 6.0 + r2 * (1.0 / 120.0 + r2 * (-1.0 / 5040.0 + r2 * (1.0 / 362_880.0 + r2 * (-1.0 / 39_916_800.0))))));
-    if (k as i32) % 2 != 0 { -s } else { s }
+    let s = r
+        * (1.0
+            + r2 * (-1.0 / 6.0
+                + r2 * (1.0 / 120.0
+                    + r2 * (-1.0 / 5040.0 + r2 * (1.0 / 362_880.0 + r2 * (-1.0 / 39_916_800.0))))));
+    if (k as i32) % 2 != 0 {
+        -s
+    } else {
+        s
+    }
 }
 
 pub fn fx_cos(x: f32) -> f32 {
@@ -425,12 +515,23 @@ fn mix(x: f32, y: f32, t: f32) -> f32 {
 }
 
 fn mix4(a: WorkingRgba, b: WorkingRgba, t: f32) -> WorkingRgba {
-    WorkingRgba { r: mix(a.r, b.r, t), g: mix(a.g, b.g, t), b: mix(a.b, b.b, t), a: mix(a.a, b.a, t) }
+    WorkingRgba {
+        r: mix(a.r, b.r, t),
+        g: mix(a.g, b.g, t),
+        b: mix(a.b, b.b, t),
+        a: mix(a.a, b.a, t),
+    }
 }
 
 /// The compositor's sampler (`composite.wgsl`): pixel centres at +0.5,
 /// transparent outside, never clamped.
-pub fn sample_bilinear(buf: &[WorkingRgba], width: usize, height: usize, x: f32, y: f32) -> WorkingRgba {
+pub fn sample_bilinear(
+    buf: &[WorkingRgba],
+    width: usize,
+    height: usize,
+    x: f32,
+    y: f32,
+) -> WorkingRgba {
     let get = |i: i64, j: i64| {
         if i < 0 || j < 0 || i >= width as i64 || j >= height as i64 {
             WorkingRgba::transparent()
@@ -448,11 +549,21 @@ pub fn sample_bilinear(buf: &[WorkingRgba], width: usize, height: usize, x: f32,
 }
 
 fn scaled(px: WorkingRgba, k: f32) -> WorkingRgba {
-    WorkingRgba { r: px.r * k, g: px.g * k, b: px.b * k, a: px.a * k }
+    WorkingRgba {
+        r: px.r * k,
+        g: px.g * k,
+        b: px.b * k,
+        a: px.a * k,
+    }
 }
 
 fn finite(px: WorkingRgba) -> WorkingRgba {
-    WorkingRgba { r: bound(px.r), g: bound(px.g), b: bound(px.b), a: bound(px.a).clamp(0.0, 1.0) }
+    WorkingRgba {
+        r: bound(px.r),
+        g: bound(px.g),
+        b: bound(px.b),
+        a: bound(px.a).clamp(0.0, 1.0),
+    }
 }
 
 /// One per-pixel pass at a layer-space position.
@@ -476,7 +587,12 @@ pub fn point(e: &PackedEffect, px: WorkingRgba, l: [f32; 2]) -> WorkingRgba {
             let ramp = [mix(p[0], p[4], t), mix(p[1], p[5], t), mix(p[2], p[6], t)];
             let k = (1.0 - p[13]) * mix(p[3], p[7], t);
             let o = [0, 1, 2].map(|i| c[i] + (ramp[i] - c[i]) * k);
-            finite(WorkingRgba { r: o[0] * a, g: o[1] * a, b: o[2] * a, a })
+            finite(WorkingRgba {
+                r: o[0] * a,
+                g: o[1] * a,
+                b: o[2] * a,
+                a,
+            })
         }
         LINEAR_WIPE => {
             let d = l[0] * p[0] + l[1] * p[1];
@@ -487,7 +603,13 @@ pub fn point(e: &PackedEffect, px: WorkingRgba, l: [f32; 2]) -> WorkingRgba {
             let r = (vx * vx + vy * vy).sqrt();
             let deg = fx_atan2(vx, -vy) * (180.0 / PI) - p[2];
             let a = deg - (deg / 360.0).floor() * 360.0;
-            let a = if p[5] > 1.5 { a.min(360.0 - a) } else if p[5] > 0.5 { 360.0 - a } else { a };
+            let a = if p[5] > 1.5 {
+                a.min(360.0 - a)
+            } else if p[5] > 0.5 {
+                360.0 - a
+            } else {
+                a
+            };
             let arc = (a - p[3]) * (PI / 180.0) * r;
             finite(scaled(px, (arc / p[4] + 0.5).clamp(0.0, 1.0)))
         }
@@ -508,7 +630,11 @@ pub fn point(e: &PackedEffect, px: WorkingRgba, l: [f32; 2]) -> WorkingRgba {
             let (ux, uy) = (fx_sin(th), -fx_cos(th));
             let (ex, ey) = (p1x - p0x, p1y - p0y);
             let denom = ux * ey - uy * ex;
-            let radius = if denom.abs() < 1e-12 { r0 } else { (p0x * p1y - p0y * p1x) / denom };
+            let radius = if denom.abs() < 1e-12 {
+                r0
+            } else {
+                (p0x * p1y - p0y * p1x) / denom
+            };
             finite(scaled(px, ((d - radius) / p[6] + 0.5).clamp(0.0, 1.0)))
         }
         GLOW_BRIGHT => {
@@ -525,7 +651,14 @@ pub fn point(e: &PackedEffect, px: WorkingRgba, l: [f32; 2]) -> WorkingRgba {
 
 /// One pass over a layer-space buffer; `aux` is the saved input for the
 /// combine passes.
-fn run_pass(e: &PackedEffect, cur: &[WorkingRgba], aux: &[WorkingRgba], w: usize, h: usize, ctx: &EffectContext) -> Vec<WorkingRgba> {
+fn run_pass(
+    e: &PackedEffect,
+    cur: &[WorkingRgba],
+    aux: &[WorkingRgba],
+    w: usize,
+    h: usize,
+    ctx: &EffectContext,
+) -> Vec<WorkingRgba> {
     let p = &e.params;
     let origin = [p[ORIGIN_SLOT], p[ORIGIN_SLOT + 1]];
     let _ = ctx;
@@ -534,7 +667,13 @@ fn run_pass(e: &PackedEffect, cur: &[WorkingRgba], aux: &[WorkingRgba], w: usize
         BOX => {
             let (r, repeat, horizontal) = (p[0] as i64, p[1] > 0.5, p[2] > 0.5);
             let (lines, n) = if horizontal { (h, w) } else { (w, h) };
-            let at = |line: usize, i: usize| if horizontal { line * w + i } else { i * w + line };
+            let at = |line: usize, i: usize| {
+                if horizontal {
+                    line * w + i
+                } else {
+                    i * w + line
+                }
+            };
             let norm = 1.0 / (2 * r + 1) as f32;
             let mut out = vec![WorkingRgba::transparent(); cur.len()];
             for line in 0..lines {
@@ -553,10 +692,20 @@ fn run_pass(e: &PackedEffect, cur: &[WorkingRgba], aux: &[WorkingRgba], w: usize
                     acc = [acc[0] + q.r, acc[1] + q.g, acc[2] + q.b, acc[3] + q.a];
                 }
                 for i in 0..n {
-                    out[at(line, i)] = WorkingRgba { r: acc[0] * norm, g: acc[1] * norm, b: acc[2] * norm, a: acc[3] * norm };
+                    out[at(line, i)] = WorkingRgba {
+                        r: acc[0] * norm,
+                        g: acc[1] * norm,
+                        b: acc[2] * norm,
+                        a: acc[3] * norm,
+                    };
                     let add = get(i as i64 + r + 1);
                     let sub = get(i as i64 - r);
-                    acc = [acc[0] + (add.r - sub.r), acc[1] + (add.g - sub.g), acc[2] + (add.b - sub.b), acc[3] + (add.a - sub.a)];
+                    acc = [
+                        acc[0] + (add.r - sub.r),
+                        acc[1] + (add.g - sub.g),
+                        acc[2] + (add.b - sub.b),
+                        acc[3] + (add.a - sub.a),
+                    ];
                 }
             }
             out
@@ -569,11 +718,22 @@ fn run_pass(e: &PackedEffect, cur: &[WorkingRgba], aux: &[WorkingRgba], w: usize
                     let mut acc = [0f32; 4];
                     for i in 0..n {
                         let t = (i as f32 / (n - 1) as f32 - 0.5) * len;
-                        let s = sample_bilinear(cur, w, h, x as f32 + 0.5 + dx * t, y as f32 + 0.5 + dy * t);
+                        let s = sample_bilinear(
+                            cur,
+                            w,
+                            h,
+                            x as f32 + 0.5 + dx * t,
+                            y as f32 + 0.5 + dy * t,
+                        );
                         acc = [acc[0] + s.r, acc[1] + s.g, acc[2] + s.b, acc[3] + s.a];
                     }
                     let k = 1.0 / n as f32;
-                    out[y * w + x] = finite(WorkingRgba { r: acc[0] * k, g: acc[1] * k, b: acc[2] * k, a: acc[3] * k });
+                    out[y * w + x] = finite(WorkingRgba {
+                        r: acc[0] * k,
+                        g: acc[1] * k,
+                        b: acc[2] * k,
+                        a: acc[3] * k,
+                    });
                 }
             }
             out
@@ -583,15 +743,28 @@ fn run_pass(e: &PackedEffect, cur: &[WorkingRgba], aux: &[WorkingRgba], w: usize
             .zip(aux)
             .map(|(g, o)| {
                 let g = scaled(*g, p[0]);
-                finite(WorkingRgba { r: o.r + g.r, g: o.g + g.g, b: o.b + g.b, a: (o.a + g.a * (1.0 - o.a)).min(1.0) })
+                finite(WorkingRgba {
+                    r: o.r + g.r,
+                    g: o.g + g.g,
+                    b: o.b + g.b,
+                    a: (o.a + g.a * (1.0 - o.a)).min(1.0),
+                })
             })
             .collect(),
         SHADOW_MAKE => {
             let mut out = vec![WorkingRgba::transparent(); cur.len()];
             for y in 0..h {
                 for x in 0..w {
-                    let a = sample_bilinear(cur, w, h, x as f32 + 0.5 - p[5], y as f32 + 0.5 - p[6]).a * p[4] * p[3];
-                    out[y * w + x] = finite(WorkingRgba { r: p[0] * a, g: p[1] * a, b: p[2] * a, a });
+                    let a =
+                        sample_bilinear(cur, w, h, x as f32 + 0.5 - p[5], y as f32 + 0.5 - p[6]).a
+                            * p[4]
+                            * p[3];
+                    out[y * w + x] = finite(WorkingRgba {
+                        r: p[0] * a,
+                        g: p[1] * a,
+                        b: p[2] * a,
+                        a,
+                    });
                 }
             }
             out
@@ -604,14 +777,28 @@ fn run_pass(e: &PackedEffect, cur: &[WorkingRgba], aux: &[WorkingRgba], w: usize
                     *s
                 } else {
                     let k = 1.0 - o.a;
-                    finite(WorkingRgba { r: o.r + s.r * k, g: o.g + s.g * k, b: o.b + s.b * k, a: o.a + s.a * k })
+                    finite(WorkingRgba {
+                        r: o.r + s.r * k,
+                        g: o.g + s.g * k,
+                        b: o.b + s.b * k,
+                        a: o.a + s.a * k,
+                    })
                 }
             })
             .collect(),
         _ => cur
             .iter()
             .enumerate()
-            .map(|(i, px)| point(e, *px, [origin[0] + (i % w) as f32 + 0.5, origin[1] + (i / w) as f32 + 0.5]))
+            .map(|(i, px)| {
+                point(
+                    e,
+                    *px,
+                    [
+                        origin[0] + (i % w) as f32 + 0.5,
+                        origin[1] + (i / w) as f32 + 0.5,
+                    ],
+                )
+            })
             .collect(),
     }
 }
@@ -627,7 +814,11 @@ mod tests {
     const OFF: usize = 7;
 
     fn ctx() -> EffectContext {
-        EffectContext { origin: [-(OFF as f64), -(OFF as f64)], size: [10.0, 10.0], space: WorkingColorSpace::LinearSrgb }
+        EffectContext {
+            origin: [-(OFF as f64), -(OFF as f64)],
+            size: [10.0, 10.0],
+            space: WorkingColorSpace::LinearSrgb,
+        }
     }
 
     /// The buffer index of layer-space pixel (x, y) of the box.
@@ -659,18 +850,36 @@ mod tests {
     #[test]
     fn blurs_preserve_coverage_and_spread_it() {
         for effect in [
-            Effect::GaussianBlur(GaussianBlur { blurriness: 4.0, ..Default::default() }),
-            Effect::BoxBlur(BoxBlur { radius: 1.0, iterations: 2.0, ..Default::default() }),
+            Effect::GaussianBlur(GaussianBlur {
+                blurriness: 4.0,
+                ..Default::default()
+            }),
+            Effect::BoxBlur(BoxBlur {
+                radius: 1.0,
+                iterations: 2.0,
+                ..Default::default()
+            }),
         ] {
             let out = run(effect);
-            assert!((total(&out) - total(&square())).abs() < 1e-3, "a transparent-edged blur keeps total coverage");
-            assert!(out[(OFF - 1) * N + OFF + 5].a > 0.0, "and spreads past the edge");
+            assert!(
+                (total(&out) - total(&square())).abs() < 1e-3,
+                "a transparent-edged blur keeps total coverage"
+            );
+            assert!(
+                out[(OFF - 1) * N + OFF + 5].a > 0.0,
+                "and spreads past the edge"
+            );
         }
     }
 
     #[test]
     fn a_drop_shadow_appears_offset_and_the_layer_stays_on_top() {
-        let out = run(Effect::DropShadow(DropShadow { distance: 2.0, direction: 180.0, opacity: 1.0, ..Default::default() }));
+        let out = run(Effect::DropShadow(DropShadow {
+            distance: 2.0,
+            direction: 180.0,
+            opacity: 1.0,
+            ..Default::default()
+        }));
         // Direction 180 is down: just below the square the shadow shows.
         let below = out[(OFF + 11) * N + OFF + 5];
         assert!(below.a > 0.9 && below.r < 0.05, "{below:?}");
@@ -679,15 +888,30 @@ mod tests {
 
     #[test]
     fn wipes_hide_by_completion_and_never_add_pixels() {
-        let half = run(Effect::LinearWipe(LinearWipe { completion: 0.5, angle: 90.0, feather: 0.0 }));
+        let half = run(Effect::LinearWipe(LinearWipe {
+            completion: 0.5,
+            angle: 90.0,
+            feather: 0.0,
+        }));
         // Angle 90 wipes left to right: the left half of the box is hidden.
         assert!(half[at(1, 5)].a < 0.01 && half[at(8, 5)].a > 0.99);
-        let none = run(Effect::LinearWipe(LinearWipe { completion: 0.0, ..Default::default() }));
+        let none = run(Effect::LinearWipe(LinearWipe {
+            completion: 0.0,
+            ..Default::default()
+        }));
         assert_eq!(total(&none), total(&square()));
-        let iris = run(Effect::IrisWipe(IrisWipe { center: EffectPoint { x: 5.0, y: 5.0 }, outer_radius: 3.0, ..Default::default() }));
+        let iris = run(Effect::IrisWipe(IrisWipe {
+            center: EffectPoint { x: 5.0, y: 5.0 },
+            outer_radius: 3.0,
+            ..Default::default()
+        }));
         assert!(iris[at(5, 5)].a < 0.01, "inside the iris is wiped");
         assert!(iris[at(0, 0)].a > 0.99, "outside it the layer shows");
-        let all = run(Effect::RadialWipe(RadialWipe { completion: 1.0, center: EffectPoint { x: 5.0, y: 5.0 }, ..Default::default() }));
+        let all = run(Effect::RadialWipe(RadialWipe {
+            completion: 1.0,
+            center: EffectPoint { x: 5.0, y: 5.0 },
+            ..Default::default()
+        }));
         assert!(total(&all) < total(&square()) * 0.1);
     }
 
@@ -704,9 +928,17 @@ mod tests {
 
     #[test]
     fn a_glow_brightens_and_spreads() {
-        let out = run(Effect::Glow(Glow { threshold: 0.2, radius: 4.0, intensity: 1.0, ..Default::default() }));
+        let out = run(Effect::Glow(Glow {
+            threshold: 0.2,
+            radius: 4.0,
+            intensity: 1.0,
+            ..Default::default()
+        }));
         assert!(out[at(5, 5)].r > 0.8, "the layer brightens");
-        assert!(out[(OFF - 1) * N + OFF + 5].a > 0.0, "and glows past its edge");
+        assert!(
+            out[(OFF - 1) * N + OFF + 5].a > 0.0,
+            "and glows past its edge"
+        );
     }
 
     #[test]
@@ -716,19 +948,37 @@ mod tests {
             base: gx_contracts::scene::ObjectBase::new("r", "r"),
             radius: 0.0,
         });
-        rect.base_mut().effects = Some(vec![EffectInstance::new("b", Effect::BoxBlur(BoxBlur { radius: 2.0, ..Default::default() }))]);
+        rect.base_mut().effects = Some(vec![EffectInstance::new(
+            "b",
+            Effect::BoxBlur(BoxBlur {
+                radius: 2.0,
+                ..Default::default()
+            }),
+        )]);
         doc.objects.push(rect);
         doc.timeline.duration_frames = 20;
         let (pad, it) = layer_extent(&doc, 0).unwrap();
         assert_eq!((pad, it.clone()), (3, vec![1]));
-        doc.timeline.channels.push(gx_contracts::animation::KeyframeChannel {
-            object_id: "r".into(),
-            property: "effects.b.iterations".into(),
-            keys: vec![
-                gx_contracts::animation::SceneKeyframe { frame: 0, value: 1.0, easing: Default::default(), bezier: None },
-                gx_contracts::animation::SceneKeyframe { frame: 20, value: 4.0, easing: Default::default(), bezier: None },
-            ],
-        });
+        doc.timeline
+            .channels
+            .push(gx_contracts::animation::KeyframeChannel {
+                object_id: "r".into(),
+                property: "effects.b.iterations".into(),
+                keys: vec![
+                    gx_contracts::animation::SceneKeyframe {
+                        frame: 0,
+                        value: 1.0,
+                        easing: Default::default(),
+                        bezier: None,
+                    },
+                    gx_contracts::animation::SceneKeyframe {
+                        frame: 20,
+                        value: 4.0,
+                        easing: Default::default(),
+                        bezier: None,
+                    },
+                ],
+            });
         let (pad, it) = layer_extent(&doc, 0).unwrap();
         assert_eq!((pad, it), (9, vec![4]));
     }

@@ -47,8 +47,15 @@ impl OutputTables {
         let mut words = [0u32; 768];
         let program = |x: f32| straight_code(x, OutputTransform::Rec709, space);
         let preview = |x: f32| straight_code(x, OutputTransform::Srgb, space);
-        let alpha = |x: f32| WorkingRgba { r: 0.0, g: 0.0, b: 0.0, a: x }
-            .encode(OutputTransform::Srgb, space)[3];
+        let alpha = |x: f32| {
+            WorkingRgba {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: x,
+            }
+            .encode(OutputTransform::Srgb, space)[3]
+        };
         fill(&mut words[0..256], program);
         fill(&mut words[256..512], preview);
         fill(&mut words[512..768], alpha);
@@ -62,7 +69,13 @@ impl OutputTables {
 
 /// The code the CPU authority gives one straight (unpremultiplied) channel.
 fn straight_code(x: f32, output: OutputTransform, space: WorkingColorSpace) -> u8 {
-    WorkingRgba { r: x, g: x, b: x, a: 1.0 }.encode(output, space)[0]
+    WorkingRgba {
+        r: x,
+        g: x,
+        b: x,
+        a: 1.0,
+    }
+    .encode(output, space)[0]
 }
 
 fn fill(table: &mut [u32], code: impl Fn(f32) -> u8) {
@@ -70,7 +83,10 @@ fn fill(table: &mut [u32], code: impl Fn(f32) -> u8) {
     for (k, entry) in table.iter_mut().enumerate().skip(1) {
         // Codes are monotone in the bit pattern of a non-negative f32.
         let (mut lo, mut hi) = (0u32, 0x7f80_0000u32);
-        assert!(code(f32::from_bits(hi - 1)) as usize >= k, "code {k} is unreachable");
+        assert!(
+            code(f32::from_bits(hi - 1)) as usize >= k,
+            "code {k} is unreachable"
+        );
         while lo < hi {
             let mid = lo + (hi - lo) / 2;
             if code(f32::from_bits(mid)) as usize >= k {
@@ -130,7 +146,10 @@ pub fn channel_code(table: &[u32], r: f32, a: f32) -> u8 {
         return 0;
     }
     let x = r / a;
-    let mut code = table[1..].iter().take_while(|&&t| x >= f32::from_bits(t)).count();
+    let mut code = table[1..]
+        .iter()
+        .take_while(|&&t| x >= f32::from_bits(t))
+        .count();
     while code < 255 && quotient_reaches(r.to_bits(), a.to_bits(), table[code + 1]) {
         code += 1;
     }
@@ -308,11 +327,26 @@ impl OutputRing {
                     label: Some("gx-output"),
                     layout: &layout,
                     entries: &[
-                        wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
-                        wgpu::BindGroupEntry { binding: 1, resource: tables.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 2, resource: program_out.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 3, resource: preview_out.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 4, resource: uniform.as_entire_binding() },
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: tables.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: program_out.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: preview_out.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: uniform.as_entire_binding(),
+                        },
                     ],
                 });
                 TileEncode {
@@ -379,9 +413,11 @@ impl OutputRing {
             self.ring_full += 1;
             return Submitted::RingFull;
         }
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("gx-output-frame"),
-        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("gx-output-frame"),
+            });
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("gx-output-encode"),
@@ -402,9 +438,14 @@ impl OutputRing {
         slot.tag = tag;
         slot.submitted_at = Instant::now();
         let state = Arc::clone(&slot.state);
-        slot.staging.slice(..).map_async(wgpu::MapMode::Read, move |result| {
-            state.store(if result.is_ok() { READY } else { FAILED }, Ordering::Release);
-        });
+        slot.staging
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                state.store(
+                    if result.is_ok() { READY } else { FAILED },
+                    Ordering::Release,
+                );
+            });
         self.pending.push_back(index);
         self.next = (index + 1) % self.slots.len();
         Submitted::Queued
@@ -432,7 +473,9 @@ impl OutputRing {
                 FAILED => {
                     self.pending.pop_front();
                     self.release(index);
-                    return Err(CompositorError::Readback("an output readback mapping failed".into()));
+                    return Err(CompositorError::Readback(
+                        "an output readback mapping failed".into(),
+                    ));
                 }
                 _ => break,
             }
@@ -461,13 +504,17 @@ impl OutputRing {
                     FAILED => {
                         self.pending.pop_front();
                         self.release(index);
-                        return Err(CompositorError::Readback("an output readback mapping failed".into()));
+                        return Err(CompositorError::Readback(
+                            "an output readback mapping failed".into(),
+                        ));
                     }
                     _ => break,
                 }
             }
             if self.pending.is_empty() {
-                return Err(CompositorError::Readback(format!("frame {tag} was never submitted")));
+                return Err(CompositorError::Readback(format!(
+                    "frame {tag} was never submitted"
+                )));
             }
             if started.elapsed() > deadline {
                 return Err(CompositorError::Readback(format!(
@@ -488,7 +535,9 @@ impl OutputRing {
             });
             self.collect()?;
             if started.elapsed() > deadline {
-                return Err(CompositorError::Readback(format!("no readback slot idle within {deadline:?}")));
+                return Err(CompositorError::Readback(format!(
+                    "no readback slot idle within {deadline:?}"
+                )));
             }
         }
         Ok(())
@@ -519,8 +568,16 @@ impl OutputRing {
                 debug_assert_eq!(program.len(), split);
                 Delivered {
                     tag: slot.tag,
-                    program: Frame { width: self.width, height: self.height, pixels: program },
-                    preview: Frame { width: self.width, height: self.height, pixels: preview },
+                    program: Frame {
+                        width: self.width,
+                        height: self.height,
+                        pixels: program,
+                    },
+                    preview: Frame {
+                        width: self.width,
+                        height: self.height,
+                        pixels: preview,
+                    },
                     latency: slot.submitted_at.elapsed(),
                 }
             });
@@ -572,7 +629,10 @@ mod tests {
     struct Lcg(u64);
     impl Lcg {
         fn next(&mut self) -> u32 {
-            self.0 = self.0.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
             (self.0 >> 32) as u32
         }
         fn unit(&mut self) -> f32 {
@@ -616,10 +676,21 @@ mod tests {
                     }
                 }
             }
-            cases.extend([(0.0, 0.0), (0.2, 0.0), (-0.0, 0.5), (-0.1, 0.5), (0.5, 0.25), (1.0, 1.0), (f32::NAN, 1.0)]);
+            cases.extend([
+                (0.0, 0.0),
+                (0.2, 0.0),
+                (-0.0, 0.5),
+                (-0.1, 0.5),
+                (0.5, 0.25),
+                (1.0, 1.0),
+                (f32::NAN, 1.0),
+            ]);
             for (r, a) in cases {
                 let pixel = WorkingRgba { r, g: r, b: r, a };
-                for (base, output) in [(0usize, OutputTransform::Rec709), (256, OutputTransform::Srgb)] {
+                for (base, output) in [
+                    (0usize, OutputTransform::Rec709),
+                    (256, OutputTransform::Srgb),
+                ] {
                     let expected = pixel.encode(output, space)[0];
                     let got = channel_code(&tables.words[base..base + 256], r, a);
                     assert_eq!(got, expected, "{space:?} {output:?} r={r:e} a={a:e}");

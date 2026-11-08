@@ -180,8 +180,8 @@ mod tests {
     fn a_stale_revision_refuses_with_the_current_one() {
         // 0.8: the loser learns the state it must re-read rather than
         // overwriting blind.
-        let conflict = guarded(Revision(5), Revision(2))
-            .expect_err("a stale revision cannot write");
+        let conflict =
+            guarded(Revision(5), Revision(2)).expect_err("a stale revision cannot write");
         assert!(matches!(
             conflict,
             Refusal::RevisionMismatch { expected, actual } if expected == Revision(2) && actual == Revision(5)
@@ -289,9 +289,6 @@ mod tests {
             });
         }
         batch.commit().expect("all steps apply");
-        assert_eq!(
-            *order.lock(),
-            vec!["first", "second", "third"]
-        );
+        assert_eq!(*order.lock(), vec!["first", "second", "third"]);
     }
 }

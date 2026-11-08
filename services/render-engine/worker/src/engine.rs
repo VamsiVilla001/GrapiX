@@ -24,15 +24,17 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use gx_asset_plane::{AssetPublishPeer, PublishRefusal, PublishReply};
-use gx_contracts::material::MaterialSupport;
-use gx_contracts::scene::SceneDocument;
 #[cfg(test)]
 use gx_contracts::color::OutputTransform;
+use gx_contracts::material::MaterialSupport;
+use gx_contracts::scene::SceneDocument;
 use gx_contracts::{
     ContentHash, DeviceTier, Epoch, Locality, MediaCodec, RationalRate, Refusal, Revision, TakeId,
 };
 use gx_control_plane::capability::{check_protocol, live_allowed, EngineCapability};
-use gx_control_plane::intent::{check_reference, HeldRevision, Lead, PhaseCommitted, TakeAt, TakeCommitted};
+use gx_control_plane::intent::{
+    check_reference, HeldRevision, Lead, PhaseCommitted, TakeAt, TakeCommitted,
+};
 use gx_control_plane::message::{ClientRequest, EngineEvent, EngineReply, OutputConfig};
 use gx_control_plane::peer::{EnginePeer, Handled};
 use gx_control_plane::render::check_render;
@@ -41,18 +43,16 @@ use gx_control_plane::status::{Degradation, EngineStatus, ProgramState};
 use crate::clock::ProgramClock;
 use crate::compositor::output::{Delivered, Submitted};
 use crate::compositor::scene::{GpuScene, SourceTrace};
-use crate::render_work::{ProgramFrameTrace, RenderWork};
 use crate::emission::{FrameEmitter, ProgramEmission};
 use crate::gpu::{self, Gpu};
 use crate::headless::{answer_render, RenderedImages};
 use crate::mesh::AssetBytes;
 use crate::metrics::{EnginePerformance, FrameMetrics, FrameSample};
 use crate::output_adapter::{OutputAdapterError, OutputAdapterRegistry};
-use crate::recovery::{PreparedSceneRecord, RecoveryError, RecoveryJournal, RecoveryState};
 use crate::prepared::PreparedScene;
-use crate::rasterizer::{
-    key_for_take, Frame, SoftwareRasterizer, FRAME_HEIGHT, FRAME_WIDTH,
-};
+use crate::rasterizer::{key_for_take, Frame, SoftwareRasterizer, FRAME_HEIGHT, FRAME_WIDTH};
+use crate::recovery::{PreparedSceneRecord, RecoveryError, RecoveryJournal, RecoveryState};
+use crate::render_work::{ProgramFrameTrace, RenderWork};
 
 /// The render engine. Owns the GPU, the clock and Program.
 /// The newest GPU delivery: the pinned revision it belongs to, and its Program
@@ -261,12 +261,19 @@ impl Engine {
                     record.take_id, record.revision.0
                 ),
             })?;
-            if let Some(cause) = gx_contracts::drawability::gpu_compositor_animation_refusal(scene.resolved_document()) {
-                return Err(RecoveryError::InvalidState { detail: cause.to_string() });
+            if let Some(cause) = gx_contracts::drawability::gpu_compositor_animation_refusal(
+                scene.resolved_document(),
+            ) {
+                return Err(RecoveryError::InvalidState {
+                    detail: cause.to_string(),
+                });
             }
             if self.gpu.has_hardware() {
-                let gpu_scene = GpuScene::prepare(&self.gpu, &scene)
-                    .map_err(|cause| RecoveryError::InvalidState { detail: cause.to_string() })?;
+                let gpu_scene = GpuScene::prepare(&self.gpu, &scene).map_err(|cause| {
+                    RecoveryError::InvalidState {
+                        detail: cause.to_string(),
+                    }
+                })?;
                 gpu_prepared.insert((record.take_id.clone(), record.revision), gpu_scene);
             }
             prepared.insert((record.take_id, record.revision), Arc::new(scene));
@@ -297,7 +304,10 @@ impl Engine {
         {
             // Authored scenes own prepared GPU resources already. Never touch
             // the CPU reference frame at Take, recovery re-arm or Phase.
-            self.gpu_clear_frame = self.gpu_prepared.get(&(program.take_id.clone(), program.revision)).map(GpuScene::clear_frame);
+            self.gpu_clear_frame = self
+                .gpu_prepared
+                .get(&(program.take_id.clone(), program.revision))
+                .map(GpuScene::clear_frame);
         } else {
             self.gpu_clear_frame = None;
             self.rasterizer.take(take_key);
@@ -310,7 +320,9 @@ impl Engine {
     /// to wall time. This keeps reconnects and frame-pump catch-up deterministic.
     fn program_scene_frame(&self, engine_frame: u64) -> Option<u64> {
         let program = self.program.as_ref()?;
-        let prepared = self.prepared.get(&(program.take_id.clone(), program.revision))?;
+        let prepared = self
+            .prepared
+            .get(&(program.take_id.clone(), program.revision))?;
         let elapsed = engine_frame.saturating_sub(program.committed_frame);
         let current_phase = program
             .phase
@@ -318,8 +330,7 @@ impl Engine {
             .and_then(|address| prepared.phase(address));
         let mut scene_frame = match current_phase {
             Some(phase)
-                if program.playing
-                    && phase.kind == gx_contracts::phases::PhaseKind::Hold =>
+                if program.playing && phase.kind == gx_contracts::phases::PhaseKind::Hold =>
             {
                 let length = phase.end_frame - phase.start_frame;
                 phase.start_frame + (elapsed % length)
@@ -328,8 +339,7 @@ impl Engine {
             _ => program.scene_frame,
         };
         if let Some(stop) = program.stop_frame {
-            if current_phase.map(|phase| phase.kind)
-                != Some(gx_contracts::phases::PhaseKind::Hold)
+            if current_phase.map(|phase| phase.kind) != Some(gx_contracts::phases::PhaseKind::Hold)
             {
                 scene_frame = scene_frame.min(stop);
             }
@@ -337,7 +347,6 @@ impl Engine {
         scene_frame = scene_frame.min(prepared.document().timeline.duration_frames);
         Some(scene_frame)
     }
-
 
     /// Publish a scene identifier so a take of it can succeed, with no
     /// content.
@@ -349,8 +358,19 @@ impl Engine {
     /// [`Engine::publish`], and an identifier published this way has no
     /// `PreparedScene` behind it. With no document to hash, the caller
     /// declares the content hash a take must pin.
-    pub fn publish_identifier(&mut self, take_id: TakeId, revision: Revision, content_hash: ContentHash) {
-        self.published.insert(take_id, HeldRevision { revision, content_hash });
+    pub fn publish_identifier(
+        &mut self,
+        take_id: TakeId,
+        revision: Revision,
+        content_hash: ContentHash,
+    ) {
+        self.published.insert(
+            take_id,
+            HeldRevision {
+                revision,
+                content_hash,
+            },
+        );
     }
 
     /// Prepare and publish one complete authored scene as a new pinned revision.
@@ -382,17 +402,23 @@ impl Engine {
                 return PublishReply::Refused(PublishRefusal::PreparationRefused { cause });
             }
         };
-        if let Some(cause) = gx_contracts::drawability::gpu_compositor_animation_refusal(prepared.resolved_document()) {
+        if let Some(cause) = gx_contracts::drawability::gpu_compositor_animation_refusal(
+            prepared.resolved_document(),
+        ) {
             return PublishReply::Refused(PublishRefusal::PreparationRefused { cause });
         }
         if self.gpu.has_hardware() {
             let gpu_scene = match GpuScene::prepare(&self.gpu, &prepared) {
                 Ok(scene) => scene,
-                Err(cause) => return PublishReply::Refused(PublishRefusal::PreparationRefused { cause }),
+                Err(cause) => {
+                    return PublishReply::Refused(PublishRefusal::PreparationRefused { cause })
+                }
             };
-            self.gpu_prepared.insert((take_id.clone(), revision), gpu_scene);
+            self.gpu_prepared
+                .insert((take_id.clone(), revision), gpu_scene);
         }
-        self.prepared.insert((take_id.clone(), revision), Arc::new(prepared));
+        self.prepared
+            .insert((take_id.clone(), revision), Arc::new(prepared));
         self.published.insert(
             take_id.clone(),
             HeldRevision {
@@ -417,15 +443,23 @@ impl Engine {
 
     /// The prepared scene a published revision pins, if this engine holds it.
     pub fn prepared_scene(&self, take_id: &TakeId, revision: Revision) -> Option<&PreparedScene> {
-        self.prepared.get(&(take_id.clone(), revision)).map(Arc::as_ref)
+        self.prepared
+            .get(&(take_id.clone(), revision))
+            .map(Arc::as_ref)
     }
 
-    pub fn program_frame_trace(&self) -> Option<&ProgramFrameTrace> { self.last_render_trace.as_ref() }
+    pub fn program_frame_trace(&self) -> Option<&ProgramFrameTrace> {
+        self.last_render_trace.as_ref()
+    }
 
-    pub fn gpu_description(&self) -> Option<String> { self.gpu.diagnostic_description() }
+    pub fn gpu_description(&self) -> Option<String> {
+        self.gpu.diagnostic_description()
+    }
 
     pub fn gpu_source_trace(&self, take_id: &TakeId, revision: Revision) -> Option<&[SourceTrace]> {
-        self.gpu_prepared.get(&(take_id.clone(), revision)).map(GpuScene::sources)
+        self.gpu_prepared
+            .get(&(take_id.clone(), revision))
+            .map(GpuScene::sources)
     }
 
     fn ensure_program_backend(&self, take_id: &TakeId, revision: Revision) -> Result<(), Refusal> {
@@ -434,9 +468,15 @@ impl Engine {
             // diagnostics, not a published scene or a production fallback.
             return Ok(());
         }
-        if !self.gpu.has_hardware() { return Err(Refusal::TierTooLow { actual: self.gpu.tier() }); }
+        if !self.gpu.has_hardware() {
+            return Err(Refusal::TierTooLow {
+                actual: self.gpu.tier(),
+            });
+        }
         if !self.gpu_prepared.contains_key(&(take_id.clone(), revision)) {
-            return Err(Refusal::TransportFailed { detail: "published GPU revision has no prepared compositor".into() });
+            return Err(Refusal::TransportFailed {
+                detail: "published GPU revision has no prepared compositor".into(),
+            });
         }
         Ok(())
     }
@@ -493,89 +533,118 @@ impl Engine {
         let started = Instant::now();
         let work_before = RenderWork::snapshot();
         let scene_frame = self.program_scene_frame(frame_number);
-        let (program, preview, backend) = if let (Some(scene_frame), false) = (scene_frame, self.output_inhibited) {
-            let state = self.program.as_ref().expect("scene time requires Program");
-            self.ensure_program_backend(&state.take_id, state.revision)
-                .map_err(|cause| OutputAdapterError::Render { cause })?;
-            let key = (state.take_id.clone(), state.revision);
-            let scene = self.gpu_prepared.get_mut(&key)
-                .expect("backend checked before rendering");
-            let recycle = &mut self.recycle;
-            let mut i = 0;
-            while i < recycle.len() {
-                if Arc::strong_count(&recycle[i]) == 1 {
-                    if let Some(Ok(frame)) = recycle.remove(i).map(Arc::try_unwrap) {
-                        scene.recycle(frame.pixels);
+        let (program, preview, backend) =
+            if let (Some(scene_frame), false) = (scene_frame, self.output_inhibited) {
+                let state = self.program.as_ref().expect("scene time requires Program");
+                self.ensure_program_backend(&state.take_id, state.revision)
+                    .map_err(|cause| OutputAdapterError::Render { cause })?;
+                let key = (state.take_id.clone(), state.revision);
+                let scene = self
+                    .gpu_prepared
+                    .get_mut(&key)
+                    .expect("backend checked before rendering");
+                let recycle = &mut self.recycle;
+                let mut i = 0;
+                while i < recycle.len() {
+                    if Arc::strong_count(&recycle[i]) == 1 {
+                        if let Some(Ok(frame)) = recycle.remove(i).map(Arc::try_unwrap) {
+                            scene.recycle(frame.pixels);
+                        }
+                    } else {
+                        i += 1;
                     }
+                }
+                if settled {
+                    let (program, preview) = scene
+                        .render(scene_frame)
+                        .map_err(|cause| OutputAdapterError::Render { cause })?;
+                    let (program, preview) = (Arc::new(program), Arc::new(preview));
+                    self.gpu_delivered = Some((key, Arc::clone(&program), Arc::clone(&preview)));
+                    (program, preview, "gpu-compositor")
                 } else {
-                    i += 1;
+                    let submitted = scene
+                        .submit(scene_frame, frame_number)
+                        .map_err(|cause| OutputAdapterError::Render { cause })?;
+                    if submitted == Submitted::RingFull {
+                        self.readback.ring_full += 1;
+                    }
+                    if let Some(delivered) = scene
+                        .collect()
+                        .map_err(|cause| OutputAdapterError::Render { cause })?
+                    {
+                        self.readback.record(frame_number, &delivered);
+                        self.gpu_delivered = Some((
+                            key.clone(),
+                            Arc::new(delivered.program),
+                            Arc::new(delivered.preview),
+                        ));
+                    }
+                    self.readback.superseded = scene.ring_counters().1;
+                    match &self.gpu_delivered {
+                        Some((held, program, preview)) if *held == key => {
+                            (Arc::clone(program), Arc::clone(preview), "gpu-compositor")
+                        }
+                        // The new scene's first readback is still in flight: the
+                        // previous picture repeats for the pipeline's latency.
+                        _ => {
+                            self.readback.awaiting_first += 1;
+                            let fallback = self.last_frames.clone();
+                            let (program, preview) = match fallback {
+                                Some(frames) => frames,
+                                None => {
+                                    let clear = match self.gpu_clear_frame.clone() {
+                                        Some(clear) => clear,
+                                        None => Arc::new(self.rasterizer.render(frame_number)),
+                                    };
+                                    (Arc::clone(&clear), clear)
+                                }
+                            };
+                            (program, preview, "gpu-compositor-awaiting-readback")
+                        }
+                    }
                 }
-            }
-            if settled {
-                let (program, preview) = scene.render(scene_frame).map_err(|cause| OutputAdapterError::Render { cause })?;
-                let (program, preview) = (Arc::new(program), Arc::new(preview));
-                self.gpu_delivered = Some((key, Arc::clone(&program), Arc::clone(&preview)));
-                (program, preview, "gpu-compositor")
+            } else if let Some(clear) = self
+                .gpu_clear_frame
+                .as_ref()
+                .filter(|_| self.program.is_none() || self.output_inhibited)
+            {
+                (clear.clone(), clear.clone(), "clear-or-inhibited")
             } else {
-                let submitted = scene.submit(scene_frame, frame_number).map_err(|cause| OutputAdapterError::Render { cause })?;
-                if submitted == Submitted::RingFull {
-                    self.readback.ring_full += 1;
-                }
-                if let Some(delivered) = scene.collect().map_err(|cause| OutputAdapterError::Render { cause })? {
-                    self.readback.record(frame_number, &delivered);
-                    self.gpu_delivered = Some((key.clone(), Arc::new(delivered.program), Arc::new(delivered.preview)));
-                }
-                self.readback.superseded = scene.ring_counters().1;
-                match &self.gpu_delivered {
-                    Some((held, program, preview)) if *held == key => {
-                        (Arc::clone(program), Arc::clone(preview), "gpu-compositor")
-                    }
-                    // The new scene's first readback is still in flight: the
-                    // previous picture repeats for the pipeline's latency.
-                    _ => {
-                        self.readback.awaiting_first += 1;
-                        let fallback = self.last_frames.clone();
-                        let (program, preview) = match fallback {
-                            Some(frames) => frames,
-                            None => {
-                                let clear = match self.gpu_clear_frame.clone() {
-                                    Some(clear) => clear,
-                                    None => Arc::new(self.rasterizer.render(frame_number)),
-                                };
-                                (Arc::clone(&clear), clear)
-                            }
-                        };
-                        (program, preview, "gpu-compositor-awaiting-readback")
-                    }
-                }
-            }
-        } else if let Some(clear) = self.gpu_clear_frame.as_ref().filter(|_| self.program.is_none() || self.output_inhibited) {
-            (clear.clone(), clear.clone(), "clear-or-inhibited")
-        } else {
-            (Arc::new(self.rasterizer.render(frame_number)), Arc::new(self.preview_rasterizer.render(frame_number)),
-             if self.program.is_some() && !self.output_inhibited { "identifier-only-diagnostic" } else { "clear-or-inhibited" })
-        };
-        if let Some((old_program, old_preview)) = self.last_frames.replace((Arc::clone(&program), Arc::clone(&preview))) {
+                (
+                    Arc::new(self.rasterizer.render(frame_number)),
+                    Arc::new(self.preview_rasterizer.render(frame_number)),
+                    if self.program.is_some() && !self.output_inhibited {
+                        "identifier-only-diagnostic"
+                    } else {
+                        "clear-or-inhibited"
+                    },
+                )
+            };
+        if let Some((old_program, old_preview)) = self
+            .last_frames
+            .replace((Arc::clone(&program), Arc::clone(&preview)))
+        {
             self.recycle.push_back(old_program);
             self.recycle.push_back(old_preview);
             while self.recycle.len() > 8 {
                 self.recycle.pop_front();
             }
         }
-        self.last_render_trace = Some(ProgramFrameTrace { engine_frame: frame_number,
-            scene_frame: scene_frame.unwrap_or(0), backend, work: RenderWork::snapshot().since(work_before) });
+        self.last_render_trace = Some(ProgramFrameTrace {
+            engine_frame: frame_number,
+            scene_frame: scene_frame.unwrap_or(0),
+            backend,
+            work: RenderWork::snapshot().since(work_before),
+        });
         let render_nanos = started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
         self.emitter
             .emit(Arc::clone(&preview), Arc::clone(&program));
-        let interval_nanos = self
-            .clock
-            .offset_nanos(1)
-            .min(u128::from(u64::MAX)) as u64;
+        let interval_nanos = self.clock.offset_nanos(1).min(u128::from(u64::MAX)) as u64;
         // The clock may have passed frames while this loop was away; each is
         // a Program frame that was never emitted, and is counted as missed.
-        let missed_before = self
-            .last_emitted
-            .map_or(0, |last| frame_number.saturating_sub(last).saturating_sub(1));
+        let missed_before = self.last_emitted.map_or(0, |last| {
+            frame_number.saturating_sub(last).saturating_sub(1)
+        });
         self.last_emitted = Some(frame_number);
         let sample = FrameSample {
             frame: frame_number,
@@ -715,7 +784,12 @@ impl Engine {
     /// Check a scene reference against what is published: the shared rule
     /// (unknown take, wrong revision, missing or wrong pin), so this engine
     /// and every mock refuse alike.
-    fn check_published(&self, take_id: &TakeId, revision: Revision, pin: Option<&ContentHash>) -> Result<(), Refusal> {
+    fn check_published(
+        &self,
+        take_id: &TakeId,
+        revision: Revision,
+        pin: Option<&ContentHash>,
+    ) -> Result<(), Refusal> {
         check_reference(take_id, revision, pin, self.published.get(take_id))
     }
 
@@ -747,7 +821,8 @@ impl Engine {
         }
         if self.output_inhibited {
             if let Some(program) = &self.program {
-                if let Err(cause) = self.ensure_program_backend(&program.take_id, program.revision) {
+                if let Err(cause) = self.ensure_program_backend(&program.take_id, program.revision)
+                {
                     return EngineReply::Refused(cause);
                 }
             }
@@ -778,7 +853,6 @@ impl AssetPublishPeer for Engine {
 }
 impl EnginePeer for Engine {
     fn capability(&self) -> EngineCapability {
-
         EngineCapability {
             protocol: gx_contracts::PROTOCOL_VERSION,
             epoch: self.clock.epoch(),
@@ -831,7 +905,9 @@ impl EnginePeer for Engine {
             }
 
             ClientRequest::Cue(req) => {
-                if let Err(refusal) = self.check_published(&req.take_id, req.revision, req.content_hash.as_ref()) {
+                if let Err(refusal) =
+                    self.check_published(&req.take_id, req.revision, req.content_hash.as_ref())
+                {
                     return EngineReply::Refused(refusal);
                 }
                 match self.commit(req.at) {
@@ -852,7 +928,9 @@ impl EnginePeer for Engine {
             }
 
             ClientRequest::Take(req) => {
-                if let Err(refusal) = self.check_published(&req.take_id, req.revision, req.content_hash.as_ref()) {
+                if let Err(refusal) =
+                    self.check_published(&req.take_id, req.revision, req.content_hash.as_ref())
+                {
                     return EngineReply::Refused(refusal);
                 }
                 if let Err(refusal) = self.ensure_program_backend(&req.take_id, req.revision) {
@@ -975,8 +1053,13 @@ impl EnginePeer for Engine {
             return Handled::Reply(self.handle(request));
         };
         let held = self.published.get(&req.take_id).cloned();
-        let scene = self.prepared.get(&(req.take_id.clone(), req.revision)).cloned();
-        let duration = scene.as_ref().map(|scene| scene.document().timeline.duration_frames);
+        let scene = self
+            .prepared
+            .get(&(req.take_id.clone(), req.revision))
+            .cloned();
+        let duration = scene
+            .as_ref()
+            .map(|scene| scene.document().timeline.duration_frames);
         if let Err(refusal) = check_render(&req, held.as_ref(), duration) {
             return Handled::Reply(EngineReply::Refused(refusal));
         }
@@ -984,7 +1067,9 @@ impl EnginePeer for Engine {
             unreachable!("check_render refuses a render with no held revision or scene");
         };
         let images = Arc::clone(&self.rendered);
-        Handled::Detached(Box::new(move || answer_render(req, held.content_hash, &scene, &images)))
+        Handled::Detached(Box::new(move || {
+            answer_render(req, held.content_hash, &scene, &images)
+        }))
     }
 
     fn drain_events(&mut self) -> Vec<EngineEvent> {
@@ -1024,19 +1109,21 @@ impl ReadbackReport {
             self.latency_nanos.remove(0);
             self.frames_behind.remove(0);
         }
-        self.latency_nanos.push(delivered.latency.as_nanos().min(u128::from(u64::MAX)) as u64);
-        self.frames_behind.push(clock_frame.saturating_sub(delivered.tag));
+        self.latency_nanos
+            .push(delivered.latency.as_nanos().min(u128::from(u64::MAX)) as u64);
+        self.frames_behind
+            .push(clock_frame.saturating_sub(delivered.tag));
     }
 }
 
 #[cfg(test)]
-mod gpu_tests;
-#[cfg(test)]
-mod output_tests;
-#[cfg(test)]
 mod blend_tests;
 #[cfg(test)]
 mod effect_tests;
+#[cfg(test)]
+mod gpu_tests;
+#[cfg(test)]
+mod output_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1044,13 +1131,11 @@ mod tests {
     use gx_control_plane::intent::{ClearRequest, CueRequest, PhaseRequest, TakeRequest};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use gx_control_plane::message::OutputConfig;
     use gx_contracts::animation::{KeyframeChannel, SceneEasing, SceneKeyframe};
     use gx_contracts::color::ColorValue;
     use gx_contracts::phases::{PhaseKind, TimelinePhase};
-    use gx_contracts::scene::{
-        ObjectBase, RectObject, SceneCanvas, SceneObject, SceneTimeline,
-    };
+    use gx_contracts::scene::{ObjectBase, RectObject, SceneCanvas, SceneObject, SceneTimeline};
+    use gx_control_plane::message::OutputConfig;
 
     fn engine() -> Engine {
         // A clock that does not advance on its own: the test drives the frame
@@ -1063,21 +1148,27 @@ mod tests {
         let mut engine = engine();
         assert_eq!(engine.material_support(), MaterialSupport::none());
         assert_eq!(engine.capability().material, MaterialSupport::none());
-        let EngineReply::Capability(capability) = engine.handle(ClientRequest::Capability)
-            else { panic!("capability exchange must succeed") };
+        let EngineReply::Capability(capability) = engine.handle(ClientRequest::Capability) else {
+            panic!("capability exchange must succeed")
+        };
         assert_eq!(capability.material, MaterialSupport::none());
     }
 
     #[test]
     fn truthful_material_support_preserves_every_drawable_reference_pixel() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .ancestors().nth(3).unwrap();
+            .ancestors()
+            .nth(3)
+            .unwrap();
         let scenes = std::fs::read_dir(root.join("tests/reference-scenes")).unwrap();
         let mut checked = 0;
         for entry in scenes {
             let path = entry.unwrap().path();
-            if path.extension().is_none_or(|ext| ext != "json") { continue; }
-            let document = gx_contracts::scene::parse_scene_document(&std::fs::read(&path).unwrap()).unwrap();
+            if path.extension().is_none_or(|ext| ext != "json") {
+                continue;
+            }
+            let document =
+                gx_contracts::scene::parse_scene_document(&std::fs::read(&path).unwrap()).unwrap();
             let mut available = HashSet::new();
             let mut bytes = AssetBytes::new();
             for asset in &document.assets {
@@ -1087,9 +1178,22 @@ mod tests {
                 available.insert(hash.clone());
                 bytes.insert(hash, payload);
             }
-            let before = PreparedScene::prepare(document.clone(), &available, &bytes, &MaterialSupport::fixed_function()).unwrap();
-            let after = PreparedScene::prepare(document, &available, &bytes, &engine().material_support()).unwrap();
-            assert_eq!(before.frame(OutputTransform::Srgb), after.frame(OutputTransform::Srgb), "{}", path.display());
+            let before = PreparedScene::prepare(
+                document.clone(),
+                &available,
+                &bytes,
+                &MaterialSupport::fixed_function(),
+            )
+            .unwrap();
+            let after =
+                PreparedScene::prepare(document, &available, &bytes, &engine().material_support())
+                    .unwrap();
+            assert_eq!(
+                before.frame(OutputTransform::Srgb),
+                after.frame(OutputTransform::Srgb),
+                "{}",
+                path.display()
+            );
             checked += 1;
         }
         assert!(checked > 0, "reference scenes must actually be exercised");
@@ -1308,7 +1412,12 @@ mod tests {
         assert_eq!(emission.sample.frame, 1);
         assert_eq!(e.preview_drops().consumer_busy, 1);
         assert_eq!(e.program_drops().consumer_busy, 0);
-        assert_eq!(e.take_program().expect("fresh Program remains available").checksum(), emission.frame.checksum());
+        assert_eq!(
+            e.take_program()
+                .expect("fresh Program remains available")
+                .checksum(),
+            emission.frame.checksum()
+        );
     }
 
     #[test]
@@ -1380,10 +1489,15 @@ mod tests {
             PublishReply::Published { .. }
         ));
         if !e.gpu.has_hardware() {
-            assert!(matches!(e.handle(ClientRequest::Take(TakeRequest {
-                take_id: TakeId("animated".into()), revision: Revision(1),
-                content_hash: Some(animated_scene().content_hash()), at: TakeAt::NextOpportunity,
-            })), EngineReply::Refused(Refusal::TierTooLow { .. })));
+            assert!(matches!(
+                e.handle(ClientRequest::Take(TakeRequest {
+                    take_id: TakeId("animated".into()),
+                    revision: Revision(1),
+                    content_hash: Some(animated_scene().content_hash()),
+                    at: TakeAt::NextOpportunity,
+                })),
+                EngineReply::Refused(Refusal::TierTooLow { .. })
+            ));
             return;
         }
         assert!(matches!(
@@ -1475,7 +1589,12 @@ mod tests {
     fn a_headless_render_is_byte_identical_served_by_hash_and_leaves_program_alone() {
         use gx_control_plane::render::RenderRequest;
         let mut e = engine();
-        let PublishReply::Published { take_id, revision, content_hash } = e.publish(animated_scene()) else {
+        let PublishReply::Published {
+            take_id,
+            revision,
+            content_hash,
+        } = e.publish(animated_scene())
+        else {
             panic!("the animated scene publishes");
         };
         let request = |frame, pin: Option<ContentHash>| {
@@ -1493,20 +1612,44 @@ mod tests {
         let first = rendered(e.handle(request(50, Some(content_hash.clone()))));
         let again = rendered(e.handle(request(50, Some(content_hash.clone()))));
         let start = rendered(e.handle(request(0, Some(content_hash.clone()))));
-        assert_eq!(first, again, "the same revision and frame render to the same bytes");
-        assert_ne!(first.image, start.image, "frame 50 of the animation differs from frame 0");
+        assert_eq!(
+            first, again,
+            "the same revision and frame render to the same bytes"
+        );
+        assert_ne!(
+            first.image, start.image,
+            "frame 50 of the animation differs from frame 0"
+        );
         assert_eq!((first.width, first.height), (64, 32));
-        let png = e.fetch(&first.image).expect("the image is served by its hash");
+        let png = e
+            .fetch(&first.image)
+            .expect("the image is served by its hash");
         assert_eq!(gx_asset_plane::content_hash(&png), first.image);
         let pixels = crate::headless::decode_png(&png).expect("the image decodes");
-        assert_eq!(pixels, e.prepared_scene(&take_id, revision).unwrap().frame_at(50, OutputTransform::Srgb).unwrap());
-        assert!(e.program.is_none(), "a headless render never reaches Program");
+        assert_eq!(
+            pixels,
+            e.prepared_scene(&take_id, revision)
+                .unwrap()
+                .frame_at(50, OutputTransform::Srgb)
+                .unwrap()
+        );
+        assert!(
+            e.program.is_none(),
+            "a headless render never reaches Program"
+        );
 
         assert!(matches!(
             e.handle(request(101, Some(content_hash.clone()))),
-            EngineReply::Refused(Refusal::RenderFrameOutOfRange { frame: 101, duration_frames: 100, .. })
+            EngineReply::Refused(Refusal::RenderFrameOutOfRange {
+                frame: 101,
+                duration_frames: 100,
+                ..
+            })
         ));
-        assert!(matches!(e.handle(request(0, None)), EngineReply::Refused(Refusal::RevisionUnpinned { .. })));
+        assert!(matches!(
+            e.handle(request(0, None)),
+            EngineReply::Refused(Refusal::RevisionUnpinned { .. })
+        ));
         let (identifier, identifier_revision) = published(&mut e);
         assert!(matches!(
             e.handle(ClientRequest::Render(RenderRequest {

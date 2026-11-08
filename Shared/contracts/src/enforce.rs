@@ -225,7 +225,12 @@ pub fn enforce(
                 if !in_palette(colour, system) {
                     found.push(apply_override(
                         StructuredRefusal::error(Refusal::InvalidColor {
-                            given: format!("#{:02x}{:02x}{:02x}", quantise(colour.r), quantise(colour.g), quantise(colour.b)),
+                            given: format!(
+                                "#{:02x}{:02x}{:02x}",
+                                quantise(colour.r),
+                                quantise(colour.g),
+                                quantise(colour.b)
+                            ),
                         })
                         .at(
                             format!("objects[{index}].fill"),
@@ -253,10 +258,7 @@ pub fn enforce(
                 let mut refusal = StructuredRefusal::error(Refusal::NotImplemented {
                     what: format!("spacing {value} is not on the design system scale"),
                 })
-                .at(
-                    format!("objects[{index}].{axis}"),
-                    serde_json::json!(value),
-                )
+                .at(format!("objects[{index}].{axis}"), serde_json::json!(value))
                 .allowing(
                     system
                         .visual
@@ -395,7 +397,10 @@ mod tests {
                 height: 1080,
                 frame_rate: RationalRate::P50,
             },
-            timeline: SceneTimeline { duration_frames: 1, ..Default::default() },
+            timeline: SceneTimeline {
+                duration_frames: 1,
+                ..Default::default()
+            },
             data_context: Default::default(),
             assets: Vec::new(),
             fonts: Vec::new(),
@@ -507,8 +512,13 @@ mod tests {
         let scene = document(vec![rect("logo", Rgba::srgb(1.0, 0.0, 0.0, 1.0), 18.0)]);
         let mut log = OverrideLog::new();
         log.record(
-            Override::new(rule::PALETTE, "logo", "sponsor mandated red", "head-of-design")
-                .expect("a reason was given"),
+            Override::new(
+                rule::PALETTE,
+                "logo",
+                "sponsor mandated red",
+                "head-of-design",
+            )
+            .expect("a reason was given"),
         );
 
         let found = enforce(&scene, &system(), &log);
@@ -545,7 +555,9 @@ mod tests {
         let bytes = br#"{"entries":[{"rule":"designSystem.palette","objectId":"logo","reason":"","acceptedBy":"x"}]}"#;
         assert!(matches!(
             OverrideLog::load_checked(bytes),
-            Err(OverrideLogError::Invalid(OverrideError::ReasonRequired { .. }))
+            Err(OverrideLogError::Invalid(
+                OverrideError::ReasonRequired { .. }
+            ))
         ));
     }
 

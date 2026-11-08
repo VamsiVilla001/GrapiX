@@ -129,7 +129,10 @@ impl LocalMediaProducer {
             // Dropping this frame is preferable to blocking Program (invariants
             // 13 and 14), and the cause remains visible to operators.
             Err(TryLockError::WouldBlock) => {
-                self.shared.drops.consumer_busy.fetch_add(1, Ordering::Relaxed);
+                self.shared
+                    .drops
+                    .consumer_busy
+                    .fetch_add(1, Ordering::Relaxed);
                 return Ok(PublishDisposition::Dropped);
             }
         };
@@ -139,11 +142,7 @@ impl LocalMediaProducer {
             .len
             .store(frame_len, Ordering::Relaxed);
 
-        let generation = self
-            .shared
-            .next_generation
-            .fetch_add(1, Ordering::Relaxed)
-            + 1;
+        let generation = self.shared.next_generation.fetch_add(1, Ordering::Relaxed) + 1;
         let state = encode_state(generation, target);
         // The release store makes both pixel writes and the declared length
         // visible before a reader accepts this generation.
@@ -152,7 +151,10 @@ impl LocalMediaProducer {
         if current != NO_FRAME
             && self.shared.consumed_generation.load(Ordering::Acquire) != state_generation(current)
         {
-            self.shared.drops.consumer_busy.fetch_add(1, Ordering::Relaxed);
+            self.shared
+                .drops
+                .consumer_busy
+                .fetch_add(1, Ordering::Relaxed);
         }
 
         Ok(PublishDisposition::Published { generation })
@@ -252,7 +254,9 @@ fn recover_read(mapping: &RwLock<MmapMut>) -> std::sync::RwLockReadGuard<'_, Mma
     // A producer callback panic never publishes its partial frame.  Recovering
     // this lock therefore preserves the last released generation instead of
     // turning a local callback failure into a silent stale-frame substitution.
-    mapping.read().unwrap_or_else(|poisoned| poisoned.into_inner())
+    mapping
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn media_unavailable(detail: String) -> Refusal {
@@ -298,7 +302,10 @@ mod tests {
             PublishDisposition::Published { generation: 1 }
         );
         let observed = consumer.with_latest(|frame| {
-            assert_eq!(frame.bytes().as_ptr() as usize, producer_address.load(Ordering::Relaxed));
+            assert_eq!(
+                frame.bytes().as_ptr() as usize,
+                producer_address.load(Ordering::Relaxed)
+            );
             assert_eq!(frame.bytes(), [1, 2, 3, 4]);
             frame.generation()
         });
@@ -330,7 +337,8 @@ mod tests {
         let publishing = thread::spawn(move || {
             let first = producer.publish_with(8, |bytes| bytes.fill(2));
             let second = producer.publish_with(8, |bytes| bytes.fill(3));
-            sent.send((first, second)).expect("test receiver remains available");
+            sent.send((first, second))
+                .expect("test receiver remains available");
         });
         let (first, second) = received
             .recv_timeout(Duration::from_secs(1))
@@ -348,7 +356,9 @@ mod tests {
         const FRAME_LEN: usize = 16 * 1024;
         const WRITES: usize = 2_000;
 
-        let transport = Arc::new(LocalMediaTransport::establish(FRAME_LEN).expect("the local mapping establishes"));
+        let transport = Arc::new(
+            LocalMediaTransport::establish(FRAME_LEN).expect("the local mapping establishes"),
+        );
         let producer = transport.producer();
         let consumer = transport.consumer();
         producer
@@ -369,7 +379,10 @@ mod tests {
         while !done.load(Ordering::Acquire) {
             if let Some(()) = consumer.with_latest(|frame| {
                 let bytes = frame.bytes();
-                assert!(bytes.iter().all(|byte| *byte == bytes[0]), "a frame mixed two generations");
+                assert!(
+                    bytes.iter().all(|byte| *byte == bytes[0]),
+                    "a frame mixed two generations"
+                );
                 saw_frame.fetch_add(1, Ordering::Relaxed);
             }) {}
         }
@@ -377,11 +390,17 @@ mod tests {
         for _ in 0..32 {
             let _ = consumer.with_latest(|frame| {
                 let bytes = frame.bytes();
-                assert!(bytes.iter().all(|byte| *byte == bytes[0]), "a frame mixed two generations");
+                assert!(
+                    bytes.iter().all(|byte| *byte == bytes[0]),
+                    "a frame mixed two generations"
+                );
                 saw_frame.fetch_add(1, Ordering::Relaxed);
             });
         }
-        assert!(saw_frame.load(Ordering::Relaxed) > 0, "the consumer observed no frames");
+        assert!(
+            saw_frame.load(Ordering::Relaxed) > 0,
+            "the consumer observed no frames"
+        );
     }
 
     #[test]

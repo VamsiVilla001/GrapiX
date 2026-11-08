@@ -25,12 +25,23 @@ const FIXTURE: &[u8] = include_bytes!("../../tests/fixtures/gpu-lower-third-50.j
 fn hardware_engine() -> (Engine, Arc<AtomicU64>) {
     let ticks = Arc::new(AtomicU64::new(0));
     let engine = match std::env::var("GX_GPU_316_BACKEND").as_deref() {
-        Ok("dx12") => Engine::with_gpu(ticks.clone(), Locality::CoLocated, gpu::negotiate_for_test(wgpu::Backends::DX12)),
-        Ok("vulkan") => Engine::with_gpu(ticks.clone(), Locality::CoLocated, gpu::negotiate_for_test(wgpu::Backends::VULKAN)),
+        Ok("dx12") => Engine::with_gpu(
+            ticks.clone(),
+            Locality::CoLocated,
+            gpu::negotiate_for_test(wgpu::Backends::DX12),
+        ),
+        Ok("vulkan") => Engine::with_gpu(
+            ticks.clone(),
+            Locality::CoLocated,
+            gpu::negotiate_for_test(wgpu::Backends::VULKAN),
+        ),
         Err(_) => Engine::new(ticks.clone(), Locality::CoLocated),
         other => panic!("unsupported explicit proof backend: {other:?}"),
     };
-    assert!(engine.gpu.has_hardware(), "3.21 execution proof requires a hardware GPU");
+    assert!(
+        engine.gpu.has_hardware(),
+        "3.21 execution proof requires a hardware GPU"
+    );
     (engine, ticks)
 }
 
@@ -41,7 +52,11 @@ fn publish(engine: &mut Engine, scene: SceneDocument) -> (TakeId, Revision, Cont
         }
     }
     match engine.publish(scene) {
-        PublishReply::Published { take_id, revision, content_hash } => (take_id, revision, content_hash),
+        PublishReply::Published {
+            take_id,
+            revision,
+            content_hash,
+        } => (take_id, revision, content_hash),
         other => panic!("scene must publish: {other:?}"),
     }
 }
@@ -68,7 +83,13 @@ fn text(id: &str, x: f64, y: f64, size: f64, z: i64, content: &str) -> Value {
 }
 
 /// The fixture lower third with its objects, canvas and timeline replaced.
-fn workload(name: &str, width: u32, height: u32, objects: Vec<Value>, channels: Vec<Value>) -> SceneDocument {
+fn workload(
+    name: &str,
+    width: u32,
+    height: u32,
+    objects: Vec<Value>,
+    channels: Vec<Value>,
+) -> SceneDocument {
     let mut doc: Value = serde_json::from_slice(FIXTURE).unwrap();
     doc["id"] = json!(format!("gpu-321-{name}-{height}"));
     doc["canvas"]["width"] = json!(width);
@@ -88,9 +109,13 @@ fn lower_third(width: u32, height: u32) -> SceneDocument {
     let mut objects = doc["objects"].as_array().unwrap().clone();
     for o in &mut objects {
         for k in ["x", "y", "width", "height"] {
-            if let Some(v) = o[k].as_f64() { o[k] = json!(v * s); }
+            if let Some(v) = o[k].as_f64() {
+                o[k] = json!(v * s);
+            }
         }
-        if let Some(v) = o["size"].as_f64() { o["size"] = json!(v * s); }
+        if let Some(v) = o["size"].as_f64() {
+            o["size"] = json!(v * s);
+        }
     }
     let channels = doc["timeline"]["channels"].as_array().unwrap().clone();
     workload("lower-third", width, height, objects, channels)
@@ -100,16 +125,49 @@ fn lower_third(width: u32, height: u32) -> SceneDocument {
 fn scorebug(width: u32, height: u32) -> SceneDocument {
     let s = f64::from(height) / 1080.0;
     let mut objects = vec![
-        rect("plate", 60.0 * s, 40.0 * s, 720.0 * s, 120.0 * s, 0, [0.05, 0.05, 0.08, 0.92]),
-        rect("home", 60.0 * s, 40.0 * s, 16.0 * s, 120.0 * s, 1, [0.9, 0.1, 0.1, 1.0]),
-        rect("away", 764.0 * s, 40.0 * s, 16.0 * s, 120.0 * s, 1, [0.1, 0.3, 0.9, 1.0]),
+        rect(
+            "plate",
+            60.0 * s,
+            40.0 * s,
+            720.0 * s,
+            120.0 * s,
+            0,
+            [0.05, 0.05, 0.08, 0.92],
+        ),
+        rect(
+            "home",
+            60.0 * s,
+            40.0 * s,
+            16.0 * s,
+            120.0 * s,
+            1,
+            [0.9, 0.1, 0.1, 1.0],
+        ),
+        rect(
+            "away",
+            764.0 * s,
+            40.0 * s,
+            16.0 * s,
+            120.0 * s,
+            1,
+            [0.1, 0.3, 0.9, 1.0],
+        ),
     ];
-    let fields = ["HOME", "0", "AWAY", "0", "1st", "12:34", "P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9", "P10",
-        "SOG 12", "SOG 9", "PIM 4", "PIM 6"];
+    let fields = [
+        "HOME", "0", "AWAY", "0", "1st", "12:34", "P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8",
+        "P9", "P10", "SOG 12", "SOG 9", "PIM 4", "PIM 6",
+    ];
     for (i, f) in fields.iter().enumerate() {
         let col = (i % 10) as f64;
         let row = (i / 10) as f64;
-        objects.push(text(&format!("f{i}"), (90.0 + col * 68.0) * s, (56.0 + row * 52.0) * s, 28.0 * s, 2, f));
+        objects.push(text(
+            &format!("f{i}"),
+            (90.0 + col * 68.0) * s,
+            (56.0 + row * 52.0) * s,
+            28.0 * s,
+            2,
+            f,
+        ));
     }
     let mut channels = vec![slide("plate", "opacity", 0.0, 1.0)];
     for i in 0..20 {
@@ -127,11 +185,26 @@ fn stats_page(width: u32, height: u32) -> SceneDocument {
         let id = format!("bar{i}");
         let x = w * 0.08 + (i as f64) * w * 0.0168;
         let bh = h * (0.15 + 0.5 * ((i * 37) % 11) as f64 / 11.0);
-        objects.push(rect(&id, x, h * 0.85 - bh, w * 0.012, bh, 1, [0.2 + 0.6 * (i as f64 / 50.0), 0.7, 0.3, 1.0]));
+        objects.push(rect(
+            &id,
+            x,
+            h * 0.85 - bh,
+            w * 0.012,
+            bh,
+            1,
+            [0.2 + 0.6 * (i as f64 / 50.0), 0.7, 0.3, 1.0],
+        ));
         channels.push(slide(&id, "y", h * 0.85, h * 0.85 - bh));
     }
     for i in 0..20 {
-        objects.push(text(&format!("label{i}"), w * 0.08 + (i as f64) * w * 0.044, h * 0.9, h / 40.0, 2, &format!("S{i}")));
+        objects.push(text(
+            &format!("label{i}"),
+            w * 0.08 + (i as f64) * w * 0.044,
+            h * 0.9,
+            h / 40.0,
+            2,
+            &format!("S{i}"),
+        ));
     }
     workload("stats-page", width, height, objects, channels)
 }
@@ -150,7 +223,9 @@ fn pace(next: Instant) -> Instant {
 }
 
 fn percentile(sorted: &[u64], p: f64) -> u64 {
-    if sorted.is_empty() { return 0; }
+    if sorted.is_empty() {
+        return 0;
+    }
     let rank = ((sorted.len() as f64 - 1.0) * p).round() as usize;
     sorted[rank.min(sorted.len() - 1)]
 }
@@ -159,7 +234,11 @@ fn evidence(name: &str, data: &Value) {
     println!("{}", serde_json::to_string(data).unwrap());
     if let Some(dir) = std::env::var_os("GX_GPU_321_EVIDENCE_DIR") {
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(std::path::PathBuf::from(dir).join(name), serde_json::to_vec_pretty(data).unwrap()).unwrap();
+        std::fs::write(
+            std::path::PathBuf::from(dir).join(name),
+            serde_json::to_vec_pretty(data).unwrap(),
+        )
+        .unwrap();
     }
 }
 
@@ -176,15 +255,29 @@ fn gpu_output_encode_equals_the_cpu_encode_of_the_same_pixels() {
         let mut doc = lower_third(1920, 1080);
         doc.working_color_space = space;
         let pin = publish(&mut engine, doc);
-        let scene = engine.gpu_prepared.get_mut(&(pin.0.clone(), pin.1)).unwrap();
+        let scene = engine
+            .gpu_prepared
+            .get_mut(&(pin.0.clone(), pin.1))
+            .unwrap();
         let mut non_trivial = 0;
         for scene_frame in (0..=100u64).step_by(7).chain([1, 2, 3, 99, 100]) {
             let (program, preview, working) = scene.render_with_working(scene_frame).unwrap();
-            assert_eq!(program, working.encode(OutputTransform::Rec709), "{space:?} Program at {scene_frame}");
-            assert_eq!(preview, working.encode(OutputTransform::Srgb), "{space:?} Preview at {scene_frame}");
+            assert_eq!(
+                program,
+                working.encode(OutputTransform::Rec709),
+                "{space:?} Program at {scene_frame}"
+            );
+            assert_eq!(
+                preview,
+                working.encode(OutputTransform::Srgb),
+                "{space:?} Preview at {scene_frame}"
+            );
             non_trivial += usize::from(!program.is_black());
         }
-        assert!(non_trivial > 10, "the comparison must cover drawn frames, not only black ones");
+        assert!(
+            non_trivial > 10,
+            "the comparison must cover drawn frames, not only black ones"
+        );
     }
 }
 
@@ -232,9 +325,16 @@ fn the_ring_delivers_the_frame_it_was_given() {
             // full under contention, e.g. parallel GPU tests) ages the next
             // delivered frame by the refused frames, never more.
             let bound = crate::compositor::output::RING_SLOTS as u64 + ring_full_seen;
-            assert!(behind <= bound, "a paced 50 fps loop runs {behind} frames behind with {ring_full_seen} refusals");
+            assert!(
+                behind <= bound,
+                "a paced 50 fps loop runs {behind} frames behind with {ring_full_seen} refusals"
+            );
             let shown = submitted_at[&(trace.engine_frame - behind)];
-            live.push((shown, Arc::clone(&emission.frame), engine.take_preview().unwrap()));
+            live.push((
+                shown,
+                Arc::clone(&emission.frame),
+                engine.take_preview().unwrap(),
+            ));
             checked += 1;
         }
     }
@@ -246,14 +346,26 @@ fn the_ring_delivers_the_frame_it_was_given() {
     let in_flight = crate::compositor::output::RING_SLOTS as u64;
     assert!(
         report.delivered + report.superseded + report.ring_full + in_flight >= 60,
-        "60 frames: {} delivered, {} superseded, {} refused", report.delivered, report.superseded, report.ring_full
+        "60 frames: {} delivered, {} superseded, {} refused",
+        report.delivered,
+        report.superseded,
+        report.ring_full
     );
     assert!(checked >= 20, "checked {checked} delivered frames");
-    let scene = engine.gpu_prepared.get_mut(&(pin.0.clone(), pin.1)).unwrap();
+    let scene = engine
+        .gpu_prepared
+        .get_mut(&(pin.0.clone(), pin.1))
+        .unwrap();
     for (shown, program, preview) in live {
         let (settled_program, settled_preview) = scene.render(shown).unwrap();
-        assert!(*program == settled_program, "Program delivered for scene frame {shown} is not that frame");
-        assert!(*preview == settled_preview, "Preview delivered for scene frame {shown} is not that frame");
+        assert!(
+            *program == settled_program,
+            "Program delivered for scene frame {shown} is not that frame"
+        );
+        assert!(
+            *preview == settled_preview,
+            "Preview delivered for scene frame {shown} is not that frame"
+        );
     }
 }
 
@@ -280,18 +392,33 @@ fn the_readback_ring_refuses_instead_of_stalling() {
         let started = Instant::now();
         engine.emit_frame().unwrap();
         worst = worst.max(started.elapsed().as_micros());
-        *backends.entry(engine.program_frame_trace().unwrap().backend).or_insert(0) += 1;
+        *backends
+            .entry(engine.program_frame_trace().unwrap().backend)
+            .or_insert(0) += 1;
     }
     let report = engine.readback_report();
     assert!(report.delivered > 0, "no delivery in {emits} emits: backends {backends:?}, ring_full {}, awaiting_first {}, superseded {}", report.ring_full, report.awaiting_first, report.superseded);
-    assert!(report.ring_full > 0, "an unpaced loop must saturate a {}-slot ring", crate::compositor::output::RING_SLOTS);
-    assert!(report.delivered + report.ring_full + report.superseded >= emits.saturating_sub(crate::compositor::output::RING_SLOTS as u64));
+    assert!(
+        report.ring_full > 0,
+        "an unpaced loop must saturate a {}-slot ring",
+        crate::compositor::output::RING_SLOTS
+    );
+    assert!(
+        report.delivered + report.ring_full + report.superseded
+            >= emits.saturating_sub(crate::compositor::output::RING_SLOTS as u64)
+    );
     if std::env::var_os("GX_GPU_321_ASSERT_BUDGET").is_some() {
-        assert!(worst < 20_000, "an emit took {worst} us; the ring must never block on the GPU");
+        assert!(
+            worst < 20_000,
+            "an emit took {worst} us; the ring must never block on the GPU"
+        );
     }
-    evidence("ring-saturation-2160p.json", &json!({
+    evidence(
+        "ring-saturation-2160p.json",
+        &json!({
         "emits": emits, "delivered": report.delivered, "ringFull": report.ring_full,
-        "superseded": report.superseded, "worstEmitMicros": worst }));
+        "superseded": report.superseded, "worstEmitMicros": worst }),
+    );
 }
 
 /// The row's budget: lower third, scorebug (about 20 live text fields) and
@@ -334,7 +461,13 @@ fn program_holds_the_frame_budget_on_the_reference_workloads() {
             assert_eq!(work.cpu_source_rasterizations, 0);
             assert_eq!(work.gpu_resource_builds, 0);
             let report = engine.readback_report().clone();
-            let mut latency: Vec<u64> = report.latency_nanos.iter().rev().take(frames as usize).map(|n| n / 1000).collect();
+            let mut latency: Vec<u64> = report
+                .latency_nanos
+                .iter()
+                .rev()
+                .take(frames as usize)
+                .map(|n| n / 1000)
+                .collect();
             // Settled frames: submit, GPU composite and encode, readback and
             // copy, waited for. This is the per-frame end-to-end time with the
             // one-frame pipeline delay removed.
@@ -362,20 +495,32 @@ fn program_holds_the_frame_budget_on_the_reference_workloads() {
             });
             println!("{}", serde_json::to_string(&row).unwrap());
             if end_to_end_p99 > 10_000 {
-                failures.push(format!("{name} {width}x{height}: settled p99 {} us", end_to_end_p99));
+                failures.push(format!(
+                    "{name} {width}x{height}: settled p99 {} us",
+                    end_to_end_p99
+                ));
             }
             if percentile(&emit_micros, 0.99) > 20_000 {
-                failures.push(format!("{name} {width}x{height}: live emit p99 {} us exceeds the 20 ms interval", percentile(&emit_micros, 0.99)));
+                failures.push(format!(
+                    "{name} {width}x{height}: live emit p99 {} us exceeds the 20 ms interval",
+                    percentile(&emit_micros, 0.99)
+                ));
             }
             rows.push(row);
         }
     }
-    evidence("frame-budget.json", &json!({
-        "method": "loop paced at 20 ms like the clock pump, clock advanced one frame per emit_frame; then 100 settled frames (submit, GPU, readback, copy, waited for) as the per-frame end-to-end figure; emit wall time plus ring submit-to-delivery latency; 50 warm-up frames then 300 measured; debug or release as built",
-        "profile": if cfg!(debug_assertions) { "debug" } else { "release" },
-        "budgetMicros": 10_000, "rows": rows, "overBudget": failures,
-    }));
+    evidence(
+        "frame-budget.json",
+        &json!({
+            "method": "loop paced at 20 ms like the clock pump, clock advanced one frame per emit_frame; then 100 settled frames (submit, GPU, readback, copy, waited for) as the per-frame end-to-end figure; emit wall time plus ring submit-to-delivery latency; 50 warm-up frames then 300 measured; debug or release as built",
+            "profile": if cfg!(debug_assertions) { "debug" } else { "release" },
+            "budgetMicros": 10_000, "rows": rows, "overBudget": failures,
+        }),
+    );
     if assert_budget {
-        assert!(failures.is_empty(), "over the 10 ms p99 budget: {failures:?}");
+        assert!(
+            failures.is_empty(),
+            "over the 10 ms p99 budget: {failures:?}"
+        );
     }
 }

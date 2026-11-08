@@ -223,7 +223,9 @@ mod tests {
             stylesheet_url: Some("https://fonts.googleapis.com/css2?family=Inter".into()),
         };
         let sheet = build_font_css(&[font], |id| format!("asset://{id}"));
-        assert!(sheet.css.contains("src: url(\"asset://asset_font_0123\") format(\"woff2\");"));
+        assert!(sheet
+            .css
+            .contains("src: url(\"asset://asset_font_0123\") format(\"woff2\");"));
         assert!(sheet.css.contains("unicode-range: U+0000-00FF;"));
         assert!(!sheet.css.contains("gstatic"));
         assert!(!sheet.css.contains("googleapis"));

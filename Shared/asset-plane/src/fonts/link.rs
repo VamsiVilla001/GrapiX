@@ -330,14 +330,15 @@ pub fn prepare_font_link(
             }));
         }
         // The `@font-face` rule names the face; Adobe kit files name nothing.
-        let verified = verify_declared_font_file(&bytes, &collected.face.family).map_err(|refusal| {
-            refuse_link(match refusal {
-                Refusal::InvalidFontData { detail } => Refusal::InvalidFontData {
-                    detail: format!("{}: {detail}", source.url),
-                },
-                other => other,
-            })
-        })?;
+        let verified =
+            verify_declared_font_file(&bytes, &collected.face.family).map_err(|refusal| {
+                refuse_link(match refusal {
+                    Refusal::InvalidFontData { detail } => Refusal::InvalidFontData {
+                        detail: format!("{}: {detail}", source.url),
+                    },
+                    other => other,
+                })
+            })?;
         downloads.insert(
             source.url.clone(),
             Download {
@@ -490,8 +491,7 @@ fn prepare_direct_font(
     };
     let provider = Provider::of_font(&url)
         .ok_or_else(|| refuse(Refusal::FontFetchHostNotTrusted { url: url.clone() }))?;
-    let bytes =
-        fetch(fetcher, &url, provider.font_hosts(), MAX_FONT_FILE_BYTES).map_err(refuse)?;
+    let bytes = fetch(fetcher, &url, provider.font_hosts(), MAX_FONT_FILE_BYTES).map_err(refuse)?;
     let verified = verify_font_file(&bytes).map_err(refuse)?;
     if format.is_some_and(|expected| expected != verified.format) {
         return Err(refuse(Refusal::InvalidFontData {
@@ -936,7 +936,8 @@ mod tests {
     #[test]
     #[ignore = "manual live Adobe Fonts check; needs GX_LIVE_ADOBE_KIT and HTTPS access"]
     fn live_adobe_kit_resolves_under_its_declared_families() {
-        let kit = std::env::var("GX_LIVE_ADOBE_KIT").expect("set GX_LIVE_ADOBE_KIT to an Adobe Fonts kit id");
+        let kit = std::env::var("GX_LIVE_ADOBE_KIT")
+            .expect("set GX_LIVE_ADOBE_KIT to an Adobe Fonts kit id");
         let (mut store, root) = store();
         let batch = prepare_font_link(
             &mut store,
@@ -947,13 +948,19 @@ mod tests {
         .expect("live Adobe Fonts kit must resolve");
         assert!(!batch.fonts.is_empty());
         for font in &batch.fonts {
-            assert!(!font.family.trim().is_empty() && font.faces.iter().all(|face| face.family == font.family));
+            assert!(
+                !font.family.trim().is_empty()
+                    && font.faces.iter().all(|face| face.family == font.family)
+            );
             assert!(font.license.as_deref().is_some_and(|l| !l.is_empty()));
             println!(
                 "live Adobe family {}: {} face(s), weights {:?}",
                 font.family,
                 font.faces.len(),
-                font.faces.iter().map(|face| face.weight).collect::<Vec<_>>()
+                font.faces
+                    .iter()
+                    .map(|face| face.weight)
+                    .collect::<Vec<_>>()
             );
         }
         for asset in &batch.assets {
@@ -1138,8 +1145,10 @@ mod tests {
     fn an_adobe_kit_whose_files_name_no_family_takes_the_declared_names() {
         let (mut store, root) = store();
         let kit = "https://use.typekit.net/dgy5lkh.css";
-        let mono = "https://use.typekit.net/af/3ff53c/00000000000000007756ad5c/31/l?primer=x&fvd=n7&v=3";
-        let wide = "https://use.typekit.net/af/1a2b3c/00000000000000007760dcb7/31/l?primer=x&fvd=n4&v=3";
+        let mono =
+            "https://use.typekit.net/af/3ff53c/00000000000000007756ad5c/31/l?primer=x&fvd=n7&v=3";
+        let wide =
+            "https://use.typekit.net/af/1a2b3c/00000000000000007760dcb7/31/l?primer=x&fvd=n4&v=3";
         let css = format!(
             "@font-face {{ font-family: \"new-science-mono\"; src: url(\"{mono}\") format(\"opentype\"); \
                font-style: normal; font-weight: 700; }}\n\
@@ -1168,12 +1177,30 @@ mod tests {
         let named: Vec<_> = batch
             .fonts
             .iter()
-            .map(|font| (font.family.as_str(), font.faces[0].family.as_str(), font.faces[0].weight))
+            .map(|font| {
+                (
+                    font.family.as_str(),
+                    font.faces[0].family.as_str(),
+                    font.faces[0].weight,
+                )
+            })
             .collect();
-        assert_eq!(named, [("new-science-mono", "new-science-mono", 700), ("gear-wide", "gear-wide", 400)]);
+        assert_eq!(
+            named,
+            [
+                ("new-science-mono", "new-science-mono", 700),
+                ("gear-wide", "gear-wide", 400)
+            ]
+        );
         // The file's own licence record, else Adobe's packaging position.
-        assert!(batch.fonts.iter().all(|font| font.license.as_deref().is_some_and(|l| !l.is_empty())));
-        assert!(store.contains(&content_hash(&otf)).unwrap() && store.contains(&content_hash(&ttf)).unwrap());
+        assert!(batch
+            .fonts
+            .iter()
+            .all(|font| font.license.as_deref().is_some_and(|l| !l.is_empty())));
+        assert!(
+            store.contains(&content_hash(&otf)).unwrap()
+                && store.contains(&content_hash(&ttf)).unwrap()
+        );
         std::fs::remove_dir_all(root).ok();
     }
 

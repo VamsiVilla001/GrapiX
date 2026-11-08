@@ -118,8 +118,15 @@ mod tests {
         ));
         assert!(matches!(
             check_render(&request(11, Some("a")), Some(&held), Some(10)),
-            Err(Refusal::RenderFrameOutOfRange { frame: 11, duration_frames: 10, .. })
+            Err(Refusal::RenderFrameOutOfRange {
+                frame: 11,
+                duration_frames: 10,
+                ..
+            })
         ));
-        assert_eq!(check_render(&request(10, Some("a")), Some(&held), Some(10)), Ok(()));
+        assert_eq!(
+            check_render(&request(10, Some("a")), Some(&held), Some(10)),
+            Ok(())
+        );
     }
 }

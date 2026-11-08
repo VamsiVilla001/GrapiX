@@ -60,7 +60,11 @@ pub fn covers(alpha: f32) -> bool {
 /// A subnormal is zero, as it is on a GPU that flushes. Applied to every
 /// un-premultiplied colour before a formula branches or divides on it.
 pub fn flush(value: f32) -> f32 {
-    if value.to_bits() & EXPONENT == 0 { 0.0 } else { value }
+    if value.to_bits() & EXPONENT == 0 {
+        0.0
+    } else {
+        value
+    }
 }
 
 /// Keep a result finite: NaN becomes 0, an infinity the largest finite value
@@ -84,7 +88,8 @@ pub fn bound(value: f32) -> f32 {
 /// A fixed per-pixel threshold in [0, 1) for Dissolve. `x` and `y` are the
 /// stage pixel's integer index: a hash key, never a coordinate in float math.
 pub fn hash_noise(x: u32, y: u32, seed: u32) -> f32 {
-    let mut h = x.wrapping_mul(0x8da6_b343) ^ y.wrapping_mul(0xd816_3841) ^ seed.wrapping_mul(0xcb1a_b31f);
+    let mut h =
+        x.wrapping_mul(0x8da6_b343) ^ y.wrapping_mul(0xd816_3841) ^ seed.wrapping_mul(0xcb1a_b31f);
     h ^= h >> 13;
     h = h.wrapping_mul(0x5bd1_e995);
     h ^= h >> 15;
@@ -108,14 +113,24 @@ pub fn dissolve_seed(object_id: &str, mode: BlendMode, scene_frame: u64) -> u32 
 
 /// Composite one premultiplied source pixel onto a premultiplied backdrop.
 pub fn blend(mode: BlendMode, dst: WorkingRgba, src: WorkingRgba, noise: f32) -> WorkingRgba {
-    let [r, g, b, a] = blend_pixel(mode, [dst.r, dst.g, dst.b, dst.a], [src.r, src.g, src.b, src.a], noise);
+    let [r, g, b, a] = blend_pixel(
+        mode,
+        [dst.r, dst.g, dst.b, dst.a],
+        [src.r, src.g, src.b, src.a],
+        noise,
+    );
     WorkingRgba { r, g, b, a }
 }
 
 /// [`blend`] on component arrays: the form the GPU twin is written in.
 pub fn blend_pixel(mode: BlendMode, dst: [f32; 4], src: [f32; 4], noise: f32) -> [f32; 4] {
     let raw = blend_raw(mode, dst, src, noise);
-    [bound(raw[0]), bound(raw[1]), bound(raw[2]), bound(raw[3]).clamp(0.0, 1.0)]
+    [
+        bound(raw[0]),
+        bound(raw[1]),
+        bound(raw[2]),
+        bound(raw[3]).clamp(0.0, 1.0),
+    ]
 }
 
 fn rec709_luminance(c: [f32; 3]) -> f32 {
@@ -127,7 +142,12 @@ fn blend_raw(mode: BlendMode, dst: [f32; 4], src: [f32; 4], noise: f32) -> [f32;
     let da = dst[3];
     let over = |alpha: f32| {
         let k = 1.0 - sa;
-        [src[0] + dst[0] * k, src[1] + dst[1] * k, src[2] + dst[2] * k, alpha]
+        [
+            src[0] + dst[0] * k,
+            src[1] + dst[1] * k,
+            src[2] + dst[2] * k,
+            alpha,
+        ]
     };
     let scale = |k: f32| [dst[0] * k, dst[1] * k, dst[2] * k, dst[3] * k];
     match mode {
@@ -249,7 +269,11 @@ fn soft_light(cb: f32, cs: f32) -> f32 {
     if cs <= 0.5 {
         cb - (1.0 - 2.0 * cs) * cb * (1.0 - cb)
     } else {
-        let d = if cb <= 0.25 { ((16.0 * cb - 12.0) * cb + 4.0) * cb } else { cb.max(0.0).sqrt() };
+        let d = if cb <= 0.25 {
+            ((16.0 * cb - 12.0) * cb + 4.0) * cb
+        } else {
+            cb.max(0.0).sqrt()
+        };
         cb + (2.0 * cs - 1.0) * (d - cb)
     }
 }
@@ -260,28 +284,60 @@ fn separable(mode: BlendMode, cb: f32, cs: f32) -> f32 {
         BlendMode::Multiply => cb * cs,
         BlendMode::ColorBurn => burn(cb, cs),
         // Negative results are kept, as in After Effects.
-        BlendMode::ClassicColorBurn => if cs <= 0.0 { 0.0 } else { 1.0 - (1.0 - cb) / cs },
+        BlendMode::ClassicColorBurn => {
+            if cs <= 0.0 {
+                0.0
+            } else {
+                1.0 - (1.0 - cb) / cs
+            }
+        }
         BlendMode::LinearBurn => (cb + cs - 1.0).max(0.0),
         BlendMode::Add | BlendMode::LinearDodge => cb + cs,
         BlendMode::Lighten => cb.max(cs),
         BlendMode::Screen => cb + cs - cb * cs,
         BlendMode::ColorDodge => dodge(cb, cs),
-        BlendMode::ClassicColorDodge => if cs >= 1.0 { 1.0 } else { (cb / (1.0 - cs)).min(1.0) },
+        BlendMode::ClassicColorDodge => {
+            if cs >= 1.0 {
+                1.0
+            } else {
+                (cb / (1.0 - cs)).min(1.0)
+            }
+        }
         BlendMode::Overlay => hard_light(cs, cb),
         BlendMode::SoftLight => soft_light(cb, cs),
         BlendMode::HardLight => hard_light(cb, cs),
         BlendMode::LinearLight => (cb + 2.0 * cs - 1.0).clamp(0.0, 1.0),
         BlendMode::VividLight => {
-            if cs <= 0.5 { burn(cb, 2.0 * cs) } else { dodge(cb, 2.0 * (cs - 0.5)) }
+            if cs <= 0.5 {
+                burn(cb, 2.0 * cs)
+            } else {
+                dodge(cb, 2.0 * (cs - 0.5))
+            }
         }
-        BlendMode::PinLight => if cs <= 0.5 { cb.min(2.0 * cs) } else { cb.max(2.0 * cs - 1.0) },
-        BlendMode::HardMix => if cb + cs >= 1.0 { 1.0 } else { 0.0 },
+        BlendMode::PinLight => {
+            if cs <= 0.5 {
+                cb.min(2.0 * cs)
+            } else {
+                cb.max(2.0 * cs - 1.0)
+            }
+        }
+        BlendMode::HardMix => {
+            if cb + cs >= 1.0 {
+                1.0
+            } else {
+                0.0
+            }
+        }
         BlendMode::Difference | BlendMode::ClassicDifference => (cb - cs).abs(),
         BlendMode::Exclusion => cb + cs - 2.0 * cb * cs,
         BlendMode::Subtract => (cb - cs).max(0.0),
         BlendMode::Divide => {
             if cs <= 0.0 {
-                if cb > 0.0 { 1.0 } else { 0.0 }
+                if cb > 0.0 {
+                    1.0
+                } else {
+                    0.0
+                }
             } else {
                 cb / cs
             }
@@ -339,9 +395,25 @@ fn non_separable(mode: BlendMode, cb: [f32; 3], cs: [f32; 3]) -> [f32; 3] {
         BlendMode::Saturation => set_lum(set_sat(cb, sat(cs)), lum(cb)),
         BlendMode::Color => set_lum(cs, lum(cb)),
         BlendMode::Luminosity => set_lum(cb, lum(cs)),
-        BlendMode::DarkerColor => if rec709_luminance(cs) < rec709_luminance(cb) { cs } else { cb },
-        BlendMode::LighterColor => if rec709_luminance(cs) > rec709_luminance(cb) { cs } else { cb },
-        _ => [separable(mode, cb[0], cs[0]), separable(mode, cb[1], cs[1]), separable(mode, cb[2], cs[2])],
+        BlendMode::DarkerColor => {
+            if rec709_luminance(cs) < rec709_luminance(cb) {
+                cs
+            } else {
+                cb
+            }
+        }
+        BlendMode::LighterColor => {
+            if rec709_luminance(cs) > rec709_luminance(cb) {
+                cs
+            } else {
+                cb
+            }
+        }
+        _ => [
+            separable(mode, cb[0], cs[0]),
+            separable(mode, cb[1], cs[1]),
+            separable(mode, cb[2], cs[2]),
+        ],
     }
 }
 
@@ -395,7 +467,9 @@ mod tests {
     fn a_source_over_a_transparent_backdrop_is_the_source() {
         let s = [0.25, 0.1, 0.05, 0.5];
         for m in BlendMode::ALL {
-            if m.acts_on_whole_backdrop() || matches!(m, BlendMode::Dissolve | BlendMode::DancingDissolve) {
+            if m.acts_on_whole_backdrop()
+                || matches!(m, BlendMode::Dissolve | BlendMode::DancingDissolve)
+            {
                 continue;
             }
             let o = blend_pixel(m, [0.0; 4], s, 0.9);
@@ -405,26 +479,47 @@ mod tests {
 
     #[test]
     fn the_after_effects_32_bit_formulas_hold() {
-        let at = |m, b: f32, o: f32, k: f32| blend_pixel(m, opaque(b), [o * k, o * k, o * k, k], 0.5)[0];
+        let at =
+            |m, b: f32, o: f32, k: f32| blend_pixel(m, opaque(b), [o * k, o * k, o * k, k], 0.5)[0];
         for (b, o) in [(0.4, 0.5), (0.8, 0.9), (0.1, 0.3)] {
             let k = 0.15;
-            assert!(close(at(BlendMode::ClassicColorDodge, b, o, k), (b / (1.0 - k * o)).min(1.0)));
-            assert!(close(at(BlendMode::ClassicDifference, b, o, k), (b - k * o).abs()));
-            assert!(close(at(BlendMode::ClassicColorBurn, b, o, k), 1.0 - (1.0 - b) / (1.0 - k * (1.0 - o))));
+            assert!(close(
+                at(BlendMode::ClassicColorDodge, b, o, k),
+                (b / (1.0 - k * o)).min(1.0)
+            ));
+            assert!(close(
+                at(BlendMode::ClassicDifference, b, o, k),
+                (b - k * o).abs()
+            ));
+            assert!(close(
+                at(BlendMode::ClassicColorBurn, b, o, k),
+                1.0 - (1.0 - b) / (1.0 - k * (1.0 - o))
+            ));
         }
         assert!(close(at(BlendMode::ClassicDifference, 0.6, 0.3, 1.0), 0.3));
         let (b, o) = (0.7, 3.0);
-        assert!(close(at(BlendMode::Exclusion, b, o, 1.0), b + o - 2.0 * b * o));
+        assert!(close(
+            at(BlendMode::Exclusion, b, o, 1.0),
+            b + o - 2.0 * b * o
+        ));
         let s = 2.0 * b - 1.0;
         assert!(close(at(BlendMode::Overlay, b, o, 1.0), o + s - o * s));
-        assert!(close(at(BlendMode::ClassicColorBurn, 0.0, 0.1, 1.0), -9.0), "negative results are kept");
+        assert!(
+            close(at(BlendMode::ClassicColorBurn, 0.0, 0.1, 1.0), -9.0),
+            "negative results are kept"
+        );
         // Add and Screen keep over-range values; Soft Light clamps its inputs.
         let d = [2.0, 2.0, 2.0, 1.0];
         let h = [0.5, 0.5, 0.5, 1.0];
         assert!(close(blend_pixel(BlendMode::Add, d, h, 0.5)[0], 2.5));
         assert!(close(blend_pixel(BlendMode::Screen, d, h, 0.5)[0], 1.5));
         assert!(blend_pixel(BlendMode::SoftLight, d, h, 0.5)[0] <= 1.0);
-        let l = blend_pixel(BlendMode::Luminosity, [0.2, 0.4, 0.6, 1.0], [2.0, 2.0, 2.0, 1.0], 0.5);
+        let l = blend_pixel(
+            BlendMode::Luminosity,
+            [0.2, 0.4, 0.6, 1.0],
+            [2.0, 2.0, 2.0, 1.0],
+            0.5,
+        );
         let e = set_lum([0.2, 0.4, 0.6], 2.0);
         assert!((0..3).all(|i| close(l[i], e[i])), "{l:?} {e:?}");
     }
@@ -436,8 +531,14 @@ mod tests {
         assert_eq!(blend_pixel(BlendMode::Dissolve, d, s, 0.7), d);
         let shown = blend_pixel(BlendMode::Dissolve, d, s, 0.2);
         assert!(close(shown[0], 0.6) && close(shown[3], 1.0));
-        assert_ne!(dissolve_seed("a", BlendMode::Dissolve, 0), dissolve_seed("b", BlendMode::Dissolve, 0));
-        assert_eq!(dissolve_seed("a", BlendMode::Dissolve, 0), dissolve_seed("a", BlendMode::Dissolve, 9));
+        assert_ne!(
+            dissolve_seed("a", BlendMode::Dissolve, 0),
+            dissolve_seed("b", BlendMode::Dissolve, 0)
+        );
+        assert_eq!(
+            dissolve_seed("a", BlendMode::Dissolve, 0),
+            dissolve_seed("a", BlendMode::Dissolve, 9)
+        );
         assert_ne!(
             dissolve_seed("a", BlendMode::DancingDissolve, 0),
             dissolve_seed("a", BlendMode::DancingDissolve, 1)
@@ -448,7 +549,16 @@ mod tests {
     fn no_input_makes_a_non_finite_or_out_of_range_result() {
         // Subnormal and tiny alphas, over-range and huge colours, the inputs
         // behind EffectCraft's DX12 NaNs among them.
-        let alphas = [0.0, f32::from_bits(1), 1e-39, f32::MIN_POSITIVE, 1e-30, 1e-7, 0.5, 1.0];
+        let alphas = [
+            0.0,
+            f32::from_bits(1),
+            1e-39,
+            f32::MIN_POSITIVE,
+            1e-30,
+            1e-7,
+            0.5,
+            1.0,
+        ];
         let colours = [0.0, 1e-39, 1e-20, 0.25, 1.0, 3.0, 1e20, 3e38];
         let mut checked = 0u64;
         for m in BlendMode::ALL {
@@ -459,7 +569,10 @@ mod tests {
                             let src = [c * sa.clamp(1e-30, 1.0), c * 0.5, c, sa];
                             let dst = [e, e * 0.25, e * sa, da];
                             let o = blend_pixel(m, dst, src, 0.37);
-                            assert!(o.iter().all(|v| v.is_finite()), "{m:?} {dst:?} {src:?} -> {o:?}");
+                            assert!(
+                                o.iter().all(|v| v.is_finite()),
+                                "{m:?} {dst:?} {src:?} -> {o:?}"
+                            );
                             assert!((0.0..=1.0).contains(&o[3]), "{m:?} alpha {o:?}");
                             checked += 1;
                         }

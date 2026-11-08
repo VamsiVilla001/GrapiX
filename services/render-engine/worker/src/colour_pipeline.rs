@@ -137,7 +137,11 @@ impl WorkingRgba {
             SourceColorSpace::DisplayP3 => display_p3_to_linear_srgb(r, g, b),
             _ => [r, g, b],
         };
-        let [r, g, b] = [space.from_linear(r), space.from_linear(g), space.from_linear(b)];
+        let [r, g, b] = [
+            space.from_linear(r),
+            space.from_linear(g),
+            space.from_linear(b),
+        ];
         let a = source.a as f32;
         Self {
             r: r as f32 * a,
@@ -219,7 +223,12 @@ impl WorkingRgba {
     pub fn encode(self, output: OutputTransform, space: WorkingColorSpace) -> [u8; 4] {
         let [r, g, b] = self.straight_rgb();
         let channel = |c: f32| quantize(output.encode(space.to_linear(f64::from(c))));
-        [channel(r), channel(g), channel(b), quantize(f64::from(self.a))]
+        [
+            channel(r),
+            channel(g),
+            channel(b),
+            quantize(f64::from(self.a)),
+        ]
     }
 
     fn straight_rgb(self) -> [f32; 3] {
@@ -251,13 +260,16 @@ impl WorkingTexture {
             .rgba8
             .chunks_exact(4)
             .map(|texel| {
-                WorkingRgba::from_source(Rgba::new(
-                    f64::from(texel[0]) / 255.0,
-                    f64::from(texel[1]) / 255.0,
-                    f64::from(texel[2]) / 255.0,
-                    f64::from(texel[3]) / 255.0,
-                    upload.source,
-                ), space)
+                WorkingRgba::from_source(
+                    Rgba::new(
+                        f64::from(texel[0]) / 255.0,
+                        f64::from(texel[1]) / 255.0,
+                        f64::from(texel[2]) / 255.0,
+                        f64::from(texel[3]) / 255.0,
+                        upload.source,
+                    ),
+                    space,
+                )
             })
             .collect();
         Self {
@@ -427,7 +439,9 @@ mod tests {
         for space in SPACES {
             let source = WorkingRgba::from_source(Rgba::srgb(0.5, 0.5, 0.5, 0.5), space);
             let destination = WorkingRgba::from_source(Rgba::srgb(0.5, 0.5, 0.5, 1.0), space);
-            let encoded = source.over(destination).encode(OutputTransform::Srgb, space);
+            let encoded = source
+                .over(destination)
+                .encode(OutputTransform::Srgb, space);
 
             assert_eq!(encoded, [128, 128, 128, 255], "{space:?}");
         }
@@ -449,8 +463,14 @@ mod tests {
             let overlap = black.over(white);
             let srgb = overlap.encode(OutputTransform::Srgb, space);
             let rec709 = overlap.encode(OutputTransform::Rec709, space);
-            assert!(near(srgb, [preview, preview, preview, 255]), "{space:?} Preview {srgb:?}");
-            assert!(near(rec709, [program, program, program, 255]), "{space:?} Program {rec709:?}");
+            assert!(
+                near(srgb, [preview, preview, preview, 255]),
+                "{space:?} Preview {srgb:?}"
+            );
+            assert!(
+                near(rec709, [program, program, program, 255]),
+                "{space:?} Program {rec709:?}"
+            );
         }
     }
 
@@ -469,19 +489,49 @@ mod tests {
             let quarter = WorkingRgba::from_source(Rgba::srgb(1.0, 1.0, 1.0, 0.25), space);
 
             let antialiased = quarter.over(black);
-            assert!(near(antialiased.encode(OutputTransform::Srgb, space), [edge, edge, edge, 255]), "{space:?} edge");
-            assert!(near(antialiased.encode(OutputTransform::Rec709, space), [edge_program, edge_program, edge_program, 255]), "{space:?} edge Program");
+            assert!(
+                near(
+                    antialiased.encode(OutputTransform::Srgb, space),
+                    [edge, edge, edge, 255]
+                ),
+                "{space:?} edge"
+            );
+            assert!(
+                near(
+                    antialiased.encode(OutputTransform::Rec709, space),
+                    [edge_program, edge_program, edge_program, 255]
+                ),
+                "{space:?} edge Program"
+            );
 
             let gradient_midpoint = black.mix(white, 0.5);
             let blur_average = white.mix(black, 0.5);
             for value in [gradient_midpoint, blur_average] {
-                assert!(near(value.encode(OutputTransform::Srgb, space), [mid, mid, mid, 255]), "{space:?} mix");
-                assert!(near(value.encode(OutputTransform::Rec709, space), [mid_program, mid_program, mid_program, 255]), "{space:?} mix Program");
+                assert!(
+                    near(
+                        value.encode(OutputTransform::Srgb, space),
+                        [mid, mid, mid, 255]
+                    ),
+                    "{space:?} mix"
+                );
+                assert!(
+                    near(
+                        value.encode(OutputTransform::Rec709, space),
+                        [mid_program, mid_program, mid_program, 255]
+                    ),
+                    "{space:?} mix Program"
+                );
             }
 
             let red = WorkingRgba::from_source(Rgba::srgb(1.0, 0.0, 0.0, 1.0), space);
             let blue = WorkingRgba::from_source(Rgba::srgb(0.0, 0.0, 1.0, 1.0), space);
-            assert!(near(red.mix(blue, 0.5).encode(OutputTransform::Srgb, space), [mid, 0, mid, 255]), "{space:?} red-blue stop");
+            assert!(
+                near(
+                    red.mix(blue, 0.5).encode(OutputTransform::Srgb, space),
+                    [mid, 0, mid, 255]
+                ),
+                "{space:?} red-blue stop"
+            );
         }
     }
 
@@ -491,9 +541,15 @@ mod tests {
     fn a_linear_paint_re_expressed_matches_a_direct_conversion() {
         let colour = Rgba::srgb(0.2, 0.6, 0.9, 0.5);
         for space in SPACES {
-            let via_linear = WorkingRgba::from_source(colour, WorkingColorSpace::LinearSrgb).linear_to(space);
+            let via_linear =
+                WorkingRgba::from_source(colour, WorkingColorSpace::LinearSrgb).linear_to(space);
             let direct = WorkingRgba::from_source(colour, space);
-            for (a, b) in [(via_linear.r, direct.r), (via_linear.g, direct.g), (via_linear.b, direct.b), (via_linear.a, direct.a)] {
+            for (a, b) in [
+                (via_linear.r, direct.r),
+                (via_linear.g, direct.g),
+                (via_linear.b, direct.b),
+                (via_linear.a, direct.a),
+            ] {
                 assert!((a - b).abs() < 1e-6, "{space:?}: {a} vs {b}");
             }
         }
@@ -504,7 +560,8 @@ mod tests {
         let width = 257;
         let height = 3;
         for space in SPACES {
-            let rendered = WorkingFrame::swept_linear_ramp(width, height, space).encode(OutputTransform::Srgb);
+            let rendered =
+                WorkingFrame::swept_linear_ramp(width, height, space).encode(OutputTransform::Srgb);
 
             assert_eq!(
                 rendered.pixels,

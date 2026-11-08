@@ -48,7 +48,11 @@ pub struct EffectInstance {
 
 impl EffectInstance {
     pub fn new(effect_id: impl Into<String>, effect: Effect) -> Self {
-        Self { effect_id: effect_id.into(), enabled: true, effect }
+        Self {
+            effect_id: effect_id.into(),
+            enabled: true,
+            effect,
+        }
     }
 }
 
@@ -187,7 +191,9 @@ pub struct Exposure {
 }
 
 /// Which axes a blur or glow spreads along.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum BlurDimensions {
     #[default]
@@ -253,14 +259,18 @@ pub struct DropShadow {
 }
 
 /// A point in the layer's own pixels.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub struct EffectPoint {
     pub x: f64,
     pub y: f64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum RampShape {
     #[default]
@@ -291,7 +301,9 @@ pub struct LinearWipe {
     pub feather: f64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum WipeDirection {
     #[default]
@@ -339,51 +351,136 @@ fn identity_curve() -> Vec<CurvePoint> {
 }
 
 impl Default for Fill {
-    fn default() -> Self { Self { color: srgb(1.0, 0.0, 0.0), opacity: 1.0 } }
+    fn default() -> Self {
+        Self {
+            color: srgb(1.0, 0.0, 0.0),
+            opacity: 1.0,
+        }
+    }
 }
 impl Default for Tint {
-    fn default() -> Self { Self { map_black_to: srgb(0.0, 0.0, 0.0), map_white_to: srgb(1.0, 1.0, 1.0), amount: 1.0 } }
+    fn default() -> Self {
+        Self {
+            map_black_to: srgb(0.0, 0.0, 0.0),
+            map_white_to: srgb(1.0, 1.0, 1.0),
+            amount: 1.0,
+        }
+    }
 }
 impl Default for LevelsChannel {
-    fn default() -> Self { Self { input_black: 0.0, input_white: 1.0, gamma: 1.0, output_black: 0.0, output_white: 1.0 } }
+    fn default() -> Self {
+        Self {
+            input_black: 0.0,
+            input_white: 1.0,
+            gamma: 1.0,
+            output_black: 0.0,
+            output_white: 1.0,
+        }
+    }
 }
 impl Default for Levels {
     fn default() -> Self {
         let c = LevelsChannel::default();
-        Self { rgb: c, red: c, green: c, blue: c, alpha: c, clip_to_output_black: true, clip_to_output_white: true }
+        Self {
+            rgb: c,
+            red: c,
+            green: c,
+            blue: c,
+            alpha: c,
+            clip_to_output_black: true,
+            clip_to_output_white: true,
+        }
     }
 }
 impl Default for Curves {
     fn default() -> Self {
-        Self { rgb: identity_curve(), red: identity_curve(), green: identity_curve(), blue: identity_curve(), alpha: identity_curve() }
+        Self {
+            rgb: identity_curve(),
+            red: identity_curve(),
+            green: identity_curve(),
+            blue: identity_curve(),
+            alpha: identity_curve(),
+        }
     }
 }
 impl Default for HueSaturation {
     fn default() -> Self {
-        Self { hue: 0.0, saturation: 0.0, lightness: 0.0, colorize: false, colorize_hue: 0.0, colorize_saturation: 0.25, colorize_lightness: 0.0 }
+        Self {
+            hue: 0.0,
+            saturation: 0.0,
+            lightness: 0.0,
+            colorize: false,
+            colorize_hue: 0.0,
+            colorize_saturation: 0.25,
+            colorize_lightness: 0.0,
+        }
     }
 }
 impl Default for BrightnessContrast {
-    fn default() -> Self { Self { brightness: 0.0, contrast: 0.0, use_legacy: false } }
+    fn default() -> Self {
+        Self {
+            brightness: 0.0,
+            contrast: 0.0,
+            use_legacy: false,
+        }
+    }
 }
 impl Default for Exposure {
-    fn default() -> Self { Self { exposure: 0.0, offset: 0.0, gamma_correction: 1.0 } }
+    fn default() -> Self {
+        Self {
+            exposure: 0.0,
+            offset: 0.0,
+            gamma_correction: 1.0,
+        }
+    }
 }
 impl Default for GaussianBlur {
-    fn default() -> Self { Self { blurriness: 0.0, dimensions: BlurDimensions::default(), repeat_edge_pixels: false } }
+    fn default() -> Self {
+        Self {
+            blurriness: 0.0,
+            dimensions: BlurDimensions::default(),
+            repeat_edge_pixels: false,
+        }
+    }
 }
 impl Default for BoxBlur {
-    fn default() -> Self { Self { radius: 0.0, iterations: 1.0, dimensions: BlurDimensions::default(), repeat_edge_pixels: false } }
+    fn default() -> Self {
+        Self {
+            radius: 0.0,
+            iterations: 1.0,
+            dimensions: BlurDimensions::default(),
+            repeat_edge_pixels: false,
+        }
+    }
 }
 impl Default for DirectionalBlur {
-    fn default() -> Self { Self { direction: 0.0, length: 0.0 } }
+    fn default() -> Self {
+        Self {
+            direction: 0.0,
+            length: 0.0,
+        }
+    }
 }
 impl Default for Glow {
-    fn default() -> Self { Self { threshold: 0.6, radius: 10.0, intensity: 1.0, dimensions: BlurDimensions::default() } }
+    fn default() -> Self {
+        Self {
+            threshold: 0.6,
+            radius: 10.0,
+            intensity: 1.0,
+            dimensions: BlurDimensions::default(),
+        }
+    }
 }
 impl Default for DropShadow {
     fn default() -> Self {
-        Self { color: srgb(0.0, 0.0, 0.0), opacity: 0.5, direction: 135.0, distance: 5.0, softness: 0.0, shadow_only: false }
+        Self {
+            color: srgb(0.0, 0.0, 0.0),
+            opacity: 0.5,
+            direction: 135.0,
+            distance: 5.0,
+            softness: 0.0,
+            shadow_only: false,
+        }
     }
 }
 impl Default for GradientRamp {
@@ -399,16 +496,36 @@ impl Default for GradientRamp {
     }
 }
 impl Default for LinearWipe {
-    fn default() -> Self { Self { completion: 0.0, angle: 90.0, feather: 0.0 } }
+    fn default() -> Self {
+        Self {
+            completion: 0.0,
+            angle: 90.0,
+            feather: 0.0,
+        }
+    }
 }
 impl Default for RadialWipe {
     fn default() -> Self {
-        Self { completion: 0.0, start_angle: 0.0, center: EffectPoint::default(), direction: WipeDirection::default(), feather: 0.0 }
+        Self {
+            completion: 0.0,
+            start_angle: 0.0,
+            center: EffectPoint::default(),
+            direction: WipeDirection::default(),
+            feather: 0.0,
+        }
     }
 }
 impl Default for IrisWipe {
     fn default() -> Self {
-        Self { center: EffectPoint::default(), points: 6.0, outer_radius: 0.0, inner_radius: 0.0, use_inner_radius: false, rotation: 0.0, feather: 0.0 }
+        Self {
+            center: EffectPoint::default(),
+            points: 6.0,
+            outer_radius: 0.0,
+            inner_radius: 0.0,
+            use_inner_radius: false,
+            rotation: 0.0,
+            feather: 0.0,
+        }
     }
 }
 
@@ -440,7 +557,9 @@ impl Domain {
             Domain::Finite => true,
             Domain::Range { min, max } => (min..=max).contains(&value),
             Domain::Switch => value == 0.0 || value == 1.0,
-            Domain::Choice { count } => value.fract() == 0.0 && value >= 0.0 && (value as usize) < count,
+            Domain::Choice { count } => {
+                value.fract() == 0.0 && value >= 0.0 && (value as usize) < count
+            }
         }
     }
 
@@ -461,7 +580,11 @@ pub trait ChoiceParam: Copy + PartialEq + 'static {
 }
 
 impl ChoiceParam for BlurDimensions {
-    const OPTIONS: &'static [Self] = &[Self::HorizontalAndVertical, Self::Horizontal, Self::Vertical];
+    const OPTIONS: &'static [Self] = &[
+        Self::HorizontalAndVertical,
+        Self::Horizontal,
+        Self::Vertical,
+    ];
 }
 impl ChoiceParam for RampShape {
     const OPTIONS: &'static [Self] = &[Self::Linear, Self::Radial];
@@ -507,7 +630,9 @@ impl Slot<'_> {
         match self {
             Slot::Number(_, domain) => *domain,
             Slot::Switch(_) => Domain::Switch,
-            Slot::Choice(choice) => Domain::Choice { count: choice.count() },
+            Slot::Choice(choice) => Domain::Choice {
+                count: choice.count(),
+            },
         }
     }
 
@@ -532,9 +657,18 @@ impl Slot<'_> {
 }
 
 const UNIT: Domain = Domain::Range { min: 0.0, max: 1.0 };
-const SIGNED_UNIT: Domain = Domain::Range { min: -1.0, max: 1.0 };
-const PIXELS: Domain = Domain::Range { min: 0.0, max: 1000.0 };
-const GAMMA: Domain = Domain::Range { min: 0.01, max: 10.0 };
+const SIGNED_UNIT: Domain = Domain::Range {
+    min: -1.0,
+    max: 1.0,
+};
+const PIXELS: Domain = Domain::Range {
+    min: 0.0,
+    max: 1000.0,
+};
+const GAMMA: Domain = Domain::Range {
+    min: 0.01,
+    max: 10.0,
+};
 
 fn colour(prefix: &str, colour: &mut Rgba, f: &mut dyn FnMut(&str, Slot<'_>)) {
     f(&format!("{prefix}.r"), Slot::Number(&mut colour.r, UNIT));
@@ -544,16 +678,37 @@ fn colour(prefix: &str, colour: &mut Rgba, f: &mut dyn FnMut(&str, Slot<'_>)) {
 }
 
 fn point(prefix: &str, p: &mut EffectPoint, f: &mut dyn FnMut(&str, Slot<'_>)) {
-    f(&format!("{prefix}.x"), Slot::Number(&mut p.x, Domain::Finite));
-    f(&format!("{prefix}.y"), Slot::Number(&mut p.y, Domain::Finite));
+    f(
+        &format!("{prefix}.x"),
+        Slot::Number(&mut p.x, Domain::Finite),
+    );
+    f(
+        &format!("{prefix}.y"),
+        Slot::Number(&mut p.y, Domain::Finite),
+    );
 }
 
 fn levels_channel(prefix: &str, c: &mut LevelsChannel, f: &mut dyn FnMut(&str, Slot<'_>)) {
-    f(&format!("{prefix}.inputBlack"), Slot::Number(&mut c.input_black, UNIT));
-    f(&format!("{prefix}.inputWhite"), Slot::Number(&mut c.input_white, UNIT));
-    f(&format!("{prefix}.gamma"), Slot::Number(&mut c.gamma, GAMMA));
-    f(&format!("{prefix}.outputBlack"), Slot::Number(&mut c.output_black, UNIT));
-    f(&format!("{prefix}.outputWhite"), Slot::Number(&mut c.output_white, UNIT));
+    f(
+        &format!("{prefix}.inputBlack"),
+        Slot::Number(&mut c.input_black, UNIT),
+    );
+    f(
+        &format!("{prefix}.inputWhite"),
+        Slot::Number(&mut c.input_white, UNIT),
+    );
+    f(
+        &format!("{prefix}.gamma"),
+        Slot::Number(&mut c.gamma, GAMMA),
+    );
+    f(
+        &format!("{prefix}.outputBlack"),
+        Slot::Number(&mut c.output_black, UNIT),
+    );
+    f(
+        &format!("{prefix}.outputWhite"),
+        Slot::Number(&mut c.output_white, UNIT),
+    );
 }
 
 fn curve(prefix: &str, points: &mut [CurvePoint], f: &mut dyn FnMut(&str, Slot<'_>)) {
@@ -620,8 +775,14 @@ impl Effect {
                 levels_channel("green", &mut e.green, f);
                 levels_channel("blue", &mut e.blue, f);
                 levels_channel("alpha", &mut e.alpha, f);
-                f("clipToOutputBlack", Slot::Switch(&mut e.clip_to_output_black));
-                f("clipToOutputWhite", Slot::Switch(&mut e.clip_to_output_white));
+                f(
+                    "clipToOutputBlack",
+                    Slot::Switch(&mut e.clip_to_output_black),
+                );
+                f(
+                    "clipToOutputWhite",
+                    Slot::Switch(&mut e.clip_to_output_white),
+                );
             }
             Effect::Curves(e) => {
                 curve("rgb", &mut e.rgb, f);
@@ -635,19 +796,49 @@ impl Effect {
                 f("saturation", Slot::Number(&mut e.saturation, SIGNED_UNIT));
                 f("lightness", Slot::Number(&mut e.lightness, SIGNED_UNIT));
                 f("colorize", Slot::Switch(&mut e.colorize));
-                f("colorizeHue", Slot::Number(&mut e.colorize_hue, Domain::Finite));
-                f("colorizeSaturation", Slot::Number(&mut e.colorize_saturation, UNIT));
-                f("colorizeLightness", Slot::Number(&mut e.colorize_lightness, SIGNED_UNIT));
+                f(
+                    "colorizeHue",
+                    Slot::Number(&mut e.colorize_hue, Domain::Finite),
+                );
+                f(
+                    "colorizeSaturation",
+                    Slot::Number(&mut e.colorize_saturation, UNIT),
+                );
+                f(
+                    "colorizeLightness",
+                    Slot::Number(&mut e.colorize_lightness, SIGNED_UNIT),
+                );
             }
             Effect::BrightnessContrast(e) => {
-                f("brightness", Slot::Number(&mut e.brightness, Domain::Range { min: -1.5, max: 1.5 }));
+                f(
+                    "brightness",
+                    Slot::Number(
+                        &mut e.brightness,
+                        Domain::Range {
+                            min: -1.5,
+                            max: 1.5,
+                        },
+                    ),
+                );
                 f("contrast", Slot::Number(&mut e.contrast, SIGNED_UNIT));
                 f("useLegacy", Slot::Switch(&mut e.use_legacy));
             }
             Effect::Exposure(e) => {
-                f("exposure", Slot::Number(&mut e.exposure, Domain::Range { min: -20.0, max: 20.0 }));
+                f(
+                    "exposure",
+                    Slot::Number(
+                        &mut e.exposure,
+                        Domain::Range {
+                            min: -20.0,
+                            max: 20.0,
+                        },
+                    ),
+                );
                 f("offset", Slot::Number(&mut e.offset, SIGNED_UNIT));
-                f("gammaCorrection", Slot::Number(&mut e.gamma_correction, GAMMA));
+                f(
+                    "gammaCorrection",
+                    Slot::Number(&mut e.gamma_correction, GAMMA),
+                );
             }
             Effect::GaussianBlur(e) => {
                 f("blurriness", Slot::Number(&mut e.blurriness, PIXELS));
@@ -656,7 +847,16 @@ impl Effect {
             }
             Effect::BoxBlur(e) => {
                 f("radius", Slot::Number(&mut e.radius, PIXELS));
-                f("iterations", Slot::Number(&mut e.iterations, Domain::Range { min: 1.0, max: 50.0 }));
+                f(
+                    "iterations",
+                    Slot::Number(
+                        &mut e.iterations,
+                        Domain::Range {
+                            min: 1.0,
+                            max: 50.0,
+                        },
+                    ),
+                );
                 f("dimensions", Slot::Choice(&mut e.dimensions));
                 f("repeatEdgePixels", Slot::Switch(&mut e.repeat_edge_pixels));
             }
@@ -667,7 +867,16 @@ impl Effect {
             Effect::Glow(e) => {
                 f("threshold", Slot::Number(&mut e.threshold, UNIT));
                 f("radius", Slot::Number(&mut e.radius, PIXELS));
-                f("intensity", Slot::Number(&mut e.intensity, Domain::Range { min: 0.0, max: 10.0 }));
+                f(
+                    "intensity",
+                    Slot::Number(
+                        &mut e.intensity,
+                        Domain::Range {
+                            min: 0.0,
+                            max: 10.0,
+                        },
+                    ),
+                );
                 f("dimensions", Slot::Choice(&mut e.dimensions));
             }
             Effect::DropShadow(e) => {
@@ -684,7 +893,10 @@ impl Effect {
                 point("end", &mut e.end, f);
                 colour("endColor", &mut e.end_color, f);
                 f("shape", Slot::Choice(&mut e.shape));
-                f("blendWithOriginal", Slot::Number(&mut e.blend_with_original, UNIT));
+                f(
+                    "blendWithOriginal",
+                    Slot::Number(&mut e.blend_with_original, UNIT),
+                );
             }
             Effect::LinearWipe(e) => {
                 f("completion", Slot::Number(&mut e.completion, UNIT));
@@ -693,16 +905,46 @@ impl Effect {
             }
             Effect::RadialWipe(e) => {
                 f("completion", Slot::Number(&mut e.completion, UNIT));
-                f("startAngle", Slot::Number(&mut e.start_angle, Domain::Finite));
+                f(
+                    "startAngle",
+                    Slot::Number(&mut e.start_angle, Domain::Finite),
+                );
                 point("center", &mut e.center, f);
                 f("direction", Slot::Choice(&mut e.direction));
                 f("feather", Slot::Number(&mut e.feather, PIXELS));
             }
             Effect::IrisWipe(e) => {
                 point("center", &mut e.center, f);
-                f("points", Slot::Number(&mut e.points, Domain::Range { min: 6.0, max: 32.0 }));
-                f("outerRadius", Slot::Number(&mut e.outer_radius, Domain::Range { min: 0.0, max: 10000.0 }));
-                f("innerRadius", Slot::Number(&mut e.inner_radius, Domain::Range { min: 0.0, max: 10000.0 }));
+                f(
+                    "points",
+                    Slot::Number(
+                        &mut e.points,
+                        Domain::Range {
+                            min: 6.0,
+                            max: 32.0,
+                        },
+                    ),
+                );
+                f(
+                    "outerRadius",
+                    Slot::Number(
+                        &mut e.outer_radius,
+                        Domain::Range {
+                            min: 0.0,
+                            max: 10000.0,
+                        },
+                    ),
+                );
+                f(
+                    "innerRadius",
+                    Slot::Number(
+                        &mut e.inner_radius,
+                        Domain::Range {
+                            min: 0.0,
+                            max: 10000.0,
+                        },
+                    ),
+                );
                 f("useInnerRadius", Slot::Switch(&mut e.use_inner_radius));
                 f("rotation", Slot::Number(&mut e.rotation, Domain::Finite));
                 f("feather", Slot::Number(&mut e.feather, PIXELS));
@@ -785,15 +1027,27 @@ pub fn validate_effects(object: &str, effects: &[EffectInstance]) -> Result<(), 
     for instance in effects {
         let id = instance.effect_id.as_str();
         if id.is_empty() || id.contains('.') {
-            return Err(invalid(id, "effectId must be non-empty and contain no '.'".into()));
+            return Err(invalid(
+                id,
+                "effectId must be non-empty and contain no '.'".into(),
+            ));
         }
         if !seen.insert(id) {
             return Err(invalid(id, "effectId is used twice on this object".into()));
         }
         if let Effect::Curves(c) = &instance.effect {
-            for (name, points) in [("rgb", &c.rgb), ("red", &c.red), ("green", &c.green), ("blue", &c.blue), ("alpha", &c.alpha)] {
+            for (name, points) in [
+                ("rgb", &c.rgb),
+                ("red", &c.red),
+                ("green", &c.green),
+                ("blue", &c.blue),
+                ("alpha", &c.alpha),
+            ] {
                 if points.len() < 2 {
-                    return Err(invalid(id, format!("curve {name} needs at least two points")));
+                    return Err(invalid(
+                        id,
+                        format!("curve {name} needs at least two points"),
+                    ));
                 }
             }
         }
@@ -844,8 +1098,16 @@ mod tests {
             assert_eq!(wire["effectId"], "e");
             let back: EffectInstance = serde_json::from_value(wire).unwrap();
             assert_eq!(back, instance);
-            assert!(!effect.parameter_paths().is_empty(), "{} has parameters", effect.name());
-            assert!(validate_effects("o", &[instance]).is_ok(), "{} defaults are valid", effect.name());
+            assert!(
+                !effect.parameter_paths().is_empty(),
+                "{} has parameters",
+                effect.name()
+            );
+            assert!(
+                validate_effects("o", &[instance]).is_ok(),
+                "{} defaults are valid",
+                effect.name()
+            );
         }
     }
 
@@ -870,7 +1132,9 @@ mod tests {
         assert!(!levels.set("rgb.gamma", 0.0), "outside the domain");
         assert_eq!(levels.value("rgb.gamma"), Some(2.2));
         assert!(levels.set("clipToOutputWhite", 0.0));
-        let Effect::Levels(l) = &levels.effect else { unreachable!() };
+        let Effect::Levels(l) = &levels.effect else {
+            unreachable!()
+        };
         assert_eq!(l.rgb.gamma, 2.2);
         assert!(!l.clip_to_output_white);
 
@@ -878,12 +1142,17 @@ mod tests {
         assert_eq!(blur.domain("dimensions"), Some(Domain::Choice { count: 3 }));
         assert!(blur.set("dimensions", 2.0));
         assert!(!blur.set("dimensions", 3.0));
-        let Effect::GaussianBlur(g) = &blur.effect else { unreachable!() };
+        let Effect::GaussianBlur(g) = &blur.effect else {
+            unreachable!()
+        };
         assert_eq!(g.dimensions, BlurDimensions::Vertical);
 
         let curves = EffectInstance::new("c", Effect::Curves(Curves::default()));
         assert_eq!(curves.domain("rgb.1.y"), Some(UNIT));
-        assert_eq!(split_effect_property("effects.c.rgb.1.y"), Some(("c", "rgb.1.y")));
+        assert_eq!(
+            split_effect_property("effects.c.rgb.1.y"),
+            Some(("c", "rgb.1.y"))
+        );
         assert_eq!(split_effect_property("effects.c"), None);
         assert_eq!(split_effect_property("opacity"), None);
     }
@@ -897,12 +1166,18 @@ mod tests {
         if let Effect::Tint(t) = &mut bad.effect {
             t.amount = 2.0;
         }
-        assert!(matches!(validate_effects("o", &[bad]), Err(Refusal::EffectInvalid { detail, .. }) if detail.contains("amount")));
+        assert!(
+            matches!(validate_effects("o", &[bad]), Err(Refusal::EffectInvalid { detail, .. }) if detail.contains("amount"))
+        );
         let mut short = EffectInstance::new("c", Effect::Curves(Curves::default()));
         if let Effect::Curves(c) = &mut short.effect {
             c.red.pop();
         }
         assert!(validate_effects("o", &[short]).is_err());
-        assert!(validate_effects("o", &[EffectInstance::new("a.b", Effect::Tint(Tint::default()))]).is_err());
+        assert!(validate_effects(
+            "o",
+            &[EffectInstance::new("a.b", Effect::Tint(Tint::default()))]
+        )
+        .is_err());
     }
 }

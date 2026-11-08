@@ -69,14 +69,25 @@ mod tests {
         // The duplicate is the batch's second entry: the first must not land.
         let refused = add_assets(
             &mut scene,
-            &[asset("clip", AssetKind::Video), asset("logo", AssetKind::Image)],
+            &[
+                asset("clip", AssetKind::Video),
+                asset("logo", AssetKind::Image),
+            ],
         );
-        assert_eq!(refused, Err(Refusal::SceneAssetDuplicate { asset_id: "logo".into() }));
+        assert_eq!(
+            refused,
+            Err(Refusal::SceneAssetDuplicate {
+                asset_id: "logo".into()
+            })
+        );
         assert_eq!(scene.assets.len(), 1);
 
         assert_eq!(
             add_assets(&mut scene, &[asset("face", AssetKind::Font)]),
-            Err(Refusal::AssetKindNotAddable { asset_id: "face".into(), kind: AssetKind::Font })
+            Err(Refusal::AssetKindNotAddable {
+                asset_id: "face".into(),
+                kind: AssetKind::Font
+            })
         );
         assert_eq!(add_assets(&mut scene, &[]), Err(Refusal::AssetBatchEmpty));
         assert_eq!(scene.assets.len(), 1);

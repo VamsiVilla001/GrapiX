@@ -237,7 +237,9 @@ fn run((engine, token, op): (SocketAddr, Option<String>, Operation)) -> Result<(
         }
         // The code name first, so a script can act on the refusal without
         // parsing prose (invariant 17).
-        EngineReply::Refused(r) => return Err(Error::Refused(format!("refused [{}]: {r}", r.code_name()))),
+        EngineReply::Refused(r) => {
+            return Err(Error::Refused(format!("refused [{}]: {r}", r.code_name())))
+        }
         other => return Err(Error::Reply(format!("unexpected reply {other:?}"))),
     };
     Ok(())
@@ -253,7 +255,16 @@ mod tests {
     fn cue_defaults_to_next_opportunity() {
         let (_, _, op) =
             parse(["--engine", "127.0.0.1:4400", "--cue", "a:1"].map(str::to_string)).unwrap();
-        assert!(matches!(op, Operation::Cue(Pin { content_hash: None, .. }, TakeAt::NextOpportunity)));
+        assert!(matches!(
+            op,
+            Operation::Cue(
+                Pin {
+                    content_hash: None,
+                    ..
+                },
+                TakeAt::NextOpportunity
+            )
+        ));
     }
     #[test]
     fn frame_is_the_only_explicit_scheduling_choice() {

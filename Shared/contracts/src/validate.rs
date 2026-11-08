@@ -82,17 +82,13 @@ pub fn validate_scene_document(
                 StructuredRefusal::error(Refusal::AssetMissing {
                     hash: ContentHash(format!("{} (no content hash yet)", asset.asset_id)),
                 })
-                .at(
-                    format!("assets[{index}].checksum"),
-                    serde_json::Value::Null,
-                ),
+                .at(format!("assets[{index}].checksum"), serde_json::Value::Null),
             ),
             Some(hash) if check_assets_present && !available.contains(hash) => found.push(
-                StructuredRefusal::error(Refusal::AssetMissing { hash: hash.clone() })
-                    .at(
-                        format!("assets[{index}].checksum"),
-                        serde_json::json!(hash.0),
-                    ),
+                StructuredRefusal::error(Refusal::AssetMissing { hash: hash.clone() }).at(
+                    format!("assets[{index}].checksum"),
+                    serde_json::json!(hash.0),
+                ),
             ),
             Some(_) => {}
         }
@@ -120,12 +116,16 @@ pub fn validate_scene_document(
     // will never resolve later — there is no ambient registry to consult.
     for (index, object) in document.objects.iter().enumerate() {
         // 3.22: a malformed effect stack refuses by object and effect.
-        if let Err(refusal) = crate::effect::validate_effects(&object.base().id, object.base().effects()) {
+        if let Err(refusal) =
+            crate::effect::validate_effects(&object.base().id, object.base().effects())
+        {
             let given = match &refusal {
                 Refusal::EffectInvalid { effect_id, .. } => serde_json::json!(effect_id),
                 _ => serde_json::Value::Null,
             };
-            found.push(StructuredRefusal::error(refusal).at(format!("objects[{index}].effects"), given));
+            found.push(
+                StructuredRefusal::error(refusal).at(format!("objects[{index}].effects"), given),
+            );
         }
         match object {
             SceneObject::Text(text) => {
@@ -186,7 +186,10 @@ pub fn validate_scene_document(
                                 field: field.into(),
                                 value: value.to_string(),
                             })
-                            .at(format!("objects[{index}].{field}"), serde_json::json!(value)),
+                            .at(
+                                format!("objects[{index}].{field}"),
+                                serde_json::json!(value),
+                            ),
                         );
                     }
                 }
@@ -363,7 +366,10 @@ mod tests {
                 height: 1080,
                 frame_rate: RationalRate::P50,
             },
-            timeline: SceneTimeline { duration_frames: 1, ..Default::default() },
+            timeline: SceneTimeline {
+                duration_frames: 1,
+                ..Default::default()
+            },
             data_context: Default::default(),
             assets: Vec::new(),
             fonts: Vec::new(),
@@ -426,18 +432,35 @@ mod tests {
         };
         let support = crate::material::MaterialSupport::fixed_function();
         let problems = |objects| {
-            validate_scene_document(&document(objects), &support, &std::collections::HashSet::new(), false)
-                .into_iter()
-                .filter_map(|refusal| match refusal.code {
-                    Refusal::SceneHierarchyInvalid { problem, .. } => Some(problem),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
+            validate_scene_document(
+                &document(objects),
+                &support,
+                &std::collections::HashSet::new(),
+                false,
+            )
+            .into_iter()
+            .filter_map(|refusal| match refusal.code {
+                Refusal::SceneHierarchyInvalid { problem, .. } => Some(problem),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
         };
-        assert!(problems(vec![group("a", &["b"]), group("b", &[])]).is_empty(), "a sound hierarchy passes");
+        assert!(
+            problems(vec![group("a", &["b"]), group("b", &[])]).is_empty(),
+            "a sound hierarchy passes"
+        );
         assert_eq!(problems(vec![group("a", &["ghost"])]), ["missingChild"]);
-        assert_eq!(problems(vec![group("a", &["c"]), group("b", &["c"]), group("c", &[])]), ["multipleParents"]);
-        assert!(problems(vec![group("a", &["b"]), group("b", &["a"])]).contains(&"cycle".to_string()));
+        assert_eq!(
+            problems(vec![
+                group("a", &["c"]),
+                group("b", &["c"]),
+                group("c", &[])
+            ]),
+            ["multipleParents"]
+        );
+        assert!(
+            problems(vec![group("a", &["b"]), group("b", &["a"])]).contains(&"cycle".to_string())
+        );
     }
 
     /// 3.13: a trim value outside its domain refuses by name before publish.
@@ -465,16 +488,33 @@ mod tests {
         };
         let support = crate::material::MaterialSupport::fixed_function();
         let codes = |object| {
-            validate_scene_document(&document(vec![object]), &support, &std::collections::HashSet::new(), false)
-                .into_iter()
-                .map(|refusal| refusal.code)
-                .collect::<Vec<_>>()
+            validate_scene_document(
+                &document(vec![object]),
+                &support,
+                &std::collections::HashSet::new(),
+                false,
+            )
+            .into_iter()
+            .map(|refusal| refusal.code)
+            .collect::<Vec<_>>()
         };
-        assert!(codes(shape(Some(0.0), Some(100.0), Some(250.0))).is_empty(), "any finite offset is valid");
-        assert!(codes(shape(Some(75.0), Some(25.0), None)).is_empty(), "a start after the end is valid");
-        assert!(matches!(codes(shape(Some(140.0), None, None)).as_slice(), [Refusal::ShapeTrimInvalid { field, .. }] if field == "trimStart"));
-        assert!(matches!(codes(shape(None, Some(-1.0), None)).as_slice(), [Refusal::ShapeTrimInvalid { field, .. }] if field == "trimEnd"));
-        assert!(matches!(codes(shape(None, None, Some(f64::NAN))).as_slice(), [Refusal::ShapeTrimInvalid { field, .. }] if field == "trimOffset"));
+        assert!(
+            codes(shape(Some(0.0), Some(100.0), Some(250.0))).is_empty(),
+            "any finite offset is valid"
+        );
+        assert!(
+            codes(shape(Some(75.0), Some(25.0), None)).is_empty(),
+            "a start after the end is valid"
+        );
+        assert!(
+            matches!(codes(shape(Some(140.0), None, None)).as_slice(), [Refusal::ShapeTrimInvalid { field, .. }] if field == "trimStart")
+        );
+        assert!(
+            matches!(codes(shape(None, Some(-1.0), None)).as_slice(), [Refusal::ShapeTrimInvalid { field, .. }] if field == "trimEnd")
+        );
+        assert!(
+            matches!(codes(shape(None, None, Some(f64::NAN))).as_slice(), [Refusal::ShapeTrimInvalid { field, .. }] if field == "trimOffset")
+        );
     }
 
     #[test]
@@ -606,12 +646,20 @@ mod tests {
             provenance: crate::provenance::AssetProvenance::default(),
         });
 
-        let authoring =
-            validate_scene_document(&scene, &MaterialSupport::fixed_function(), &HashSet::new(), false);
+        let authoring = validate_scene_document(
+            &scene,
+            &MaterialSupport::fixed_function(),
+            &HashSet::new(),
+            false,
+        );
         assert!(authoring.is_empty(), "authoring must not demand transfer");
 
-        let engine =
-            validate_scene_document(&scene, &MaterialSupport::fixed_function(), &HashSet::new(), true);
+        let engine = validate_scene_document(
+            &scene,
+            &MaterialSupport::fixed_function(),
+            &HashSet::new(),
+            true,
+        );
         assert!(
             engine
                 .iter()
@@ -668,20 +716,22 @@ mod tests {
                 .into_iter()
                 .collect(),
         );
-        scene.objects.push(SceneObject::Mesh(crate::scene::MeshObject {
-            base: mesh_base,
-            mesh_kind: crate::scene::MeshPrimitiveKind::Cube,
-            depth: 1.0,
-            slab: None,
-            model_asset_id: None,
-            material_elements: None,
-            anchor_3d: None,
-            clip_name: None,
-            clip_index: None,
-            time_scale: None,
-            frame_offset: None,
-            animation_loop: false,
-        }));
+        scene
+            .objects
+            .push(SceneObject::Mesh(crate::scene::MeshObject {
+                base: mesh_base,
+                mesh_kind: crate::scene::MeshPrimitiveKind::Cube,
+                depth: 1.0,
+                slab: None,
+                model_asset_id: None,
+                material_elements: None,
+                anchor_3d: None,
+                clip_name: None,
+                clip_index: None,
+                time_scale: None,
+                frame_offset: None,
+                animation_loop: false,
+            }));
 
         let fixed = validate_scene_document(
             &scene,
@@ -719,9 +769,8 @@ mod tests {
         assert!(!blocking.publishable());
         assert_eq!(blocking.worst_severity(), Some(RefusalSeverity::Error));
 
-        let mut advisory = StructuredRefusal::error(Refusal::SceneParseFailed {
-            detail: "x".into(),
-        });
+        let mut advisory =
+            StructuredRefusal::error(Refusal::SceneParseFailed { detail: "x".into() });
         advisory.severity = RefusalSeverity::Warning;
         let permitted = PreflightReport {
             refusals: vec![advisory],
@@ -731,6 +780,9 @@ mod tests {
             "a warning is recorded, not a block (ADR-0002 G.4)"
         );
 
-        assert!(PreflightReport { refusals: Vec::new() }.publishable());
+        assert!(PreflightReport {
+            refusals: Vec::new()
+        }
+        .publishable());
     }
 }

@@ -9,8 +9,10 @@
 
 use gx_contracts::auth::Scope;
 use gx_mcp_server::Server;
-use gx_playout_mcp::{PackagesBuild, PackagesInspect, PackagesPublish, PlayoutLibrary, PlayoutTake};
 use gx_playout::PublishedLibrary;
+use gx_playout_mcp::{
+    PackagesBuild, PackagesInspect, PackagesPublish, PlayoutLibrary, PlayoutTake,
+};
 use parking_lot::Mutex;
 
 /// Run a batch of requests through the server and return the parsed replies.
@@ -62,7 +64,10 @@ fn scene(id: &str) -> gx_contracts::scene::SceneDocument {
             height: 1080,
             frame_rate: gx_contracts::RationalRate::P50,
         },
-        timeline: gx_contracts::scene::SceneTimeline { duration_frames: 1, ..Default::default() },
+        timeline: gx_contracts::scene::SceneTimeline {
+            duration_frames: 1,
+            ..Default::default()
+        },
         data_context: Default::default(),
         assets: Vec::new(),
         fonts: Vec::new(),
@@ -100,8 +105,16 @@ fn an_author_builds_and_publishes_a_package_over_the_wire() {
                     "designSystemVersion": 3,
                 }),
             ),
-            call(2, "packages.inspect", serde_json::json!({ "package": package })),
-            call(3, "packages.publish", serde_json::json!({ "package": package })),
+            call(
+                2,
+                "packages.inspect",
+                serde_json::json!({ "package": package }),
+            ),
+            call(
+                3,
+                "packages.publish",
+                serde_json::json!({ "package": package }),
+            ),
         ],
     );
 
@@ -176,11 +189,16 @@ fn capability_discovery_answers_before_any_scope_is_granted() {
     let tools = replies[0]["result"]["tools"].as_array().unwrap();
     assert_eq!(tools.len(), 1, "only installed handlers are advertised");
     assert_eq!(tools[0]["name"], "system.capability");
-    assert_eq!(tools[0]["inputSchema"], gx_contracts::mcp::input_schema("()").unwrap());
+    assert_eq!(
+        tools[0]["inputSchema"],
+        gx_contracts::mcp::input_schema("()").unwrap()
+    );
     // The capability catalogue describes the shared contracts, including
     // tools that this particular server has not installed. Discovery of the
     // callable instance surface remains tools/list's responsibility.
-    let names: Vec<&str> = replies[1]["result"]["tools"].as_array().unwrap()
+    let names: Vec<&str> = replies[1]["result"]["tools"]
+        .as_array()
+        .unwrap()
         .iter()
         .map(|tool| tool["name"].as_str().unwrap())
         .collect();
@@ -215,10 +233,7 @@ fn capability_discovery_answers_before_any_scope_is_granted() {
 struct Unreachable;
 
 impl gx_mcp_server::ToolHandler for Unreachable {
-    fn handle(
-        &self,
-        _args: serde_json::Value,
-    ) -> Result<serde_json::Value, gx_contracts::Refusal> {
+    fn handle(&self, _args: serde_json::Value) -> Result<serde_json::Value, gx_contracts::Refusal> {
         panic!("the scope gate let a call through to a handler it should have refused");
     }
 }

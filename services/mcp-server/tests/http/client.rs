@@ -35,7 +35,12 @@ impl HttpReply {
 
 /// POST one JSON-RPC message to `/mcp` with `Connection: close`. `host` is
 /// sent as the `Host` header, so a test can present a foreign one.
-pub fn post(addr: SocketAddr, host: &str, headers: &[(&str, &str)], body: &serde_json::Value) -> HttpReply {
+pub fn post(
+    addr: SocketAddr,
+    host: &str,
+    headers: &[(&str, &str)],
+    body: &serde_json::Value,
+) -> HttpReply {
     let body = body.to_string();
     let mut stream = TcpStream::connect(addr).expect("the HTTP server accepts");
     stream.set_read_timeout(Some(REPLY_TIMEOUT)).unwrap();
@@ -49,7 +54,9 @@ pub fn post(addr: SocketAddr, host: &str, headers: &[(&str, &str)], body: &serde
     }
     request.push_str("\r\n");
     request.push_str(&body);
-    stream.write_all(request.as_bytes()).expect("the request is sent");
+    stream
+        .write_all(request.as_bytes())
+        .expect("the request is sent");
     let mut raw = Vec::new();
     stream.read_to_end(&mut raw).expect("the response is read");
     let split = raw
@@ -68,23 +75,38 @@ pub fn post(addr: SocketAddr, host: &str, headers: &[(&str, &str)], body: &serde
         .filter_map(|line| line.split_once(':'))
         .map(|(name, value)| (name.trim().to_ascii_lowercase(), value.trim().to_owned()))
         .collect();
-    if headers.iter().any(|(name, value)| name == "transfer-encoding" && value.contains("chunked")) {
+    if headers
+        .iter()
+        .any(|(name, value)| name == "transfer-encoding" && value.contains("chunked"))
+    {
         payload = dechunk(&payload);
     }
-    HttpReply { status, headers, body: String::from_utf8(payload).expect("a UTF-8 body") }
+    HttpReply {
+        status,
+        headers,
+        body: String::from_utf8(payload).expect("a UTF-8 body"),
+    }
 }
 
 /// `post` to the server's own address with a matching `Host`.
-pub fn post_local(addr: SocketAddr, headers: &[(&str, &str)], body: &serde_json::Value) -> HttpReply {
+pub fn post_local(
+    addr: SocketAddr,
+    headers: &[(&str, &str)],
+    body: &serde_json::Value,
+) -> HttpReply {
     post(addr, &format!("127.0.0.1:{}", addr.port()), headers, body)
 }
 
 fn dechunk(mut data: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     loop {
-        let line_end = data.windows(2).position(|window| window == b"\r\n").expect("a chunk size line");
+        let line_end = data
+            .windows(2)
+            .position(|window| window == b"\r\n")
+            .expect("a chunk size line");
         let size_text = String::from_utf8_lossy(&data[..line_end]);
-        let size = usize::from_str_radix(size_text.split(';').next().unwrap().trim(), 16).expect("a hex chunk size");
+        let size = usize::from_str_radix(size_text.split(';').next().unwrap().trim(), 16)
+            .expect("a hex chunk size");
         data = &data[line_end + 2..];
         if size == 0 {
             return out;

@@ -77,7 +77,10 @@ struct Job {
 
 enum JobKind {
     List,
-    Call { name: String, args: serde_json::Value },
+    Call {
+        name: String,
+        args: serde_json::Value,
+    },
 }
 
 enum Answer {
@@ -150,7 +153,10 @@ fn tool(listed: ListedTool) -> Result<Tool, ErrorData> {
     });
     serde_json::from_value(value).map_err(|error| {
         refused(Refusal::TransportFailed {
-            detail: format!("MCP tool {} does not fit the Tool shape: {error}", descriptor.name),
+            detail: format!(
+                "MCP tool {} does not fit the Tool shape: {error}",
+                descriptor.name
+            ),
         })
     })
 }
@@ -175,7 +181,10 @@ impl ServerHandler for McpService {
         let Answer::Listed(listed) = self.ask(JobKind::List).await? else {
             unreachable!("a list job is answered with a listing")
         };
-        let tools = listed.into_iter().map(tool).collect::<Result<Vec<_>, _>>()?;
+        let tools = listed
+            .into_iter()
+            .map(tool)
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(ListToolsResult::with_all_items(tools))
     }
 
@@ -191,24 +200,33 @@ impl ServerHandler for McpService {
             .arguments
             .map(serde_json::Value::Object)
             .unwrap_or(serde_json::Value::Null);
-        let job = JobKind::Call { name: name.clone(), args };
+        let job = JobKind::Call {
+            name: name.clone(),
+            args,
+        };
         let Answer::Called(output) = self.ask(job).await? else {
             unreachable!("a call job is answered with the tool's output")
         };
         let result = match output {
             ToolOutput::Value(value) => CallToolResult::structured(value),
-            ToolOutput::CallToolResult(value) => serde_json::from_value(value).map_err(|error| {
-                refused(Refusal::TransportFailed {
-                    detail: format!("{name} declared a CallToolResult it did not return: {error}"),
-                })
-            })?,
+            ToolOutput::CallToolResult(value) => {
+                serde_json::from_value(value).map_err(|error| {
+                    refused(Refusal::TransportFailed {
+                        detail: format!(
+                            "{name} declared a CallToolResult it did not return: {error}"
+                        ),
+                    })
+                })?
+            }
         };
         Ok(result.into())
     }
 }
 
 fn runtime() -> std::io::Result<tokio::runtime::Runtime> {
-    tokio::runtime::Builder::new_multi_thread().enable_all().build()
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
 }
 
 impl Server {
@@ -236,10 +254,15 @@ impl Server {
     /// picks a free one) before the first request is accepted.
     pub fn serve_http(self, port: u16, on_bound: impl FnOnce(SocketAddr)) -> std::io::Result<()> {
         let runtime = runtime()?;
-        let listener = runtime.block_on(tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)))?;
+        let listener =
+            runtime.block_on(tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)))?;
         on_bound(listener.local_addr()?);
         let (service, jobs) = McpService::pair();
-        let transport = runtime.spawn(serve_http_listener(service, listener, CancellationToken::new()));
+        let transport = runtime.spawn(serve_http_listener(
+            service,
+            listener,
+            CancellationToken::new(),
+        ));
         self.drive(jobs);
         runtime.block_on(transport).map_err(std::io::Error::other)?
     }
@@ -339,7 +362,10 @@ mod tests {
             let mut lines = BufReader::new(client_read).lines();
             let mut replies = Vec::new();
             for message in messages {
-                client_write.write_all(format!("{message}\n").as_bytes()).await.unwrap();
+                client_write
+                    .write_all(format!("{message}\n").as_bytes())
+                    .await
+                    .unwrap();
                 if message.get("id").is_some() {
                     let line = tokio::time::timeout(Duration::from_secs(10), lines.next_line())
                         .await
@@ -390,14 +416,22 @@ mod tests {
         server.register("scenes.create", Box::new(Echo));
         let replies = exchange(
             server,
-            vec![initialize("2025-06-18"), initialized(), call(1, "scenes.create", serde_json::json!({ "id": "x" }))],
+            vec![
+                initialize("2025-06-18"),
+                initialized(),
+                call(1, "scenes.create", serde_json::json!({ "id": "x" })),
+            ],
         );
         assert_eq!(replies[0]["result"]["protocolVersion"], "2025-06-18");
         assert_eq!(replies[0]["result"]["serverInfo"]["name"], "gx-mcp-server");
         let result = &replies[1]["result"];
-        assert_eq!(result["structuredContent"], serde_json::json!({ "id": "x" }));
+        assert_eq!(
+            result["structuredContent"],
+            serde_json::json!({ "id": "x" })
+        );
         assert_eq!(result["content"][0]["type"], "text");
-        let text: serde_json::Value = serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+        let text: serde_json::Value =
+            serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
         assert_eq!(text, result["structuredContent"]);
         assert_ne!(result["isError"], true);
     }
@@ -410,12 +444,17 @@ mod tests {
         server.register("playout.take", Box::new(Echo));
         let replies = exchange(
             server,
-            vec![initialize("2025-06-18"), initialized(), call(1, "playout.take", serde_json::Value::Null)],
+            vec![
+                initialize("2025-06-18"),
+                initialized(),
+                call(1, "playout.take", serde_json::Value::Null),
+            ],
         );
         let reply = &replies[1];
         assert!(reply["result"].is_null(), "{reply}");
         assert_eq!(reply["error"]["code"], REFUSED);
-        let expected = serde_json::to_value(StructuredRefusal::error(Refusal::Unauthenticated)).unwrap();
+        let expected =
+            serde_json::to_value(StructuredRefusal::error(Refusal::Unauthenticated)).unwrap();
         assert_eq!(reply["error"]["data"], expected, "{reply}");
     }
 
@@ -425,19 +464,29 @@ mod tests {
         server.register("render.preview", Box::new(Image));
         let replies = exchange(
             server,
-            vec![initialize("2025-06-18"), initialized(), call(1, "render.preview", serde_json::json!({}))],
+            vec![
+                initialize("2025-06-18"),
+                initialized(),
+                call(1, "render.preview", serde_json::json!({})),
+            ],
         );
         let result = &replies[1]["result"];
         assert_eq!(result["content"][0]["type"], "image", "{result}");
         assert_eq!(result["content"].as_array().map(Vec::len), Some(1));
-        assert_eq!(result["structuredContent"], serde_json::json!({ "frame": 7 }));
+        assert_eq!(
+            result["structuredContent"],
+            serde_json::json!({ "frame": 7 })
+        );
     }
 
     #[test]
     fn initialize_negotiates_down_to_2025_06_18() {
         for asked in ["2026-07-28", "2025-11-25", "2025-06-18", "2024-11-05"] {
             let replies = exchange(Server::new(Vec::new()), vec![initialize(asked)]);
-            assert_eq!(replies[0]["result"]["protocolVersion"], "2025-06-18", "asked {asked}");
+            assert_eq!(
+                replies[0]["result"]["protocolVersion"], "2025-06-18",
+                "asked {asked}"
+            );
         }
     }
 
@@ -477,15 +526,34 @@ mod tests {
             ],
         );
         let tools = replies[1]["result"]["tools"].as_array().unwrap();
-        let mut names: Vec<&str> = tools.iter().map(|tool| tool["name"].as_str().unwrap()).collect();
+        let mut names: Vec<&str> = tools
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap())
+            .collect();
         names.sort_unstable();
-        assert_eq!(names, ["scenes.create", "system.capability"], "only installed handlers are listed");
+        assert_eq!(
+            names,
+            ["scenes.create", "system.capability"],
+            "only installed handlers are listed"
+        );
         for tool in tools {
             let name = tool["name"].as_str().unwrap();
             let descriptor = gx_contracts::mcp::ToolRegistry::get(name).unwrap();
-            assert_eq!(tool["inputSchema"], gx_contracts::mcp::input_schema(descriptor.input).unwrap(), "{name}");
-            assert_eq!(tool["_meta"][TOOL_META_KEY], serde_json::to_value(descriptor).unwrap(), "{name}");
-            assert_eq!(tool["annotations"]["readOnlyHint"], descriptor.effect == ToolEffect::Read, "{name}");
+            assert_eq!(
+                tool["inputSchema"],
+                gx_contracts::mcp::input_schema(descriptor.input).unwrap(),
+                "{name}"
+            );
+            assert_eq!(
+                tool["_meta"][TOOL_META_KEY],
+                serde_json::to_value(descriptor).unwrap(),
+                "{name}"
+            );
+            assert_eq!(
+                tool["annotations"]["readOnlyHint"],
+                descriptor.effect == ToolEffect::Read,
+                "{name}"
+            );
         }
     }
 
@@ -497,7 +565,9 @@ mod tests {
         let (service, _jobs) = McpService::pair();
         let refused = runtime
             .block_on(async {
-                let listener = tokio::net::TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await.unwrap();
+                let listener = tokio::net::TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0))
+                    .await
+                    .unwrap();
                 serve_http_listener(service, listener, CancellationToken::new()).await
             })
             .expect_err("only 127.0.0.1 is served");

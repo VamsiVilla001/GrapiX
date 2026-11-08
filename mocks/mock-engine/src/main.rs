@@ -126,7 +126,11 @@ fn parse_publish(spec: &str) -> Option<(TakeId, Revision, ContentHash)> {
     if id.is_empty() || !is_hash {
         return None;
     }
-    Some((TakeId(id.to_string()), Revision(revision.parse().ok()?), ContentHash(hash.to_string())))
+    Some((
+        TakeId(id.to_string()),
+        Revision(revision.parse().ok()?),
+        ContentHash(hash.to_string()),
+    ))
 }
 
 fn usage(problem: &str) {
