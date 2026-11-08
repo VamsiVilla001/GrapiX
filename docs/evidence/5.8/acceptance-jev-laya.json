@@ -1,0 +1,107 @@
+{
+  "laya": {
+    "model": "convaiinnovations/laya-multilingual",
+    "max_len": 8192,
+    "state_tokens": 871,
+    "truncated": false,
+    "load_s": 20.93,
+    "predict_s": 3.687
+  },
+  "jev_model": "jev-1.14.0",
+  "rows": [
+    {
+      "question": "row_5_8_done",
+      "type": "noul",
+      "laya": 0.5743,
+      "jev": 0.86,
+      "agree": false,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.5743,
+        "confidence": 0.5743,
+        "answer_confidence": 0.5743,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.86
+      }
+    },
+    {
+      "question": "identical_shown",
+      "type": "noul",
+      "laya": 0.8914,
+      "jev": 0.97,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.8914,
+        "confidence": 0.8914,
+        "answer_confidence": 0.8914,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.97
+      }
+    },
+    {
+      "question": "toctou_blocks",
+      "type": "noul",
+      "laya": 0.9036,
+      "jev": 0.16,
+      "agree": false,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9036,
+        "confidence": 0.9036,
+        "answer_confidence": 0.9036,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.16
+      }
+    },
+    {
+      "question": "weakest",
+      "type": "choice",
+      "laya": "editor_not_wired",
+      "jev": "toctou",
+      "agree": false,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "editor_not_wired",
+        "probabilities": {
+          "editor_not_wired": 0.9413,
+          "toctou": 0.0108,
+          "single_fixture": 0.0134,
+          "none": 0.0346
+        },
+        "confidence": 0.7982,
+        "answer_confidence": 0.9413,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "toctou",
+        "confidence": 0.45,
+        "probabilities": {
+          "editor_not_wired": 0.12,
+          "toctou": 0.59,
+          "single_fixture": 0.29,
+          "none": 0
+        }
+      }
+    }
+  ],
+  "agreement": 0.25
+}

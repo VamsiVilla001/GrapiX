@@ -11,9 +11,9 @@
 use gx_conformance::{
     asset_plane_suite, asset_route_suite, control_plane_delivery_suite, control_plane_fault_suite,
     control_plane_suite, editor_command_suite, headless_render_suite, locality_suite,
-    media_plane_suite, mock_product_suite, real_engine_scope_suite, refusal_audit_suite,
-    render_preview_suite, scene_plane_suite, scope_enforcement_suite, timing_plane_suite, Outcome,
-    Report,
+    media_plane_suite, mock_product_suite, package_handoff_suite, real_engine_scope_suite,
+    refusal_audit_suite, render_preview_suite, scene_plane_suite, scope_enforcement_suite,
+    timing_plane_suite, Outcome, Report,
 };
 use gx_contracts::{DeviceTier, Locality, RationalRate};
 use gx_control_plane::peer::EnginePeer;
@@ -72,6 +72,9 @@ fn main() {
     run_against_real_engine(&mut report);
     // 5.7 against the real worker, started protected.
     run_scope_against_real_engine(&mut report);
+    // 5.8: one package, by local path to a co-located worker and by chunked
+    // upload to a LAN worker.
+    run_package_handoff_against_real_engines(&mut report);
 
     report.set_peer("plane contract, no peer");
     control_plane_delivery_suite(&mut report);
@@ -371,6 +374,106 @@ fn run_scope_against_real_engine(report: &mut Report) {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     real_engine_scope_suite(addr, SECRET, report);
+}
+
+/// A worker the harness started, stopped when this drops.
+struct Worker {
+    child: std::process::Child,
+    client: Client,
+    assets: SocketAddr,
+}
+
+impl Drop for Worker {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// Start the real worker on fresh loopback ports with `extra` arguments and
+/// wait for its capability exchange.
+fn start_worker(worker: &std::path::Path, tag: &str, extra: &[String]) -> Result<Worker, String> {
+    let port = free_port();
+    let asset_port = free_port();
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+    let journal = std::env::temp_dir().join(format!(
+        "gx-conformance-{tag}-{}-{port}/recovery.json",
+        std::process::id()
+    ));
+    let mut args = vec![
+        "--port".to_owned(),
+        port.to_string(),
+        "--asset-port".to_owned(),
+        asset_port.to_string(),
+        "--recovery-journal".to_owned(),
+        journal.display().to_string(),
+    ];
+    args.extend_from_slice(extra);
+    let mut child = std::process::Command::new(worker)
+        .args(&args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("could not spawn worker: {e}"))?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    let client = loop {
+        match Client::connect(addr) {
+            Ok(client) => break client,
+            Err(_) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("worker did not answer on its control port".into());
+            }
+        }
+    };
+    Ok(Worker {
+        child,
+        client,
+        assets: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), asset_port),
+    })
+}
+
+/// 5.8 against two real workers: co-located with a package directory, and LAN.
+fn run_package_handoff_against_real_engines(report: &mut Report) {
+    report.set_peer("real render engines, co-located with a package directory and LAN (5.8)");
+    let Some(worker) = worker_binary() else {
+        report.skip_unavailable("gx-render-worker binary not built");
+        return;
+    };
+    let package_dir =
+        std::env::temp_dir().join(format!("gx-conformance-packages-{}", std::process::id()));
+    if let Err(e) = std::fs::create_dir_all(&package_dir) {
+        report.skip_unavailable(format!("could not create a package directory: {e}"));
+        return;
+    }
+    let started = start_worker(
+        &worker,
+        "package-local",
+        &[
+            "--package-dir".to_owned(),
+            package_dir.display().to_string(),
+        ],
+    )
+    .and_then(|local| {
+        start_worker(&worker, "package-lan", &["--lan".to_owned()]).map(|lan| (local, lan))
+    });
+    match started {
+        Ok((mut local, mut lan)) => {
+            let (local_assets, lan_assets) = (local.assets, lan.assets);
+            package_handoff_suite(
+                (&mut local.client, local_assets),
+                (&mut lan.client, lan_assets),
+                &package_dir,
+                report,
+            );
+        }
+        Err(e) => report.skip_unavailable(e),
+    }
+    let _ = std::fs::remove_dir_all(&package_dir);
 }
 
 fn worker_binary() -> Option<std::path::PathBuf> {

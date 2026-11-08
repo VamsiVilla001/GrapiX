@@ -243,7 +243,7 @@ function at(path, text, index) {
 }
 
 /** Who may name a `Locality` variant (R9): declarers, the lead, the negotiator, conformance. */
-const LOCALITY_ALLOWED = /^(?:Shared\/contracts\/|Shared\/control-plane\/|Shared\/media-plane\/|services\/render-engine\/|mocks\/mock-engine\/|conformance\/)/;
+const LOCALITY_ALLOWED = /^(?:Shared\/contracts\/|Shared\/control-plane\/|Shared\/media-plane\/|Shared\/asset-plane\/|services\/render-engine\/|mocks\/mock-engine\/|conformance\/)/;
 
 function checkProductBoundaries(path, text, add) {
   if (path.startsWith("Shared/") && path.endsWith("Cargo.toml")) {
@@ -360,7 +360,7 @@ export function check(files) {
       }
       const branch = LOCALITY_ALLOWED.test(path) ? null : /\bLocality::(?:CoLocated|Lan)\s*(?:=>|\||==|!=)|(?:==|!=)\s*Locality::(?:CoLocated|Lan)\b|\bmatches!\s*\([^;]*?\bLocality::|\bif\s+let\s+Locality::/.exec(source.code);
       if (branch) {
-        add(at(path, source.code, branch.index), "a consumer branches on a Locality variant: ask gx_media_plane::profile_for with the declared locality instead (R9, 5.5)");
+        add(at(path, source.code, branch.index), "a consumer branches on a Locality variant: ask gx_media_plane::profile_for or gx_asset_plane::handoff_for with the declared locality instead (R9, 5.5)");
       }
       const listener = path === "Shared/control-plane/src/bind.rs" ? null : /(?:bind|listen|TcpListener)[^;\n]*\b4100\b/.exec(source.text);
       if (listener) {

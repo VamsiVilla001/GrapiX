@@ -17,7 +17,7 @@ application is operable and automatable before it is clickable.
 
 ---
 
-**255 steps across 19 phases.**
+**256 steps across 19 phases.**
 
 **Product direction — 15 October 2026 (user):** GrapiX combines After
 Effects-style composition authoring with Scene Manager and live broadcast
@@ -313,7 +313,8 @@ Location-transparent from the first line. Local is an optimisation, not a differ
 | `5.6` | Conformance suite passes over the real transport, not just mocks | BE | 1.12 | Same suite, both paths |
 | `5.7` | Control-port scope enforcement: every request checked against the token role's scopes at the transport, before the engine sees it (added 8 Nov 2026 from the done-row review: `server.rs` verified a token's signature and then ignored its claims; only the MCP server enforced scopes) | BE | 5.2, 8.13 | A conformance test sends every control request with an author-scoped token and each is refused by name at the transport; the engine handler is never reached (asserted by trace). Done before Phase 14 exposes the port beyond loopback. |
 | `5.9` | Published assets reach the engine: the 5.3 transfer wired into the engine's asset plane and the Editor's publish (added 8 Nov 2026, user decision; before it no published font or image could reach the real engine) | BE | 5.3 | The Editor's publish sends every asset the scene declares (re-hash checked from its store) through preflight and the 5.3 transfer on the same asset-plane address before the scene, and the real engine keeps the verified bytes; a conformance test against the real worker shows a scene with a font and an image asset refused AssetMissing alone, its assets transferred, then published and taken to Program, an image object refused by name until 3.17 draws images, and a re-publish moving no bytes. |
-| `5.8` | L0 asset handoff by local path (ADR-001's co-located asset plane) (added 8 Nov 2026, user decision, split from `5.5`) | BE | 5.5, 5.9 | A co-located engine accepts a published package by local path, re-hashing every asset before use and refusing by name a path outside the package directory or a hash mismatch; the publisher chooses path or chunked upload from the declared locality through one negotiation function; a conformance test publishes the same package both ways and the engine prepares identical scenes. |
+| `5.8` | L0 asset handoff by local path (ADR-001's co-located asset plane) (added 8 Nov 2026, user decision, split from `5.5`) | BE | 5.5, 5.9 | A co-located engine accepts a published package by local path, re-hashing every asset before use and refusing by name a path outside the package directory or a hash mismatch; the publisher chooses path or chunked upload from the declared locality through one negotiation function; a conformance test publishes the same package both ways and the engine prepares identical scenes. (Done 8 Nov 2026, user decision: a file swapped for a link between the directory check and the open is not re-checked on the open handle; every byte is still verified before use. Noted and tracked as hardening; evidence `docs/evidence/5.8`.) |
+| `5.10` | Editor publishes by path when co-located (added 8 Nov 2026, user decision, split from `5.8`) | BE | 5.8 | The Editor's publish reads the engine's declared locality from the capability exchange and publishes through `gx_asset_plane::publish_package`: co-located, it writes a package into the configured package directory and hands it over by path; over a LAN, it uploads chunked. An Editor-path test publishes the Inter lower third both ways to real workers, and both are taken. |
 
 ## Phase 6 — Playout service
 

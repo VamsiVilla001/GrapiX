@@ -10,6 +10,7 @@
 
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
@@ -65,6 +66,10 @@ pub enum PublishRefusal {
     /// The peer could parse the scene but cannot prepare it from the assets
     /// and render support it actually has.
     PreparationRefused { cause: gx_contracts::Refusal },
+    /// A package offered by local path was refused before its scene reached
+    /// the peer (5.8): no package directory, a path outside it, an unreadable
+    /// package, or bytes that do not match their manifest or declared hash.
+    PackageRefused { cause: gx_contracts::Refusal },
 }
 
 /// A peer that can atomically turn a strictly parsed scene into a revision,
@@ -94,6 +99,12 @@ pub trait AssetPublishPeer: Send + 'static {
         Err(Refusal::NotImplemented {
             what: format!("this asset-plane peer keeps no asset bytes (asset {hash})"),
         })
+    }
+
+    /// The absolute directory a co-located publisher may hand packages from
+    /// by local path (5.8). `None`, the default, reads no path at all.
+    fn package_directory(&self) -> Option<PathBuf> {
+        None
     }
 }
 
@@ -234,6 +245,19 @@ pub fn publish_scene(
     serde_json::from_slice(&header).map_err(PublishClientError::Malformed)
 }
 
+/// Offer a package by local path (5.8). Crate-private: a publisher goes
+/// through `handoff::publish_package`, which chooses this route from the
+/// declared locality, so no caller picks a route by hand.
+pub(crate) fn publish_package_path(
+    engine: SocketAddr,
+    path: &str,
+) -> Result<PublishReply, PublishClientError> {
+    let request = serde_json::to_vec(&serde_json::json!({ "package": { "path": path } }))
+        .map_err(PublishClientError::Malformed)?;
+    let (_, header) = exchange(engine, &request)?;
+    serde_json::from_slice(&header).map_err(PublishClientError::Malformed)
+}
+
 /// Why a fetch returned no bytes.
 #[derive(Debug)]
 pub enum FetchError {
@@ -326,6 +350,8 @@ enum AssetRequest {
     /// The opening frame of the 5.3 transfer dialect (5.9): the rest of the
     /// connection is preflight and chunks into this peer.
     Transfer(crate::preflight::AssetTransferRequest),
+    /// A package offered by local path (5.8).
+    Package(String),
 }
 
 fn handle_publish<P: AssetPublishPeer>(
@@ -357,6 +383,16 @@ fn handle_publish<P: AssetPublishPeer>(
             &PeerAssets(Arc::clone(&peer)),
             &crate::preflight::AssetTransferMetrics::new(),
         ),
+        AssetRequest::Package(path) => {
+            let directory = locked()?.package_directory();
+            // Read and verified without the peer lock, so a large package
+            // never holds up a take.
+            let reply = match crate::handoff::open_package_in(directory.as_deref(), &path) {
+                Ok(packaged) => deliver_packaged(&mut *locked()?, packaged),
+                Err(cause) => PublishReply::Refused(PublishRefusal::PackageRefused { cause }),
+            };
+            write_header(&mut stream, &reply)
+        }
         AssetRequest::Publish(scene) => {
             let reply = match scene {
                 Ok(scene) => locked()?.publish_scene(scene),
@@ -390,6 +426,23 @@ fn handle_publish<P: AssetPublishPeer>(
     }
 }
 
+/// Hand a package's verified assets to the peer through the same receipt the
+/// chunked route uses, then publish its scene through the same entry point.
+fn deliver_packaged<P: AssetPublishPeer>(
+    peer: &mut P,
+    packaged: crate::handoff::PackagedScene,
+) -> PublishReply {
+    for asset in packaged.assets {
+        if peer.has_verified_asset(&asset.hash) {
+            continue;
+        }
+        if let Err(cause) = peer.accept_verified_asset(asset.hash, asset.bytes) {
+            return PublishReply::Refused(PublishRefusal::PackageRefused { cause });
+        }
+    }
+    peer.publish_scene(packaged.scene)
+}
+
 fn write_header<T: Serialize>(stream: &mut TcpStream, header: &T) -> io::Result<()> {
     let bytes = serde_json::to_vec(header).map_err(io::Error::other)?;
     stream.write_all(&(bytes.len() as u32).to_be_bytes())?;
@@ -407,7 +460,8 @@ fn parse_request(bytes: &[u8]) -> AssetRequest {
             Err(error) => return invalid(error.to_string()),
         };
     // The transfer dialect's frames carry a `request` tag (preflight, begin,
-    // chunk); a publication carries `scene` and a fetch `fetch`.
+    // chunk); a publication carries `scene`, a fetch `fetch` and a package
+    // offered by local path `package` (5.8).
     if request.contains_key("request") {
         return match serde_json::from_value(serde_json::Value::Object(request)) {
             Ok(transfer) => AssetRequest::Transfer(transfer),
@@ -416,8 +470,20 @@ fn parse_request(bytes: &[u8]) -> AssetRequest {
     }
     if request.len() != 1 {
         return invalid(
-            "an asset-plane request must contain exactly one of `scene` or `fetch`".to_string(),
+            "an asset-plane request must contain exactly one of `scene`, `fetch` or `package`"
+                .to_string(),
         );
+    }
+    if let Some(package) = request.remove("package") {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Package {
+            path: String,
+        }
+        return match serde_json::from_value::<Package>(package) {
+            Ok(package) => AssetRequest::Package(package.path),
+            Err(error) => invalid(format!("package request: {error}")),
+        };
     }
     if let Some(fetch) = request.remove("fetch") {
         #[derive(Deserialize)]
@@ -432,7 +498,8 @@ fn parse_request(bytes: &[u8]) -> AssetRequest {
     }
     let Some(scene) = request.remove("scene") else {
         return invalid(
-            "an asset-plane request must contain exactly one of `scene` or `fetch`".to_string(),
+            "an asset-plane request must contain exactly one of `scene`, `fetch` or `package`"
+                .to_string(),
         );
     };
     AssetRequest::Publish(

@@ -543,6 +543,18 @@ pub enum Refusal {
     PackageScenePinMismatch { detail: String },
     /// A scene-declared asset was omitted from the package closure.
     PackageAssetNotPackaged { asset_id: String, path: String },
+    /// A package was offered by local path to an engine started without a
+    /// package directory (5.8). Such an engine reads no path at all; the
+    /// publisher uses the chunked upload instead.
+    PackageDirectoryNotConfigured { path: String },
+    /// A package path offered by local path does not resolve inside the
+    /// engine's package directory (5.8). Checked after resolving links, so a
+    /// link inside the directory cannot reach a file outside it.
+    PackagePathOutsideDirectory { path: String, directory: String },
+    /// The package file offered by local path could not be opened or is not
+    /// a package archive (5.8). Distinct from a member that fails to decode,
+    /// which is `PackageEntryUnreadable`.
+    PackageUnreadable { path: String, detail: String },
     /// Project JSON could not be parsed. The store refuses it instead of
     /// selecting a backup without the operator's explicit recovery choice.
     ProjectJsonCorrupt { project: String, detail: String },
@@ -1197,6 +1209,17 @@ impl std::fmt::Display for Refusal {
             }
             Refusal::PackageAssetNotPackaged { asset_id, path } => {
                 write!(f, "scene asset {asset_id} is not packaged at {path}")
+            }
+            Refusal::PackageDirectoryNotConfigured { path } => write!(
+                f,
+                "package {path} was offered by path, but this engine has no package directory"
+            ),
+            Refusal::PackagePathOutsideDirectory { path, directory } => write!(
+                f,
+                "package path {path} is outside the engine's package directory {directory}"
+            ),
+            Refusal::PackageUnreadable { path, detail } => {
+                write!(f, "package {path} cannot be read: {detail}")
             }
             Refusal::ProjectJsonCorrupt { project, detail } => {
                 write!(f, "project JSON is corrupt ({project}): {detail}")
@@ -1956,6 +1979,17 @@ impl Refusal {
                 asset_id: "audit".into(),
                 path: "audit".into(),
             },
+            Self::PackageDirectoryNotConfigured {
+                path: "audit".into(),
+            },
+            Self::PackagePathOutsideDirectory {
+                path: "audit".into(),
+                directory: "audit".into(),
+            },
+            Self::PackageUnreadable {
+                path: "audit".into(),
+                detail: "audit".into(),
+            },
             Self::ProjectJsonCorrupt {
                 project: "audit".into(),
                 detail: "audit".into(),
@@ -2276,6 +2310,9 @@ impl Refusal {
             Self::PackageFileHashMismatch { .. } => "packageFileHashMismatch",
             Self::PackageScenePinMismatch { .. } => "packageScenePinMismatch",
             Self::PackageAssetNotPackaged { .. } => "packageAssetNotPackaged",
+            Self::PackageDirectoryNotConfigured { .. } => "packageDirectoryNotConfigured",
+            Self::PackagePathOutsideDirectory { .. } => "packagePathOutsideDirectory",
+            Self::PackageUnreadable { .. } => "packageUnreadable",
             Self::ProjectJsonCorrupt { .. } => "projectJsonCorrupt",
             Self::UnknownProjectSchema { .. } => "unknownProjectSchema",
             Self::ProjectIdLocationMismatch { .. } => "projectIdLocationMismatch",

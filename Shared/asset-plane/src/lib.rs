@@ -6,12 +6,17 @@
 #![forbid(unsafe_code)]
 
 pub mod fonts;
+pub mod handoff;
 pub mod import;
 pub mod package;
 pub mod preflight;
 pub mod publish;
 pub mod store;
 pub mod transfer;
+pub use handoff::{
+    handoff_for, open_package_in, publish_package, AssetHandoff, PackagePublication,
+    PackagePublishError, PackagedScene,
+};
 pub use preflight::{
     publish_assets, AssetBytes, AssetPublishSummary, AssetTransferClient, AssetTransferClientError,
     AssetTransferMetrics, AssetTransferReply, AssetTransferRequest, AssetTransferServer,

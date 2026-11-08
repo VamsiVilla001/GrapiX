@@ -30,6 +30,7 @@ use gx_control_plane::status::{Degradation, EngineStatus, ProgramState, Referenc
 use gx_render_worker::headless::{answer_render, RenderedImages};
 use gx_render_worker::{AssetBytes, PreparedScene};
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 /// A mock engine. Deterministic, in-process, no GPU and no transport.
@@ -53,6 +54,8 @@ pub struct MockEngine {
     assets: HashSet<ContentHash>,
     /// Verified bytes held for headless renders, by content hash.
     asset_bytes: AssetBytes,
+    /// The engine's package directory for handoff by local path (5.8).
+    package_directory: Option<PathBuf>,
     /// Headless renders' images, served on the asset plane by content hash.
     rendered: Arc<Mutex<RenderedImages>>,
     program: Option<ProgramState>,
@@ -81,11 +84,19 @@ impl MockEngine {
             documents: HashMap::new(),
             assets: HashSet::new(),
             asset_bytes: HashMap::new(),
+            package_directory: None,
             rendered: Arc::new(Mutex::new(RenderedImages::with_capacity(64))),
             program: None,
             cued: None,
             events: Vec::new(),
         }
+    }
+
+    /// Accept packages by local path from `directory`, as the engine's
+    /// `--package-dir` does (5.8).
+    pub fn with_package_directory(mut self, directory: PathBuf) -> Self {
+        self.package_directory = Some(directory);
+        self
     }
 
     /// Pretend to be reachable over a LAN, which lengthens the lead.
@@ -338,6 +349,10 @@ impl AssetPublishPeer for MockEngine {
         self.assets.insert(hash.clone());
         self.asset_bytes.insert(hash, bytes);
         Ok(())
+    }
+
+    fn package_directory(&self) -> Option<PathBuf> {
+        self.package_directory.clone()
     }
 
     fn fetch(&self, hash: &ContentHash) -> Option<Arc<Vec<u8>>> {

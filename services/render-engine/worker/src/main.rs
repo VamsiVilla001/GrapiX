@@ -28,6 +28,7 @@ fn main() {
     let mut token: Option<String> = None;
     let mut asset_port = None;
     let mut recovery_path: Option<PathBuf> = None;
+    let mut package_dir: Option<PathBuf> = None;
     let mut lan = false;
     let mut rate = RationalRate::P50;
     let mut publish_specs: Vec<(TakeId, Revision, ContentHash)> = Vec::new();
@@ -45,6 +46,10 @@ fn main() {
             "--recovery-journal" => match args.next() {
                 Some(path) => recovery_path = Some(PathBuf::from(path)),
                 None => return usage("--recovery-journal needs a path"),
+            },
+            "--package-dir" => match args.next() {
+                Some(dir) => package_dir = Some(PathBuf::from(dir)),
+                None => return usage("--package-dir needs a path"),
             },
             "--lan" => lan = true,
             "--rate" => match args.next().as_deref().and_then(parse_rate) {
@@ -79,6 +84,22 @@ fn main() {
     let tier = engine.device_tier();
     for (id, revision, content_hash) in publish_specs {
         engine.publish_identifier(id, revision, content_hash);
+    }
+    // 5.8: packages by local path, from this directory only. Checked here so
+    // a mistyped directory stops the engine instead of refusing every package.
+    if let Some(dir) = package_dir {
+        match std::path::absolute(&dir) {
+            Ok(dir) if dir.is_dir() => {
+                println!("  packages by local path from {}", dir.display());
+                engine.set_package_directory(dir);
+            }
+            _ => {
+                return usage(&format!(
+                    "--package-dir {} is not a directory",
+                    dir.display()
+                ))
+            }
+        }
     }
     let recovery = match recovery_path {
         Some(path) => RecoveryJournal::open_at(path),
@@ -232,7 +253,7 @@ fn usage(problem: &str) {
     }
     eprintln!(
         "gx-render-worker [--port N] [--asset-port N] [--recovery-journal PATH] \
-         [--lan] [--rate R] [--publish id:rev:sha256 ...] [--token SECRET]"
+         [--lan] [--package-dir DIR] [--rate R] [--publish id:rev:sha256 ...] [--token SECRET]"
     );
     std::process::exit(if problem.is_empty() { 0 } else { 2 });
 }

@@ -118,6 +118,46 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-08 — 5.8 done: L0 asset handoff by local path (Claude)
+
+**Resume here.** Phase 5's open rows: 5.10 (Editor publishes by path when co-located,
+Needs 5.8, new by user decision). Then 3.21 (Claude); 3.17 is Codex's.
+
+**5.8** (`docs/evidence/5.8`). `Shared/asset-plane/src/handoff.rs`: `handoff_for(locality)`
+(the one negotiation, LocalPath | ChunkedUpload), `open_package_in(dir, path)` (engine side:
+resolves with links followed, refuses `PackagePathOutsideDirectory` / `PackageDirectoryNotConfigured`
+/ `PackageUnreadable`, then `read_package` re-hashes members and `packaged_scene` re-hashes declared
+assets, `AssetHashMismatch`), `publish_package(addr, declared_locality, path)` (the one publisher;
+the by-path client is crate-private). The asset port takes `{package:{path}}`, reads outside the
+peer lock, then the same `accept_verified_asset` + `publish_scene` as chunked; the engine keeps no
+path. Worker `--package-dir DIR` (must exist); mock `with_package_directory`. R9 allows
+`Shared/asset-plane/`. Refusal reply `PublishRefusal::PackageRefused`. User decisions (8 Nov): the
+Editor is row 5.10; the publisher is configured with the directory (nothing on the wire); done with
+the check-then-open window noted (Jev 0.16 blocks / Laya 0.90 blocks; tracked as hardening).
+
+**Executed.** Conformance 543 passed / 0 failed / 9 skipped, incl. 7 new checks against two real
+workers (co-located `--package-dir`, `--lan`): by path 0 asset bytes on the plane, chunked exactly
+the font; same revision and content hash; frames 0/50/100 byte-identical; outside path, declared-hash
+mismatch and no-directory refused by name. Mutation (directory and hash checks removed): both refusal
+checks FAIL on the real worker; restored. `cargo test -p gx-asset-plane handoff` 6 pass; boundary
+tests 19 pass. `cargo fmt --all --check` and clippy `-D warnings` exit 0; `npm run check` exit 0
+(377 codegen, 44 Node, 412 Editor, 780 Rust / 0 failed / 26 ignored, conformance 543/0/9).
+
+## 2026-11-08 — 0.4 done: SBOM uploaded by a run with the always() config (Claude)
+
+CI run 42463262622 at 5cae2e8, the first with the SBOM steps and their upload under
+`if: always()`, succeeded on windows-latest and uploaded `sbom-windows-latest`
+(71868 bytes: `sbom-rust.json`, `sbom-npm.json`). 0.4's done-when, an SBOM on every
+build, now holds for failing builds too. The superseded 5.9 run (42462964285) was
+cancelled by the workflow's concurrency rule, as configured.
+
+**Executed.** `gh run view 42463262622`: conclusion success; `gh api .../runs/42463262622/artifacts`:
+sbom-windows-latest, 71868 bytes. `npm run check` exit 0 (377 codegen, 44 Node, 412 Editor, 780 Rust / 0 failed / 26 ignored, conformance 543/0/9).
+
+**Next:** 5.8 (L0 handoff by path). User decisions of 8 Nov: the Editor's publish is a
+follow-up row 5.10 (Needs 5.8); a co-located publisher is configured with the engine's
+package directory (nothing new on the wire).
+
 ## 2026-11-08 — 0.4: SBOM on every build, failing ones included (Claude)
 
 The user chose Laya's answer over Jev's: the SBOM steps and their upload in

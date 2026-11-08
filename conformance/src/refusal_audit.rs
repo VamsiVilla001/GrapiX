@@ -1360,6 +1360,45 @@ fn drive_asset_refusals(report: &mut Report) {
             "mismatched asset bytes were not refused as AssetHashMismatch",
         ),
     );
+    // 5.8: the engine-side open of a package offered by local path. The full
+    // route, against two real workers, is the package handoff suite.
+    let directory =
+        std::env::temp_dir().join(format!("gx-refusal-audit-packages-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&directory);
+    report.record(
+        PLANE,
+        "PackageDirectoryNotConfigured is produced for a path offered to an engine with no package directory",
+        expect(
+            matches!(
+                gx_asset_plane::open_package_in(None, "scene.gpxpkg"),
+                Err(Refusal::PackageDirectoryNotConfigured { .. })
+            ),
+            "a path offered with no package directory was not refused as PackageDirectoryNotConfigured",
+        ),
+    );
+    report.record(
+        PLANE,
+        "PackagePathOutsideDirectory is produced for a path that climbs out of the package directory",
+        expect(
+            matches!(
+                gx_asset_plane::open_package_in(Some(&directory), "../elsewhere/scene.gpxpkg"),
+                Err(Refusal::PackagePathOutsideDirectory { .. })
+            ),
+            "a path outside the package directory was not refused as PackagePathOutsideDirectory",
+        ),
+    );
+    report.record(
+        PLANE,
+        "PackageUnreadable is produced for a package path inside the directory that is not a package",
+        expect(
+            matches!(
+                gx_asset_plane::open_package_in(Some(&directory), "missing.gpxpkg"),
+                Err(Refusal::PackageUnreadable { .. })
+            ),
+            "a missing package inside the directory was not refused as PackageUnreadable",
+        ),
+    );
+    let _ = std::fs::remove_dir_all(&directory);
 }
 fn drive_material_refusals(report: &mut Report) {
     for mode in BlendMode::ALL {
@@ -1868,6 +1907,9 @@ fn is_driven(variant: &str) -> bool {
             | "AssetTransferAlreadyComplete"
             | "EmptyAssetTransfer"
             | "AssetHashMismatch"
+            | "PackageDirectoryNotConfigured"
+            | "PackagePathOutsideDirectory"
+            | "PackageUnreadable"
             | "RundownCursorOutOfRange"
             | "RundownEntryUnknown"
             | "AutomationExecutionDeferred"

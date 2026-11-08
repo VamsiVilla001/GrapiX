@@ -1,0 +1,225 @@
+{
+  "laya": {
+    "model": "convaiinnovations/laya-multilingual",
+    "max_len": 8192,
+    "state_tokens": 821,
+    "truncated": false,
+    "load_s": 17.24,
+    "predict_s": 6.705
+  },
+  "jev_model": "jev-1.14.0",
+  "rows": [
+    {
+      "question": "directory_boundary",
+      "type": "choice",
+      "laya": "engine_configured_dir",
+      "jev": "engine_configured_dir",
+      "agree": true,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "engine_configured_dir",
+        "probabilities": {
+          "engine_configured_dir": 0.6021,
+          "package_own_dir": 0.2888,
+          "archive_root_only": 0.1091
+        },
+        "confidence": 0.1754,
+        "answer_confidence": 0.6021,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "engine_configured_dir",
+        "confidence": 1,
+        "probabilities": {
+          "engine_configured_dir": 1,
+          "package_own_dir": 0,
+          "archive_root_only": 0
+        }
+      }
+    },
+    {
+      "question": "publisher_learns_dir",
+      "type": "choice",
+      "laya": "capability_field",
+      "jev": "caller_configured",
+      "agree": false,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "capability_field",
+        "probabilities": {
+          "caller_configured": 0.3092,
+          "asset_port_query": 0.1767,
+          "capability_field": 0.5141
+        },
+        "confidence": 0.0795,
+        "answer_confidence": 0.5141,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "caller_configured",
+        "confidence": 0.73,
+        "probabilities": {
+          "caller_configured": 0.82,
+          "asset_port_query": 0.16,
+          "capability_field": 0.02
+        }
+      }
+    },
+    {
+      "question": "bytes_path",
+      "type": "choice",
+      "laya": "lazy_path_reads",
+      "jev": "same_route_in_memory",
+      "agree": false,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "lazy_path_reads",
+        "probabilities": {
+          "same_route_in_memory": 0.4691,
+          "lazy_path_reads": 0.5309
+        },
+        "confidence": 0.0028,
+        "answer_confidence": 0.5309,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "same_route_in_memory",
+        "confidence": 1,
+        "probabilities": {
+          "same_route_in_memory": 1,
+          "lazy_path_reads": 0
+        }
+      }
+    },
+    {
+      "question": "negotiation_home",
+      "type": "choice",
+      "laya": "control_plane",
+      "jev": "asset_plane",
+      "agree": false,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "control_plane",
+        "probabilities": {
+          "asset_plane": 0.2539,
+          "media_plane": 0.3371,
+          "control_plane": 0.409
+        },
+        "confidence": 0.0167,
+        "answer_confidence": 0.409,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "asset_plane",
+        "confidence": 1,
+        "probabilities": {
+          "asset_plane": 1,
+          "media_plane": 0,
+          "control_plane": 0
+        }
+      }
+    },
+    {
+      "question": "editor_in_scope",
+      "type": "noul",
+      "laya": 0.8651,
+      "jev": 0.15,
+      "agree": false,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.8651,
+        "confidence": 0.8651,
+        "answer_confidence": 0.8651,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.15
+      }
+    },
+    {
+      "question": "identical_evidence",
+      "type": "choice",
+      "laya": "hash_only",
+      "jev": "hash_and_frames",
+      "agree": false,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "hash_only",
+        "probabilities": {
+          "hash_and_frames": 0.4887,
+          "hash_only": 0.5113
+        },
+        "confidence": 0.0004,
+        "answer_confidence": 0.5113,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "hash_and_frames",
+        "confidence": 0.82,
+        "probabilities": {
+          "hash_and_frames": 0.91,
+          "hash_only": 0.09
+        }
+      }
+    },
+    {
+      "question": "proposal_sound",
+      "type": "noul",
+      "laya": 0.9332,
+      "jev": 0.82,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9332,
+        "confidence": 0.9332,
+        "answer_confidence": 0.9332,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.82
+      }
+    },
+    {
+      "question": "needs_user",
+      "type": "noul",
+      "laya": 0.9089,
+      "jev": 0.41,
+      "agree": false,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9089,
+        "confidence": 0.9089,
+        "answer_confidence": 0.9089,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.41
+      }
+    }
+  ],
+  "agreement": 0.25
+}

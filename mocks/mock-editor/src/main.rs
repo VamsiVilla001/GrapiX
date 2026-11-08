@@ -157,7 +157,8 @@ fn publish((engine, scene): (SocketAddr, SceneDocument)) -> Result<(), EditorErr
             return Err(EditorError::PublishRefused(detail))
         }
         PublishReply::Refused(PublishRefusal::SceneRefused { cause })
-        | PublishReply::Refused(PublishRefusal::PreparationRefused { cause }) => {
+        | PublishReply::Refused(PublishRefusal::PreparationRefused { cause })
+        | PublishReply::Refused(PublishRefusal::PackageRefused { cause }) => {
             return Err(EditorError::PublishRefused(cause.to_string()))
         }
     }

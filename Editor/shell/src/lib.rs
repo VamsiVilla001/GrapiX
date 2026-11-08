@@ -356,7 +356,9 @@ pub fn publish(endpoint: &str, scene: SceneDocument) -> Result<PublishResult, Ed
             Err(EditorError::PublishRefused { detail })
         }
         Ok(PublishReply::Refused(
-            PublishRefusal::SceneRefused { cause } | PublishRefusal::PreparationRefused { cause },
+            PublishRefusal::SceneRefused { cause }
+            | PublishRefusal::PreparationRefused { cause }
+            | PublishRefusal::PackageRefused { cause },
         )) => Err(EditorError::PublishRefused {
             detail: cause.to_string(),
         }),

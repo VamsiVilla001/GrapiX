@@ -19,6 +19,7 @@
 //! trait is separate and why the fault suite reports SKIP against this peer.
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -100,6 +101,9 @@ pub struct Engine {
     /// Verified asset bytes bound by content hash. Mesh and font preparation
     /// receive these only after the asset plane has completed verification.
     asset_bytes: AssetBytes,
+    /// The directory a co-located publisher may hand packages from by local
+    /// path (5.8). `None` reads no path.
+    package_directory: Option<PathBuf>,
     program: Option<ProgramState>,
     cued: Option<ProgramState>,
     rasterizer: SoftwareRasterizer,
@@ -156,6 +160,7 @@ impl Engine {
             readback: ReadbackReport::default(),
             assets: HashSet::new(),
             asset_bytes: HashMap::new(),
+            package_directory: None,
             program: None,
             cued: None,
             rasterizer,
@@ -172,6 +177,13 @@ impl Engine {
             output_inhibited: false,
             events: Vec::new(),
         }
+    }
+
+    /// Accept packages by local path from `directory`, an absolute path the
+    /// host has checked exists (5.8). The asset plane refuses any path that
+    /// does not resolve inside it.
+    pub fn set_package_directory(&mut self, directory: PathBuf) {
+        self.package_directory = Some(directory);
     }
 
     /// The negotiated device tier. Read by the host to report health.
@@ -852,6 +864,10 @@ impl AssetPublishPeer for Engine {
     fn accept_verified_asset(&mut self, hash: ContentHash, bytes: Vec<u8>) -> Result<(), Refusal> {
         self.record_verified_asset_bytes(hash, bytes);
         Ok(())
+    }
+
+    fn package_directory(&self) -> Option<PathBuf> {
+        self.package_directory.clone()
     }
 
     fn fetch(&self, hash: &ContentHash) -> Option<Arc<Vec<u8>>> {
