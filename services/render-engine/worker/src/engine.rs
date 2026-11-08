@@ -844,6 +844,16 @@ impl AssetPublishPeer for Engine {
         self.publish(scene)
     }
 
+    // 5.9: the asset plane re-hashed these bytes before handing them over.
+    fn has_verified_asset(&self, hash: &ContentHash) -> bool {
+        self.asset_bytes.contains_key(hash)
+    }
+
+    fn accept_verified_asset(&mut self, hash: ContentHash, bytes: Vec<u8>) -> Result<(), Refusal> {
+        self.record_verified_asset_bytes(hash, bytes);
+        Ok(())
+    }
+
     fn fetch(&self, hash: &ContentHash) -> Option<Arc<Vec<u8>>> {
         self.rendered
             .lock()

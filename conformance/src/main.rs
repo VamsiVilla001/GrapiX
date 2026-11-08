@@ -9,7 +9,7 @@
 //! same as a clean one (invariant 43).
 
 use gx_conformance::{
-    asset_plane_suite, control_plane_delivery_suite, control_plane_fault_suite,
+    asset_plane_suite, asset_route_suite, control_plane_delivery_suite, control_plane_fault_suite,
     control_plane_suite, editor_command_suite, headless_render_suite, locality_suite,
     media_plane_suite, mock_product_suite, real_engine_scope_suite, refusal_audit_suite,
     render_preview_suite, scene_plane_suite, scope_enforcement_suite, timing_plane_suite, Outcome,
@@ -312,6 +312,9 @@ fn run_against_real_engine(report: &mut Report) {
     // render.preview over JSON-RPC (8.9), drawn through the headless entry
     // point on a second control connection.
     render_preview_suite(addr, asset_addr, report);
+    // 5.9: a scene's font and image reach the engine, then it publishes and
+    // takes. Before headless_render_suite, which leaves a scene on Program.
+    asset_route_suite(&mut client, asset_addr, report);
     // Headless render (11.41) runs last: its timed run puts a scene on Program.
     headless_render_suite(&mut client, asset_addr, report);
 }

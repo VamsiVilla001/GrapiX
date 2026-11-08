@@ -1,0 +1,107 @@
+{
+  "laya": {
+    "model": "convaiinnovations/laya-multilingual",
+    "max_len": 8192,
+    "state_tokens": 772,
+    "truncated": false,
+    "load_s": 25.59,
+    "predict_s": 3.373
+  },
+  "jev_model": "jev-1.14.0",
+  "rows": [
+    {
+      "question": "row_5_9_done",
+      "type": "noul",
+      "laya": 0.9604,
+      "jev": 0.88,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9604,
+        "confidence": 0.9604,
+        "answer_confidence": 0.9604,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.88
+      }
+    },
+    {
+      "question": "image_clause_honest",
+      "type": "noul",
+      "laya": 0.9782,
+      "jev": 0.97,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9782,
+        "confidence": 0.9782,
+        "answer_confidence": 0.9782,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.97
+      }
+    },
+    {
+      "question": "ci_rows_done",
+      "type": "noul",
+      "laya": 0.9834,
+      "jev": 0.2,
+      "agree": false,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9834,
+        "confidence": 0.9834,
+        "answer_confidence": 0.9834,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.2
+      }
+    },
+    {
+      "question": "weakest",
+      "type": "choice",
+      "laya": "single_platform",
+      "jev": "single_platform",
+      "agree": true,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "single_platform",
+        "probabilities": {
+          "image_undrawn": 0.0032,
+          "single_platform": 0.965,
+          "editor_path_partial": 0.0033,
+          "none": 0.0285
+        },
+        "confidence": 0.8752,
+        "answer_confidence": 0.965,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "single_platform",
+        "confidence": 0.41,
+        "probabilities": {
+          "image_undrawn": 0.05,
+          "single_platform": 0.56,
+          "editor_path_partial": 0.38,
+          "none": 0.01
+        }
+      }
+    }
+  ],
+  "agreement": 0.75
+}

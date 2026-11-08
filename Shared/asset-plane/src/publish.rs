@@ -80,6 +80,41 @@ pub trait AssetPublishPeer: Send + 'static {
     fn fetch(&self, _hash: &ContentHash) -> Option<Arc<Vec<u8>>> {
         None
     }
+
+    /// Whether this peer already holds verified bytes for `hash` (5.9): the
+    /// preflight answer, so a publisher sends only what is missing.
+    fn has_verified_asset(&self, _hash: &ContentHash) -> bool {
+        false
+    }
+
+    /// Keep asset bytes the transfer dialect has re-hashed against `hash`
+    /// (5.9). A peer that keeps no asset bytes refuses by name rather than
+    /// acknowledging bytes it then drops.
+    fn accept_verified_asset(&mut self, hash: ContentHash, _bytes: Vec<u8>) -> Result<(), Refusal> {
+        Err(Refusal::NotImplemented {
+            what: format!("this asset-plane peer keeps no asset bytes (asset {hash})"),
+        })
+    }
+}
+
+/// A publish peer seen as the transfer dialect's receiver (5.9).
+struct PeerAssets<P>(Arc<Mutex<P>>);
+
+impl<P: AssetPublishPeer> crate::preflight::VerifiedAssets for PeerAssets<P> {
+    fn has(&self, hash: &ContentHash) -> io::Result<bool> {
+        Ok(self
+            .0
+            .lock()
+            .map_err(|_| io::Error::other("asset publish peer mutex poisoned"))?
+            .has_verified_asset(hash))
+    }
+    fn accept(&self, hash: &ContentHash, bytes: Vec<u8>) -> io::Result<Result<(), Refusal>> {
+        Ok(self
+            .0
+            .lock()
+            .map_err(|_| io::Error::other("asset publish peer mutex poisoned"))?
+            .accept_verified_asset(hash.clone(), bytes))
+    }
 }
 
 /// The asset-plane reply to one fetch. `Bytes` is followed on the stream by
@@ -288,6 +323,9 @@ fn exchange(
 enum AssetRequest {
     Publish(Result<SceneDocument, PublishRefusal>),
     Fetch(ContentHash),
+    /// The opening frame of the 5.3 transfer dialect (5.9): the rest of the
+    /// connection is preflight and chunks into this peer.
+    Transfer(crate::preflight::AssetTransferRequest),
 }
 
 fn handle_publish<P: AssetPublishPeer>(
@@ -313,6 +351,12 @@ fn handle_publish<P: AssetPublishPeer>(
             .map_err(|_| io::Error::other("asset publish peer mutex poisoned"))
     };
     match request {
+        AssetRequest::Transfer(first) => crate::preflight::serve_transfer(
+            &mut stream,
+            Some(first),
+            &PeerAssets(Arc::clone(&peer)),
+            &crate::preflight::AssetTransferMetrics::new(),
+        ),
         AssetRequest::Publish(scene) => {
             let reply = match scene {
                 Ok(scene) => locked()?.publish_scene(scene),
@@ -362,6 +406,14 @@ fn parse_request(bytes: &[u8]) -> AssetRequest {
             Ok(request) => request,
             Err(error) => return invalid(error.to_string()),
         };
+    // The transfer dialect's frames carry a `request` tag (preflight, begin,
+    // chunk); a publication carries `scene` and a fetch `fetch`.
+    if request.contains_key("request") {
+        return match serde_json::from_value(serde_json::Value::Object(request)) {
+            Ok(transfer) => AssetRequest::Transfer(transfer),
+            Err(error) => invalid(format!("asset transfer request: {error}")),
+        };
+    }
     if request.len() != 1 {
         return invalid(
             "an asset-plane request must contain exactly one of `scene` or `fetch`".to_string(),

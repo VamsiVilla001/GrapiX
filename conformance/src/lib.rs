@@ -8,11 +8,13 @@
 //! reports SKIP and says why. Defaulting it to PASS would claim coverage of
 //! precisely the paths nobody ran.
 
+mod asset_route;
 mod editor_commands;
 mod headless;
 mod refusal_audit;
 mod scene_plane;
 mod scope;
+pub use asset_route::asset_route_suite;
 pub use editor_commands::editor_command_suite;
 pub use headless::{headless_render_suite, render_preview_suite};
 pub use refusal_audit::refusal_audit_suite;

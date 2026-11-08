@@ -1,0 +1,114 @@
+{
+  "laya": {
+    "model": "convaiinnovations/laya-multilingual",
+    "max_len": 8192,
+    "state_tokens": 421,
+    "truncated": false,
+    "load_s": 14.99,
+    "predict_s": 1.835
+  },
+  "jev_model": "jev-1.14.0",
+  "rows": [
+    {
+      "question": "row_0_3",
+      "type": "noul",
+      "laya": 0.991,
+      "jev": 0.54,
+      "agree": false,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.991,
+        "confidence": 0.991,
+        "answer_confidence": 0.991,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.54
+      }
+    },
+    {
+      "question": "row_0_4",
+      "type": "noul",
+      "laya": 0.9737,
+      "jev": 0.11,
+      "agree": false,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9737,
+        "confidence": 0.9737,
+        "answer_confidence": 0.9737,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.11
+      }
+    },
+    {
+      "question": "row_0_10",
+      "type": "noul",
+      "laya": 0.9864,
+      "jev": 0.41,
+      "agree": false,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9864,
+        "confidence": 0.9864,
+        "answer_confidence": 0.9864,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.41
+      }
+    },
+    {
+      "question": "row_4_2",
+      "type": "noul",
+      "laya": 0.9915,
+      "jev": 0.96,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9915,
+        "confidence": 0.9915,
+        "answer_confidence": 0.9915,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.96
+      }
+    },
+    {
+      "question": "fix_0_4",
+      "type": "noul",
+      "laya": 0.976,
+      "jev": 0.29,
+      "agree": false,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.976,
+        "confidence": 0.976,
+        "answer_confidence": 0.976,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.29
+      }
+    }
+  ],
+  "agreement": 0.2
+}

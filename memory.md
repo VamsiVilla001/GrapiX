@@ -118,6 +118,38 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-08 — 5.9 done: published assets reach the engine; first green CI run (Claude)
+
+**Resume here.** Phase 5's only open row is 5.8 (L0 by-path handoff; Needs 5.5, 5.9).
+Phase 3: 3.21 (Claude), 3.17 (Codex). 0.4 waits on the user (SBOM on failing builds).
+
+**5.9** (`docs/evidence/5.9`; added by user decision while scoping 5.8). The real
+engine had no route for asset bytes: the worker's asset port took the scene JSON
+only, the Editor published the scene only, and 5.3's transfer dialect was used by
+nothing, so every published font or image was refused AssetMissing. Now the
+transfer handler is generic over the receiver (disk AssetStore as before; an
+AssetPublishPeer in memory), the publish port serves the transfer dialect when the
+first frame carries a `request` tag, the engine and mock keep verified bytes via
+`record_verified_asset_bytes`, and the Editor's `cmd_publish` runs
+`scene_asset_bytes` (re-hash from its store) then `publish_with_assets` (transfer,
+then publish). Conformance (real worker): scene alone refused AssetMissing; both
+assets transfer; published and taken; image object refused ObjectKindNotDrawable
+owner 3.17; re-publish moves 0 bytes. Editor-path test publishes the Inter lower
+third to the real worker. Design: Jev's answers taken over Laya's (control plane for
+bytes, disk loading, publish-before-transfer each break a standing rule). 5.3 stays
+done by user decision with a note. Plan: 255 steps.
+
+**First green CI run** (42460775962 at 69751ef, windows-latest): lint, gate,
+pixel gate, SBOM all green; artifact sbom-windows-latest. 0.10 and 4.2 back to
+done (the user's reopening condition); 0.3 done. **0.4 stays active**: the SBOM
+steps follow the gate, so a failing run uploads none and "every build" does not
+hold; Jev 0.11 / Laya 0.97, and Jev rejected `if: always()` (0.29) where Laya
+accepted it (0.98), so the fix goes to the user.
+
+**Executed.** asset-plane 76 tests; Editor shell publish tests 3 (none skipped);
+conformance 533 passed / 0 failed / 9 skipped; `cargo fmt --check` and clippy
+`-D warnings` exit 0; `npm run check` exit 0 (377 codegen files current, 43 Node, 412 Editor, 774 Rust passed / 0 failed / 26 ignored, conformance 533 passed / 0 failed / 9 skipped).
+
 ## 2026-11-08 — 5.7 done: the control port enforces token scopes; third CI run fixes (Claude)
 
 **Resume here.** Next open Phase 5 row: 5.8 (L0 asset handoff by path). Phase 3: 3.21

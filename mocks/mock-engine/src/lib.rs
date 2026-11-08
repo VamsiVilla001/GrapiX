@@ -325,6 +325,21 @@ impl AssetPublishPeer for MockEngine {
         MockEngine::publish_scene(self, scene)
     }
 
+    // 5.9: the same receipt as the engine's.
+    fn has_verified_asset(&self, hash: &ContentHash) -> bool {
+        self.asset_bytes.contains_key(hash)
+    }
+
+    fn accept_verified_asset(
+        &mut self,
+        hash: ContentHash,
+        bytes: Vec<u8>,
+    ) -> Result<(), gx_contracts::Refusal> {
+        self.assets.insert(hash.clone());
+        self.asset_bytes.insert(hash, bytes);
+        Ok(())
+    }
+
     fn fetch(&self, hash: &ContentHash) -> Option<Arc<Vec<u8>>> {
         self.rendered
             .lock()

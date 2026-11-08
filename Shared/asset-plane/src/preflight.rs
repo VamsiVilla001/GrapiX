@@ -304,49 +304,95 @@ struct ActiveTransfer {
     bytes: Vec<u8>,
 }
 
+/// Where a transfer's verified bytes go (5.9): the on-disk [`AssetStore`] for
+/// the standalone listener, or an engine that keeps them in memory behind the
+/// publish port. Both answer the same two questions, so the dialect has one
+/// implementation whichever receiver it serves (invariant 27).
+pub(crate) trait VerifiedAssets {
+    /// Whether verified bytes for `hash` are already held.
+    fn has(&self, hash: &ContentHash) -> io::Result<bool>;
+    /// Keep bytes the dialect has re-hashed against `hash`.
+    fn accept(&self, hash: &ContentHash, bytes: Vec<u8>) -> io::Result<Result<(), Refusal>>;
+}
+
+impl VerifiedAssets for Arc<Mutex<AssetStore>> {
+    fn has(&self, hash: &ContentHash) -> io::Result<bool> {
+        self.lock()
+            .map_err(|_| io::Error::other("asset store mutex poisoned"))?
+            .contains(hash)
+            .map_err(io::Error::other)
+    }
+    fn accept(&self, hash: &ContentHash, bytes: Vec<u8>) -> io::Result<Result<(), Refusal>> {
+        self.lock()
+            .map_err(|_| io::Error::other("asset store mutex poisoned"))?
+            .promote_verified(hash, &bytes)
+            .map_err(io::Error::other)?;
+        Ok(Ok(()))
+    }
+}
+
 fn handle_connection(
     mut stream: TcpStream,
     store: Arc<Mutex<AssetStore>>,
     metrics: AssetTransferMetrics,
 ) -> io::Result<()> {
-    let mut active = None;
-    while let Some(request) = read_frame::<_, AssetTransferRequest>(&mut stream)? {
-        let reply = handle_request(request, &store, &metrics, &mut active)?;
-        write_frame(&mut stream, &reply)?;
-    }
-    Ok(())
+    serve_transfer(&mut stream, None, &store, &metrics)
 }
 
-fn handle_request(
+/// Serve the transfer dialect on one connection, starting with `first` when a
+/// caller has already read the opening frame (the publish port does, to tell
+/// the two dialects apart).
+pub(crate) fn serve_transfer<A: VerifiedAssets>(
+    stream: &mut TcpStream,
+    first: Option<AssetTransferRequest>,
+    assets: &A,
+    metrics: &AssetTransferMetrics,
+) -> io::Result<()> {
+    let mut active = None;
+    let mut next = first;
+    loop {
+        let request = match next.take() {
+            Some(request) => request,
+            None => match read_frame::<_, AssetTransferRequest>(stream)? {
+                Some(request) => request,
+                None => return Ok(()),
+            },
+        };
+        let reply = handle_request(request, assets, metrics, &mut active)?;
+        write_frame(stream, &reply)?;
+    }
+}
+
+impl AssetTransferMetrics {
+    /// A fresh counter, for a listener other than [`AssetTransferServer`].
+    pub(crate) fn new() -> Self {
+        Self(Arc::new(AtomicU64::new(0)))
+    }
+}
+
+fn handle_request<A: VerifiedAssets>(
     request: AssetTransferRequest,
-    store: &Arc<Mutex<AssetStore>>,
+    assets: &A,
     metrics: &AssetTransferMetrics,
     active: &mut Option<ActiveTransfer>,
 ) -> io::Result<AssetTransferReply> {
     match request {
         AssetTransferRequest::Preflight { hashes } => {
-            let store = store
-                .lock()
-                .map_err(|_| io::Error::other("asset store mutex poisoned"))?;
             let mut seen = HashSet::new();
             let mut missing = Vec::new();
             for hash in hashes {
-                if seen.insert(hash.clone()) && !store.contains(&hash).map_err(io::Error::other)? {
+                if seen.insert(hash.clone()) && !assets.has(&hash)? {
                     missing.push(hash);
                 }
             }
             Ok(AssetTransferReply::Preflight { missing })
         }
         AssetTransferRequest::Begin { hash, total_chunks } => {
-            let store = store
-                .lock()
-                .map_err(|_| io::Error::other("asset store mutex poisoned"))?;
-            if store.contains(&hash).map_err(io::Error::other)? {
+            if assets.has(&hash)? {
                 return Ok(AssetTransferReply::Refused {
                     cause: Refusal::AssetTransferAlreadyComplete { hash },
                 });
             }
-            drop(store);
             match Transfer::new(hash.clone(), total_chunks) {
                 Ok(transfer) => {
                     *active = Some(ActiveTransfer {
@@ -396,12 +442,10 @@ fn handle_request(
             if let Err(cause) = completed.transfer.verify(&actual) {
                 return Ok(AssetTransferReply::Refused { cause });
             }
-            store
-                .lock()
-                .map_err(|_| io::Error::other("asset store mutex poisoned"))?
-                .promote_verified(&hash, &completed.bytes)
-                .map_err(io::Error::other)?;
-            Ok(AssetTransferReply::Stored { hash })
+            match assets.accept(&hash, completed.bytes)? {
+                Ok(()) => Ok(AssetTransferReply::Stored { hash }),
+                Err(cause) => Ok(AssetTransferReply::Refused { cause }),
+            }
         }
     }
 }

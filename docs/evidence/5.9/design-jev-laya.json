@@ -1,0 +1,107 @@
+{
+  "laya": {
+    "model": "convaiinnovations/laya-multilingual",
+    "max_len": 8192,
+    "state_tokens": 394,
+    "truncated": false,
+    "load_s": 13.19,
+    "predict_s": 1.165
+  },
+  "jev_model": "jev-1.14.0",
+  "rows": [
+    {
+      "question": "endpoint",
+      "type": "choice",
+      "laya": "control_plane",
+      "jev": "same_port",
+      "agree": false,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "control_plane",
+        "probabilities": {
+          "same_port": 0.1178,
+          "second_port": 0.0678,
+          "control_plane": 0.8144
+        },
+        "confidence": 0.4524,
+        "answer_confidence": 0.8144,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "same_port",
+        "confidence": 0.34,
+        "probabilities": {
+          "same_port": 0.56,
+          "second_port": 0.43,
+          "control_plane": 0.01
+        }
+      }
+    },
+    {
+      "question": "sink",
+      "type": "choice",
+      "laya": "disk_then_load",
+      "jev": "sink_trait",
+      "agree": false,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "disk_then_load",
+        "probabilities": {
+          "sink_trait": 0.2007,
+          "disk_then_load": 0.5027,
+          "copy_after": 0.2966
+        },
+        "confidence": 0.0638,
+        "answer_confidence": 0.5027,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "sink_trait",
+        "confidence": 0.97,
+        "probabilities": {
+          "sink_trait": 0.98,
+          "disk_then_load": 0,
+          "copy_after": 0.02
+        }
+      }
+    },
+    {
+      "question": "publisher",
+      "type": "choice",
+      "laya": "publish_then_transfer",
+      "jev": "transfer_then_publish",
+      "agree": false,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "publish_then_transfer",
+        "probabilities": {
+          "transfer_then_publish": 0.1079,
+          "publish_then_transfer": 0.6151,
+          "engine_pulls": 0.277
+        },
+        "confidence": 0.1855,
+        "answer_confidence": 0.6151,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "transfer_then_publish",
+        "confidence": 1,
+        "probabilities": {
+          "transfer_then_publish": 1,
+          "publish_then_transfer": 0,
+          "engine_pulls": 0
+        }
+      }
+    }
+  ],
+  "agreement": 0.0
+}

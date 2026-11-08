@@ -1,0 +1,105 @@
+{
+  "laya": {
+    "model": "convaiinnovations/laya-multilingual",
+    "max_len": 8192,
+    "state_tokens": 562,
+    "truncated": false,
+    "load_s": 12.99,
+    "predict_s": 2.341
+  },
+  "jev_model": "jev-1.14.0",
+  "rows": [
+    {
+      "question": "plan_change",
+      "type": "choice",
+      "laya": "new_row_before",
+      "jev": "new_row_before",
+      "agree": true,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "new_row_before",
+        "probabilities": {
+          "new_row_before": 0.9998,
+          "fold_into_5_8": 0.0001,
+          "reopen_5_3": 0.0001
+        },
+        "confidence": 0.998,
+        "answer_confidence": 0.9998,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "new_row_before",
+        "confidence": 0.55,
+        "probabilities": {
+          "new_row_before": 0.7,
+          "fold_into_5_8": 0.01,
+          "reopen_5_3": 0.29
+        }
+      }
+    },
+    {
+      "question": "row_5_3_breach",
+      "type": "noul",
+      "laya": 0.9635,
+      "jev": 0.45,
+      "agree": false,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9635,
+        "confidence": 0.9635,
+        "answer_confidence": 0.9635,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.45
+      }
+    },
+    {
+      "question": "urgency",
+      "type": "noul",
+      "laya": 0.9703,
+      "jev": 0.82,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9703,
+        "confidence": 0.9703,
+        "answer_confidence": 0.9703,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.82
+      }
+    },
+    {
+      "question": "needs_user",
+      "type": "noul",
+      "laya": 0.9435,
+      "jev": 0.65,
+      "agree": false,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9435,
+        "confidence": 0.9435,
+        "answer_confidence": 0.9435,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.65
+      }
+    }
+  ],
+  "agreement": 0.5
+}

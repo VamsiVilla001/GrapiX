@@ -136,3 +136,59 @@ fn an_unreachable_asset_plane_is_not_reported_as_a_refusal() {
         "expected Unreachable, got {error:?}"
     );
 }
+
+/// 5.9: a scene that declares a font publishes through the Editor's own path.
+/// The bytes come from the Editor's asset store, reach the engine through
+/// preflight and transfer, and only then is the scene published; the same
+/// scene published alone is refused for the missing bytes.
+#[test]
+fn a_scene_with_a_font_publishes_with_its_assets_to_a_real_engine() {
+    let Some(binary) = worker_binary() else {
+        eprintln!("SKIP: gx-render-worker binary not built");
+        return;
+    };
+    let control = free_port();
+    let asset = free_port();
+    let scratch = std::env::temp_dir().join(format!(
+        "gx-editor-shell-assets-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos()
+    ));
+    let Some(_worker) = start_worker(&binary, control, asset, &scratch.join("recovery.json"))
+    else {
+        eprintln!("SKIP: the worker did not come up");
+        return;
+    };
+    let endpoint = format!("127.0.0.1:{asset}");
+
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../services/render-engine/worker/tests/fixtures");
+    let font = std::fs::read(fixtures.join("Inter-Regular.ttf")).expect("fixture font");
+    let hash = gx_asset_plane::content_hash(&font);
+    let store = gx_asset_plane::AssetStore::at_root(scratch.join("assets"));
+    store
+        .promote_verified(&hash, &font)
+        .expect("the font enters the Editor's store");
+    let mut scene = gx_contracts::scene::parse_scene_document(
+        &std::fs::read(fixtures.join("gpu-lower-third-50.json")).expect("fixture scene"),
+    )
+    .expect("the fixture parses");
+    scene.id = "shell-with-font".into();
+
+    let alone = publish(&endpoint, scene.clone()).expect_err("the engine has no font bytes yet");
+    assert!(
+        matches!(&alone, EditorError::PublishRefused { detail } if detail.contains("asset missing")),
+        "expected the missing font to refuse the publish, got {alone:?}"
+    );
+
+    let assets =
+        gx_editor_shell::scene_asset_bytes(&scene, &store).expect("the store holds the font");
+    assert_eq!(assets.len(), 1, "the scene declares one asset");
+    let published = gx_editor_shell::publish_with_assets(&endpoint, scene, &assets)
+        .expect("with its font the scene publishes");
+    assert_eq!(published.take_id.0, "shell-with-font");
+    assert_eq!(published.revision.0, 1);
+}

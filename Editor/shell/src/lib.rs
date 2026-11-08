@@ -44,7 +44,8 @@ use gx_asset_plane::fonts::link::{prepare_font_link, UreqFontFetcher};
 use gx_asset_plane::fonts::manager::LinkedSource;
 use gx_asset_plane::import::{prepare_asset_files, AssetFileInput, PreparedAssetBatch};
 use gx_asset_plane::{
-    content_hash, publish_scene, AssetStore, PublishClientError, PublishRefusal, PublishReply,
+    content_hash, publish_assets, publish_scene, AssetBytes, AssetStore, AssetTransferClientError,
+    PublishClientError, PublishRefusal, PublishReply,
 };
 use gx_contracts::animation::{animation_surface, validate_scene_animation, AnimationSurface};
 use gx_contracts::command::{
@@ -261,6 +262,74 @@ pub struct PublishResult {
     pub revision: Revision,
     /// The content hash every cue and take of this revision must pin.
     pub content_hash: ContentHash,
+}
+
+/// The verified bytes of every asset `scene` declares by content hash, read
+/// from the Editor's own store (5.9). Each file is re-hashed, so a cache entry
+/// that no longer matches its name refuses the publish by name before anything
+/// is sent; an asset with no content hash cannot be verified by the engine
+/// and is not sent.
+pub fn scene_asset_bytes(
+    scene: &SceneDocument,
+    store: &AssetStore,
+) -> Result<Vec<AssetBytes>, EditorError> {
+    let mut assets = Vec::new();
+    for item in &scene.assets {
+        let Some(hash) = &item.checksum else { continue };
+        if assets.iter().any(|asset: &AssetBytes| &asset.hash == hash) {
+            continue;
+        }
+        let bytes = std::fs::read(store.cache_path(hash))
+            .map_err(|_| refused(Refusal::AssetMissing { hash: hash.clone() }))?;
+        let actual = content_hash(&bytes);
+        if actual != *hash {
+            return Err(refused(Refusal::AssetHashMismatch {
+                expected: hash.clone(),
+                actual,
+            }));
+        }
+        assets.push(AssetBytes {
+            hash: hash.clone(),
+            bytes,
+        });
+    }
+    Ok(assets)
+}
+
+/// Publish a document and the assets it declares (5.9): preflight and send
+/// only the bytes the engine does not hold, then publish the scene, all on the
+/// one asset-plane address. The engine prepares at publication, so the bytes
+/// must arrive first or the publish refuses `AssetMissing`.
+pub fn publish_with_assets(
+    endpoint: &str,
+    scene: SceneDocument,
+    assets: &[AssetBytes],
+) -> Result<PublishResult, EditorError> {
+    let address: SocketAddr = endpoint.parse().map_err(|_| EditorError::InvalidEndpoint {
+        endpoint: endpoint.to_owned(),
+    })?;
+    if !assets.is_empty() {
+        match publish_assets(address, assets) {
+            Ok(_) => {}
+            Err(AssetTransferClientError::Connect(source)) => {
+                return Err(EditorError::Unreachable {
+                    endpoint: endpoint.to_owned(),
+                    detail: source.to_string(),
+                })
+            }
+            Err(AssetTransferClientError::Refused(cause)) => {
+                return Err(EditorError::PublishRefused {
+                    detail: cause.to_string(),
+                })
+            }
+            Err(other) => {
+                return Err(EditorError::Protocol {
+                    detail: other.to_string(),
+                })
+            }
+        }
+    }
+    publish(endpoint, scene)
 }
 
 /// Publish one complete document and report the revision it became.
@@ -524,7 +593,10 @@ fn cmd_publish(
         .document(&target)
         .map_err(|error| command_error(error, None))?
         .into_owned();
-    publish(&endpoint, scene)
+    // The asset files are read under the store lock; the network work runs
+    // after it is released.
+    let assets = state.with_asset_store(|store| scene_asset_bytes(&scene, store))?;
+    publish_with_assets(&endpoint, scene, &assets)
 }
 
 #[tauri::command]
