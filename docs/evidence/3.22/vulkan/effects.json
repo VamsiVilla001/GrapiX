@@ -19,9 +19,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9076057,
+        "program_frame": 9079453,
         "strict4_4": true,
-        "workingRelative": 1.1861622084552437e-7
+        "workingRelative": 6.914961886650417e-6
       },
       "workingSpace": "srgb"
     },
@@ -32,10 +32,10 @@
         "frame": 0,
         "pass": true,
         "preview": {
-          "differing": 0,
+          "differing": 2,
           "notTieFlips": 0,
           "pixels": 15360,
-          "worstDelta": 0
+          "worstDelta": 1
         },
         "program": {
           "differing": 0,
@@ -43,9 +43,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9586361,
+        "program_frame": 9610949,
         "strict4_4": true,
-        "workingRelative": 1.083720917449682e-7
+        "workingRelative": 5.2998834689788055e-6
       },
       "workingSpace": "srgb"
     },
@@ -67,9 +67,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9274388,
+        "program_frame": 9324737,
         "strict4_4": true,
-        "workingRelative": 1.5065759839671955e-7
+        "workingRelative": 6.209791081346339e-6
       },
       "workingSpace": "srgb"
     },
@@ -91,9 +91,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9638636,
+        "program_frame": 9690548,
         "strict4_4": true,
-        "workingRelative": 1.3062431492016913e-7
+        "workingRelative": 0.000011098992217739578
       },
       "workingSpace": "srgb"
     },
@@ -115,9 +115,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9722401,
+        "program_frame": 9781396,
         "strict4_4": true,
-        "workingRelative": 1.882042255374472e-7
+        "workingRelative": 0.000011098992217739578
       },
       "workingSpace": "srgb"
     },
@@ -139,9 +139,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9614346,
+        "program_frame": 9652543,
         "strict4_4": true,
-        "workingRelative": 1.710442631974729e-7
+        "workingRelative": 6.430842404370196e-6
       },
       "workingSpace": "srgb"
     },
@@ -163,9 +163,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 8792457,
+        "program_frame": 8734414,
         "strict4_4": true,
-        "workingRelative": 7.163286568356853e-7
+        "workingRelative": 0.000012570263606903609
       },
       "workingSpace": "srgb"
     },
@@ -187,9 +187,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10255101,
+        "program_frame": 10287672,
         "strict4_4": true,
-        "workingRelative": 2.0694862712389295e-7
+        "workingRelative": 9.04344688024139e-6
       },
       "workingSpace": "srgb"
     },
@@ -211,9 +211,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10065996,
+        "program_frame": 10090096,
         "strict4_4": false,
-        "workingRelative": 2.1913479031354655e-7
+        "workingRelative": 0.000010203007150266785
       },
       "workingSpace": "srgb"
     },
@@ -235,9 +235,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9566475,
+        "program_frame": 9622133,
         "strict4_4": true,
-        "workingRelative": 3.3870887250486703e-7
+        "workingRelative": 0.00001434369642083766
       },
       "workingSpace": "srgb"
     },
@@ -259,9 +259,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 8739557,
+        "program_frame": 8743199,
         "strict4_4": true,
-        "workingRelative": 2.2746527861272625e-7
+        "workingRelative": 7.875046321714763e-6
       },
       "workingSpace": "srgb"
     },
@@ -283,9 +283,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10741814,
+        "program_frame": 10823535,
         "strict4_4": true,
-        "workingRelative": 1.1296808111183054e-7
+        "workingRelative": 0.00001853739195212256
       },
       "workingSpace": "srgb"
     },
@@ -307,9 +307,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10572084,
+        "program_frame": 10642332,
         "strict4_4": true,
-        "workingRelative": 9.19681042432785e-6
+        "workingRelative": 0.00001209094170917524
       },
       "workingSpace": "srgb"
     },
@@ -331,9 +331,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 7898875,
+        "program_frame": 7865468,
         "strict4_4": true,
-        "workingRelative": 4.82719485717098e-7
+        "workingRelative": 5.077236437500687e-6
       },
       "workingSpace": "srgb"
     },
@@ -355,9 +355,369 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10706902,
+        "program_frame": 10753975,
         "strict4_4": true,
-        "workingRelative": 6.011464392940979e-7
+        "workingRelative": 6.691322141705314e-6
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "gaussian-blur",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 18,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 1,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program_frame": 9251068,
+        "strict4_4": false,
+        "workingRelative": 9.566520020598546e-7
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "gaussian-blur-horizontal",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 21,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9242561,
+        "strict4_4": false,
+        "workingRelative": 5.782570042356383e-6
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "gaussian-blur-repeat-edges",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 39,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9264920,
+        "strict4_4": false,
+        "workingRelative": 4.601670752890641e-6
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "box-blur",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 123,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9256347,
+        "strict4_4": false,
+        "workingRelative": 1.276989905818482e-6
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "directional-blur",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 102,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9266228,
+        "strict4_4": false,
+        "workingRelative": 1.7843005934992107e-6
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "glow",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 331,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 10011676,
+        "strict4_4": false,
+        "workingRelative": 6.5568365243962035e-6
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "drop-shadow",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 8816242,
+        "strict4_4": true,
+        "workingRelative": 0.000013985828445584048
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "drop-shadow-only",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 7723644,
+        "strict4_4": true,
+        "workingRelative": 4.141295903536957e-6
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "gradient-ramp",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 104,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9130315,
+        "strict4_4": false,
+        "workingRelative": 7.11595794200548e-6
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "gradient-ramp-radial",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 11174746,
+        "strict4_4": true,
+        "workingRelative": 0.000012157121091149747
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "linear-wipe",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 124,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9129225,
+        "strict4_4": false,
+        "workingRelative": 8.167853593477048e-6
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "radial-wipe",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 389,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9343565,
+        "strict4_4": false,
+        "workingRelative": 0.000016273366782115772
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "radial-wipe-both",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 328,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9175552,
+        "strict4_4": false,
+        "workingRelative": 4.1915918700397015e-6
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "iris-wipe",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 213,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9107289,
+        "strict4_4": false,
+        "workingRelative": 0.00001913501000672113
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "iris-wipe-star",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 275,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9165979,
+        "strict4_4": false,
+        "workingRelative": 9.124901225732174e-6
       },
       "workingSpace": "srgb"
     },
@@ -379,9 +739,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9625577,
+        "program_frame": 9613721,
         "strict4_4": true,
-        "workingRelative": 1.5191403690550942e-7
+        "workingRelative": 0.00001597205482539721
       },
       "workingSpace": "linear-srgb"
     },
@@ -403,9 +763,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10226062,
+        "program_frame": 10257041,
         "strict4_4": true,
-        "workingRelative": 1.1147556477908438e-7
+        "workingRelative": 0.000027923193556489423
       },
       "workingSpace": "linear-srgb"
     },
@@ -427,9 +787,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9598749,
+        "program_frame": 9632147,
         "strict4_4": true,
-        "workingRelative": 1.2651167935473495e-7
+        "workingRelative": 0.000010029816621681675
       },
       "workingSpace": "linear-srgb"
     },
@@ -451,9 +811,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9963947,
+        "program_frame": 10005638,
         "strict4_4": true,
-        "workingRelative": 5.41056749625568e-7
+        "workingRelative": 0.000023640182917006314
       },
       "workingSpace": "linear-srgb"
     },
@@ -475,9 +835,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10003581,
+        "program_frame": 10044487,
         "strict4_4": true,
-        "workingRelative": 5.41056749625568e-7
+        "workingRelative": 0.000023640182917006314
       },
       "workingSpace": "linear-srgb"
     },
@@ -499,9 +859,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10167086,
+        "program_frame": 10205193,
         "strict4_4": true,
-        "workingRelative": 1.105708875570599e-7
+        "workingRelative": 0.000021399164324975573
       },
       "workingSpace": "linear-srgb"
     },
@@ -512,10 +872,10 @@
         "frame": 0,
         "pass": true,
         "preview": {
-          "differing": 0,
+          "differing": 1,
           "notTieFlips": 0,
           "pixels": 15360,
-          "worstDelta": 0
+          "worstDelta": 1
         },
         "program": {
           "differing": 0,
@@ -523,9 +883,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9475336,
+        "program_frame": 9452823,
         "strict4_4": true,
-        "workingRelative": 3.2917928365350235e-6
+        "workingRelative": 0.000019632967450888827
       },
       "workingSpace": "linear-srgb"
     },
@@ -547,9 +907,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 11041747,
+        "program_frame": 11087895,
         "strict4_4": true,
-        "workingRelative": 2.800824177029426e-7
+        "workingRelative": 0.000042832714825635776
       },
       "workingSpace": "linear-srgb"
     },
@@ -571,9 +931,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10758912,
+        "program_frame": 10789175,
         "strict4_4": true,
-        "workingRelative": 1.7037753252679977e-7
+        "workingRelative": 0.00004548624201561324
       },
       "workingSpace": "linear-srgb"
     },
@@ -595,9 +955,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9641207,
+        "program_frame": 9666261,
         "strict4_4": true,
-        "workingRelative": 7.768730938551016e-7
+        "workingRelative": 0.00004193636777927168
       },
       "workingSpace": "linear-srgb"
     },
@@ -619,9 +979,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9459376,
+        "program_frame": 9464861,
         "strict4_4": true,
-        "workingRelative": 4.7657422896918433e-7
+        "workingRelative": 0.00002592283817648422
       },
       "workingSpace": "linear-srgb"
     },
@@ -643,9 +1003,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10174259,
+        "program_frame": 10218094,
         "strict4_4": true,
-        "workingRelative": 3.029049935321382e-7
+        "workingRelative": 0.00006783026037737727
       },
       "workingSpace": "linear-srgb"
     },
@@ -667,9 +1027,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10945779,
+        "program_frame": 11008360,
         "strict4_4": true,
-        "workingRelative": 4.308089387450309e-7
+        "workingRelative": 0.00006430075882235542
       },
       "workingSpace": "linear-srgb"
     },
@@ -691,9 +1051,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 8236431,
+        "program_frame": 8188713,
         "strict4_4": true,
-        "workingRelative": 3.675802986435883e-7
+        "workingRelative": 0.000011452709259174298
       },
       "workingSpace": "linear-srgb"
     },
@@ -715,9 +1075,369 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 11167772,
+        "program_frame": 11211931,
         "strict4_4": true,
-        "workingRelative": 8.525094017386436e-7
+        "workingRelative": 0.000013636516996484715
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "gaussian-blur",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 36,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9830097,
+        "strict4_4": false,
+        "workingRelative": 2.0345391931186896e-6
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "gaussian-blur-horizontal",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9777633,
+        "strict4_4": true,
+        "workingRelative": 0.000010167145774175879
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "gaussian-blur-repeat-edges",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 40,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9738971,
+        "strict4_4": false,
+        "workingRelative": 8.579151653975714e-6
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "box-blur",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 128,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9811142,
+        "strict4_4": false,
+        "workingRelative": 2.301325139342225e-6
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "directional-blur",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 175,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9777584,
+        "strict4_4": false,
+        "workingRelative": 5.3241597015585285e-6
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "glow",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 28,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9883976,
+        "strict4_4": false,
+        "workingRelative": 0.00003387044125702232
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "drop-shadow",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9381711,
+        "strict4_4": true,
+        "workingRelative": 0.000049887836212292314
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "drop-shadow-only",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 8333125,
+        "strict4_4": true,
+        "workingRelative": 4.136241386731854e-6
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "gradient-ramp",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 2,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 10022781,
+        "strict4_4": true,
+        "workingRelative": 0.000010725752872531302
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "gradient-ramp-radial",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 11982525,
+        "strict4_4": true,
+        "workingRelative": 0.000050775586714735255
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "linear-wipe",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 28,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9465853,
+        "strict4_4": false,
+        "workingRelative": 0.00001829571556299925
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "radial-wipe",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 1,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9642426,
+        "strict4_4": true,
+        "workingRelative": 0.00009340082033304498
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "radial-wipe-both",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 5,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9423545,
+        "strict4_4": true,
+        "workingRelative": 0.00001784889718692284
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "iris-wipe",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 17,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9407657,
+        "strict4_4": false,
+        "workingRelative": 0.00003245126208639704
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "iris-wipe-star",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 16,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9484540,
+        "strict4_4": false,
+        "workingRelative": 0.00003387044125702232
       },
       "workingSpace": "linear-srgb"
     }

@@ -586,8 +586,8 @@ impl Effect {
         }
     }
 
-    /// Whether the effect maps each pixel on its own: no neighbours, no
-    /// growth. These are the ones drawn so far (3.22, first increment).
+    /// Whether the effect maps each pixel on its own, from its colour alone:
+    /// no neighbours, no position, no growth.
     pub fn is_pointwise(&self) -> bool {
         matches!(
             self,

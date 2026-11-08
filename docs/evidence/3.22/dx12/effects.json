@@ -8,10 +8,10 @@
         "frame": 0,
         "pass": true,
         "preview": {
-          "differing": 0,
+          "differing": 1,
           "notTieFlips": 0,
           "pixels": 15360,
-          "worstDelta": 0
+          "worstDelta": 1
         },
         "program": {
           "differing": 0,
@@ -19,9 +19,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9076057,
+        "program_frame": 9079453,
         "strict4_4": true,
-        "workingRelative": 1.1861622084552437e-7
+        "workingRelative": 8.163905476976652e-6
       },
       "workingSpace": "srgb"
     },
@@ -32,10 +32,10 @@
         "frame": 0,
         "pass": true,
         "preview": {
-          "differing": 0,
+          "differing": 2,
           "notTieFlips": 0,
           "pixels": 15360,
-          "worstDelta": 0
+          "worstDelta": 1
         },
         "program": {
           "differing": 0,
@@ -43,9 +43,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9586361,
+        "program_frame": 9610949,
         "strict4_4": true,
-        "workingRelative": 1.083720917449682e-7
+        "workingRelative": 5.2998834689788055e-6
       },
       "workingSpace": "srgb"
     },
@@ -67,9 +67,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9274388,
+        "program_frame": 9324737,
         "strict4_4": true,
-        "workingRelative": 1.5065759839671955e-7
+        "workingRelative": 6.209791081346339e-6
       },
       "workingSpace": "srgb"
     },
@@ -91,7 +91,7 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9638636,
+        "program_frame": 9690548,
         "strict4_4": true,
         "workingRelative": 0.00001921465627674479
       },
@@ -115,7 +115,7 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9722401,
+        "program_frame": 9781396,
         "strict4_4": true,
         "workingRelative": 0.00001921465627674479
       },
@@ -139,9 +139,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9614346,
+        "program_frame": 9652543,
         "strict4_4": true,
-        "workingRelative": 1.710442631974729e-7
+        "workingRelative": 6.430842404370196e-6
       },
       "workingSpace": "srgb"
     },
@@ -163,9 +163,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 8792457,
+        "program_frame": 8734414,
         "strict4_4": true,
-        "workingRelative": 7.163286568356853e-7
+        "workingRelative": 0.000034616023185662925
       },
       "workingSpace": "srgb"
     },
@@ -187,9 +187,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10255101,
+        "program_frame": 10287672,
         "strict4_4": true,
-        "workingRelative": 2.0694862712389295e-7
+        "workingRelative": 9.04344688024139e-6
       },
       "workingSpace": "srgb"
     },
@@ -211,9 +211,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10065996,
+        "program_frame": 10090096,
         "strict4_4": false,
-        "workingRelative": 2.1913479031354655e-7
+        "workingRelative": 0.000010203007150266785
       },
       "workingSpace": "srgb"
     },
@@ -235,9 +235,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9566475,
+        "program_frame": 9622133,
         "strict4_4": true,
-        "workingRelative": 3.3870887250486703e-7
+        "workingRelative": 0.000010313269740436226
       },
       "workingSpace": "srgb"
     },
@@ -259,9 +259,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 8739557,
+        "program_frame": 8743199,
         "strict4_4": true,
-        "workingRelative": 2.2746527861272625e-7
+        "workingRelative": 7.784017725498416e-6
       },
       "workingSpace": "srgb"
     },
@@ -283,9 +283,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10741814,
+        "program_frame": 10823535,
         "strict4_4": false,
-        "workingRelative": 3.6388226476447016e-7
+        "workingRelative": 9.853633855527733e-6
       },
       "workingSpace": "srgb"
     },
@@ -307,7 +307,7 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10572084,
+        "program_frame": 10642332,
         "strict4_4": true,
         "workingRelative": 9.19681042432785e-6
       },
@@ -331,9 +331,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 7898875,
+        "program_frame": 7865468,
         "strict4_4": true,
-        "workingRelative": 4.82719485717098e-7
+        "workingRelative": 7.804450433468446e-6
       },
       "workingSpace": "srgb"
     },
@@ -355,9 +355,369 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10706902,
+        "program_frame": 10753975,
         "strict4_4": true,
-        "workingRelative": 6.011464392940979e-7
+        "workingRelative": 9.659186616772786e-6
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "gaussian-blur",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 18,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 1,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program_frame": 9251068,
+        "strict4_4": false,
+        "workingRelative": 1.0341708502892288e-6
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "gaussian-blur-horizontal",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 21,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9242561,
+        "strict4_4": false,
+        "workingRelative": 7.89553905633511e-6
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "gaussian-blur-repeat-edges",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 39,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9264920,
+        "strict4_4": false,
+        "workingRelative": 5.322884135239292e-6
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "box-blur",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 122,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9256347,
+        "strict4_4": false,
+        "workingRelative": 1.2020648227917263e-6
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "directional-blur",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 98,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9266228,
+        "strict4_4": false,
+        "workingRelative": 1.9691492525453214e-6
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "glow",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 357,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 10011676,
+        "strict4_4": false,
+        "workingRelative": 5.805239197798073e-6
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "drop-shadow",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 8816242,
+        "strict4_4": true,
+        "workingRelative": 0.000015613179130014032
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "drop-shadow-only",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 7723644,
+        "strict4_4": true,
+        "workingRelative": 5.101817350805504e-6
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "gradient-ramp",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 104,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9130315,
+        "strict4_4": false,
+        "workingRelative": 7.73134070186643e-6
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "gradient-ramp-radial",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 11174746,
+        "strict4_4": true,
+        "workingRelative": 0.000012157121091149747
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "linear-wipe",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 118,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9129225,
+        "strict4_4": false,
+        "workingRelative": 0.000015106689716049004
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "radial-wipe",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 392,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9343565,
+        "strict4_4": false,
+        "workingRelative": 7.311500212381361e-6
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "radial-wipe-both",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 329,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9175552,
+        "strict4_4": false,
+        "workingRelative": 4.1915918700397015e-6
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "iris-wipe",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 217,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9107289,
+        "strict4_4": false,
+        "workingRelative": 0.000028228248993400484
+      },
+      "workingSpace": "srgb"
+    },
+    {
+      "effect": "iris-wipe-star",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 272,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9165979,
+        "strict4_4": false,
+        "workingRelative": 0.000041645023884484544
       },
       "workingSpace": "srgb"
     },
@@ -379,9 +739,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9625577,
+        "program_frame": 9613721,
         "strict4_4": true,
-        "workingRelative": 1.5191403690550942e-7
+        "workingRelative": 0.000014842496966593899
       },
       "workingSpace": "linear-srgb"
     },
@@ -403,9 +763,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10226062,
+        "program_frame": 10257041,
         "strict4_4": true,
-        "workingRelative": 1.1147556477908438e-7
+        "workingRelative": 0.000027923193556489423
       },
       "workingSpace": "linear-srgb"
     },
@@ -427,9 +787,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9598749,
+        "program_frame": 9632147,
         "strict4_4": true,
-        "workingRelative": 1.2651167935473495e-7
+        "workingRelative": 0.000014037172149983235
       },
       "workingSpace": "linear-srgb"
     },
@@ -451,9 +811,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9963947,
+        "program_frame": 10005638,
         "strict4_4": true,
-        "workingRelative": 5.41056749625568e-7
+        "workingRelative": 0.00003105317955487408
       },
       "workingSpace": "linear-srgb"
     },
@@ -475,9 +835,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10003581,
+        "program_frame": 10044487,
         "strict4_4": true,
-        "workingRelative": 5.41056749625568e-7
+        "workingRelative": 0.00003105317955487408
       },
       "workingSpace": "linear-srgb"
     },
@@ -499,9 +859,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10167086,
+        "program_frame": 10205193,
         "strict4_4": true,
-        "workingRelative": 1.105708875570599e-7
+        "workingRelative": 0.000012934960977872834
       },
       "workingSpace": "linear-srgb"
     },
@@ -512,10 +872,10 @@
         "frame": 0,
         "pass": true,
         "preview": {
-          "differing": 0,
+          "differing": 1,
           "notTieFlips": 0,
           "pixels": 15360,
-          "worstDelta": 0
+          "worstDelta": 1
         },
         "program": {
           "differing": 0,
@@ -523,9 +883,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9475336,
+        "program_frame": 9452823,
         "strict4_4": true,
-        "workingRelative": 3.2917928365350235e-6
+        "workingRelative": 0.00007888211257522926
       },
       "workingSpace": "linear-srgb"
     },
@@ -547,9 +907,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 11041747,
+        "program_frame": 11087895,
         "strict4_4": true,
-        "workingRelative": 2.800824177029426e-7
+        "workingRelative": 0.000042832714825635776
       },
       "workingSpace": "linear-srgb"
     },
@@ -571,9 +931,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10758912,
+        "program_frame": 10789175,
         "strict4_4": true,
-        "workingRelative": 1.7037753252679977e-7
+        "workingRelative": 0.00004548624201561324
       },
       "workingSpace": "linear-srgb"
     },
@@ -595,9 +955,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9641207,
+        "program_frame": 9666261,
         "strict4_4": true,
-        "workingRelative": 7.768730938551016e-7
+        "workingRelative": 0.00003672674938570708
       },
       "workingSpace": "linear-srgb"
     },
@@ -619,9 +979,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9459376,
+        "program_frame": 9464861,
         "strict4_4": true,
-        "workingRelative": 4.7657422896918433e-7
+        "workingRelative": 0.00001636660635995213
       },
       "workingSpace": "linear-srgb"
     },
@@ -643,9 +1003,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10174259,
+        "program_frame": 10218094,
         "strict4_4": true,
-        "workingRelative": 5.694613719242625e-6
+        "workingRelative": 0.00008289809193229303
       },
       "workingSpace": "linear-srgb"
     },
@@ -667,9 +1027,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10945779,
+        "program_frame": 11008360,
         "strict4_4": true,
-        "workingRelative": 4.308089387450309e-7
+        "workingRelative": 0.000014946792362025008
       },
       "workingSpace": "linear-srgb"
     },
@@ -691,9 +1051,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 8236431,
+        "program_frame": 8188713,
         "strict4_4": true,
-        "workingRelative": 3.675802986435883e-7
+        "workingRelative": 0.0000113097912617377
       },
       "workingSpace": "linear-srgb"
     },
@@ -715,9 +1075,369 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 11167772,
+        "program_frame": 11211931,
         "strict4_4": true,
-        "workingRelative": 8.525094017386436e-7
+        "workingRelative": 0.000038802150811534375
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "gaussian-blur",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 36,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9830097,
+        "strict4_4": false,
+        "workingRelative": 2.1453265617310535e-6
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "gaussian-blur-horizontal",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9777633,
+        "strict4_4": true,
+        "workingRelative": 0.000026691057428251952
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "gaussian-blur-repeat-edges",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 40,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9738971,
+        "strict4_4": false,
+        "workingRelative": 0.000012239388524903916
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "box-blur",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 128,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9811142,
+        "strict4_4": false,
+        "workingRelative": 2.6667398742574733e-6
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "directional-blur",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 172,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9777584,
+        "strict4_4": false,
+        "workingRelative": 5.633487944578519e-6
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "glow",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 18,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9883976,
+        "strict4_4": false,
+        "workingRelative": 0.00002070604205073323
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "drop-shadow",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9381711,
+        "strict4_4": true,
+        "workingRelative": 0.000038323229091474786
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "drop-shadow-only",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 8333125,
+        "strict4_4": true,
+        "workingRelative": 5.094007065054029e-6
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "gradient-ramp",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 1,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 10022781,
+        "strict4_4": true,
+        "workingRelative": 0.000010725752872531302
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "gradient-ramp-radial",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 11982525,
+        "strict4_4": true,
+        "workingRelative": 0.000050775586714735255
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "linear-wipe",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 26,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9465853,
+        "strict4_4": false,
+        "workingRelative": 0.00005682749178959057
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "radial-wipe",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 3,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9642426,
+        "strict4_4": true,
+        "workingRelative": 0.000011274583812337369
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "radial-wipe-both",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 6,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9423545,
+        "strict4_4": true,
+        "workingRelative": 5.876991053810343e-6
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "iris-wipe",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 16,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9407657,
+        "strict4_4": false,
+        "workingRelative": 0.000028272277631913312
+      },
+      "workingSpace": "linear-srgb"
+    },
+    {
+      "effect": "iris-wipe-star",
+      "result": {
+        "encodedExactly": true,
+        "frame": 0,
+        "pass": true,
+        "preview": {
+          "differing": 17,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 1
+        },
+        "program": {
+          "differing": 0,
+          "notTieFlips": 0,
+          "pixels": 15360,
+          "worstDelta": 0
+        },
+        "program_frame": 9484540,
+        "strict4_4": false,
+        "workingRelative": 0.00004160117532592267
       },
       "workingSpace": "linear-srgb"
     }

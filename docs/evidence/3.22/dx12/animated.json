@@ -7,10 +7,10 @@
         "frame": 0,
         "pass": true,
         "preview": {
-          "differing": 727,
+          "differing": 0,
           "notTieFlips": 0,
           "pixels": 15360,
-          "worstDelta": 1
+          "worstDelta": 0
         },
         "program": {
           "differing": 0,
@@ -18,9 +18,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9253246,
-        "strict4_4": false,
-        "workingRelative": 2.7939677238464355e-7
+        "program_frame": 9041258,
+        "strict4_4": true,
+        "workingRelative": 4.149378128204262e-6
       },
       "workingSpace": "srgb"
     },
@@ -30,7 +30,7 @@
         "frame": 10,
         "pass": true,
         "preview": {
-          "differing": 210,
+          "differing": 158,
           "notTieFlips": 0,
           "pixels": 15360,
           "worstDelta": 1
@@ -41,9 +41,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9628850,
+        "program_frame": 9576191,
         "strict4_4": false,
-        "workingRelative": 6.187048597894318e-7
+        "workingRelative": 3.492480573186185e-6
       },
       "workingSpace": "srgb"
     },
@@ -53,7 +53,7 @@
         "frame": 19,
         "pass": true,
         "preview": {
-          "differing": 210,
+          "differing": 107,
           "notTieFlips": 0,
           "pixels": 15360,
           "worstDelta": 1
@@ -64,9 +64,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9788572,
+        "program_frame": 9570684,
         "strict4_4": false,
-        "workingRelative": 3.340634293635958e-7
+        "workingRelative": 2.3749385036353488e-6
       },
       "workingSpace": "srgb"
     },
@@ -76,20 +76,20 @@
         "frame": 20,
         "pass": true,
         "preview": {
-          "differing": 0,
+          "differing": 165,
           "notTieFlips": 0,
           "pixels": 15360,
-          "worstDelta": 0
+          "worstDelta": 1
         },
         "program": {
-          "differing": 0,
+          "differing": 3,
           "notTieFlips": 0,
           "pixels": 15360,
-          "worstDelta": 0
+          "worstDelta": 1
         },
-        "program_frame": 9635550,
-        "strict4_4": true,
-        "workingRelative": 5.532118052542501e-7
+        "program_frame": 9357634,
+        "strict4_4": false,
+        "workingRelative": 2.586796881587361e-6
       },
       "workingSpace": "srgb"
     },
@@ -99,10 +99,10 @@
         "frame": 35,
         "pass": true,
         "preview": {
-          "differing": 0,
+          "differing": 24,
           "notTieFlips": 0,
           "pixels": 15360,
-          "worstDelta": 0
+          "worstDelta": 1
         },
         "program": {
           "differing": 0,
@@ -110,9 +110,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10319956,
-        "strict4_4": true,
-        "workingRelative": 3.3900550988619216e-7
+        "program_frame": 10321543,
+        "strict4_4": false,
+        "workingRelative": 6.014995960867964e-6
       },
       "workingSpace": "srgb"
     },
@@ -122,20 +122,20 @@
         "frame": 50,
         "pass": true,
         "preview": {
-          "differing": 0,
+          "differing": 2,
           "notTieFlips": 0,
           "pixels": 15360,
-          "worstDelta": 0
+          "worstDelta": 1
         },
         "program": {
-          "differing": 0,
+          "differing": 2,
           "notTieFlips": 0,
           "pixels": 15360,
-          "worstDelta": 0
+          "worstDelta": 1
         },
-        "program_frame": 11089497,
+        "program_frame": 11317474,
         "strict4_4": true,
-        "workingRelative": 4.415959153902804e-7
+        "workingRelative": 7.14487032382749e-6
       },
       "workingSpace": "srgb"
     },
@@ -145,10 +145,10 @@
         "frame": 0,
         "pass": true,
         "preview": {
-          "differing": 0,
+          "differing": 5,
           "notTieFlips": 0,
           "pixels": 15360,
-          "worstDelta": 0
+          "worstDelta": 1
         },
         "program": {
           "differing": 0,
@@ -156,9 +156,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9647629,
+        "program_frame": 9576692,
         "strict4_4": true,
-        "workingRelative": 8.887715097216642e-8
+        "workingRelative": 0.000011452865692263003
       },
       "workingSpace": "linear-srgb"
     },
@@ -168,10 +168,10 @@
         "frame": 10,
         "pass": true,
         "preview": {
-          "differing": 0,
+          "differing": 316,
           "notTieFlips": 0,
           "pixels": 15360,
-          "worstDelta": 0
+          "worstDelta": 1
         },
         "program": {
           "differing": 0,
@@ -179,9 +179,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10073290,
-        "strict4_4": true,
-        "workingRelative": 1.1468916909507243e-6
+        "program_frame": 10259241,
+        "strict4_4": false,
+        "workingRelative": 6.771298103558365e-6
       },
       "workingSpace": "linear-srgb"
     },
@@ -191,10 +191,10 @@
         "frame": 19,
         "pass": true,
         "preview": {
-          "differing": 0,
+          "differing": 37,
           "notTieFlips": 0,
           "pixels": 15360,
-          "worstDelta": 0
+          "worstDelta": 1
         },
         "program": {
           "differing": 0,
@@ -202,9 +202,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10182111,
-        "strict4_4": true,
-        "workingRelative": 6.805329917369818e-7
+        "program_frame": 10338133,
+        "strict4_4": false,
+        "workingRelative": 0.000015313913536374457
       },
       "workingSpace": "linear-srgb"
     },
@@ -214,10 +214,10 @@
         "frame": 20,
         "pass": true,
         "preview": {
-          "differing": 0,
+          "differing": 144,
           "notTieFlips": 0,
           "pixels": 15360,
-          "worstDelta": 0
+          "worstDelta": 1
         },
         "program": {
           "differing": 0,
@@ -225,9 +225,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 9983247,
-        "strict4_4": true,
-        "workingRelative": 3.653852616025688e-7
+        "program_frame": 10062467,
+        "strict4_4": false,
+        "workingRelative": 0.00001339993832516484
       },
       "workingSpace": "linear-srgb"
     },
@@ -237,10 +237,10 @@
         "frame": 35,
         "pass": true,
         "preview": {
-          "differing": 0,
+          "differing": 3,
           "notTieFlips": 0,
           "pixels": 15360,
-          "worstDelta": 0
+          "worstDelta": 1
         },
         "program": {
           "differing": 0,
@@ -248,9 +248,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 10673947,
+        "program_frame": 11209967,
         "strict4_4": true,
-        "workingRelative": 4.297590407986718e-7
+        "workingRelative": 0.000022731688659405336
       },
       "workingSpace": "linear-srgb"
     },
@@ -260,10 +260,10 @@
         "frame": 50,
         "pass": true,
         "preview": {
-          "differing": 0,
+          "differing": 1,
           "notTieFlips": 0,
           "pixels": 15360,
-          "worstDelta": 0
+          "worstDelta": 1
         },
         "program": {
           "differing": 0,
@@ -271,9 +271,9 @@
           "pixels": 15360,
           "worstDelta": 0
         },
-        "program_frame": 11501164,
+        "program_frame": 12611124,
         "strict4_4": true,
-        "workingRelative": 8.124148394017539e-7
+        "workingRelative": 0.000048947156756184995
       },
       "workingSpace": "linear-srgb"
     }

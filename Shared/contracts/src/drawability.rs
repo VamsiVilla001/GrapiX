@@ -139,18 +139,8 @@ pub fn drawability_refusals(document: &SceneDocument) -> Vec<StructuredRefusal> 
             }
             _ => {}
         }
-        // 3.22: the pointwise effects are drawn; the spatial ones (blurs,
-        // glow, drop shadow, gradient ramp, wipes) refuse by effect until
-        // their kernels land, rather than being skipped.
-        for (position, instance) in base.effects().iter().enumerate() {
-            if !instance.effect.is_pointwise() {
-                found.push(
-                    property(id, &format!("effects.{} ({})", instance.effect_id, instance.effect.name()), "3.22"),
-                    at(&format!("effects[{position}]")),
-                    serde_json::json!(instance.effect.name()),
-                );
-            }
-        }
+        // 3.22: every declared effect is drawn, on the GPU and by the CPU
+        // reference; none refuses here.
         if base.material_slots.as_ref().is_some_and(|slots| !slots.is_empty()) {
             found.push(
                 property(id, "materialSlots", "11.50"),

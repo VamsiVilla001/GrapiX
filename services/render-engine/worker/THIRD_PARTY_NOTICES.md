@@ -42,3 +42,20 @@ GrapiX's own: the typed contract, the packed parameter block both renderers
 read, the prepared per-layer effect chain, coverage tests on bit patterns,
 transparent pixels never gaining coverage, exact identity settings, Exposure
 in linear light in either working space, and effects before opacity.
+
+## Spatial effects (3.22)
+
+`src/effect_chain.rs` (the CPU reference) and the spatial passes of
+`src/compositor/effects.wgsl` port the box radii and box passes, the
+directional blur, glow (bright pass, blur, combine) and drop shadow (make,
+blur, combine) kernels, and the linear and radial wipe masks from
+EffectCraft's `crates/raster/src/blur.rs`, `crates/gpu/src/shaders/
+kernels.wgsl` and `crates/effects/src/misc.rs`, pinned at
+`9a7d3e76991d5372448033b473dc12c2480a6a04`.
+
+Copyright (c) 2026 ArtCraft Team and the EffectCraft contributors.
+Used under the MIT licence retained in `EFFECTCRAFT-LICENSE`.
+GrapiX's own: the fixed pass plan sized at prepare from every animated
+frame, one running sum per line in both directions, layer-space coordinates,
+the gradient ramp, the iris star, the radial wipe's feather in pixels, and
+the shared polynomial trigonometry both renderers evaluate.

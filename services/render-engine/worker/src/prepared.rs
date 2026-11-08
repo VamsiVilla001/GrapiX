@@ -53,6 +53,9 @@ pub struct PreparedScene {
     resolved: SceneDocument,
     /// Effective transforms and state, resolved once (1.2's resolver).
     effective: Vec<ResolvedObject>,
+    /// 3.22: each object with effects, drawn once in its own padded layer
+    /// space (the GPU's source too), with its Box Blur iteration counts.
+    effect_layers: Vec<Option<EffectLayer>>,
     /// Hierarchy diagnostics. Preparation refuses any repaired edge, so a
     /// successfully prepared scene has none; retained for inspection callers.
     diagnostics: Vec<HierarchyDiagnostic>,
@@ -133,9 +136,19 @@ impl PreparedScene {
         let paths = PreparedPaths::prepare(&resolved, &resolution.effective)?;
         let texts = prepare_texts(&resolved, asset_bytes)?;
         let meshes = prepare_meshes(&resolved, available, asset_bytes, support)?;
+        let mut effect_layers = Vec::with_capacity(resolved.objects.len());
+        for (index, object) in resolved.objects.iter().enumerate() {
+            if object.base().effects().is_empty() {
+                effect_layers.push(None);
+                continue;
+            }
+            let (pad, iterations) = crate::effect_chain::layer_extent(&resolved, index)?;
+            let source = crate::layer_source::prepare_layer_source(&resolved, &resolution.effective, &texts, index, pad, u32::MAX)?;
+            effect_layers.push(Some(EffectLayer { source, iterations }));
+        }
         let static_frame = OnceLock::new();
         if build_reference {
-            let _ = static_frame.set(compose(&resolved, &resolution.effective, &paths, &texts, 0)?);
+            let _ = static_frame.set(compose(&resolved, &resolution.effective, &paths, &texts, 0, &effect_layers)?);
         }
         let by_id = resolution
             .effective
@@ -148,6 +161,7 @@ impl PreparedScene {
             document,
             resolved,
             effective: resolution.effective,
+            effect_layers,
             diagnostics: resolution.diagnostics,
             by_id,
             paths,
@@ -195,7 +209,7 @@ impl PreparedScene {
     /// composed once at publish, in draw order across object kinds.
     pub fn frame(&self, output: OutputTransform) -> Frame {
         self.static_frame.get_or_init(|| {
-            compose(&self.resolved, &self.effective, &self.paths, &self.texts, 0)
+            compose(&self.resolved, &self.effective, &self.paths, &self.texts, 0, &self.effect_layers)
                 .expect("semantically prepared static reference remains drawable")
         }).encode(output, self.document.working_color_space)
     }
@@ -256,7 +270,7 @@ impl PreparedScene {
         }
         let resolution = resolve_hierarchy(&evaluated.objects);
         let paths = PreparedPaths::prepare(&evaluated, &resolution.effective)?;
-        let surface = compose(&evaluated, &resolution.effective, &paths, &self.texts, scene_frame)?;
+        let surface = compose(&evaluated, &resolution.effective, &paths, &self.texts, scene_frame, &self.effect_layers)?;
         Ok(surface.encode(output, self.document.working_color_space))
     }
 
@@ -281,7 +295,7 @@ impl PreparedScene {
         }
         let resolution = resolve_hierarchy(&evaluated.objects);
         let paths = PreparedPaths::prepare(&evaluated, &resolution.effective)?;
-        compose(&evaluated, &resolution.effective, &paths, &self.texts, scene_frame)
+        compose(&evaluated, &resolution.effective, &paths, &self.texts, scene_frame, &self.effect_layers)
     }
 
     /// Glyph runs shaped from packaged fonts only.
@@ -308,12 +322,20 @@ impl PreparedScene {
 /// the GPU compositor is held to. The whole canvas is visited, because the
 /// stencil and silhouette modes change the backdrop outside the object too.
 /// A hidden or fully transparent object changes nothing, in every mode.
+/// An object with effects in its own layer space (3.22).
+#[derive(Debug, Clone)]
+struct EffectLayer {
+    source: crate::layer_source::LayerSource,
+    iterations: Vec<usize>,
+}
+
 fn compose(
     document: &SceneDocument,
     effective: &[ResolvedObject],
     paths: &PreparedPaths,
     texts: &PreparedTexts,
     scene_frame: u64,
+    effect_layers: &[Option<EffectLayer>],
 ) -> Result<RasterSurface, Refusal> {
     crate::render_work::cpu_frame();
     let mut surface = RasterSurface::transparent(document.canvas.width, document.canvas.height);
@@ -326,7 +348,33 @@ fn compose(
         let id = object.base().id.as_str();
         let mode = object.base().blend_mode();
         let effects = object.base().effects();
-        if mode != BlendMode::Normal || !effects.is_empty() {
+        if let Some(layer) = effect_layers.get(index).and_then(Option::as_ref) {
+            // 3.22: the effects run on the object's layer-space pixels (the
+            // GPU's source), which are then warped onto the canvas exactly
+            // as the composite pass samples them.
+            let resolved = &effective[index];
+            if !(resolved.visible && resolved.opacity > 0.0) {
+                continue;
+            }
+            let source = &layer.source;
+            let (w, h) = (source.surface.width() as usize, source.surface.height() as usize);
+            let ctx = crate::effect_chain::EffectContext {
+                origin: source.origin,
+                size: [object.base().width, object.base().height],
+                space: document.working_color_space,
+            };
+            let mut plan = crate::effect_chain::EffectPlan::layout(effects, &layer.iterations);
+            plan.pack(effects, &ctx);
+            let pixels = plan.run(source.surface.pixels(), w, h, &ctx);
+            let state = crate::compositor::scene::layer_state(object.base().anchor, resolved, source.origin);
+            let rows = crate::compositor::layer_rows(surface.width(), surface.height(), state).map_err(|e| {
+                crate::compositor::scene::mapping_refusal(id, &format!("objects[{index}]"), &e.to_string())
+            })?;
+            let seed = crate::blend::dissolve_seed(id, mode, scene_frame);
+            surface.warp_blend(&pixels, w, h, &rows, state.opacity, mode, seed);
+            continue;
+        }
+        if mode != BlendMode::Normal {
             let shown = effective
                 .get(index)
                 .is_some_and(|resolved| resolved.visible && resolved.opacity > 0.0);

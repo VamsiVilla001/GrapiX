@@ -25,12 +25,14 @@
 pub mod blend;
 pub mod clock;
 pub mod colour_pipeline;
+pub mod effect_chain;
 pub mod effects;
 pub mod compositor;
 pub mod emission;
 pub mod engine;
 pub mod gpu;
 pub mod headless;
+pub mod layer_source;
 pub mod metrics;
 pub mod mesh;
 pub mod output_adapter;

@@ -1379,6 +1379,45 @@ mod tests {
     }
 
     #[test]
+    fn every_parameter_of_every_effect_takes_a_keyframe() {
+        // 3.22's "every parameter is keyframable", over the whole registry:
+        // each path the typed table lists is an animatable channel, and a key
+        // at its current value (hold-keyed when discrete) is accepted.
+        use crate::effect::*;
+        let all = [
+            Effect::Fill(Fill::default()), Effect::Tint(Tint::default()), Effect::Levels(Levels::default()),
+            Effect::Curves(Curves::default()), Effect::HueSaturation(HueSaturation::default()),
+            Effect::BrightnessContrast(BrightnessContrast::default()), Effect::Exposure(Exposure::default()),
+            Effect::GaussianBlur(GaussianBlur::default()), Effect::BoxBlur(BoxBlur::default()),
+            Effect::DirectionalBlur(DirectionalBlur::default()), Effect::Glow(Glow::default()),
+            Effect::DropShadow(DropShadow::default()), Effect::GradientRamp(GradientRamp::default()),
+            Effect::LinearWipe(LinearWipe::default()), Effect::RadialWipe(RadialWipe::default()),
+            Effect::IrisWipe(IrisWipe::default()),
+        ];
+        let mut checked = 0;
+        for effect in all {
+            let name = effect.name();
+            let mut object = rect("o");
+            let instance = EffectInstance::new("e", effect);
+            object.base_mut().effects = Some(vec![instance.clone()]);
+            let mut scene = scene_with(vec![object]);
+            let mut paths = vec!["enabled".to_owned()];
+            paths.extend(instance.effect.parameter_paths());
+            for path in paths {
+                let property = format!("effects.e.{path}");
+                assert!(is_animatable_on(&scene.objects[0], &property), "{name}: {property}");
+                let domain = instance.domain(&path).unwrap();
+                let value = instance.value(&path).unwrap();
+                let easing = if domain.is_discrete() { SceneEasing::Hold } else { SceneEasing::Linear };
+                set_keyframe(&mut scene, "o", &property, SceneKeyframe { easing, ..key(10, value) })
+                    .unwrap_or_else(|refusal| panic!("{name}: {property} refused {refusal:?}"));
+                checked += 1;
+            }
+        }
+        assert!(checked > 100, "{checked} parameters");
+    }
+
+    #[test]
     fn every_effect_parameter_is_keyframable_through_its_typed_table() {
         // 3.22: effects.<effectId>.<path>, validated by each effect's own
         // parameter table, and written back by set_base_property.

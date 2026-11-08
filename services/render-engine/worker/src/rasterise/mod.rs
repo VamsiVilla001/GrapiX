@@ -259,6 +259,50 @@ impl RasterSurface {
         }
     }
 
+    /// Warp a layer-space buffer onto this canvas-sized surface and blend it,
+    /// as the GPU composite pass does (3.22): `rows` are the layer's inverse
+    /// affine rows (`compositor::layer_rows`), the sampler is the
+    /// compositor's, opacity applies to the sample, and a layer at zero
+    /// opacity changes nothing.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn warp_blend(
+        &mut self,
+        layer: &[WorkingRgba],
+        layer_width: usize,
+        layer_height: usize,
+        rows: &[f32; 12],
+        opacity: f32,
+        mode: gx_contracts::material::BlendMode,
+        seed: u32,
+    ) {
+        if !(opacity > 0.0) {
+            return;
+        }
+        let dissolve = matches!(
+            mode,
+            gx_contracts::material::BlendMode::Dissolve | gx_contracts::material::BlendMode::DancingDissolve
+        );
+        let (lw, lh) = (layer_width as f32, layer_height as f32);
+        let width = self.width as usize;
+        for (index, dst) in self.pixels.iter_mut().enumerate() {
+            let (x, y) = ((index % width) as f32 + 0.5, (index / width) as f32 + 0.5);
+            let sx = rows[0] * x + rows[1] * y + rows[2];
+            let sy = rows[4] * x + rows[5] * y + rows[6];
+            let s = if sx > -1.0 && sy > -1.0 && sx < lw + 1.0 && sy < lh + 1.0 {
+                let p = crate::effect_chain::sample_bilinear(layer, layer_width, layer_height, sx, sy);
+                WorkingRgba { r: p.r * opacity, g: p.g * opacity, b: p.b * opacity, a: p.a * opacity }
+            } else {
+                WorkingRgba::transparent()
+            };
+            let noise = if dissolve {
+                crate::blend::hash_noise((index % width) as u32, (index / width) as u32, seed)
+            } else {
+                0.5
+            };
+            *dst = crate::blend::blend(mode, *dst, s, noise);
+        }
+    }
+
     /// Blend a same-sized layer onto this surface in `mode` (3.20), every
     /// pixel, through the CPU reference `crate::blend`. `seed` is the layer's
     /// Dissolve seed; the noise key is the stage pixel's integer index.

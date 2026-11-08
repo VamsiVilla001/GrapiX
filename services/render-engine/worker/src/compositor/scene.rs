@@ -58,8 +58,8 @@ pub struct GpuScene {
     states: Vec<LayerState>,
     // 3.22: each layer's effect stack, re-packed in place every frame from
     // the evaluated scene (no per-frame allocation).
-    effects: Vec<Vec<crate::effects::PackedEffect>>,
-    space: gx_contracts::color::WorkingColorSpace,
+    effects: Vec<Option<crate::effect_chain::EffectPlan>>,
+    effect_contexts: Vec<crate::effect_chain::EffectContext>,
     sources: Vec<SourceTrace>,
     clear_frame: Arc<Frame>,
 }
@@ -74,6 +74,7 @@ impl GpuScene {
             .max_texture_dimension_2d()
             .ok_or(Refusal::TierTooLow { actual: gpu.tier() })?;
         let mut inputs = Vec::new();
+        let mut contexts = Vec::new();
         let mut layers = Vec::new();
         let mut sources = Vec::new();
         for index in PreparedScene::draw_order(doc) {
@@ -91,89 +92,29 @@ impl GpuScene {
             let path = format!("objects[{index}]");
             // Semantic validation already refuses unsupported object kinds,
             // gradients, materials, masks and text features by name.
-            let mut local = doc.clone();
-            local.objects = vec![object.clone()];
             let resolved = &scene.effective()[index];
-            let anchor = object.base().anchor.unwrap_or(Vec2 { x: 0.0, y: 0.0 });
-            let phase = [resolved.x - anchor.x, resolved.y - anchor.y];
-            // Preserve the reference's exact coverage rounding at initial
-            // integer translations. Only the CPU source rasteriser sees this
-            // sampling phase; GPU coordinates remain texture/tile-local.
-            let phase = if resolved.scale_x == 1.0
-                && resolved.scale_y == 1.0
-                && resolved.rotation_z.rem_euclid(360.0) == 0.0
-                && phase.iter().all(|v| v.fract() == 0.0 && v.abs() < 1e6)
-            {
-                phase
-            } else {
-                [0.0, 0.0]
-            };
-            let base = local.objects[0].base_mut();
-            base.x = phase[0];
-            base.y = phase[1];
-            base.rotation = 0.0;
-            base.scale_x = 1.0;
-            base.scale_y = 1.0;
-            base.anchor = None;
-            base.opacity = 1.0;
-            base.visible = true;
-            let effective = resolve_hierarchy(&local.objects).effective;
-            let paths = PreparedPaths::prepare(&local, &effective)?;
-            let mut bounds: Option<[f64; 4]> = None;
-            let mut point = |x: f64, y: f64| {
-                let b = bounds.get_or_insert([x, y, x, y]);
-                b[0] = b[0].min(x);
-                b[1] = b[1].min(y);
-                b[2] = b[2].max(x);
-                b[3] = b[3].max(y);
-            };
-            for path in paths.paths() {
-                for v in path.vertices() {
-                    point(f64::from(v.x), f64::from(v.y));
-                }
-            }
-            if let Some(text) = scene.texts().objects.iter().find(|t| t.object_id == id) {
-                for &[x, y] in &text.vertices {
-                    point(
-                        f64::from((f64::from(x) + phase[0]) as f32),
-                        f64::from((f64::from(y) + phase[1]) as f32),
-                    );
-                }
-            }
-            let b = bounds.unwrap_or([0.0, 0.0, 0.0, 0.0]);
-            let origin = [b[0].floor() - 1.0, b[1].floor() - 1.0];
-            let width = b[2].ceil() - origin[0] + 1.0;
-            let height = b[3].ceil() - origin[1] + 1.0;
-            if !width.is_finite()
-                || !height.is_finite()
-                || width > f64::from(limit)
-                || height > f64::from(limit)
-            {
-                return Err(mapping_refusal(&id, &path,
-                    &format!("CPU-prepared source {width}x{height} exceeds device limit {limit}; source tiling requires 3.17/3.18")));
-            }
-            let (width, height) = (width.max(1.0) as u32, height.max(1.0) as u32);
-            crate::render_work::cpu_source();
-            let mut surface = RasterSurface::window(width, height, origin);
-            let object_paths: Vec<_> = paths.paths().iter().collect();
-            LyonPathRasteriser.rasterise_into(&object_paths, &mut surface);
-            if matches!(object, SceneObject::Text(_)) {
-                crate::text::rasterise_text(scene.texts(), &id, &local, &effective, &mut surface)?;
-            }
-            let origin = [origin[0] - phase[0], origin[1] - phase[1]];
+            // 3.22: padded by the effect stack's largest reach over every
+            // frame, and Box Blur sized to its largest iteration count.
+            let (pad, iterations) = crate::effect_chain::layer_extent(doc, index)?;
+            let source = crate::layer_source::prepare_layer_source(doc, scene.effective(), scene.texts(), index, pad, limit)?;
+            let (width, height) = (source.surface.width(), source.surface.height());
+            let surface = source.surface;
+            let origin = source.origin;
             let blend_mode = object.base().blend_mode();
-            let effects: Vec<crate::effects::PackedEffect> = object
-                .base()
-                .effects()
-                .iter()
-                .map(|instance| {
-                    let mut packed = crate::effects::PackedEffect::identity();
-                    packed.pack(instance, doc.working_color_space);
-                    packed
-                })
-                .collect();
+            let instances = object.base().effects();
+            let effect_ctx = crate::effect_chain::EffectContext {
+                origin,
+                size: [object.base().width, object.base().height],
+                space: doc.working_color_space,
+            };
+            let effects = (!instances.is_empty()).then(|| {
+                let mut plan = crate::effect_chain::EffectPlan::layout(instances, &iterations);
+                plan.pack(instances, &effect_ctx);
+                plan
+            });
             let mut state = layer_state(object.base().anchor, resolved, origin);
             state.seed = frame_seed(&id, blend_mode, 0);
+            contexts.push(effect_ctx);
             inputs.push(LayerInput {
                 object_id: id.clone(),
                 document_path: path.clone(),
@@ -211,6 +152,7 @@ impl GpuScene {
         let ring = compositor.output_ring().map_err(compositor_refusal)?;
         let states = inputs.iter().map(|input| input.state).collect();
         let effects = inputs.iter().map(|input| input.effects.clone()).collect();
+        let effect_contexts = contexts;
         let clear_frame = Arc::new(Frame {
             width: doc.canvas.width,
             height: doc.canvas.height,
@@ -224,7 +166,7 @@ impl GpuScene {
             layers,
             states,
             effects,
-            space: doc.working_color_space,
+            effect_contexts,
             sources,
             clear_frame,
         })
@@ -264,10 +206,9 @@ impl GpuScene {
             );
             state.seed = frame_seed(&layer.object_id, layer.blend_mode, scene_frame);
         }
-        for (packed, layer) in self.effects.iter_mut().zip(&self.layers) {
-            let instances = self.evaluated.objects[layer.object_index].base().effects();
-            for (slot, instance) in packed.iter_mut().zip(instances) {
-                slot.pack(instance, self.space);
+        for ((plan, layer), ctx) in self.effects.iter_mut().zip(&self.layers).zip(&self.effect_contexts) {
+            if let Some(plan) = plan {
+                plan.pack(self.evaluated.objects[layer.object_index].base().effects(), ctx);
             }
         }
         self.compositor
@@ -330,7 +271,7 @@ impl GpuScene {
     }
 }
 
-fn layer_state(anchor: Option<Vec2>, resolved: &ResolvedObject, origin: [f64; 2]) -> LayerState {
+pub(crate) fn layer_state(anchor: Option<Vec2>, resolved: &ResolvedObject, origin: [f64; 2]) -> LayerState {
     // A zero-scale object has zero area. Hide it with an invertible identity
     // rather than rejecting a legitimate zero scale or inventing pixels.
     if resolved.scale_x == 0.0 || resolved.scale_y == 0.0 {

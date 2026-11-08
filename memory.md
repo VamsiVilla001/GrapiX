@@ -118,7 +118,7 @@ not a euphemism for nearly done.
 
 ---
 
-## 2026-11-08 — 3.22 started: typed effect registry and the pointwise effects on the GPU (Claude, #103)
+## 2026-11-08 — 3.22 done: typed effect registry and the broadcast effect set on the GPU (Claude, #103)
 
 **Decided with Jev** (TypeSafe `jev-1.14.0`, via `@typesafe-ai/sdk`, key from the user's secrets folder; user instruction 8 Nov): per-object effect stack (0.97); one serde-tagged enum with a typed struct per effect and a stable `effectId` (0.92); keyframes address `effects.<effectId>.<path>` through each effect's typed table (0.56); spatial-effect padding sized at prepare from channel extrema (1.00); first increment = contract + pointwise effects (0.96); port kernels only, not EffectCraft's chain (0.96). `jg` classified EffectCraft's effects first: string-keyed ids and parameters, per-frame allocation, CPU fallback — studied, not ported. Answers in `docs/evidence/3.22/jev-*.json`.
 
@@ -128,7 +128,11 @@ not a euphemism for nearly done.
 
 **Ties.** Decimal colours sit on exact code ties in an sRGB project (0.5 → 127.5/255); GPU fused multiply-adds put flat cells one code either side. The same 418 flips occur with **no effects** through the existing compositor. Jev chose a tie-aware 4.4 (0.81): ≤1 code, and ≤0.1% of pixels differing other than proven tie flips (GPU bytes = CPU encode of GPU floats, floats within 1e-4 of the reference); Jev also says (0.61) the user must approve that reading. Strict counts are recorded per row.
 
-**Not done.** The spatial effects; the user's decision on tie-aware 4.4; Hue/Saturation colour ranges and individual-channel Exposure. 3.22 stays active.
+**Increment 2 (same day): the nine spatial and coordinate effects; 3.22 done.** `src/layer_source.rs` (the object's padded layer-space pixels, shared by the GPU scene and the CPU reference; moved from 3.16's `compositor/scene.rs`, unchanged at pad 0); `src/effect_chain.rs` (fixed pass plan per stack at prepare: per-pixel colour/ramp/wipe passes, box passes per row or column, directional gather, save/bright-or-make/blur/combine for glow and drop shadow; padding and Box Blur iterations sized from every animated frame via exact channel evaluation; the same module runs the CPU reference); `compositor/effects.wgsl` gains the spatial passes and an `effect_line` entry (one invocation per line, one running sum) over three layer targets with a fifth binding for the saved input. The CPU reference warps the effected layer with the compositor's inverse-affine rows and sampler (`RasterSurface::warp_blend`, `compositor::layer_rows`). Wipes use the same polynomial atan2/sin/cos on both paths (radial wipe worst difference 1.8e-3 → 7e-6). Spatial effects no longer refuse; `EffectInstance.schema.json` is emitted by codegen; `every_parameter_of_every_effect_takes_a_keyframe` walks the registry. **Verified:** engine gate 30 cases × 2 spaces (every effect, a chain, a rotated/scaled/fractional layer): DX12 32/60 and Vulkan 34/60 byte-identical, 0 differing pixels other than proven tie flips, worst 1 code, worst working difference 9.3e-5; animated blurriness, iterations 1→4, shadow distance and the rest at 6 frames × 2 spaces all match tie-aware; `effect_chain::tests` 6/6; all worker hardware tests DX12 22/22, Vulkan 18/18; 3.21 budget medians unchanged (no effects on those workloads). Gate: see the 3.22 commit. Evidence: `docs/evidence/3.22/`.
+
+**Not in the contract (named findings for importers, not dropped):** Hue/Saturation colour ranges, individual-channel Levels/Exposure groups beyond the fields carried, Glow A & B colours and non-Add operations, Fill mask options. Adjustment layers are a later row.
+
+**User decision, 8 Nov 2026:** the tie-aware 4.4 reading is approved ("Approve tie-aware"); recorded in `GrapiX-Build-Plan.md` (Phase 3 notes) and beside `CROSS_MACHINE_TOLERANCE` in `headless.rs`. Next: finish 3.22's spatial effects, then the Jev review of rows already done (user, 8 Nov: "rework all the completed tasks with jev sdk and fix any issues").
 
 ## 2026-11-08 — 3.20 done: the full blend-mode set on the GPU (Claude, #103)
 

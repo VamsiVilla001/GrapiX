@@ -13,6 +13,19 @@ const E_CURVES: u32 = 4u;
 const E_HUE_SATURATION: u32 = 5u;
 const E_BRIGHTNESS_CONTRAST: u32 = 6u;
 const E_EXPOSURE: u32 = 7u;
+const E_RAMP: u32 = 8u;
+const E_LINEAR_WIPE: u32 = 9u;
+const E_RADIAL_WIPE: u32 = 10u;
+const E_IRIS_WIPE: u32 = 11u;
+const E_BOX: u32 = 12u;
+const E_DIRECTIONAL: u32 = 13u;
+const E_SAVE: u32 = 14u;
+const E_GLOW_BRIGHT: u32 = 15u;
+const E_GLOW_COMBINE: u32 = 16u;
+const E_SHADOW_MAKE: u32 = 17u;
+const E_SHADOW_COMBINE: u32 = 18u;
+const ORIGIN_SLOT: u32 = 28u;
+const PI: f32 = 3.14159265358979;
 const LUT_N: u32 = 1024u;
 const CURVE_BLOCK: u32 = 1031u;
 
@@ -25,6 +38,8 @@ struct EffectParams {
 @group(0) @binding(1) var effect_out: texture_storage_2d<rgba32float, write>;
 @group(0) @binding(2) var<uniform> effect: EffectParams;
 @group(0) @binding(3) var<storage, read> curve: array<f32>;
+// The saved input of a glow or drop shadow, for its combine pass.
+@group(0) @binding(4) var effect_aux: texture_2d<f32>;
 
 fn P(i: u32) -> f32 {
     return effect.p[i / 4u][i % 4u];
@@ -197,9 +212,229 @@ fn apply_effect(px: vec4<f32>) -> vec4<f32> {
     return r;
 }
 
+// ---------------------------------------------------------------- 3.22 spatial and coordinate passes
+// The twin of src/effect_chain.rs.
+
+fn finite4(v: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(bound(v.x), bound(v.y), bound(v.z), clamp(bound(v.w), 0.0, 1.0));
+}
+
+fn fx_get(p: vec2<i32>) -> vec4<f32> {
+    let size = vec2<i32>(textureDimensions(effect_src));
+    if (any(p < vec2<i32>(0)) || any(p >= size)) {
+        return vec4<f32>(0.0);
+    }
+    return textureLoad(effect_src, p, 0);
+}
+
+// The compositor's sampler: centres at +0.5, transparent outside.
+fn fx_sample(x: f32, y: f32) -> vec4<f32> {
+    let f = vec2<f32>(x, y) - vec2<f32>(0.5);
+    let lo = floor(f);
+    let t = f - lo;
+    let q = vec2<i32>(lo);
+    let a = fx_get(q);
+    let b = fx_get(q + vec2<i32>(1, 0));
+    let c = fx_get(q + vec2<i32>(0, 1));
+    let d = fx_get(q + vec2<i32>(1, 1));
+    return mix(mix(a, b, t.x), mix(c, d, t.x), t.y);
+}
+
+// The wipes' trigonometry, the same polynomials as src/effect_chain.rs.
+fn fx_atan(z: f32) -> f32 {
+    let z2 = z * z;
+    return z * (0.99997726 + z2 * (-0.33262347 + z2 * (0.19354346 + z2 * (-0.11643287 + z2 * (0.05265332 + z2 * -0.0117212)))));
+}
+
+fn fx_atan2(y: f32, x: f32) -> f32 {
+    let ax = abs(x);
+    let ay = abs(y);
+    if (ax == 0.0 && ay == 0.0) { return 0.0; }
+    var a: f32;
+    if (ax >= ay) { a = fx_atan(ay / ax); } else { a = PI * 0.5 - fx_atan(ax / ay); }
+    if (x < 0.0) { a = PI - a; }
+    if (y < 0.0) { a = -a; }
+    return a;
+}
+
+fn fx_sin(x: f32) -> f32 {
+    let k = floor(x / PI + 0.5);
+    let r = x - k * PI;
+    let r2 = r * r;
+    let s = r * (1.0 + r2 * (-1.0 / 6.0 + r2 * (1.0 / 120.0 + r2 * (-1.0 / 5040.0 + r2 * (1.0 / 362880.0 + r2 * (-1.0 / 39916800.0))))));
+    if ((i32(k) % 2) != 0) { return -s; }
+    return s;
+}
+
+fn fx_cos(x: f32) -> f32 {
+    return fx_sin(x + PI * 0.5);
+}
+
+fn modulo(x: f32, m: f32) -> f32 {
+    return x - floor(x / m) * m;
+}
+
+fn coordinate_effect(kind: u32, px: vec4<f32>, l: vec2<f32>) -> vec4<f32> {
+    if (kind == E_RAMP) {
+        if (!covers(px.w)) { return px; }
+        let d = vec2<f32>(P(10u) - P(8u), P(11u) - P(9u));
+        let v = vec2<f32>(l.x - P(8u), l.y - P(9u));
+        var t: f32;
+        if (P(12u) > 0.5) {
+            t = sqrt(v.x * v.x + v.y * v.y) / max(sqrt(d.x * d.x + d.y * d.y), 1e-6);
+        } else {
+            t = (v.x * d.x + v.y * d.y) / max(d.x * d.x + d.y * d.y, 1e-12);
+        }
+        t = clamp(t, 0.0, 1.0);
+        let a = px.w;
+        let c = px.xyz / a;
+        let ramp = vec3<f32>(mix(P(0u), P(4u), t), mix(P(1u), P(5u), t), mix(P(2u), P(6u), t));
+        let k = (1.0 - P(13u)) * mix(P(3u), P(7u), t);
+        let o = c + (ramp - c) * k;
+        return finite4(vec4<f32>(o * a, a));
+    }
+    if (kind == E_LINEAR_WIPE) {
+        let d = l.x * P(0u) + l.y * P(1u);
+        return finite4(px * clamp((d - P(2u)) / P(3u) + 0.5, 0.0, 1.0));
+    }
+    if (kind == E_RADIAL_WIPE) {
+        let v = vec2<f32>(l.x - P(0u), l.y - P(1u));
+        let r = sqrt(v.x * v.x + v.y * v.y);
+        let deg = fx_atan2(v.x, -v.y) * (180.0 / PI) - P(2u);
+        var a = modulo(deg, 360.0);
+        if (P(5u) > 1.5) {
+            a = min(a, 360.0 - a);
+        } else if (P(5u) > 0.5) {
+            a = 360.0 - a;
+        }
+        let arc = (a - P(3u)) * (PI / 180.0) * r;
+        return finite4(px * clamp(arc / P(4u) + 0.5, 0.0, 1.0));
+    }
+    if (kind == E_IRIS_WIPE) {
+        let v = vec2<f32>(l.x - P(0u), l.y - P(1u));
+        let d = sqrt(v.x * v.x + v.y * v.y);
+        let n = P(2u);
+        let step = PI / n;
+        let th = modulo(fx_atan2(v.x, -v.y) - P(5u), 2.0 * PI);
+        let k = min(floor(th / step), 2.0 * n - 1.0);
+        let a0 = k * step;
+        let a1 = (k + 1.0) * step;
+        var r0 = P(3u);
+        var r1 = P(4u);
+        if ((i32(k) % 2) != 0) {
+            r0 = P(4u);
+            r1 = P(3u);
+        }
+        let p0 = vec2<f32>(r0 * fx_sin(a0), -r0 * fx_cos(a0));
+        let p1 = vec2<f32>(r1 * fx_sin(a1), -r1 * fx_cos(a1));
+        let u = vec2<f32>(fx_sin(th), -fx_cos(th));
+        let e = p1 - p0;
+        let denom = u.x * e.y - u.y * e.x;
+        var radius = r0;
+        if (abs(denom) >= 1e-12) {
+            radius = (p0.x * p1.y - p0.y * p1.x) / denom;
+        }
+        return finite4(px * clamp((d - radius) / P(6u) + 0.5, 0.0, 1.0));
+    }
+    if (kind == E_GLOW_BRIGHT) {
+        if (!covers(px.w)) { return vec4<f32>(0.0); }
+        let c = px.xyz / px.w;
+        let lum = 0.2126 * c.x + 0.7152 * c.y + 0.0722 * c.z;
+        let k = clamp((lum - P(0u)) / max(1.0 - P(0u), 1e-3), 0.0, 1.0);
+        return finite4(px * k);
+    }
+    return apply_effect(px);
+}
+
 @compute @workgroup_size(16, 16)
 fn effect_step(@builtin(global_invocation_id) id: vec3<u32>) {
     if (any(id.xy >= textureDimensions(effect_out))) { return; }
-    let px = textureLoad(effect_src, vec2<i32>(id.xy), 0);
-    textureStore(effect_out, vec2<i32>(id.xy), apply_effect(px));
+    let kind = effect.kind.x;
+    let q = vec2<i32>(id.xy);
+    let px = textureLoad(effect_src, q, 0);
+    var out = px;
+    if (kind == E_IDENTITY || kind == E_SAVE) {
+        out = px;
+    } else if (kind == E_DIRECTIONAL) {
+        let n = i32(P(3u));
+        var acc = vec4<f32>(0.0);
+        for (var i = 0; i < n; i++) {
+            let t = (f32(i) / f32(n - 1) - 0.5) * P(2u);
+            acc += fx_sample(f32(q.x) + 0.5 + P(0u) * t, f32(q.y) + 0.5 + P(1u) * t);
+        }
+        out = finite4(acc * (1.0 / f32(n)));
+    } else if (kind == E_GLOW_COMBINE) {
+        let o = textureLoad(effect_aux, q, 0);
+        let g = px * P(0u);
+        out = finite4(vec4<f32>(o.xyz + g.xyz, min(o.w + g.w * (1.0 - o.w), 1.0)));
+    } else if (kind == E_SHADOW_MAKE) {
+        let a = fx_sample(f32(q.x) + 0.5 - P(5u), f32(q.y) + 0.5 - P(6u)).w * P(4u) * P(3u);
+        out = finite4(vec4<f32>(P(0u) * a, P(1u) * a, P(2u) * a, a));
+    } else if (kind == E_SHADOW_COMBINE) {
+        if (P(0u) > 0.5) {
+            out = px;
+        } else {
+            let o = textureLoad(effect_aux, q, 0);
+            let k = 1.0 - o.w;
+            out = finite4(vec4<f32>(o.xyz + px.xyz * k, o.w + px.w * k));
+        }
+    } else {
+        let l = vec2<f32>(P(ORIGIN_SLOT) + f32(q.x) + 0.5, P(ORIGIN_SLOT + 1u) + f32(q.y) + 0.5);
+        out = coordinate_effect(kind, px, l);
+    }
+    textureStore(effect_out, q, out);
+}
+
+fn line_get(horizontal: bool, line: i32, i: i32, n: i32, repeat: bool) -> vec4<f32> {
+    var j = i;
+    if (i < 0 || i >= n) {
+        if (!repeat) {
+            return vec4<f32>(0.0);
+        }
+        j = clamp(i, 0, n - 1);
+    }
+    if (horizontal) {
+        return textureLoad(effect_src, vec2<i32>(j, line), 0);
+    }
+    return textureLoad(effect_src, vec2<i32>(line, j), 0);
+}
+
+// One box pass: one invocation per row (horizontal) or column, one running
+// sum along it, in the CPU reference order of operations.
+@compute @workgroup_size(64, 1)
+fn effect_line(@builtin(global_invocation_id) id: vec3<u32>) {
+    let dims = vec2<i32>(textureDimensions(effect_out));
+    let horizontal = P(2u) > 0.5;
+    var lines = dims.x;
+    var n = dims.y;
+    if (horizontal) {
+        lines = dims.y;
+        n = dims.x;
+    }
+    let line = i32(id.x);
+    if (line >= lines) { return; }
+    let kind = effect.kind.x;
+    if (kind != E_BOX) {
+        for (var i = 0; i < n; i++) {
+            var q = vec2<i32>(line, i);
+            if (horizontal) { q = vec2<i32>(i, line); }
+            textureStore(effect_out, q, textureLoad(effect_src, q, 0));
+        }
+        return;
+    }
+    let r = i32(P(0u));
+    let repeat = P(1u) > 0.5;
+    let norm = 1.0 / f32(2 * r + 1);
+    var acc = vec4<f32>(0.0);
+    for (var i = -r; i <= r; i++) {
+        acc = acc + line_get(horizontal, line, i, n, repeat);
+    }
+    for (var i = 0; i < n; i++) {
+        var q = vec2<i32>(line, i);
+        if (horizontal) { q = vec2<i32>(i, line); }
+        textureStore(effect_out, q, acc * norm);
+        let add = line_get(horizontal, line, i + r + 1, n, repeat);
+        let sub = line_get(horizontal, line, i - r, n, repeat);
+        acc = acc + (add - sub);
+    }
 }

@@ -463,6 +463,15 @@ fn write_command_schemas(root: &Path) -> Result<(), Box<dyn std::error::Error>> 
         "SceneEdit",
         None,
     )?;
+    // 3.22: the typed effect registry, so a validator outside Rust reads the
+    // same effect vocabulary and parameter types the engine draws.
+    write_schema(
+        &schemas.join("EffectInstance.schema.json"),
+        command_schema::<gx_contracts::effect::EffectInstance>(),
+        "urn:grapix:schema:EffectInstance",
+        "EffectInstance",
+        None,
+    )?;
 
     write_payload_schemas(
         &commands,

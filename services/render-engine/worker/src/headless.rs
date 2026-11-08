@@ -132,6 +132,12 @@ pub struct ImageTolerance {
     pub max_differing_pixels_per_million: u64,
 }
 
+/// For a GPU render held to its CPU reference (user decision, 8 November
+/// 2026, build plan "The 4.4 threshold for a GPU render held to its CPU
+/// reference"): the one-code limit applies to every pixel, but a differing
+/// pixel that is a proven tie flip (GPU bytes exactly the CPU encode of the
+/// GPU's own working floats, and those floats within 1e-4 of the
+/// reference's) does not count toward the 0.1%.
 pub const CROSS_MACHINE_TOLERANCE: ImageTolerance = ImageTolerance {
     max_channel_delta: 1,
     max_differing_pixels_per_million: 1_000,

@@ -156,6 +156,7 @@ fn gpu_effect_kernels_equal_the_cpu_reference() {
                     wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&out_view) },
                     wgpu::BindGroupEntry { binding: 2, resource: uniform.as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 3, resource: curve.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&src_view) },
                 ],
             });
             let readback = device.create_buffer(&wgpu::BufferDescriptor {

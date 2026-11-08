@@ -186,6 +186,20 @@ attribution, each under the step that owns it (ADR-0003's reuse catalogue).
 Steps `3.15`–`3.22` own the GPU compositor. Until they are done, no `done`
 entry is evidence that GrapiX draws on the GPU.
 
+**The 4.4 threshold for a GPU render held to its CPU reference (user, 8
+November 2026, on Jev's recommendation).** The threshold is unchanged: no
+channel more than one code value apart, at most 0.1% of pixels differing
+(`CROSS_MACHINE_TOLERANCE`). When a GPU render is compared with the CPU
+reference of the same frame, a differing pixel does not count toward the
+0.1% if it is a proven tie flip: the GPU's output bytes are exactly the
+CPU encode of its own working-space floats, and those floats are within
+1e-4 (relative, absolute below 1e-3) of the reference's, far below one code
+step (3.9e-3). Such a pixel's reference value lay on a rounding tie (0.5 is
+127.5/255 in an sRGB project), where the GPU's fused multiply-adds may land
+it one code either side. The one-code limit still applies to every pixel,
+and the strict count is recorded beside the tie-aware one. Applies to
+`3.17`–`3.22` and later GPU rows (`docs/evidence/3.22/`).
+
 **Colour follows the project (user, 12 October 2026).** Compositing happens in
 the project's declared working colour space, not in linear light
 unconditionally. This amends ADR-0002 B.1's "render internally in linear,

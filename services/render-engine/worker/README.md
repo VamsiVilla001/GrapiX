@@ -76,12 +76,16 @@ the object. A layer at zero opacity does nothing in any mode. Gates and
 evidence: `compositor::blend_tests`, `engine::blend_tests`, `docs/evidence/3.20/`.
 
 **3.22 effects:** an object's effect stack (`gx_contracts::effect`) runs on
-the layer's own pixels before its opacity. Each effect is packed per frame
-into a fixed f32 block (`src/effects.rs`); the CPU reference and the GPU
-kernel (`src/compositor/effects.wgsl`) read the same block. The GPU chain is
-built at prepare (one step per effect, two ping-pong targets) and runs one
-dispatch per effect per frame. The pointwise effects are drawn; the spatial
-ones refuse by name. Evidence: `docs/evidence/3.22/`.
+the object's own layer-space pixels (`src/layer_source.rs`, padded by the
+stack's largest reach over every frame) before its transform and opacity.
+`src/effect_chain.rs` expands the stack into a fixed list of passes at
+prepare (per-pixel colour, ramp and wipe passes; box passes along rows or
+columns for the blurs; save, make or bright, blur and combine for drop
+shadow and glow), packs each pass per frame into a fixed f32 block, and is
+the CPU reference; `src/compositor/effects.wgsl` runs the same passes on the
+GPU over three layer-sized targets built at prepare, one dispatch per pass.
+All 16 effects of the row's first set are drawn. Evidence:
+`docs/evidence/3.22/`.
 
 EffectCraft component provenance and its retained licence are in
 `THIRD_PARTY_NOTICES.md` and `EFFECTCRAFT-LICENSE`.
