@@ -16,12 +16,12 @@ publish = false
 
 [dependencies]
 vello = "0.11"
-vello_hybrid = "0.2"
-vello_cpu = "0.3"
+vello_gpu = "=0.3.0"
+vello_cpu = "=0.3.0"
+lyon = "1"
 tiny-skia = "0.12"
-# vello_hybrid 0.2.0 (latest) is built on wgpu 29, vello 0.11 on wgpu 30:
-# they cannot share one device, so each gets its own (see README).
-wgpu29 = { package = "wgpu", version = "29" }
+# Vello Hybrid was renamed vello_gpu; 0.3 shares wgpu 30 with the product.
+# Dependency/reference decision posted on Panchayati topic:10 msg 333 first.
 pollster = "0.4"
 gx-render-worker = { path = "../../services/render-engine/worker" }
 gx-contracts = { path = "../../Shared/contracts" }

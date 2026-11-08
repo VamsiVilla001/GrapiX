@@ -1,4 +1,60 @@
-# Vello / Vello Hybrid spike
+# Vello / Vello GPU / lyon spike
+
+## Current 3.17 increment — 7 November 2026 (Codex, task #103)
+
+The executable now compares **Vello GPU 0.3.0** (the renamed Vello Hybrid),
+Vello CPU 0.3.0 and a lyon-on-wgpu 30 implementation, alongside classic
+Vello, tiny-skia and the existing worker CPU rasteriser. Both Vello 0.3
+crates use `vello_common` 0.3; every GPU backend uses wgpu 30.0.1. There is
+no wgpu downgrade and no product dependency change. The dependency and CPU
+reference decisions were posted to Panchayati topic:10 message 333 before
+changing this probe's manifest or lockfile.
+
+Vello GPU 0.3.0 is the selected **integration candidate**, with Vello CPU
+0.3.0 the new AA primitive reference family. The old six CPU golden frames
+are preserved. The unchanged 4.4 threshold remains a gate: one code value
+alone does not pass if more than 0.1% of pixels differ. Current status:
+evidence not yet recorded; docs/evidence/3.17 is owed when the measurement
+is rerun (raw DX12 captures in agent/tmp/gpu-317, untracked). Strict 4.4
+parity and product integration remain open. **3.17 is active;
+16.9 is pending** (these are broadcast-shaped synthetic fixtures, not the
+real broadcast corpus).
+
+The lyon probe tessellates the same paths and kurbo dashes, applies a
+four-sample MSAA stencil union per primitive, then paints solid, linear or
+radial colours through a GPU shader. Stencil union prevents overlapping
+stroke triangles from accumulating alpha. It is one concrete lyon AA
+implementation, not a claim about every possible lyon backend. All GPU
+timings include dynamic display-list encoding/tessellation, uploads and a
+completion wait; the readback series also includes the CPU copy. These
+are not prepared product frame-path timings or 3.21 proofs. The product
+must cache persistent resources at preparation (invariant 35).
+
+The current executable writes native premultiplied-byte comparisons to
+`report.json` before converting a copy to straight alpha for PNG export.
+Classic Vello's straight-alpha output is premultiplied once for comparison.
+The threshold is imported from the worker, never duplicated or relaxed.
+`vello-hybrid` in the report/PNG names is a retained label for Vello GPU 0.3,
+so old scripts can read both runs. DX12 explicitly selects FXC unless a DXC
+path is supplied; it no longer uses the `Auto` compiler.
+
+```powershell
+& ./tools/vello-spike/run.ps1 -Backend dx12 -OutDirectory agent/tmp/gpu-317/quiet-dx12
+& ./tools/vello-spike/run.ps1 -Backend vulkan -OutDirectory agent/tmp/gpu-317/quiet-vulkan
+cargo test --release --locked --manifest-path tools/vello-spike/Cargo.toml --target-dir agent/tmp/vello-spike/target
+```
+
+Official rename/API reference:
+[Vello GPU 0.3.0](https://docs.rs/vello_gpu/0.3.0/vello_gpu/).
+It remains subject to its documented mask/filter/blend limitations; this
+probe exercises only the 3.17 primitives, without text or masks.
+
+## Historical 0.2 Hybrid run (retained evidence)
+
+Everything below describes the earlier `c5e3657` executable and measurements.
+Its wgpu-29 compatibility blocker and recommendation predate discovery of
+the renamed 0.3 crate. Its threshold discussion is not permission to loosen
+4.4; the current increment retains that threshold unchanged.
 
 Build-plan `3.17` (GPU 2D drawing) and `16.9` (rasteriser benchmark). This is
 an isolated probe, not a drawing backend: it is its own Cargo workspace with

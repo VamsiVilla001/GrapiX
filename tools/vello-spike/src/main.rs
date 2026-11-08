@@ -1,10 +1,10 @@
-//! Vello classic / Vello Hybrid spike for build-plan 3.17 and 16.9.
+//! Vello classic / Vello GPU (formerly Hybrid) / lyon probe for 3.17 and 16.9.
 //!
 //! Isolated probe: its own workspace and lockfile, never a product
 //! dependency. It renders three broadcast-shaped workloads at 1920x1080 RGBA8
-//! through five backends, reads every frame back to the CPU, times 5 warmups
+//! through six backends, reads every frame back to the CPU, times 5 warmups
 //! and 30 samples, writes the frames as PNGs, and compares them against an
-//! independent CPU reference with the engine's own cross-machine tolerance.
+//! CPU references with the engine's unchanged cross-machine tolerance.
 //!
 //! Usage: `gx-vello-spike <dx12|vulkan> <out-dir> [dxcompiler.dll]`
 
@@ -238,6 +238,7 @@ fn kurbo_stroke(s: &StrokeStyle) -> kurbo::Stroke {
 
 /// sRGB RGBA8, tightly packed, as the backend produced it. Converted to
 /// straight alpha only after timing, so analysis costs are never measured.
+#[derive(Clone)]
 struct Image {
     pixels: Vec<u8>,
     premultiplied: bool,
@@ -286,11 +287,11 @@ struct Diff {
     mean_abs: f64,
 }
 
-/// Compared in premultiplied space, so a fully transparent pixel's colour
-/// (meaningless) never counts as a difference.
+/// Compare native premultiplied bytes; convert straight-alpha outputs once.
+/// PNG unpremultiplication is deliberately outside this comparison.
 fn diff(a: &Image, b: &Image, roi: Option<[u32; 4]>) -> Diff {
-    let pa = premultiply(&a.pixels);
-    let pb = premultiply(&b.pixels);
+    let pa = raw_premultiplied(a);
+    let pb = raw_premultiplied(b);
     let [x0, y0, w, h] = roi.unwrap_or([0, 0, WIDTH, HEIGHT]);
     let (mut differing, mut worst, mut sum) = (0u64, 0u8, 0u64);
     for y in y0..y0 + h {
@@ -308,6 +309,10 @@ fn diff(a: &Image, b: &Image, roi: Option<[u32; 4]>) -> Diff {
     }
     let total = u64::from(w) * u64::from(h);
     Diff { differing, total, worst, mean_abs: sum as f64 / (total * 4) as f64 }
+}
+
+fn raw_premultiplied(image: &Image) -> Vec<u8> {
+    if image.premultiplied { image.pixels.clone() } else { premultiply(&image.pixels) }
 }
 
 fn percentile(sorted: &[f64], p: f64) -> f64 {
@@ -335,12 +340,12 @@ fn time<F: FnMut() -> Result<Image>>(mut frame: F) -> Result<(Timing, Image)> {
     }
     let mean = samples.iter().sum::<f64>() / samples.len() as f64;
     samples.sort_by(|a, b| a.total_cmp(b));
-    let image = last.unwrap().into_straight();
+    let image = last.unwrap();
     Ok((Timing { p50: percentile(&samples, 50.0), p99: percentile(&samples, 99.0), mean }, image))
 }
 
 // ---------------------------------------------------------------------------
-// GPU readback, shared by wgpu 30 (Vello classic) and wgpu 29 (Vello Hybrid)
+// GPU readback, shared by every GPU probe on wgpu 30.
 // ---------------------------------------------------------------------------
 
 macro_rules! gpu_support {
@@ -348,7 +353,7 @@ macro_rules! gpu_support {
         mod $module {
             use $wgpu as wgpu;
 
-            /// wgpu 30 returns the mapped range as a Result, wgpu 29 does not.
+            /// Accept the mapped view returned by the pinned wgpu API.
             trait IntoView {
                 fn view(self) -> super::Result<wgpu::BufferView>;
             }
@@ -371,6 +376,7 @@ macro_rules! gpu_support {
                 };
                 let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
                 descriptor.backends = backends;
+                descriptor.backend_options.dx12.shader_compiler = wgpu::Dx12Compiler::Fxc;
                 if let Some(path) = dxc {
                     descriptor.backend_options.dx12.shader_compiler =
                         wgpu::Dx12Compiler::DynamicDxc { dxc_path: path.to_string() };
@@ -461,7 +467,7 @@ macro_rules! gpu_support {
 }
 
 gpu_support!(gpu30, vello::wgpu);
-gpu_support!(gpu29, wgpu29);
+mod lyon_gpu;
 
 // ---------------------------------------------------------------------------
 // Backends
@@ -533,31 +539,31 @@ impl Classic {
 }
 
 struct Hybrid {
-    device: wgpu29::Device,
-    queue: wgpu29::Queue,
-    renderer: vello_hybrid::Renderer,
-    resources: vello_hybrid::Resources,
-    scene: vello_hybrid::Scene,
-    texture: wgpu29::Texture,
-    view: wgpu29::TextureView,
-    buffer: wgpu29::Buffer,
+    device: vello::wgpu::Device,
+    queue: vello::wgpu::Queue,
+    renderer: vello_gpu::Renderer,
+    resources: vello_gpu::Resources,
+    scene: vello_gpu::Scene,
+    texture: vello::wgpu::Texture,
+    view: vello::wgpu::TextureView,
+    buffer: vello::wgpu::Buffer,
 }
 
 impl Hybrid {
     fn new(backend: &str, dxc: Option<&str>) -> Result<(Self, String, f64)> {
-        let (device, queue, info) = gpu29::device(backend, dxc)?;
+        let (device, queue, info) = gpu30::device(backend, dxc)?;
         let start = Instant::now();
-        let (renderer, resources) = vello_hybrid::Renderer::new(
+        let (renderer, resources) = vello_gpu::Renderer::new(
             &device,
-            &vello_hybrid::RenderTargetConfig {
-                format: wgpu29::TextureFormat::Rgba8Unorm,
-                width: WIDTH,
-                height: HEIGHT,
+            &vello_gpu::RenderTargetConfig {
+                format: vello::wgpu::TextureFormat::Rgba8Unorm,
+                width: WIDTH.try_into()?,
+                height: HEIGHT.try_into()?,
             },
         );
         let init_ms = start.elapsed().as_secs_f64() * 1000.0;
-        let (texture, view, buffer) = gpu29::target(&device, wgpu29::TextureUsages::RENDER_ATTACHMENT);
-        let scene = vello_hybrid::Scene::new(WIDTH as u16, HEIGHT as u16);
+        let (texture, view, buffer) = gpu30::target(&device, vello::wgpu::TextureUsages::RENDER_ATTACHMENT);
+        let scene = vello_gpu::Scene::new(WIDTH as u16, HEIGHT as u16);
         Ok((Self { device, queue, renderer, resources, scene, texture, view, buffer }, info, init_ms))
     }
 
@@ -585,18 +591,20 @@ impl Hybrid {
                 &self.device,
                 &self.queue,
                 &mut encoder,
-                &vello_hybrid::RenderSize { width: WIDTH, height: HEIGHT },
+                &vello_gpu::RenderSize { width: WIDTH.try_into()?, height: HEIGHT.try_into()? },
                 &self.view,
-                &vello_hybrid::TextureBindings::new(),
+                None,
+                &vello_gpu::TextureBindings::new(),
+                vello_gpu::TargetInit::Clear(vello_gpu::ClearSettings::default()),
             )
-            .map_err(|e| format!("vello_hybrid render: {e:?}"))?;
+            .map_err(|e| format!("vello_gpu render: {e:?}"))?;
         if !readback {
             self.queue.submit([encoder.finish()]);
-            self.device.poll(wgpu29::PollType::wait_indefinitely()).map_err(|e| format!("poll: {e:?}"))?;
+            self.device.poll(vello::wgpu::PollType::wait_indefinitely()).map_err(|e| format!("poll: {e:?}"))?;
             return Ok(Image::straight(Vec::new()));
         }
         // Hybrid writes premultiplied alpha.
-        let pixels = gpu29::read_back(&self.device, &self.queue, encoder, &self.texture, &self.buffer)?;
+        let pixels = gpu30::read_back(&self.device, &self.queue, encoder, &self.texture, &self.buffer)?;
         Ok(Image::premultiplied(pixels))
     }
 }
@@ -631,8 +639,8 @@ fn vello_cpu_frame(state: &mut VelloCpu, w: &Workload) -> Result<Image> {
     Ok(Image::premultiplied(state.pixmap.data_as_u8_slice().to_vec()))
 }
 
-/// tiny-skia: an independent, analytic-coverage CPU rasteriser (Skia's
-/// algorithm), used as the CPU reference every GPU backend is compared with.
+/// tiny-skia: an independent analytic-coverage diagnostic reference. Vello
+/// CPU 0.3 is the explicitly selected reference family for Vello GPU 0.3.
 fn tiny_skia_frame(pixmap: &mut tiny_skia::Pixmap, w: &Workload) -> Result<Image> {
     use tiny_skia as ts;
     pixmap.fill(ts::Color::TRANSPARENT);
@@ -782,7 +790,7 @@ fn worker_frame(scene: &gx_render_worker::PreparedScene) -> Result<Image> {
 
 /// |a - b| per pixel (largest premultiplied channel), x16, on opaque black.
 fn heatmap(a: &Image, b: &Image) -> Image {
-    let (pa, pb) = (premultiply(&a.pixels), premultiply(&b.pixels));
+    let (pa, pb) = (raw_premultiplied(a), raw_premultiplied(b));
     let mut out = Vec::with_capacity(pa.len());
     for (x, y) in pa.chunks_exact(4).zip(pb.chunks_exact(4)) {
         let d = x.iter().zip(y).map(|(p, q)| p.abs_diff(*q)).max().unwrap_or(0);
@@ -793,7 +801,7 @@ fn heatmap(a: &Image, b: &Image) -> Image {
 }
 
 fn write_png(dir: &Path, name: &str, image: &Image) -> Result<()> {
-    let frame = gx_render_worker::Frame { width: WIDTH, height: HEIGHT, pixels: image.pixels.clone() };
+    let frame = gx_render_worker::Frame { width: WIDTH, height: HEIGHT, pixels: image.clone().into_straight().pixels };
     std::fs::write(dir.join(name), gx_render_worker::headless::encode_png(&frame))?;
     Ok(())
 }
@@ -828,6 +836,9 @@ fn run() -> Result<()> {
     println!("CLASSIC adapter {classic_info}; renderer init {classic_init:.1} ms");
     let (mut hybrid, hybrid_info, hybrid_init) = Hybrid::new(&backend, dxc.as_deref())?;
     println!("HYBRID adapter {hybrid_info}; renderer init {hybrid_init:.1} ms");
+    let (mut lyon, lyon_info, lyon_init) = lyon_gpu::LyonGpu::new(&backend, dxc.as_deref())?;
+    println!("LYON adapter {lyon_info}; renderer init {lyon_init:.1} ms; 4x MSAA, stencil-union coverage");
+    println!("VERSIONS vello_gpu=0.3.0; vello_cpu=0.3.0; vello=0.11.0; wgpu=30; lyon=1");
 
     let tolerance = gx_render_worker::headless::CROSS_MACHINE_TOLERANCE;
     let mut cpu = VelloCpu {
@@ -840,27 +851,34 @@ fn run() -> Result<()> {
     println!("| workload | backend | p50 ms | p99 ms | mean ms |");
     println!("|---|---|---:|---:|---:|");
     let mut comparisons = Vec::new();
+    let mut report_rows = Vec::new();
+    let mut report_diffs = Vec::new();
     for w in [lower_third(), scorebug(), full_panel()] {
         let worker = worker_prepare(&w)?;
         let mut rows: Vec<(&str, Timing, Image)> = Vec::new();
         let (classic_gpu, _) = time(|| classic.frame(&w, false))?;
         let (hybrid_gpu, _) = time(|| hybrid.frame(&w, false))?;
+        let (lyon_gpu, _) = time(|| lyon.frame(&w, false))?;
         let (t, i) = time(|| classic.frame(&w, true))?;
         rows.push(("vello-classic", t, i));
         let (t, i) = time(|| hybrid.frame(&w, true))?;
         rows.push(("vello-hybrid", t, i));
+        let (t, i) = time(|| lyon.frame(&w, true))?;
+        rows.push(("lyon-gpu-4x-msaa", t, i));
         let (t, i) = time(|| vello_cpu_frame(&mut cpu, &w))?;
         rows.push(("vello-cpu", t, i));
         let (t, i) = time(|| tiny_skia_frame(&mut skia, &w))?;
         rows.push(("tiny-skia", t, i));
         let (t, i) = time(|| worker_frame(&worker))?;
         rows.push(("grapix-worker-cpu*", t, i));
-        for (name, t) in [("vello-classic, no readback", &classic_gpu), ("vello-hybrid, no readback", &hybrid_gpu)] {
+        for (name, t) in [("vello-classic, no readback", &classic_gpu), ("vello-hybrid, no readback", &hybrid_gpu), ("lyon-gpu-4x-msaa, no readback", &lyon_gpu)] {
             println!("| {} | {} | {:.3} | {:.3} | {:.3} |", w.name, name, t.p50, t.p99, t.mean);
+            report_rows.push(serde_json::json!({"workload": w.name, "backend": name, "p50Ms": t.p50, "p99Ms": t.p99, "meanMs": t.mean}));
         }
         for (name, t, image) in &rows {
             println!("| {} | {} | {:.3} | {:.3} | {:.3} |", w.name, name, t.p50, t.p99, t.mean);
             write_png(&out, &format!("{}-{}-{}.png", backend, w.name, name.trim_end_matches('*')), image)?;
+            report_rows.push(serde_json::json!({"workload": w.name, "backend": name, "p50Ms": t.p50, "p99Ms": t.p99, "meanMs": t.mean}));
         }
         let find = |n: &str| &rows.iter().find(|r| r.0 == n).unwrap().2;
         for (a, b) in [
@@ -869,6 +887,8 @@ fn run() -> Result<()> {
             ("vello-hybrid", "vello-cpu"),
             ("vello-classic", "vello-cpu"),
             ("vello-cpu", "tiny-skia"),
+            ("lyon-gpu-4x-msaa", "vello-cpu"),
+            ("lyon-gpu-4x-msaa", "tiny-skia"),
         ] {
             if matches!((a, b), ("vello-classic", "tiny-skia") | ("vello-hybrid", "vello-cpu")) {
                 write_png(&out, &format!("{backend}-{}-diff-{a}-vs-{b}.png", w.name), &heatmap(find(a), find(b)))?;
@@ -877,6 +897,9 @@ fn run() -> Result<()> {
             regions.extend(w.rois.iter().map(|(l, r)| (*l, Some(*r))));
             for (label, roi) in regions {
                 let d = diff(find(a), find(b), roi);
+                report_diffs.push(serde_json::json!({"workload": w.name, "a": a, "b": b, "region": label,
+                    "differingPixels": d.differing, "totalPixels": d.total, "worstChannelDelta": d.worst,
+                    "meanAbsoluteDelta": d.mean_abs, "within44": tolerance.admits(d.differing, d.total, d.worst)}));
                 comparisons.push(format!(
                     "| {} | {} vs {} | {} | {} | {:.4}% | {} | {:.3} | {} |",
                     w.name, a, b, label, d.differing, 100.0 * d.differing as f64 / d.total as f64, d.worst, d.mean_abs,
@@ -894,5 +917,31 @@ fn run() -> Result<()> {
     for line in comparisons {
         println!("{line}");
     }
+    std::fs::write(out.join("report.json"), serde_json::to_vec_pretty(&serde_json::json!({
+        "backend": backend, "adapter": hybrid_info, "warmups": WARMUPS, "samples": SAMPLES,
+        "width": WIDTH, "height": HEIGHT, "pixelDomain": "raw premultiplied RGBA8 before PNG straight-alpha conversion",
+        "versions": {"velloGpu": "0.3.0", "velloCpu": "0.3.0", "velloClassic": "0.11.0", "wgpu": "30.0.1", "lyon": "1.0.19", "lyonTessellation": "1.0.23"},
+        "initMs": {"classic": classic_init, "hybrid": hybrid_init, "lyon": lyon_init},
+        "timings": report_rows, "comparisons": report_diffs,
+        "scope": "isolated dynamic display-list benchmark; not product integration or 3.21 timing proof"
+    }))?)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn native_premultiplied_bytes_are_compared_before_unpremultiplication() {
+        let image = Image::premultiplied(vec![1, 2, 3, 4]);
+        assert_eq!(raw_premultiplied(&image), [1, 2, 3, 4]);
+        assert_eq!(raw_premultiplied(&Image::straight(vec![255,128,0,128])), [128,64,0,128]);
+    }
+    #[test]
+    fn matching_premultiplied_encodings_have_no_difference() {
+        let a = Image::premultiplied(vec![128,64,0,128]);
+        let b = Image::straight(vec![255,128,0,128]);
+        let d = diff(&a,&b,Some([0,0,1,1]));
+        assert_eq!((d.differing,d.worst), (0,0));
+    }
 }
