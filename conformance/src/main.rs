@@ -381,25 +381,49 @@ struct Worker {
     child: std::process::Child,
     client: Client,
     assets: SocketAddr,
+    /// The worker's recovery journal and stderr, removed with it.
+    scratch: std::path::PathBuf,
 }
 
 impl Drop for Worker {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        let _ = std::fs::remove_dir_all(&self.scratch);
     }
 }
 
+/// Why the harness could not start a worker.
+enum StartFailure {
+    /// The binary could not be run, or could not be reached in time: the
+    /// peer is unavailable, a skip.
+    Unavailable(String),
+    /// It ran and exited on the arguments it was given: a failure.
+    Exited(String),
+}
+
 /// Start the real worker on fresh loopback ports with `extra` arguments and
-/// wait for its capability exchange.
-fn start_worker(worker: &std::path::Path, tag: &str, extra: &[String]) -> Result<Worker, String> {
+/// wait for its capability exchange. A worker that exits first is reported
+/// with its exit status and what it wrote to stderr.
+fn start_worker(
+    worker: &std::path::Path,
+    tag: &str,
+    extra: &[String],
+) -> Result<Worker, StartFailure> {
     let port = free_port();
     let asset_port = free_port();
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
-    let journal = std::env::temp_dir().join(format!(
-        "gx-conformance-{tag}-{}-{port}/recovery.json",
+    let scratch = std::env::temp_dir().join(format!(
+        "gx-conformance-{tag}-{}-{port}",
         std::process::id()
     ));
+    let journal = scratch.join("recovery.json");
+    let stderr_path = scratch.join("stderr.log");
+    let stderr = std::fs::create_dir_all(&scratch)
+        .and_then(|()| std::fs::File::create(&stderr_path))
+        .map_err(|e| {
+            StartFailure::Unavailable(format!("could not create {}: {e}", scratch.display()))
+        })?;
     let mut args = vec![
         "--port".to_owned(),
         port.to_string(),
@@ -413,11 +437,19 @@ fn start_worker(worker: &std::path::Path, tag: &str, extra: &[String]) -> Result
         .args(&args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stderr(stderr)
         .spawn()
-        .map_err(|e| format!("could not spawn worker: {e}"))?;
+        .map_err(|e| StartFailure::Unavailable(format!("could not spawn worker: {e}")))?;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
     let client = loop {
+        if let Ok(Some(status)) = child.try_wait() {
+            let said = std::fs::read_to_string(&stderr_path).unwrap_or_default();
+            return Err(StartFailure::Exited(format!(
+                "worker {} exited with {status} before answering: {}",
+                args.join(" "),
+                said.trim()
+            )));
+        }
         match Client::connect(addr) {
             Ok(client) => break client,
             Err(_) if std::time::Instant::now() < deadline => {
@@ -426,7 +458,9 @@ fn start_worker(worker: &std::path::Path, tag: &str, extra: &[String]) -> Result
             Err(_) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err("worker did not answer on its control port".into());
+                return Err(StartFailure::Unavailable(
+                    "worker did not answer on its control port".into(),
+                ));
             }
         }
     };
@@ -434,6 +468,7 @@ fn start_worker(worker: &std::path::Path, tag: &str, extra: &[String]) -> Result
         child,
         client,
         assets: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), asset_port),
+        scratch,
     })
 }
 
@@ -471,7 +506,10 @@ fn run_package_handoff_against_real_engines(report: &mut Report) {
                 report,
             );
         }
-        Err(e) => report.skip_unavailable(e),
+        // The binary is there and the same binary started without these
+        // flags earlier in this run, so an exit here is 5.8's own defect.
+        Err(StartFailure::Exited(e)) => report.fail_to_start(e),
+        Err(StartFailure::Unavailable(e)) => report.skip_unavailable(e),
     }
     let _ = std::fs::remove_dir_all(&package_dir);
 }

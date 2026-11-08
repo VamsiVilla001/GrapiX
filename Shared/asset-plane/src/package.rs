@@ -34,6 +34,18 @@ use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
+/// The largest `manifest.json` a package may carry. A manifest lists member
+/// paths, lengths and digests; one larger than this is refused before it is
+/// read (invariant 51).
+pub const MAX_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
+
+/// The most member bytes one package may declare in total. The manifest's
+/// declared lengths are checked against it before any member is read, and no
+/// member is read past its declared length, so a package cannot make its
+/// reader hold more than this however its members are compressed
+/// (invariant 51; 5.8 review: the engine reads packages it is offered).
+pub const MAX_PACKAGE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+
 /// A file to include in a package. `path` is the package-relative location;
 /// `source` is read only while the atomic package write is in progress.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -216,7 +228,16 @@ pub fn read_package(path: &Path) -> Result<VerifiedPackage, PackageError> {
         detail: error.to_string(),
     })?;
 
-    let manifest_bytes = read_archive_member(&mut archive, MANIFEST_PATH)?;
+    let manifest_bytes = read_archive_member(&mut archive, MANIFEST_PATH, MAX_MANIFEST_BYTES)?;
+    let manifest_length = u64::try_from(manifest_bytes.len()).expect("usize fits u64");
+    if manifest_length > MAX_MANIFEST_BYTES {
+        return Err(Refusal::PackageTooLarge {
+            path: MANIFEST_PATH.into(),
+            declared_bytes: manifest_length,
+            limit_bytes: MAX_MANIFEST_BYTES,
+        }
+        .into());
+    }
     let manifest: PackageManifest = serde_json::from_slice(&manifest_bytes).map_err(|error| {
         PackageError::ManifestDeserialization {
             detail: error.to_string(),
@@ -224,10 +245,11 @@ pub fn read_package(path: &Path) -> Result<VerifiedPackage, PackageError> {
     })?;
     manifest.validate()?;
     validate_archive_inventory(&mut archive, &manifest)?;
+    validate_declared_total(&manifest)?;
 
     let mut files = BTreeMap::new();
     for entry in &manifest.files {
-        let bytes = read_archive_member(&mut archive, &entry.path)?;
+        let bytes = read_archive_member(&mut archive, &entry.path, entry.size_bytes)?;
         verify_entry(entry, &bytes)?;
         files.insert(entry.path.clone(), bytes);
     }
@@ -325,20 +347,50 @@ fn write_reader<W: Write + Seek, R: Read>(
     })
 }
 
+/// The manifest's declared member lengths, summed, must fit the package
+/// limit. Checked before any member is read.
+fn validate_declared_total(manifest: &PackageManifest) -> Result<(), PackageError> {
+    let mut total = 0_u64;
+    for entry in &manifest.files {
+        total = total.saturating_add(entry.size_bytes);
+        if total > MAX_PACKAGE_BYTES {
+            return Err(Refusal::PackageTooLarge {
+                path: entry.path.clone(),
+                declared_bytes: total,
+                limit_bytes: MAX_PACKAGE_BYTES,
+            }
+            .into());
+        }
+    }
+    Ok(())
+}
+
+/// Read one member, holding at most `most` bytes of it plus one: the one more
+/// shows the member is longer than allowed without holding the rest. The
+/// archive's own size field is never trusted for an allocation: it reserves
+/// no more than `most`, and a reservation that fails is a refusal, not an
+/// abort (invariant 51).
 fn read_archive_member(
     archive: &mut ZipArchive<File>,
     path: &str,
+    most: u64,
 ) -> Result<Vec<u8>, PackageError> {
-    let mut member = archive
+    let member = archive
         .by_name(path)
         .map_err(|_| Refusal::PackageEntryMissing { path: path.into() })?;
-    let mut bytes = Vec::with_capacity(usize::try_from(member.size()).unwrap_or(0));
+    let unreadable = |detail: String| Refusal::PackageEntryUnreadable {
+        path: path.into(),
+        detail,
+    };
+    let reserve = usize::try_from(member.size().min(most)).unwrap_or(usize::MAX);
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(reserve)
+        .map_err(|error| unreadable(format!("cannot hold {reserve} bytes: {error}")))?;
     member
+        .take(most.saturating_add(1))
         .read_to_end(&mut bytes)
-        .map_err(|error| Refusal::PackageEntryUnreadable {
-            path: path.into(),
-            detail: error.to_string(),
-        })?;
+        .map_err(|error| unreadable(error.to_string()))?;
     Ok(bytes)
 }
 
@@ -503,6 +555,107 @@ mod tests {
             Ok(())
         })
         .unwrap();
+    }
+
+    /// Make the archive's central directory claim `member` is `claimed`
+    /// bytes long, through a ZIP64 extra field, as a crafted package can. The
+    /// member's bytes are unchanged.
+    fn claim_member_size(path: &Path, member: &str, claimed: u64) {
+        let u16_at = |bytes: &[u8], at: usize| u16::from_le_bytes([bytes[at], bytes[at + 1]]);
+        let u32_at = |bytes: &[u8], at: usize| {
+            u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]])
+        };
+        let mut bytes = fs::read(path).unwrap();
+        let end = bytes
+            .windows(4)
+            .rposition(|window| window == [0x50, 0x4b, 0x05, 0x06])
+            .unwrap();
+        let directory_size = u32_at(&bytes, end + 12) as usize;
+        let directory_offset = u32_at(&bytes, end + 16) as usize;
+        let mut at = directory_offset;
+        while at < directory_offset + directory_size {
+            assert_eq!(bytes[at..at + 4], [0x50, 0x4b, 0x01, 0x02]);
+            let name_length = u16_at(&bytes, at + 28) as usize;
+            let extra_length = u16_at(&bytes, at + 30) as usize;
+            let comment_length = u16_at(&bytes, at + 32) as usize;
+            if &bytes[at + 46..at + 46 + name_length] == member.as_bytes() {
+                bytes[at + 24..at + 28].copy_from_slice(&u32::MAX.to_le_bytes());
+                bytes[at + 30..at + 32]
+                    .copy_from_slice(&u16::try_from(extra_length + 12).unwrap().to_le_bytes());
+                let mut zip64 = vec![0x01, 0x00, 0x08, 0x00];
+                zip64.extend_from_slice(&claimed.to_le_bytes());
+                let insert = at + 46 + name_length;
+                bytes.splice(insert..insert, zip64);
+                let end = end + 12;
+                bytes[end + 12..end + 16]
+                    .copy_from_slice(&u32::try_from(directory_size + 12).unwrap().to_le_bytes());
+                fs::write(path, bytes).unwrap();
+                return;
+            }
+            at += 46 + name_length + extra_length + comment_length;
+        }
+        panic!("the archive has no member {member}");
+    }
+
+    #[test]
+    fn reader_returns_when_the_archive_claims_a_member_of_any_size() {
+        let root = temporary_directory();
+        let (path, manifest) = write_test_package(&root);
+        // 16 TiB, the size the 5.8 review used to abort an engine: reserving
+        // what the archive claims would end the process before any refusal.
+        claim_member_size(&path, MANIFEST_PATH, 1 << 44);
+        let read = read_package(&path);
+        assert!(
+            matches!(&read, Ok(package) if package.manifest == manifest),
+            "{read:?}"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn reader_refuses_a_declared_total_over_the_package_limit_before_reading_members() {
+        let root = temporary_directory();
+        let (path, mut manifest) = write_test_package(&root);
+        let logo = manifest
+            .files
+            .iter_mut()
+            .find(|entry| entry.path == "assets/logo.bin")
+            .unwrap();
+        logo.size_bytes = MAX_PACKAGE_BYTES;
+        // The member really holds 4 bytes: reading it would give a length
+        // mismatch, so this refusal shows nothing was read.
+        rewrite_archive(&path, &manifest, b"logo");
+        let read = read_package(&path);
+        assert!(
+            matches!(
+                &read,
+                Err(PackageError::Refused(Refusal::PackageTooLarge { path, limit_bytes, .. }))
+                    if path == "assets/logo.bin" && *limit_bytes == MAX_PACKAGE_BYTES
+            ),
+            "{read:?}"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn reader_holds_no_more_of_a_member_than_its_declared_length_and_one_byte() {
+        let root = temporary_directory();
+        let (path, manifest) = write_test_package(&root);
+        // Declared as the 4 bytes "logo"; the member holds a mebibyte.
+        rewrite_archive(&path, &manifest, &vec![b'x'; 1 << 20]);
+        let read = read_package(&path);
+        assert!(
+            matches!(
+                &read,
+                Err(PackageError::Refused(Refusal::PackageFileLengthMismatch {
+                    path,
+                    expected: 4,
+                    actual: 5,
+                })) if path == "assets/logo.bin"
+            ),
+            "{read:?}"
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

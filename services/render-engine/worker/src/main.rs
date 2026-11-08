@@ -87,15 +87,25 @@ fn main() {
     }
     // 5.8: packages by local path, from this directory only. Checked here so
     // a mistyped directory stops the engine instead of refusing every package.
+    // Resolved here as every package request resolves it, so a directory on
+    // a volume that cannot be resolved also stops it (5.8 review).
     if let Some(dir) = package_dir {
-        match std::path::absolute(&dir) {
+        let checked = std::path::absolute(&dir)
+            .and_then(|absolute| absolute.canonicalize().map(|_| absolute));
+        match checked {
             Ok(dir) if dir.is_dir() => {
                 println!("  packages by local path from {}", dir.display());
                 engine.set_package_directory(dir);
             }
-            _ => {
+            Ok(_) => {
                 return usage(&format!(
                     "--package-dir {} is not a directory",
+                    dir.display()
+                ))
+            }
+            Err(error) => {
+                return usage(&format!(
+                    "--package-dir {} cannot be resolved: {error}",
                     dir.display()
                 ))
             }

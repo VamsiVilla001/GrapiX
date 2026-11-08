@@ -1364,7 +1364,9 @@ fn drive_asset_refusals(report: &mut Report) {
     // route, against two real workers, is the package handoff suite.
     let directory =
         std::env::temp_dir().join(format!("gx-refusal-audit-packages-{}", std::process::id()));
-    let _ = std::fs::create_dir_all(&directory);
+    let not_a_package = directory.join("not-a-package.gpxpkg");
+    let prepared = std::fs::create_dir_all(&directory)
+        .and_then(|()| std::fs::write(&not_a_package, b"plain text, not a package archive"));
     report.record(
         PLANE,
         "PackageDirectoryNotConfigured is produced for a path offered to an engine with no package directory",
@@ -1387,15 +1389,20 @@ fn drive_asset_refusals(report: &mut Report) {
             "a path outside the package directory was not refused as PackagePathOutsideDirectory",
         ),
     );
+    // A file that exists and is not a zip: read and refused, not merely
+    // missing, so the archive-open arm is the one exercised.
+    let unreadable = prepared
+        .map_err(|e| e.to_string())
+        .map(|()| gx_asset_plane::open_package_in(Some(&directory), "not-a-package.gpxpkg"));
     report.record(
         PLANE,
         "PackageUnreadable is produced for a package path inside the directory that is not a package",
         expect(
             matches!(
-                gx_asset_plane::open_package_in(Some(&directory), "missing.gpxpkg"),
-                Err(Refusal::PackageUnreadable { .. })
+                &unreadable,
+                Ok(Err(Refusal::PackageUnreadable { detail, .. })) if detail.starts_with("not a package archive")
             ),
-            "a missing package inside the directory was not refused as PackageUnreadable",
+            format!("a file inside the directory that is not a package archive was not refused as PackageUnreadable: {unreadable:?}"),
         ),
     );
     let _ = std::fs::remove_dir_all(&directory);
@@ -2100,6 +2107,10 @@ fn limitations() -> &'static [Limitation] {
         },
         Limitation {
             variant: "PackageFileLengthMismatch",
+            reason: "archive read is not an EnginePeer request",
+        },
+        Limitation {
+            variant: "PackageTooLarge",
             reason: "archive read is not an EnginePeer request",
         },
         Limitation {

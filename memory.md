@@ -118,6 +118,40 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-08 — 5.8 review fixed; 5.11 added; 5.10 reworded (Claude)
+
+**Resume here.** Next: 5.11 (engine restores asset-bearing scenes after a forced kill),
+then 5.10 (reworded), then 3.21. Design for both is decided (`docs/evidence/5.10`,
+`docs/evidence/5.8/review-jev-laya.json`).
+
+**5.8 review** (`docs/evidence/5.8/review-2026-11-08.md`). 13 confirmed of 17. Fixed in 5.8's
+code: `read_package` no longer reserves the zip's declared size (a crafted package aborted the
+engine: "memory allocation of 17592186044416 bytes failed"); reads are bounded by the manifest
+length + 1; `MAX_MANIFEST_BYTES` 16 MiB and `MAX_PACKAGE_BYTES` 4 GiB (user decision, both
+models), new `Refusal::PackageTooLarge` (TS regenerated). `open_package_in`: a path on another
+drive, share or device is refused before anything is resolved (resolver seam test); a path that
+does not resolve is placed by its deepest resolvable folder, links followed, and an unresolvable
+link is outside, so no existence oracle and no spelling mislabel; `PackageUnreadable` detail no
+longer repeats the resolved path. Worker resolves `--package-dir` at start.
+`AssetPublishServer::metrics()` counts received bytes (the by-path 0 is now measured).
+Conformance: a worker that exits on its suite arguments is `Report::fail_to_start` (FAIL, with
+its stderr), not SKIP; `npm run conformance` builds `gx-render-worker`; a real-worker junction
+check. Refusal audit drives `PackageUnreadable` with a real non-zip file.
+
+**User decisions (8 Nov).** 5.11 new (Needs 3.12, 5.9; built before 5.10): persist verified
+bytes in an engine-owned content store, re-hash on restore, drop a bad scene by name and still
+start (Jev 0.98; Laya near-random persist_only). 3.12 and 5.9 stay done with a note. 5.10
+reworded: the Editor reads `{locality:{}}` on the asset plane (Jev 1.0; Laya near-random
+editor_setting); a co-located engine without `--package-dir` is a named refusal, no fallback;
+conformance (calling `gx_editor::publish`) takes. Both models agreed on the rest
+(`docs/evidence/5.10/design-jev-laya.json`).
+
+**Executed.** Mutations, each restored byte-identical: old path check (3 new tests fail); share
+pre-check removed (seam test fails); old reader (ZIP64 test aborts, 0xc0000409; 2 more fail);
+per-connection counter (0 vs 40); misspelled worker flag (conformance exit 1, FAIL with the
+worker's usage text, was SKIP). Restart defect reproduced on both routes with a throwaway test
+(exit 1 "asset missing"), not committed. Conformance 544/0/9. `cargo fmt --all --check` and clippy `-D warnings` exit 0; `npm run check` exit 0 (377 codegen, 44 Node, 412 Editor, 787 Rust / 0 failed / 26 ignored, conformance 544/0/9).
+
 ## 2026-11-08 — 5.8 done: L0 asset handoff by local path (Claude)
 
 **Resume here.** Phase 5's open rows: 5.10 (Editor publishes by path when co-located,

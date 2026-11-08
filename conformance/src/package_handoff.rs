@@ -8,7 +8,8 @@
 //! negotiation's choice, not this suite's. Both must prepare the same scene:
 //! the same revision and content hash, and byte-identical rendered frames.
 //! Then the co-located worker refuses, by name, a path outside its directory
-//! and a package whose scene names other bytes than it holds, and the LAN
+//! (named so, or reached through a link inside it) and a package whose scene
+//! names other bytes than it holds, and the LAN
 //! worker, which has no package directory, refuses any path.
 
 use std::net::SocketAddr;
@@ -64,6 +65,26 @@ fn package(output: &Path, scene: &SceneDocument) -> Result<(), String> {
     )
     .map(|_| ())
     .map_err(|e| e.to_string())
+}
+
+/// A directory junction, which Windows lets any user create.
+fn junction(link: &Path, target: &Path) -> Result<(), String> {
+    let status = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(link)
+        .arg(target)
+        .stdout(std::process::Stdio::null())
+        .status()
+        .map_err(|e| e.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "mklink /J {} {} exited with {status}",
+            link.display(),
+            target.display()
+        ))
+    }
 }
 
 fn render(
@@ -229,6 +250,25 @@ pub fn package_handoff_suite<C: EnginePeer, L: EnginePeer>(
             format!("5.8: outside path {outside_published:?}"),
         ),
     );
+    // A link inside the directory that leads out of it: the engine follows
+    // links before it decides, so the path's name inside does not admit it.
+    let link = package_dir.join("link");
+    let linked_published = junction(&link, &outside_dir).and_then(|()| {
+        publish_package(local_assets, declared.0, &link.join("lower-third.gpxpkg"))
+            .map_err(|e| e.to_string())
+    });
+    report.record(
+        PLANE,
+        "a co-located engine refuses by name a package reached through a link that leads outside its directory",
+        expect(
+            matches!(
+                package_refused(&linked_published),
+                Some(Refusal::PackagePathOutsideDirectory { .. })
+            ),
+            format!("5.8: path through a link {linked_published:?}"),
+        ),
+    );
+    let _ = std::fs::remove_dir(&link);
     let _ = std::fs::remove_dir_all(&outside_dir);
 
     // A scene that names other bytes than its package holds.

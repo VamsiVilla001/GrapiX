@@ -1,0 +1,216 @@
+{
+  "asked": {
+    "state": {
+      "context": "An adversarial review of commit a38ab85 (row 5.8, L0 asset handoff by local path) confirmed 13 findings. The agent has fixed and mutation-tested 12 of them in the 5.8 code. Two questions remain.",
+      "package_size_fix": [
+        "Found: read_package reserved Vec::with_capacity(member.size()) from the size the zip archive declares. A crafted 200-byte .gpxpkg in the engine's package directory, offered by path to the unauthenticated loopback asset port, aborted the whole render engine ('memory allocation of 17592186044416 bytes failed', exit 0xc0000409). Reproduced by the agent.",
+        "Fixed: no allocation is sized from any declared length beyond a bounded reservation; try_reserve_exact turns a failed reservation into a refusal; every member is read through take(manifest length + 1); manifest.json is limited to 16 MiB.",
+        "Still open without a total limit: a manifest that honestly declares a huge member with a zstd stream that really decompresses to it would make the reader grow to that size before the hash check.",
+        "Implemented provisionally: MAX_PACKAGE_BYTES = 4 GiB, the sum of the manifest's declared member lengths, checked before any member is read, refused as the new Refusal::PackageTooLarge. It applies to every read_package caller (engine by path, publisher before chunked upload, Playout). The chunked route has no total limit, but its bytes really cross the socket. transfer.rs mentions a 400 MB package as a normal case."
+      ],
+      "recovery_defect": [
+        "Found and reproduced by the agent on both routes: start gx-render-worker with --recovery-journal, publish the Inter lower third (a scene with a font asset) by path or chunked, kill the worker, restart it with the same arguments. The restart exits 1: 'cannot restore recovery journal: ... prepared scene ... cannot be rebuilt: asset missing: 3127f0b8...'. The engine stays down until someone deletes the journal.",
+        "Cause: since 5.9 the engine keeps verified asset bytes only in memory (Engine.asset_bytes, 5.9's rule: never read a mutable path later); the recovery journal (row 3.12, done: 'Forced kill restores without an unrecovered output') stores only the asset hashes; restore_state rebuilds every journaled scene with an empty asset map.",
+        "Rows 3.12 and 5.9 are marked done. No test restores a scene with assets.",
+        "Fix options: (a) persist each verified asset's bytes in an engine-owned content-addressed store next to the journal, written before the reply, re-hashed on restore (content-addressed bytes are immutable by name, so re-reading them is consistent with verify-before-use); (b) on restore, drop scenes whose assets are missing with a named log line and start output-inhibited, so the operator re-publishes; (c) both: persist, and drop with a named reason only if the persisted bytes are missing or fail their hash."
+      ]
+    },
+    "questions": {
+      "package_total_limit": {
+        "type": "choice",
+        "instructions": "What total limit should a package's declared member bytes have?",
+        "criteria": {
+          "four_gib": "4 GiB, as implemented provisionally.",
+          "one_gib": "1 GiB.",
+          "no_total_limit": "No total limit; bounded per-member reads are enough."
+        }
+      },
+      "recovery_fix": {
+        "type": "choice",
+        "instructions": "How should the engine restart after publishing scenes with assets?",
+        "criteria": {
+          "persist_and_drop": "Persist verified bytes in an engine-owned content-addressed store and re-hash them on restore; drop a scene with a named reason only if its bytes are missing or fail their hash, never refusing to start.",
+          "persist_only": "Persist verified bytes and re-hash them on restore; refuse to start if any are missing.",
+          "drop_only": "Drop scenes whose assets are missing and start output-inhibited; no persistence."
+        }
+      },
+      "recovery_row": {
+        "type": "choice",
+        "instructions": "How should the plan track the recovery defect?",
+        "criteria": {
+          "new_row": "A new row (Needs 3.12 and 5.9) with a done-when that restores an asset-bearing scene after a forced kill, by both routes; 3.12 and 5.9 keep their done status with a note.",
+          "reopen_5_9": "Reopen 5.9 to active until restore works.",
+          "reopen_3_12": "Reopen 3.12 to active until restore works."
+        }
+      },
+      "fix_now": {
+        "type": "noul",
+        "instructions": "Should the recovery defect be fixed before 5.10 is built?",
+        "criteria": {
+          "true": "Yes: an engine that cannot restart after an ordinary publish is a broadcast outage, and 5.10 makes asset-bearing publishes the Editor's normal path.",
+          "false": "No: build 5.10 first."
+        }
+      },
+      "needs_user": {
+        "type": "noul",
+        "instructions": "Must the user decide any of this before the agent proceeds?",
+        "criteria": {
+          "true": "Yes.",
+          "false": "No, the agent may proceed."
+        }
+      }
+    }
+  },
+  "answers": {
+    "laya": {
+      "model": "convaiinnovations/laya-multilingual",
+      "max_len": 8192,
+      "state_tokens": 695,
+      "truncated": false,
+      "load_s": 25.37,
+      "predict_s": 4.734
+    },
+    "jev_model": "jev-1.14.0",
+    "rows": [
+      {
+        "question": "package_total_limit",
+        "type": "choice",
+        "laya": "four_gib",
+        "jev": "four_gib",
+        "agree": true,
+        "laya_detail": {
+          "type": "choice",
+          "choice": "four_gib",
+          "probabilities": {
+            "four_gib": 0.6483,
+            "one_gib": 0.2429,
+            "no_total_limit": 0.1088
+          },
+          "confidence": 0.2117,
+          "answer_confidence": 0.6483,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "jev_detail": {
+          "type": "choice",
+          "choice": "four_gib",
+          "confidence": 0.96,
+          "probabilities": {
+            "four_gib": 0.97,
+            "one_gib": 0,
+            "no_total_limit": 0.03
+          }
+        }
+      },
+      {
+        "question": "recovery_fix",
+        "type": "choice",
+        "laya": "persist_only",
+        "jev": "persist_and_drop",
+        "agree": false,
+        "laya_detail": {
+          "type": "choice",
+          "choice": "persist_only",
+          "probabilities": {
+            "persist_and_drop": 0.3095,
+            "persist_only": 0.6052,
+            "drop_only": 0.0853
+          },
+          "confidence": 0.2019,
+          "answer_confidence": 0.6052,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "jev_detail": {
+          "type": "choice",
+          "choice": "persist_and_drop",
+          "confidence": 0.98,
+          "probabilities": {
+            "persist_and_drop": 0.99,
+            "persist_only": 0.01,
+            "drop_only": 0
+          }
+        }
+      },
+      {
+        "question": "recovery_row",
+        "type": "choice",
+        "laya": "new_row",
+        "jev": "new_row",
+        "agree": true,
+        "laya_detail": {
+          "type": "choice",
+          "choice": "new_row",
+          "probabilities": {
+            "new_row": 0.4726,
+            "reopen_5_9": 0.2259,
+            "reopen_3_12": 0.3016
+          },
+          "confidence": 0.0426,
+          "answer_confidence": 0.4726,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "jev_detail": {
+          "type": "choice",
+          "choice": "new_row",
+          "confidence": 0.91,
+          "probabilities": {
+            "new_row": 0.94,
+            "reopen_5_9": 0.05,
+            "reopen_3_12": 0.01
+          }
+        }
+      },
+      {
+        "question": "fix_now",
+        "type": "noul",
+        "laya": 0.9754,
+        "jev": 0.88,
+        "agree": true,
+        "laya_detail": {
+          "type": "noul",
+          "noul": 0.9754,
+          "confidence": 0.9754,
+          "answer_confidence": 0.9754,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "jev_detail": {
+          "type": "noul",
+          "noul": 0.88
+        }
+      },
+      {
+        "question": "needs_user",
+        "type": "noul",
+        "laya": 0.9448,
+        "jev": 0.59,
+        "agree": false,
+        "laya_detail": {
+          "type": "noul",
+          "noul": 0.9448,
+          "confidence": 0.9448,
+          "answer_confidence": 0.9448,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "jev_detail": {
+          "type": "noul",
+          "noul": 0.59
+        }
+      }
+    ],
+    "agreement": 0.6
+  },
+  "user_decisions_8_nov_2026": {
+    "recovery_fix": "persist_and_drop (Laya chose persist_only, near-random; Jev persist_and_drop 0.98)",
+    "recovery_row": "new_row 5.11, fixed before 5.10 (both models)",
+    "package_total_limit": "four_gib (both models)"
+  }
+}

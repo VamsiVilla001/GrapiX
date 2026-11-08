@@ -15,7 +15,7 @@
 //! reach Program (5.9's rule, kept).
 
 use std::net::SocketAddr;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, Path, PathBuf, Prefix};
 
 use gx_contracts::package::package_path_components;
 use gx_contracts::scene::SceneDocument;
@@ -105,7 +105,23 @@ pub fn packaged_scene(package: VerifiedPackage) -> Result<PackagedScene, Refusal
 /// publisher's path, absolute or relative to `directory`. It must resolve,
 /// after links are followed, inside `directory`; then the package is read and
 /// every member and declared asset re-hashed before anything is returned.
+///
+/// The answer never depends on what exists outside the directory: a path on
+/// another drive, share or device is refused before the filesystem is
+/// touched, and a path that does not resolve is placed by the deepest folder
+/// on it that does, links followed, so a link inside the directory cannot be
+/// used to probe beyond it (5.8 review).
 pub fn open_package_in(directory: Option<&Path>, path: &str) -> Result<PackagedScene, Refusal> {
+    open_package_with(directory, path, &|path: &Path| path.canonicalize())
+}
+
+/// [`open_package_in`] with the one call that resolves a path on disk passed
+/// in, so a test can show which paths were resolved before a refusal.
+fn open_package_with(
+    directory: Option<&Path>,
+    path: &str,
+    resolve: &dyn Fn(&Path) -> std::io::Result<PathBuf>,
+) -> Result<PackagedScene, Refusal> {
     let Some(directory) = directory else {
         return Err(Refusal::PackageDirectoryNotConfigured { path: path.into() });
     };
@@ -113,21 +129,25 @@ pub fn open_package_in(directory: Option<&Path>, path: &str) -> Result<PackagedS
         path: path.into(),
         directory: directory.display().to_string(),
     };
-    let requested = directory.join(path);
     let unreadable = |detail: String| Refusal::PackageUnreadable {
         path: path.into(),
         detail,
     };
-    let root = directory
-        .canonicalize()
+    let root = resolve(directory)
         .map_err(|error| unreadable(format!("the package directory: {error}")))?;
-    let resolved = match requested.canonicalize() {
+    // `..` and `.` resolved by name, as Windows resolves them before any link.
+    let requested =
+        std::path::absolute(directory.join(path)).map_err(|error| unreadable(error.to_string()))?;
+    let volume = volume_of(&requested);
+    if volume.is_none() || (volume != volume_of(directory) && volume != volume_of(&root)) {
+        return Err(outside());
+    }
+    let resolved = match resolve(&requested) {
         Ok(resolved) => resolved,
-        // Not there: still named outside when the path itself leaves the
-        // directory, so the answer does not reveal whether an outside file
-        // exists.
-        Err(_) if !lexically_inside(&requested, directory) => return Err(outside()),
-        Err(error) => return Err(unreadable(error.to_string())),
+        Err(error) if resolves_inside(&requested, &root, resolve) => {
+            return Err(unreadable(error.to_string()))
+        }
+        Err(_) => return Err(outside()),
     };
     if !resolved.starts_with(&root) {
         return Err(outside());
@@ -141,33 +161,70 @@ pub fn open_package_in(directory: Option<&Path>, path: &str) -> Result<PackagedS
     packaged_scene(package)
 }
 
-/// A package read failure as the refusal a publisher is told.
+/// A package read failure as the refusal a publisher is told. The refusal
+/// names the publisher's own path; the engine's resolved form of it, which
+/// may name a link's target, is not repeated in the detail (5.8 review).
 fn package_refusal(path: &str, error: PackageError) -> Refusal {
-    match error {
-        PackageError::Refused(refusal) => refusal,
-        other => Refusal::PackageUnreadable {
-            path: path.into(),
-            detail: other.to_string(),
-        },
+    let detail = match error {
+        PackageError::Refused(refusal) => return refusal,
+        PackageError::Open { source, .. } => format!("could not open it: {source}"),
+        PackageError::Archive { detail, .. } => format!("not a package archive: {detail}"),
+        other => other.to_string(),
+    };
+    Refusal::PackageUnreadable {
+        path: path.into(),
+        detail,
     }
 }
 
-/// Whether `path`, with `.` and `..` resolved by name, stays under `directory`.
-fn lexically_inside(path: &Path, directory: &Path) -> bool {
-    fn normal(path: &Path) -> PathBuf {
-        let mut out = PathBuf::new();
-        for component in path.components() {
-            match component {
-                Component::CurDir => {}
-                Component::ParentDir => {
-                    out.pop();
-                }
-                other => out.push(other),
-            }
+/// The local drive or network share a path is on, compared without case, or
+/// `None` for a device or other verbatim path that names no ordinary volume.
+fn volume_of(path: &Path) -> Option<String> {
+    let Some(Component::Prefix(prefix)) = path.components().next() else {
+        return None;
+    };
+    match prefix.kind() {
+        Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) => {
+            Some(format!("{}:", char::from(letter).to_ascii_uppercase()))
         }
-        out
+        Prefix::UNC(server, share) | Prefix::VerbatimUNC(server, share) => Some(format!(
+            "unc:{}/{}",
+            server.to_string_lossy().to_lowercase(),
+            share.to_string_lossy().to_lowercase()
+        )),
+        Prefix::Verbatim(_) | Prefix::DeviceNS(_) => None,
     }
-    normal(path).starts_with(normal(directory))
+}
+
+/// Whether `requested`, which does not resolve, would lie inside `root`: the
+/// deepest folder on it that does resolve, links followed, is inside `root`,
+/// only plain names follow it, and the first of them is not a link. A link
+/// that does not resolve cannot be shown to stay inside, so it is outside
+/// whether or not its target exists.
+fn resolves_inside(
+    requested: &Path,
+    root: &Path,
+    resolve: &dyn Fn(&Path) -> std::io::Result<PathBuf>,
+) -> bool {
+    for ancestor in requested.ancestors().skip(1) {
+        let Ok(resolved) = resolve(ancestor) else {
+            continue;
+        };
+        let Ok(rest) = requested.strip_prefix(ancestor) else {
+            return false;
+        };
+        let Some(first) = rest.components().next() else {
+            return false;
+        };
+        let first_is_link = std::fs::symlink_metadata(ancestor.join(first))
+            .is_ok_and(|metadata| metadata.file_type().is_symlink());
+        return !first_is_link
+            && rest
+                .components()
+                .all(|component| matches!(component, Component::Normal(_)))
+            && resolved.join(rest).starts_with(root);
+    }
+    false
 }
 
 /// What one package publication did.
@@ -175,8 +232,9 @@ fn lexically_inside(path: &Path, directory: &Path) -> bool {
 pub struct PackagePublication {
     /// The handoff `handoff_for` chose from the declared locality.
     pub handoff: AssetHandoff,
-    /// Asset bytes sent over the asset plane: 0 by path, the missing
-    /// difference by chunked upload.
+    /// Asset bytes this publisher sent over the asset plane: none by path
+    /// (it sends one path frame), the missing difference by chunked upload.
+    /// The engine side's own count is `AssetPublishServer::metrics`.
     pub transferred_bytes: u64,
     pub reply: PublishReply,
 }
@@ -356,6 +414,18 @@ mod tests {
     }
 
     fn serve(peer: Peer) -> (SocketAddr, Arc<Mutex<Peer>>) {
+        let (addr, peer, _) = serve_counted(peer);
+        (addr, peer)
+    }
+
+    /// A served peer and the listener's own count of transfer bytes received.
+    fn serve_counted(
+        peer: Peer,
+    ) -> (
+        SocketAddr,
+        Arc<Mutex<Peer>>,
+        crate::preflight::AssetTransferMetrics,
+    ) {
         let peer = Arc::new(Mutex::new(peer));
         let server = AssetPublishServer::bind(
             SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
@@ -363,8 +433,26 @@ mod tests {
         )
         .unwrap();
         let addr = server.local_addr().unwrap();
+        let metrics = server.metrics();
         server.serve_in_background();
-        (addr, peer)
+        (addr, peer, metrics)
+    }
+
+    /// A directory junction, which Windows lets any user create.
+    fn junction(link: &Path, target: &Path) {
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(
+            status.success(),
+            "mklink /J {} {}",
+            link.display(),
+            target.display()
+        );
     }
 
     #[test]
@@ -377,21 +465,25 @@ mod tests {
     fn both_handoffs_deliver_the_same_scene_and_bytes() {
         let root = directory();
         let path = package(&root, "both", &scene(content_hash(FONT)));
-        let (local, local_peer) = serve(Peer {
+        let (local, local_peer, local_received) = serve_counted(Peer {
             directory: Some(root.clone()),
             ..Peer::default()
         });
-        let (lan, lan_peer) = serve(Peer::default());
+        let (lan, lan_peer, lan_received) = serve_counted(Peer::default());
 
         let by_path = publish_package(local, Locality::CoLocated, &path).unwrap();
         let chunked = publish_package(lan, Locality::Lan, &path).unwrap();
         assert_eq!(by_path.handoff, AssetHandoff::LocalPath);
+        assert_eq!(by_path.transferred_bytes, 0);
+        // Counted where the bytes would arrive, not where they are sent.
         assert_eq!(
-            by_path.transferred_bytes, 0,
+            local_received.received_asset_bytes(),
+            0,
             "no asset byte crosses the plane by path"
         );
         assert_eq!(chunked.handoff, AssetHandoff::ChunkedUpload);
         assert_eq!(chunked.transferred_bytes, FONT.len() as u64);
+        assert_eq!(lan_received.received_asset_bytes(), FONT.len() as u64);
         assert!(matches!(by_path.reply, PublishReply::Published { .. }));
         assert_eq!(by_path.reply, chunked.reply);
 
@@ -494,5 +586,104 @@ mod tests {
             "{refused:?}"
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_link_inside_the_directory_that_leads_outside_is_refused_by_name() {
+        let inside = directory();
+        let elsewhere = directory();
+        package(&elsewhere, "linked", &scene(content_hash(FONT)));
+        junction(&inside.join("link"), &elsewhere);
+        junction(&inside.join("dangling"), &elsewhere.join("no-such-dir"));
+        // The same answer whether what lies behind the link exists or not, so
+        // the link cannot be used to probe outside the directory.
+        for offered in [
+            r"link\linked.gpxpkg",
+            r"link\missing.gpxpkg",
+            r"link\no-such-dir\missing.gpxpkg",
+            "link",
+            r"dangling\missing.gpxpkg",
+            "dangling",
+        ] {
+            let refused = open_package_in(Some(&inside), offered);
+            assert!(
+                matches!(refused, Err(Refusal::PackagePathOutsideDirectory { .. })),
+                "{offered}: {refused:?}"
+            );
+        }
+        fs::remove_dir(inside.join("link")).unwrap();
+        fs::remove_dir(inside.join("dangling")).unwrap();
+        fs::remove_dir_all(inside).unwrap();
+        fs::remove_dir_all(elsewhere).unwrap();
+    }
+
+    #[test]
+    fn a_missing_package_spelled_differently_from_the_directory_is_still_inside() {
+        let inside = directory();
+        let shown = inside.to_str().unwrap();
+        for offered in [
+            format!(r"{}\missing.gpxpkg", shown.to_uppercase()),
+            format!(r"{}\missing.gpxpkg", shown.to_lowercase()),
+        ] {
+            let refused = open_package_in(Some(&inside), &offered);
+            assert!(
+                matches!(refused, Err(Refusal::PackageUnreadable { .. })),
+                "{offered}: {refused:?}"
+            );
+        }
+        fs::remove_dir_all(inside).unwrap();
+    }
+
+    #[test]
+    fn a_file_that_is_not_a_package_is_refused_unreadable_without_the_resolved_path() {
+        let root = directory();
+        let real = root.join("real-target");
+        fs::create_dir_all(&real).unwrap();
+        fs::write(real.join("not-a-package.gpxpkg"), b"plain text, not a zip").unwrap();
+        // The engine's directory is a link; what it resolves to is not told.
+        let linked = root.join("packages");
+        junction(&linked, &real);
+        let refused = open_package_in(Some(&linked), "not-a-package.gpxpkg");
+        match &refused {
+            Err(Refusal::PackageUnreadable { path, detail }) => {
+                assert_eq!(path, "not-a-package.gpxpkg");
+                assert!(detail.starts_with("not a package archive"), "{detail}");
+                assert!(!detail.contains("real-target"), "{detail}");
+            }
+            other => panic!("{other:?}"),
+        }
+        fs::remove_dir(&linked).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_share_or_device_path_is_refused_before_anything_is_resolved() {
+        let inside = directory();
+        let asked = std::cell::RefCell::new(Vec::new());
+        let resolve = |path: &Path| {
+            asked.borrow_mut().push(path.to_path_buf());
+            path.canonicalize()
+        };
+        // Resolving a share path opens a network session to its server, as
+        // the engine's own account, before any answer could be given.
+        for offered in [
+            r"\\gx-no-such-host.invalid\share\outside.gpxpkg",
+            r"\\127.0.0.1\gx-no-such-share\outside.gpxpkg",
+            r"\\?\UNC\gx-no-such-host.invalid\share\outside.gpxpkg",
+            r"\\.\NUL",
+            r"\\?\GLOBALROOT\Device\Null",
+        ] {
+            let refused = open_package_with(Some(&inside), offered, &resolve);
+            assert!(
+                matches!(refused, Err(Refusal::PackagePathOutsideDirectory { .. })),
+                "{offered}: {refused:?}"
+            );
+        }
+        let asked = asked.into_inner();
+        assert!(
+            asked.iter().all(|path| path == &inside),
+            "resolved before refusing: {asked:?}"
+        );
+        fs::remove_dir_all(inside).unwrap();
     }
 }

@@ -1,0 +1,464 @@
+{
+  "asked": {
+    "state": {
+      "row_5_10_as_committed": "5.10 (pending, Needs 5.8, added 8 Nov by user decision): The Editor's publish reads the engine's declared locality from the capability exchange and publishes through gx_asset_plane::publish_package: co-located, it writes a package into the configured package directory and hands it over by path; over a LAN, it uploads chunked. An Editor-path test publishes the Inter lower third both ways to real workers, and both are taken.",
+      "verified_constraints": [
+        "Boundary rule R6 (invariant 4): Editor-side crates (Editor/shell, services/editor, mocks/mock-editor) never depend on a control-plane client. So no Editor code can run the capability exchange, where EngineCapability.locality is declared.",
+        "5.7 (done): the control port authorises only Role::Playout connections (message.rs authorise). The Editor holds no Playout token.",
+        "R9: no consumer branches on Locality outside contracts, control-plane, media-plane, asset-plane, render-engine, mock-engine and conformance. gx_asset_plane::handoff_for(locality) is the one negotiation (LocalPath | ChunkedUpload); publish_package(engine, locality, package_path) is the one publisher and needs a .gpxpkg on disk for both routes.",
+        "5.8 user decisions: the publisher is configured with the engine's package directory; nothing about the directory goes on the wire or into EngineCapability.",
+        "The engine declares locality in one field (Engine.locality, --lan or not); the asset plane today answers scene, fetch, package and the transfer dialect, and no locality request. Both ports bind 127.0.0.1; --lan only changes the declaration.",
+        "The Editor publishes today through cmd_publish -> publish_with_assets (5.9): chunked upload of the scene's verified import-cache bytes, then the scene. gx-editor (services/editor) already depends on gx-asset-plane; conformance depends on gx-editor and may hold a control client, so it can take.",
+        "write_package requires scene.revision = Some and a source for every scene asset; the engine issues its own revision and the content hash ignores the top-level revision."
+      ],
+      "recommended_design": "The engine answers a new closed asset-plane read {locality:{}} from the same field it declares as EngineCapability.locality (new required AssetPublishPeer::locality, no default). gx_asset_plane::publish_as_package(engine, folder, scene, sources) reads that locality, writes one verified package named by content hash/pid/sequence into the Editor's package folder, calls publish_package, and removes the package after the reply. The publish logic moves into gx_editor::publish so cmd_publish and conformance call the same function; Editor code never names a Locality. Folder: GX_EDITOR_PACKAGE_DIR, else platform::package_exchange_root(); the launcher and gx-engine-host give a co-located engine the same folder as --package-dir. Hardening: a LAN-declared peer never reads a package path (shared server rule) and gx-render-worker refuses --lan with --package-dir. Conformance holds each peer's asset-plane answer equal to EngineCapability.locality on two real workers and both mocks, publishes the Inter lower third both ways, takes both (Taken on T0), and drives named refusals and mutations.",
+      "alternatives": {
+        "relay": "Zero new wire: a launcher or gx-engine-host --describe reads EngineCapability over the control plane and passes it to the Editor in an environment variable; goes stale on restart, and a real LAN engine needs hand configuration.",
+        "r6_carveout": "Amend R6 and 5.7 for a read-only Editor capability client with a new role; keeps the row wording literally, weakens invariant 4's structural enforcement.",
+        "editor_setting": "An Editor setting for locality: a second declaration that can disagree silently."
+      }
+    },
+    "questions": {
+      "locality_source": {
+        "type": "choice",
+        "instructions": "Where should the Editor learn the engine's declared locality, given R6 and 5.7?",
+        "criteria": {
+          "asset_plane_read": "A new one-field asset-plane read {locality:{}}, answered from the engine's single locality field and held equal to EngineCapability.locality by conformance.",
+          "relay": "A zero-wire relay through the launcher or engine host, passed to the Editor as configuration.",
+          "r6_carveout": "Amend R6 and 5.7 so the Editor may hold a read-only capability client.",
+          "editor_setting": "An Editor configuration setting for the locality."
+        }
+      },
+      "no_wire_scope": {
+        "type": "choice",
+        "instructions": "Does the 5.8 decision 'nothing about the directory goes on the wire or into EngineCapability' also forbid a new asset-plane locality read?",
+        "criteria": {
+          "directory_only": "No: it is scoped to the package directory; a locality read adds no directory and no EngineCapability field.",
+          "all_new_wire": "Yes: it forbids any new wire request."
+        }
+      },
+      "reword_row": {
+        "type": "noul",
+        "instructions": "Must row 5.10's text be reworded before it is built, since 'reads the engine's declared locality from the capability exchange' cannot be executed by Editor code under R6 and 5.7?",
+        "criteria": {
+          "true": "Yes, reword it to the design that will be built, by user decision.",
+          "false": "No, build to the current text."
+        }
+      },
+      "test_home": {
+        "type": "choice",
+        "instructions": "Where does the 'Editor-path test ... both are taken' run, given the Editor shell may not hold a control client even in tests?",
+        "criteria": {
+          "conformance_calls_gx_editor": "Conformance calls gx_editor::publish (the function cmd_publish calls) and takes there; the shell test covers routes and refusals without a take.",
+          "shell_in_conformance": "Add the Tauri shell crate as a conformance dependency and call it directly.",
+          "no_take": "Assert only the publication, take nowhere."
+        }
+      },
+      "lan_hardening": {
+        "type": "choice",
+        "instructions": "Harden the engine so a LAN-declared engine never reads a package path?",
+        "criteria": {
+          "both": "A shared asset-plane server rule (LAN-declared peer has no effective directory) and the worker refusing --lan with --package-dir at startup.",
+          "server_rule_only": "The server rule only.",
+          "neither": "Neither."
+        }
+      },
+      "co_located_without_dir": {
+        "type": "choice",
+        "instructions": "What happens when the Editor publishes to a co-located engine started without --package-dir (5.9's chunked publish worked there)?",
+        "criteria": {
+          "named_refusal": "Refused by name (PackageDirectoryNotConfigured); the launcher and engine host pass --package-dir.",
+          "worker_default_dir": "The worker defaults its package directory to a platform folder when co-located.",
+          "fallback_chunked": "The Editor falls back to the chunked upload."
+        }
+      },
+      "folder_config": {
+        "type": "choice",
+        "instructions": "Where is the Editor's package folder configured?",
+        "criteria": {
+          "env_plus_platform_default": "GX_EDITOR_PACKAGE_DIR if set, else platform::package_exchange_root(); no UI write path.",
+          "ui_parameter": "A cmd_publish parameter and a UI field.",
+          "settings_file": "A new per-machine Editor settings file."
+        }
+      },
+      "behaviour_changes": {
+        "type": "choice",
+        "instructions": "The Editor then always packages: an asset with no content hash is refused PackageAssetNotPackaged, the shell's old publish_with_assets route is retired, and 5.9's co-located behaviour changes. How is that recorded?",
+        "criteria": {
+          "accept_and_note_5_9": "Accept all, and add a note to row 5.9 saying co-located publishes now go by path.",
+          "accept_evidence_only": "Accept the code changes but record them only in docs/evidence/5.10.",
+          "keep_two_routes": "Keep publish_with_assets as a second route."
+        }
+      },
+      "evidence_bar": {
+        "type": "noul",
+        "instructions": "Is a loopback worker started with --lan acceptable as the 'LAN' worker, with the row done only when both takes are Taken on the T0 workstation (a named TierTooLow skip below T0)?",
+        "criteria": {
+          "true": "Yes, as 5.8 and 5.9 accepted.",
+          "false": "No, a second machine is required."
+        }
+      },
+      "defer_wider": {
+        "type": "noul",
+        "instructions": "Should the wider question of how the Editor reads from the engine (ADR-001's Editor control line, 11.65 engine preview, 14.4 viewport profile) be deferred to 11.65?",
+        "criteria": {
+          "true": "Yes, defer; 5.10 adds only the locality read.",
+          "false": "No, decide it now."
+        }
+      },
+      "proposal_sound": {
+        "type": "noul",
+        "instructions": "Is the recommended design sound against ADR-001 and the standing rules (R6, R9, 5.7, 5.8's decisions, content off the control plane)?",
+        "criteria": {
+          "true": "Yes.",
+          "false": "No, it breaks a rule."
+        }
+      },
+      "needs_user": {
+        "type": "noul",
+        "instructions": "Must the user decide any of this before the agent builds it?",
+        "criteria": {
+          "true": "Yes.",
+          "false": "No, the agent may proceed."
+        }
+      }
+    }
+  },
+  "answers": {
+    "laya": {
+      "model": "convaiinnovations/laya-multilingual",
+      "max_len": 8192,
+      "state_tokens": 865,
+      "truncated": false,
+      "load_s": 16.0,
+      "predict_s": 12.278
+    },
+    "jev_model": "jev-1.14.0",
+    "rows": [
+      {
+        "question": "locality_source",
+        "type": "choice",
+        "laya": "editor_setting",
+        "jev": "asset_plane_read",
+        "agree": false,
+        "laya_detail": {
+          "type": "choice",
+          "choice": "editor_setting",
+          "probabilities": {
+            "asset_plane_read": 0.0124,
+            "relay": 0.0786,
+            "r6_carveout": 0.4543,
+            "editor_setting": 0.4546
+          },
+          "confidence": 0.2994,
+          "answer_confidence": 0.4546,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "jev_detail": {
+          "type": "choice",
+          "choice": "asset_plane_read",
+          "confidence": 1,
+          "probabilities": {
+            "asset_plane_read": 1,
+            "relay": 0,
+            "r6_carveout": 0,
+            "editor_setting": 0
+          }
+        }
+      },
+      {
+        "question": "no_wire_scope",
+        "type": "choice",
+        "laya": "directory_only",
+        "jev": "directory_only",
+        "agree": true,
+        "laya_detail": {
+          "type": "choice",
+          "choice": "directory_only",
+          "probabilities": {
+            "directory_only": 0.5818,
+            "all_new_wire": 0.4182
+          },
+          "confidence": 0.0194,
+          "answer_confidence": 0.5818,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "jev_detail": {
+          "type": "choice",
+          "choice": "directory_only",
+          "confidence": 1,
+          "probabilities": {
+            "directory_only": 1,
+            "all_new_wire": 0
+          }
+        }
+      },
+      {
+        "question": "reword_row",
+        "type": "noul",
+        "laya": 0.9245,
+        "jev": 0.93,
+        "agree": true,
+        "laya_detail": {
+          "type": "noul",
+          "noul": 0.9245,
+          "confidence": 0.9245,
+          "answer_confidence": 0.9245,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "jev_detail": {
+          "type": "noul",
+          "noul": 0.93
+        }
+      },
+      {
+        "question": "test_home",
+        "type": "choice",
+        "laya": "no_take",
+        "jev": "conformance_calls_gx_editor",
+        "agree": false,
+        "laya_detail": {
+          "type": "choice",
+          "choice": "no_take",
+          "probabilities": {
+            "conformance_calls_gx_editor": 0.2174,
+            "shell_in_conformance": 0.3326,
+            "no_take": 0.4501
+          },
+          "confidence": 0.0377,
+          "answer_confidence": 0.4501,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "jev_detail": {
+          "type": "choice",
+          "choice": "conformance_calls_gx_editor",
+          "confidence": 0.97,
+          "probabilities": {
+            "conformance_calls_gx_editor": 0.98,
+            "shell_in_conformance": 0.02,
+            "no_take": 0
+          }
+        }
+      },
+      {
+        "question": "lan_hardening",
+        "type": "choice",
+        "laya": "both",
+        "jev": "both",
+        "agree": true,
+        "laya_detail": {
+          "type": "choice",
+          "choice": "both",
+          "probabilities": {
+            "both": 0.5266,
+            "server_rule_only": 0.0853,
+            "neither": 0.3881
+          },
+          "confidence": 0.167,
+          "answer_confidence": 0.5266,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "jev_detail": {
+          "type": "choice",
+          "choice": "both",
+          "confidence": 0.96,
+          "probabilities": {
+            "both": 0.97,
+            "server_rule_only": 0.02,
+            "neither": 0.01
+          }
+        }
+      },
+      {
+        "question": "co_located_without_dir",
+        "type": "choice",
+        "laya": "fallback_chunked",
+        "jev": "worker_default_dir",
+        "agree": false,
+        "laya_detail": {
+          "type": "choice",
+          "choice": "fallback_chunked",
+          "probabilities": {
+            "named_refusal": 0.2983,
+            "worker_default_dir": 0.2305,
+            "fallback_chunked": 0.4712
+          },
+          "confidence": 0.0409,
+          "answer_confidence": 0.4712,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "jev_detail": {
+          "type": "choice",
+          "choice": "worker_default_dir",
+          "confidence": 0.6,
+          "probabilities": {
+            "named_refusal": 0.25,
+            "worker_default_dir": 0.73,
+            "fallback_chunked": 0.02
+          }
+        }
+      },
+      {
+        "question": "folder_config",
+        "type": "choice",
+        "laya": "env_plus_platform_default",
+        "jev": "env_plus_platform_default",
+        "agree": true,
+        "laya_detail": {
+          "type": "choice",
+          "choice": "env_plus_platform_default",
+          "probabilities": {
+            "env_plus_platform_default": 0.5547,
+            "ui_parameter": 0.2259,
+            "settings_file": 0.2195
+          },
+          "confidence": 0.0936,
+          "answer_confidence": 0.5547,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "jev_detail": {
+          "type": "choice",
+          "choice": "env_plus_platform_default",
+          "confidence": 1,
+          "probabilities": {
+            "env_plus_platform_default": 1,
+            "ui_parameter": 0,
+            "settings_file": 0
+          }
+        }
+      },
+      {
+        "question": "behaviour_changes",
+        "type": "choice",
+        "laya": "accept_and_note_5_9",
+        "jev": "accept_and_note_5_9",
+        "agree": true,
+        "laya_detail": {
+          "type": "choice",
+          "choice": "accept_and_note_5_9",
+          "probabilities": {
+            "accept_and_note_5_9": 0.557,
+            "accept_evidence_only": 0.2697,
+            "keep_two_routes": 0.1733
+          },
+          "confidence": 0.1052,
+          "answer_confidence": 0.557,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "jev_detail": {
+          "type": "choice",
+          "choice": "accept_and_note_5_9",
+          "confidence": 0.89,
+          "probabilities": {
+            "accept_and_note_5_9": 0.93,
+            "accept_evidence_only": 0.06,
+            "keep_two_routes": 0.01
+          }
+        }
+      },
+      {
+        "question": "evidence_bar",
+        "type": "noul",
+        "laya": 0.9085,
+        "jev": 0.6,
+        "agree": false,
+        "laya_detail": {
+          "type": "noul",
+          "noul": 0.9085,
+          "confidence": 0.9085,
+          "answer_confidence": 0.9085,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "jev_detail": {
+          "type": "noul",
+          "noul": 0.6
+        }
+      },
+      {
+        "question": "defer_wider",
+        "type": "noul",
+        "laya": 0.9013,
+        "jev": 0.66,
+        "agree": true,
+        "laya_detail": {
+          "type": "noul",
+          "noul": 0.9013,
+          "confidence": 0.9013,
+          "answer_confidence": 0.9013,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "jev_detail": {
+          "type": "noul",
+          "noul": 0.66
+        }
+      },
+      {
+        "question": "proposal_sound",
+        "type": "noul",
+        "laya": 0.8628,
+        "jev": 0.76,
+        "agree": true,
+        "laya_detail": {
+          "type": "noul",
+          "noul": 0.8628,
+          "confidence": 0.8628,
+          "answer_confidence": 0.8628,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "jev_detail": {
+          "type": "noul",
+          "noul": 0.76
+        }
+      },
+      {
+        "question": "needs_user",
+        "type": "noul",
+        "laya": 0.9108,
+        "jev": 0.53,
+        "agree": false,
+        "laya_detail": {
+          "type": "noul",
+          "noul": 0.9108,
+          "confidence": 0.9108,
+          "answer_confidence": 0.9108,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "jev_detail": {
+          "type": "noul",
+          "noul": 0.53
+        }
+      }
+    ],
+    "agreement": 0.5833333333333334
+  },
+  "user_decisions_8_nov_2026": {
+    "locality_source": "asset_plane_read (Laya editor_setting, near-random; Jev asset_plane_read 1.0)",
+    "co_located_without_dir": "named_refusal (Laya fallback_chunked, Jev worker_default_dir 0.6; the synthesis recommended named_refusal)",
+    "test_home": "conformance_calls_gx_editor (Laya no_take, near-random; Jev 0.97)",
+    "agreed_by_both_models": "no_wire_scope directory_only; reword_row; lan_hardening both; folder_config env_plus_platform_default; behaviour_changes accept_and_note_5_9; evidence_bar loopback --lan, Taken on T0; defer_wider to 11.65; proposal sound"
+  }
+}

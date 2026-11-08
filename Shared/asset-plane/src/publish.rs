@@ -150,6 +150,7 @@ pub enum FetchReply {
 pub struct AssetPublishServer<P: AssetPublishPeer> {
     listener: TcpListener,
     peer: Arc<Mutex<P>>,
+    metrics: crate::preflight::AssetTransferMetrics,
 }
 
 impl<P: AssetPublishPeer> AssetPublishServer<P> {
@@ -157,11 +158,18 @@ impl<P: AssetPublishPeer> AssetPublishServer<P> {
         Ok(Self {
             listener: TcpListener::bind(addr)?,
             peer,
+            metrics: crate::preflight::AssetTransferMetrics::new(),
         })
     }
 
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.listener.local_addr()
+    }
+
+    /// The asset bytes this listener's transfer dialect has admitted, over
+    /// every connection: what crossed the asset plane into this peer.
+    pub fn metrics(&self) -> crate::preflight::AssetTransferMetrics {
+        self.metrics.clone()
     }
 
     pub fn serve_in_background(self) -> JoinHandle<()> {
@@ -170,8 +178,9 @@ impl<P: AssetPublishPeer> AssetPublishServer<P> {
                 match stream {
                     Ok(stream) => {
                         let peer = Arc::clone(&self.peer);
+                        let metrics = self.metrics.clone();
                         thread::spawn(move || {
-                            let _ = handle_publish(stream, peer);
+                            let _ = handle_publish(stream, peer, &metrics);
                         });
                     }
                     Err(error) => {
@@ -357,6 +366,7 @@ enum AssetRequest {
 fn handle_publish<P: AssetPublishPeer>(
     mut stream: TcpStream,
     peer: Arc<Mutex<P>>,
+    metrics: &crate::preflight::AssetTransferMetrics,
 ) -> io::Result<()> {
     let mut prefix = [0_u8; 4];
     stream.read_exact(&mut prefix)?;
@@ -381,7 +391,7 @@ fn handle_publish<P: AssetPublishPeer>(
             &mut stream,
             Some(first),
             &PeerAssets(Arc::clone(&peer)),
-            &crate::preflight::AssetTransferMetrics::new(),
+            metrics,
         ),
         AssetRequest::Package(path) => {
             let directory = locked()?.package_directory();

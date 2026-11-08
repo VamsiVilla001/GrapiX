@@ -259,6 +259,7 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
     "packageDirectoryNotConfigured",
     "packagePathOutsideDirectory",
     "packageUnreadable",
+    "packageTooLarge",
     "projectJsonCorrupt",
     "unknownProjectSchema",
     "projectIdLocationMismatch",

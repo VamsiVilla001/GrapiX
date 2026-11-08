@@ -555,6 +555,16 @@ pub enum Refusal {
     /// a package archive (5.8). Distinct from a member that fails to decode,
     /// which is `PackageEntryUnreadable`.
     PackageUnreadable { path: String, detail: String },
+    /// A package declares more bytes than its reader may hold: `manifest.json`
+    /// over the manifest limit, or a member that takes the members' declared
+    /// total over the package limit. Checked before the bytes are read, so a
+    /// package cannot make its reader reserve memory by declaring a size
+    /// (invariant 51).
+    PackageTooLarge {
+        path: String,
+        declared_bytes: u64,
+        limit_bytes: u64,
+    },
     /// Project JSON could not be parsed. The store refuses it instead of
     /// selecting a backup without the operator's explicit recovery choice.
     ProjectJsonCorrupt { project: String, detail: String },
@@ -1221,6 +1231,14 @@ impl std::fmt::Display for Refusal {
             Refusal::PackageUnreadable { path, detail } => {
                 write!(f, "package {path} cannot be read: {detail}")
             }
+            Refusal::PackageTooLarge {
+                path,
+                declared_bytes,
+                limit_bytes,
+            } => write!(
+                f,
+                "package entry {path} brings the declared size to {declared_bytes} bytes, over the {limit_bytes}-byte limit"
+            ),
             Refusal::ProjectJsonCorrupt { project, detail } => {
                 write!(f, "project JSON is corrupt ({project}): {detail}")
             }
@@ -1990,6 +2008,11 @@ impl Refusal {
                 path: "audit".into(),
                 detail: "audit".into(),
             },
+            Self::PackageTooLarge {
+                path: "audit".into(),
+                declared_bytes: 2,
+                limit_bytes: 1,
+            },
             Self::ProjectJsonCorrupt {
                 project: "audit".into(),
                 detail: "audit".into(),
@@ -2313,6 +2336,7 @@ impl Refusal {
             Self::PackageDirectoryNotConfigured { .. } => "packageDirectoryNotConfigured",
             Self::PackagePathOutsideDirectory { .. } => "packagePathOutsideDirectory",
             Self::PackageUnreadable { .. } => "packageUnreadable",
+            Self::PackageTooLarge { .. } => "packageTooLarge",
             Self::ProjectJsonCorrupt { .. } => "projectJsonCorrupt",
             Self::UnknownProjectSchema { .. } => "unknownProjectSchema",
             Self::ProjectIdLocationMismatch { .. } => "projectIdLocationMismatch",

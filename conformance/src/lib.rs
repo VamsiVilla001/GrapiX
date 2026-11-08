@@ -154,6 +154,17 @@ impl Report {
             Outcome::Skip(reason.into()),
         );
     }
+
+    /// Record that a peer which is present ran and exited on the arguments
+    /// the suite gave it. A failure, never a skip: the binary is there, so its
+    /// exit is the defect the suite exists to find (5.8 review).
+    pub fn fail_to_start(&mut self, reason: impl Into<String>) {
+        self.record(
+            "availability",
+            "peer starts with the suite's arguments",
+            Outcome::Fail(reason.into()),
+        );
+    }
 }
 
 /// Turn a boolean expectation into an outcome, with the failure text supplied
