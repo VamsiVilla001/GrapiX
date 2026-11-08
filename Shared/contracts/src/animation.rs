@@ -24,9 +24,12 @@ use crate::{RationalRate, Refusal};
 /// The easing between two keys. Closed and finite: the curve an author chooses
 /// must be one every evaluator knows by name, because a substituted curve is a
 /// visual change no one named (invariant 18).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum SceneEasing {
+    #[default]
     Linear,
     Hold,
     EaseIn,
@@ -78,12 +81,6 @@ pub struct SceneKeyframe {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub bezier: Option<CubicBezier>,
-}
-
-impl Default for SceneEasing {
-    fn default() -> Self {
-        Self::Linear
-    }
 }
 
 /// One animatable property on one object.

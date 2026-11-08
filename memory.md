@@ -118,6 +118,25 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-08 — First CI run on agent/shared: Rust pinned to 1.89.0 (0.2 breach fixed) (Claude)
+
+The first CI run after the push (42455966236) passed `cargo fmt --check` for the first
+time and failed clippy on both platforms: `rust-toolchain.toml` said `channel =
+"stable"`, so CI's `dtolnay/rust-toolchain@stable` installed Rust 1.99 while every
+workstation ran 1.89, and `clippy::derivable_impls` (unknown to 1.89) fired on
+`SceneEasing`'s hand-written `Default`. Row 0.2's done-when ("versions pinned in-tree,
+CI enforces") was therefore not true; it stays done because the fix is in the same
+commit: `rust-toolchain.toml` and `check.yml` pin **1.89.0** (the user's 7 Nov decision,
+Cargo.toml `rust-version = "1.89"`), and `SceneEasing` derives `Default` with
+`#[default] Linear`. Put to Jev and Laya first: both chose the 1.89.0 pin and called
+it a 0.2 breach (`docs/evidence/review-2026-11/toolchain-jev-laya.json`). rustup
+auto-installed the named 1.89.0 toolchain (the same compiler). Rule: change the
+toolchain only in all three places together.
+
+**Executed.** `cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets
+-- -D warnings` exit 0 on 1.89.0; `npm run check` exit 0 (377 codegen, 40 Node, 412
+Editor, 772 Rust / 0 failed / 25 ignored, conformance 500/0/8).
+
 ## 2026-11-08 — Whole-workspace `cargo fmt --all`, no logic change (Claude)
 
 One-time formatting commit the user approved on 8 Nov after the done-row review

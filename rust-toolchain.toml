@@ -1,3 +1,7 @@
 [toolchain]
-channel = "stable"
+# A version, never "stable" (0.2): CI and every workstation must run the same
+# compiler and the same lints. Matches Cargo.toml rust-version and the CI pin
+# in .github/workflows/check.yml. Rust stays 1.89 by user decision (7 Nov 2026;
+# wgpu 30.0.1 needs 1.87). Change all three together.
+channel = "1.89.0"
 components = ["rustfmt", "clippy"]

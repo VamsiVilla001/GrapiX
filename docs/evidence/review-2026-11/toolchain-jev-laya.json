@@ -1,0 +1,85 @@
+{
+  "laya": {
+    "model": "convaiinnovations/laya-multilingual",
+    "max_len": 8192,
+    "state_tokens": 477,
+    "truncated": false,
+    "load_s": 34.97,
+    "predict_s": 1.451
+  },
+  "jev_model": "jev-1.14.0",
+  "rows": [
+    {
+      "question": "toolchain_policy",
+      "type": "choice",
+      "laya": "pin_1_89",
+      "jev": "pin_1_89",
+      "agree": true,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "pin_1_89",
+        "probabilities": {
+          "pin_1_89": 0.775,
+          "move_to_current": 0.061,
+          "float_stable": 0.164
+        },
+        "confidence": 0.3951,
+        "answer_confidence": 0.775,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "pin_1_89",
+        "confidence": 1,
+        "probabilities": {
+          "pin_1_89": 1,
+          "move_to_current": 0,
+          "float_stable": 0
+        }
+      }
+    },
+    {
+      "question": "row_0_2_breach",
+      "type": "noul",
+      "laya": 0.9294,
+      "jev": 0.94,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9294,
+        "confidence": 0.9294,
+        "answer_confidence": 0.9294,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.94
+      }
+    },
+    {
+      "question": "fix_without_asking",
+      "type": "noul",
+      "laya": 0.9339,
+      "jev": 0.84,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9339,
+        "confidence": 0.9339,
+        "answer_confidence": 0.9339,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.84
+      }
+    }
+  ],
+  "agreement": 1.0
+}

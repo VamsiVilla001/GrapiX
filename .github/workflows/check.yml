@@ -31,10 +31,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Pinned toolchain, matching rust-toolchain.toml and package.json
-      # engines (0.2): Rust stable with rustfmt+clippy, Node >=22.
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned toolchain, matching rust-toolchain.toml, Cargo.toml rust-version
+      # and package.json engines (0.2): Rust 1.89.0 with rustfmt+clippy, Node
+      # >=22. A version, not "stable": on 8 Nov 2026 "stable" let CI install
+      # Rust 1.99 while every workstation ran 1.89, and a lint only the newer
+      # clippy knows failed the first run (user decision 7 Nov: Rust stays 1.89).
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.89.0
           components: rustfmt, clippy
       - uses: actions/setup-node@v4
         with:
