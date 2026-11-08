@@ -336,7 +336,10 @@ impl AssetPublishPeer for MockEngine {
         MockEngine::publish_scene(self, scene)
     }
 
-    // 5.9: the same receipt as the engine's.
+    // 5.9: the engine's receipt, in memory. The mock keeps no recovery
+    // journal, so it has no asset store and never restores (5.11): the
+    // engine's store refusals (`AssetStoreFailed`) and restore drops have no
+    // counterpart here because the state they protect does not exist.
     fn has_verified_asset(&self, hash: &ContentHash) -> bool {
         self.asset_bytes.contains_key(hash)
     }

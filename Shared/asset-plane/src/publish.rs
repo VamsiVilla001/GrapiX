@@ -18,7 +18,7 @@ use gx_contracts::scene::{parse_scene_document, SceneDocument};
 use gx_contracts::{ContentHash, Refusal, Revision, TakeId};
 use serde::{Deserialize, Serialize};
 
-use crate::store::content_hash;
+use crate::store::{content_hash, AssetStore};
 
 /// A complete, self-describing authored scene awaiting publication.
 ///
@@ -68,7 +68,8 @@ pub enum PublishRefusal {
     PreparationRefused { cause: gx_contracts::Refusal },
     /// A package offered by local path was refused before its scene reached
     /// the peer (5.8): no package directory, a path outside it, an unreadable
-    /// package, or bytes that do not match their manifest or declared hash.
+    /// package, bytes that do not match their manifest or declared hash, or
+    /// (5.11) a store that could not keep them.
     PackageRefused { cause: gx_contracts::Refusal },
 }
 
@@ -106,22 +107,43 @@ pub trait AssetPublishPeer: Send + 'static {
     fn package_directory(&self) -> Option<PathBuf> {
         None
     }
+
+    /// The store this peer keeps verified asset bytes in across a restart
+    /// (5.11). When it names one, this listener writes every asset there,
+    /// without holding the peer, before the peer is handed the bytes, so a
+    /// large write never delays a frame or a cue (ADR-001) and nothing is
+    /// acknowledged that the store does not hold. `None`, the default, keeps
+    /// bytes in the peer's memory only.
+    fn asset_store(&self) -> Option<Arc<AssetStore>> {
+        None
+    }
 }
 
-/// A publish peer seen as the transfer dialect's receiver (5.9).
-struct PeerAssets<P>(Arc<Mutex<P>>);
+/// A publish peer seen as the transfer dialect's receiver (5.9), with the
+/// store it keeps bytes in across a restart (5.11).
+struct PeerAssets<P> {
+    peer: Arc<Mutex<P>>,
+    store: Option<Arc<AssetStore>>,
+}
 
 impl<P: AssetPublishPeer> crate::preflight::VerifiedAssets for PeerAssets<P> {
     fn has(&self, hash: &ContentHash) -> io::Result<bool> {
         Ok(self
-            .0
+            .peer
             .lock()
             .map_err(|_| io::Error::other("asset publish peer mutex poisoned"))?
             .has_verified_asset(hash))
     }
     fn accept(&self, hash: &ContentHash, bytes: Vec<u8>) -> io::Result<Result<(), Refusal>> {
+        // Written before the peer is held: a large asset's durable write
+        // never waits on, or delays, the peer's frames (ADR-001).
+        if let Some(store) = &self.store {
+            if let Err(error) = store.promote_verified(hash, &bytes) {
+                return Ok(Err(error.into_refusal(hash)));
+            }
+        }
         Ok(self
-            .0
+            .peer
             .lock()
             .map_err(|_| io::Error::other("asset publish peer mutex poisoned"))?
             .accept_verified_asset(hash.clone(), bytes))
@@ -387,17 +409,28 @@ fn handle_publish<P: AssetPublishPeer>(
             .map_err(|_| io::Error::other("asset publish peer mutex poisoned"))
     };
     match request {
-        AssetRequest::Transfer(first) => crate::preflight::serve_transfer(
-            &mut stream,
-            Some(first),
-            &PeerAssets(Arc::clone(&peer)),
-            metrics,
-        ),
+        AssetRequest::Transfer(first) => {
+            let store = locked()?.asset_store();
+            crate::preflight::serve_transfer(
+                &mut stream,
+                Some(first),
+                &PeerAssets {
+                    peer: Arc::clone(&peer),
+                    store,
+                },
+                metrics,
+            )
+        }
         AssetRequest::Package(path) => {
-            let directory = locked()?.package_directory();
-            // Read and verified without the peer lock, so a large package
-            // never holds up a take.
-            let reply = match crate::handoff::open_package_in(directory.as_deref(), &path) {
+            let (directory, store) = {
+                let held = locked()?;
+                (held.package_directory(), held.asset_store())
+            };
+            // Read, verified and stored without the peer lock, so a large
+            // package never holds up a take.
+            let reply = match crate::handoff::open_package_in(directory.as_deref(), &path)
+                .and_then(|packaged| store_packaged(store.as_deref(), packaged))
+            {
                 Ok(packaged) => deliver_packaged(&mut *locked()?, packaged),
                 Err(cause) => PublishReply::Refused(PublishRefusal::PackageRefused { cause }),
             };
@@ -434,6 +467,22 @@ fn handle_publish<P: AssetPublishPeer>(
             }
         }
     }
+}
+
+/// Write a package's verified assets to the peer's store, if it keeps one,
+/// before the peer is handed any of them (5.11).
+fn store_packaged(
+    store: Option<&AssetStore>,
+    packaged: crate::handoff::PackagedScene,
+) -> Result<crate::handoff::PackagedScene, Refusal> {
+    if let Some(store) = store {
+        for asset in &packaged.assets {
+            store
+                .promote_verified(&asset.hash, &asset.bytes)
+                .map_err(|error| error.into_refusal(&asset.hash))?;
+        }
+    }
+    Ok(packaged)
 }
 
 /// Hand a package's verified assets to the peer through the same receipt the

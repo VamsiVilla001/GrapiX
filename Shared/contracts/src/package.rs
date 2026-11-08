@@ -124,10 +124,7 @@ pub fn package_path_components(path: &str) -> Result<Vec<FileName>, Refusal> {
 }
 
 fn is_sha256(value: &str) -> bool {
-    value.len() == 64
-        && value.bytes().all(|byte| {
-            byte.is_ascii_digit() || (byte.is_ascii_lowercase() && byte.is_ascii_hexdigit())
-        })
+    ContentHash(value.to_owned()).is_sha256()
 }
 
 #[cfg(test)]

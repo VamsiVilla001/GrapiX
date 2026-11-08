@@ -43,6 +43,7 @@ use gx_asset_plane::fonts::ingest::{
 use gx_asset_plane::fonts::link::{prepare_font_link, UreqFontFetcher};
 use gx_asset_plane::fonts::manager::LinkedSource;
 use gx_asset_plane::import::{prepare_asset_files, AssetFileInput, PreparedAssetBatch};
+use gx_asset_plane::package::MAX_PACKAGE_BYTES;
 use gx_asset_plane::{
     content_hash, publish_assets, publish_scene, AssetBytes, AssetStore, AssetTransferClientError,
     PublishClientError, PublishRefusal, PublishReply,
@@ -279,15 +280,11 @@ pub fn scene_asset_bytes(
         if assets.iter().any(|asset: &AssetBytes| &asset.hash == hash) {
             continue;
         }
-        let bytes = std::fs::read(store.cache_path(hash))
-            .map_err(|_| refused(Refusal::AssetMissing { hash: hash.clone() }))?;
-        let actual = content_hash(&bytes);
-        if actual != *hash {
-            return Err(refused(Refusal::AssetHashMismatch {
-                expected: hash.clone(),
-                actual,
-            }));
-        }
+        // The one read-back-and-re-hash (invariant 27, shared with the
+        // engine's restore, 5.11).
+        let bytes = store
+            .read_verified(hash, MAX_PACKAGE_BYTES)
+            .map_err(|error| refused(error.into_refusal(hash)))?;
         assets.push(AssetBytes {
             hash: hash.clone(),
             bytes,
@@ -820,26 +817,13 @@ fn cmd_font_bytes(
     state: tauri::State<'_, ShellState>,
     checksum: ContentHash,
 ) -> Result<tauri::ipc::Response, EditorError> {
-    let valid = checksum.0.len() == 64
-        && checksum
-            .0
-            .bytes()
-            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
-    if !valid {
-        return Err(refused(Refusal::AssetMissing { hash: checksum }));
-    }
-    let path = state.with_asset_store(|store| Ok(store.cache_path(&checksum)))?;
-    let bytes = std::fs::read(&path).map_err(|_| {
-        refused(Refusal::AssetMissing {
-            hash: checksum.clone(),
-        })
+    // A checksum that is not a content address is never made into a path,
+    // and the bytes are re-hashed before they are served (invariant 27).
+    let bytes = state.with_asset_store(|store| {
+        store
+            .read_verified(&checksum, MAX_PACKAGE_BYTES)
+            .map_err(|error| refused(error.into_refusal(&checksum)))
     })?;
-    if content_hash(&bytes) != checksum {
-        return Err(refused(Refusal::AssetHashMismatch {
-            expected: checksum,
-            actual: content_hash(&bytes),
-        }));
-    }
     Ok(tauri::ipc::Response::new(bytes))
 }
 

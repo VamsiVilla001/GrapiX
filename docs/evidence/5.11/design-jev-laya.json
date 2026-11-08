@@ -1,0 +1,449 @@
+{
+  "asked": [
+    {
+      "state": {
+        "row_5_11": "5.11 (pending, Needs 3.12 and 5.9; user decision 8 Nov: persist verified bytes, re-hash on restore, drop a bad scene by name, still start output-inhibited). Done-when: every verified asset the engine accepts, by chunked upload or by path, is written to an engine-owned content-addressed store beside its recovery journal before the publication is acknowledged. On restore each journaled scene's assets are read back from that store and re-hashed before preparation. A scene whose bytes are missing or fail their hash is dropped with a named reason, and the engine still starts output-inhibited; it never refuses to start for it. A real-worker test kills and restarts by each route and takes the restored revision (Taken on T0); a second run with one stored asset removed and another altered starts, names both dropped scenes and their reasons, and still serves the intact scene.",
+        "planned_design": "Store = AssetStore::at_root(<journal file name>.assets) beside the journal (production: %APPDATA%\\GrapiX\\GrapiX\\data\\render-engine\\recovery.json.assets). The asset plane writes each asset there outside the engine lock, before any acknowledgement; the engine refuses to record bytes its store does not hold (new Refusal::AssetStoreFailed, detail without any filesystem path). Restore reads back and re-hashes every declared asset of every journaled scene, bounded by size; a scene with a missing, altered or unreadable asset is dropped: removed from published, and program/cued cleared only if they name it; the engine still starts at epoch+1, output-inhibited; the journal is then rewritten without the dropped scenes before any port binds. Drops are named on the worker's stderr at start, and Cue/Take/Render of a dropped take is refused with the drop reason itself (an in-memory tombstone, until re-published). Journal schema stays 3, so a 5.9-era journal starts with its asset scenes dropped by name instead of exiting.",
+        "verified_facts": [
+          "gx-engine-host pipes the worker's stderr and reads it only when the child fails to answer, so start-time drop lines are lost on the host route; an undrained pipe could also block a long stderr burst before the port binds.",
+          "The journal is rewritten without dropped scenes during attach, before any port binds; in-memory tombstones are forgotten at the next restart.",
+          "Today restore is all-or-nothing: if a scene's bytes verify but preparation or GPU preparation fails (a software or capability change, or a transient GPU fault), the worker exits 1 and the journal is left untouched.",
+          "AssetStore has no delete; the engine store only grows (files of dropped scenes, altered files, hashes no scene uses).",
+          "publish() numbers revisions from the published map only; after a drop removes a take, re-publishing it restarts at Revision(1). Takes pin the content hash, and epoch reconciliation already tolerates a reused revision, but invariants say a version number identifies a publish."
+        ]
+      },
+      "questions": {
+        "prep_failure_on_good_bytes": {
+          "type": "choice",
+          "instructions": "At restore, a scene's bytes verify but preparation or the GPU still refuses it. What should the engine do?",
+          "criteria": {
+            "keep_refusing_to_start": "Keep today's refusal to start; the journal stays untouched, so a transient GPU fault cannot erase scenes. The done-when covers only missing or altered bytes.",
+            "drop_by_name_too": "Drop that scene by name as well, so no scene can keep the engine down."
+          }
+        },
+        "store_cleanup": {
+          "type": "choice",
+          "instructions": "Should 5.11 remove store files that no journaled scene needs?",
+          "criteria": {
+            "none_follow_up_row": "No cleanup in 5.11; file a follow-up row.",
+            "prune_at_start": "Prune the store at each start to the restored scenes' hashes, after the journal is rewritten."
+          }
+        },
+        "drop_report": {
+          "type": "choice",
+          "instructions": "How are dropped scenes named durably, given the host discards the worker's stderr on success and the journal no longer lists them after restart?",
+          "criteria": {
+            "report_file_and_stderr": "Write every drop, atomically, to a report file beside the journal (<journal file name>.dropped.json) before the journal is rewritten; print a bounded summary on stderr that points to it; the refusal by reason on Cue/Take/Render stays.",
+            "stderr_and_refusal_follow_up": "Stderr (capped) plus the refusal by reason only; a follow-up row for a Status/Degradation signal and for the host draining stderr.",
+            "status_field_now": "Add a Degradation or EngineStatus field now (contract and TS change)."
+          }
+        },
+        "revision_after_drop": {
+          "type": "choice",
+          "instructions": "After a drop, what revision does a re-publish of that take get?",
+          "criteria": {
+            "floor_in_incarnation": "The dropped revision plus one, from the in-memory tombstone (no reuse within this run; a later restart may reuse).",
+            "journaled_floor": "A revision floor kept in the journal, so a number is never reused (journal schema change).",
+            "allow_reuse": "Revision(1) again; the content-hash pin makes reuse safe."
+          }
+        },
+        "proposal_sound": {
+          "type": "noul",
+          "instructions": "Is the planned design sound against the standing rules (verify before use, refusal by name, 3.12's output-inhibited restore and epoch advance, ADR-001's 'a large transfer must never delay a cue')?",
+          "criteria": {
+            "true": "Yes.",
+            "false": "No, it breaks a rule."
+          }
+        },
+        "needs_user": {
+          "type": "noul",
+          "instructions": "Must the user decide any of this before the agent builds it?",
+          "criteria": {
+            "true": "Yes.",
+            "false": "No, the agent may proceed."
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "row_5_11": "5.11 (pending, Needs 3.12 and 5.9; user decision 8 Nov: persist verified bytes, re-hash on restore, drop a bad scene by name, still start output-inhibited). Done-when: every verified asset the engine accepts, by chunked upload or by path, is written to an engine-owned content-addressed store beside its recovery journal before the publication is acknowledged. On restore each journaled scene's assets are read back from that store and re-hashed before preparation. A scene whose bytes are missing or fail their hash is dropped with a named reason, and the engine still starts output-inhibited; it never refuses to start for it. A real-worker test kills and restarts by each route and takes the restored revision (Taken on T0); a second run with one stored asset removed and another altered starts, names both dropped scenes and their reasons, and still serves the intact scene.",
+        "planned_design": "Store = AssetStore::at_root(<journal file name>.assets) beside the journal (production: %APPDATA%\\GrapiX\\GrapiX\\data\\render-engine\\recovery.json.assets). The asset plane writes each asset there outside the engine lock, before any acknowledgement; the engine refuses to record bytes its store does not hold (new Refusal::AssetStoreFailed, detail without any filesystem path). Restore reads back and re-hashes every declared asset of every journaled scene, bounded by size; a scene with a missing, altered or unreadable asset is dropped: removed from published, and program/cued cleared only if they name it; the engine still starts at epoch+1, output-inhibited; the journal is then rewritten without the dropped scenes before any port binds. Drops are named on the worker's stderr at start, and Cue/Take/Render of a dropped take is refused with the drop reason itself (an in-memory tombstone, until re-published). Journal schema stays 3, so a 5.9-era journal starts with its asset scenes dropped by name instead of exiting.",
+        "verified_facts": [
+          "gx-engine-host pipes the worker's stderr and reads it only when the child fails to answer, so start-time drop lines are lost on the host route; an undrained pipe could also block a long stderr burst before the port binds.",
+          "The journal is rewritten without dropped scenes during attach, before any port binds; in-memory tombstones are forgotten at the next restart.",
+          "Today restore is all-or-nothing: if a scene's bytes verify but preparation or GPU preparation fails (a software or capability change, or a transient GPU fault), the worker exits 1 and the journal is left untouched.",
+          "AssetStore has no delete; the engine store only grows (files of dropped scenes, altered files, hashes no scene uses).",
+          "publish() numbers revisions from the published map only; after a drop removes a take, re-publishing it restarts at Revision(1). Takes pin the content hash, and epoch reconciliation already tolerates a reused revision, but invariants say a version number identifies a publish."
+        ]
+      },
+      "questions": {
+        "breaks_verify_before_use": {
+          "type": "noul",
+          "instructions": "Does the planned design use any asset byte that has not been re-hashed against its content address first?",
+          "criteria": {
+            "true": "Yes, it breaks this.",
+            "false": "No."
+          }
+        },
+        "breaks_refusal_by_name": {
+          "type": "noul",
+          "instructions": "Does the planned design let any failure pass silently instead of refusing or reporting it by name?",
+          "criteria": {
+            "true": "Yes, it breaks this.",
+            "false": "No."
+          }
+        },
+        "breaks_3_12_output_inhibited": {
+          "type": "noul",
+          "instructions": "Does the planned design break 3.12: a forced kill restores without an unrecovered output, the restored engine starts output-inhibited at a new epoch until ConfigureOutput re-arms it?",
+          "criteria": {
+            "true": "Yes, it breaks this.",
+            "false": "No."
+          }
+        },
+        "breaks_adr_001_cue_delay": {
+          "type": "noul",
+          "instructions": "Does the planned design let a large asset transfer or write delay a cue or a Program frame (ADR-001)?",
+          "criteria": {
+            "true": "Yes, it breaks this.",
+            "false": "No."
+          }
+        },
+        "breaks_5_9_mutable_path": {
+          "type": "noul",
+          "instructions": "Does the planned design break 5.9's rule that the engine never reads a mutable source path later (the user allowed re-reading content-addressed bytes that are re-hashed)?",
+          "criteria": {
+            "true": "Yes, it breaks this.",
+            "false": "No."
+          }
+        },
+        "breaks_published_contract": {
+          "type": "noul",
+          "instructions": "Does dropping a published scene at restore break a contract with Playout that a Published revision stays takeable until cleared?",
+          "criteria": {
+            "true": "Yes, it breaks this.",
+            "false": "No."
+          }
+        }
+      }
+    }
+  ],
+  "answers": [
+    {
+      "laya": {
+        "model": "convaiinnovations/laya-multilingual",
+        "max_len": 8192,
+        "state_tokens": 660,
+        "truncated": false,
+        "load_s": 43.11,
+        "predict_s": 4.914
+      },
+      "jev_model": "jev-1.14.0",
+      "rows": [
+        {
+          "question": "prep_failure_on_good_bytes",
+          "type": "choice",
+          "laya": "keep_refusing_to_start",
+          "jev": "keep_refusing_to_start",
+          "agree": true,
+          "laya_detail": {
+            "type": "choice",
+            "choice": "keep_refusing_to_start",
+            "probabilities": {
+              "keep_refusing_to_start": 0.6401,
+              "drop_by_name_too": 0.3599
+            },
+            "confidence": 0.0574,
+            "answer_confidence": 0.6401,
+            "action": {
+              "act_probability": 1.0
+            }
+          },
+          "jev_detail": {
+            "type": "choice",
+            "choice": "keep_refusing_to_start",
+            "confidence": 0.42,
+            "probabilities": {
+              "keep_refusing_to_start": 0.71,
+              "drop_by_name_too": 0.29
+            }
+          }
+        },
+        {
+          "question": "store_cleanup",
+          "type": "choice",
+          "laya": "none_follow_up_row",
+          "jev": "none_follow_up_row",
+          "agree": true,
+          "laya_detail": {
+            "type": "choice",
+            "choice": "none_follow_up_row",
+            "probabilities": {
+              "none_follow_up_row": 0.9888,
+              "prune_at_start": 0.0112
+            },
+            "confidence": 0.9112,
+            "answer_confidence": 0.9888,
+            "action": {
+              "act_probability": 1.0
+            }
+          },
+          "jev_detail": {
+            "type": "choice",
+            "choice": "none_follow_up_row",
+            "confidence": 0.5,
+            "probabilities": {
+              "none_follow_up_row": 0.75,
+              "prune_at_start": 0.25
+            }
+          }
+        },
+        {
+          "question": "drop_report",
+          "type": "choice",
+          "laya": "stderr_and_refusal_follow_up",
+          "jev": "report_file_and_stderr",
+          "agree": false,
+          "laya_detail": {
+            "type": "choice",
+            "choice": "stderr_and_refusal_follow_up",
+            "probabilities": {
+              "report_file_and_stderr": 0.3078,
+              "stderr_and_refusal_follow_up": 0.531,
+              "status_field_now": 0.1612
+            },
+            "confidence": 0.0961,
+            "answer_confidence": 0.531,
+            "action": {
+              "act_probability": 1.0
+            }
+          },
+          "jev_detail": {
+            "type": "choice",
+            "choice": "report_file_and_stderr",
+            "confidence": 0.67,
+            "probabilities": {
+              "report_file_and_stderr": 0.78,
+              "stderr_and_refusal_follow_up": 0.2,
+              "status_field_now": 0.02
+            }
+          }
+        },
+        {
+          "question": "revision_after_drop",
+          "type": "choice",
+          "laya": "journaled_floor",
+          "jev": "allow_reuse",
+          "agree": false,
+          "laya_detail": {
+            "type": "choice",
+            "choice": "journaled_floor",
+            "probabilities": {
+              "floor_in_incarnation": 0.1146,
+              "journaled_floor": 0.6286,
+              "allow_reuse": 0.2568
+            },
+            "confidence": 0.1906,
+            "answer_confidence": 0.6286,
+            "action": {
+              "act_probability": 1.0
+            }
+          },
+          "jev_detail": {
+            "type": "choice",
+            "choice": "allow_reuse",
+            "confidence": 0.96,
+            "probabilities": {
+              "floor_in_incarnation": 0.03,
+              "journaled_floor": 0,
+              "allow_reuse": 0.97
+            }
+          }
+        },
+        {
+          "question": "proposal_sound",
+          "type": "noul",
+          "laya": 0.8767,
+          "jev": 0.33,
+          "agree": false,
+          "laya_detail": {
+            "type": "noul",
+            "noul": 0.8767,
+            "confidence": 0.8767,
+            "answer_confidence": 0.8767,
+            "action": {
+              "act_probability": 1.0
+            }
+          },
+          "jev_detail": {
+            "type": "noul",
+            "noul": 0.33
+          }
+        },
+        {
+          "question": "needs_user",
+          "type": "noul",
+          "laya": 0.9057,
+          "jev": 0.49,
+          "agree": false,
+          "laya_detail": {
+            "type": "noul",
+            "noul": 0.9057,
+            "confidence": 0.9057,
+            "answer_confidence": 0.9057,
+            "action": {
+              "act_probability": 1.0
+            }
+          },
+          "jev_detail": {
+            "type": "noul",
+            "noul": 0.49
+          }
+        }
+      ],
+      "agreement": 0.3333333333333333
+    },
+    {
+      "laya": {
+        "model": "convaiinnovations/laya-multilingual",
+        "max_len": 8192,
+        "state_tokens": 660,
+        "truncated": false,
+        "load_s": 25.29,
+        "predict_s": 4.362
+      },
+      "jev_model": "jev-1.14.0",
+      "rows": [
+        {
+          "question": "breaks_verify_before_use",
+          "type": "noul",
+          "laya": 0.8766,
+          "jev": 0.28,
+          "agree": false,
+          "laya_detail": {
+            "type": "noul",
+            "noul": 0.8766,
+            "confidence": 0.8766,
+            "answer_confidence": 0.8766,
+            "action": {
+              "act_probability": 1.0
+            }
+          },
+          "jev_detail": {
+            "type": "noul",
+            "noul": 0.28
+          }
+        },
+        {
+          "question": "breaks_refusal_by_name",
+          "type": "noul",
+          "laya": 0.9313,
+          "jev": 0.66,
+          "agree": false,
+          "laya_detail": {
+            "type": "noul",
+            "noul": 0.9313,
+            "confidence": 0.9313,
+            "answer_confidence": 0.9313,
+            "action": {
+              "act_probability": 1.0
+            }
+          },
+          "jev_detail": {
+            "type": "noul",
+            "noul": 0.66
+          }
+        },
+        {
+          "question": "breaks_3_12_output_inhibited",
+          "type": "noul",
+          "laya": 0.9308,
+          "jev": 0.21,
+          "agree": false,
+          "laya_detail": {
+            "type": "noul",
+            "noul": 0.9308,
+            "confidence": 0.9308,
+            "answer_confidence": 0.9308,
+            "action": {
+              "act_probability": 1.0
+            }
+          },
+          "jev_detail": {
+            "type": "noul",
+            "noul": 0.21
+          }
+        },
+        {
+          "question": "breaks_adr_001_cue_delay",
+          "type": "noul",
+          "laya": 0.9243,
+          "jev": 0.43,
+          "agree": false,
+          "laya_detail": {
+            "type": "noul",
+            "noul": 0.9243,
+            "confidence": 0.9243,
+            "answer_confidence": 0.9243,
+            "action": {
+              "act_probability": 1.0
+            }
+          },
+          "jev_detail": {
+            "type": "noul",
+            "noul": 0.43
+          }
+        },
+        {
+          "question": "breaks_5_9_mutable_path",
+          "type": "noul",
+          "laya": 0.898,
+          "jev": 0.29,
+          "agree": false,
+          "laya_detail": {
+            "type": "noul",
+            "noul": 0.898,
+            "confidence": 0.898,
+            "answer_confidence": 0.898,
+            "action": {
+              "act_probability": 1.0
+            }
+          },
+          "jev_detail": {
+            "type": "noul",
+            "noul": 0.29
+          }
+        },
+        {
+          "question": "breaks_published_contract",
+          "type": "noul",
+          "laya": 0.9787,
+          "jev": 0.7,
+          "agree": false,
+          "laya_detail": {
+            "type": "noul",
+            "noul": 0.9787,
+            "confidence": 0.9787,
+            "answer_confidence": 0.9787,
+            "action": {
+              "act_probability": 1.0
+            }
+          },
+          "jev_detail": {
+            "type": "noul",
+            "noul": 0.7
+          }
+        }
+      ],
+      "agreement": 0.0
+    }
+  ],
+  "decisions_8_nov_2026": {
+    "prep_failure_on_good_bytes": "keep_refusing_to_start (both models: Laya 0.64, Jev 0.71)",
+    "store_cleanup": "none in 5.11, follow-up (both models: Laya 0.99, Jev 0.75)",
+    "drop_report": "user: report file + stderr (Jev report_file 0.78; Laya stderr+follow-up 0.53)",
+    "revision_after_drop": "user: journaled floor (Laya journaled_floor 0.63; Jev allow_reuse 0.97)",
+    "rule_probe": "Laya answered 'breaks' at about 0.9 for every rule, contradicting its own 0.88 'sound': no signal. Jev: published contract 0.70, refusal by name 0.66, others 0.21-0.43; both concerns are met by the drop report (user decision) and the refusal by reason."
+  }
+}

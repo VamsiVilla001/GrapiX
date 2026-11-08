@@ -8,6 +8,7 @@
 //! reports SKIP and says why. Defaulting it to PASS would claim coverage of
 //! precisely the paths nobody ran.
 
+mod asset_restart;
 mod asset_route;
 mod editor_commands;
 mod headless;
@@ -15,6 +16,7 @@ mod package_handoff;
 mod refusal_audit;
 mod scene_plane;
 mod scope;
+pub use asset_restart::{asset_restart_suite, RestartableWorker};
 pub use asset_route::asset_route_suite;
 pub use editor_commands::editor_command_suite;
 pub use headless::{headless_render_suite, render_preview_suite};

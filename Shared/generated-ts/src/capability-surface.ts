@@ -267,6 +267,7 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
     "assetTransferAlreadyComplete",
     "emptyAssetTransfer",
     "assetHashMismatch",
+    "assetStoreFailed",
     "mediaTransportUnavailable",
     "mediaCodecNotOffered",
     "scopeNotGranted",

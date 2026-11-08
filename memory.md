@@ -118,6 +118,39 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-08 — 5.11 done: restart after asset-bearing publishes (Claude)
+
+**Resume here.** Next: 5.12 (re-publish a take while an older revision of it is on Program;
+user decision 8 Nov: the journal keeps every revision Program or the cue names; new row, built
+before 5.10), then 5.10 (reworded), then 3.21. Task #108 (store cleanup) is open.
+
+**5.11** (`docs/evidence/5.11`). Store `<journal file name>.assets` beside the journal
+(`RecoveryJournal::asset_store_directory`, `AssetStore::at_root`). The asset port writes each
+asset there **outside the engine lock** before the engine is handed it (`PeerAssets::accept`,
+`store_packaged`; new `AssetPublishPeer::asset_store()`); the engine refuses bytes the store
+does not hold and `publish()` refuses `AssetMissing` for a declared asset it does not hold
+(new `Refusal::AssetStoreFailed`, detail never a path; TS regenerated). Restore reads back and
+re-hashes every declared asset of every journaled scene (`AssetStore::read_verified`: content
+address check, plain file, bounded, re-hash); a bad scene is dropped: out of `published`,
+Program/cue cleared only if they name it, journaled `revisionFloors`, refusal by reason on
+Cue/Take/Render; still starts at epoch+1 output-inhibited; `recovery.json.dropped.json` is
+written before the journal, stderr gets a 2 KB summary. Schema stays 3. A scene whose bytes
+verify but no longer prepares still stops the restore (Jev and Laya agreed). Editor's two
+read-back copies now use `read_verified` (invariant 27). Runbook updated.
+
+**Executed.** Conformance 561/0/9: 15 new 5.11 checks against four real workers killed with
+TerminateProcess and restarted on their journals (both routes restored and Taken on T0;
+damaged store: two drops named on stderr and in the report, refused by reason, intact scene
+Taken, journal rewritten, re-send repairs and continues the revision; unwritable store refused
+by name). Refusal audit drives `AssetMissing` and `AssetStoreFailed` through the engine.
+Mutations (20, each restored byte-identical): see the evidence table. `cargo fmt --all --check` and clippy `-D warnings` exit 0; `npm run check` exit 0 (377 codegen, 44 Node, 412 Editor, 805 Rust / 0 failed / 26 ignored, conformance 561/0/9).
+
+**Found, pre-existing, now row 5.12.** Re-publishing a take while an older revision of it is on
+Program fails: `publish()` moves `published` to N+1, the journal validate refuses Program at N,
+the publish is refused and output inhibited (reproduced in process on T0 with a throwaway
+test, not committed). User decisions (Jev keep-both 0.88 / Laya refuse 0.97; Jev new row 0.95 /
+Laya reopen 3.12 0.85): keep both revisions; new row 5.12 before 5.10. Plan: 258 steps.
+
 ## 2026-11-08 — 5.8 review fixed; 5.11 added; 5.10 reworded (Claude)
 
 **Resume here.** Next: 5.11 (engine restores asset-bearing scenes after a forced kill),

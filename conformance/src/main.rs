@@ -9,11 +9,11 @@
 //! same as a clean one (invariant 43).
 
 use gx_conformance::{
-    asset_plane_suite, asset_route_suite, control_plane_delivery_suite, control_plane_fault_suite,
-    control_plane_suite, editor_command_suite, headless_render_suite, locality_suite,
-    media_plane_suite, mock_product_suite, package_handoff_suite, real_engine_scope_suite,
-    refusal_audit_suite, render_preview_suite, scene_plane_suite, scope_enforcement_suite,
-    timing_plane_suite, Outcome, Report,
+    asset_plane_suite, asset_restart_suite, asset_route_suite, control_plane_delivery_suite,
+    control_plane_fault_suite, control_plane_suite, editor_command_suite, headless_render_suite,
+    locality_suite, media_plane_suite, mock_product_suite, package_handoff_suite,
+    real_engine_scope_suite, refusal_audit_suite, render_preview_suite, scene_plane_suite,
+    scope_enforcement_suite, timing_plane_suite, Outcome, Report, RestartableWorker,
 };
 use gx_contracts::{DeviceTier, Locality, RationalRate};
 use gx_control_plane::peer::EnginePeer;
@@ -75,6 +75,9 @@ fn main() {
     // 5.8: one package, by local path to a co-located worker and by chunked
     // upload to a LAN worker.
     run_package_handoff_against_real_engines(&mut report);
+    // 5.11: asset-bearing scenes restored after a kill, by each route, and
+    // dropped by name when their stored bytes were removed or altered.
+    run_asset_restart_against_real_engines(&mut report);
 
     report.set_peer("plane contract, no peer");
     control_plane_delivery_suite(&mut report);
@@ -381,15 +384,18 @@ struct Worker {
     child: std::process::Child,
     client: Client,
     assets: SocketAddr,
-    /// The worker's recovery journal and stderr, removed with it.
-    scratch: std::path::PathBuf,
+    /// The worker's recovery journal and stderr, removed with it unless a
+    /// restarting owner keeps them (5.11).
+    scratch: Option<std::path::PathBuf>,
 }
 
 impl Drop for Worker {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
-        let _ = std::fs::remove_dir_all(&self.scratch);
+        if let Some(scratch) = &self.scratch {
+            let _ = std::fs::remove_dir_all(scratch);
+        }
     }
 }
 
@@ -410,13 +416,24 @@ fn start_worker(
     tag: &str,
     extra: &[String],
 ) -> Result<Worker, StartFailure> {
+    let scratch = std::env::temp_dir().join(format!(
+        "gx-conformance-{tag}-{}-{}",
+        std::process::id(),
+        free_port()
+    ));
+    start_worker_in(worker, scratch, extra)
+}
+
+/// [`start_worker`] with its journal and stderr in `scratch`, which may hold
+/// a previous incarnation's journal (5.11). The ports are fresh each time.
+fn start_worker_in(
+    worker: &std::path::Path,
+    scratch: std::path::PathBuf,
+    extra: &[String],
+) -> Result<Worker, StartFailure> {
     let port = free_port();
     let asset_port = free_port();
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
-    let scratch = std::env::temp_dir().join(format!(
-        "gx-conformance-{tag}-{}-{port}",
-        std::process::id()
-    ));
     let journal = scratch.join("recovery.json");
     let stderr_path = scratch.join("stderr.log");
     let stderr = std::fs::create_dir_all(&scratch)
@@ -468,8 +485,170 @@ fn start_worker(
         child,
         client,
         assets: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), asset_port),
-        scratch,
+        scratch: Some(scratch),
     })
+}
+
+/// A real worker killed outright and started again on the same journal and
+/// arguments (5.11). Its scratch outlives each incarnation and is removed
+/// when this drops.
+struct RestartingWorker {
+    binary: std::path::PathBuf,
+    scratch: std::path::PathBuf,
+    extra: Vec<String>,
+    current: Option<Worker>,
+}
+
+impl RestartingWorker {
+    /// Start the first incarnation. `prepare` runs on the empty scratch
+    /// before the worker is spawned.
+    fn start(
+        binary: &std::path::Path,
+        tag: &str,
+        extra: Vec<String>,
+        prepare: impl FnOnce(&std::path::Path) -> std::io::Result<()>,
+    ) -> Result<Self, StartFailure> {
+        let scratch = std::env::temp_dir().join(format!(
+            "gx-conformance-{tag}-{}-{}",
+            std::process::id(),
+            free_port()
+        ));
+        let _ = std::fs::remove_dir_all(&scratch);
+        std::fs::create_dir_all(&scratch)
+            .and_then(|()| prepare(&scratch))
+            .map_err(|e| {
+                StartFailure::Unavailable(format!("could not prepare {}: {e}", scratch.display()))
+            })?;
+        let mut worker = Self {
+            binary: binary.to_path_buf(),
+            scratch,
+            extra,
+            current: None,
+        };
+        let mut first = start_worker_in(&worker.binary, worker.scratch.clone(), &worker.extra)?;
+        first.scratch = None;
+        worker.current = Some(first);
+        Ok(worker)
+    }
+
+    fn running(&self) -> &Worker {
+        self.current
+            .as_ref()
+            .expect("the suite stops using a worker that did not come back")
+    }
+}
+
+impl Drop for RestartingWorker {
+    fn drop(&mut self) {
+        drop(self.current.take());
+        let _ = std::fs::remove_dir_all(&self.scratch);
+    }
+}
+
+impl RestartableWorker for RestartingWorker {
+    type Control = Client;
+
+    fn control(&mut self) -> &mut Client {
+        &mut self
+            .current
+            .as_mut()
+            .expect("the suite stops using a worker that did not come back")
+            .client
+    }
+
+    fn assets(&self) -> SocketAddr {
+        self.running().assets
+    }
+
+    fn journal(&self) -> std::path::PathBuf {
+        self.scratch.join("recovery.json")
+    }
+
+    fn stderr(&self) -> String {
+        std::fs::read_to_string(self.scratch.join("stderr.log")).unwrap_or_default()
+    }
+
+    fn kill_and_restart(
+        &mut self,
+        between: &mut dyn FnMut() -> Result<(), String>,
+    ) -> Result<(), String> {
+        // TerminateProcess: no shutdown code runs, as in a crash.
+        drop(self.current.take());
+        between()?;
+        match start_worker_in(&self.binary, self.scratch.clone(), &self.extra) {
+            Ok(mut worker) => {
+                worker.scratch = None;
+                self.current = Some(worker);
+                Ok(())
+            }
+            Err(StartFailure::Exited(e) | StartFailure::Unavailable(e)) => Err(e),
+        }
+    }
+}
+
+/// 5.11 against four real workers, each killed and started again on its
+/// journal.
+fn run_asset_restart_against_real_engines(report: &mut Report) {
+    report.set_peer("real render engines killed and restarted on their journals (5.11)");
+    let Some(binary) = worker_binary() else {
+        report.skip_unavailable("gx-render-worker binary not built");
+        return;
+    };
+    let root = std::env::temp_dir().join(format!("gx-conformance-restart-{}", std::process::id()));
+    let dirs = [
+        root.join("by-path"),
+        root.join("damaged"),
+        root.join("unwritable"),
+    ];
+    if let Err(e) = dirs.iter().try_for_each(std::fs::create_dir_all) {
+        report.skip_unavailable(format!("could not create package directories: {e}"));
+        return;
+    }
+    let package_dir =
+        |dir: &std::path::Path| vec!["--package-dir".to_owned(), dir.display().to_string()];
+    let started = RestartingWorker::start(
+        &binary,
+        "restart-by-path",
+        package_dir(&dirs[0]),
+        |_| Ok(()),
+    )
+    .and_then(|by_path| {
+        RestartingWorker::start(&binary, "restart-lan", vec!["--lan".to_owned()], |_| Ok(()))
+            .map(|lan| (by_path, lan))
+    })
+    .and_then(|(by_path, lan)| {
+        RestartingWorker::start(
+            &binary,
+            "restart-damaged",
+            package_dir(&dirs[1]),
+            |_| Ok(()),
+        )
+        .map(|damaged| (by_path, lan, damaged))
+    })
+    .and_then(|(by_path, lan, damaged)| {
+        // A file where the store's directory would be: nothing can be
+        // written to the store.
+        RestartingWorker::start(
+            &binary,
+            "restart-unwritable",
+            package_dir(&dirs[2]),
+            |scratch| std::fs::write(scratch.join("recovery.json.assets"), b"not a directory"),
+        )
+        .map(|unwritable| (by_path, lan, damaged, unwritable))
+    });
+    match started {
+        Ok((mut by_path, mut lan, mut damaged, mut unwritable)) => asset_restart_suite(
+            &mut by_path,
+            &mut lan,
+            &mut damaged,
+            &mut unwritable,
+            (&dirs[0], &dirs[1], &dirs[2]),
+            report,
+        ),
+        Err(StartFailure::Exited(e)) => report.fail_to_start(e),
+        Err(StartFailure::Unavailable(e)) => report.skip_unavailable(e),
+    }
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 /// 5.8 against two real workers: co-located with a package directory, and LAN.

@@ -25,7 +25,24 @@ use serde::{Deserialize, Serialize};
 /// schema 2 documents (11.39): the pinned hashes in a version 2 journal were
 /// taken over scene schema 1, so its prepared scenes would no longer match
 /// them, and it is refused by version rather than by hash.
+///
+/// 5.11 keeps version 3. The asset bytes live in a store beside the journal,
+/// not in it, and the one new field (`revisionFloors`) is optional, so a
+/// version-3 journal written before 5.11 still restores: its scenes with
+/// assets have no stored bytes and are dropped by name instead of keeping
+/// the engine down.
 pub const RECOVERY_SCHEMA_VERSION: u32 = 3;
+
+/// Appended to the journal's file name to name the engine's own asset store
+/// beside it (5.11): `recovery.json` keeps its bytes in `recovery.json.assets`.
+pub const ASSET_STORE_SUFFIX: &str = ".assets";
+
+/// Appended to the journal's file name to name the report of the scenes the
+/// last restore that dropped any dropped (5.11).
+pub const DROP_REPORT_SUFFIX: &str = ".dropped.json";
+
+/// The only drop report schema this worker writes.
+pub const DROP_REPORT_SCHEMA_VERSION: u32 = 1;
 
 /// The journal's standard location beneath the operating-system service root.
 pub const RECOVERY_JOURNAL_RELATIVE_PATH: &str = "render-engine/recovery.json";
@@ -54,9 +71,69 @@ pub struct RecoveryState {
     /// 11.38). A schema-1 journal carries no hashes and is refused by name.
     pub published: BTreeMap<TakeId, gx_control_plane::intent::HeldRevision>,
     pub prepared_scenes: Vec<PreparedSceneRecord>,
+    /// Hashes whose verified bytes are in the store beside the journal: those
+    /// accepted since start and those read back at restore (5.11). Restore
+    /// does not trust this list; it reads back every journaled scene's
+    /// declared assets.
     pub verified_assets: BTreeSet<ContentHash>,
     pub cued: Option<ProgramState>,
     pub program: Option<ProgramState>,
+    /// The revision each dropped take last had (5.11), so publishing it again
+    /// continues from there and a revision number is never reused for other
+    /// content (invariant 61). A take has a floor only while it is not
+    /// published.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub revision_floors: BTreeMap<TakeId, Revision>,
+}
+
+/// A journaled scene a restore dropped because its asset bytes were missing,
+/// altered or unreadable in the engine's store (5.11). The engine starts
+/// without it; Cue, Take and Render of the take are refused with `reason`
+/// until it is published again.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DroppedScene {
+    pub take_id: TakeId,
+    pub revision: Revision,
+    pub content_hash: ContentHash,
+    pub reason: Refusal,
+    pub was_program: bool,
+    pub was_cued: bool,
+}
+
+impl fmt::Display for DroppedScene {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}/{} (pin {}): {}: {}",
+            self.take_id,
+            self.revision.0,
+            self.content_hash,
+            self.reason.code_name(),
+            self.reason
+        )?;
+        if self.was_program {
+            f.write_str("; it was on Program, now clear")?;
+        }
+        if self.was_cued {
+            f.write_str("; it was cued, now clear")?;
+        }
+        Ok(())
+    }
+}
+
+/// Every scene one restore dropped, written beside the journal before the
+/// journal that no longer lists them replaces the one that did (5.11). The
+/// engine host does not keep a worker's stderr, so this file is where an
+/// operator finds what to re-publish. It holds the latest restore that
+/// dropped anything.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DropReport {
+    pub schema_version: u32,
+    /// The incarnation that dropped them.
+    pub epoch: Epoch,
+    pub dropped: Vec<DroppedScene>,
 }
 
 impl RecoveryState {
@@ -70,6 +147,7 @@ impl RecoveryState {
             verified_assets: BTreeSet::new(),
             cued: None,
             program: None,
+            revision_floors: BTreeMap::new(),
         }
     }
 
@@ -124,6 +202,18 @@ impl RecoveryState {
                     ),
                 });
             }
+        }
+
+        if let Some(take_id) = self
+            .revision_floors
+            .keys()
+            .find(|take_id| self.published.contains_key(*take_id))
+        {
+            return Err(RecoveryError::InvalidState {
+                detail: format!(
+                    "take {take_id} is published and also has a dropped revision floor"
+                ),
+            });
         }
 
         for (name, state) in [("cued", &self.cued), ("program", &self.program)] {
@@ -266,6 +356,11 @@ impl RecoveryJournal {
     /// child of that same root so process-death coverage never writes a repo
     /// fixture.
     pub fn open_at(path: PathBuf) -> Result<Self, RecoveryError> {
+        if path.file_name().is_none() {
+            return Err(RecoveryError::InvalidState {
+                detail: format!("journal path {} names no file", path.display()),
+            });
+        }
         let parent = path.parent().ok_or_else(|| RecoveryError::InvalidState {
             detail: format!("journal path {} has no parent directory", path.display()),
         })?;
@@ -278,6 +373,40 @@ impl RecoveryJournal {
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// The engine's own content-addressed asset store beside this journal
+    /// (5.11). Named after the journal's file, so two journals in one
+    /// directory never share a store, and never equal to the journal itself.
+    pub fn asset_store_directory(&self) -> PathBuf {
+        self.sibling(ASSET_STORE_SUFFIX)
+    }
+
+    /// The report of the scenes the last restore that dropped any dropped.
+    pub fn drop_report_path(&self) -> PathBuf {
+        self.sibling(DROP_REPORT_SUFFIX)
+    }
+
+    fn sibling(&self, suffix: &str) -> PathBuf {
+        let mut name = self
+            .path
+            .file_name()
+            .expect("open_at refuses a journal path that names no file")
+            .to_os_string();
+        name.push(suffix);
+        self.path.with_file_name(name)
+    }
+
+    /// Atomically write the scenes a restore dropped (5.11).
+    pub fn record_drops(&self, report: &DropReport) -> Result<PathBuf, RecoveryError> {
+        let path = self.drop_report_path();
+        let bytes =
+            serde_json::to_vec_pretty(report).map_err(|source| RecoveryError::Encode { source })?;
+        gx_fs::write_atomic(&path, &bytes).map_err(|source| RecoveryError::Write {
+            path: path.clone(),
+            source,
+        })?;
+        Ok(path)
     }
 
     /// Read and validate a complete journal. Absence is only normal before the
@@ -379,5 +508,67 @@ mod tests {
             RecoveryState::empty(Epoch(u64::MAX)).next_epoch(),
             Err(RecoveryError::EpochExhausted)
         ));
+    }
+
+    #[test]
+    fn the_store_and_the_drop_report_are_named_after_their_journal_file() {
+        let root = std::env::temp_dir().join(format!(
+            "gx-recovery-names-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let journal = RecoveryJournal::open_at(root.join("recovery.json")).expect("journal");
+        assert_eq!(
+            journal.asset_store_directory(),
+            root.join("recovery.json.assets")
+        );
+        assert_eq!(
+            journal.drop_report_path(),
+            root.join("recovery.json.dropped.json")
+        );
+        // Two journals in one directory get distinct stores; a journal named
+        // like a store never shares its own name.
+        let other = RecoveryJournal::open_at(root.join("other.json")).expect("journal");
+        assert_ne!(
+            other.asset_store_directory(),
+            journal.asset_store_directory()
+        );
+        let odd = RecoveryJournal::open_at(root.join("x.assets")).expect("journal");
+        assert_eq!(odd.asset_store_directory(), root.join("x.assets.assets"));
+        assert_ne!(odd.asset_store_directory(), odd.path());
+        assert!(matches!(
+            RecoveryJournal::open_at(PathBuf::from(r"C:\")),
+            Err(RecoveryError::InvalidState { .. })
+        ));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_take_cannot_be_published_and_carry_a_dropped_floor() {
+        let mut state = RecoveryState::empty(Epoch(4));
+        state.published.insert(
+            TakeId("t".into()),
+            gx_control_plane::intent::HeldRevision {
+                revision: Revision(2),
+                content_hash: ContentHash("0".repeat(64)),
+            },
+        );
+        state
+            .revision_floors
+            .insert(TakeId("t".into()), Revision(1));
+        assert!(matches!(
+            state.validate(),
+            Err(RecoveryError::InvalidState { .. })
+        ));
+        // A journal without the field still reads, as a version-3 journal
+        // written before 5.11 does.
+        let mut plain = serde_json::to_value(RecoveryState::empty(Epoch(4))).unwrap();
+        assert!(plain.get("revisionFloors").is_none());
+        plain.as_object_mut().unwrap().remove("revisionFloors");
+        let read: RecoveryState = serde_json::from_value(plain).unwrap();
+        assert!(read.revision_floors.is_empty());
     }
 }

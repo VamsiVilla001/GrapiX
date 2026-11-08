@@ -1,0 +1,142 @@
+{
+  "asked": {
+    "state": {
+      "defect": "Reproduced on 8 Nov 2026 with an in-process real engine, journal attached, T0 GPU: publish take T (revision 1), Take it (Taken), then publish T again with an edit while revision 1 is on Program. The second publish is refused PreparationRefused{TransportFailed: 'recovery journal write failed: invalid recovery journal state: program state T/1 is not a published revision'} and the engine sets output_inhibited, so Program stops emitting until ConfigureOutput re-arms it.",
+      "cause": "Engine::publish moves published[T] to revision 2 and then writes the journal. RecoveryState::validate requires program and cued to name the take's currently published revision, and the journal records a prepared scene only for each take's latest published revision. So any state with Program on an older revision of a re-published take is invalid by construction, although the engine itself keeps every published revision prepared in memory (publication is additive, invariant 30) and Playout pins revisions by hash (invariant 61).",
+      "context": "Present since 3.12 and 11.38. Row 5.10 (next after this) makes the Editor publish on every save, so editing a live graphic would black out Program. The worker never re-publishes in conformance while a take is on Program, which is why no test caught it. Rows 3.12 and 11.38 are marked done.",
+      "fix_options": {
+        "journal_referenced_revisions": "The journal records a prepared scene for every revision Program or the cue names as well as each take's latest; validate accepts program/cued naming any journaled revision of a published take. Restore rebuilds them all. Schema stays 3 if the shape is unchanged (same PreparedSceneRecord list, more entries).",
+        "refuse_republish_on_air": "Refuse, by name, a publish of a take that is on Program or cued, until it is cleared.",
+        "skip_journal_check": "Relax validate so program/cued may name a revision that is not journaled."
+      }
+    },
+    "questions": {
+      "fix": {
+        "type": "choice",
+        "instructions": "How should the engine handle a re-publish of a take whose older revision is on Program or cued?",
+        "criteria": {
+          "journal_referenced_revisions": "Journal and restore every revision Program or the cue names, as well as the latest; the re-publish succeeds and Program keeps its revision.",
+          "refuse_republish_on_air": "Refuse the re-publish by name while the take is on Program or cued.",
+          "skip_journal_check": "Relax the journal check; Program may name a revision the journal cannot rebuild."
+        }
+      },
+      "tracking": {
+        "type": "choice",
+        "instructions": "How should the plan track this defect?",
+        "criteria": {
+          "new_row_before_5_10": "A new row (Needs 3.12, 5.11), built before 5.10, with a done-when that re-publishes a take on Program on a real worker, keeps Program emitting, and restores both revisions after a kill; 3.12 and 11.38 keep done with a note.",
+          "reopen_3_12": "Reopen 3.12 to active until fixed.",
+          "inside_5_10": "Fix it as part of 5.10."
+        }
+      },
+      "needs_user": {
+        "type": "noul",
+        "instructions": "Must the user decide this before the agent fixes it?",
+        "criteria": {
+          "true": "Yes.",
+          "false": "No."
+        }
+      }
+    }
+  },
+  "answers": {
+    "laya": {
+      "model": "convaiinnovations/laya-multilingual",
+      "max_len": 8192,
+      "state_tokens": 455,
+      "truncated": false,
+      "load_s": 20.21,
+      "predict_s": 1.663
+    },
+    "jev_model": "jev-1.14.0",
+    "rows": [
+      {
+        "question": "fix",
+        "type": "choice",
+        "laya": "refuse_republish_on_air",
+        "jev": "journal_referenced_revisions",
+        "agree": false,
+        "laya_detail": {
+          "type": "choice",
+          "choice": "refuse_republish_on_air",
+          "probabilities": {
+            "journal_referenced_revisions": 0.0012,
+            "refuse_republish_on_air": 0.966,
+            "skip_journal_check": 0.0328
+          },
+          "confidence": 0.86,
+          "answer_confidence": 0.966,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "jev_detail": {
+          "type": "choice",
+          "choice": "journal_referenced_revisions",
+          "confidence": 0.82,
+          "probabilities": {
+            "journal_referenced_revisions": 0.88,
+            "refuse_republish_on_air": 0.12,
+            "skip_journal_check": 0
+          }
+        }
+      },
+      {
+        "question": "tracking",
+        "type": "choice",
+        "laya": "reopen_3_12",
+        "jev": "new_row_before_5_10",
+        "agree": false,
+        "laya_detail": {
+          "type": "choice",
+          "choice": "reopen_3_12",
+          "probabilities": {
+            "new_row_before_5_10": 0.0144,
+            "reopen_3_12": 0.8491,
+            "inside_5_10": 0.1365
+          },
+          "confidence": 0.5707,
+          "answer_confidence": 0.8491,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "jev_detail": {
+          "type": "choice",
+          "choice": "new_row_before_5_10",
+          "confidence": 0.92,
+          "probabilities": {
+            "new_row_before_5_10": 0.95,
+            "reopen_3_12": 0.01,
+            "inside_5_10": 0.04
+          }
+        }
+      },
+      {
+        "question": "needs_user",
+        "type": "noul",
+        "laya": 0.983,
+        "jev": 0.56,
+        "agree": false,
+        "laya_detail": {
+          "type": "noul",
+          "noul": 0.983,
+          "confidence": 0.983,
+          "answer_confidence": 0.983,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "jev_detail": {
+          "type": "noul",
+          "noul": 0.56
+        }
+      }
+    ],
+    "agreement": 0.0
+  },
+  "user_decisions_8_nov_2026": {
+    "fix": "journal_referenced_revisions (Jev 0.88; Laya refuse_republish_on_air 0.97)",
+    "tracking": "new row 5.12 before 5.10 (Jev 0.95; Laya reopen_3_12 0.85)"
+  }
+}

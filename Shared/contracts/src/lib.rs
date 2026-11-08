@@ -81,6 +81,19 @@ impl std::fmt::Display for TakeId {
 )]
 pub struct ContentHash(pub String);
 
+impl ContentHash {
+    /// Whether this is a content address at all: 64 lowercase hexadecimal
+    /// digits. A hash that is not one names no stored bytes, so it is never
+    /// turned into a path (5.11).
+    pub fn is_sha256(&self) -> bool {
+        self.0.len() == 64
+            && self
+                .0
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    }
+}
+
 impl std::fmt::Display for ContentHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
@@ -605,6 +618,11 @@ pub enum Refusal {
         expected: ContentHash,
         actual: ContentHash,
     },
+    /// The engine could not keep or read back an asset in its own store
+    /// beside its recovery journal (5.11): the bytes are not accepted, or a
+    /// restored scene that declares them is dropped. The detail names the
+    /// operation and the operating-system cause, never a filesystem path.
+    AssetStoreFailed { hash: ContentHash, detail: String },
     /// A media-plane shared buffer could not be established or mapped.
     ///
     /// The media plane drops rather than queues, but failing to create the
@@ -1275,6 +1293,9 @@ impl std::fmt::Display for Refusal {
                 f,
                 "transferred bytes hash to {actual}, not the declared {expected}"
             ),
+            Refusal::AssetStoreFailed { hash, detail } => {
+                write!(f, "the engine's asset store failed for {hash}: {detail}")
+            }
             Refusal::MediaTransportUnavailable { detail } => {
                 write!(f, "media transport unavailable: {detail}")
             }
@@ -2041,6 +2062,10 @@ impl Refusal {
                 expected: ContentHash("expected".into()),
                 actual: ContentHash("actual".into()),
             },
+            Self::AssetStoreFailed {
+                hash: ContentHash("audit".into()),
+                detail: "audit".into(),
+            },
             Self::MediaTransportUnavailable {
                 detail: "audit".into(),
             },
@@ -2378,6 +2403,7 @@ impl Refusal {
             Self::AssetTransferAlreadyComplete { .. } => "assetTransferAlreadyComplete",
             Self::EmptyAssetTransfer { .. } => "emptyAssetTransfer",
             Self::AssetHashMismatch { .. } => "assetHashMismatch",
+            Self::AssetStoreFailed { .. } => "assetStoreFailed",
             Self::MediaTransportUnavailable { .. } => "mediaTransportUnavailable",
             Self::MediaCodecNotOffered { .. } => "mediaCodecNotOffered",
             Self::ScopeNotGranted { .. } => "scopeNotGranted",

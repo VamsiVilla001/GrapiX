@@ -19,6 +19,7 @@ use gx_asset_plane::AssetPublishServer;
 use gx_contracts::{ContentHash, Locality, RationalRate, Revision, TakeId};
 use gx_control_plane::bind::ENGINE_CONTROL_PORT;
 use gx_control_transport::Server;
+use gx_render_worker::engine::Restored;
 use gx_render_worker::recovery::RecoveryJournal;
 use gx_render_worker::Engine;
 
@@ -122,9 +123,12 @@ fn main() {
             std::process::exit(1);
         }
     };
-    if let Err(error) = engine.attach_recovery_journal(recovery) {
-        eprintln!("cannot restore recovery journal: {error}");
-        std::process::exit(1);
+    match engine.attach_recovery_journal(recovery) {
+        Ok(restored) => report_drops(&restored),
+        Err(error) => {
+            eprintln!("cannot restore recovery journal: {error}");
+            std::process::exit(1);
+        }
     }
 
     println!("RENDER ENGINE - real device, engine-owned clock");
@@ -246,8 +250,7 @@ fn parse_rate(s: &str) -> Option<RationalRate> {
 fn parse_publish(spec: &str) -> Option<(TakeId, Revision, ContentHash)> {
     let (rest, hash) = spec.rsplit_once(':')?;
     let (id, revision) = rest.rsplit_once(':')?;
-    let is_hash = hash.len() == 64 && hash.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
-    if id.is_empty() || !is_hash {
+    if id.is_empty() || !ContentHash(hash.to_owned()).is_sha256() {
         return None;
     }
     Some((
@@ -255,6 +258,39 @@ fn parse_publish(spec: &str) -> Option<(TakeId, Revision, ContentHash)> {
         Revision(revision.parse().ok()?),
         ContentHash(hash.to_string()),
     ))
+}
+
+/// Name, on stderr, the scenes a restore dropped (5.11). The engine host does
+/// not drain a running worker's stderr, so the lines stop at a small budget
+/// and point to the drop report beside the journal, which names every one.
+fn report_drops(restored: &Restored) {
+    let count = restored.dropped.len();
+    if count == 0 {
+        return;
+    }
+    eprintln!("recovery: {count} journaled scene(s) dropped; re-publish them");
+    let mut budget = 2048_usize;
+    let mut shown = 0;
+    for scene in &restored.dropped {
+        let line = format!("recovery: dropped scene {scene}");
+        if line.len() > budget {
+            break;
+        }
+        budget -= line.len();
+        eprintln!("{line}");
+        shown += 1;
+    }
+    if shown < count {
+        eprintln!("recovery: and {} more", count - shown);
+    }
+    match &restored.report {
+        Some(Ok(path)) => eprintln!(
+            "recovery: every dropped scene is listed in {}",
+            path.display()
+        ),
+        Some(Err(error)) => eprintln!("recovery: the drop report could not be written: {error}"),
+        None => {}
+    }
 }
 
 fn usage(problem: &str) {

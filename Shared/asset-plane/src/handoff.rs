@@ -385,6 +385,30 @@ mod tests {
         directory: Option<PathBuf>,
         assets: HashMap<ContentHash, Vec<u8>>,
         published: Vec<SceneDocument>,
+        /// The store this peer keeps bytes in across a restart (5.11).
+        store: Option<Arc<crate::store::AssetStore>>,
+        /// Assets handed over before the store held them.
+        received_unstored: Vec<ContentHash>,
+        /// Signalled at the `nth` preflight answer, or at the package
+        /// directory read, so a test can take the peer at that moment.
+        signal: Option<(Signal, std::sync::mpsc::Sender<()>)>,
+        preflight_answers: std::cell::Cell<usize>,
+    }
+
+    #[derive(Clone, Copy, PartialEq)]
+    enum Signal {
+        PreflightAnswer(usize),
+        PackageDirectory,
+    }
+
+    impl Peer {
+        fn signal_at(&self, at: Signal) {
+            if let Some((when, sender)) = &self.signal {
+                if *when == at {
+                    let _ = sender.send(());
+                }
+            }
+        }
     }
 
     impl AssetPublishPeer for Peer {
@@ -398,6 +422,9 @@ mod tests {
             }
         }
         fn has_verified_asset(&self, hash: &ContentHash) -> bool {
+            let answer = self.preflight_answers.get() + 1;
+            self.preflight_answers.set(answer);
+            self.signal_at(Signal::PreflightAnswer(answer));
             self.assets.contains_key(hash)
         }
         fn accept_verified_asset(
@@ -405,11 +432,20 @@ mod tests {
             hash: ContentHash,
             bytes: Vec<u8>,
         ) -> Result<(), Refusal> {
+            if let Some(store) = &self.store {
+                if !store.holds_entry(&hash, bytes.len() as u64) {
+                    self.received_unstored.push(hash.clone());
+                }
+            }
             self.assets.insert(hash, bytes);
             Ok(())
         }
         fn package_directory(&self) -> Option<PathBuf> {
+            self.signal_at(Signal::PackageDirectory);
             self.directory.clone()
+        }
+        fn asset_store(&self) -> Option<Arc<crate::store::AssetStore>> {
+            self.store.clone()
         }
     }
 
@@ -685,5 +721,134 @@ mod tests {
             "resolved before refusing: {asked:?}"
         );
         fs::remove_dir_all(inside).unwrap();
+    }
+
+    fn stored_peer(
+        root: &Path,
+        directory: Option<PathBuf>,
+    ) -> (Peer, Arc<crate::store::AssetStore>) {
+        let store = Arc::new(crate::store::AssetStore::at_root(root.join("store")));
+        (
+            Peer {
+                directory,
+                store: Some(Arc::clone(&store)),
+                ..Peer::default()
+            },
+            store,
+        )
+    }
+
+    #[test]
+    fn each_route_stores_the_bytes_before_the_peer_receives_them() {
+        let root = directory();
+        let path = package(&root, "stored", &scene(content_hash(FONT)));
+        let hash = content_hash(FONT);
+        for locality in [Locality::CoLocated, Locality::Lan] {
+            let store_root = root.join(format!("{locality:?}"));
+            let (peer, store) = stored_peer(&store_root, Some(root.clone()));
+            let (addr, peer) = serve(peer);
+            let published = publish_package(addr, locality, &path).unwrap();
+            assert!(
+                matches!(published.reply, PublishReply::Published { .. }),
+                "{locality:?}: {published:?}"
+            );
+            let peer = peer.lock().unwrap();
+            assert_eq!(peer.assets[&hash], FONT, "{locality:?}");
+            assert!(
+                peer.received_unstored.is_empty(),
+                "{locality:?}: handed over before stored"
+            );
+            assert_eq!(
+                store.read_verified(&hash, 1 << 20).unwrap(),
+                FONT,
+                "{locality:?}"
+            );
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_store_that_cannot_write_refuses_by_name_and_the_peer_receives_nothing() {
+        let root = directory();
+        let path = package(&root, "unwritable", &scene(content_hash(FONT)));
+        let hash = content_hash(FONT);
+        // The store's directory is a file: no entry can be written under it.
+        let blocked = root.join("blocked");
+        fs::write(&blocked, b"a file, not a directory").unwrap();
+        for locality in [Locality::CoLocated, Locality::Lan] {
+            let peer = Peer {
+                directory: Some(root.clone()),
+                store: Some(Arc::new(crate::store::AssetStore::at_root(blocked.clone()))),
+                ..Peer::default()
+            };
+            let (addr, peer) = serve(peer);
+            let published = publish_package(addr, locality, &path);
+            let cause = match &published {
+                Ok(PackagePublication {
+                    reply: PublishReply::Refused(PublishRefusal::PackageRefused { cause }),
+                    ..
+                }) => Some(cause.clone()),
+                Err(PackagePublishError::Transfer(AssetTransferClientError::Refused(cause))) => {
+                    Some(cause.clone())
+                }
+                _ => None,
+            };
+            match cause {
+                Some(Refusal::AssetStoreFailed {
+                    hash: named,
+                    detail,
+                }) => {
+                    assert_eq!(named, hash);
+                    assert!(!detail.contains(root.to_str().unwrap()), "{detail}");
+                }
+                other => panic!("{locality:?}: {other:?} from {published:?}"),
+            }
+            let peer = peer.lock().unwrap();
+            assert!(peer.assets.is_empty(), "{locality:?}");
+            assert!(peer.published.is_empty(), "{locality:?}");
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn the_store_write_never_waits_for_the_peer() {
+        let root = directory();
+        let path = package(&root, "unlocked", &scene(content_hash(FONT)));
+        let hash = content_hash(FONT);
+        // By path the moment is the package directory read; chunked, it is
+        // the second preflight answer (the transfer's Begin), after which
+        // only chunks arrive before the bytes are stored.
+        for (locality, at) in [
+            (Locality::CoLocated, Signal::PackageDirectory),
+            (Locality::Lan, Signal::PreflightAnswer(2)),
+        ] {
+            let store_root = root.join(format!("unlocked-{locality:?}"));
+            let (mut peer, store) = stored_peer(&store_root, Some(root.clone()));
+            let (sender, signalled) = std::sync::mpsc::channel();
+            peer.signal = Some((at, sender));
+            let (addr, peer) = serve(peer);
+            let offered = path.clone();
+            let publisher = std::thread::spawn(move || publish_package(addr, locality, &offered));
+            signalled
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .expect("the listener reached the signal");
+            // The peer is held from here until the store has the bytes.
+            let held = peer.lock().unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while !store.holds_entry(&hash, FONT.len() as u64) {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "{locality:?}: the store write waited for the held peer"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            drop(held);
+            let published = publisher.join().unwrap().unwrap();
+            assert!(
+                matches!(published.reply, PublishReply::Published { .. }),
+                "{locality:?}"
+            );
+        }
+        fs::remove_dir_all(root).unwrap();
     }
 }

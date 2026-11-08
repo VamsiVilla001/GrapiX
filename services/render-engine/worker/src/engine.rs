@@ -18,13 +18,14 @@
 //! make real hardware lose genlock on request, which is exactly why that
 //! trait is separate and why the fault suite reports SKIP against this peer.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use gx_asset_plane::{AssetPublishPeer, PublishRefusal, PublishReply};
+use gx_asset_plane::package::MAX_PACKAGE_BYTES;
+use gx_asset_plane::{AssetPublishPeer, AssetStore, PublishRefusal, PublishReply};
 #[cfg(test)]
 use gx_contracts::color::OutputTransform;
 use gx_contracts::material::MaterialSupport;
@@ -52,7 +53,10 @@ use crate::metrics::{EnginePerformance, FrameMetrics, FrameSample};
 use crate::output_adapter::{OutputAdapterError, OutputAdapterRegistry};
 use crate::prepared::PreparedScene;
 use crate::rasterizer::{key_for_take, Frame, SoftwareRasterizer, FRAME_HEIGHT, FRAME_WIDTH};
-use crate::recovery::{PreparedSceneRecord, RecoveryError, RecoveryJournal, RecoveryState};
+use crate::recovery::{
+    DropReport, DroppedScene, PreparedSceneRecord, RecoveryError, RecoveryJournal, RecoveryState,
+    DROP_REPORT_SCHEMA_VERSION,
+};
 use crate::render_work::{ProgramFrameTrace, RenderWork};
 
 /// The render engine. Owns the GPU, the clock and Program.
@@ -104,6 +108,16 @@ pub struct Engine {
     /// The directory a co-located publisher may hand packages from by local
     /// path (5.8). `None` reads no path.
     package_directory: Option<PathBuf>,
+    /// The engine's own store of verified asset bytes beside its recovery
+    /// journal (5.11). The asset plane writes every asset there before this
+    /// engine is handed it. `None` until a journal is attached.
+    asset_store: Option<Arc<AssetStore>>,
+    /// Takes the last restore dropped, and why (5.11). Cue, Take and Render
+    /// of one are refused with that reason until it is published again.
+    dropped: BTreeMap<TakeId, DroppedScene>,
+    /// The last revision of each dropped take, journaled, so publishing it
+    /// again continues from there (5.11, invariant 61).
+    revision_floors: BTreeMap<TakeId, Revision>,
     program: Option<ProgramState>,
     cued: Option<ProgramState>,
     rasterizer: SoftwareRasterizer,
@@ -120,6 +134,16 @@ pub struct Engine {
     recovery: Option<RecoveryJournal>,
     output_inhibited: bool,
     events: Vec<EngineEvent>,
+}
+
+/// What attaching a recovery journal dropped (5.11).
+#[derive(Debug, Default)]
+pub struct Restored {
+    /// Journaled scenes dropped because their bytes were not intact.
+    pub dropped: Vec<DroppedScene>,
+    /// Where the drops were written, or why they could not be. `None` when
+    /// nothing was dropped.
+    pub report: Option<Result<PathBuf, RecoveryError>>,
 }
 
 impl Engine {
@@ -161,6 +185,9 @@ impl Engine {
             assets: HashSet::new(),
             asset_bytes: HashMap::new(),
             package_directory: None,
+            asset_store: None,
+            dropped: BTreeMap::new(),
+            revision_floors: BTreeMap::new(),
             program: None,
             cued: None,
             rasterizer,
@@ -195,18 +222,40 @@ impl Engine {
     ///
     /// A recovered Program is rebuilt but remains output-inhibited until a
     /// fresh `ConfigureOutput` request explicitly re-arms a destination.
+    ///
+    /// 5.11: the engine's asset store beside the journal is attached with it,
+    /// and restore reads every journaled scene's assets back from it. A scene
+    /// whose bytes are missing, altered or unreadable is dropped by name
+    /// rather than keeping the engine down; the drops are written to the drop
+    /// report before the journal that no longer lists them is written.
     pub fn attach_recovery_journal(
         &mut self,
         journal: RecoveryJournal,
-    ) -> Result<(), RecoveryError> {
+    ) -> Result<Restored, RecoveryError> {
+        let store = Arc::new(AssetStore::at_root(journal.asset_store_directory()));
+        let mut restored = Restored::default();
         if let Some(state) = journal.load()? {
-            self.restore_state(state)?;
+            restored.dropped = self.restore_state(state, &store)?;
             self.output_inhibited = true;
             self.rasterizer.clear();
             self.preview_rasterizer.clear();
         }
+        self.asset_store = Some(store);
+        if !restored.dropped.is_empty() {
+            restored.report = Some(journal.record_drops(&DropReport {
+                schema_version: DROP_REPORT_SCHEMA_VERSION,
+                epoch: self.clock.epoch(),
+                dropped: restored.dropped.clone(),
+            }));
+        }
         self.recovery = Some(journal);
-        self.persist_recovery()
+        self.persist_recovery()?;
+        Ok(restored)
+    }
+
+    /// The takes the last restore dropped, in take order (5.11).
+    pub fn dropped_scenes(&self) -> impl Iterator<Item = &DroppedScene> {
+        self.dropped.values()
     }
 
     /// Whether a recovered engine is still prevented from emitting old state.
@@ -243,6 +292,7 @@ impl Engine {
             verified_assets: self.assets.iter().cloned().collect(),
             cued: self.cued.clone(),
             program: self.program.clone(),
+            revision_floors: self.revision_floors.clone(),
         }
     }
 
@@ -253,26 +303,92 @@ impl Engine {
         }
     }
 
-    fn restore_state(&mut self, state: RecoveryState) -> Result<(), RecoveryError> {
+    /// Rebuild a journaled state from the bytes in `store` (5.11).
+    ///
+    /// Every asset a journaled scene declares, whatever its kind, is read
+    /// back and re-hashed before preparation; `verified_assets` is not
+    /// trusted. A scene with a missing, altered or unreadable asset is
+    /// dropped: it leaves `published` (so no take can reach it through the
+    /// identifier-only path), Program and the cue are cleared only if they
+    /// name it, and its revision becomes the take's floor. A scene whose bytes
+    /// are intact but which no longer prepares still stops the restore, as
+    /// before 5.11 (user decision, 8 Nov 2026): the journal is then left as
+    /// it was, so a transient fault cannot erase scenes.
+    fn restore_state(
+        &mut self,
+        state: RecoveryState,
+        store: &AssetStore,
+    ) -> Result<Vec<DroppedScene>, RecoveryError> {
         state.validate()?;
         let next_epoch = state.next_epoch()?;
-        let assets: HashSet<_> = state.verified_assets.iter().cloned().collect();
+        let support = self.material_support();
+        let mut read_back: HashMap<ContentHash, Result<(), Refusal>> = HashMap::new();
+        let mut asset_bytes: AssetBytes = HashMap::new();
+        let mut published = state.published;
+        let mut revision_floors = state.revision_floors;
+        let (mut cued, mut program) = (state.cued, state.program);
+        let mut dropped = Vec::new();
         let mut prepared = HashMap::new();
         let mut gpu_prepared = HashMap::new();
-        let support = self.material_support();
         for record in state.prepared_scenes {
-            let scene = PreparedScene::prepare_for_gpu(
-                record.document,
-                &assets,
-                &self.asset_bytes,
-                &support,
-            )
-            .map_err(|refusal| RecoveryError::InvalidState {
-                detail: format!(
-                    "prepared scene {}/{} cannot be rebuilt: {refusal}",
-                    record.take_id, record.revision.0
-                ),
-            })?;
+            let mut failure = None;
+            for hash in record
+                .document
+                .assets
+                .iter()
+                .filter_map(|asset| asset.checksum.as_ref())
+            {
+                let verdict = read_back.entry(hash.clone()).or_insert_with(|| {
+                    match store.read_verified(hash, MAX_PACKAGE_BYTES) {
+                        Ok(bytes) => {
+                            asset_bytes.insert(hash.clone(), bytes);
+                            Ok(())
+                        }
+                        Err(error) => Err(error.into_refusal(hash)),
+                    }
+                });
+                if let Err(reason) = verdict {
+                    failure = Some(reason.clone());
+                    break;
+                }
+            }
+            if let Some(reason) = failure {
+                let content_hash = published
+                    .remove(&record.take_id)
+                    .map(|held| held.content_hash)
+                    .unwrap_or_else(|| record.document.content_hash());
+                let names = |state: &Option<ProgramState>| {
+                    state
+                        .as_ref()
+                        .is_some_and(|state| state.take_id == record.take_id)
+                };
+                let (was_program, was_cued) = (names(&program), names(&cued));
+                if was_program {
+                    program = None;
+                }
+                if was_cued {
+                    cued = None;
+                }
+                revision_floors.insert(record.take_id.clone(), record.revision);
+                dropped.push(DroppedScene {
+                    take_id: record.take_id,
+                    revision: record.revision,
+                    content_hash,
+                    reason,
+                    was_program,
+                    was_cued,
+                });
+                continue;
+            }
+            let available: HashSet<ContentHash> = asset_bytes.keys().cloned().collect();
+            let scene =
+                PreparedScene::prepare_for_gpu(record.document, &available, &asset_bytes, &support)
+                    .map_err(|refusal| RecoveryError::InvalidState {
+                        detail: format!(
+                            "prepared scene {}/{} cannot be rebuilt: {refusal}",
+                            record.take_id, record.revision.0
+                        ),
+                    })?;
             if let Some(cause) = gx_contracts::drawability::gpu_compositor_animation_refusal(
                 scene.resolved_document(),
             ) {
@@ -295,13 +411,19 @@ impl Engine {
             self.clock.timebase(),
             Lead::for_locality(self.locality),
         );
-        self.published = state.published.into_iter().collect();
+        self.published = published.into_iter().collect();
         self.prepared = prepared;
         self.gpu_prepared = gpu_prepared;
-        self.assets = assets;
-        self.cued = state.cued;
-        self.program = state.program;
-        Ok(())
+        self.assets = asset_bytes.keys().cloned().collect();
+        self.asset_bytes = asset_bytes;
+        self.cued = cued;
+        self.program = program;
+        self.revision_floors = revision_floors;
+        self.dropped = dropped
+            .iter()
+            .map(|scene| (scene.take_id.clone(), scene.clone()))
+            .collect();
+        Ok(dropped)
     }
     fn activate_program_base(&mut self) {
         let Some(program) = self.program.clone() else {
@@ -397,10 +519,12 @@ impl Engine {
     /// immutable in `prepared` when the same take id is published again.
     pub fn publish(&mut self, document: SceneDocument) -> PublishReply {
         let take_id = TakeId(document.id.clone());
+        // A take a restore dropped continues from its last revision (5.11).
         let revision = self
             .published
             .get(&take_id)
             .map(|held| held.revision.next())
+            .or_else(|| self.revision_floors.get(&take_id).map(|floor| floor.next()))
             .unwrap_or(Revision(1));
         let content_hash = document.content_hash();
         let prepared = match PreparedScene::prepare_for_gpu(
@@ -418,6 +542,26 @@ impl Engine {
             prepared.resolved_document(),
         ) {
             return PublishReply::Refused(PublishRefusal::PreparationRefused { cause });
+        }
+        // 5.11: nothing is acknowledged that the store beside the journal does
+        // not hold, so the publication survives a restart.
+        if let Some(store) = &self.asset_store {
+            for hash in prepared
+                .document()
+                .assets
+                .iter()
+                .filter_map(|asset| asset.checksum.as_ref())
+            {
+                let stored = self
+                    .asset_bytes
+                    .get(hash)
+                    .is_some_and(|bytes| store.holds_entry(hash, bytes.len() as u64));
+                if !stored {
+                    return PublishReply::Refused(PublishRefusal::PreparationRefused {
+                        cause: Refusal::AssetMissing { hash: hash.clone() },
+                    });
+                }
+            }
         }
         if self.gpu.has_hardware() {
             let gpu_scene = match GpuScene::prepare(&self.gpu, &prepared) {
@@ -438,6 +582,8 @@ impl Engine {
                 content_hash: content_hash.clone(),
             },
         );
+        self.revision_floors.remove(&take_id);
+        self.dropped.remove(&take_id);
         if let Err(error) = self.persist_recovery() {
             self.output_inhibited = true;
             return PublishReply::Refused(PublishRefusal::PreparationRefused {
@@ -493,19 +639,12 @@ impl Engine {
         Ok(())
     }
 
-    /// Record that the asset plane has verified these bytes into the store.
-    ///
-    /// Verification is the asset plane's job (invariant 28); the engine only
-    /// learns the result, and a scene declaring bytes not recorded here
-    /// refuses to prepare (invariant 29).
-    pub fn record_verified_asset(&mut self, hash: ContentHash) {
-        self.assets.insert(hash);
-    }
-
     /// Record a verified asset and retain its immutable bytes for per-publish
-    /// font and mesh preparation. The asset plane verifies the content hash
-    /// before this receipt; the engine never reads a mutable source path.
-    pub fn record_verified_asset_bytes(&mut self, hash: ContentHash, bytes: Vec<u8>) {
+    /// font and mesh preparation, in memory only. The asset plane verifies
+    /// the content hash before this receipt; the engine never reads a mutable
+    /// source path. Production receipt goes through `accept_verified_asset`,
+    /// which also requires the bytes to be in the engine's store (5.11).
+    pub(crate) fn record_verified_asset_bytes(&mut self, hash: ContentHash, bytes: Vec<u8>) {
         self.assets.insert(hash.clone());
         self.asset_bytes.insert(hash, bytes);
     }
@@ -802,7 +941,17 @@ impl Engine {
         revision: Revision,
         pin: Option<&ContentHash>,
     ) -> Result<(), Refusal> {
+        self.check_not_dropped(take_id)?;
         check_reference(take_id, revision, pin, self.published.get(take_id))
+    }
+
+    /// A take the last restore dropped is refused with why (5.11), until it
+    /// is published again.
+    fn check_not_dropped(&self, take_id: &TakeId) -> Result<(), Refusal> {
+        match self.dropped.get(take_id) {
+            Some(dropped) if !self.published.contains_key(take_id) => Err(dropped.reason.clone()),
+            _ => Ok(()),
+        }
     }
 
     fn configure_output(&mut self, config: &OutputConfig) -> EngineReply {
@@ -857,13 +1006,38 @@ impl AssetPublishPeer for Engine {
     }
 
     // 5.9: the asset plane re-hashed these bytes before handing them over.
+    // 5.11: held means in memory and in the store, so an entry removed from
+    // the store while the engine runs is reported missing and sent again.
     fn has_verified_asset(&self, hash: &ContentHash) -> bool {
-        self.asset_bytes.contains_key(hash)
+        self.asset_bytes.get(hash).is_some_and(|bytes| {
+            self.asset_store
+                .as_ref()
+                .is_some_and(|store| store.holds_entry(hash, bytes.len() as u64))
+        })
     }
 
+    // 5.11: accepted means stored. The asset plane writes the bytes to
+    // `asset_store` before this call; bytes the store does not hold are not
+    // kept, so nothing is acknowledged that a restart would lose.
     fn accept_verified_asset(&mut self, hash: ContentHash, bytes: Vec<u8>) -> Result<(), Refusal> {
-        self.record_verified_asset_bytes(hash, bytes);
-        Ok(())
+        let detail = match &self.asset_store {
+            None => "no recovery journal is attached, so this engine keeps no asset store",
+            Some(store) if !store.holds_entry(&hash, bytes.len() as u64) => {
+                "the bytes were handed over before the engine's asset store held them"
+            }
+            Some(_) => {
+                self.record_verified_asset_bytes(hash, bytes);
+                return Ok(());
+            }
+        };
+        Err(Refusal::AssetStoreFailed {
+            hash,
+            detail: detail.to_owned(),
+        })
+    }
+
+    fn asset_store(&self) -> Option<Arc<AssetStore>> {
+        self.asset_store.clone()
     }
 
     fn package_directory(&self) -> Option<PathBuf> {
@@ -1078,6 +1252,9 @@ impl EnginePeer for Engine {
         let ClientRequest::Render(req) = request else {
             return Handled::Reply(self.handle(request));
         };
+        if let Err(refusal) = self.check_not_dropped(&req.take_id) {
+            return Handled::Reply(EngineReply::Refused(refusal));
+        }
         let held = self.published.get(&req.take_id).cloned();
         let scene = self
             .prepared
@@ -1150,6 +1327,8 @@ mod effect_tests;
 mod gpu_tests;
 #[cfg(test)]
 mod output_tests;
+#[cfg(test)]
+mod restore_tests;
 
 #[cfg(test)]
 mod tests {

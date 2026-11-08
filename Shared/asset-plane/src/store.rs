@@ -128,10 +128,38 @@ impl From<Refusal> for AssetStoreError {
     }
 }
 
+impl AssetStoreError {
+    /// This failure as the refusal a peer is told about `hash`. It names the
+    /// operation and the operating-system cause, never a path: a store's
+    /// location is the engine's own business (5.11; the 5.8 review's rule).
+    pub fn into_refusal(self, hash: &ContentHash) -> Refusal {
+        let detail = match self {
+            Self::Refusal(refusal) => return refusal,
+            Self::CreateCacheDirectory { source, .. } => {
+                format!("could not create the store: {source}")
+            }
+            Self::WriteCache { source, .. } => format!("could not write the entry: {source}"),
+            Self::ReadCache { source, .. } => format!("could not read the entry: {source}"),
+            Self::CacheHashMismatch { actual, .. } => {
+                format!("the entry written does not hash to its name; it holds {actual}")
+            }
+            other @ (Self::UnsafeLibraryPath { .. }
+            | Self::CaseVariantLibraryPath { .. }
+            | Self::LibraryPathMissing { .. }) => other.to_string(),
+        };
+        Refusal::AssetStoreFailed {
+            hash: hash.clone(),
+            detail,
+        }
+    }
+}
+
 /// The content-addressed cache and its case-stable project library.
 ///
 /// The cache is rooted under [`cache_root`] in production. [`AssetStore::at_root`]
-/// exists for isolated callers and tests; it has the same layout and write path.
+/// has the same layout and write path at any directory: isolated callers,
+/// tests, and the render engine's own store beside its recovery journal
+/// (5.11), which is not the expendable cache.
 #[derive(Debug)]
 pub struct AssetStore {
     cache_directory: PathBuf,
@@ -227,6 +255,74 @@ impl AssetStore {
     /// The path of a verified cache entry for a known content hash.
     pub fn cache_path(&self, hash: &ContentHash) -> PathBuf {
         self.cache_directory.join(&hash.0)
+    }
+
+    /// Read an entry back and re-hash it (5.11): the bytes are returned only
+    /// if they still hash to `hash`.
+    ///
+    /// A hash that is not a content address names no entry and is never made
+    /// into a path. Anything at the entry's name that is not a plain file, a
+    /// link included, is no entry. An entry longer than `most` bytes is
+    /// refused from its metadata, and no more than `most` + 1 bytes are ever
+    /// read, so a grown entry cannot make its reader hold it (invariant 51).
+    pub fn read_verified(&self, hash: &ContentHash, most: u64) -> Result<Vec<u8>, AssetStoreError> {
+        let missing = || AssetStoreError::Refusal(Refusal::AssetMissing { hash: hash.clone() });
+        if !hash.is_sha256() {
+            return Err(missing());
+        }
+        let path = self.cache_path(hash);
+        let read_error = |source: io::Error| AssetStoreError::ReadCache {
+            path: path.clone(),
+            source,
+        };
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(source) if source.kind() == io::ErrorKind::NotFound => return Err(missing()),
+            Err(source) => return Err(read_error(source)),
+        };
+        if !metadata.file_type().is_file() {
+            return Err(missing());
+        }
+        let oversized = |length: u64| {
+            AssetStoreError::Refusal(Refusal::AssetStoreFailed {
+                hash: hash.clone(),
+                detail: format!("the entry is {length} bytes, more than the {most} it may hold"),
+            })
+        };
+        if metadata.len() > most {
+            return Err(oversized(metadata.len()));
+        }
+        let file = fs::File::open(&path).map_err(read_error)?;
+        let reserve = usize::try_from(metadata.len()).unwrap_or(usize::MAX);
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(reserve)
+            .map_err(|error| read_error(io::Error::other(error.to_string())))?;
+        file.take(most.saturating_add(1))
+            .read_to_end(&mut bytes)
+            .map_err(read_error)?;
+        let length = u64::try_from(bytes.len()).expect("usize fits u64");
+        if length > most {
+            return Err(oversized(length));
+        }
+        let actual = content_hash(&bytes);
+        if actual != *hash {
+            return Err(Refusal::AssetHashMismatch {
+                expected: hash.clone(),
+                actual,
+            }
+            .into());
+        }
+        Ok(bytes)
+    }
+
+    /// Whether a plain file of exactly `length` bytes is stored under `hash`.
+    /// It reads no bytes: a check that the write reached the store, not a
+    /// verification (that is [`AssetStore::read_verified`], at restore).
+    pub fn holds_entry(&self, hash: &ContentHash, length: u64) -> bool {
+        hash.is_sha256()
+            && fs::symlink_metadata(self.cache_path(hash))
+                .is_ok_and(|metadata| metadata.file_type().is_file() && metadata.len() == length)
     }
 
     /// Whether the cache holds bytes that still verify as this content address.
@@ -592,5 +688,117 @@ mod tests {
             }
         );
         fs::remove_dir_all(directory).expect("test cache directory must be removable");
+    }
+
+    #[test]
+    fn read_verified_returns_only_bytes_that_still_hash_to_their_name() {
+        let root = temporary_directory();
+        let store = AssetStore::at_root(root.clone());
+        let bytes = b"stored asset bytes".to_vec();
+        let hash = content_hash(&bytes);
+        store.promote_verified(&hash, &bytes).unwrap();
+        assert_eq!(store.read_verified(&hash, 1 << 20).unwrap(), bytes);
+        assert!(store.holds_entry(&hash, bytes.len() as u64));
+        assert!(!store.holds_entry(&hash, bytes.len() as u64 + 1));
+
+        // Removed: missing. Same length, one byte changed: a mismatch naming
+        // what the entry now holds. Truncated: a mismatch too.
+        let missing = content_hash(b"never stored");
+        assert!(matches!(
+            store.read_verified(&missing, 1 << 20),
+            Err(AssetStoreError::Refusal(Refusal::AssetMissing { hash })) if hash == missing
+        ));
+        let mut altered = bytes.clone();
+        altered[0] ^= 0x20;
+        fs::write(store.cache_path(&hash), &altered).unwrap();
+        assert!(matches!(
+            store.read_verified(&hash, 1 << 20),
+            Err(AssetStoreError::Refusal(Refusal::AssetHashMismatch { expected, actual }))
+                if expected == hash && actual == content_hash(&altered)
+        ));
+        fs::write(store.cache_path(&hash), &bytes[..4]).unwrap();
+        assert!(matches!(
+            store.read_verified(&hash, 1 << 20),
+            Err(AssetStoreError::Refusal(Refusal::AssetHashMismatch { .. }))
+        ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn read_verified_refuses_a_grown_entry_from_its_length_without_reading_it() {
+        let root = temporary_directory();
+        let store = AssetStore::at_root(root.clone());
+        let bytes = b"small".to_vec();
+        let hash = content_hash(&bytes);
+        store.promote_verified(&hash, &bytes).unwrap();
+        // Grown past what the reader may hold: refused by its length.
+        let grown = fs::OpenOptions::new()
+            .write(true)
+            .open(store.cache_path(&hash))
+            .unwrap();
+        grown.set_len(8 << 20).unwrap();
+        drop(grown);
+        let read = store.read_verified(&hash, 1 << 20);
+        assert!(
+            matches!(&read, Err(AssetStoreError::Refusal(Refusal::AssetStoreFailed { hash: named, detail }))
+                if *named == hash && detail.contains("8388608") && detail.contains("1048576")),
+            "{read:?}"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn read_verified_never_makes_a_path_of_a_hash_that_is_not_a_content_address() {
+        let root = temporary_directory();
+        let store_root = root.join("store");
+        fs::create_dir_all(&store_root).unwrap();
+        // A file the traversal would reach, if the hash became a path.
+        fs::write(root.join("evil"), b"outside the store").unwrap();
+        let store = AssetStore::at_root(store_root);
+        for name in ["../evil", "EVIL", "", &"A".repeat(64)] {
+            let hash = ContentHash(name.to_owned());
+            assert!(
+                matches!(
+                    store.read_verified(&hash, 1 << 20),
+                    Err(AssetStoreError::Refusal(Refusal::AssetMissing { .. }))
+                ),
+                "{name}"
+            );
+            assert!(!store.holds_entry(&hash, 17));
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_store_failure_is_told_by_name_without_a_path() {
+        let root = temporary_directory();
+        // The store's directory is a file: nothing can be written under it.
+        let blocked = root.join("blocked");
+        fs::write(&blocked, b"a file, not a directory").unwrap();
+        let store = AssetStore::at_root(blocked);
+        let bytes = b"bytes".to_vec();
+        let hash = content_hash(&bytes);
+        let refusal = store
+            .promote_verified(&hash, &bytes)
+            .unwrap_err()
+            .into_refusal(&hash);
+        match &refusal {
+            Refusal::AssetStoreFailed {
+                hash: named,
+                detail,
+            } => {
+                assert_eq!(*named, hash);
+                assert!(!detail.contains(root.to_str().unwrap()), "{detail}");
+                assert!(!detail.contains("blocked"), "{detail}");
+            }
+            other => panic!("{other:?}"),
+        }
+        // A refusal passes through unchanged.
+        assert_eq!(
+            AssetStoreError::Refusal(Refusal::AssetMissing { hash: hash.clone() })
+                .into_refusal(&hash),
+            Refusal::AssetMissing { hash }
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 }

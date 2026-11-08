@@ -1406,6 +1406,105 @@ fn drive_asset_refusals(report: &mut Report) {
         ),
     );
     let _ = std::fs::remove_dir_all(&directory);
+    drive_engine_store_refusals(report);
+}
+
+/// 5.11, through an in-process engine with a journal: a cue of a take a
+/// restore dropped because its stored bytes were removed is refused
+/// `AssetMissing`, and an engine with no store refuses bytes it could not
+/// keep `AssetStoreFailed`. The same, against real workers killed and
+/// restarted, is the asset restart suite.
+fn drive_engine_store_refusals(report: &mut Report) {
+    use gx_asset_plane::AssetPublishPeer;
+    use gx_contracts::scene::{new_scene, AssetKind, AssetLibraryItem};
+    use gx_control_plane::intent::CueRequest;
+    use gx_render_worker::recovery::RecoveryJournal;
+    use gx_render_worker::Engine;
+    use std::sync::atomic::AtomicU64;
+    use std::sync::Arc;
+
+    let root =
+        std::env::temp_dir().join(format!("gx-refusal-audit-restore-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let journal = root.join("recovery.json");
+    let bytes = b"refusal audit asset bytes".to_vec();
+    let hash = gx_asset_plane::content_hash(&bytes);
+    let new_engine = || {
+        Engine::new(
+            Arc::new(AtomicU64::new(0)),
+            gx_contracts::Locality::CoLocated,
+        )
+    };
+    let restored_cue = (|| {
+        let mut scene = new_scene(
+            "audit/restore",
+            "Audit restore",
+            gx_contracts::color::WorkingColorSpace::LinearSrgb,
+        );
+        scene.assets.push(AssetLibraryItem {
+            asset_id: "audit".into(),
+            name: "Audit".into(),
+            kind: AssetKind::Image,
+            path: "images/audit.png".into(),
+            checksum: Some(hash.clone()),
+            mime_type: None,
+            size_bytes: Some(bytes.len() as u64),
+            status: None,
+            provenance: Default::default(),
+        });
+        let open = || RecoveryJournal::open_at(journal.clone()).map_err(|e| e.to_string());
+        let mut first = new_engine();
+        first
+            .attach_recovery_journal(open()?)
+            .map_err(|e| e.to_string())?;
+        first
+            .asset_store()
+            .ok_or("no store")?
+            .promote_verified(&hash, &bytes)
+            .map_err(|e| e.to_string())?;
+        first
+            .accept_verified_asset(hash.clone(), bytes.clone())
+            .map_err(|e| e.to_string())?;
+        let gx_asset_plane::PublishReply::Published {
+            take_id,
+            revision,
+            content_hash,
+        } = first.publish_scene(scene)
+        else {
+            return Err("the audit scene did not publish".to_owned());
+        };
+        drop(first);
+        std::fs::remove_file(root.join("recovery.json.assets").join(&hash.0))
+            .map_err(|e| e.to_string())?;
+        let mut restored = new_engine();
+        restored
+            .attach_recovery_journal(open()?)
+            .map_err(|e| e.to_string())?;
+        Ok(restored.handle(ClientRequest::Cue(CueRequest {
+            take_id,
+            revision,
+            content_hash: Some(content_hash),
+            at: TakeAt::NextOpportunity,
+        })))
+    })();
+    report.record(
+        PLANE,
+        "AssetMissing is produced for a cue of a take a restore dropped because its stored bytes were removed",
+        expect(
+            matches!(&restored_cue, Ok(EngineReply::Refused(Refusal::AssetMissing { hash: missing })) if *missing == hash),
+            format!("the cue after the restore was {restored_cue:?}"),
+        ),
+    );
+    let bare = new_engine().accept_verified_asset(hash.clone(), bytes);
+    report.record(
+        PLANE,
+        "AssetStoreFailed is produced for asset bytes handed to an engine that keeps no store",
+        expect(
+            matches!(&bare, Err(Refusal::AssetStoreFailed { hash: named, .. }) if *named == hash),
+            format!("bytes handed to an engine with no journal gave {bare:?}"),
+        ),
+    );
+    let _ = std::fs::remove_dir_all(&root);
 }
 fn drive_material_refusals(report: &mut Report) {
     for mode in BlendMode::ALL {
@@ -1917,6 +2016,8 @@ fn is_driven(variant: &str) -> bool {
             | "PackageDirectoryNotConfigured"
             | "PackagePathOutsideDirectory"
             | "PackageUnreadable"
+            | "AssetMissing"
+            | "AssetStoreFailed"
             | "RundownCursorOutOfRange"
             | "RundownEntryUnknown"
             | "AutomationExecutionDeferred"
@@ -2009,10 +2110,6 @@ fn is_driven(variant: &str) -> bool {
 
 fn limitations() -> &'static [Limitation] {
     &[
-        Limitation {
-            variant: "AssetMissing",
-            reason: "asset publication has no EnginePeer request",
-        },
         Limitation {
             variant: "Unauthenticated",
             reason: "the transport refuses it before EnginePeer",
