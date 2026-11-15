@@ -799,7 +799,7 @@ fn shears(id: &str, parents: &HashMap<&str, &str>, by_id: &HashMap<&str, &SceneO
     false
 }
 
-fn paints(value: &Option<ColorValue>) -> bool {
+pub(crate) fn paints(value: &Option<ColorValue>) -> bool {
     !matches!(value, None | Some(ColorValue::None))
 }
 

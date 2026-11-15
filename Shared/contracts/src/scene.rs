@@ -380,6 +380,47 @@ impl Default for StrokeStyle {
     }
 }
 
+/// Most entries a dash pattern may have (3.17).
+pub const MOST_DASH_ENTRIES: usize = 64;
+
+impl StrokeStyle {
+    /// Why this style cannot be drawn as authored, from its values alone
+    /// (3.17). The engine adds the one check that needs the path (how many
+    /// dash periods the stroke expands into). The engine's stroke preparation
+    /// and the `SetStroke` edit both call this, so an edit accepts exactly what
+    /// the engine will draw (invariant 27).
+    pub fn problem(&self) -> Option<String> {
+        if !self.miter_limit.is_finite() || self.miter_limit < 1.0 {
+            return Some(format!(
+                "strokeStyle.miterLimit {} must be finite and at least 1",
+                self.miter_limit
+            ));
+        }
+        if self.dash.is_empty() {
+            return None;
+        }
+        if self.dash.len() > MOST_DASH_ENTRIES {
+            return Some(format!(
+                "strokeStyle.dash has {} entries; at most {MOST_DASH_ENTRIES}",
+                self.dash.len()
+            ));
+        }
+        if !self.dash.iter().all(|d| d.is_finite() && *d >= 0.0) || !self.dash_offset.is_finite() {
+            return Some(
+                "strokeStyle.dash entries and dashOffset must be finite, and the entries not negative"
+                    .into(),
+            );
+        }
+        // An odd pattern repeats twice to alternate dash and gap, as in SVG.
+        let period: f64 =
+            self.dash.iter().sum::<f64>() * if self.dash.len() % 2 == 1 { 2.0 } else { 1.0 };
+        if period <= 0.0 {
+            return Some("strokeStyle.dash has no length".into());
+        }
+        None
+    }
+}
+
 /// What a track matte takes from its source (3.19), After Effects' modes.
 /// Luma is the Rec.709 weighting of the source's premultiplied working-space
 /// colour, so a transparent source counts as black; values clamp to 0..1.
@@ -1228,6 +1269,18 @@ pub enum HierarchyDiagnosticCode {
     SelfReference,
     MultipleParents,
     Cycle,
+}
+
+impl HierarchyDiagnosticCode {
+    /// The name `SceneHierarchyInvalid` carries as its `problem`.
+    pub const fn problem(self) -> &'static str {
+        match self {
+            Self::MissingChild => "missingChild",
+            Self::SelfReference => "selfReference",
+            Self::MultipleParents => "multipleParents",
+            Self::Cycle => "cycle",
+        }
+    }
 }
 
 /// An edge the resolver refused, with the reason. The scene still resolves;

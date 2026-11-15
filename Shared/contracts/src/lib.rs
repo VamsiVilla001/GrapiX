@@ -30,6 +30,7 @@ pub mod phases;
 pub mod platform;
 pub mod project;
 pub mod provenance;
+pub mod render_edit;
 pub mod scene;
 pub mod text_style;
 pub mod validate;

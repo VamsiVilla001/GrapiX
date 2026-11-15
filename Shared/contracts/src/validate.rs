@@ -98,16 +98,10 @@ pub fn validate_scene_document(
     // resolves deterministically so an author can keep editing, but on air
     // it would show a parent choice nobody made.
     for diagnostic in crate::scene::resolve_hierarchy(&document.objects).diagnostics {
-        let problem = match diagnostic.code {
-            crate::scene::HierarchyDiagnosticCode::MissingChild => "missingChild",
-            crate::scene::HierarchyDiagnosticCode::SelfReference => "selfReference",
-            crate::scene::HierarchyDiagnosticCode::MultipleParents => "multipleParents",
-            crate::scene::HierarchyDiagnosticCode::Cycle => "cycle",
-        };
         found.push(StructuredRefusal::error(Refusal::SceneHierarchyInvalid {
             parent: diagnostic.parent_id,
             child: diagnostic.child_id,
-            problem: problem.into(),
+            problem: diagnostic.code.problem().into(),
         }));
     }
 
@@ -179,7 +173,7 @@ pub fn validate_scene_document(
                     ("trimOffset", shape.trim_offset, false),
                 ] {
                     let Some(value) = value else { continue };
-                    if !value.is_finite() || (percentage && !(0.0..=100.0).contains(&value)) {
+                    if !crate::render_edit::trim_value_valid(percentage, value) {
                         found.push(
                             StructuredRefusal::error(Refusal::ShapeTrimInvalid {
                                 object: shape.base.id.clone(),

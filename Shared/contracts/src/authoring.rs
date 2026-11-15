@@ -78,7 +78,7 @@ fn default_size(kind: &str) -> (f64, f64) {
 /// Mid grey, opaque, in the scene's authoring space. A created shape needs a
 /// fill for the same reason it needs a size: an unfilled rectangle is an
 /// object the author cannot see or hit-test.
-fn default_fill() -> ColorValue {
+pub(crate) fn default_fill() -> ColorValue {
     ColorValue::Solid {
         color: Rgba::new(0.5, 0.5, 0.5, 1.0, SourceColorSpace::Srgb),
     }
@@ -88,7 +88,7 @@ fn default_fill() -> ColorValue {
 ///
 /// Deterministic rather than random so a created id is reproducible in a test
 /// and readable in a diff.
-fn next_object_id(scene: &SceneDocument, kind: &str) -> String {
+pub(crate) fn next_object_id(scene: &SceneDocument, kind: &str) -> String {
     let taken: BTreeSet<&str> = scene.objects.iter().map(|o| o.base().id.as_str()).collect();
     (1..)
         .map(|n| format!("{kind}-{n}"))
@@ -455,7 +455,7 @@ pub fn rename_object(
 // not the ways of reaching into it.
 // ---------------------------------------------------------------------------
 
-fn refuse_duplicate_object_ids(scene: &SceneDocument) -> Result<(), Refusal> {
+pub(crate) fn refuse_duplicate_object_ids(scene: &SceneDocument) -> Result<(), Refusal> {
     let mut seen = BTreeSet::new();
     for object in &scene.objects {
         if !seen.insert(object.base().id.as_str()) {

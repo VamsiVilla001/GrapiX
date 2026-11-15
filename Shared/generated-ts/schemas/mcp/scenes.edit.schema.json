@@ -314,6 +314,39 @@
       },
       "type": "object"
     },
+    "BezierPath": {
+      "description": "A cubic bezier path, structured like Lottie/Bodymovin's \"sh\" shape so it\nround-trips with the web's proven vector-animation format. Segment k→k+1 is\na cubic bezier; tangents are relative to their vertex. All three arrays\nmust be the same length — the constraint that also makes a path animatable.",
+      "properties": {
+        "closed": {
+          "type": "boolean"
+        },
+        "inTangents": {
+          "items": {
+            "$ref": "#/$defs/Vec2"
+          },
+          "type": "array"
+        },
+        "outTangents": {
+          "items": {
+            "$ref": "#/$defs/Vec2"
+          },
+          "type": "array"
+        },
+        "vertices": {
+          "items": {
+            "$ref": "#/$defs/Vec2"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "closed",
+        "vertices",
+        "inTangents",
+        "outTangents"
+      ],
+      "type": "object"
+    },
     "ColorValue": {
       "description": "An authored paint: nothing, a colour, or a gradient.\n\n`None` is a value, not an absence — \"the author turned the fill off\" and\n\"the author has not set a fill\" are different states, and collapsing them\nis how a transparent object becomes a black one on the other renderer.\nPorted from 1.x `ColorValue`, with every colour now tagged.",
       "oneOf": [
@@ -631,6 +664,22 @@
       "required": [
         "kind",
         "name"
+      ],
+      "type": "object"
+    },
+    "CreateShape": {
+      "description": "Create a shape from a bezier path (3.13). The path's own coordinates\nplace it; its fill is grey and its stroke off until `setPaint` and\n`setStroke` say otherwise.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "$ref": "#/$defs/BezierPath"
+        }
+      },
+      "required": [
+        "name",
+        "path"
       ],
       "type": "object"
     },
@@ -1126,6 +1175,73 @@
         }
       ]
     },
+    "Mask": {
+      "description": "One layer mask (3.19): a closed path in the object's own coordinates.",
+      "properties": {
+        "expansion": {
+          "default": 0.0,
+          "description": "Grows (positive) or shrinks (negative) the mask outward from its\npath, in pixels.",
+          "format": "double",
+          "type": "number"
+        },
+        "feather": {
+          "default": 0.0,
+          "description": "Softens the edge: a Gaussian blur of the mask's coverage, in pixels\n(the blur's standard deviation is half of it).",
+          "format": "double",
+          "type": "number"
+        },
+        "inverted": {
+          "default": false,
+          "type": "boolean"
+        },
+        "mode": {
+          "$ref": "#/$defs/MaskMode",
+          "default": "add"
+        },
+        "opacity": {
+          "default": 1.0,
+          "format": "double",
+          "type": "number"
+        },
+        "path": {
+          "$ref": "#/$defs/BezierPath"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "MaskMode": {
+      "description": "How a mask combines with the masks above it (3.19), After Effects' modes.",
+      "oneOf": [
+        {
+          "const": "none",
+          "description": "Ignored: the mask is kept but shapes nothing.",
+          "type": "string"
+        },
+        {
+          "const": "add",
+          "description": "Union with the masks above.",
+          "type": "string"
+        },
+        {
+          "const": "subtract",
+          "description": "Removes its area from the masks above.",
+          "type": "string"
+        },
+        {
+          "const": "intersect",
+          "description": "Keeps only where it overlaps the masks above.",
+          "type": "string"
+        },
+        {
+          "const": "difference",
+          "description": "Keeps where exactly one of it and the masks above covers.",
+          "type": "string"
+        }
+      ]
+    },
     "MoveKeyframe": {
       "properties": {
         "fromFrame": {
@@ -1325,6 +1441,14 @@
           "type": "object"
         }
       ]
+    },
+    "PaintSlot": {
+      "description": "Which of an object's two paints `SetPaint` sets.",
+      "enum": [
+        "fill",
+        "stroke"
+      ],
+      "type": "string"
     },
     "PhaseKind": {
       "description": "The operator phases a scene timeline can name.\n\nThese are exactly `crate::mcp::MOTION_PHASES`, and a test below pins them\nagainst it: a phase added to one and not the other fails the gate rather\nthan producing a scene the agent surface cannot describe.",
@@ -2059,6 +2183,110 @@
             "edit"
           ],
           "type": "object"
+        },
+        {
+          "$ref": "#/$defs/CreateShape",
+          "properties": {
+            "edit": {
+              "const": "createShape",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/SetGroupChildren",
+          "properties": {
+            "edit": {
+              "const": "setGroupChildren",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/SetObjectMasks",
+          "properties": {
+            "edit": {
+              "const": "setObjectMasks",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/SetClipChild",
+          "properties": {
+            "edit": {
+              "const": "setClipChild",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/SetTrackMatte",
+          "properties": {
+            "edit": {
+              "const": "setTrackMatte",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/SetTrim",
+          "properties": {
+            "edit": {
+              "const": "setTrim",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/SetPaint",
+          "properties": {
+            "edit": {
+              "const": "setPaint",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/SetStroke",
+          "properties": {
+            "edit": {
+              "const": "setStroke",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edit"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -2216,6 +2444,43 @@
       },
       "type": "object"
     },
+    "SetClipChild": {
+      "description": "Name a group's clip child, or clear it by leaving `clipChildId` out\n(3.19). The clip child must be one of the group's own children and\ndraw pixels (`clipGroupInvalid`).",
+      "properties": {
+        "clipChildId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "groupId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "groupId"
+      ],
+      "type": "object"
+    },
+    "SetGroupChildren": {
+      "description": "Replace a group's ordered children (3.19). A child another group\nalready claims, a missing child and a cycle refuse\n`sceneHierarchyInvalid`; a group is the only kind with children here.",
+      "properties": {
+        "childIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "groupId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "groupId",
+        "childIds"
+      ],
+      "type": "object"
+    },
     "SetObjectField": {
       "description": "One inspector field over every listed object.",
       "properties": {
@@ -2250,6 +2515,25 @@
       ],
       "type": "object"
     },
+    "SetObjectMasks": {
+      "description": "Replace one object's mask list; an empty list clears it (3.19).\nEach mask refuses by name (`maskInvalid`, with its index) when the\nengine cannot draw it as authored.",
+      "properties": {
+        "masks": {
+          "items": {
+            "$ref": "#/$defs/Mask"
+          },
+          "type": "array"
+        },
+        "objectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "objectId",
+        "masks"
+      ],
+      "type": "object"
+    },
     "SetObjectVisible": {
       "properties": {
         "objectId": {
@@ -2262,6 +2546,35 @@
       "required": [
         "objectId",
         "visible"
+      ],
+      "type": "object"
+    },
+    "SetPaint": {
+      "description": "Set one paint of every listed object to a colour or gradient, or\nclear it by leaving `paint` out (3.17). A shape's fill or stroke\nswitch follows the paint.",
+      "properties": {
+        "objectIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "paint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ColorValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "slot": {
+          "$ref": "#/$defs/PaintSlot"
+        }
+      },
+      "required": [
+        "objectIds",
+        "slot"
       ],
       "type": "object"
     },
@@ -2299,6 +2612,91 @@
       ],
       "type": "object"
     },
+    "SetStroke": {
+      "description": "Set the stroke width and style of every listed object (3.17). A\nstyle left out is the default: miter joins, butt caps, solid.",
+      "properties": {
+        "objectIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "style": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StrokeStyle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "width": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "objectIds",
+        "width"
+      ],
+      "type": "object"
+    },
+    "SetTrackMatte": {
+      "description": "Set one object's track matte by its source's id, or clear it by\nleaving `trackMatte` out (3.19). Refuses by name\n(`trackMatteInvalid`) what cannot be drawn as authored.",
+      "properties": {
+        "objectId": {
+          "type": "string"
+        },
+        "trackMatte": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrackMatte"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "objectId"
+      ],
+      "type": "object"
+    },
+    "SetTrim": {
+      "description": "Set one shape's trim window (3.13): start and end in percent of the\npath, offset in percent of a turn. A value left out is its default\n(0, 100, 0); all three replace what the shape had.",
+      "properties": {
+        "end": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "objectId": {
+          "type": "string"
+        },
+        "offset": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "start": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "objectId"
+      ],
+      "type": "object"
+    },
     "SourceColorSpace": {
       "description": "What a colour or a texture was authored in. There is no `Unknown`: an\nuntagged source is a defect the importer must refuse, not a value a\nrenderer may guess at (B.1, \"never infer\").",
       "oneOf": [
@@ -2324,6 +2722,58 @@
           "type": "string"
         }
       ]
+    },
+    "StrokeCap": {
+      "description": "How a stroke ends an open path and each dash. SVG's and CSS's names.",
+      "enum": [
+        "butt",
+        "round",
+        "square"
+      ],
+      "type": "string"
+    },
+    "StrokeJoin": {
+      "description": "How a stroke joins its segments. The names are SVG's and CSS's.",
+      "enum": [
+        "miter",
+        "round",
+        "bevel"
+      ],
+      "type": "string"
+    },
+    "StrokeStyle": {
+      "description": "A stroke's joins, caps and dash pattern (3.17). Lengths are in the\nobject's own units, like `strokeWidth`.",
+      "properties": {
+        "cap": {
+          "$ref": "#/$defs/StrokeCap",
+          "default": "butt"
+        },
+        "dash": {
+          "description": "Alternating dash and gap lengths; empty is a solid line.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "dashOffset": {
+          "default": 0.0,
+          "description": "How far into the dash pattern the stroke starts.",
+          "format": "double",
+          "type": "number"
+        },
+        "join": {
+          "$ref": "#/$defs/StrokeJoin",
+          "default": "miter"
+        },
+        "miterLimit": {
+          "default": 4.0,
+          "description": "A miter join longer than this many stroke widths becomes a bevel.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
     },
     "StyleColor": {
       "anyOf": [
@@ -2474,6 +2924,47 @@
       "description": "A token reference in a preset: `{duration.base}`, `{easing.brand-in}`.\n\nA preset that hardcodes a value instead of referencing a token is a bug for\nthe same reason a component hardcoding a hex colour is (G.6.1). Kept as a\nstring with a checked shape rather than a free string, so a malformed\nreference is caught at parse, not at render.",
       "type": "string"
     },
+    "TrackMatte": {
+      "description": "A layer's track matte (3.19): its source by explicit id, and the mode.",
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/TrackMatteMode",
+          "default": "alpha"
+        },
+        "sourceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sourceId"
+      ],
+      "type": "object"
+    },
+    "TrackMatteMode": {
+      "description": "What a track matte takes from its source (3.19), After Effects' modes.\nLuma is the Rec.709 weighting of the source's premultiplied working-space\ncolour, so a transparent source counts as black; values clamp to 0..1.",
+      "oneOf": [
+        {
+          "const": "alpha",
+          "description": "The layer shows where the source is opaque.",
+          "type": "string"
+        },
+        {
+          "const": "alphaInverted",
+          "description": "The layer shows where the source is transparent.",
+          "type": "string"
+        },
+        {
+          "const": "luma",
+          "description": "The layer shows where the source is bright.",
+          "type": "string"
+        },
+        {
+          "const": "lumaInverted",
+          "description": "The layer shows where the source is dark.",
+          "type": "string"
+        }
+      ]
+    },
     "UpdateFont": {
       "description": "Change a font's display name, fallbacks or enabled state (11.13).\nSwitching off a font something names is refused, as removing it is.",
       "properties": {
@@ -2524,6 +3015,24 @@
         "objectId",
         "property",
         "keyframe"
+      ],
+      "type": "object"
+    },
+    "Vec2": {
+      "description": "A 2D point in scene coordinates.",
+      "properties": {
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "y": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y"
       ],
       "type": "object"
     }

@@ -15,13 +15,17 @@ use ts_rs::TS;
 use crate::animation::{self, AutoKey, KeyRef, SceneKeyframe};
 use crate::authoring::{self, ObjectDeletion, ObjectDuplication};
 use crate::bindings::{self, BindingIssue};
+use crate::color::ColorValue;
 use crate::control::{self, ControlField, TakePage};
 use crate::design_system::{self, DesignSystem, DesignSystemCommit, MotionPreset};
 use crate::font::FontDefinition;
 use crate::import::ImportReport;
 use crate::object_edit::{self, ObjectField};
 use crate::phases::{self, TimelinePhase};
-use crate::scene::{AssetLibraryItem, DataContext, SceneDocument};
+use crate::render_edit::{self, PaintSlot};
+use crate::scene::{
+    AssetLibraryItem, BezierPath, DataContext, Mask, SceneDocument, StrokeStyle, TrackMatte,
+};
 use crate::text_style::{self, TextStyle};
 use crate::{asset_edit, font_edit, material_edit, ContentHash, RationalRate, Refusal};
 
@@ -400,6 +404,70 @@ commands! {
             #[ts(optional)]
             pub height: Option<u32>,
         },
+        /// Create a shape from a bezier path (3.13). The path's own coordinates
+        /// place it; its fill is grey and its stroke off until `setPaint` and
+        /// `setStroke` say otherwise.
+        CreateShape = "createShape" { pub name: String, pub path: BezierPath },
+        /// Replace a group's ordered children (3.19). A child another group
+        /// already claims, a missing child and a cycle refuse
+        /// `sceneHierarchyInvalid`; a group is the only kind with children here.
+        SetGroupChildren = "setGroupChildren" { pub group_id: String, pub child_ids: Vec<String> },
+        /// Replace one object's mask list; an empty list clears it (3.19).
+        /// Each mask refuses by name (`maskInvalid`, with its index) when the
+        /// engine cannot draw it as authored.
+        SetObjectMasks = "setObjectMasks" { pub object_id: String, pub masks: Vec<Mask> },
+        /// Name a group's clip child, or clear it by leaving `clipChildId` out
+        /// (3.19). The clip child must be one of the group's own children and
+        /// draw pixels (`clipGroupInvalid`).
+        SetClipChild = "setClipChild" {
+            pub group_id: String,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub clip_child_id: Option<String>,
+        },
+        /// Set one object's track matte by its source's id, or clear it by
+        /// leaving `trackMatte` out (3.19). Refuses by name
+        /// (`trackMatteInvalid`) what cannot be drawn as authored.
+        SetTrackMatte = "setTrackMatte" {
+            pub object_id: String,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub track_matte: Option<TrackMatte>,
+        },
+        /// Set one shape's trim window (3.13): start and end in percent of the
+        /// path, offset in percent of a turn. A value left out is its default
+        /// (0, 100, 0); all three replace what the shape had.
+        SetTrim = "setTrim" {
+            pub object_id: String,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub start: Option<f64>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub end: Option<f64>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub offset: Option<f64>,
+        },
+        /// Set one paint of every listed object to a colour or gradient, or
+        /// clear it by leaving `paint` out (3.17). A shape's fill or stroke
+        /// switch follows the paint.
+        SetPaint = "setPaint" {
+            pub object_ids: Vec<String>,
+            pub slot: PaintSlot,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub paint: Option<ColorValue>,
+        },
+        /// Set the stroke width and style of every listed object (3.17). A
+        /// style left out is the default: miter joins, butt caps, solid.
+        SetStroke = "setStroke" {
+            pub object_ids: Vec<String>,
+            pub width: f64,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub style: Option<StrokeStyle>,
+        },
     }
 }
 
@@ -745,6 +813,28 @@ fn apply_edit(
             set_canvas(scene, p.frame_rate, p.width, p.height)?;
             EditEffect::None
         }
+        SceneEdit::CreateShape(p) => render_edit::create_shape(scene, &p.name, &p.path)?,
+        SceneEdit::SetGroupChildren(p) => {
+            render_edit::set_group_children(scene, &p.group_id, &p.child_ids)?
+        }
+        SceneEdit::SetObjectMasks(p) => {
+            render_edit::set_object_masks(scene, &p.object_id, &p.masks)?
+        }
+        SceneEdit::SetClipChild(p) => {
+            render_edit::set_clip_child(scene, &p.group_id, p.clip_child_id.as_deref())?
+        }
+        SceneEdit::SetTrackMatte(p) => {
+            render_edit::set_track_matte(scene, &p.object_id, p.track_matte.as_ref())?
+        }
+        SceneEdit::SetTrim(p) => {
+            render_edit::set_trim(scene, &p.object_id, p.start, p.end, p.offset)?
+        }
+        SceneEdit::SetPaint(p) => {
+            render_edit::set_paint(scene, &p.object_ids, p.slot, p.paint.as_ref())?
+        }
+        SceneEdit::SetStroke(p) => {
+            render_edit::set_stroke(scene, &p.object_ids, p.width, p.style.as_ref())?
+        }
     })
 }
 
@@ -831,6 +921,7 @@ pub mod witness {
     use crate::scene;
     use crate::scene::{
         AssetKind, AssetLibraryItem, ObjectBase, RectObject, SceneObject, TextCase, TextObject,
+        Vec2,
     };
     use crate::text_style::StyleNumber;
 
@@ -889,6 +980,14 @@ pub mod witness {
             SceneEdit::ReplaceFont(_) => 31,
             SceneEdit::SetCanvas(_) => 32,
             SceneEdit::SetAssetColorSpace(_) => 33,
+            SceneEdit::SetObjectMasks(_) => 34,
+            SceneEdit::SetClipChild(_) => 35,
+            SceneEdit::SetTrackMatte(_) => 36,
+            SceneEdit::SetTrim(_) => 37,
+            SceneEdit::SetPaint(_) => 38,
+            SceneEdit::SetStroke(_) => 39,
+            SceneEdit::CreateShape(_) => 40,
+            SceneEdit::SetGroupChildren(_) => 41,
         }
     }
 
@@ -1398,6 +1497,102 @@ pub mod witness {
                 frame_rate: Some(RationalRate::P59_94),
                 width: None,
                 height: None,
+            }),
+            // The render features (3.17 to 3.19), authored through the same
+            // path: a group holding a shape and an ellipse, the shape as its
+            // clip child, a mask, a track matte, a trim window, a gradient
+            // fill and a round dashed stroke.
+            SceneEdit::CreateObject(CreateObject {
+                kind: "group".into(),
+                name: "Stack".into(),
+            }),
+            SceneEdit::CreateShape(CreateShape {
+                name: "Path".into(),
+                path: BezierPath {
+                    closed: false,
+                    vertices: vec![Vec2 { x: 0.0, y: 0.0 }, Vec2 { x: 100.0, y: 0.0 }],
+                    in_tangents: vec![Vec2 { x: 0.0, y: 0.0 }; 2],
+                    out_tangents: vec![Vec2 { x: 0.0, y: 0.0 }; 2],
+                },
+            }),
+            SceneEdit::CreateObject(CreateObject {
+                kind: "ellipse".into(),
+                name: "Content".into(),
+            }),
+            SceneEdit::SetGroupChildren(SetGroupChildren {
+                group_id: "group-1".into(),
+                child_ids: vec!["shape-1".into(), "ellipse-1".into()],
+            }),
+            SceneEdit::SetObjectMasks(SetObjectMasks {
+                object_id: "card".into(),
+                masks: vec![crate::scene::Mask {
+                    path: BezierPath {
+                        closed: true,
+                        vertices: vec![
+                            Vec2 { x: 0.0, y: 0.0 },
+                            Vec2 { x: 80.0, y: 0.0 },
+                            Vec2 { x: 40.0, y: 60.0 },
+                        ],
+                        in_tangents: vec![Vec2 { x: 0.0, y: 0.0 }; 3],
+                        out_tangents: vec![Vec2 { x: 0.0, y: 0.0 }; 3],
+                    },
+                    mode: crate::scene::MaskMode::Add,
+                    feather: 4.0,
+                    expansion: 0.0,
+                    opacity: 1.0,
+                    inverted: false,
+                }],
+            }),
+            SceneEdit::SetClipChild(SetClipChild {
+                group_id: "group-1".into(),
+                clip_child_id: Some("shape-1".into()),
+            }),
+            SceneEdit::SetTrackMatte(SetTrackMatte {
+                object_id: "text".into(),
+                track_matte: Some(crate::scene::TrackMatte {
+                    source_id: "ellipse-1".into(),
+                    mode: crate::scene::TrackMatteMode::Luma,
+                }),
+            }),
+            SceneEdit::SetTrim(SetTrim {
+                object_id: "shape-1".into(),
+                start: Some(0.0),
+                end: Some(50.0),
+                offset: None,
+            }),
+            SceneEdit::SetPaint(SetPaint {
+                object_ids: vec!["ellipse-1".into()],
+                slot: PaintSlot::Fill,
+                paint: Some(ColorValue::LinearGradient {
+                    angle: 0.0,
+                    start_x: 0.0,
+                    start_y: 0.0,
+                    end_x: 1.0,
+                    end_y: 0.0,
+                    stops: vec![
+                        crate::color::GradientStop {
+                            position: 0.0,
+                            color: crate::color::Rgba::srgb(1.0, 1.0, 1.0, 1.0),
+                        },
+                        crate::color::GradientStop {
+                            position: 1.0,
+                            color: crate::color::Rgba::srgb(0.0, 0.0, 1.0, 1.0),
+                        },
+                    ],
+                    spread: Default::default(),
+                    coordinate_mode: Default::default(),
+                }),
+            }),
+            SceneEdit::SetStroke(SetStroke {
+                object_ids: vec!["ellipse-1".into()],
+                width: 4.0,
+                style: Some(StrokeStyle {
+                    join: crate::scene::StrokeJoin::Round,
+                    cap: crate::scene::StrokeCap::Round,
+                    miter_limit: 4.0,
+                    dash: vec![12.0, 6.0],
+                    dash_offset: 0.0,
+                }),
             }),
         ]
     }

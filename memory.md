@@ -118,6 +118,39 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-16 — The render features through the Editor MCP (Claude, on the user's instruction)
+
+**Resume here.** The user said "write each module MCP accessible"; asked which job that meant, they chose "render
+features via the Editor MCP". 3.17 to 3.19 draw gradients, strokes, masks, clip groups, track mattes and trim, but
+`scenes.edit` could set ten object fields, so an agent could use none. Eight typed `SceneEdit`s now set them:
+`setObjectMasks`, `setClipChild`, `setTrackMatte`, `setTrim`, `setPaint`, `setStroke`, and two prerequisites found
+while testing (`scenes.import` yields only empty groups and rectangles, and `shape` was not creatable): `createShape`
+and `setGroupChildren`. New module `Shared/contracts/src/render_edit.rs`; evidence `docs/evidence/mcp-render-edits`.
+No new `Refusal`: each edit applies the change to a copy and refuses on any `drawability_refusals` entry at the fields
+it edited or any entry the scene did not have before, so there is one rule. Shared, not copied: `StrokeStyle::problem()`
+(the engine's stroke preparation in `rasterise/lyon.rs` now calls it, so the Editor no longer accepts a stroke style the
+engine refuses), `trim_value_valid()` (validator and `setTrim`), `HierarchyDiagnosticCode::problem()`. A refused edit
+puts the scene back as it was. Jev and Laya on the design: they agreed on four questions and split on two (stroke
+style checks: Jev shared function, Laya engine only; a paint on a kind that does not draw it: Jev refuse by name, Laya
+store and ignore) and on whether the user must approve (0.47 / 0.82); decided by hand on invariants 18 and 27, and the
+split is reported to the user. Acceptance run: they split again on silent substitution (0.23 / 0.96); the hand check
+found the wire read-back missing the matte mode and the stroke join and cap, now asserted.
+Verified: 8 contract tests (`render_edit`); `services/editor-mcp/tests/render_edit_surface.rs` drives the real
+`gx-editor-mcp` binary (a 12-edit batch builds a clip group, mask, luma matte, trim, gradient and round dashed stroke;
+a second process reads it back; `validate.preflight` passes; nine bad edits each return their named code with the
+store equal to before; a bad edit after a good one in one batch keeps neither; a misspelt key is refused naming it);
+worker test `a_scene_authored_by_edits_draws_what_the_edits_say` draws the same wire JSON on the CPU reference and
+measures the pixels. Conformance witness carries all eight (`every SceneEdit variant executed`). Mutations: 13 of 13
+fail named tests; two (N2, N13) survived the first run and their tests were strengthened. Gate: fmt, clippy -D warnings
+and npm run check exit 0 (46 Node, 412 Editor, 875 Rust passed, 0 failed, 37 ignored; conformance 591/0/9); hardware
+worker suite 191/0/0. Plan: 11.47 gains a scope note (the Editor's panels, pen tool and gestures stay there); no row
+changes state.
+**Not done, by name:** no edit for object width or height (ObjectField has ten fields; a rect made over MCP is 200 by
+120 and can only be scaled), effects, blend mode, material, anchor, z-order, layer membership or compound paths; a created
+group is centred in the canvas like any object, so place it with x and y; animation of these properties stays with
+11.47; the Program (Playout) side still has no shipped MCP binary (8.14's transport half covered the Editor only).
+Next in the core backend: 3.21's remaining budget (the stats page at 1080p; 2160p on a quiet machine).
+
 ## 2026-11-15 — 3.19 done: masks, clip groups, track mattes and trim on the GPU (Claude, on the user's instruction)
 
 **Resume here.** 3.19 is done (evidence `docs/evidence/3.19`). Increment 4 adds a trim engine test: static trim

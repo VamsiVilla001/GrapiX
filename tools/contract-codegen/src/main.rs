@@ -27,14 +27,15 @@ use gx_contracts::color::{
 };
 use gx_contracts::command::{
     ApplyPreset, ApplyTextStyle, CloseScene, CommandOutcome, ConfirmDesignSystem, CreateKeyframe,
-    CreateObject, CreateProject, CreateScene, DeclareControl, DeleteMaterial, DeleteObject,
-    DeleteScene, DuplicateObject, DuplicateScene, EditEffect, EditProperty, EditScene,
-    EditorCommand, HistoryDirection, MoveKeyframe, OpenScene, PresetPhase, Redo, RelinkAsset,
-    RelinkMaterial, RemoveControl, RemoveKeyframe, RemovePhase, RenameObject, ReplaceControl,
-    ReplaceDataContext, SaveMotionPreset, SaveScene, SaveTakePage, SaveTarget, SaveTextStyle,
-    SceneEdit, SceneOrigin, SceneSource, SceneTarget, SessionKey, SessionView, SetBinding,
-    SetObjectField, SetObjectLocked, SetObjectVisible, SetPhase, SetSceneId, SetSceneName, Undo,
-    UpdateKeyframe,
+    CreateObject, CreateProject, CreateScene, CreateShape, DeclareControl, DeleteMaterial,
+    DeleteObject, DeleteScene, DuplicateObject, DuplicateScene, EditEffect, EditProperty,
+    EditScene, EditorCommand, HistoryDirection, MoveKeyframe, OpenScene, PresetPhase, Redo,
+    RelinkAsset, RelinkMaterial, RemoveControl, RemoveKeyframe, RemovePhase, RenameObject,
+    ReplaceControl, ReplaceDataContext, SaveMotionPreset, SaveScene, SaveTakePage, SaveTarget,
+    SaveTextStyle, SceneEdit, SceneOrigin, SceneSource, SceneTarget, SessionKey, SessionView,
+    SetBinding, SetClipChild, SetGroupChildren, SetObjectField, SetObjectLocked, SetObjectMasks,
+    SetObjectVisible, SetPaint, SetPhase, SetSceneId, SetSceneName, SetStroke, SetTrackMatte,
+    SetTrim, Undo, UpdateKeyframe,
 };
 use gx_contracts::control::{ControlField, ControlFieldKind, ControlValue, TakePage};
 use gx_contracts::design_system::{
@@ -63,6 +64,7 @@ use gx_contracts::package::{PackageFileEntry, PackageManifest};
 use gx_contracts::provenance::{
     AssetApproval, AssetOrigin, AssetProvenance, LicenseClass, ProvenanceTool,
 };
+use gx_contracts::render_edit::PaintSlot;
 use gx_contracts::scene::{
     AssetAvailability, AssetKind, AssetLibraryItem, BezierPath, BrushBlendMode, BrushPoint,
     CameraKind, CameraObject, EllipseObject, FillRule, GroupObject, HierarchyChildren,
@@ -250,6 +252,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         PresetPhase,
         HistoryDirection,
         ObjectField,
+        PaintSlot,
         BindingIssue,
         EditorCommand,
         SceneEdit,
@@ -294,6 +297,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         RelinkAsset,
         SetSceneName,
         SetSceneId,
+        CreateShape,
+        SetGroupChildren,
+        SetObjectMasks,
+        SetClipChild,
+        SetTrackMatte,
+        SetTrim,
+        SetPaint,
+        SetStroke,
         EditEffect,
         SessionView,
         CommandOutcome,

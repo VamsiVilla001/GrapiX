@@ -578,8 +578,6 @@ const STROKE_TOLERANCE: f64 = 0.01;
 /// Most dash periods one stroke may expand into: a bound checked before the
 /// dashes are generated (invariant 51).
 const MOST_DASH_PERIODS: f64 = 100_000.0;
-/// Most entries a dash pattern may have.
-const MOST_DASH_ENTRIES: usize = 64;
 
 /// The authored stroke style as kurbo's, refused by name when it cannot be
 /// drawn as written.
@@ -595,11 +593,8 @@ fn kurbo_stroke(
         object: object.into(),
         detail,
     };
-    if !style.miter_limit.is_finite() || style.miter_limit < 1.0 {
-        return Err(refuse(format!(
-            "strokeStyle.miterLimit {} must be finite and at least 1",
-            style.miter_limit
-        )));
+    if let Some(detail) = style.problem() {
+        return Err(refuse(detail));
     }
     let join = match style.join {
         StrokeJoin::Miter => Join::Miter,
@@ -618,24 +613,11 @@ fn kurbo_stroke(
     if style.dash.is_empty() {
         return Ok(stroke);
     }
-    if style.dash.len() > MOST_DASH_ENTRIES {
-        return Err(refuse(format!(
-            "strokeStyle.dash has {} entries; at most {MOST_DASH_ENTRIES}",
-            style.dash.len()
-        )));
-    }
-    if !style.dash.iter().all(|d| d.is_finite() && *d >= 0.0) || !style.dash_offset.is_finite() {
-        return Err(refuse(
-            "strokeStyle.dash entries and dashOffset must be finite, and the entries not negative"
-                .into(),
-        ));
-    }
-    // An odd pattern repeats twice to alternate dash and gap, as in SVG.
+    // The values were checked above (`StrokeStyle::problem`); what is left is
+    // what only the path can say. An odd pattern repeats twice to alternate
+    // dash and gap, as in SVG.
     let period: f64 =
         style.dash.iter().sum::<f64>() * if style.dash.len() % 2 == 1 { 2.0 } else { 1.0 };
-    if period <= 0.0 {
-        return Err(refuse("strokeStyle.dash has no length".into()));
-    }
     let length: f64 = path.segments().map(|s| s.arclen(STROKE_TOLERANCE)).sum();
     if length / period > MOST_DASH_PERIODS {
         return Err(refuse(format!(

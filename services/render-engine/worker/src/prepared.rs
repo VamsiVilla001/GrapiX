@@ -1848,4 +1848,131 @@ mod tests {
         // Between the consumers, inside the source: the source draws nothing.
         assert_eq!(alpha(50, 70), 0, "a matte source is never drawn");
     }
+
+    /// The render features (3.17 to 3.19) authored through the scene edits, as
+    /// an MCP agent sends them, then drawn by the CPU reference: the edits
+    /// reach the pixels, not only the stored document. A masked rect, a
+    /// trimmed stroke beside an untrimmed one, a clip group and a track
+    /// matte, each checked by where it is lit and where it is not.
+    #[test]
+    fn a_scene_authored_by_edits_draws_what_the_edits_say() {
+        use gx_contracts::command::{apply_edits, EditContext, SceneEdit};
+        let place = |ids: &[&str], x: Option<f64>, y: f64| {
+            let mut edits = Vec::new();
+            for id in ids {
+                if let Some(x) = x {
+                    edits.push(serde_json::json!({ "edit": "setObjectField", "objectIds": [id], "field": { "name": "x", "value": x } }));
+                }
+                edits.push(serde_json::json!({ "edit": "setObjectField", "objectIds": [id], "field": { "name": "y", "value": y } }));
+            }
+            edits
+        };
+        let at = |id: &str, x: f64, y: f64| place(&[id], Some(x), y);
+        let corner = |points: [(f64, f64); 4]| {
+            let vertex = |(x, y): (f64, f64)| serde_json::json!({ "x": x, "y": y });
+            let none = serde_json::json!({ "x": 0.0, "y": 0.0 });
+            serde_json::json!({
+                "closed": true,
+                "vertices": points.map(vertex),
+                "inTangents": [none, none, none, none],
+                "outTangents": [none, none, none, none],
+            })
+        };
+        let white = serde_json::json!({ "type": "solid", "color": { "r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0, "space": "srgb" } });
+        let line = serde_json::json!({
+            "closed": false,
+            "vertices": [{ "x": 0.0, "y": 0.0 }, { "x": 200.0, "y": 0.0 }],
+            "inTangents": [{ "x": 0.0, "y": 0.0 }, { "x": 0.0, "y": 0.0 }],
+            "outTangents": [{ "x": 0.0, "y": 0.0 }, { "x": 0.0, "y": 0.0 }],
+        });
+        let mut edits: Vec<serde_json::Value> = vec![
+            serde_json::json!({ "edit": "createObject", "kind": "rect", "name": "Card" }),
+            serde_json::json!({ "edit": "createObject", "kind": "rect", "name": "Clip" }),
+            serde_json::json!({ "edit": "createObject", "kind": "rect", "name": "Content" }),
+            serde_json::json!({ "edit": "createObject", "kind": "rect", "name": "Plate" }),
+            serde_json::json!({ "edit": "createObject", "kind": "rect", "name": "Source" }),
+            serde_json::json!({ "edit": "createObject", "kind": "group", "name": "Stack" }),
+            serde_json::json!({ "edit": "createShape", "name": "Trimmed", "path": line }),
+            serde_json::json!({ "edit": "createShape", "name": "Whole", "path": line }),
+        ];
+        // rect-1 at x 0, rect-2 at 400, rect-3 at 500, rect-4 at 800, rect-5 at 900.
+        for (id, x) in [
+            ("rect-1", 0.0),
+            ("rect-2", 400.0),
+            ("rect-3", 500.0),
+            ("rect-4", 800.0),
+            ("rect-5", 900.0),
+        ] {
+            edits.extend(at(id, x, 0.0));
+        }
+        // A created group is centred in the canvas like any object, and its
+        // children are placed from it, so put it at the origin.
+        edits.extend(at("group-1", 0.0, 0.0));
+        edits.extend(place(&["shape-1"], None, 300.0));
+        edits.extend(place(&["shape-2"], None, 400.0));
+        edits.extend([
+            // A mask over the left half of the 200 x 120 card.
+            serde_json::json!({ "edit": "setObjectMasks", "objectId": "rect-1", "masks": [{
+                "path": corner([(0.0, 0.0), (100.0, 0.0), (100.0, 120.0), (0.0, 120.0)]),
+                "mode": "add", "feather": 0.0, "expansion": 0.0, "opacity": 1.0, "inverted": false }] }),
+            // A clip group: rect-2 clips rect-3.
+            serde_json::json!({ "edit": "setGroupChildren", "groupId": "group-1", "childIds": ["rect-2", "rect-3"] }),
+            serde_json::json!({ "edit": "setClipChild", "groupId": "group-1", "clipChildId": "rect-2" }),
+            // An alpha matte: rect-5 lets rect-4 through where they overlap.
+            serde_json::json!({ "edit": "setTrackMatte", "objectId": "rect-4", "trackMatte": { "sourceId": "rect-5", "mode": "alpha" } }),
+        ]);
+        // Two 10 px white strokes along the same 200 px line; one trimmed to 0-50.
+        for id in ["shape-1", "shape-2"] {
+            edits
+                .push(serde_json::json!({ "edit": "setPaint", "objectIds": [id], "slot": "fill" }));
+            edits.push(serde_json::json!({ "edit": "setPaint", "objectIds": [id], "slot": "stroke", "paint": white }));
+            edits
+                .push(serde_json::json!({ "edit": "setStroke", "objectIds": [id], "width": 10.0 }));
+        }
+        edits.push(serde_json::json!({ "edit": "setTrim", "objectId": "shape-1", "start": 0.0, "end": 50.0 }));
+
+        let edits: Vec<SceneEdit> = serde_json::from_value(serde_json::Value::Array(edits))
+            .expect("the wire JSON is a batch of scene edits");
+        let mut scene = document(Vec::new());
+        apply_edits(&mut scene, &edits, &EditContext::default()).expect("the batch applies");
+
+        let prepared = PreparedScene::prepare(
+            scene,
+            &HashSet::new(),
+            &AssetBytes::new(),
+            &MaterialSupport::fixed_function(),
+        )
+        .expect("the authored scene prepares");
+        let frame = prepared.frame(OutputTransform::Srgb);
+        let alpha = |x: usize, y: usize| frame.pixels[(y * frame.width as usize + x) * 4 + 3];
+        // The mask keeps the card's left half.
+        assert_eq!([alpha(50, 60), alpha(150, 60)], [255, 0], "mask");
+        // The clip child clips its sibling and is never drawn: only the
+        // overlap of x 500..600 is lit, not the clip's own 400..500 or the
+        // content's 600..700.
+        assert_eq!(
+            [alpha(450, 60), alpha(550, 60), alpha(650, 60)],
+            [0, 255, 0],
+            "clip group"
+        );
+        // The matte source lets the plate through where they overlap, and is
+        // never drawn where it stands alone.
+        assert_eq!(
+            [alpha(850, 60), alpha(950, 60), alpha(1050, 60)],
+            [0, 255, 0],
+            "track matte"
+        );
+        // The trimmed stroke lights half what the untrimmed one does.
+        let lit = |y: usize| (0..400).filter(|&x| alpha(x, y) >= 128).count();
+        let (trimmed, whole) = (lit(300), lit(400));
+        assert!((190..=210).contains(&whole), "the whole stroke lit {whole}");
+        assert!(
+            (95..=105).contains(&trimmed),
+            "the trimmed stroke lit {trimmed} of {whole}"
+        );
+        assert!(
+            alpha(50, 300) >= 128 && alpha(150, 300) == 0,
+            "trim keeps 0 to 50"
+        );
+    }
 }
