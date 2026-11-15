@@ -118,6 +118,28 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-15 — Jev and Laya run on 5.12 and 5.10 (Claude)
+
+**Resume here.** Jev and Laya are reinstalled outside the repo in `D:\Project KK\ai-tools\` (README.txt there:
+`typesafe-sdk-0.7.0`, `jev_runner.mjs`, `laya-venv` with `laya==0.4.28`); the checkpoint is
+`convaiinnovations/laya-multilingual`, `max_len=8192`, no truncation on either row. Answers are in
+`docs/evidence/5.12/jev-laya-acceptance.json` and `docs/evidence/5.10/jev-laya-acceptance.json`. Laya answered
+0.89 or more to every yes/no question on both rows (uncalibrated, second opinion only). **5.12:** Jev
+agrees the row is met (0.89); nothing found. **5.10:** Jev found the weakest point as an unexecuted clause
+(`done_when_met` 0.61) and hand verification confirms it: the done-when says the launcher and `gx-engine-host`
+give a co-located engine the same folder as `--package-dir`, and no check in the gate runs either. The host
+was executed afterwards (see the 5.10 evidence); the launcher was not. The row stays done; whether to add a
+durable check is the user's call (open). Not re-run: the row tests themselves.
+
+**Found on the way, not changed.** (1) `target/debug/gx-engine-host.exe` was a stale 16 Oct binary; the gate does
+not rebuild it. Rebuilt with `cargo build -p gx-engine-host`. (2) Every worker that uses the default recovery
+journal refuses to start on this machine: `%APPDATA%\GrapiX\GrapiX\data\render-engine\recovery.json` is a schema 1
+journal from 3 Oct (it holds `demo-scene` and `shell-demo`), and the worker supports 3
+(`recovery journal schema 1 is unsupported`). `gx-engine-host` and `npm run shells` pass that default path, so
+the dev engine will not start until the user moves or deletes it. It was not touched (it is the user's file).
+Also: `taskkill`, `tasklist` and PowerShell process queries hang in this session; the Windows-MCP Process tool
+worked, and the one test worker started on port 4177 was stopped by its PID.
+
 ## 2026-11-15 — 5.10 done: the Editor publishes by the engine's declared route (Claude)
 
 **Resume here.** Next: 3.21 (GPU frame budget; the per-layer bounding-box dispatch in `composite()` is the

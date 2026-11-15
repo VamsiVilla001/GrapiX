@@ -94,12 +94,46 @@ M5 survived on the first run. The "ahead" case also left revision 1 unnamed, so
 the check refused it for the wrong reason. The case now keeps revision 1 named
 by the cue, so Program ahead is the only fault, and M5 fails it.
 
+## Jev and Laya (run after the row was done)
+
+Run on 15 Nov 2026, after both were reinstalled with the user's approval. The
+same typed questions went to both: Jev `jev-1.14.0` (the numbers below are its
+confidences, not versions) and `laya-multilingual` 0.4.28 at `max_len=8192`
+(2155 state tokens, `truncated: false`). The state was the done-when as the plan
+words it, this README in full and the gate facts. Both answers, with the
+questions, are in `jev-laya-acceptance.json`. These answers are about the
+record: the tests were not re-run for the review (the gate at `245859d` ran
+them).
+
+| Question | Jev | Laya |
+| --- | --- | --- |
+| `done_when_met` | 0.89 | 0.97 |
+| `evidence_names_execution` | 0.99 | 0.98 |
+| `silent_substitution_risk` | 0.39 | 0.98 |
+| `weakest` | `platform_gap` | `vague_record` |
+| `unrun_is_named` | 0.67 | 0.97 |
+| `mutations_can_fail` | 0.76 | 0.98 |
+| `after_kill_both_revisions` | 0.92 | 0.99 |
+| `edit_does_not_inhibit` | 0.89 | 0.99 |
+| `check_still_refuses_bad` | 0.94 | 0.99 |
+
+Read by hand against this README. On the three clauses specific to this row
+(the forced kill, the edit that does not inhibit Program, and the check that
+still refuses) both say yes, and Jev is at 0.89 or above. Laya answers 0.97 or
+more to every yes/no question, including `silent_substitution_risk` (0.98)
+beside `done_when_met` (0.97), which contradict each other, and its `weakest`
+answer `vague_record` is wrong for a record that names tests, commands and
+counts: it is uncalibrated, so it is a second opinion and never a vote. Jev's
+`platform_gap` is the T0 skip this README already names (below T0 the
+real-worker checks skip by name; the done-when names no platform). No clause
+without an executed check was found. The row is unchanged.
+
 ## Not in this row
 
-- **Jev and Laya were not run.** Their environments were gone from this machine
-  after the scratchpad reset (no `laya` Python package, no installed
-  `@typesafe-ai/sdk`), and reinstalling them is a download the user has not
-  approved in this session. The acceptance rests on the execution above.
+- **Jev and Laya were not run when the row was built.** Their environments were
+  gone from this machine. They were reinstalled with the user's approval on 15
+  Nov 2026 and run afterwards; see "Jev and Laya (run after the row was done)"
+  below. The acceptance rests on the execution above.
 - **The engine keeps every published revision prepared in memory.** That is
   older than this row and unchanged: only the journal is bounded.
 - **Taking revision 2 while revision 1 is on Program** uses the existing

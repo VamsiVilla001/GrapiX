@@ -1,0 +1,318 @@
+{
+  "row": "5.10",
+  "jev": {
+    "model": "jev-1.14.0"
+  },
+  "laya": {
+    "model": "convaiinnovations/laya-multilingual",
+    "package": "laya 0.4.28",
+    "max_len": 8192,
+    "load_s": 29.7,
+    "input_tokens": 30167,
+    "output_tokens": 0,
+    "state_tokens": 3278,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": [],
+    "predict_s": 37.22
+  },
+  "state": {
+    "row": "5.10 Editor publishes by the engine's declared route: by path when co-located, chunked over a LAN (added 8 Nov 2026, user decision, split from `5.8`; reworded 8 Nov 2026, user decision: the Editor cannot read the control-plane capability exchange, because R6 bars a control client and 5.7 answers the control port only for Playout, so it reads the same declaration from the engine on its asset plane)",
+    "done_when": "The Editor's publish (`cmd_publish` → `gx_editor::publish::publish_document` → `gx_asset_plane::publish_as_package`) learns the engine's declared locality only from the engine itself. It sends a closed `{locality:{}}` read to the asset-plane address it publishes to, and the engine answers from the same field it declares as `EngineCapability.locality`. The Editor holds no control-plane client (R6) and names no `Locality` (R9). The publish always writes one verified package, named by content hash and never by user text, into its package folder: `GX_EDITOR_PACKAGE_DIR` if set, else `platform::package_exchange_root()`. The launcher and `gx-engine-host` give a co-located engine that same folder as `--package-dir`. The package is published through `gx_asset_plane::publish_package`: co-located by path with 0 asset bytes, over a LAN chunked with only the missing bytes. It is removed after the reply. A LAN-declared engine reads no package path, and `gx-render-worker` refuses `--lan --package-dir`. Nothing about the directory goes on the wire or into `EngineCapability`. A conformance suite runs against two real workers (one with `--package-dir D`, one with `--lan`) and both mocks. It shows each peer's asset-plane answer equal to the `EngineCapability.locality` read over the control plane. It publishes the Inter lower third from an Editor `AssetStore` through the functions `cmd_publish` calls, with folder D, to each worker: `LocalPath` with 0 bytes and the package inside D, and `ChunkedUpload` with exactly the font's bytes. Both publications are Published with the document's content hash, D is empty afterwards, and the harness takes each with its pinned hash: Taken on the T0 workstation, a named skip below T0. The suite also shows each of these refused by name as `PublishRefused`, never `Unreachable`: a folder outside D, a co-located worker without `--package-dir` (`PackageDirectoryNotConfigured`, no fallback), and a path offered to a LAN-declared engine that holds a directory. An asset with no content hash is refused before any socket opens. Mutations of the declared value, of the peer's answer and of the server rule each fail a check. `npm run check` passes with check:boundaries clean.",
+    "evidence_record": "# 5.10 — the Editor publishes by the engine's declared route\n\n**Done-when (reworded 8 Nov 2026, user decision).** The Editor's publish learns\nthe engine's declared locality only from the engine itself, with a closed\n`{locality:{}}` read on the asset-plane address it publishes to, answered from\nthe same field as `EngineCapability.locality`. The Editor holds no control-plane\nclient (R6) and names no `Locality` (R9). The publish always writes one verified\npackage, named by content hash, into its package folder, and publishes it\nthrough `gx_asset_plane::publish_package`: co-located by path with 0 asset\nbytes, over a LAN chunked with only the missing bytes. The package is removed\nafter the reply. Conformance against real workers and both mocks shows each\npeer's asset-plane answer equal to its capability, publishes the Inter lower\nthird to each route, takes both with their pinned hashes on T0, and shows each\nnamed refusal. Mutations each fail a check. `npm run check` passes.\n\n## Design\n\n`design-synthesis.json` and `design-jev-laya.json` in this directory. User\ndecisions (8 Nov 2026): the Editor reads locality through an asset-plane read; a\nco-located engine without `--package-dir` is a named refusal with no fallback;\nconformance does the take.\n\n## What was built\n\n- **Asset plane.** The closed request `{\"locality\":{}}` and its reply\n  (`LocalityReply`); `AssetPublishPeer::locality` with no default, so no peer\n  declares by omission; `declared_locality`; `publish_as_package`,\n  `DocumentPublication`, `DocumentPublishError`; `AssetHandoff` serialises. A\n  LAN-declared engine reads no path even if it holds a package directory.\n- **Peers.** The worker engine and the mock return the field their capability\n  declares; the conformance recording peer delegates. `gx-render-worker` refuses\n  `--lan` together with `--package-dir` (usage error, exit 2).\n- **Contracts.** `platform::package_exchange_root()` (`<cache root>/packages`).\n- **`gx_editor::publish`** (new): `package_sources`, `publish_document`,\n  `Published`, `PublishFailure`. No `Locality` appears in it. Only the caller's\n  own clone is pinned to the revision a package needs; the workspace document is\n  untouched. The hash the engine issues is compared with the hash of what was\n  packaged: a mismatch is a Protocol failure that says not to take that revision.\n- **Editor shell.** `cmd_publish` goes through `package_sources` and\n  `publish_with_sources`; `PublishResult` gains `handoff` and `transferredBytes`;\n  `EditorError::WritePackage`; the package folder is `GX_EDITOR_PACKAGE_DIR` or the\n  platform exchange root. The old `publish`, `publish_with_assets` and\n  `scene_asset_bytes` are removed. Its own cache read failures are `AssetCache`.\n- **Web.** The result and the log show the route and bytes.\n- **Launchers.** `tools/launch-shells.mjs` creates `target/dev-packages`, starts\n  the worker with it as `--package-dir` and tells the Editor\n  `GX_EDITOR_PACKAGE_DIR`. `gx-engine-host` gives a worker it spawns the same\n  folder.\n- **Conformance.** `conformance/src/editor_publish.rs`, against three real\n  workers (`--package-dir D`, `--lan`, and co-located with none), plus the\n  locality agreement on both mocks.\n- **Boundaries.** Two new synthetic cases: a `Locality::Lan` arm in the Editor's\n  publish, and a control-plane client in the shell's manifest, are each refused.\n\n## Executed\n\n| Check | Result |\n| --- | --- |\n| `cargo test -p gx-asset-plane --lib` | 109 passed, includes the locality read, the closed forms, the LAN rule, both routes of `publish_as_package`, unique package names, a missing source, an unreachable engine, a pre-5.10 engine |\n| `cargo test -p gx-editor --lib publish` | 9 passed |\n| `cargo test -p gx-editor-shell --test publish` | 6 passed against real workers: by path (revisions 1 then 2, folder empty), unreachable, font by path, the same scene chunked to `--lan` (the font's bytes, then 0), no `--package-dir` (named, with the Editor's folder), a folder the engine was not started with (named) |\n| `node --test tools/tests/check-boundaries.test.mjs` | 21 passed |\n| `npm run typecheck:web` | clean |\n| `npm run conformance` | 583 passed, 0 failed, 9 skipped; the 5.10 checks below all PASS on this T0 workstation |\n| Gate | cargo fmt --check and clippy -D warnings exit 0; npm run check exit 0 (46 Node, 412 Editor, 837 Rust / 0 failed / 26 ignored, conformance 583/0/9) |\n\nConformance, plane \"asset\", real workers:\n\n1. the asset-plane locality equals the capability's on the worker started with a\n   package directory, with `--lan`, and with none (three checks), and on the\n   co-located and LAN mocks (two);\n2. the Editor publishes the Inter lower third by path (0 asset bytes) to the\n   co-located engine and chunked (exactly the font's bytes) to the LAN engine;\n3. both are the document's content hash, revision 1, and leave the folder empty;\n4. the co-located publication is taken with its pinned hash, and the LAN one is\n   (Taken on T0; a named skip below T0);\n5. publishing again issues revision 2 by the same route;\n6. a folder the engine was not started with is `PackagePathOutsideDirectory`;\n7. a co-located engine with no package directory is\n   `PackageDirectoryNotConfigured`, with no fallback and nothing written;\n8. a LAN-declared worker engine holding a directory still refuses a forced path;\n9. an asset with no content hash is refused before any socket opens;\n10. an engine nothing listens for is unreachable, not refused, and writes no\n    package;\n11. `--lan` with `--package-dir` exits 2 and names `--package-dir`.\n\n## Mutations\n\nOne exact replacement each, run alone, files restored byte-identical (compared\nbyte for byte). Conformance totals are from `npm run conformance`.\n\n| # | Mutation | Failing |\n| --- | --- | --- |\n| M1 | the publisher ignores the declared locality and always sends chunked | 4 checks (by path expected, republish, outside folder, no package directory) |\n| M2 | the publisher ignores it and always sends by path | 2 checks (the LAN route, the folder and hashes) |\n| M3 | the worker answers the opposite locality on the asset plane | 19 checks, including all three agreement checks and the 5.8 suite |\n| M4 | the LAN mock answers co-located | the LAN mock agreement check |\n| M5 | the server reads a path for a LAN-declared engine that holds a directory | the LAN-holding-a-directory check |\n| M6 | the package is not removed after the reply | 3 checks (the empty folder, and two that read it) |\n| M7 | the Editor accepts a revision for other content | `a_revision_for_other_content_is_a_protocol_failure_that_says_not_to_take_it` |\n| M8 | the locality read accepts an argument | `the_locality_read_takes_no_argument_and_no_company` |\n| M9 | the package is written outside the folder | 3 checks |\n\n## Supersedes and changes\n\n- **5.8 evidence** (`docs/evidence/5.8/README.md`) said the Editor never builds a\n  package. From 5.10 it always does, and removes it.\n- **5.9.** Its done-when \"the Editor's publish sends every asset through\n  preflight and the 5.3 transfer\" now holds over a LAN. Co-located, the path\n  handoff replaces it. A co-located engine started by hand without\n  `--package-dir` now refuses every Editor publish by name; 5.9's chunked publish\n  succeeded. A running dev pair must be restarted once through the updated\n  launcher.\n- An asset with no content hash, which the 5.9 publish skipped, is now refused\n  `PackageAssetNotPackaged` before any connection.\n\n## Not in this row\n\n- **Live check in the Tauri window was not run.** The shell's Rust path, the web\n  bundle (`npm run build:web`, `npm run typecheck:web`) and the conformance suite\n  were. What remains to see by eye: the result line in the window showing the\n  route and bytes, and the dev pair through `npm run shells`.\n- **Orphans.** A crash between writing and removing a package, or a removal that\n  fails, leaves one inert, uniquely named `.gpxpkg` that is never offered again.\n  There is no sweeper.\n- **Residual staleness** between the locality read and the publish, which are two\n  connections. An engine restarted from co-located to LAN in that window is\n  refused by name; one restarted the other way is published chunked, with\n  verified, identical content.\n- **The asset plane is unauthenticated** and binds loopback. The locality read is\n  readable by any local process. Phase 14 must authenticate the plane, this read\n  included, before it is exposed beyond loopback (invariant 55).\n- **Folder agreement** holds by construction only when the host and the Editor\n  share one user's cache root. Under different accounts the result is a named\n  refusal, never a mis-route.\n- **The \"LAN\" worker** is a loopback worker started with `--lan`, not a second\n  machine.\n- **Jev and Laya were not run** on this row's acceptance; their environments are\n  not installed on this machine (see 5.12). The design was decided with both on\n  8 Nov (`design-jev-laya.json`).\n",
+    "repository_gate": "Repository gate npm run check exit 0 at commit d1592f1 (46 Node, 412 Editor, 837 Rust tests 0 failed 26 ignored, conformance 583 passed 0 failed 9 skipped), cargo fmt --check and clippy -D warnings clean.",
+    "note": "Rust tests and conformance checks named in the evidence run in the repository gate. The author of this evidence is the same agent that built the row."
+  },
+  "questions": {
+    "done_when_met": {
+      "type": "noul",
+      "instructions": "Does the recorded evidence show that this row's done-when was met by execution (tests run, commands run, figures recorded), not merely claimed?",
+      "criteria": {
+        "true": "Every clause of the done-when has executed evidence.",
+        "false": "A clause is unmet, only claimed, or the evidence does not name what was run."
+      }
+    },
+    "evidence_names_execution": {
+      "type": "noul",
+      "instructions": "Does the evidence name specific executed checks (test names, commands, counts, measured figures) rather than describing the feature?",
+      "criteria": {
+        "true": "Specific executed checks are named.",
+        "false": "The evidence describes the feature without naming what was run."
+      }
+    },
+    "silent_substitution_risk": {
+      "type": "noul",
+      "instructions": "Is there a risk that this row ships a silent substitution: something the done-when asks for that is approximated, skipped or deferred without being refused by name?",
+      "criteria": {
+        "true": "Yes, a clause appears approximated, skipped or deferred silently.",
+        "false": "No, every gap is named or refused."
+      }
+    },
+    "weakest": {
+      "type": "choice",
+      "instructions": "What is the weakest point of this row's evidence?",
+      "criteria": {
+        "none": "No weak point: evidence covers every clause with executed checks.",
+        "unexecuted_clause": "A done-when clause has no executed check.",
+        "platform_gap": "A platform the done-when names (e.g. macOS, hardware) was not run.",
+        "stale": "Later changes may have invalidated the recorded evidence.",
+        "vague_record": "The record is too vague to tell what was run."
+      }
+    },
+    "unrun_is_named": {
+      "type": "noul",
+      "instructions": "Does the evidence name every check or step it did not run, rather than leaving a gap unmentioned?",
+      "criteria": {
+        "true": "Everything not run is named in the evidence.",
+        "false": "Some gap is not mentioned in the evidence."
+      }
+    },
+    "mutations_can_fail": {
+      "type": "noul",
+      "instructions": "Do the recorded mutations show that the named checks can fail: each mutation was run alone, made at least one named check fail, and the file was restored identical?",
+      "criteria": {
+        "true": "Each recorded mutation names the check or test that failed and says the file was restored.",
+        "false": "A mutation survived, was not run alone, or does not name what failed."
+      }
+    },
+    "both_routes_taken_on_t0": {
+      "type": "noul",
+      "instructions": "Does the evidence show by execution that the Inter lower third was published by path with 0 asset bytes and chunked with exactly the missing bytes, and that each publication was taken with its pinned hash?",
+      "criteria": {
+        "true": "A named conformance check shows both routes, the byte counts, and both taken with pinned hashes.",
+        "false": "Some part is claimed but not shown by a named executed check."
+      }
+    },
+    "named_refusals_shown": {
+      "type": "noul",
+      "instructions": "Does the evidence show by execution each of the refusals the done-when lists (a folder outside D, a co-located worker without a package directory, a path offered to a LAN-declared engine holding a directory, an asset with no content hash)?",
+      "criteria": {
+        "true": "Each listed refusal has a named executed check.",
+        "false": "At least one listed refusal has no named executed check."
+      }
+    },
+    "live_check_required": {
+      "type": "choice",
+      "instructions": "Does the done-when require a live check in the Tauri window?",
+      "criteria": {
+        "required": "The done-when names a live check in the Tauri window.",
+        "not_required": "The done-when does not name a live check in the Tauri window."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "done_when_met",
+      "type": "noul",
+      "instructions": "Does the recorded evidence show that this row's done-when was met by execution (tests run, commands run, figures recorded), not merely claimed?",
+      "laya": 0.9487,
+      "jev": 0.61,
+      "agree": false,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9487,
+        "confidence": 0.9487,
+        "answer_confidence": 0.9487,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.61
+      }
+    },
+    {
+      "question": "evidence_names_execution",
+      "type": "noul",
+      "instructions": "Does the evidence name specific executed checks (test names, commands, counts, measured figures) rather than describing the feature?",
+      "laya": 0.8866,
+      "jev": 0.99,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.8866,
+        "confidence": 0.8866,
+        "answer_confidence": 0.8866,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.99
+      }
+    },
+    {
+      "question": "silent_substitution_risk",
+      "type": "noul",
+      "instructions": "Is there a risk that this row ships a silent substitution: something the done-when asks for that is approximated, skipped or deferred without being refused by name?",
+      "laya": 0.9619,
+      "jev": 0.5,
+      "agree": false,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9619,
+        "confidence": 0.9619,
+        "answer_confidence": 0.9619,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.5
+      }
+    },
+    {
+      "question": "weakest",
+      "type": "choice",
+      "instructions": "What is the weakest point of this row's evidence?",
+      "laya": "vague_record",
+      "jev": "unexecuted_clause",
+      "agree": false,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "vague_record",
+        "probabilities": {
+          "none": 0.0399,
+          "unexecuted_clause": 0.048,
+          "platform_gap": 0.0198,
+          "stale": 0.0563,
+          "vague_record": 0.8359
+        },
+        "confidence": 0.5875,
+        "answer_confidence": 0.8359,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "unexecuted_clause",
+        "confidence": 0.69,
+        "probabilities": {
+          "none": 0.06,
+          "unexecuted_clause": 0.75,
+          "platform_gap": 0.16,
+          "stale": 0.03,
+          "vague_record": 0
+        }
+      }
+    },
+    {
+      "question": "unrun_is_named",
+      "type": "noul",
+      "instructions": "Does the evidence name every check or step it did not run, rather than leaving a gap unmentioned?",
+      "laya": 0.9069,
+      "jev": 0.71,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9069,
+        "confidence": 0.9069,
+        "answer_confidence": 0.9069,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.71
+      }
+    },
+    {
+      "question": "mutations_can_fail",
+      "type": "noul",
+      "instructions": "Do the recorded mutations show that the named checks can fail: each mutation was run alone, made at least one named check fail, and the file was restored identical?",
+      "laya": 0.9081,
+      "jev": 0.95,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9081,
+        "confidence": 0.9081,
+        "answer_confidence": 0.9081,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.95
+      }
+    },
+    {
+      "question": "both_routes_taken_on_t0",
+      "type": "noul",
+      "instructions": "Does the evidence show by execution that the Inter lower third was published by path with 0 asset bytes and chunked with exactly the missing bytes, and that each publication was taken with its pinned hash?",
+      "laya": 0.8867,
+      "jev": 0.86,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.8867,
+        "confidence": 0.8867,
+        "answer_confidence": 0.8867,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.86
+      }
+    },
+    {
+      "question": "named_refusals_shown",
+      "type": "noul",
+      "instructions": "Does the evidence show by execution each of the refusals the done-when lists (a folder outside D, a co-located worker without a package directory, a path offered to a LAN-declared engine holding a directory, an asset with no content hash)?",
+      "laya": 0.9178,
+      "jev": 0.93,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9178,
+        "confidence": 0.9178,
+        "answer_confidence": 0.9178,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.93
+      }
+    },
+    {
+      "question": "live_check_required",
+      "type": "choice",
+      "instructions": "Does the done-when require a live check in the Tauri window?",
+      "laya": "not_required",
+      "jev": "not_required",
+      "agree": true,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "not_required",
+        "probabilities": {
+          "required": 0.3267,
+          "not_required": 0.6733
+        },
+        "confidence": 0.0885,
+        "answer_confidence": 0.6733,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "not_required",
+        "confidence": 1,
+        "probabilities": {
+          "required": 0,
+          "not_required": 1
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,309 @@
+{
+  "row": "5.12",
+  "jev": {
+    "model": "jev-1.14.0"
+  },
+  "laya": {
+    "model": "convaiinnovations/laya-multilingual",
+    "package": "laya 0.4.28",
+    "max_len": 8192,
+    "load_s": 29.7,
+    "input_tokens": 20088,
+    "output_tokens": 0,
+    "state_tokens": 2155,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": [],
+    "predict_s": 26.99
+  },
+  "state": {
+    "row": "5.12 Re-publish a take while an older revision of it is on Program or cued (added 8 Nov 2026, user decision, found while verifying `5.11`: the journal check refused the publish and inhibited output)",
+    "done_when": "The recovery journal records a prepared scene for every revision Program or the cue names as well as each take's latest published revision, and its check accepts Program or the cue on any journaled revision of a published take, so publishing is additive on air as everywhere else (invariant 30). A test on a real worker publishes a take, takes it, and publishes an edit of it while revision 1 is on Program: the edit is Published as revision 2, Program keeps emitting revision 1 and is never inhibited, and revision 2 can be cued and taken. After a forced kill and restart both revisions are restored and Program is revision 1. `npm run check` passes.",
+    "evidence_record": "# 5.12 — publishing is additive on air\n\n**Done-when.** The recovery journal records a prepared scene for every revision\nProgram or the cue names, as well as each take's latest. Its check accepts\nProgram or the cue on any journaled revision of a published take. A test on a\nreal worker publishes a take, takes it, and publishes an edit while revision 1\nis on Program: the edit is Published as revision 2, Program keeps revision 1\nand is never inhibited, and revision 2 can be cued and taken. After a forced\nkill and restart both revisions are restored and Program is revision 1.\n`npm run check` passes.\n\n## The defect (found while verifying 5.11, 8 Nov 2026)\n\n`Engine::publish` moved `published[take]` to revision N+1 and then wrote the\njournal. The journal recorded a prepared scene only for each take's latest\nrevision and refused Program or the cue on any other. So a take published\nagain while revision N was on Program was refused with `PreparationRefused {\nTransportFailed \"recovery journal write failed: ... program state T/N is not a\npublished revision\" }` and output was inhibited. Row 5.10 makes the Editor\npublish on every save, so editing a live graphic would have blacked out\nProgram.\n\n## What changed\n\n- **One rule for what the journal keeps.** `Engine::recovery_state` records\n  each published take's latest revision and any earlier revision Program or\n  the cue names. The rule is `RecoveryState::names`, which `validate` uses as\n  well (invariant 27).\n- **The check accepts what it can rebuild and nothing else.** An earlier\n  revision is valid only if it is older than the published one, named by\n  Program or the cue, and held by a record. A record of a take that is not\n  published, of a revision newer than the published one, or of an earlier\n  revision nobody names is refused. Program or the cue on an earlier revision\n  the journal does not hold is refused. The pin check stays on the latest\n  revision.\n- **Restore judges a take's revisions as one.** Every record's assets are read\n  back and re-hashed first. A take with a bad asset in any journaled revision is\n  dropped whole and once: one `DroppedScene` at its latest revision (the floor),\n  Program and the cue cleared if they name it. Before this change a take with\n  two records would have been dropped twice.\n- Schema stays 3: the shape is unchanged, the list has more entries.\n- Runbook: the journal table says which revisions `preparedScenes` holds.\n\n## Executed\n\n| Check | Result |\n| --- | --- |\n| `cargo test -p gx-render-worker --lib restore_tests` | 14 passed (4 new for 5.12) |\n| `a_take_published_again_while_its_earlier_revision_is_on_program_is_accepted` | Published as revision 2, Program still revision 1, output not inhibited, both journaled, the edit cued, a stale cue refused, both restored with Program on revision 1 and the cue on revision 2 after a restart |\n| `an_earlier_revision_is_journaled_only_while_program_or_the_cue_names_it` | revision 1 leaves the journal once nothing names it |\n| `the_journal_check_accepts_only_what_it_can_rebuild` | an unreferenced earlier revision, a missing record and Program ahead of the published revision are each refused |\n| `a_take_with_a_bad_asset_in_any_journaled_revision_is_dropped_whole_and_once` | the damaged revision is either 1 or 2: one drop at revision 2, Program cleared, the other take untouched, publishing again gives revision 3 |\n| `npm run conformance`, real worker `gx-render-worker` | 5 new checks in plane \"recovery\", all PASS on this T0 machine (below) |\n| Gate | cargo fmt --check and clippy -D warnings exit 0; npm run check exit 0 (44 Node, 412 Editor, 817 Rust / 0 failed / 26 ignored, conformance 567/0/9) |\n\nThe conformance checks (`conformance/src/asset_restart.rs`, `republish_on_air`),\non the worker that is killed and restarted by the 5.11 suite:\n\n1. a take is published and taken;\n2. an edit is published while it is on Program: Published as revision 2, and\n   `Status.program` is still revision 1;\n3. the journal, read independently, holds revisions 1 and 2, and revision 2 is\n   cued;\n4. after a forced kill (TerminateProcess) the epoch has advanced by one, nothing\n   was dropped, `Status.program` is still revision 1 and the journal still holds\n   both;\n5. revision 2 is taken and Program moves to it.\n\nOn an engine below T0 the checks skip by name: it cannot put revision 1 on\nProgram.\n\n**Not observable over the wire.** \"Never inhibited\" is proved in process\n(`output_inhibited()` is false after the publish). On these free-running\nworkers `live_allowed` is false either way, so the wire cannot show it. The\nwire check is that the publish is Published, where it was refused before, and\nthat Program stays on revision 1.\n\n## Mutations\n\nEach is one exact replacement, run alone against `restore_tests`, with the file\nrestored byte-identical afterwards (compared byte for byte).\n\n| # | Mutation | Failing tests |\n| --- | --- | --- |\n| M1 | the journal keeps only the latest revision | the accepted-republish, the forgets-when-unnamed, the check, and the dropped-whole tests |\n| M2 | the check refuses any earlier revision | the same four |\n| M3 | the check accepts an unnamed earlier revision | `the_journal_check_accepts_only_what_it_can_rebuild` |\n| M4 | Program on an earlier revision needs no journaled record | `the_journal_check_accepts_only_what_it_can_rebuild` |\n| M5 | Program may run ahead of the published revision | `the_journal_check_accepts_only_what_it_can_rebuild` |\n| M6 | restore reads back only the first record of a take | `a_take_with_a_bad_asset_in_any_journaled_revision_is_dropped_whole_and_once` |\n| M7 | a drop floors the wrong revision | the dropped-whole test and `a_dropped_take_is_refused_with_its_reason_and_continues_its_revisions_when_republished` |\n\nM5 survived on the first run. The \"ahead\" case also left revision 1 unnamed, so\nthe check refused it for the wrong reason. The case now keeps revision 1 named\nby the cue, so Program ahead is the only fault, and M5 fails it.\n\n## Not in this row\n\n- **Jev and Laya were not run.** Their environments were gone from this machine\n  after the scratchpad reset (no `laya` Python package, no installed\n  `@typesafe-ai/sdk`), and reinstalling them is a download the user has not\n  approved in this session. The acceptance rests on the execution above.\n- **The engine keeps every published revision prepared in memory.** That is\n  older than this row and unchanged: only the journal is bounded.\n- **Taking revision 2 while revision 1 is on Program** uses the existing\n  cue-then-take path. Stale references for new cues and takes are still\n  refused: only the latest published revision can be cued or taken.\n",
+    "repository_gate": "Repository gate npm run check exit 0 at commit 245859d (46 Node, 412 Editor, Rust 0 failed, conformance 0 failed), cargo fmt --check and clippy -D warnings clean.",
+    "note": "Rust tests and conformance checks named in the evidence run in the repository gate. The author of this evidence is the same agent that built the row."
+  },
+  "questions": {
+    "done_when_met": {
+      "type": "noul",
+      "instructions": "Does the recorded evidence show that this row's done-when was met by execution (tests run, commands run, figures recorded), not merely claimed?",
+      "criteria": {
+        "true": "Every clause of the done-when has executed evidence.",
+        "false": "A clause is unmet, only claimed, or the evidence does not name what was run."
+      }
+    },
+    "evidence_names_execution": {
+      "type": "noul",
+      "instructions": "Does the evidence name specific executed checks (test names, commands, counts, measured figures) rather than describing the feature?",
+      "criteria": {
+        "true": "Specific executed checks are named.",
+        "false": "The evidence describes the feature without naming what was run."
+      }
+    },
+    "silent_substitution_risk": {
+      "type": "noul",
+      "instructions": "Is there a risk that this row ships a silent substitution: something the done-when asks for that is approximated, skipped or deferred without being refused by name?",
+      "criteria": {
+        "true": "Yes, a clause appears approximated, skipped or deferred silently.",
+        "false": "No, every gap is named or refused."
+      }
+    },
+    "weakest": {
+      "type": "choice",
+      "instructions": "What is the weakest point of this row's evidence?",
+      "criteria": {
+        "none": "No weak point: evidence covers every clause with executed checks.",
+        "unexecuted_clause": "A done-when clause has no executed check.",
+        "platform_gap": "A platform the done-when names (e.g. macOS, hardware) was not run.",
+        "stale": "Later changes may have invalidated the recorded evidence.",
+        "vague_record": "The record is too vague to tell what was run."
+      }
+    },
+    "unrun_is_named": {
+      "type": "noul",
+      "instructions": "Does the evidence name every check or step it did not run, rather than leaving a gap unmentioned?",
+      "criteria": {
+        "true": "Everything not run is named in the evidence.",
+        "false": "Some gap is not mentioned in the evidence."
+      }
+    },
+    "mutations_can_fail": {
+      "type": "noul",
+      "instructions": "Do the recorded mutations show that the named checks can fail: each mutation was run alone, made at least one named check fail, and the file was restored identical?",
+      "criteria": {
+        "true": "Each recorded mutation names the check or test that failed and says the file was restored.",
+        "false": "A mutation survived, was not run alone, or does not name what failed."
+      }
+    },
+    "after_kill_both_revisions": {
+      "type": "noul",
+      "instructions": "Does the evidence show by execution, on a real worker, that after a forced kill and restart both revisions are restored and Program is revision 1?",
+      "criteria": {
+        "true": "A named check or test kills a real worker and shows both revisions restored with Program on revision 1.",
+        "false": "The evidence only claims it, or uses a mock, or does not name the check."
+      }
+    },
+    "edit_does_not_inhibit": {
+      "type": "noul",
+      "instructions": "Does the evidence show by execution that publishing an edit while revision 1 is on Program yields revision 2, Program keeps emitting revision 1 and is never inhibited, and revision 2 can be cued and taken?",
+      "criteria": {
+        "true": "A named check shows all of: revision 2 published, Program unchanged and not inhibited, revision 2 cued and taken.",
+        "false": "Some part of that is not shown by a named executed check."
+      }
+    },
+    "check_still_refuses_bad": {
+      "type": "noul",
+      "instructions": "The done-when says the journal's check accepts Program or the cue on any journaled revision of a published take 'and nothing else'. Does the evidence show by execution that other states are still refused?",
+      "criteria": {
+        "true": "Named tests or mutations show unnamed or ahead-of-published revisions are still refused.",
+        "false": "Only the accepting side is shown."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "done_when_met",
+      "type": "noul",
+      "instructions": "Does the recorded evidence show that this row's done-when was met by execution (tests run, commands run, figures recorded), not merely claimed?",
+      "laya": 0.9737,
+      "jev": 0.89,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9737,
+        "confidence": 0.9737,
+        "answer_confidence": 0.9737,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.89
+      }
+    },
+    {
+      "question": "evidence_names_execution",
+      "type": "noul",
+      "instructions": "Does the evidence name specific executed checks (test names, commands, counts, measured figures) rather than describing the feature?",
+      "laya": 0.981,
+      "jev": 0.99,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.981,
+        "confidence": 0.981,
+        "answer_confidence": 0.981,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.99
+      }
+    },
+    {
+      "question": "silent_substitution_risk",
+      "type": "noul",
+      "instructions": "Is there a risk that this row ships a silent substitution: something the done-when asks for that is approximated, skipped or deferred without being refused by name?",
+      "laya": 0.9802,
+      "jev": 0.39,
+      "agree": false,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9802,
+        "confidence": 0.9802,
+        "answer_confidence": 0.9802,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.39
+      }
+    },
+    {
+      "question": "weakest",
+      "type": "choice",
+      "instructions": "What is the weakest point of this row's evidence?",
+      "laya": "vague_record",
+      "jev": "platform_gap",
+      "agree": false,
+      "laya_detail": {
+        "type": "choice",
+        "choice": "vague_record",
+        "probabilities": {
+          "none": 0.0966,
+          "unexecuted_clause": 0.1541,
+          "platform_gap": 0.0603,
+          "stale": 0.111,
+          "vague_record": 0.578
+        },
+        "confidence": 0.227,
+        "answer_confidence": 0.578,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "choice",
+        "choice": "platform_gap",
+        "confidence": 0.36,
+        "probabilities": {
+          "none": 0.29,
+          "unexecuted_clause": 0.17,
+          "platform_gap": 0.49,
+          "stale": 0.04,
+          "vague_record": 0.01
+        }
+      }
+    },
+    {
+      "question": "unrun_is_named",
+      "type": "noul",
+      "instructions": "Does the evidence name every check or step it did not run, rather than leaving a gap unmentioned?",
+      "laya": 0.9718,
+      "jev": 0.67,
+      "agree": false,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9718,
+        "confidence": 0.9718,
+        "answer_confidence": 0.9718,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.67
+      }
+    },
+    {
+      "question": "mutations_can_fail",
+      "type": "noul",
+      "instructions": "Do the recorded mutations show that the named checks can fail: each mutation was run alone, made at least one named check fail, and the file was restored identical?",
+      "laya": 0.9798,
+      "jev": 0.76,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9798,
+        "confidence": 0.9798,
+        "answer_confidence": 0.9798,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.76
+      }
+    },
+    {
+      "question": "after_kill_both_revisions",
+      "type": "noul",
+      "instructions": "Does the evidence show by execution, on a real worker, that after a forced kill and restart both revisions are restored and Program is revision 1?",
+      "laya": 0.9925,
+      "jev": 0.92,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9925,
+        "confidence": 0.9925,
+        "answer_confidence": 0.9925,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.92
+      }
+    },
+    {
+      "question": "edit_does_not_inhibit",
+      "type": "noul",
+      "instructions": "Does the evidence show by execution that publishing an edit while revision 1 is on Program yields revision 2, Program keeps emitting revision 1 and is never inhibited, and revision 2 can be cued and taken?",
+      "laya": 0.9919,
+      "jev": 0.89,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9919,
+        "confidence": 0.9919,
+        "answer_confidence": 0.9919,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.89
+      }
+    },
+    {
+      "question": "check_still_refuses_bad",
+      "type": "noul",
+      "instructions": "The done-when says the journal's check accepts Program or the cue on any journaled revision of a published take 'and nothing else'. Does the evidence show by execution that other states are still refused?",
+      "laya": 0.9937,
+      "jev": 0.94,
+      "agree": true,
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9937,
+        "confidence": 0.9937,
+        "answer_confidence": 0.9937,
+        "action": {
+          "act_probability": 1.0
+        }
+      },
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.94
+      }
+    }
+  ]
+}

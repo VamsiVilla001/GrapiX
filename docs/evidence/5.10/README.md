@@ -135,6 +135,65 @@ byte for byte). Conformance totals are from `npm run conformance`.
   refusal, never a mis-route.
 - **The "LAN" worker** is a loopback worker started with `--lan`, not a second
   machine.
-- **Jev and Laya were not run** on this row's acceptance; their environments are
-  not installed on this machine (see 5.12). The design was decided with both on
-  8 Nov (`design-jev-laya.json`).
+- **The launcher's wiring was not executed.** See "Jev and Laya" below: no check
+  in the gate runs `tools/launch-shells.mjs`. The host's wiring was executed
+  after the row was done; the launcher's was not.
+- **Jev and Laya were not run when the row was built**; their environments were
+  not installed on this machine. They were reinstalled and run on 15 Nov 2026
+  (below). The design was decided with both on 8 Nov (`design-jev-laya.json`).
+
+## Jev and Laya (run after the row was done)
+
+Run on 15 Nov 2026, after both were reinstalled with the user's approval. The
+same typed questions went to both: Jev `jev-1.14.0` (the numbers below are its
+confidences, not versions) and `laya-multilingual` 0.4.28 at `max_len=8192`
+(3278 state tokens, `truncated: false`). The state was the done-when as the plan
+words it, this README in full and the gate facts. Both answers, with the
+questions, are in `jev-laya-acceptance.json`. These answers are about the
+record: the tests were not re-run for the review (the gate at `d1592f1` ran
+them).
+
+| Question | Jev | Laya |
+| --- | --- | --- |
+| `done_when_met` | 0.61 | 0.95 |
+| `evidence_names_execution` | 0.99 | 0.89 |
+| `silent_substitution_risk` | 0.50 | 0.96 |
+| `weakest` | `unexecuted_clause` | `vague_record` |
+| `unrun_is_named` | 0.71 | 0.91 |
+| `mutations_can_fail` | 0.95 | 0.91 |
+| `both_routes_taken_on_t0` | 0.86 | 0.89 |
+| `named_refusals_shown` | 0.93 | 0.92 |
+| `live_check_required` | `not_required` | `not_required` |
+
+Laya answers 0.89 or more to every yes/no question, including
+`silent_substitution_risk` (0.96) beside `done_when_met` (0.95), so it carries no
+signal here. Jev is the model that separated the row's clauses: it is high on
+the routes, the refusals and the mutations, and low on `done_when_met` (0.61),
+at the threshold on `silent_substitution_risk` (0.50), and names the weakest
+point as an unexecuted clause. Both agree the done-when does not require the
+live check in the Tauri window.
+
+**Hand verification of Jev's `unexecuted_clause`.** Jev is right. The done-when
+says "The launcher and `gx-engine-host` give a co-located engine that same
+folder as `--package-dir`." This README's "What was built" states that wiring,
+but no check under "Executed" runs it: no test in the gate starts
+`tools/launch-shells.mjs` or `gx-engine-host` (the host's own tests, `ensure.rs`
+and `lib.rs`, do not mention a package folder), and "Not in this row" named only
+the Tauri live check. The clause was complete in code and unexecuted.
+
+Executed afterwards, on 15 Nov 2026 (this is not part of the gate):
+
+- `target/debug/gx-engine-host.exe` was a stale binary from 16 Oct 2026, before
+  the host change (the gate does not rebuild it). It was rebuilt with
+  `cargo build -p gx-engine-host`.
+- The rebuilt host was run with `GX_EDITOR_PACKAGE_DIR` naming a folder that did
+  not exist and a logging wrapper in place of the worker. The host created the
+  folder and passed the worker `--package-dir <that folder>` (after `--port` and
+  its own `--recovery-journal`); the worker started and listened, and was
+  stopped afterwards.
+- The launcher was not executed: `npm run shells` starts both Tauri windows, and
+  no check runs it.
+
+The row stays done. Whether the launcher and host wiring needs a durable check
+in the gate (and whether `npm run shells` should be run by eye) is the user's
+decision.
