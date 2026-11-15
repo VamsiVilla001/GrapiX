@@ -1,0 +1,199 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual 0.4.28 max_len 8192",
+  "laya_usage": {
+    "input_tokens": 2593,
+    "output_tokens": 0,
+    "state_tokens": 433,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row_3_19_done_when": "Masks (add, subtract, intersect, difference; feather; expansion), clip groups, alpha and luma mattes and trim start/end/offset render on the GPU and match CPU references; the scene contract's trim values are honoured (they are silently ignored today); an unsupported combination refuses by name.",
+    "user_decisions_15_nov": [
+      "A track matte names its source by explicit id: ObjectBase.trackMatte {sourceId, mode}, modes alpha, alphaInverted, luma, lumaInverted (After Effects 2023 and later, where any layer can be the matte and several layers can share one).",
+      "Mattes composite per frame: the compositor renders the matte source into its own tile target each frame and the consumer layer's sample is multiplied by the matte there.",
+      "Clip groups (done): a clip child is composited per frame into a matte target at its own opacity (not its effective opacity, which would apply a group's opacity twice), whether visible or not, and is never drawn itself; nested clips multiply."
+    ],
+    "facts": [
+      "Every drawing object is drawn once at prepare into its own layer texture; per frame the GPU warps and blends it. Groups paint nothing; effective transform, opacity and visibility multiply down from ancestors.",
+      "Colour is composited premultiplied in the project working space (sRGB-encoded or linear sRGB); the Rec.709 luma weights are 0.2126, 0.7152, 0.0722.",
+      "In After Effects, choosing a layer as a track matte turns that layer's video switch off, and the matte still works; the user may switch the video back on to see the layer as well. GrapiX objects have one visible flag and no separate video switch.",
+      "The matte-target machinery from clip groups already composites a matte layer each frame (its own opacity, its own clip if it sits in a clip group) and multiplies a consumer by the target's alpha."
+    ]
+  },
+  "questions": {
+    "source_drawn": {
+      "type": "choice",
+      "instructions": "Is a track matte source also drawn itself?",
+      "criteria": {
+        "never_drawn": "Never: being named as a track matte source makes it a matte only, as a clip child is (After Effects turns its video off when it becomes a matte), whatever its visible flag.",
+        "drawn_when_visible": "Drawn when its visible flag is set, and a matte either way, as After Effects allows by switching the video back on."
+      }
+    },
+    "source_opacity": {
+      "type": "choice",
+      "instructions": "Which opacity does the matte source's matte carry?",
+      "criteria": {
+        "own_opacity": "Its own opacity, as clip children do: a group's opacity already reaches the consumers in that group.",
+        "effective_opacity": "Its effective opacity (own times ancestors'), so fading the source's group fades the matte."
+      }
+    },
+    "luma": {
+      "type": "choice",
+      "instructions": "How is a luma matte value computed?",
+      "criteria": {
+        "rec709_premultiplied": "Rec.709 weights over the matte target's premultiplied working-space colour (transparent counts as black), clamped to 0..1; inverted luma is one minus that.",
+        "rec709_straight_times_alpha": "Rec.709 weights over the straight (unpremultiplied) colour, then multiplied by alpha.",
+        "linear_always": "Convert to linear light first whatever the working space, then Rec.709 weights."
+      }
+    },
+    "refusals": {
+      "type": "choice",
+      "instructions": "Which track mattes should refuse by name (Refusal::TrackMatteInvalid)?",
+      "criteria": {
+        "strict_set": "An object naming itself; a source not in the scene; a source or consumer that draws no pixels (group, layer, camera, light, marker, mesh, paint); a source that has a track matte of its own; a clip child that has a track matte. Everything else, including a source inside a clip group, a consumer inside a clip group and several consumers sharing a source, renders.",
+        "permissive": "Only a missing source or an object naming itself refuses; chains of mattes and mattes on groups render too."
+      }
+    },
+    "needs_user": {
+      "type": "noul",
+      "instructions": "Must the user approve these before implementation?",
+      "criteria": {
+        "true": "Yes, a recorded user decision would change or a new product choice is being made.",
+        "false": "No, these follow from the recorded decisions."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "source_drawn",
+      "jev": "drawn_when_visible",
+      "laya": "never_drawn",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "drawn_when_visible",
+        "confidence": 0.08,
+        "probabilities": {
+          "never_drawn": 0.46,
+          "drawn_when_visible": 0.54
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "never_drawn",
+        "probabilities": {
+          "never_drawn": 0.9065,
+          "drawn_when_visible": 0.0935
+        },
+        "confidence": 0.5521,
+        "answer_confidence": 0.9065,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "source_opacity",
+      "jev": "own_opacity",
+      "laya": "effective_opacity",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "own_opacity",
+        "confidence": 0.32,
+        "probabilities": {
+          "own_opacity": 0.66,
+          "effective_opacity": 0.34
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "effective_opacity",
+        "probabilities": {
+          "own_opacity": 0.4618,
+          "effective_opacity": 0.5382
+        },
+        "confidence": 0.0042,
+        "answer_confidence": 0.5382,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "luma",
+      "jev": "rec709_premultiplied",
+      "laya": "rec709_straight_times_alpha",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "rec709_premultiplied",
+        "confidence": 0.88,
+        "probabilities": {
+          "rec709_premultiplied": 0.92,
+          "rec709_straight_times_alpha": 0.06,
+          "linear_always": 0.02
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "rec709_straight_times_alpha",
+        "probabilities": {
+          "rec709_premultiplied": 0.2851,
+          "rec709_straight_times_alpha": 0.3669,
+          "linear_always": 0.348
+        },
+        "confidence": 0.0051,
+        "answer_confidence": 0.3669,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "refusals",
+      "jev": "strict_set",
+      "laya": "permissive",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "strict_set",
+        "confidence": 0.88,
+        "probabilities": {
+          "strict_set": 0.94,
+          "permissive": 0.06
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "permissive",
+        "probabilities": {
+          "strict_set": 0.0862,
+          "permissive": 0.9138
+        },
+        "confidence": 0.5764,
+        "answer_confidence": 0.9138,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "needs_user",
+      "jev": 0.37,
+      "laya": 0.9253,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.37
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9253,
+        "confidence": 0.9253,
+        "answer_confidence": 0.9253,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

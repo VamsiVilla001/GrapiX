@@ -1674,3 +1674,270 @@ fn gpu_engine_clips_groups_by_a_moving_matte_within_one_code_of_the_cpu_referenc
         );
     }
 }
+
+/// 3.19's track-matte fixture: a moving ellipse with a white-to-black
+/// gradient at 90%, in a group at 50%, is the shared source of four bands,
+/// one per mode, and of a consumer inside a clip group; a second source sits
+/// inside a clip group of its own.
+fn matte_fixture() -> SceneDocument {
+    use gx_contracts::animation::{KeyframeChannel, SceneKeyframe};
+    use gx_contracts::color::GradientStop;
+    use gx_contracts::scene::{EllipseObject, GroupObject, TrackMatte, TrackMatteMode};
+    let solid = |r: f64, g: f64, b: f64| ColorValue::Solid {
+        color: Rgba::srgb(r, g, b, 1.0),
+    };
+    let rect = |id: &str, x: f64, y: f64, w: f64, h: f64, fill: ColorValue| {
+        let mut base = ObjectBase::new(id, id);
+        (base.x, base.y, base.width, base.height) = (x, y, w, h);
+        base.fill = Some(fill);
+        SceneObject::Rect(RectObject { base, radius: 0.0 })
+    };
+    let matted = |mut object: SceneObject, source: &str, mode| {
+        object.base_mut().track_matte = Some(TrackMatte {
+            source_id: source.into(),
+            mode,
+        });
+        object
+    };
+    let group = |id: &str, children: &[&str], clip: Option<&str>| {
+        SceneObject::Group(GroupObject {
+            base: ObjectBase::new(id, id),
+            child_ids: children.iter().map(|c| (*c).into()).collect(),
+            clip_child_id: clip.map(Into::into),
+        })
+    };
+    let mut doc = lower_third();
+    doc.objects.clear();
+    doc.assets.clear();
+    doc.fonts.clear();
+    doc.timeline.channels.clear();
+    let mut holder = group("holder", &["spot"], None);
+    holder.base_mut().opacity = 0.5;
+    doc.objects.push(holder);
+    let mut base = ObjectBase::new("spot", "spot");
+    (base.x, base.y, base.width, base.height) = (200.0, 50.0, 300.0, 700.0);
+    base.opacity = 0.9;
+    base.fill = Some(ColorValue::LinearGradient {
+        angle: 0.0,
+        start_x: 0.0,
+        start_y: 0.0,
+        end_x: 1.0,
+        end_y: 0.0,
+        stops: vec![
+            GradientStop {
+                position: 0.0,
+                color: Rgba::srgb(1.0, 1.0, 1.0, 1.0),
+            },
+            GradientStop {
+                position: 1.0,
+                color: Rgba::srgb(0.0, 0.0, 0.0, 1.0),
+            },
+        ],
+        spread: Default::default(),
+        coordinate_mode: Default::default(),
+    });
+    doc.objects
+        .push(SceneObject::Ellipse(EllipseObject { base }));
+    let modes = [
+        TrackMatteMode::Alpha,
+        TrackMatteMode::AlphaInverted,
+        TrackMatteMode::Luma,
+        TrackMatteMode::LumaInverted,
+    ];
+    for (k, mode) in modes.into_iter().enumerate() {
+        let band = rect(
+            &format!("band-{k}"),
+            0.0,
+            60.0 + 120.0 * k as f64,
+            800.0,
+            60.0,
+            solid(0.2, 0.6, 0.9),
+        );
+        doc.objects.push(matted(band, "spot", mode));
+    }
+    // A consumer inside a clip group: clip times matte.
+    doc.objects.push(group(
+        "framed",
+        &["frame-clip", "framed-consumer"],
+        Some("frame-clip"),
+    ));
+    doc.objects.push(rect(
+        "frame-clip",
+        300.0,
+        600.0,
+        100.0,
+        100.0,
+        solid(1.0, 1.0, 1.0),
+    ));
+    doc.objects.push(matted(
+        rect(
+            "framed-consumer",
+            200.0,
+            600.0,
+            300.0,
+            100.0,
+            solid(0.9, 0.3, 0.2),
+        ),
+        "spot",
+        TrackMatteMode::Alpha,
+    ));
+    // A source inside a clip group: its matte is clipped too.
+    doc.objects
+        .push(group("src-box", &["box-clip", "box-src"], Some("box-clip")));
+    doc.objects.push(rect(
+        "box-clip",
+        1000.0,
+        100.0,
+        100.0,
+        200.0,
+        solid(1.0, 1.0, 1.0),
+    ));
+    doc.objects.push(rect(
+        "box-src",
+        1000.0,
+        100.0,
+        200.0,
+        100.0,
+        solid(1.0, 1.0, 1.0),
+    ));
+    doc.objects.push(matted(
+        rect(
+            "box-consumer",
+            1000.0,
+            100.0,
+            300.0,
+            200.0,
+            solid(0.3, 0.9, 0.4),
+        ),
+        "box-src",
+        TrackMatteMode::Alpha,
+    ));
+    // The source moves 60 px right over ten frames.
+    doc.timeline.channels.push(KeyframeChannel {
+        object_id: "spot".into(),
+        property: "x".into(),
+        keys: vec![
+            SceneKeyframe {
+                frame: 0,
+                value: 200.0,
+                easing: Default::default(),
+                bezier: None,
+            },
+            SceneKeyframe {
+                frame: 10,
+                value: 260.0,
+                easing: Default::default(),
+                bezier: None,
+            },
+        ],
+    });
+    doc
+}
+
+#[test]
+#[ignore = "requires hardware GPU; explicit 3.19 matte gate"]
+fn gpu_engine_draws_track_mattes_in_every_mode_within_one_code_of_the_cpu_reference() {
+    for space in [WorkingColorSpace::Srgb, WorkingColorSpace::LinearSrgb] {
+        let (mut engine, ticks) = hardware_engine();
+        let mut doc = matte_fixture();
+        doc.working_color_space = space;
+        let pin = publish(&mut engine, doc);
+        let sources = engine.gpu_source_trace(&pin.0, pin.1).unwrap().to_vec();
+        assert_eq!(sources.len(), 10, "every drawing object, mattes too");
+        assert!(matches!(take(&mut engine, &pin), EngineReply::Taken(_)));
+        let mut seen = Vec::new();
+        let mut strict = Vec::new();
+        // Frames 0, 5 and 10: the source at rest, half way and arrived.
+        for tick in [1, 6, 11] {
+            ticks.store(tick, Ordering::Relaxed);
+            let program = engine.emit_frame_settled().unwrap().frame;
+            let scene_frame = engine.program_frame_trace().unwrap().scene_frame;
+            let cpu = engine.prepared_scene(&pin.0, pin.1).unwrap();
+            let reference = cpu.frame_at(scene_frame, OutputTransform::Rec709).unwrap();
+            let checked = scene_frame == 0 || scene_frame == 10;
+            let preview_reference =
+                checked.then(|| cpu.frame_at(scene_frame, OutputTransform::Srgb).unwrap());
+            assert_within_one_code(
+                &program,
+                &reference,
+                &format!("{space:?} frame {scene_frame}"),
+            );
+            if let Some(preview_reference) = preview_reference {
+                let preview = engine.take_preview().unwrap();
+                assert_within_one_code(
+                    &preview,
+                    &preview_reference,
+                    &format!("{space:?} Preview frame {scene_frame}"),
+                );
+                strict.push((scene_frame, strict_44(&preview, &preview_reference)));
+                seen.push((scene_frame, preview));
+            }
+        }
+        let at = |frame: u64| {
+            &seen
+                .iter()
+                .find(|(f, _)| *f == frame)
+                .expect("frame seen")
+                .1
+        };
+        let alpha =
+            |f: &Frame, x: u32, y: u32| i32::from(f.pixels[((y * f.width + x) * 4 + 3) as usize]);
+        let near = |actual: i32, expected: f64, what: &str| {
+            let expected = (expected * 255.0).round() as i32;
+            assert!(
+                (actual - expected).abs() <= 1,
+                "{space:?}: {what}: alpha {actual}, expected {expected}"
+            );
+        };
+        let first = at(0);
+        // The source's own 90%, not 50% x 90%.
+        near(alpha(first, 350, 90), 0.9, "alpha band inside the source");
+        near(alpha(first, 700, 90), 0.0, "alpha band outside the source");
+        near(
+            alpha(first, 350, 210),
+            0.1,
+            "inverted alpha band inside the source",
+        );
+        near(
+            alpha(first, 700, 210),
+            1.0,
+            "inverted alpha band outside the source",
+        );
+        near(alpha(first, 700, 330), 0.0, "luma band outside the source");
+        near(
+            alpha(first, 700, 450),
+            1.0,
+            "inverted luma band outside the source",
+        );
+        assert!(
+            alpha(first, 250, 330) > alpha(first, 450, 330) + 40,
+            "{space:?}: the luma band follows the white-to-black gradient"
+        );
+        assert!(
+            alpha(first, 250, 450) + 40 < alpha(first, 450, 450),
+            "{space:?}: the inverted luma band is its complement"
+        );
+        near(
+            alpha(first, 350, 650),
+            0.9,
+            "a matted consumer inside its clip",
+        );
+        near(
+            alpha(first, 250, 650),
+            0.0,
+            "a matted consumer outside its clip",
+        );
+        near(alpha(first, 1050, 150), 1.0, "a source inside its clip");
+        near(alpha(first, 1150, 150), 0.0, "a source clipped away");
+        near(alpha(first, 1050, 250), 0.0, "no source, no consumer");
+        // Ten frames on, the source has moved 60 px right.
+        near(alpha(at(10), 505, 210), 0.1, "the source has arrived");
+        near(alpha(first, 505, 210), 1.0, "the source was not there yet");
+        println!("3.19 {space:?} matte: strict 4.4 reading (frame, (differing share, worst)): {strict:?}");
+        evidence(
+            &format!("mattes-{}.json", space.as_str()),
+            &json!({"strict44": strict.iter().map(|(f, (share, worst))| json!({"frame": f, "differingShare": share, "worst": worst})).collect::<Vec<_>>(),
+                    "sources": sources, "adapter": engine.gpu_description()}),
+        );
+    }
+}

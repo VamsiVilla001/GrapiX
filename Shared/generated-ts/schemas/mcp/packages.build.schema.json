@@ -674,6 +674,17 @@
             }
           ]
         },
+        "trackMatte": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrackMatte"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The layer's track matte (3.19, user decisions 15 Nov 2026): another\nobject, named by id, whose alpha or luma shapes this layer each frame,\nat the source's own opacity. The source is a matte only and is never\ndrawn itself, whatever its visible flag; several layers may share it."
+        },
         "up": {
           "anyOf": [
             {
@@ -1631,6 +1642,17 @@
           "format": "double",
           "type": "number"
         },
+        "trackMatte": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrackMatte"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The layer's track matte (3.19, user decisions 15 Nov 2026): another\nobject, named by id, whose alpha or luma shapes this layer each frame,\nat the source's own opacity. The source is a matte only and is never\ndrawn itself, whatever its visible flag; several layers may share it."
+        },
         "visible": {
           "default": true,
           "type": "boolean"
@@ -2365,6 +2387,17 @@
           "format": "double",
           "type": "number"
         },
+        "trackMatte": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrackMatte"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The layer's track matte (3.19, user decisions 15 Nov 2026): another\nobject, named by id, whose alpha or luma shapes this layer each frame,\nat the source's own opacity. The source is a matte only and is never\ndrawn itself, whatever its visible flag; several layers may share it."
+        },
         "visible": {
           "default": true,
           "type": "boolean"
@@ -2627,6 +2660,17 @@
           "default": 0.0,
           "format": "double",
           "type": "number"
+        },
+        "trackMatte": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrackMatte"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The layer's track matte (3.19, user decisions 15 Nov 2026): another\nobject, named by id, whose alpha or luma shapes this layer each frame,\nat the source's own opacity. The source is a matte only and is never\ndrawn itself, whatever its visible flag; several layers may share it."
         },
         "visible": {
           "default": true,
@@ -2942,6 +2986,17 @@
           "default": 0.0,
           "format": "double",
           "type": "number"
+        },
+        "trackMatte": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrackMatte"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The layer's track matte (3.19, user decisions 15 Nov 2026): another\nobject, named by id, whose alpha or luma shapes this layer each frame,\nat the source's own opacity. The source is a matte only and is never\ndrawn itself, whatever its visible flag; several layers may share it."
         },
         "visible": {
           "default": true,
@@ -3343,6 +3398,17 @@
           ],
           "description": "Point the light aims at, for directional and spot lights."
         },
+        "trackMatte": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrackMatte"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The layer's track matte (3.19, user decisions 15 Nov 2026): another\nobject, named by id, whose alpha or luma shapes this layer each frame,\nat the source's own opacity. The source is a matte only and is never\ndrawn itself, whatever its visible flag; several layers may share it."
+        },
         "visible": {
           "default": true,
           "type": "boolean"
@@ -3548,6 +3614,17 @@
           "default": 0.0,
           "format": "double",
           "type": "number"
+        },
+        "trackMatte": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrackMatte"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The layer's track matte (3.19, user decisions 15 Nov 2026): another\nobject, named by id, whose alpha or luma shapes this layer each frame,\nat the source's own opacity. The source is a matte only and is never\ndrawn itself, whatever its visible flag; several layers may share it."
         },
         "visible": {
           "default": true,
@@ -3781,6 +3858,17 @@
           "default": 0.0,
           "format": "double",
           "type": "number"
+        },
+        "trackMatte": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrackMatte"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The layer's track matte (3.19, user decisions 15 Nov 2026): another\nobject, named by id, whose alpha or luma shapes this layer each frame,\nat the source's own opacity. The source is a matte only and is never\ndrawn itself, whatever its visible flag; several layers may share it."
         },
         "visible": {
           "default": true,
@@ -4292,6 +4380,17 @@
             "null"
           ]
         },
+        "trackMatte": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrackMatte"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The layer's track matte (3.19, user decisions 15 Nov 2026): another\nobject, named by id, whose alpha or luma shapes this layer each frame,\nat the source's own opacity. The source is a matte only and is never\ndrawn itself, whatever its visible flag; several layers may share it."
+        },
         "visible": {
           "default": true,
           "type": "boolean"
@@ -4527,6 +4626,17 @@
             "$ref": "#/$defs/PaintStroke"
           },
           "type": "array"
+        },
+        "trackMatte": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrackMatte"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The layer's track matte (3.19, user decisions 15 Nov 2026): another\nobject, named by id, whose alpha or luma shapes this layer each frame,\nat the source's own opacity. The source is a matte only and is never\ndrawn itself, whatever its visible flag; several layers may share it."
         },
         "visible": {
           "default": true,
@@ -4906,6 +5016,17 @@
           "default": 0.0,
           "format": "double",
           "type": "number"
+        },
+        "trackMatte": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrackMatte"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The layer's track matte (3.19, user decisions 15 Nov 2026): another\nobject, named by id, whose alpha or luma shapes this layer each frame,\nat the source's own opacity. The source is a matte only and is never\ndrawn itself, whatever its visible flag; several layers may share it."
         },
         "visible": {
           "default": true,
@@ -5558,6 +5679,17 @@
           "format": "double",
           "type": "number"
         },
+        "trackMatte": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrackMatte"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The layer's track matte (3.19, user decisions 15 Nov 2026): another\nobject, named by id, whose alpha or luma shapes this layer each frame,\nat the source's own opacity. The source is a matte only and is never\ndrawn itself, whatever its visible flag; several layers may share it."
+        },
         "trimEnd": {
           "format": "double",
           "type": [
@@ -6076,6 +6208,17 @@
           "format": "double",
           "type": "number"
         },
+        "trackMatte": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrackMatte"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The layer's track matte (3.19, user decisions 15 Nov 2026): another\nobject, named by id, whose alpha or luma shapes this layer each frame,\nat the source's own opacity. The source is a matte only and is never\ndrawn itself, whatever its visible flag; several layers may share it."
+        },
         "verticalAlign": {
           "$ref": "#/$defs/VerticalAlign",
           "default": "top"
@@ -6301,6 +6444,47 @@
     "TokenRef": {
       "description": "A token reference in a preset: `{duration.base}`, `{easing.brand-in}`.\n\nA preset that hardcodes a value instead of referencing a token is a bug for\nthe same reason a component hardcoding a hex colour is (G.6.1). Kept as a\nstring with a checked shape rather than a free string, so a malformed\nreference is caught at parse, not at render.",
       "type": "string"
+    },
+    "TrackMatte": {
+      "description": "A layer's track matte (3.19): its source by explicit id, and the mode.",
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/TrackMatteMode",
+          "default": "alpha"
+        },
+        "sourceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sourceId"
+      ],
+      "type": "object"
+    },
+    "TrackMatteMode": {
+      "description": "What a track matte takes from its source (3.19), After Effects' modes.\nLuma is the Rec.709 weighting of the source's premultiplied working-space\ncolour, so a transparent source counts as black; values clamp to 0..1.",
+      "oneOf": [
+        {
+          "const": "alpha",
+          "description": "The layer shows where the source is opaque.",
+          "type": "string"
+        },
+        {
+          "const": "alphaInverted",
+          "description": "The layer shows where the source is transparent.",
+          "type": "string"
+        },
+        {
+          "const": "luma",
+          "description": "The layer shows where the source is bright.",
+          "type": "string"
+        },
+        {
+          "const": "lumaInverted",
+          "description": "The layer shows where the source is dark.",
+          "type": "string"
+        }
+      ]
     },
     "Vec2": {
       "description": "A 2D point in scene coordinates.",

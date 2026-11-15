@@ -293,6 +293,13 @@ pub struct ObjectBase {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub masks: Option<Vec<Mask>>,
+    /// The layer's track matte (3.19, user decisions 15 Nov 2026): another
+    /// object, named by id, whose alpha or luma shapes this layer each frame,
+    /// at the source's own opacity. The source is a matte only and is never
+    /// drawn itself, whatever its visible flag; several layers may share it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub track_matte: Option<TrackMatte>,
     /// The layer's effect stack (3.22), applied in order to its own pixels
     /// before it is transformed and blended. Read it through
     /// [`ObjectBase::effects`]; absent and empty both mean none.
@@ -368,6 +375,41 @@ impl Default for StrokeStyle {
             dash: Vec::new(),
             dash_offset: 0.0,
         }
+    }
+}
+
+/// What a track matte takes from its source (3.19), After Effects' modes.
+/// Luma is the Rec.709 weighting of the source's premultiplied working-space
+/// colour, so a transparent source counts as black; values clamp to 0..1.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum TrackMatteMode {
+    /// The layer shows where the source is opaque.
+    #[default]
+    Alpha,
+    /// The layer shows where the source is transparent.
+    AlphaInverted,
+    /// The layer shows where the source is bright.
+    Luma,
+    /// The layer shows where the source is dark.
+    LumaInverted,
+}
+
+/// A layer's track matte (3.19): its source by explicit id, and the mode.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackMatte {
+    pub source_id: String,
+    #[serde(default)]
+    pub mode: TrackMatteMode,
+}
+
+impl ObjectBase {
+    /// The layer's track matte, if it has one (3.19).
+    pub fn track_matte(&self) -> Option<&TrackMatte> {
+        self.track_matte.as_ref()
     }
 }
 
@@ -472,6 +514,7 @@ impl ObjectBase {
             material_slots: None,
             blend_mode: None,
             masks: None,
+            track_matte: None,
             effects: None,
         }
     }

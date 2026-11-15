@@ -179,6 +179,7 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
     "imageNotDrawable",
     "maskInvalid",
     "clipGroupInvalid",
+    "trackMatteInvalid",
     "vectorTessellationFailed",
     "unknownOutputAdapter",
     "sceneMaterialUnknown",

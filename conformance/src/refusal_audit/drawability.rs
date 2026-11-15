@@ -326,6 +326,12 @@ fn parity_cases() -> Vec<(&'static str, SceneDocument, Refusal)> {
     stray_clip.objects.push(object(
         serde_json::json!({ "type": "rect", "id": "loose", "name": "loose", "width": 10, "height": 10 }),
     ));
+    // 3.19: a layer whose track matte is itself.
+    let mut self_matte = empty_scene("wire-matte-self");
+    self_matte.objects.push(object(
+        serde_json::json!({ "type": "rect", "id": "mirror", "name": "mirror",
+        "width": 10, "height": 10, "trackMatte": { "sourceId": "mirror", "mode": "luma" } }),
+    ));
     let mut grouped = empty_scene("wire-mask-group");
     grouped.objects.push(object(
         serde_json::json!({ "type": "group", "id": "holder", "name": "holder", "childIds": [],
@@ -339,6 +345,14 @@ fn parity_cases() -> Vec<(&'static str, SceneDocument, Refusal)> {
                 object: "masked".into(),
                 index: 1,
                 detail: "feather 300 is outside 0 to 250".into(),
+            },
+        ),
+        (
+            "a self track matte refuses identically in validator and publication wire",
+            self_matte,
+            Refusal::TrackMatteInvalid {
+                object: "mirror".into(),
+                detail: "an object cannot be its own track matte".into(),
             },
         ),
         (

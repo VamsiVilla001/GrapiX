@@ -152,7 +152,7 @@ impl PreparedScene {
             if object.base().effects().is_empty()
                 && object.base().masks().is_empty()
                 && !matches!(object, SceneObject::Image(_))
-                && !clips.is_clip[index]
+                && !clips.is_matte(index)
             {
                 effect_layers.push(None);
                 continue;
@@ -406,20 +406,25 @@ fn compose(
         effective,
         effect_layers,
     };
-    // 3.19: each clip child's matte this frame, built when first needed.
-    let mut mattes: HashMap<usize, Vec<f32>> = HashMap::new();
+    // 3.19: each clip child's and track matte source's matte this frame,
+    // built when first needed.
+    let mut mattes: HashMap<usize, Vec<crate::colour_pipeline::WorkingRgba>> = HashMap::new();
     for index in PreparedScene::draw_order(document) {
         let object = &document.objects[index];
         let id = object.base().id.as_str();
         let mode = object.base().blend_mode();
         let effects = object.base().effects();
-        // 3.19: a clip child is never drawn itself; it is its group's matte.
-        if clips.is_clip.get(index) == Some(&true) {
+        // 3.19: a clip child or a track matte source is never drawn itself;
+        // it is a matte.
+        if clips.is_matte(index) {
             continue;
         }
-        if let Some(clip) = clips.clip_of.get(index).copied().flatten() {
-            // 3.19: a clipped object is drawn alone, as the GPU samples it,
-            // multiplied by its clip's matte, then blended in its mode.
+        let clip = clips.clip_of.get(index).copied().flatten();
+        let track = clips.track_of.get(index).copied().flatten();
+        if clip.is_some() || track.is_some() {
+            // 3.19: a clipped or matted object is drawn alone, as the GPU
+            // samples it, multiplied by its clip's matte alpha and then by its
+            // track matte's value, then blended in its mode.
             let resolved = &effective[index];
             if !(resolved.visible && resolved.opacity > 0.0) {
                 continue;
@@ -430,9 +435,18 @@ fn compose(
             } else if let Some(object_paths) = by_object.get(id) {
                 VelloCpuRasteriser.rasterise_into(object_paths, &mut layer);
             }
-            let matte = matte(&layers, clips, clip, &mut mattes)?;
-            for (px, a) in layer.pixels_mut().iter_mut().zip(matte) {
-                *px = px.scaled(*a);
+            for &index in clip.iter().chain(track.map(|(source, _)| source).iter()) {
+                matte(&layers, clips, index, &mut mattes)?;
+            }
+            if let Some(clip) = clip {
+                for (px, m) in layer.pixels_mut().iter_mut().zip(&mattes[&clip]) {
+                    *px = px.scaled(m.a);
+                }
+            }
+            if let Some((source, mode)) = track {
+                for (px, m) in layer.pixels_mut().iter_mut().zip(&mattes[&source]) {
+                    *px = px.scaled(crate::clip::track_value(*m, mode));
+                }
             }
             surface.blend_layer(
                 &layer,
@@ -562,15 +576,15 @@ impl LayerPixels<'_> {
     }
 }
 
-/// A clip child's matte (3.19): its alpha warped onto the canvas at its own
-/// opacity, visible or not, times its own clip's matte, as the GPU composites
-/// it into its matte target.
-fn matte<'m>(
+/// A clip child's or track matte source's matte (3.19): its pixels warped onto
+/// the canvas at its own opacity, visible or not, times its own clip's matte
+/// alpha, as the GPU composites it into its matte target.
+fn matte(
     layers: &LayerPixels<'_>,
     clips: &crate::clip::ClipPlan,
     clip: usize,
-    mattes: &'m mut HashMap<usize, Vec<f32>>,
-) -> Result<&'m Vec<f32>, Refusal> {
+    mattes: &mut HashMap<usize, Vec<crate::colour_pipeline::WorkingRgba>>,
+) -> Result<(), Refusal> {
     // Outermost first: each matte multiplies the one around it.
     let mut chain = vec![clip];
     while let Some(outer) = clips.clip_of[*chain.last().expect("non-empty")] {
@@ -587,29 +601,28 @@ fn matte<'m>(
         let mut surface = RasterSurface::transparent(canvas.width, canvas.height);
         let (pixels, w, h, _, _) = layers
             .warped(index)?
-            .expect("a clip child is drawn in its own layer space");
+            .expect("a matte is drawn in its own layer space");
         let object = &layers.document.objects[index];
         let state = crate::compositor::scene::matte_state(
             object.base().anchor,
             &layers.effective[index],
             layers.effect_layers[index]
                 .as_ref()
-                .expect("a clip child has a layer")
+                .expect("a matte has a layer")
                 .source
                 .origin,
             object.base().opacity,
         );
         let rows = layers.rows(index, state)?;
         surface.warp_blend(&pixels, w, h, &rows, state.opacity, BlendMode::Normal, 0);
-        let mut alpha: Vec<f32> = surface.pixels().iter().map(|p| p.a).collect();
         if let Some(outer) = clips.clip_of[index] {
-            for (a, o) in alpha.iter_mut().zip(&mattes[&outer]) {
-                *a *= o;
+            for (p, o) in surface.pixels_mut().iter_mut().zip(&mattes[&outer]) {
+                *p = p.scaled(o.a);
             }
         }
-        mattes.insert(index, alpha);
+        mattes.insert(index, surface.pixels().to_vec());
     }
-    Ok(&mattes[&clip])
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1771,5 +1784,68 @@ mod tests {
         // x 125: inside the nested clip but outside the outer one: nothing.
         // x 200: outside both. The visible nested clip child is not drawn.
         assert_eq!([alpha(125), alpha(200)], [0, 0]);
+    }
+
+    /// 3.19: on the CPU reference, each track matte mode lets through what its
+    /// name says, the source at its own opacity, and the source is never drawn.
+    #[test]
+    fn track_mattes_let_through_alpha_or_luma_and_the_source_is_never_drawn() {
+        use gx_contracts::color::Rgba;
+        use gx_contracts::scene::{TrackMatte, TrackMatteMode};
+        let rect = |id: &str, x: f64, y: f64, w: f64, h: f64, colour: Rgba| {
+            let mut base = ObjectBase::new(id, id);
+            (base.x, base.y, base.width, base.height) = (x, y, w, h);
+            base.fill = Some(ColorValue::Solid { color: colour });
+            SceneObject::Rect(RectObject { base, radius: 0.0 })
+        };
+        // A red source over x 0..100 (Rec.709 luma 0.2126), visible.
+        let mut objects = vec![rect(
+            "source",
+            0.0,
+            0.0,
+            100.0,
+            500.0,
+            Rgba::srgb(1.0, 0.0, 0.0, 1.0),
+        )];
+        let modes = [
+            TrackMatteMode::Alpha,
+            TrackMatteMode::AlphaInverted,
+            TrackMatteMode::Luma,
+            TrackMatteMode::LumaInverted,
+        ];
+        for (k, mode) in modes.into_iter().enumerate() {
+            let mut consumer = rect(
+                &format!("consumer-{k}"),
+                0.0,
+                100.0 * k as f64,
+                200.0,
+                40.0,
+                Rgba::srgb(1.0, 1.0, 1.0, 1.0),
+            );
+            consumer.base_mut().track_matte = Some(TrackMatte {
+                source_id: "source".into(),
+                mode,
+            });
+            objects.push(consumer);
+        }
+        let prepared = PreparedScene::prepare(
+            document(objects),
+            &HashSet::new(),
+            &AssetBytes::new(),
+            &MaterialSupport::fixed_function(),
+        )
+        .expect("the matted scene prepares");
+        let frame = prepared.frame(OutputTransform::Srgb);
+        let alpha = |x: usize, y: usize| frame.pixels[(y * frame.width as usize + x) * 4 + 3];
+        // Inside the source (x 50), then outside it (x 150), per mode.
+        let rows: Vec<[u8; 2]> = (0..4)
+            .map(|k| [alpha(50, 100 * k + 20), alpha(150, 100 * k + 20)])
+            .collect();
+        assert_eq!(rows[0], [255, 0], "alpha");
+        assert_eq!(rows[1], [0, 255], "inverted alpha");
+        assert_eq!(rows[2], [54, 0], "luma 0.2126");
+        assert_eq!(rows[3], [201, 255], "inverted luma 0.7874");
+        // Between the consumers, inside the source: the source draws nothing.
+        assert_eq!(alpha(50, 70), 0, "a matte source is never drawn");
     }
 }

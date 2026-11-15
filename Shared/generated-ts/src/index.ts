@@ -287,6 +287,8 @@ export * from "./TokenMapping.js";
 export * from "./TokenRef.js";
 export * from "./ToolDescriptor.js";
 export * from "./ToolEffect.js";
+export * from "./TrackMatte.js";
+export * from "./TrackMatteMode.js";
 export * from "./TransferState.js";
 export * from "./Undo.js";
 export * from "./UnexpressibleToken.js";

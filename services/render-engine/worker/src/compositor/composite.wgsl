@@ -25,6 +25,10 @@ struct Params {
 // 3.19: the tile's matte target of this layer's clip child, read where
 // params.state.y is set; a 1 x 1 placeholder otherwise.
 @group(0) @binding(4) var clip: texture_2d<f32>;
+// 3.19: the tile's matte target of this layer's track matte source, read by
+// the mode in params.state.z (1 alpha, 2 inverted alpha, 3 luma, 4 inverted
+// luma); a 1 x 1 placeholder otherwise.
+@group(0) @binding(5) var track: texture_2d<f32>;
 
 fn tex_get(p: vec2<i32>) -> vec4<f32> {
     let size = vec2<i32>(textureDimensions(src));
@@ -83,6 +87,18 @@ fn composite(@builtin(global_invocation_id) id: vec3<u32>) {
     // 3.19: a clipped layer's sample is multiplied by its clip's matte alpha.
     if (params.state.y > 0.5) {
         s = s * textureLoad(clip, vec2<i32>(px), 0).a;
+    }
+    let track_mode = u32(params.state.z + 0.5);
+    if (track_mode > 0u) {
+        let m = textureLoad(track, vec2<i32>(px), 0);
+        var v = m.a;
+        if (track_mode >= 3u) {
+            v = clamp(m.r * 0.2126 + m.g * 0.7152 + m.b * 0.0722, 0.0, 1.0);
+        }
+        if (track_mode == 2u || track_mode == 4u) {
+            v = 1.0 - v;
+        }
+        s = s * v;
     }
     let mode = params.key.x;
     // Where the source is exactly zero the backdrop is kept bit for bit, as

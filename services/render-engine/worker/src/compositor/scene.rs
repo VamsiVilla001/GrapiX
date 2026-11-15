@@ -128,7 +128,7 @@ impl GpuScene {
                 plan.pack(instances, &effect_ctx);
                 plan
             });
-            let matte = clips.is_clip[index];
+            let matte = clips.is_matte(index);
             let mut state = if matte {
                 matte_state(
                     object.base().anchor,
@@ -157,6 +157,7 @@ impl GpuScene {
                 state,
                 matte,
                 clip: None,
+                track: None,
             });
             sources.push(SourceTrace {
                 object_id: id.clone(),
@@ -182,6 +183,8 @@ impl GpuScene {
             .collect();
         for (input, layer) in inputs.iter_mut().zip(&layers) {
             input.clip = clips.clip_of[layer.object_index].and_then(|c| layer_of.get(&c).copied());
+            input.track = clips.track_of[layer.object_index]
+                .and_then(|(source, mode)| Some((*layer_of.get(&source)?, mode)));
         }
         let stage = Stage::new(
             doc.canvas.width,

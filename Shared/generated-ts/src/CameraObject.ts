@@ -7,6 +7,7 @@ import type { JsonValue } from "./serde_json/JsonValue";
 import type { Mask } from "./Mask";
 import type { MaterialBinding } from "./MaterialBinding";
 import type { StrokeStyle } from "./StrokeStyle";
+import type { TrackMatte } from "./TrackMatte";
 import type { Vec2 } from "./Vec2";
 import type { Vec3 } from "./Vec3";
 
@@ -102,6 +103,13 @@ blendMode?: BlendMode,
  * mean none. Static: not animatable yet.
  */
 masks?: Array<Mask>,
+/**
+ * The layer's track matte (3.19, user decisions 15 Nov 2026): another
+ * object, named by id, whose alpha or luma shapes this layer each frame,
+ * at the source's own opacity. The source is a matte only and is never
+ * drawn itself, whatever its visible flag; several layers may share it.
+ */
+trackMatte?: TrackMatte,
 /**
  * The layer's effect stack (3.22), applied in order to its own pixels
  * before it is transformed and blended. Read it through

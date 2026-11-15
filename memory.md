@@ -118,6 +118,20 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-15 — 3.19 increment 3: track mattes (Claude, on the user's instruction)
+
+**Resume here.** User decisions (third round; Jev and Laya split on all four: `docs/evidence/3.19/matte-design-jev-laya.json`):
+a track matte source is never drawn, whatever its visible flag; its matte carries its own opacity. Hand verification:
+luma is Rec.709 over premultiplied working-space colour, clamped (Laya's straight-times-alpha is the same value); the
+strict refusal set (matte chains and group mattes refuse by name). `ObjectBase.trackMatte` (`TrackMatte`,
+`TrackMatteMode`), `Refusal::TrackMatteInvalid` (`drawability::track_matte_problem`). `ClipPlan` gains `track_of`,
+`is_source`, `is_matte`; `clip::track_value`/`LUMA` twin the shader. GPU: sources are matte layers like clip children;
+`composite.wgsl` binding 5 with the mode in `params.state.z`; sample x clip alpha x track value. CPU: mattes keep full
+pixels. Verified: CPU four-mode test; GPU engine test (shared moving gradient source in a 50% group, all four modes,
+clip x matte, a clipped source) within one code of the CPU reference on DX12 and Vulkan in both spaces; validator and
+audit. **3.19 stays active.** Next: a static trim GPU test, mutations, Jev and Laya acceptance, then close.
+Gate: fmt, clippy -D warnings and npm run check exit 0 (46 Node, 412 Editor, 865 Rust passed, 0 failed, 36 ignored; conformance 591/0/9); hardware worker suite 189/0/0.
+
 ## 2026-11-15 — 3.19 increment 2: clip groups as per-frame mattes (Claude, on the user's instruction)
 
 **Resume here.** User decisions (second round, Jev and Laya first: `docs/evidence/3.19/clip-design-jev-laya.json`):

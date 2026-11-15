@@ -71,8 +71,8 @@ use gx_contracts::scene::{
     MaskMode, MeshObject, MeshPrimitiveKind, ObjectBase, PaintObject, PaintStroke, RectObject,
     ResolvedObject, SceneCanvas, SceneDocument, SceneObject, SceneTimeline, ShapeObject, SlabBevel,
     SlabProperties, StrokeCap, StrokeJoin, StrokeStyle, TextAlign, TextAutoFit, TextCase,
-    TextDecoration, TextDirection, TextLayout, TextObject, TextOverflow, Vec2, Vec3, VerticalAlign,
-    WritingMode,
+    TextDecoration, TextDirection, TextLayout, TextObject, TextOverflow, TrackMatte,
+    TrackMatteMode, Vec2, Vec3, VerticalAlign, WritingMode,
 };
 use gx_contracts::text_style::{StyleColor, StyleNumber, TextStyle};
 use gx_contracts::{
@@ -214,6 +214,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         StrokeStyle,
         MaskMode,
         Mask,
+        TrackMatteMode,
+        TrackMatte,
         ShapeObject,
         BrushPoint,
         BrushBlendMode,

@@ -37,6 +37,22 @@ user decides; the user chose as above.
   clips (it is never drawn anyway); every other descendant of the group is
   clipped, whatever its draw order; the clip child is a drawing object.
 
+### Third round, before track mattes (`matte-design-jev-laya.json`)
+
+Jev and Laya split on all four questions.
+
+- **A track matte source is never drawn** (user), whatever its visible flag,
+  as a clip child. Jev was split 54/46 for "drawn when visible"; Laya chose
+  never drawn.
+- **The matte carries the source's own opacity** (user), as clips do. Jev
+  chose own (0.66); Laya chose effective.
+- **Luma** is Rec.709 over the premultiplied working-space colour, clamped to
+  0..1. Jev chose this (0.88). Laya's "straight colour times alpha" is the same
+  value, since premultiplied colour is straight colour times alpha.
+- **Refusals** are the strict set, by hand verification. Jev chose it (0.88);
+  Laya chose permissive. A matte chain or a matte on a group needs a
+  precomposed target, which the done-when lets refuse by name.
+
 ## Increment 1: layer masks
 
 ### What changed
@@ -157,9 +173,63 @@ user decides; the user chose as above.
   refuses identically in the validator and over the publication wire.
 - Gate: fmt, clippy -D warnings and npm run check exit 0 (46 Node, 412 Editor, 863 Rust passed, 0 failed, 35 ignored; conformance 589/0/9); hardware worker suite 187/0/0. The timed conformance check "headless renders while Program runs add no late or missed Program frame" failed in two earlier full gates on this tree (22 late/38 missed, then 2/2) and in 1 of 4 standalone runs; an A/B of standalone conformance alternating HEAD a17a545 (exported, own target dir) and this tree passed 3/3 each, and neither timing scene touches the clip code (plain rects); the clip-free per-tile zero texture was removed anyway. Treat that check as load-sensitive in debug builds.
 
+## Increment 3: track mattes
+
+### What changed
+
+- **Contract.** `ObjectBase.trackMatte: Option<TrackMatte>`;
+  `TrackMatte { sourceId, mode }`, where `mode` is a `TrackMatteMode`:
+  `alpha` (the default), `alphaInverted`, `luma` or `lumaInverted`.
+  `Refusal::TrackMatteInvalid { object, detail }` (`trackMatteInvalid`) comes
+  from `drawability::track_matte_problem`, shared by the validator and the
+  engine, at `objects[i].trackMatte`. It refuses:
+  - an object naming itself;
+  - a source that is not in the scene or draws no pixels;
+  - a source with a track matte of its own;
+  - a matted object that draws no pixels;
+  - a clip child with a track matte.
+- **One plan.** `ClipPlan` gains `track_of` and `is_source`. A matte layer is
+  a clip child or a track matte source (`is_matte`), and is never drawn.
+  `clip::track_value` and `clip::LUMA` are the CPU's twin of the shader's
+  arithmetic.
+- **GPU.** A track matte source is a matte layer like a clip child: one
+  matte target per tile, composited each frame at its own opacity. If the
+  source sits in a clip group, its matte is clipped too. `composite.wgsl`
+  gains binding 5, the track matte's target; `params.state.z` carries the mode
+  code (1 alpha, 2 inverted alpha, 3 luma, 4 inverted luma). A layer's sample
+  is multiplied by its clip's alpha, then by its track matte's value.
+- **CPU reference.** A matte holds the source's full premultiplied pixels
+  (needed for luma). A clipped or matted object is drawn alone, times its
+  clip's alpha, then times its track value, then blended in its mode.
+
+### Executed checks
+
+- `cargo test -p gx-render-worker --lib track_mattes`: on the CPU reference,
+  with a red source (luma 0.2126), each mode gives inside/outside alphas of
+  255/0 (alpha), 0/255 (alphaInverted), 54/0 (luma) and 201/255
+  (lumaInverted). The source is not drawn.
+- `GX_GPU_316_BACKEND=dx12|vulkan cargo test -p gx-render-worker --lib
+  gpu_engine_draws_track_mattes -- --include-ignored` (RTX 3070 Ti). The
+  fixture is a moving ellipse with a white-to-black gradient at 90% opacity,
+  in a group at 50%. It is the shared source of four bands, one per mode, and
+  of a consumer inside a clip group. A second source sits inside a clip group
+  of its own.
+  - Program and Preview at frames 0, 5 and 10, in both working spaces, are
+    within one code of the CPU reference. Strict 4.4 reading: 0.026% of pixels
+    differ, by at most one code.
+  - Alpha 0.9 inside the source, from its own opacity rather than 0.45.
+  - The inverse modes are complements, and luma follows the gradient.
+  - Clip times matte; a source is clipped by its own clip group.
+  - The matte follows the source's animation.
+- `cargo test -p gx-contracts --lib track_matte`: each `TrackMatteInvalid`
+  detail; several layers may share a source.
+- Conformance refusal audit: `TrackMatteInvalid` is driven; a layer that is
+  its own matte refuses identically in the validator and over the publication
+  wire.
+- Gate: fmt, clippy -D warnings and npm run check exit 0 (46 Node, 412 Editor, 865 Rust passed, 0 failed, 36 ignored; conformance 591/0/9); hardware worker suite 189/0/0.
+
 ### Still open in 3.19
 
-Track mattes (alpha, inverted alpha, luma and inverted luma, by explicit
-source id, a matte source not drawn on its own), trim start/end/offset
-honoured on the GPU and the CPU, mutations, and the Jev and Laya acceptance
-run.
+Trim start/end/offset: already honoured at prepare on both paths since 3.13,
+static; a GPU test against the CPU reference is still to be recorded. Then
+the mutations, the Jev and Laya acceptance run, and closing the row.

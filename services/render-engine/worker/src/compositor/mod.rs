@@ -74,6 +74,9 @@ pub struct LayerInput {
     /// 3.19: the layer index of the clip child whose matte alpha multiplies
     /// this layer's sample.
     pub clip: Option<usize>,
+    /// 3.19: the layer index of this layer's track matte source, and what the
+    /// matte lets through.
+    pub track: Option<(usize, gx_contracts::scene::TrackMatteMode)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -142,6 +145,8 @@ struct Layer {
     /// 3.19: the matte slot (position in `PreparedCompositor::mattes`) whose
     /// alpha multiplies this layer's sample.
     clip: Option<usize>,
+    /// 3.19: the track matte's slot and the shader's code for its mode.
+    track: Option<(usize, f32)>,
 }
 
 /// A layer's effect stack on the GPU, built at prepare (3.22): one step per
@@ -454,12 +459,15 @@ impl PreparedCompositor {
             Some(d)
         };
         for (i, input) in inputs.iter().enumerate() {
-            if depth(i).is_none() {
+            let track_ok = input
+                .track
+                .is_none_or(|(j, _)| j < inputs.len() && j != i && inputs[j].matte && !input.matte);
+            if depth(i).is_none() || !track_ok {
                 return Err(mapping(
                     &input.object_id,
                     &input.document_path,
                     "clip",
-                    "a clip names another layer that is a matte, without a cycle",
+                    "a clip or track matte names another layer that is a matte, without a cycle",
                 ));
             }
         }
@@ -512,6 +520,7 @@ impl PreparedCompositor {
                 sampled_entry(0),
                 sampled_entry(1),
                 sampled_entry(4),
+                sampled_entry(5),
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
                     visibility: wgpu::ShaderStages::COMPUTE,
@@ -608,6 +617,9 @@ impl PreparedCompositor {
                     chain,
                     matte: input.matte,
                     clip: input.clip.and_then(slot),
+                    track: input
+                        .track
+                        .and_then(|(j, mode)| Some((slot(j)?, crate::clip::track_code(mode)))),
                 }
             })
             .collect();
@@ -671,11 +683,14 @@ impl PreparedCompositor {
                 let zero_view = zero.as_ref().map(|z| z.create_view(&Default::default()));
                 let clip_view =
                     |clip: Option<usize>| clip.map_or(&no_clip_view, |slot| &matte_views[slot]);
+                let track_view =
+                    |track: Option<(usize, f32)>| clip_view(track.map(|(slot, _)| slot));
                 let bind = |src: &wgpu::TextureView,
                             dst: &wgpu::TextureView,
                             out: &wgpu::TextureView,
                             uniform: &wgpu::Buffer,
-                            clip: &wgpu::TextureView| {
+                            clip: &wgpu::TextureView,
+                            track: &wgpu::TextureView| {
                     crate::render_work::gpu_build();
                     device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("gx-compositor"),
@@ -701,6 +716,10 @@ impl PreparedCompositor {
                                 binding: 4,
                                 resource: wgpu::BindingResource::TextureView(clip),
                             },
+                            wgpu::BindGroupEntry {
+                                binding: 5,
+                                resource: wgpu::BindingResource::TextureView(track),
+                            },
                         ],
                     })
                 };
@@ -708,15 +727,23 @@ impl PreparedCompositor {
                              dst: usize,
                              out: usize,
                              uniform: &wgpu::Buffer,
-                             clip: Option<usize>| {
-                    bind(src, &views[dst], &views[out], uniform, clip_view(clip))
+                             clip: Option<usize>,
+                             track: Option<(usize, f32)>| {
+                    bind(
+                        src,
+                        &views[dst],
+                        &views[out],
+                        uniform,
+                        clip_view(clip),
+                        track_view(track),
+                    )
                 };
                 // Both targets start each frame transparent: a layer writes
                 // only its region, so the target it writes must already hold
                 // the frame's state outside it.
                 let clear = [
-                    group(&views[1], 1, 0, &clear_uniform, None),
-                    group(&views[0], 0, 1, &clear_uniform, None),
+                    group(&views[1], 1, 0, &clear_uniform, None, None),
+                    group(&views[0], 0, 1, &clear_uniform, None, None),
                 ];
                 let uniforms: Vec<_> = (0..layers.len())
                     .map(|i| make_uniform(&uniform_scratch[tile_index * layers.len() + i]))
@@ -731,6 +758,7 @@ impl PreparedCompositor {
                             (i + 1) % 2,
                             &uniforms[i],
                             layer.clip,
+                            layer.track,
                         )
                     })
                     .collect();
@@ -750,6 +778,7 @@ impl PreparedCompositor {
                             &matte_views[k],
                             &matte_uniforms[k],
                             clip_view(layer.clip),
+                            &no_clip_view,
                         )
                     })
                     .collect();
@@ -879,6 +908,9 @@ impl PreparedCompositor {
                     })?;
                 if layer.clip.is_some() {
                     geometry[9] = 1.0;
+                }
+                if let Some((_, code)) = layer.track {
+                    geometry[10] = code;
                 }
                 let footprint = layer_region(
                     self.stage,

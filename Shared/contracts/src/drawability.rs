@@ -217,6 +217,17 @@ pub fn drawability_refusals(document: &SceneDocument) -> Vec<StructuredRefusal> 
                 given.unwrap_or_default(),
             );
         }
+        // 3.19: a track matte names another object that draws pixels.
+        if let Some(detail) = track_matte_problem(document, object) {
+            found.push(
+                Refusal::TrackMatteInvalid {
+                    object: id.into(),
+                    detail,
+                },
+                at("trackMatte"),
+                serde_json::to_value(base.track_matte()).unwrap_or_default(),
+            );
+        }
         // 3.19: masks shape the pixels of objects that draw some.
         if let Some((index, detail)) = mask_problem(object) {
             found.push(
@@ -610,6 +621,45 @@ pub fn clip_group_problem(document: &SceneDocument, object: &SceneObject) -> Opt
             "the clip child {clip} is a {}, which draws no pixels; a clip child is a rect, ellipse, line, shape, text or image",
             child.kind()
         ));
+    }
+    None
+}
+
+/// Why a layer's track matte cannot be drawn as authored, if it cannot (3.19).
+pub fn track_matte_problem(document: &SceneDocument, object: &SceneObject) -> Option<String> {
+    let matte = object.base().track_matte()?;
+    let id = object.base().id.as_str();
+    if !draws_pixels(object) {
+        return Some(format!("a {} draws no pixels to matte", object.kind()));
+    }
+    let source = matte.source_id.as_str();
+    if source == id {
+        return Some("an object cannot be its own track matte".into());
+    }
+    let Some(found) = document.objects.iter().find(|o| o.base().id == source) else {
+        return Some(format!(
+            "the track matte source {source} is not in the scene"
+        ));
+    };
+    if !draws_pixels(found) {
+        return Some(format!(
+            "the track matte source {source} is a {}, which draws no pixels; a track matte source is a rect, ellipse, line, shape, text or image",
+            found.kind()
+        ));
+    }
+    if found.base().track_matte().is_some() {
+        return Some(format!(
+            "the track matte source {source} has a track matte of its own"
+        ));
+    }
+    let is_clip_child = document.objects.iter().any(|o| match o {
+        SceneObject::Group(group) => {
+            group.clip_child_id.as_deref() == Some(id) && group.child_ids.iter().any(|c| c == id)
+        }
+        _ => false,
+    });
+    if is_clip_child {
+        return Some("a clip child cannot have a track matte".into());
     }
     None
 }
@@ -1612,6 +1662,79 @@ mod tests {
             invalid(
                 "the clip child inner is a group, which draws no pixels; a clip child is a rect, ellipse, line, shape, text or image"
             )
+        );
+    }
+
+    #[test]
+    fn a_track_matte_refuses_what_it_cannot_draw_as_authored() {
+        use crate::scene::{TrackMatte, TrackMatteMode};
+        let matted = |id: &str, source: &str| {
+            let mut object = rect(id);
+            object.base_mut().track_matte = Some(TrackMatte {
+                source_id: source.into(),
+                mode: TrackMatteMode::Luma,
+            });
+            object
+        };
+        let invalid = |object: &str, detail: &str| {
+            Some(Refusal::TrackMatteInvalid {
+                object: object.into(),
+                detail: detail.into(),
+            })
+        };
+        // 3.19: a drawing source draws; several layers may share it.
+        assert_eq!(
+            refused(vec![rect("src"), matted("a", "src"), matted("b", "src")]),
+            None
+        );
+        assert_eq!(
+            refused(vec![matted("a", "a")]),
+            invalid("a", "an object cannot be its own track matte")
+        );
+        assert_eq!(
+            refused(vec![matted("a", "gone")]),
+            invalid("a", "the track matte source gone is not in the scene")
+        );
+        let holder = SceneObject::Group(GroupObject {
+            base: ObjectBase::new("holder", "holder"),
+            child_ids: Vec::new(),
+            clip_child_id: None,
+        });
+        assert_eq!(
+            refused(vec![holder.clone(), matted("a", "holder")]),
+            invalid(
+                "a",
+                "the track matte source holder is a group, which draws no pixels; a track matte source is a rect, ellipse, line, shape, text or image"
+            )
+        );
+        let mut matted_group = holder;
+        matted_group.base_mut().track_matte = Some(TrackMatte {
+            source_id: "src".into(),
+            mode: TrackMatteMode::Alpha,
+        });
+        assert_eq!(
+            refused(vec![rect("src"), matted_group]),
+            invalid("holder", "a group draws no pixels to matte")
+        );
+        assert_eq!(
+            refused(vec![
+                matted("src", "other"),
+                rect("other"),
+                matted("a", "src")
+            ]),
+            invalid(
+                "a",
+                "the track matte source src has a track matte of its own"
+            )
+        );
+        let clip_group = SceneObject::Group(GroupObject {
+            base: ObjectBase::new("g", "g"),
+            child_ids: vec!["c".into()],
+            clip_child_id: Some("c".into()),
+        });
+        assert_eq!(
+            refused(vec![clip_group, matted("c", "src"), rect("src")]),
+            invalid("c", "a clip child cannot have a track matte")
         );
     }
 }

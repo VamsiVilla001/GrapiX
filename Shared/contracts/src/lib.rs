@@ -399,6 +399,11 @@ pub enum Refusal {
     /// not one of the group's children, is not in the scene, or names an
     /// object that draws no pixels.
     ClipGroupInvalid { group: String, detail: String },
+    /// A layer's track matte cannot be drawn as authored (3.19): the layer
+    /// names itself or a source that is missing, draws no pixels or has a
+    /// track matte of its own; the layer draws no pixels; or the layer is a
+    /// clip child.
+    TrackMatteInvalid { object: String, detail: String },
     /// A vector path could not be represented as triangles. The object and
     /// tessellator diagnostic are retained so a malformed path never turns
     /// into an absent or approximate graphic.
@@ -1197,6 +1202,9 @@ impl std::fmt::Display for Refusal {
             Refusal::ClipGroupInvalid { group, detail } => {
                 write!(f, "group {group} cannot clip: {detail}")
             }
+            Refusal::TrackMatteInvalid { object, detail } => {
+                write!(f, "object {object}'s track matte cannot be drawn: {detail}")
+            }
             Refusal::VectorTessellationFailed { object, detail } => {
                 write!(f, "object {object} could not be tessellated: {detail}")
             }
@@ -1794,6 +1802,10 @@ impl Refusal {
                 group: "audit".into(),
                 detail: "audit".into(),
             },
+            Self::TrackMatteInvalid {
+                object: "audit".into(),
+                detail: "audit".into(),
+            },
             Self::VectorTessellationFailed {
                 object: "audit".into(),
                 detail: "audit".into(),
@@ -2385,6 +2397,7 @@ impl Refusal {
             Self::ImageNotDrawable { .. } => "imageNotDrawable",
             Self::MaskInvalid { .. } => "maskInvalid",
             Self::ClipGroupInvalid { .. } => "clipGroupInvalid",
+            Self::TrackMatteInvalid { .. } => "trackMatteInvalid",
             Self::VectorTessellationFailed { .. } => "vectorTessellationFailed",
             Self::AssetMissing { .. } => "assetMissing",
             Self::ProtocolMismatch { .. } => "protocolMismatch",

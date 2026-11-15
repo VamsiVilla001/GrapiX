@@ -19,6 +19,7 @@ fn layer(id: &str, colour: Rgba, space: WorkingColorSpace, width: u32, height: u
         effects: None,
         matte: false,
         clip: None,
+        track: None,
         state: LayerState::default(),
     }
 }

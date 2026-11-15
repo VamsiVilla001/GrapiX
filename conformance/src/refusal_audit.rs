@@ -2062,6 +2062,7 @@ fn is_driven(variant: &str) -> bool {
             | "ImageNotDrawable"
             | "MaskInvalid"
             | "ClipGroupInvalid"
+            | "TrackMatteInvalid"
             | "CommandUnknownField"
             | "SessionUnknown"
             | "HistoryEmpty"
