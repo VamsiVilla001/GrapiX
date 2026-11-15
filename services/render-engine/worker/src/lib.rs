@@ -23,6 +23,7 @@
 //! become render targets (invariant 37).
 
 pub mod blend;
+pub(crate) mod clip;
 pub mod clock;
 pub mod colour_pipeline;
 pub mod compositor;

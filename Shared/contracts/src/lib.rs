@@ -395,6 +395,10 @@ pub enum Refusal {
         index: usize,
         detail: String,
     },
+    /// A clip group's `clipChildId` cannot be drawn as a clip (3.19): it is
+    /// not one of the group's children, is not in the scene, or names an
+    /// object that draws no pixels.
+    ClipGroupInvalid { group: String, detail: String },
     /// A vector path could not be represented as triangles. The object and
     /// tessellator diagnostic are retained so a malformed path never turns
     /// into an absent or approximate graphic.
@@ -1190,6 +1194,9 @@ impl std::fmt::Display for Refusal {
                 index,
                 detail,
             } => write!(f, "object {object}'s mask {index} cannot be drawn: {detail}"),
+            Refusal::ClipGroupInvalid { group, detail } => {
+                write!(f, "group {group} cannot clip: {detail}")
+            }
             Refusal::VectorTessellationFailed { object, detail } => {
                 write!(f, "object {object} could not be tessellated: {detail}")
             }
@@ -1783,6 +1790,10 @@ impl Refusal {
                 index: 0,
                 detail: "audit".into(),
             },
+            Self::ClipGroupInvalid {
+                group: "audit".into(),
+                detail: "audit".into(),
+            },
             Self::VectorTessellationFailed {
                 object: "audit".into(),
                 detail: "audit".into(),
@@ -2373,6 +2384,7 @@ impl Refusal {
             Self::GradientNotDrawable { .. } => "gradientNotDrawable",
             Self::ImageNotDrawable { .. } => "imageNotDrawable",
             Self::MaskInvalid { .. } => "maskInvalid",
+            Self::ClipGroupInvalid { .. } => "clipGroupInvalid",
             Self::VectorTessellationFailed { .. } => "vectorTessellationFailed",
             Self::AssetMissing { .. } => "assetMissing",
             Self::ProtocolMismatch { .. } => "protocolMismatch",

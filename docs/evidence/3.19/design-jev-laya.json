@@ -1,0 +1,233 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual 0.4.28 max_len 8192",
+  "laya_usage": {
+    "input_tokens": 2386,
+    "output_tokens": 0,
+    "state_tokens": 319,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row_3_19_done_when": "Masks (add, subtract, intersect, difference; feather; expansion), clip groups, alpha and luma mattes and trim start/end/offset render on the GPU and match CPU references; the scene contract's trim values are honoured; an unsupported combination refuses by name.",
+    "today": [
+      "The contract has no masks, clip groups or track mattes. The scene module says layer masks are owned by row 11.47 (2D object library: pen paths, masks, clip groups, trim paths; not started), which also wants golden-frame tests per object type.",
+      "Trim start/end/offset exist on ShapeObject and are honoured at prepare on both paths (since 3.13); trim is not an animatable property, so it is only ever static.",
+      "Every object is drawn once at prepare into its own layer texture (Vello coverage, float colour) and the GPU compositor warps and blends those layers per frame; only transform and opacity (and effect parameters) animate.",
+      "Groups are hierarchy containers that paint nothing; children are listed by id.",
+      "Products the user designs in: After Effects (layer masks with modes add/subtract/intersect/difference/none, feather, expansion, opacity, inverted; track mattes alpha/alpha-inverted/luma/luma-inverted, since 2023 choosing any layer as the matte source), Figma and Photoshop (clipping masks: a shape clips the layers above it in a group)."
+    ]
+  },
+  "questions": {
+    "mask_location": {
+      "type": "choice",
+      "instructions": "Where should masks be declared?",
+      "criteria": {
+        "object_masks": "On each object: ObjectBase.masks, a list of mask paths in the object's own coordinates, each with mode, feather, expansion, opacity and inverted (After Effects).",
+        "mask_objects": "As separate scene objects of a new kind that name the object they mask.",
+        "clip_groups_only": "No per-object masks; only clip groups."
+      }
+    },
+    "clip_group": {
+      "type": "choice",
+      "instructions": "How should a clip group name its clip shape?",
+      "criteria": {
+        "named_child": "GroupObject.clipChildId names one child whose coverage clips the group's other children; the clip child is not drawn itself.",
+        "first_child": "The group's first (bottom) child always clips the rest when GroupObject.clip is true (Figma).",
+        "object_flag": "Any object can be flagged as a clipping mask for the objects above it in its parent (Photoshop)."
+      }
+    },
+    "matte_source": {
+      "type": "choice",
+      "instructions": "How should a track matte name its source?",
+      "criteria": {
+        "explicit_id": "ObjectBase.trackMatte {sourceId, mode} names any object as the matte (After Effects 2023 and later).",
+        "layer_above": "The object directly above in draw order is the matte (classic After Effects)."
+      }
+    },
+    "when_drawn": {
+      "type": "choice",
+      "instructions": "When should masks and clip shapes be drawn?",
+      "criteria": {
+        "prepare_static": "At prepare, into coverage multiplied into the layer source, like every other drawing; masks and clip shapes are static (not animatable) until a later row, and anything animated refuses by name.",
+        "per_frame": "Every frame, so they can animate."
+      }
+    },
+    "matte_composite": {
+      "type": "choice",
+      "instructions": "A matte source and its consumer move independently. How should mattes composite?",
+      "criteria": {
+        "per_frame_matte_target": "Each frame the compositor renders the matte source into its own tile target, and the consumer layer's sample is multiplied by the matte's alpha or luma there.",
+        "bake_at_prepare": "Bake the matte into the consumer at prepare, refusing by name when either one animates its transform or opacity."
+      }
+    },
+    "needs_user": {
+      "type": "noul",
+      "instructions": "Does this design need user decisions before implementation (new contract fields, scope against row 11.47)?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "mask_location",
+      "jev": "object_masks",
+      "laya": "mask_objects",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "object_masks",
+        "confidence": 0.64,
+        "probabilities": {
+          "object_masks": 0.76,
+          "mask_objects": 0.22,
+          "clip_groups_only": 0.02
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "mask_objects",
+        "probabilities": {
+          "object_masks": 0.199,
+          "mask_objects": 0.4534,
+          "clip_groups_only": 0.3476
+        },
+        "confidence": 0.0468,
+        "answer_confidence": 0.4534,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "clip_group",
+      "jev": "named_child",
+      "laya": "named_child",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "named_child",
+        "confidence": 0.79,
+        "probabilities": {
+          "named_child": 0.86,
+          "first_child": 0.08,
+          "object_flag": 0.06
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "named_child",
+        "probabilities": {
+          "named_child": 0.4887,
+          "first_child": 0.3633,
+          "object_flag": 0.148
+        },
+        "confidence": 0.0893,
+        "answer_confidence": 0.4887,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "matte_source",
+      "jev": "explicit_id",
+      "laya": "layer_above",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "explicit_id",
+        "confidence": 0.98,
+        "probabilities": {
+          "explicit_id": 0.99,
+          "layer_above": 0.01
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "layer_above",
+        "probabilities": {
+          "explicit_id": 0.0565,
+          "layer_above": 0.9435
+        },
+        "confidence": 0.6867,
+        "answer_confidence": 0.9435,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "when_drawn",
+      "jev": "prepare_static",
+      "laya": "prepare_static",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "prepare_static",
+        "confidence": 1,
+        "probabilities": {
+          "prepare_static": 1,
+          "per_frame": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "prepare_static",
+        "probabilities": {
+          "prepare_static": 0.6063,
+          "per_frame": 0.3937
+        },
+        "confidence": 0.0328,
+        "answer_confidence": 0.6063,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "matte_composite",
+      "jev": "per_frame_matte_target",
+      "laya": "per_frame_matte_target",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "per_frame_matte_target",
+        "confidence": 0.78,
+        "probabilities": {
+          "per_frame_matte_target": 0.89,
+          "bake_at_prepare": 0.11
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "per_frame_matte_target",
+        "probabilities": {
+          "per_frame_matte_target": 0.687,
+          "bake_at_prepare": 0.313
+        },
+        "confidence": 0.1034,
+        "answer_confidence": 0.687,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "needs_user",
+      "jev": 0.85,
+      "laya": 0.9281,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.85
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9281,
+        "confidence": 0.9281,
+        "answer_confidence": 0.9281,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

@@ -32,6 +32,8 @@ struct MappedLayer {
     origin: [f64; 2],
     object_id: String,
     blend_mode: BlendMode,
+    /// 3.19: a clip child, placed as its group's matte.
+    matte: bool,
 }
 
 /// The Dissolve seed of a layer at a frame; 0 for modes that use none.
@@ -76,6 +78,8 @@ impl GpuScene {
         let mut contexts = Vec::new();
         let mut layers = Vec::new();
         let mut sources = Vec::new();
+        // 3.19: clip groups become per-frame mattes.
+        let clips = crate::clip::ClipPlan::of(doc);
         for index in PreparedScene::draw_order(doc) {
             let object = &doc.objects[index];
             if matches!(
@@ -124,7 +128,17 @@ impl GpuScene {
                 plan.pack(instances, &effect_ctx);
                 plan
             });
-            let mut state = layer_state(object.base().anchor, resolved, origin);
+            let matte = clips.is_clip[index];
+            let mut state = if matte {
+                matte_state(
+                    object.base().anchor,
+                    resolved,
+                    origin,
+                    object.base().opacity,
+                )
+            } else {
+                layer_state(object.base().anchor, resolved, origin)
+            };
             state.seed = frame_seed(&id, blend_mode, 0);
             contexts.push(effect_ctx);
             inputs.push(LayerInput {
@@ -141,6 +155,8 @@ impl GpuScene {
                 blend_mode,
                 effects,
                 state,
+                matte,
+                clip: None,
             });
             sources.push(SourceTrace {
                 object_id: id.clone(),
@@ -155,7 +171,17 @@ impl GpuScene {
                 origin,
                 object_id: id,
                 blend_mode,
+                matte,
             });
+        }
+        // 3.19: each clipped layer reads its clip child's matte.
+        let layer_of: std::collections::HashMap<usize, usize> = layers
+            .iter()
+            .enumerate()
+            .map(|(i, layer)| (layer.object_index, i))
+            .collect();
+        for (input, layer) in inputs.iter_mut().zip(&layers) {
+            input.clip = clips.clip_of[layer.object_index].and_then(|c| layer_of.get(&c).copied());
         }
         let stage = Stage::new(
             doc.canvas.width,
@@ -215,11 +241,20 @@ impl GpuScene {
         let effective = resolve_hierarchy(&self.evaluated.objects).effective;
         for (state, layer) in self.states.iter_mut().zip(&self.layers) {
             let object = &self.evaluated.objects[layer.object_index];
-            *state = layer_state(
-                object.base().anchor,
-                &effective[layer.object_index],
-                layer.origin,
-            );
+            *state = if layer.matte {
+                matte_state(
+                    object.base().anchor,
+                    &effective[layer.object_index],
+                    layer.origin,
+                    object.base().opacity,
+                )
+            } else {
+                layer_state(
+                    object.base().anchor,
+                    &effective[layer.object_index],
+                    layer.origin,
+                )
+            };
             state.seed = frame_seed(&layer.object_id, layer.blend_mode, scene_frame);
         }
         for ((plan, layer), ctx) in self
@@ -336,6 +371,23 @@ pub(crate) fn layer_state(
         },
         seed: 0,
     }
+}
+
+/// A clip child's placement as its group's matte (3.19): its layer state at
+/// its own opacity, not its effective one (the group's opacity already reaches
+/// the clipped objects), whether visible or not. A zero-scale clip child has
+/// no area and clips everything away.
+pub(crate) fn matte_state(
+    anchor: Option<Vec2>,
+    resolved: &ResolvedObject,
+    origin: [f64; 2],
+    own_opacity: f64,
+) -> LayerState {
+    let mut state = layer_state(anchor, resolved, origin);
+    if resolved.scale_x != 0.0 && resolved.scale_y != 0.0 {
+        state.opacity = own_opacity as f32;
+    }
+    state
 }
 
 pub(crate) fn mapping_refusal(id: &str, path: &str, detail: &str) -> Refusal {

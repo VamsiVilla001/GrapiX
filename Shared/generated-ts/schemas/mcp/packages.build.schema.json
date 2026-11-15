@@ -2234,6 +2234,13 @@
           },
           "type": "array"
         },
+        "clipChildId": {
+          "description": "The clip group's clip child (3.19, user decisions 15 Nov 2026): one of\n`child_ids`, a drawing object whose alpha, at its own opacity, clips\nevery other descendant of the group as a per-frame matte. It is never\ndrawn itself, whether visible or not; nested clip groups multiply.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "effects": {
           "description": "The layer's effect stack (3.22), applied in order to its own pixels\nbefore it is transformed and blended. Read it through\n[`ObjectBase::effects`]; absent and empty both mean none.",
           "items": {

@@ -22,6 +22,9 @@ struct Params {
 @group(0) @binding(1) var dst: texture_2d<f32>;
 @group(0) @binding(2) var out: texture_storage_2d<rgba32float, write>;
 @group(0) @binding(3) var<uniform> params: Params;
+// 3.19: the tile's matte target of this layer's clip child, read where
+// params.state.y is set; a 1 x 1 placeholder otherwise.
+@group(0) @binding(4) var clip: texture_2d<f32>;
 
 fn tex_get(p: vec2<i32>) -> vec4<f32> {
     let size = vec2<i32>(textureDimensions(src));
@@ -76,6 +79,10 @@ fn composite(@builtin(global_invocation_id) id: vec3<u32>) {
     // never overflow a sample coordinate or read an unrelated texel.
     if (all(source_p > vec2<f32>(-1.0)) && all(source_p < size + vec2<f32>(1.0))) {
         s = sample_bilinear(source_p) * params.state.x;
+    }
+    // 3.19: a clipped layer's sample is multiplied by its clip's matte alpha.
+    if (params.state.y > 0.5) {
+        s = s * textureLoad(clip, vec2<i32>(px), 0).a;
     }
     let mode = params.key.x;
     // Where the source is exactly zero the backdrop is kept bit for bit, as

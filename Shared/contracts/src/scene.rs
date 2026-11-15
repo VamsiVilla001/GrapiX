@@ -698,6 +698,13 @@ pub struct GroupObject {
     pub base: ObjectBase,
     #[serde(default)]
     pub child_ids: Vec<String>,
+    /// The clip group's clip child (3.19, user decisions 15 Nov 2026): one of
+    /// `child_ids`, a drawing object whose alpha, at its own opacity, clips
+    /// every other descendant of the group as a per-frame matte. It is never
+    /// drawn itself, whether visible or not; nested clip groups multiply.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub clip_child_id: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -2378,6 +2385,7 @@ mod tests {
             SceneObject::Group(GroupObject {
                 base: populated_base("group"),
                 child_ids: vec!["rect".into()],
+                clip_child_id: None,
             }),
         ]
     }
@@ -2465,6 +2473,7 @@ mod tests {
         SceneObject::Group(GroupObject {
             base: base(id),
             child_ids: children.iter().map(|c| (*c).to_string()).collect(),
+            clip_child_id: None,
         })
     }
 
@@ -2671,6 +2680,7 @@ mod tests {
         let mut parent = GroupObject {
             base: base("g"),
             child_ids: vec!["r".into()],
+            clip_child_id: None,
         };
         parent.base.x = 100.0;
         parent.base.y = 50.0;
@@ -2703,12 +2713,14 @@ mod tests {
         let mut outer = GroupObject {
             base: base("outer"),
             child_ids: vec!["inner".into()],
+            clip_child_id: None,
         };
         outer.base.x = 100.0;
         outer.base.opacity = 0.5;
         let mut inner = GroupObject {
             base: base("inner"),
             child_ids: vec!["r".into()],
+            clip_child_id: None,
         };
         inner.base.x = 10.0;
         inner.base.scale_x = 2.0;
@@ -2744,6 +2756,7 @@ mod tests {
         let mut parent = GroupObject {
             base: base("g"),
             child_ids: vec!["r".into()],
+            clip_child_id: None,
         };
         parent.base.y = 50.0;
         parent.base.scale_y = 2.0;
@@ -2766,6 +2779,7 @@ mod tests {
         let mut parent = GroupObject {
             base: base("g"),
             child_ids: vec!["r".into()],
+            clip_child_id: None,
         };
         parent.base.opacity = 0.5;
         parent.base.locked = true;
@@ -2800,6 +2814,7 @@ mod tests {
         let mut parent = GroupObject {
             base: base("g"),
             child_ids: vec!["m".into(), "r".into()],
+            clip_child_id: None,
         };
         parent.base.rotation_x = 30.0;
         parent.base.rotation_y = 10.0;

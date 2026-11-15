@@ -428,6 +428,7 @@ mod tests {
             SceneObject::Group(GroupObject {
                 base: ObjectBase::new(id, id),
                 child_ids: children.iter().map(|c| c.to_string()).collect(),
+                clip_child_id: None,
             })
         };
         let support = crate::material::MaterialSupport::fixed_function();

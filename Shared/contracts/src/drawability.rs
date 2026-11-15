@@ -202,6 +202,21 @@ pub fn drawability_refusals(document: &SceneDocument) -> Vec<StructuredRefusal> 
             }
             _ => {}
         }
+        // 3.19: a clip group's clip child must be a child that draws pixels.
+        if let Some(detail) = clip_group_problem(document, object) {
+            let given = match object {
+                SceneObject::Group(group) => serde_json::to_value(&group.clip_child_id),
+                _ => Ok(serde_json::Value::Null),
+            };
+            found.push(
+                Refusal::ClipGroupInvalid {
+                    group: id.into(),
+                    detail,
+                },
+                at("clipChildId"),
+                given.unwrap_or_default(),
+            );
+        }
         // 3.19: masks shape the pixels of objects that draw some.
         if let Some((index, detail)) = mask_problem(object) {
             found.push(
@@ -562,14 +577,10 @@ fn gradients(object: &SceneObject, at: &dyn Fn(&str) -> String, found: &mut Foun
     }
 }
 
-/// The first mask of `object` that cannot be drawn as authored, if any (3.19).
-pub fn mask_problem(object: &SceneObject) -> Option<(usize, String)> {
-    use crate::scene::{MOST_MASKS, MOST_MASK_EXPANSION, MOST_MASK_FEATHER};
-    let masks = object.base().masks();
-    if masks.is_empty() {
-        return None;
-    }
-    let draws = matches!(
+/// Whether an object draws pixels of its own, and so can be masked or be a
+/// clip child (3.19).
+pub fn draws_pixels(object: &SceneObject) -> bool {
+    matches!(
         object,
         SceneObject::Rect(_)
             | SceneObject::Ellipse(_)
@@ -577,8 +588,40 @@ pub fn mask_problem(object: &SceneObject) -> Option<(usize, String)> {
             | SceneObject::Shape(_)
             | SceneObject::Text(_)
             | SceneObject::Image(_)
-    );
-    if !draws {
+    )
+}
+
+/// Why a clip group cannot clip as authored, if it cannot (3.19).
+pub fn clip_group_problem(document: &SceneDocument, object: &SceneObject) -> Option<String> {
+    let SceneObject::Group(group) = object else {
+        return None;
+    };
+    let clip = group.clip_child_id.as_deref()?;
+    if !group.child_ids.iter().any(|child| child == clip) {
+        return Some(format!(
+            "clipChildId {clip} is not one of the group's children"
+        ));
+    }
+    let Some(child) = document.objects.iter().find(|o| o.base().id == clip) else {
+        return Some(format!("the clip child {clip} is not in the scene"));
+    };
+    if !draws_pixels(child) {
+        return Some(format!(
+            "the clip child {clip} is a {}, which draws no pixels; a clip child is a rect, ellipse, line, shape, text or image",
+            child.kind()
+        ));
+    }
+    None
+}
+
+/// The first mask of `object` that cannot be drawn as authored, if any (3.19).
+pub fn mask_problem(object: &SceneObject) -> Option<(usize, String)> {
+    use crate::scene::{MOST_MASKS, MOST_MASK_EXPANSION, MOST_MASK_FEATHER};
+    let masks = object.base().masks();
+    if masks.is_empty() {
+        return None;
+    }
+    if !draws_pixels(object) {
         return Some((0, format!("a {} draws no pixels to mask", object.kind())));
     }
     if masks.len() > MOST_MASKS {
@@ -986,6 +1029,7 @@ mod tests {
         let mut group = GroupObject {
             base: ObjectBase::new("g", "g"),
             child_ids: vec!["r".into()],
+            clip_child_id: None,
         };
         group.base.scale_x = 2.0;
         let mut child = ObjectBase::new("r", "r");
@@ -1049,6 +1093,7 @@ mod tests {
         let mut group = GroupObject {
             base: ObjectBase::new("g", "g"),
             child_ids: vec!["r".into()],
+            clip_child_id: None,
         };
         group.base.scale_x = 2.0;
         let mut scene = document(vec![SceneObject::Group(group), rect("r")]);
@@ -1451,6 +1496,7 @@ mod tests {
         let group = SceneObject::Group(GroupObject {
             base: ObjectBase::new("g", "g"),
             child_ids: Vec::new(),
+            clip_child_id: None,
         });
         assert_eq!(
             refused(vec![with(group, vec![good()])]),
@@ -1520,6 +1566,52 @@ mod tests {
         assert_eq!(
             bad(&|m| m.opacity = f64::NAN),
             invalid("r", 1, "opacity NaN is outside 0 to 1")
+        );
+    }
+
+    #[test]
+    fn a_clip_group_refuses_a_clip_child_it_cannot_clip_with() {
+        let group = |clip: &str, children: &[&str]| {
+            SceneObject::Group(GroupObject {
+                base: ObjectBase::new("g", "g"),
+                child_ids: children.iter().map(|c| (*c).into()).collect(),
+                clip_child_id: Some(clip.into()),
+            })
+        };
+        let invalid = |detail: &str| {
+            Some(Refusal::ClipGroupInvalid {
+                group: "g".into(),
+                detail: detail.into(),
+            })
+        };
+        // 3.19: a drawing child clips; no clip child is no clip.
+        assert_eq!(refused(vec![group("r", &["r"]), rect("r")]), None);
+        let mut plain = group("r", &["r"]);
+        if let SceneObject::Group(g) = &mut plain {
+            g.clip_child_id = None;
+        }
+        assert_eq!(refused(vec![plain, rect("r")]), None);
+        // The clip child must be one of the group's own children.
+        assert_eq!(
+            refused(vec![group("r", &[]), rect("r")]),
+            invalid("clipChildId r is not one of the group's children")
+        );
+        // It must be in the scene.
+        assert_eq!(
+            refused(vec![group("gone", &["gone"])]),
+            invalid("the clip child gone is not in the scene")
+        );
+        // And it must draw pixels: a group cannot clip.
+        let inner = SceneObject::Group(GroupObject {
+            base: ObjectBase::new("inner", "inner"),
+            child_ids: Vec::new(),
+            clip_child_id: None,
+        });
+        assert_eq!(
+            refused(vec![group("inner", &["inner"]), inner]),
+            invalid(
+                "the clip child inner is a group, which draws no pixels; a clip child is a rect, ellipse, line, shape, text or image"
+            )
         );
     }
 }

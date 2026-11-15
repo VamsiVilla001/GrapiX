@@ -152,6 +152,7 @@ fn build_object(scene: &SceneDocument, kind: &str, id: String, name: String) -> 
         "group" => SceneObject::Group(GroupObject {
             base,
             child_ids: Vec::new(),
+            clip_child_id: None,
         }),
         "layer" => SceneObject::Layer(LayerObject {
             base,
@@ -535,6 +536,7 @@ mod tests {
         SceneObject::Group(GroupObject {
             base: ObjectBase::new(id, id),
             child_ids: children.iter().map(|c| (*c).to_owned()).collect(),
+            clip_child_id: None,
         })
     }
 

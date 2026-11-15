@@ -338,6 +338,7 @@ mod tests {
             SceneObject::Group(GroupObject {
                 base: ObjectBase::new("group", "Group"),
                 child_ids: Vec::new(),
+                clip_child_id: None,
             }),
         ];
         let ids = vec!["card".into(), "group".into()];
@@ -363,6 +364,7 @@ mod tests {
         let mut group = GroupObject {
             base: ObjectBase::new("group", "Group"),
             child_ids: vec!["card".into()],
+            clip_child_id: None,
         };
         group.base.visible = false;
         scene.objects = vec![SceneObject::Group(group), rect("card")];

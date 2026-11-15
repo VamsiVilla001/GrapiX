@@ -1682,6 +1682,7 @@ fn drive_material_refusals(report: &mut Report) {
             gx_contracts::scene::GroupObject {
                 base: gx_contracts::scene::ObjectBase::new("orphaning", "orphaning"),
                 child_ids: vec!["ghost".into()],
+                clip_child_id: None,
             },
         ));
     let found = gx_contracts::validate::validate_scene_document(
@@ -2060,6 +2061,7 @@ fn is_driven(variant: &str) -> bool {
             | "GradientNotDrawable"
             | "ImageNotDrawable"
             | "MaskInvalid"
+            | "ClipGroupInvalid"
             | "CommandUnknownField"
             | "SessionUnknown"
             | "HistoryEmpty"

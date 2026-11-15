@@ -68,6 +68,12 @@ pub struct LayerInput {
     /// fixed at prepare; a disabled effect packs as identity passes.
     pub effects: Option<crate::effect_chain::EffectPlan>,
     pub state: LayerState,
+    /// 3.19: a clip child. Each frame it is composited, at `state` (its own
+    /// opacity), into its own matte target, and never into the frame.
+    pub matte: bool,
+    /// 3.19: the layer index of the clip child whose matte alpha multiplies
+    /// this layer's sample.
+    pub clip: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -131,6 +137,11 @@ struct Layer {
     whole_backdrop: bool,
     view: wgpu::TextureView,
     chain: Option<EffectChain>,
+    /// 3.19: composited into its matte target, never into the frame.
+    matte: bool,
+    /// 3.19: the matte slot (position in `PreparedCompositor::mattes`) whose
+    /// alpha multiplies this layer's sample.
+    clip: Option<usize>,
 }
 
 /// A layer's effect stack on the GPU, built at prepare (3.22): one step per
@@ -195,6 +206,13 @@ struct TileResources {
     clear: [wgpu::BindGroup; 2],
     uniforms: Vec<wgpu::Buffer>,
     groups: Vec<wgpu::BindGroup>,
+    /// 3.19: one matte target per clip child, in `mattes` order, each
+    /// composited over the whole tile from a never-written zero backdrop.
+    _mattes: Vec<wgpu::Texture>,
+    /// Only a scene with a clip allocates it.
+    _zero: Option<wgpu::Texture>,
+    matte_uniforms: Vec<wgpu::Buffer>,
+    matte_groups: Vec<wgpu::BindGroup>,
     readback: wgpu::Buffer,
     padded_row: u32,
 }
@@ -225,6 +243,13 @@ pub struct PreparedCompositor {
     stage: Stage,
     working_space: WorkingColorSpace,
     layers: Vec<Layer>,
+    /// 3.19: the clip children's layer indices, each after the clip that
+    /// clips it, so a nested matte reads an outer one already composited.
+    mattes: Vec<usize>,
+    /// Each matte's uniform per tile for this frame (tile-major).
+    matte_scratch: Vec<[u8; UNIFORM_BYTES]>,
+    /// Bound where a layer has no clip; never read.
+    _no_clip: wgpu::Texture,
     tiles: Vec<TileResources>,
     clear_pipeline: wgpu::ComputePipeline,
     composite_pipeline: wgpu::ComputePipeline,
@@ -416,6 +441,31 @@ impl PreparedCompositor {
                 )));
             }
         }
+        // 3.19: a clip names a matte layer, and mattes nest without a cycle.
+        let depth = |mut i: usize| -> Option<usize> {
+            let mut d = 0;
+            while let Some(j) = inputs[i].clip {
+                if j >= inputs.len() || j == i || !inputs[j].matte || d > inputs.len() {
+                    return None;
+                }
+                i = j;
+                d += 1;
+            }
+            Some(d)
+        };
+        for (i, input) in inputs.iter().enumerate() {
+            if depth(i).is_none() {
+                return Err(mapping(
+                    &input.object_id,
+                    &input.document_path,
+                    "clip",
+                    "a clip names another layer that is a matte, without a cycle",
+                ));
+            }
+        }
+        let mut mattes: Vec<usize> = (0..inputs.len()).filter(|&i| inputs[i].matte).collect();
+        mattes.sort_by_key(|&i| depth(i));
+        let slot = |layer: usize| mattes.iter().position(|&m| m == layer);
         let mut uniform_scratch = Vec::with_capacity(uniform_count);
         for tile in plan.tiles() {
             for input in inputs {
@@ -426,6 +476,26 @@ impl PreparedCompositor {
                 uniform_scratch.push(pack_uniform(
                     &geometry,
                     key(mode, *tile, input.state),
+                    Region::full(*tile),
+                ));
+            }
+        }
+        let mut matte_scratch = Vec::with_capacity(plan.tiles().len() * mattes.len());
+        for tile in plan.tiles() {
+            for &m in &mattes {
+                let input = &inputs[m];
+                let mut geometry =
+                    uniforms(stage, *tile, input.state).map_err(|(field, detail)| {
+                        mapping(&input.object_id, &input.document_path, field, detail)
+                    })?;
+                geometry[9] = if input.clip.is_some() { 1.0 } else { 0.0 };
+                matte_scratch.push(pack_uniform(
+                    &geometry,
+                    key(
+                        crate::blend::mode_index(BlendMode::Normal),
+                        *tile,
+                        input.state,
+                    ),
                     Region::full(*tile),
                 ));
             }
@@ -441,6 +511,7 @@ impl PreparedCompositor {
             entries: &[
                 sampled_entry(0),
                 sampled_entry(1),
+                sampled_entry(4),
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
                     visibility: wgpu::ShaderStages::COMPUTE,
@@ -535,9 +606,13 @@ impl PreparedCompositor {
                     whole_backdrop: input.blend_mode.acts_on_whole_backdrop(),
                     view,
                     chain,
+                    matte: input.matte,
+                    clip: input.clip.and_then(slot),
                 }
             })
             .collect();
+        let no_clip = float_texture(device, 1, 1, wgpu::TextureUsages::TEXTURE_BINDING);
+        let no_clip_view = no_clip.create_view(&Default::default());
         let tiles = plan
             .tiles()
             .iter()
@@ -567,38 +642,81 @@ impl PreparedCompositor {
                     })
                 };
                 let clear_uniform = make_uniform(&[0; UNIFORM_BYTES]);
-                let group =
-                    |src: &wgpu::TextureView, dst: usize, out: usize, uniform: &wgpu::Buffer| {
-                        crate::render_work::gpu_build();
-                        device.create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some("gx-compositor"),
-                            layout: &layout,
-                            entries: &[
-                                wgpu::BindGroupEntry {
-                                    binding: 0,
-                                    resource: wgpu::BindingResource::TextureView(src),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 1,
-                                    resource: wgpu::BindingResource::TextureView(&views[dst]),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 2,
-                                    resource: wgpu::BindingResource::TextureView(&views[out]),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 3,
-                                    resource: uniform.as_entire_binding(),
-                                },
-                            ],
-                        })
-                    };
+                // 3.19: one matte target per clip child, composited from a
+                // zero backdrop that is never written.
+                let matte_targets: Vec<_> = mattes
+                    .iter()
+                    .map(|_| {
+                        float_texture(
+                            device,
+                            r.width,
+                            r.height,
+                            wgpu::TextureUsages::TEXTURE_BINDING
+                                | wgpu::TextureUsages::STORAGE_BINDING,
+                        )
+                    })
+                    .collect();
+                let matte_views: Vec<_> = matte_targets
+                    .iter()
+                    .map(|t| t.create_view(&Default::default()))
+                    .collect();
+                let zero = (!mattes.is_empty()).then(|| {
+                    float_texture(
+                        device,
+                        r.width,
+                        r.height,
+                        wgpu::TextureUsages::TEXTURE_BINDING,
+                    )
+                });
+                let zero_view = zero.as_ref().map(|z| z.create_view(&Default::default()));
+                let clip_view =
+                    |clip: Option<usize>| clip.map_or(&no_clip_view, |slot| &matte_views[slot]);
+                let bind = |src: &wgpu::TextureView,
+                            dst: &wgpu::TextureView,
+                            out: &wgpu::TextureView,
+                            uniform: &wgpu::Buffer,
+                            clip: &wgpu::TextureView| {
+                    crate::render_work::gpu_build();
+                    device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("gx-compositor"),
+                        layout: &layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(src),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::TextureView(dst),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::TextureView(out),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: uniform.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 4,
+                                resource: wgpu::BindingResource::TextureView(clip),
+                            },
+                        ],
+                    })
+                };
+                let group = |src: &wgpu::TextureView,
+                             dst: usize,
+                             out: usize,
+                             uniform: &wgpu::Buffer,
+                             clip: Option<usize>| {
+                    bind(src, &views[dst], &views[out], uniform, clip_view(clip))
+                };
                 // Both targets start each frame transparent: a layer writes
                 // only its region, so the target it writes must already hold
                 // the frame's state outside it.
                 let clear = [
-                    group(&views[1], 1, 0, &clear_uniform),
-                    group(&views[0], 0, 1, &clear_uniform),
+                    group(&views[1], 1, 0, &clear_uniform, None),
+                    group(&views[0], 0, 1, &clear_uniform, None),
                 ];
                 let uniforms: Vec<_> = (0..layers.len())
                     .map(|i| make_uniform(&uniform_scratch[tile_index * layers.len() + i]))
@@ -606,7 +724,34 @@ impl PreparedCompositor {
                 let groups = layers
                     .iter()
                     .enumerate()
-                    .map(|(i, layer)| group(layer.sampled(), i % 2, (i + 1) % 2, &uniforms[i]))
+                    .map(|(i, layer)| {
+                        group(
+                            layer.sampled(),
+                            i % 2,
+                            (i + 1) % 2,
+                            &uniforms[i],
+                            layer.clip,
+                        )
+                    })
+                    .collect();
+                let matte_uniforms: Vec<_> = (0..mattes.len())
+                    .map(|k| make_uniform(&matte_scratch[tile_index * mattes.len() + k]))
+                    .collect();
+                let matte_groups = mattes
+                    .iter()
+                    .enumerate()
+                    .map(|(k, &m)| {
+                        let layer = &layers[m];
+                        bind(
+                            layer.sampled(),
+                            zero_view
+                                .as_ref()
+                                .expect("a scene with mattes has a zero backdrop"),
+                            &matte_views[k],
+                            &matte_uniforms[k],
+                            clip_view(layer.clip),
+                        )
+                    })
                     .collect();
                 let padded_row = (r.width * 16).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
                     * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
@@ -623,6 +768,10 @@ impl PreparedCompositor {
                     clear,
                     uniforms,
                     groups,
+                    _mattes: matte_targets,
+                    _zero: zero,
+                    matte_uniforms,
+                    matte_groups,
                     readback,
                     padded_row,
                 }
@@ -634,6 +783,9 @@ impl PreparedCompositor {
             stage,
             working_space: space,
             layers,
+            mattes,
+            matte_scratch,
+            _no_clip: no_clip,
             tiles,
             clear_pipeline,
             composite_pipeline,
@@ -694,11 +846,40 @@ impl PreparedCompositor {
         // targets start the frame cleared, so layer 0 has no predecessor.
         for (tile_index, tile) in self.tiles.iter().enumerate() {
             let mut previous = Region::default();
+            for (k, &m) in self.mattes.iter().enumerate() {
+                let (state, layer) = (states[m], &self.layers[m]);
+                let mut geometry =
+                    uniforms(self.stage, tile.tile, state).map_err(|(field, detail)| {
+                        mapping(&layer.object_id, &layer.document_path, field, detail)
+                    })?;
+                geometry[9] = if layer.clip.is_some() { 1.0 } else { 0.0 };
+                self.matte_scratch[tile_index * self.mattes.len() + k] = pack_uniform(
+                    &geometry,
+                    key(
+                        crate::blend::mode_index(BlendMode::Normal),
+                        tile.tile,
+                        state,
+                    ),
+                    Region::full(tile.tile),
+                );
+            }
             for (i, (state, layer)) in states.iter().zip(&self.layers).enumerate() {
-                let geometry =
+                // 3.19: a matte layer passes the frame through unchanged.
+                let state = &if layer.matte {
+                    LayerState {
+                        opacity: 0.0,
+                        ..*state
+                    }
+                } else {
+                    *state
+                };
+                let mut geometry =
                     uniforms(self.stage, tile.tile, *state).map_err(|(field, detail)| {
                         mapping(&layer.object_id, &layer.document_path, field, detail)
                     })?;
+                if layer.clip.is_some() {
+                    geometry[9] = 1.0;
+                }
                 let footprint = layer_region(
                     self.stage,
                     tile.tile,
@@ -725,6 +906,13 @@ impl PreparedCompositor {
                     uniform,
                     0,
                     &self.uniform_scratch[tile_index * states.len() + i],
+                );
+            }
+            for (k, uniform) in tile.matte_uniforms.iter().enumerate() {
+                self.queue.write_buffer(
+                    uniform,
+                    0,
+                    &self.matte_scratch[tile_index * self.mattes.len() + k],
                 );
             }
         }
@@ -792,6 +980,12 @@ impl PreparedCompositor {
                 pass.dispatch_workgroups(bounds.width.div_ceil(16), bounds.height.div_ceil(16), 1);
             }
             pass.set_pipeline(&self.composite_pipeline);
+            // 3.19: the mattes first, outer before inner, over the whole tile.
+            for group in &tile.matte_groups {
+                pass.set_bind_group(0, group, &[]);
+                pass.dispatch_workgroups(bounds.width.div_ceil(16), bounds.height.div_ceil(16), 1);
+                layer_pixels += Region::full(tile.tile).area();
+            }
             for (group, region) in tile.groups.iter().zip(regions) {
                 pass.set_bind_group(0, group, &[]);
                 // An empty region dispatches no workgroup; the layer is still
@@ -801,7 +995,7 @@ impl PreparedCompositor {
             }
         }
         self.queue.submit([encoder.finish()]);
-        crate::render_work::gpu_dispatch(self.tiles.len() * states.len());
+        crate::render_work::gpu_dispatch(self.tiles.len() * (states.len() + self.mattes.len()));
         crate::render_work::gpu_layer_area(layer_pixels);
         self.submitted = true;
         Ok(CompositeSubmission {

@@ -56,6 +56,8 @@ pub struct PreparedScene {
     /// 3.22: each object with effects, drawn once in its own padded layer
     /// space (the GPU's source too), with its Box Blur iteration counts.
     effect_layers: Vec<Option<EffectLayer>>,
+    /// 3.19: each object's clip group matte and whether it is a clip child.
+    clips: crate::clip::ClipPlan,
     /// Hierarchy diagnostics. Preparation refuses any repaired edge, so a
     /// successfully prepared scene has none; retained for inspection callers.
     diagnostics: Vec<HierarchyDiagnostic>,
@@ -141,13 +143,16 @@ impl PreparedScene {
         let meshes = prepare_meshes(&resolved, available, asset_bytes, support)?;
         // 3.17: images are decoded once, then drawn as layers.
         let images = crate::image::prepare_images(&resolved, asset_bytes)?;
+        let clips = crate::clip::ClipPlan::of(&resolved);
         let mut effect_layers = Vec::with_capacity(resolved.objects.len());
         for (index, object) in resolved.objects.iter().enumerate() {
-            // An object with effects, and every image, is drawn in its own
-            // layer space and warped onto the canvas as the GPU composites it.
+            // An object with effects or masks, every image and every clip
+            // child is drawn in its own layer space and warped onto the
+            // canvas as the GPU composites it.
             if object.base().effects().is_empty()
                 && object.base().masks().is_empty()
                 && !matches!(object, SceneObject::Image(_))
+                && !clips.is_clip[index]
             {
                 effect_layers.push(None);
                 continue;
@@ -173,6 +178,7 @@ impl PreparedScene {
                 &paths,
                 0,
                 &effect_layers,
+                &clips,
             )?);
         }
         let by_id = resolution
@@ -187,6 +193,7 @@ impl PreparedScene {
             resolved,
             effective: resolution.effective,
             effect_layers,
+            clips,
             diagnostics: resolution.diagnostics,
             by_id,
             paths,
@@ -244,6 +251,7 @@ impl PreparedScene {
                     &self.paths,
                     0,
                     &self.effect_layers,
+                    &self.clips,
                 )
                 .expect("semantically prepared static reference remains drawable")
             })
@@ -307,6 +315,7 @@ impl PreparedScene {
             &paths,
             scene_frame,
             &self.effect_layers,
+            &self.clips,
         )?;
         Ok(surface.encode(output, self.document.working_color_space))
     }
@@ -338,6 +347,7 @@ impl PreparedScene {
             &paths,
             scene_frame,
             &self.effect_layers,
+            &self.clips,
         )
     }
 
@@ -383,6 +393,7 @@ fn compose(
     paths: &PreparedPaths,
     scene_frame: u64,
     effect_layers: &[Option<EffectLayer>],
+    clips: &crate::clip::ClipPlan,
 ) -> Result<RasterSurface, Refusal> {
     crate::render_work::cpu_frame();
     let mut surface = RasterSurface::transparent(document.canvas.width, document.canvas.height);
@@ -390,12 +401,47 @@ fn compose(
     for path in paths.paths() {
         by_object.entry(path.object_id()).or_default().push(path);
     }
+    let layers = LayerPixels {
+        document,
+        effective,
+        effect_layers,
+    };
+    // 3.19: each clip child's matte this frame, built when first needed.
+    let mut mattes: HashMap<usize, Vec<f32>> = HashMap::new();
     for index in PreparedScene::draw_order(document) {
         let object = &document.objects[index];
         let id = object.base().id.as_str();
         let mode = object.base().blend_mode();
         let effects = object.base().effects();
-        if let Some(layer) = effect_layers.get(index).and_then(Option::as_ref) {
+        // 3.19: a clip child is never drawn itself; it is its group's matte.
+        if clips.is_clip.get(index) == Some(&true) {
+            continue;
+        }
+        if let Some(clip) = clips.clip_of.get(index).copied().flatten() {
+            // 3.19: a clipped object is drawn alone, as the GPU samples it,
+            // multiplied by its clip's matte, then blended in its mode.
+            let resolved = &effective[index];
+            if !(resolved.visible && resolved.opacity > 0.0) {
+                continue;
+            }
+            let mut layer = RasterSurface::transparent(surface.width(), surface.height());
+            if let Some((pixels, w, h, rows, state)) = layers.warped(index)? {
+                layer.warp_blend(&pixels, w, h, &rows, state.opacity, BlendMode::Normal, 0);
+            } else if let Some(object_paths) = by_object.get(id) {
+                VelloCpuRasteriser.rasterise_into(object_paths, &mut layer);
+            }
+            let matte = matte(&layers, clips, clip, &mut mattes)?;
+            for (px, a) in layer.pixels_mut().iter_mut().zip(matte) {
+                *px = px.scaled(*a);
+            }
+            surface.blend_layer(
+                &layer,
+                mode,
+                crate::blend::dissolve_seed(id, mode, scene_frame),
+            );
+            continue;
+        }
+        if effect_layers.get(index).and_then(Option::as_ref).is_some() {
             // 3.22: the effects run on the object's layer-space pixels (the
             // GPU's source), which are then warped onto the canvas exactly
             // as the composite pass samples them.
@@ -403,34 +449,9 @@ fn compose(
             if !(resolved.visible && resolved.opacity > 0.0) {
                 continue;
             }
-            let source = &layer.source;
-            // Prepared without a GPU, so always drawn on the CPU.
-            let layer_surface = source
-                .surface
-                .as_ref()
-                .expect("a CPU reference layer source is drawn on the CPU");
-            let (w, h) = (source.width as usize, source.height as usize);
-            let ctx = crate::effect_chain::EffectContext {
-                origin: source.origin,
-                size: [object.base().width, object.base().height],
-                space: document.working_color_space,
-            };
-            let mut plan = crate::effect_chain::EffectPlan::layout(effects, &layer.iterations);
-            plan.pack(effects, &ctx);
-            let pixels = plan.run(layer_surface.pixels(), w, h, &ctx);
-            let state = crate::compositor::scene::layer_state(
-                object.base().anchor,
-                resolved,
-                source.origin,
-            );
-            let rows = crate::compositor::layer_rows(surface.width(), surface.height(), state)
-                .map_err(|e| {
-                    crate::compositor::scene::mapping_refusal(
-                        id,
-                        &format!("objects[{index}]"),
-                        &e.to_string(),
-                    )
-                })?;
+            let (pixels, w, h, rows, state) = layers
+                .warped(index)?
+                .expect("an object with a layer is warped from it");
             let seed = crate::blend::dissolve_seed(id, mode, scene_frame);
             surface.warp_blend(&pixels, w, h, &rows, state.opacity, mode, seed);
             continue;
@@ -475,6 +496,120 @@ fn compose(
         }
     }
     Ok(surface)
+}
+
+/// An object's layer-space pixels with its effects run, and how it is warped
+/// onto the canvas this frame (3.22; 3.19 for clips and masks).
+struct LayerPixels<'a> {
+    document: &'a SceneDocument,
+    effective: &'a [ResolvedObject],
+    effect_layers: &'a [Option<EffectLayer>],
+}
+
+type Warped = (
+    Vec<crate::colour_pipeline::WorkingRgba>,
+    usize,
+    usize,
+    [f32; 12],
+    crate::compositor::LayerState,
+);
+
+impl LayerPixels<'_> {
+    /// `None` when the object is not drawn in its own layer space.
+    fn warped(&self, index: usize) -> Result<Option<Warped>, Refusal> {
+        let Some(layer) = self.effect_layers.get(index).and_then(Option::as_ref) else {
+            return Ok(None);
+        };
+        let object = &self.document.objects[index];
+        let source = &layer.source;
+        // Prepared without a GPU, so always drawn on the CPU.
+        let layer_surface = source
+            .surface
+            .as_ref()
+            .expect("a CPU reference layer source is drawn on the CPU");
+        let (w, h) = (source.width as usize, source.height as usize);
+        let ctx = crate::effect_chain::EffectContext {
+            origin: source.origin,
+            size: [object.base().width, object.base().height],
+            space: self.document.working_color_space,
+        };
+        let effects = object.base().effects();
+        let mut plan = crate::effect_chain::EffectPlan::layout(effects, &layer.iterations);
+        plan.pack(effects, &ctx);
+        let pixels = plan.run(layer_surface.pixels(), w, h, &ctx);
+        let state = crate::compositor::scene::layer_state(
+            object.base().anchor,
+            &self.effective[index],
+            source.origin,
+        );
+        let rows = self.rows(index, state)?;
+        Ok(Some((pixels, w, h, rows, state)))
+    }
+
+    fn rows(
+        &self,
+        index: usize,
+        state: crate::compositor::LayerState,
+    ) -> Result<[f32; 12], Refusal> {
+        let canvas = &self.document.canvas;
+        crate::compositor::layer_rows(canvas.width, canvas.height, state).map_err(|e| {
+            crate::compositor::scene::mapping_refusal(
+                &self.document.objects[index].base().id,
+                &format!("objects[{index}]"),
+                &e.to_string(),
+            )
+        })
+    }
+}
+
+/// A clip child's matte (3.19): its alpha warped onto the canvas at its own
+/// opacity, visible or not, times its own clip's matte, as the GPU composites
+/// it into its matte target.
+fn matte<'m>(
+    layers: &LayerPixels<'_>,
+    clips: &crate::clip::ClipPlan,
+    clip: usize,
+    mattes: &'m mut HashMap<usize, Vec<f32>>,
+) -> Result<&'m Vec<f32>, Refusal> {
+    // Outermost first: each matte multiplies the one around it.
+    let mut chain = vec![clip];
+    while let Some(outer) = clips.clip_of[*chain.last().expect("non-empty")] {
+        if mattes.contains_key(&outer) || chain.len() > clips.clip_of.len() {
+            break;
+        }
+        chain.push(outer);
+    }
+    for &index in chain.iter().rev() {
+        if mattes.contains_key(&index) {
+            continue;
+        }
+        let canvas = &layers.document.canvas;
+        let mut surface = RasterSurface::transparent(canvas.width, canvas.height);
+        let (pixels, w, h, _, _) = layers
+            .warped(index)?
+            .expect("a clip child is drawn in its own layer space");
+        let object = &layers.document.objects[index];
+        let state = crate::compositor::scene::matte_state(
+            object.base().anchor,
+            &layers.effective[index],
+            layers.effect_layers[index]
+                .as_ref()
+                .expect("a clip child has a layer")
+                .source
+                .origin,
+            object.base().opacity,
+        );
+        let rows = layers.rows(index, state)?;
+        surface.warp_blend(&pixels, w, h, &rows, state.opacity, BlendMode::Normal, 0);
+        let mut alpha: Vec<f32> = surface.pixels().iter().map(|p| p.a).collect();
+        if let Some(outer) = clips.clip_of[index] {
+            for (a, o) in alpha.iter_mut().zip(&mattes[&outer]) {
+                *a *= o;
+            }
+        }
+        mattes.insert(index, alpha);
+    }
+    Ok(&mattes[&clip])
 }
 
 #[cfg(test)]
@@ -653,6 +788,7 @@ mod tests {
         let mut group = GroupObject {
             base: ObjectBase::new("g", "g"),
             child_ids: vec!["child".into()],
+            clip_child_id: None,
         };
         group.base.opacity = 0.5;
         for (space, expected) in [
@@ -1008,6 +1144,7 @@ mod tests {
         let mut parent = GroupObject {
             base: ObjectBase::new("g", "g"),
             child_ids: vec!["r".into()],
+            clip_child_id: None,
         };
         parent.base.x = 100.0;
         let objects = vec![SceneObject::Group(parent), rect("r")];
@@ -1162,6 +1299,7 @@ mod tests {
         let mut parent = GroupObject {
             base: ObjectBase::new("parent", "parent"),
             child_ids: vec!["sheared".into()],
+            clip_child_id: None,
         };
         parent.base.scale_x = 2.0;
         let mut sheared = rect("sheared");
@@ -1195,6 +1333,7 @@ mod tests {
         let mut painted_group = GroupObject {
             base: ObjectBase::new("painted", "painted"),
             child_ids: Vec::new(),
+            clip_child_id: None,
         };
         painted_group.base.fill = solid();
         let painted_group = SceneObject::Group(painted_group);
@@ -1338,6 +1477,7 @@ mod tests {
         let group = SceneObject::Group(GroupObject {
             base: ObjectBase::new("g", "g"),
             child_ids: vec!["ghost".into()],
+            clip_child_id: None,
         });
         let refused = PreparedScene::prepare(
             document(vec![group, rect("r")]),
@@ -1575,5 +1715,61 @@ mod tests {
             paragraph_spacing: 0.0,
             text_indent: 0.0,
         }
+    }
+
+    /// 3.19: on the CPU reference, a clip group's clip child clips every other
+    /// descendant at its own opacity, visible or not, and is never drawn;
+    /// nested clip groups multiply; a group outside any clip is untouched.
+    #[test]
+    fn clip_groups_clip_their_other_descendants_at_the_clip_childs_own_opacity() {
+        use gx_contracts::color::Rgba;
+        let rect = |id: &str, x: f64, w: f64, opacity: f64, visible: bool| {
+            let mut base = ObjectBase::new(id, id);
+            base.x = x;
+            base.y = 0.0;
+            base.width = w;
+            base.height = 40.0;
+            base.opacity = opacity;
+            base.visible = visible;
+            base.fill = Some(ColorValue::Solid {
+                color: Rgba::srgb(1.0, 1.0, 1.0, 1.0),
+            });
+            SceneObject::Rect(RectObject { base, radius: 0.0 })
+        };
+        let group = |id: &str, children: &[&str], clip: &str, opacity: f64| {
+            let mut base = ObjectBase::new(id, id);
+            base.opacity = opacity;
+            SceneObject::Group(GroupObject {
+                base,
+                child_ids: children.iter().map(|c| (*c).into()).collect(),
+                clip_child_id: Some(clip.into()),
+            })
+        };
+        // Outer: a hidden clip at 80% over x 0..100, a fill over 0..300 and a
+        // nested group clipped to x 50..150 holding a fill over 0..300.
+        let scene = document(vec![
+            group("outer", &["clip", "fill", "inner"], "clip", 0.5),
+            rect("clip", 0.0, 100.0, 0.8, false),
+            rect("fill", 0.0, 300.0, 1.0, true),
+            group("inner", &["inner-clip", "inner-fill"], "inner-clip", 1.0),
+            rect("inner-clip", 50.0, 100.0, 1.0, true),
+            rect("inner-fill", 0.0, 300.0, 1.0, true),
+        ]);
+        let prepared = PreparedScene::prepare(
+            scene,
+            &HashSet::new(),
+            &AssetBytes::new(),
+            &MaterialSupport::fixed_function(),
+        )
+        .expect("the clipped scene prepares");
+        let frame = prepared.frame(OutputTransform::Srgb);
+        let alpha = |x: usize| frame.pixels[(20 * frame.width as usize + x) * 4 + 3];
+        // x 25: the fill at 0.5 x 0.8 = 0.4; the nested fill is outside its clip.
+        assert_eq!(alpha(25), 102);
+        // x 75: both fills at 0.4: 0.4 + 0.4 x 0.6 = 0.64.
+        assert_eq!(alpha(75), 163);
+        // x 125: inside the nested clip but outside the outer one: nothing.
+        // x 200: outside both. The visible nested clip child is not drawn.
+        assert_eq!([alpha(125), alpha(200)], [0, 0]);
     }
 }

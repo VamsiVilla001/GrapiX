@@ -118,6 +118,21 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-15 — 3.19 increment 2: clip groups as per-frame mattes (Claude, on the user's instruction)
+
+**Resume here.** User decisions (second round, Jev and Laya first: `docs/evidence/3.19/clip-design-jev-laya.json`):
+clips are per-frame mattes, replacing "static clip shapes", so a moving or fading clip renders; the clip carries the
+clip child's own opacity (Laya's "effective" applies group opacity twice). Agreed by both models: a hidden clip child
+still clips, every other descendant is clipped, the clip child is a drawing object. `GroupObject.clipChildId` and
+`Refusal::ClipGroupInvalid` (`drawability::clip_group_problem`); `worker/src/clip.rs` `ClipPlan` (nearest clip; an
+inner clip child is clipped by the outer one, so each matte holds every clip around it). GPU: clip children are matte
+layers (pass-through in the frame), with one matte target per clip child per tile, composited whole-tile from a zero
+backdrop outer-first (`matte_state`: effective transform at own opacity); `composite.wgsl` binding 4 multiplies a
+clipped sample by the matte alpha. CPU: clipped objects are drawn alone, times the matte, then blended in their mode.
+Verified: CPU clip test; GPU engine clip test byte-identical to the CPU reference at frames 0 and 10 on DX12 and
+Vulkan in both spaces; validator and audit. **3.19 stays active.** Next: track mattes (`ObjectBase.trackMatte`),
+which reuse the matte targets with alpha/luma modes, then trim, mutations, Jev and Laya. Gate: fmt, clippy -D warnings and npm run check exit 0 (46 Node, 412 Editor, 863 Rust passed, 0 failed, 35 ignored; conformance 589/0/9); hardware worker suite 187/0/0. The timed conformance check "headless renders while Program runs add no late or missed Program frame" failed in two earlier full gates on this tree (22 late/38 missed, then 2/2) and in 1 of 4 standalone runs; an A/B of standalone conformance alternating HEAD a17a545 (exported, own target dir) and this tree passed 3/3 each, and neither timing scene touches the clip code (plain rects); the clip-free per-tile zero texture was removed anyway. Treat that check as load-sensitive in debug builds.
+
 ## 2026-11-15 — 3.19 increment 1: layer masks on the GPU and the CPU (Claude, on the user's instruction)
 
 **Resume here.** User decisions: masks on each object, track matte by explicit source id, clip groups as

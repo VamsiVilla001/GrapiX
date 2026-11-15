@@ -1,0 +1,238 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual 0.4.28 max_len 8192",
+  "laya_usage": {
+    "input_tokens": 3089,
+    "output_tokens": 0,
+    "state_tokens": 430,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row_3_19_done_when": "Masks (add, subtract, intersect, difference; feather; expansion), clip groups, alpha and luma mattes and trim start/end/offset render on the GPU and match CPU references; the scene contract's trim values are honoured (they are silently ignored today); an unsupported combination refuses by name.",
+    "user_decisions_15_nov": [
+      "Masks live on each object (ObjectBase.masks); done and committed as increment 1.",
+      "Clip groups: GroupObject.clipChildId names one child whose coverage clips the group's other children; the clip child is not drawn itself.",
+      "Masks and clip shapes are drawn at prepare and are static for now; animating them refuses by name.",
+      "Track mattes (next increment): ObjectBase.trackMatte {sourceId, mode alpha|alphaInverted|luma|lumaInverted}; each frame the compositor renders the matte source into its own tile target and the consumer sample is multiplied by the matte there."
+    ],
+    "facts": [
+      "Every drawing object is drawn once at prepare into its own layer texture (Vello coverage, float colour); per frame the GPU compositor only warps (affine: position, rotation, scale) and blends those textures, with the object effective opacity. Animatable properties: opacity, x, y, zDepth, rotation, rotationX, rotationY, scaleX, scaleY, scaleZ, width, height.",
+      "Groups paint nothing. An object's effective transform, opacity and visibility multiply down from its ancestors (a group at opacity 0.5 halves every descendant).",
+      "The CPU reference evaluates every frame from the document too, so it can draw a clip shape at its per-frame position exactly as the GPU does.",
+      "Implementing clips through the per-frame matte target that track mattes need anyway means the clip shape is still drawn at prepare (its layer texture) and is only warped per frame, like every other layer; a clip child or clip group that moves or fades then renders correctly instead of refusing, with no extra refusal code path."
+    ]
+  },
+  "questions": {
+    "clip_mechanism": {
+      "type": "choice",
+      "instructions": "How should a clip group be rendered?",
+      "criteria": {
+        "per_frame_matte": "As an alpha matte: the clip child's prepared layer is warped each frame into a matte target and every other descendant's sample is multiplied by its alpha there; a moving or fading clip renders correctly and nothing about animation refuses. Report the deviation from the static decision to the user.",
+        "static_refuse": "Bake the clip coverage at prepare and refuse by name any animation channel on the clip child, the clip group or the group's ancestors, as the user's decision literally says."
+      }
+    },
+    "clip_opacity": {
+      "type": "choice",
+      "instructions": "Which opacity does the clip child's coverage carry?",
+      "criteria": {
+        "own_opacity": "Only the clip child's own opacity: the group's and ancestors' opacity already reach the clipped children through effective opacity, so counting it in the clip as well would apply it twice.",
+        "effective_opacity": "The clip child's effective opacity (its own times its ancestors').",
+        "ignore_opacity": "None: the clip is the clip child's shape coverage at full strength, whatever its opacity."
+      }
+    },
+    "clip_hidden": {
+      "type": "choice",
+      "instructions": "The clip child has visible = false (it is never drawn itself in any case). What should the group do?",
+      "criteria": {
+        "clip_still_applies": "The clip still applies: visibility of a clip child only affects drawing it, which never happens (After Effects track mattes behave so).",
+        "clip_off": "The clip is switched off and the other children draw unclipped (Figma hides the mask layer this way).",
+        "refuse": "Refuse by name: a hidden clip child is ambiguous."
+      }
+    },
+    "clip_scope": {
+      "type": "choice",
+      "instructions": "Which objects does a clip group clip?",
+      "criteria": {
+        "all_descendants": "Every descendant of the group except the clip child, whatever its draw order; a nested clip group multiplies its own clip with the outer one.",
+        "above_clip_only": "Only children drawn above the clip child in draw order (Figma/Photoshop clipping)."
+      }
+    },
+    "clip_child_kind": {
+      "type": "choice",
+      "instructions": "What may the clip child be?",
+      "criteria": {
+        "drawing_kinds": "A drawing object (rect, ellipse, line, shape, text, image) with its fill, stroke, masks and effects; a group, layer, camera, light, marker, mesh or paint clip child refuses by name, as does a clipChildId that is not one of the group childIds.",
+        "any_object": "Any object, a nested group included (its composite becomes the clip)."
+      }
+    },
+    "needs_user": {
+      "type": "noul",
+      "instructions": "Must the user approve this before implementation?",
+      "criteria": {
+        "true": "Yes, a recorded user decision would change.",
+        "false": "No."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "clip_mechanism",
+      "jev": "per_frame_matte",
+      "laya": "per_frame_matte",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "per_frame_matte",
+        "confidence": 0.88,
+        "probabilities": {
+          "per_frame_matte": 0.94,
+          "static_refuse": 0.06
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "per_frame_matte",
+        "probabilities": {
+          "per_frame_matte": 0.7235,
+          "static_refuse": 0.2765
+        },
+        "confidence": 0.1494,
+        "answer_confidence": 0.7235,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "clip_opacity",
+      "jev": "own_opacity",
+      "laya": "effective_opacity",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "own_opacity",
+        "confidence": 0.28,
+        "probabilities": {
+          "own_opacity": 0.52,
+          "effective_opacity": 0.24,
+          "ignore_opacity": 0.24
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "effective_opacity",
+        "probabilities": {
+          "own_opacity": 0.2104,
+          "effective_opacity": 0.5928,
+          "ignore_opacity": 0.1968
+        },
+        "confidence": 0.1281,
+        "answer_confidence": 0.5928,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "clip_hidden",
+      "jev": "clip_still_applies",
+      "laya": "clip_still_applies",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "clip_still_applies",
+        "confidence": 0.76,
+        "probabilities": {
+          "clip_still_applies": 0.84,
+          "clip_off": 0.13,
+          "refuse": 0.03
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "clip_still_applies",
+        "probabilities": {
+          "clip_still_applies": 0.3798,
+          "clip_off": 0.2525,
+          "refuse": 0.3678
+        },
+        "confidence": 0.0141,
+        "answer_confidence": 0.3798,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "clip_scope",
+      "jev": "all_descendants",
+      "laya": "all_descendants",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "all_descendants",
+        "confidence": 0.9,
+        "probabilities": {
+          "all_descendants": 0.95,
+          "above_clip_only": 0.05
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "all_descendants",
+        "probabilities": {
+          "all_descendants": 0.7225,
+          "above_clip_only": 0.2775
+        },
+        "confidence": 0.148,
+        "answer_confidence": 0.7225,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "clip_child_kind",
+      "jev": "drawing_kinds",
+      "laya": "drawing_kinds",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "drawing_kinds",
+        "confidence": 0.32,
+        "probabilities": {
+          "drawing_kinds": 0.66,
+          "any_object": 0.34
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "drawing_kinds",
+        "probabilities": {
+          "drawing_kinds": 0.6949,
+          "any_object": 0.3051
+        },
+        "confidence": 0.1125,
+        "answer_confidence": 0.6949,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "needs_user",
+      "jev": 0.57,
+      "laya": 0.7796,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.57
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.7796,
+        "confidence": 0.7796,
+        "answer_confidence": 0.7796,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

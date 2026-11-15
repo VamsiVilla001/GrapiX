@@ -17,6 +17,8 @@ fn layer(id: &str, colour: Rgba, space: WorkingColorSpace, width: u32, height: u
         drawn: None,
         blend_mode: BlendMode::Normal,
         effects: None,
+        matte: false,
+        clip: None,
         state: LayerState::default(),
     }
 }

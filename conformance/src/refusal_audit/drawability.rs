@@ -317,6 +317,15 @@ fn parity_cases() -> Vec<(&'static str, SceneDocument, Refusal)> {
     let mut feathered = empty_scene("wire-mask-feather");
     feathered.objects.push(object(serde_json::json!({ "type": "rect", "id": "masked", "name": "masked", "width": 10, "height": 10,
         "masks": [{ "path": square }, { "path": square, "mode": "subtract", "feather": 300 }] })));
+    // 3.19: a clip group whose clip child is not one of its children.
+    let mut stray_clip = empty_scene("wire-clip-stray");
+    stray_clip.objects.push(object(
+        serde_json::json!({ "type": "group", "id": "clipped", "name": "clipped",
+        "childIds": [], "clipChildId": "loose" }),
+    ));
+    stray_clip.objects.push(object(
+        serde_json::json!({ "type": "rect", "id": "loose", "name": "loose", "width": 10, "height": 10 }),
+    ));
     let mut grouped = empty_scene("wire-mask-group");
     grouped.objects.push(object(
         serde_json::json!({ "type": "group", "id": "holder", "name": "holder", "childIds": [],
@@ -330,6 +339,14 @@ fn parity_cases() -> Vec<(&'static str, SceneDocument, Refusal)> {
                 object: "masked".into(),
                 index: 1,
                 detail: "feather 300 is outside 0 to 250".into(),
+            },
+        ),
+        (
+            "a stray clip child refuses identically in validator and publication wire",
+            stray_clip,
+            Refusal::ClipGroupInvalid {
+                group: "clipped".into(),
+                detail: "clipChildId loose is not one of the group's children".into(),
             },
         ),
         (

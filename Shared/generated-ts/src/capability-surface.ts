@@ -178,6 +178,7 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
     "gradientNotDrawable",
     "imageNotDrawable",
     "maskInvalid",
+    "clipGroupInvalid",
     "vectorTessellationFailed",
     "unknownOutputAdapter",
     "sceneMaterialUnknown",

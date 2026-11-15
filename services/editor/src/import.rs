@@ -129,6 +129,7 @@ pub fn import_svg(
                 objects.push(SceneObject::Group(gx_contracts::scene::GroupObject {
                     base,
                     child_ids: Vec::new(),
+                    clip_child_id: None,
                 }));
                 entries.push(ImportEntry {
                     source_id: source_id.clone(),

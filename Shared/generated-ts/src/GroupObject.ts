@@ -12,7 +12,14 @@ import type { Vec2 } from "./Vec2";
  * A group: a hierarchy container that affects descendants but paints no
  * pixels. Children are object ids, in scene order.
  */
-export type GroupObject = { childIds: Array<string>, id: string, name: string, visible: boolean, locked: boolean,
+export type GroupObject = { childIds: Array<string>,
+/**
+ * The clip group's clip child (3.19, user decisions 15 Nov 2026): one of
+ * `child_ids`, a drawing object whose alpha, at its own opacity, clips
+ * every other descendant of the group as a per-frame matte. It is never
+ * drawn itself, whether visible or not; nested clip groups multiply.
+ */
+clipChildId?: string, id: string, name: string, visible: boolean, locked: boolean,
 /**
  * 0–1.
  */

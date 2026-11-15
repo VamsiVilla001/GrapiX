@@ -1428,3 +1428,249 @@ fn gpu_engine_draws_masked_layers_within_one_code_of_the_cpu_reference() {
         );
     }
 }
+
+/// 3.19's clip-group fixture: a half-opaque group clipped by a hidden,
+/// moving ellipse at 80% (its own opacity), holding a plain fill, a Multiply
+/// rect and a nested clip group whose masked fill is clipped by a square; a
+/// second group clipped by a visible rect; and an unclipped rect.
+fn clip_fixture() -> SceneDocument {
+    use gx_contracts::animation::{KeyframeChannel, SceneKeyframe};
+    use gx_contracts::material::BlendMode;
+    use gx_contracts::scene::{BezierPath, EllipseObject, GroupObject, Mask, MaskMode, Vec2};
+    let solid = |r: f64, g: f64, b: f64| ColorValue::Solid {
+        color: Rgba::srgb(r, g, b, 1.0),
+    };
+    let rect = |id: &str, x: f64, y: f64, w: f64, h: f64, fill: ColorValue| {
+        let mut base = ObjectBase::new(id, id);
+        base.x = x;
+        base.y = y;
+        base.width = w;
+        base.height = h;
+        base.fill = Some(fill);
+        SceneObject::Rect(RectObject { base, radius: 0.0 })
+    };
+    let group = |id: &str, children: &[&str], clip: &str| {
+        SceneObject::Group(GroupObject {
+            base: ObjectBase::new(id, id),
+            child_ids: children.iter().map(|c| (*c).into()).collect(),
+            clip_child_id: Some(clip.into()),
+        })
+    };
+    let mut doc = lower_third();
+    doc.objects.clear();
+    doc.assets.clear();
+    doc.fonts.clear();
+    doc.timeline.channels.clear();
+    let mut card = group(
+        "card",
+        &["card-clip", "card-fill", "card-multiply", "inner"],
+        "card-clip",
+    );
+    card.base_mut().opacity = 0.5;
+    doc.objects.push(card);
+    let mut base = ObjectBase::new("card-clip", "card-clip");
+    base.x = 100.0;
+    base.y = 100.0;
+    base.width = 400.0;
+    base.height = 200.0;
+    base.opacity = 0.8;
+    base.visible = false;
+    base.fill = Some(solid(1.0, 1.0, 1.0));
+    doc.objects
+        .push(SceneObject::Ellipse(EllipseObject { base }));
+    doc.objects.push(rect(
+        "card-fill",
+        50.0,
+        80.0,
+        520.0,
+        240.0,
+        solid(0.95, 0.5, 0.1),
+    ));
+    let mut multiply = rect(
+        "card-multiply",
+        300.0,
+        150.0,
+        300.0,
+        100.0,
+        solid(0.2, 0.4, 0.9),
+    );
+    multiply.base_mut().blend_mode = Some(BlendMode::Multiply);
+    doc.objects.push(multiply);
+    doc.objects
+        .push(group("inner", &["inner-clip", "inner-fill"], "inner-clip"));
+    doc.objects.push(rect(
+        "inner-clip",
+        120.0,
+        120.0,
+        100.0,
+        100.0,
+        solid(1.0, 1.0, 1.0),
+    ));
+    let mut inner_fill = rect("inner-fill", 0.0, 0.0, 700.0, 400.0, solid(0.1, 0.8, 0.3));
+    let v = |x: f64, y: f64| Vec2 { x, y };
+    inner_fill.base_mut().masks = Some(vec![Mask {
+        path: BezierPath {
+            closed: true,
+            vertices: vec![v(0.0, 0.0), v(170.0, 0.0), v(170.0, 400.0), v(0.0, 400.0)],
+            in_tangents: vec![v(0.0, 0.0); 4],
+            out_tangents: vec![v(0.0, 0.0); 4],
+        },
+        mode: MaskMode::Add,
+        feather: 0.0,
+        expansion: 0.0,
+        opacity: 1.0,
+        inverted: false,
+    }]);
+    doc.objects.push(inner_fill);
+    doc.objects
+        .push(group("badge", &["badge-clip", "badge-fill"], "badge-clip"));
+    doc.objects.push(rect(
+        "badge-clip",
+        900.0,
+        100.0,
+        100.0,
+        100.0,
+        solid(0.9, 0.1, 0.1),
+    ));
+    doc.objects.push(rect(
+        "badge-fill",
+        950.0,
+        150.0,
+        150.0,
+        100.0,
+        solid(0.1, 0.2, 0.9),
+    ));
+    doc.objects.push(rect(
+        "outside",
+        700.0,
+        100.0,
+        100.0,
+        100.0,
+        solid(0.9, 0.9, 0.9),
+    ));
+    // The clip moves 60 px right over ten frames.
+    doc.timeline.channels.push(KeyframeChannel {
+        object_id: "card-clip".into(),
+        property: "x".into(),
+        keys: vec![
+            SceneKeyframe {
+                frame: 0,
+                value: 100.0,
+                easing: Default::default(),
+                bezier: None,
+            },
+            SceneKeyframe {
+                frame: 10,
+                value: 160.0,
+                easing: Default::default(),
+                bezier: None,
+            },
+        ],
+    });
+    doc
+}
+
+#[test]
+#[ignore = "requires hardware GPU; explicit 3.19 clip gate"]
+fn gpu_engine_clips_groups_by_a_moving_matte_within_one_code_of_the_cpu_reference() {
+    for space in [WorkingColorSpace::Srgb, WorkingColorSpace::LinearSrgb] {
+        let (mut engine, ticks) = hardware_engine();
+        let mut doc = clip_fixture();
+        doc.working_color_space = space;
+        let pin = publish(&mut engine, doc);
+        let sources = engine.gpu_source_trace(&pin.0, pin.1).unwrap().to_vec();
+        assert_eq!(sources.len(), 8, "every drawing object, clip children too");
+        assert!(sources
+            .iter()
+            .all(|s| s.route == "gpu-vello-coverage-at-prepare"));
+        assert!(matches!(take(&mut engine, &pin), EngineReply::Taken(_)));
+        assert!(engine
+            .prepared_scene(&pin.0, pin.1)
+            .unwrap()
+            .has_animation());
+        let mut seen = Vec::new();
+        let mut strict = Vec::new();
+        // Frames 0, 5 and 10: the clip at rest, half way and arrived.
+        for tick in [1, 6, 11] {
+            ticks.store(tick, Ordering::Relaxed);
+            let program = engine.emit_frame_settled().unwrap().frame;
+            let scene_frame = engine.program_frame_trace().unwrap().scene_frame;
+            let cpu = engine.prepared_scene(&pin.0, pin.1).unwrap();
+            let reference = cpu.frame_at(scene_frame, OutputTransform::Rec709).unwrap();
+            let checked = scene_frame == 0 || scene_frame == 10;
+            let preview_reference =
+                checked.then(|| cpu.frame_at(scene_frame, OutputTransform::Srgb).unwrap());
+            assert_within_one_code(
+                &program,
+                &reference,
+                &format!("{space:?} frame {scene_frame}"),
+            );
+            if let Some(preview_reference) = preview_reference {
+                let preview = engine.take_preview().unwrap();
+                assert_within_one_code(
+                    &preview,
+                    &preview_reference,
+                    &format!("{space:?} Preview frame {scene_frame}"),
+                );
+                strict.push((scene_frame, strict_44(&preview, &preview_reference)));
+                seen.push((scene_frame, preview));
+            }
+        }
+        let at = |frame: u64| {
+            &seen
+                .iter()
+                .find(|(f, _)| *f == frame)
+                .expect("frame seen")
+                .1
+        };
+        let alpha =
+            |f: &Frame, x: u32, y: u32| i32::from(f.pixels[((y * f.width + x) * 4 + 3) as usize]);
+        let near = |actual: i32, expected: f64, what: &str| {
+            let expected = (expected * 255.0).round() as i32;
+            assert!(
+                (actual - expected).abs() <= 1,
+                "{space:?}: {what}: alpha {actual}, expected {expected}"
+            );
+        };
+        let first = at(0);
+        // Group 50% x the clip's own 80%: 0.4, not 0.5 x 0.4.
+        near(alpha(first, 200, 200), 0.4, "card fill inside the clip");
+        // The nested fill, masked and inside both clips, over the card fill.
+        near(
+            alpha(first, 150, 150),
+            0.64,
+            "nested fill inside both clips",
+        );
+        near(
+            alpha(first, 110, 200),
+            0.4,
+            "card fill near the clip's left edge",
+        );
+        near(
+            alpha(first, 520, 200),
+            0.0,
+            "card fill and Multiply outside the clip",
+        );
+        near(alpha(first, 750, 150), 1.0, "the unclipped rect");
+        near(
+            alpha(first, 920, 120),
+            0.0,
+            "a visible clip child is not drawn",
+        );
+        near(alpha(first, 970, 170), 1.0, "badge fill inside its clip");
+        near(alpha(first, 1050, 220), 0.0, "badge fill outside its clip");
+        // Ten frames on, the clip has moved 60 px right.
+        let last = at(10);
+        near(alpha(last, 110, 200), 0.0, "the clip has left");
+        // There both the fill and the Multiply rect show, each at 0.4.
+        near(alpha(last, 520, 200), 0.64, "the clip has arrived");
+        println!(
+            "3.19 {space:?} clip: strict 4.4 reading (frame, (differing share, worst)): {strict:?}"
+        );
+        evidence(
+            &format!("clips-{}.json", space.as_str()),
+            &json!({"strict44": strict.iter().map(|(f, (share, worst))| json!({"frame": f, "differingShare": share, "worst": worst})).collect::<Vec<_>>(),
+                    "sources": sources, "adapter": engine.gpu_description()}),
+        );
+    }
+}

@@ -44,6 +44,7 @@ fn fixture() -> SceneDocument {
     let group = |id: &str, child: &str| GroupObject {
         base: ObjectBase::new(id, id),
         child_ids: vec![child.to_owned()],
+        clip_child_id: None,
     };
     let mut hidden = group("hidden-group", "hidden-child");
     hidden.base.visible = false;

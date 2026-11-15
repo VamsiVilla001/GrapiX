@@ -79,6 +79,7 @@ mod tests {
             SceneObject::Group(GroupObject {
                 base: ObjectBase::new("g", "g"),
                 child_ids: Vec::new(),
+                clip_child_id: None,
             })
         };
 
@@ -123,6 +124,7 @@ mod tests {
         let mut none = SceneObject::Group(GroupObject {
             base: ObjectBase::new("g", "g"),
             child_ids: Vec::new(),
+            clip_child_id: None,
         });
         none.base_mut().fill = Some(ColorValue::None);
         none.base_mut().stroke_width = 3.0;
