@@ -1,0 +1,304 @@
+{
+  "row": "3.19",
+  "jev": {
+    "model": "jev-1.14.0"
+  },
+  "laya": {
+    "model": "convaiinnovations/laya-multilingual",
+    "package": "laya 0.4.28",
+    "max_len": 8192,
+    "input_tokens": 56998,
+    "output_tokens": 0,
+    "state_tokens": 5632,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "3.19 GPU masks, clip groups, track mattes and trim paths",
+    "done_when": "Masks (add, subtract, intersect, difference; feather; expansion), clip groups, alpha and luma mattes and trim start/end/offset render on the GPU and match CPU references; the scene contract's trim values are honoured (they are silently ignored today); an unsupported combination refuses by name",
+    "evidence_record": "# 3.19 evidence: GPU masks, clip groups, track mattes and trim paths\n\nBuild-plan row `3.19`. **Done, 15 Nov 2026.** Taken on the user's\ninstruction (\"start with the unblocked pointers\"), after 3.18.\n\n## User decisions (15 Nov 2026)\n\nPut to the user before any code, as each one changes the contract:\n\n- **Masks live on each object** (`ObjectBase.masks`), as After Effects layer\n  masks.\n- **A track matte names its source by explicit id**, not by \"the layer\n  above\".\n- **The agreed set:** clip groups as `GroupObject.clipChildId`; static masks\n  and clip shapes drawn at prepare; track mattes as per-frame matte targets.\n- **Scope:** 3.19 adds the contract and the rendering. 11.47 keeps the Editor\n  tools, pen paths, animated trim and its goldens.\n\nJev and Laya were run on the design first (`design-jev-laya.json`). They\nagreed on the clip child, when masks are drawn and the matte target, and split\non where masks live (Jev: on each object; Laya: mask objects) and on how a\nmatte names its source (Jev: explicit id; Laya: the layer above). Both said the\nuser decides; the user chose as above.\n\n### Second round, before clip groups (`clip-design-jev-laya.json`)\n\n- **Clips are per-frame mattes** (user, replacing \"static clip shapes\"):\n  the clip child is still drawn once at prepare, into its own layer, and is\n  warped each frame into a matte target, so a clip child or clip group that\n  moves or fades renders instead of refusing. Jev and Laya both chose this,\n  and both leaned towards asking the user (Jev 0.57, Laya 0.78).\n- **The clip carries the clip child's own opacity** (user). Jev chose this,\n  with low confidence. Laya chose effective opacity, which applies a group's\n  opacity twice when checked by hand: at 50% the clipped children would show\n  at 25%.\n- Jev and Laya agreed, and it was checked by hand: a hidden clip child still\n  clips (it is never drawn anyway); every other descendant of the group is\n  clipped, whatever its draw order; the clip child is a drawing object.\n\n### Third round, before track mattes (`matte-design-jev-laya.json`)\n\nJev and Laya split on all four questions.\n\n- **A track matte source is never drawn** (user), whatever its visible flag,\n  as a clip child. Jev was split 54/46 for \"drawn when visible\"; Laya chose\n  never drawn.\n- **The matte carries the source's own opacity** (user), as clips do. Jev\n  chose own (0.66); Laya chose effective.\n- **Luma** is Rec.709 over the premultiplied working-space colour, clamped to\n  0..1. Jev chose this (0.88). Laya's \"straight colour times alpha\" is the same\n  value, since premultiplied colour is straight colour times alpha.\n- **Refusals** are the strict set, by hand verification. Jev chose it (0.88);\n  Laya chose permissive. A matte chain or a matte on a group needs a\n  precomposed target, which the done-when lets refuse by name.\n\n## Increment 1: layer masks\n\n### What changed\n\n- **Contract.** `ObjectBase.masks: Option<Vec<Mask>>` (absent and empty both\n  mean none). A `Mask` is a closed `BezierPath` in the object's own\n  coordinates plus `mode` (`none`, `add`, `subtract`, `intersect`,\n  `difference`; default `add`), `feather` (0 to 250 px), `expansion`\n  (-1000 to 1000 px), `opacity` (0 to 1, default 1) and `inverted`. At most 16\n  per object. Static: masks are not animatable yet.\n- **Refusal.** `Refusal::MaskInvalid { object, index, detail }`\n  (`maskInvalid`), from one rule (`drawability::mask_problem`) shared by the\n  validator and the engine: a mask on an object that draws no pixels (group,\n  layer, camera, light, marker, mesh, paint), too many masks, an open path or\n  one under three vertices, tangents that do not match the vertices, a\n  non-finite point, or a value out of range. The validator reports it at\n  `objects[i].masks[j]` with the mask as the given value.\n- **The After Effects model, once, on both paths.** For each mask: its\n  coverage, grown (a union with a band of width 2|e| around the path) or shrunk\n  (multiplied by one minus that band), feathered by a normalised Gaussian\n  (sigma = feather / 2, radius ceil(3 sigma), zero outside the layer),\n  inverted, then scaled by its opacity. Masks fold in order: add\n  `a + c - ac`, subtract `a(1 - c)`, intersect `ac`, difference\n  `a + c - 2ac`; `none` is skipped. The fold starts at 0 when the first mask\n  that is not `none` adds, else at 1. The layer's pixels are multiplied by the\n  result before its effects.\n- **CPU twin:** `services/render-engine/worker/src/rasterise/mask.rs` (coverage\n  by Vello CPU over the layer's coverage window).\n- **GPU:** `compositor/mask.wgsl` and `GpuDrawer::apply_masks`. Fill and band\n  coverage come from Vello GPU; `init`, `shape`, `blur_h`, `blur_v`, `fold`\n  and `apply` passes run over the layer's float buffer at prepare, before the\n  copy into the layer texture. Nothing waits for the GPU.\n- **Wiring.** Paths, text and images all take masks. Vector and text masks are\n  placed by the same transform as the object's own paths; an image's raster is\n  in box coordinates, as its masks are. A masked object is drawn in its own\n  layer space on the CPU reference as well, like an object with effects.\n\n### Executed checks\n\n- `cargo test -p gx-render-worker --lib rasterise::mask`: 5 passed (each\n  mode's fold and the starting alpha, inversion and opacity, expansion grow\n  and shrink, the feather weights and the softened edge, the multiply).\n- `cargo test -p gx-render-worker --lib gpu_masks_match -- --include-ignored`\n  (RTX 3070 Ti): the GPU passes equal the CPU twin to within 1.5/255 under five\n  masks (every mode, both feathers, both expansions, inversion, opacity) at\n  three sizes and origins.\n- `GX_GPU_316_BACKEND=dx12|vulkan cargo test -p gx-render-worker --lib\n  gpu_engine_draws_masked -- --include-ignored`: a masked image, rect, shape\n  and text line, in both working spaces, Program and Preview within one code\n  of the CPU reference on DX12 and Vulkan; strict 4.4 reading (LinearSrgb):\n  Program 4.8e-7 of pixels differ, Preview 2.1e-4, worst one code. The masks\n  land where their object coordinates put them (inside, subtracted, the hole,\n  the 70% ellipse differenced back, the image corner, the caption's first\n  200 px).\n- `cargo test -p gx-contracts --lib mask`: the validator refuses each bad mask\n  by index, hidden objects too, and accepts every range's extremes; the\n  structured refusal carries `objects[0].masks[0]` and the mask.\n- Conformance refusal audit: `MaskInvalid` is driven; two parity cases (a\n  feather past the limit, a mask on a group) refuse identically in the\n  validator and over the publication wire.\n\n- Gate: `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D\n  warnings` and `npm run check` exit 0 (46 Node, 412 Editor, 860 Rust passed,\n  0 failed, 34 ignored; conformance 587/0/9). Hardware worker suite\n  (`cargo test -p gx-render-worker --lib -- --include-ignored`): 184/0/0.\n\n## Increment 2: clip groups\n\n### What changed\n\n- **Contract.** `GroupObject.clipChildId: Option<String>` names one of the\n  group's `childIds`. `Refusal::ClipGroupInvalid { group, detail }`\n  (`clipGroupInvalid`) comes from `drawability::clip_group_problem`, shared by\n  the validator and the engine, at `objects[i].clipChildId`. It refuses a clip\n  child that is not one of the group's children, is not in the scene, or draws\n  no pixels (the drawing kinds are rect, ellipse, line, shape, text and image:\n  `drawability::draws_pixels`, which masks now use too).\n- **One plan for both paths** (`worker/src/clip.rs`, `ClipPlan`). It names\n  each object's clip as the clip child of its nearest enclosing clip group\n  that does not name the object itself, and it marks the clip children. A\n  nested clip child is clipped by the outer clip, so each matte already holds\n  every clip around it.\n- **GPU.** A clip child is a matte layer. In the frame it passes the backdrop\n  through (opacity 0), so the ping-pong chain and the final target are\n  unchanged. Each tile has one matte target per clip child. Before the frame's\n  layers, each matte is composited over the whole tile from a zero backdrop\n  that is never written, outer mattes before inner ones. It is placed by\n  `matte_state`: its effective transform at its own opacity, whether visible or\n  not, and with no area at zero scale. `composite.wgsl` gains binding 4 (the\n  clip's matte target); a clipped layer's sample is multiplied by the matte's\n  alpha before its blend.\n- **CPU reference.** A clip child is drawn in its own layer space and never\n  drawn itself. A clipped object is drawn alone on a transparent canvas,\n  multiplied by its clip's matte (built once per frame, outermost first) and\n  blended in its mode. Effects, masks, opacity and every blend mode keep their\n  order.\n\n### Executed checks\n\n- `cargo test -p gx-render-worker --lib clip`:\n  - `ClipPlan` names the nearest clip, and an inner clip child is clipped by\n    the outer one.\n  - The CPU reference clips at the clip child's own opacity (group 50% times\n    clip 80% = alpha 102, not 51), with nested clips multiplying (163). A\n    hidden clip still clips, and a visible clip child is not drawn.\n- `GX_GPU_316_BACKEND=dx12|vulkan cargo test -p gx-render-worker --lib\n  gpu_engine_clips -- --include-ignored` (RTX 3070 Ti). The fixture is a\n  group at 50% clipped by a hidden ellipse at 80% that moves 60 px over ten\n  frames, holding a fill, a Multiply rect and a nested clip group with a masked\n  fill; a second group with a visible clip child; and an unclipped rect.\n  - Program and Preview at frames 0, 5 and 10, in both working spaces, are\n    within one code of the CPU reference; the strict 4.4 reading is 0\n    differing pixels at frames 0 and 10.\n  - Alpha lands where expected: 0.4 and 0.64 inside the clips, 0 outside, and\n    the clip follows its animation.\n- `cargo test -p gx-contracts --lib clip`: each `ClipGroupInvalid` detail.\n- Conformance refusal audit: `ClipGroupInvalid` is driven; a stray clip child\n  refuses identically in the validator and over the publication wire.\n- Gate: fmt, clippy -D warnings and npm run check exit 0 (46 Node, 412 Editor, 863 Rust passed, 0 failed, 35 ignored; conformance 589/0/9); hardware worker suite 187/0/0. The timed conformance check \"headless renders while Program runs add no late or missed Program frame\" failed in two earlier full gates on this tree (22 late/38 missed, then 2/2) and in 1 of 4 standalone runs; an A/B of standalone conformance alternating HEAD a17a545 (exported, own target dir) and this tree passed 3/3 each, and neither timing scene touches the clip code (plain rects); the clip-free per-tile zero texture was removed anyway. Treat that check as load-sensitive in debug builds.\n\n## Increment 3: track mattes\n\n### What changed\n\n- **Contract.** `ObjectBase.trackMatte: Option<TrackMatte>`;\n  `TrackMatte { sourceId, mode }`, where `mode` is a `TrackMatteMode`:\n  `alpha` (the default), `alphaInverted`, `luma` or `lumaInverted`.\n  `Refusal::TrackMatteInvalid { object, detail }` (`trackMatteInvalid`) comes\n  from `drawability::track_matte_problem`, shared by the validator and the\n  engine, at `objects[i].trackMatte`. It refuses:\n  - an object naming itself;\n  - a source that is not in the scene or draws no pixels;\n  - a source with a track matte of its own;\n  - a matted object that draws no pixels;\n  - a clip child with a track matte.\n- **One plan.** `ClipPlan` gains `track_of` and `is_source`. A matte layer is\n  a clip child or a track matte source (`is_matte`), and is never drawn.\n  `clip::track_value` and `clip::LUMA` are the CPU's twin of the shader's\n  arithmetic.\n- **GPU.** A track matte source is a matte layer like a clip child: one\n  matte target per tile, composited each frame at its own opacity. If the\n  source sits in a clip group, its matte is clipped too. `composite.wgsl`\n  gains binding 5, the track matte's target; `params.state.z` carries the mode\n  code (1 alpha, 2 inverted alpha, 3 luma, 4 inverted luma). A layer's sample\n  is multiplied by its clip's alpha, then by its track matte's value.\n- **CPU reference.** A matte holds the source's full premultiplied pixels\n  (needed for luma). A clipped or matted object is drawn alone, times its\n  clip's alpha, then times its track value, then blended in its mode.\n\n### Executed checks\n\n- `cargo test -p gx-render-worker --lib track_mattes`: on the CPU reference,\n  with a red source (luma 0.2126), each mode gives inside/outside alphas of\n  255/0 (alpha), 0/255 (alphaInverted), 54/0 (luma) and 201/255\n  (lumaInverted). The source is not drawn.\n- `GX_GPU_316_BACKEND=dx12|vulkan cargo test -p gx-render-worker --lib\n  gpu_engine_draws_track_mattes -- --include-ignored` (RTX 3070 Ti). The\n  fixture is a moving ellipse with a white-to-blue gradient at 90% opacity,\n  in a group at 50%. It is the shared source of four bands, one per mode, and\n  of a consumer inside a clip group. A second source sits inside a clip group\n  of its own.\n  - Program and Preview at frames 0, 5 and 10, in both working spaces, are\n    within one code of the CPU reference. Strict 4.4 reading: 0.072% of pixels\n    differ, by at most one code. The gradient runs white to blue, not to\n    black, since grey cannot show a luma weighting with red and blue swapped\n    (mutation M10 below).\n  - Alpha 0.9 inside the source, from its own opacity rather than 0.45.\n  - The inverse modes are complements, and luma follows the gradient.\n  - Clip times matte; a source is clipped by its own clip group.\n  - The matte follows the source's animation.\n- `cargo test -p gx-contracts --lib track_matte`: each `TrackMatteInvalid`\n  detail; several layers may share a source.\n- Conformance refusal audit: `TrackMatteInvalid` is driven; a layer that is\n  its own matte refuses identically in the validator and over the publication\n  wire.\n- Gate: fmt, clippy -D warnings and npm run check exit 0 (46 Node, 412 Editor, 865 Rust passed, 0 failed, 36 ignored; conformance 591/0/9); hardware worker suite 189/0/0.\n\n## Increment 4: trim paths on the GPU, mutations, acceptance\n\n### Trim\n\nTrim start, end and offset have been honoured since 3.13, when the paths are\nprepared (`rasterise/lyon.rs`, `trim_window` and `trimmed_stroke`, After\nEffects' Trim Paths as a window on each subpath's normalised length). Both\npaths draw from those prepared paths. Trim is static: it is not an animatable\nproperty, and animated trim stays with 11.47.\n\n- `GX_GPU_316_BACKEND=dx12|vulkan cargo test -p gx-render-worker --lib\n  gpu_engine_honours_trim -- --include-ignored`. The fixture is 10 px strokes:\n  a whole line; windows 0-50 and 25-75; a closed square at 0-50 turned 75%;\n  a curve at 10-60; a dashed line at 0-75; and a masked line at 0-80.\n  - Program and Preview in both working spaces have 0 differing pixels against\n    the CPU reference.\n  - Lit pixels on the GPU's own frame: whole 3600, 0-50 and 25-75 1800 each\n    (exactly half), in place.\n  - The turned window covers the square's left and top edges and leaves its\n    bottom dark.\n  - The dash pattern and the trim both cut the dashed line (2208 lit), and\n    the masked trim stops at its mask.\n- `cargo test -p gx-render-worker --lib trim_paths`: the 3.13 CPU test. It\n  covers a start after its end drawing the same window, an empty window\n  drawing nothing, and a window wrapping past the end. A scaled stroke\n  refuses by name (`scaled strokeWidth`).\n\n### Mutations\n\nOne exact replacement each, run alone against the tests named, and each file\nrestored byte-identical (`mutate_319.py` in the session scratchpad). All 15\nmake named tests fail.\n\n| # | Mutation | Failing |\n| --- | --- | --- |\n| M1 | subtract masks keep what they cover (CPU twin) | `each_mode_folds_as_after_effects_does`, `gpu_masks_match_the_cpu_twin`, the masked engine test |\n| M2 | the GPU folds difference as add | `gpu_masks_match_the_cpu_twin` |\n| M3 | feather sigma is the whole feather | `feather_is_a_normalised_gaussian_that_softens_the_edge` |\n| M4 | a shrinking expansion grows | `expansion_grows_and_shrinks_the_mask_by_its_band` |\n| M5 | the GPU path draw skips its masks | `gpu_masks_match_the_cpu_twin`, the masked engine test |\n| M6 | the composite ignores a layer's clip | the clip engine test |\n| M7 | a matte takes its effective opacity | the clip and track matte engine tests, the CPU clip test |\n| M8 | the CPU reference draws matte layers | the clip and track matte engine tests, the CPU clip and track matte tests |\n| M9 | a clip child is clipped by its own group | `nearest_clip_group_clips_every_other_descendant`, the clip engine test, the CPU clip test |\n| M10 | the GPU luma weights swap red and blue | the track matte engine test. This mutation first survived: the source was white to black, so grey hid it. With the source white to blue, it fails |\n| M11 | inverted alpha is not inverted (CPU) | the track matte engine test, the CPU track matte test |\n| M12 | an object may be its own track matte | `a_track_matte_refuses_what_it_cannot_draw_as_authored` |\n| M13 | a clip child need not be a child | `a_clip_group_refuses_a_clip_child_it_cannot_clip_with` |\n| M14 | any feather is accepted | `masks_refuse_by_index_only_what_cannot_be_drawn_as_authored` |\n| M15 | trim is ignored | the trim engine test, `trim_paths_cut_the_stroke_to_the_authored_window` |\n\n### Gate\n\nGATE4_PENDING: the repository gate (fmt, clippy -D warnings, npm run check) and the hardware worker suite run on the final tree before the commit.\n\n## Not in this row\n\n- **11.47 keeps** the Editor tools for masks, clip groups and mattes, pen\n  paths, animated trim, masks that animate, and its golden frames (user\n  decision, 15 Nov 2026).\n- **Refused by name, not drawn:**\n  - a track matte whose source has a track matte of its own;\n  - a matte or clip whose source draws no pixels (a group as matte or clip\n    source would need a precomposed target);\n  - a clip child with a track matte;\n  - masks on objects that draw no pixels.\n- **Mattes and clip children are composited over the whole tile** each frame,\n  one pass each. A scene without them takes no extra pass and allocates\n  nothing. Their cost on the frame budget belongs to 3.21.\n"
+  },
+  "questions": {
+    "done_when_met": {
+      "type": "noul",
+      "instructions": "Does the recorded evidence show that this row's done-when was met by execution (tests run, commands run, figures recorded), not merely claimed?",
+      "criteria": {
+        "true": "Every clause of the done-when has executed evidence.",
+        "false": "A clause is unmet, only claimed, or the evidence does not name what was run."
+      }
+    },
+    "evidence_names_execution": {
+      "type": "noul",
+      "instructions": "Does the evidence name specific executed checks (test names, commands, counts, measured figures) rather than describing the feature?",
+      "criteria": {
+        "true": "Specific executed checks are named.",
+        "false": "The evidence describes the feature without naming what was run."
+      }
+    },
+    "silent_substitution_risk": {
+      "type": "noul",
+      "instructions": "Is there a risk that this row ships a silent substitution: something the done-when asks for that is approximated, skipped or deferred without being refused by name?",
+      "criteria": {
+        "true": "Yes, a clause appears approximated, skipped or deferred silently.",
+        "false": "No, every gap is named or refused."
+      }
+    },
+    "weakest": {
+      "type": "choice",
+      "instructions": "What is the weakest point of this row's evidence?",
+      "criteria": {
+        "none": "No weak point: evidence covers every clause with executed checks.",
+        "unexecuted_clause": "A done-when clause has no executed check.",
+        "platform_gap": "A platform the done-when names (e.g. macOS, hardware) was not run.",
+        "stale": "Later changes may have invalidated the recorded evidence.",
+        "vague_record": "The record is too vague to tell what was run."
+      }
+    },
+    "unrun_is_named": {
+      "type": "noul",
+      "instructions": "Does the evidence name every check or step it did not run, rather than leaving a gap unmentioned?",
+      "criteria": {
+        "true": "Everything not run is named in the evidence.",
+        "false": "Some gap is not mentioned in the evidence."
+      }
+    },
+    "mutations_can_fail": {
+      "type": "noul",
+      "instructions": "Do the recorded mutations show that the named checks can fail: each mutation was run alone, made at least one named check fail, and the file was restored identical?",
+      "criteria": {
+        "true": "Each recorded mutation names the check or test that failed and says the file was restored.",
+        "false": "A mutation survived, was not run alone, or does not name what failed."
+      }
+    },
+    "every_feature_matches_cpu": {
+      "type": "noul",
+      "instructions": "Does the evidence show, by named executed tests, that masks (add, subtract, intersect, difference, feather, expansion), clip groups, alpha and luma mattes and trim start/end/offset each render on the GPU and match the CPU reference?",
+      "criteria": {
+        "true": "Each named feature has an executed GPU-against-CPU check.",
+        "false": "A feature lacks an executed GPU-against-CPU check."
+      }
+    },
+    "trim_honoured": {
+      "type": "noul",
+      "instructions": "Does the evidence show by execution that the contract's trim values are honoured (the drawn window measured, not only compared between paths)?",
+      "criteria": {
+        "true": "A named test measures the trimmed windows.",
+        "false": "Trim is only claimed or only compared."
+      }
+    },
+    "unsupported_refuses_by_name": {
+      "type": "noul",
+      "instructions": "Does the evidence show by execution that unsupported combinations refuse by name, in the validator and at publication alike?",
+      "criteria": {
+        "true": "Named refusals are driven by executed tests on both routes.",
+        "false": "Refusals are only claimed."
+      }
+    },
+    "both_backends": {
+      "type": "noul",
+      "instructions": "Does the evidence show the GPU comparisons on both DX12 and Vulkan?",
+      "criteria": {
+        "true": "Named tests ran on both backends.",
+        "false": "Only one backend is shown."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "done_when_met",
+      "jev": 0.8,
+      "laya": 0.9763,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.8
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9763,
+        "confidence": 0.9763,
+        "answer_confidence": 0.9763,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "evidence_names_execution",
+      "jev": 0.99,
+      "laya": 0.9585,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.99
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9585,
+        "confidence": 0.9585,
+        "answer_confidence": 0.9585,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "silent_substitution_risk",
+      "jev": 0.35,
+      "laya": 0.9671,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.35
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9671,
+        "confidence": 0.9671,
+        "answer_confidence": 0.9671,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "weakest",
+      "jev": "unexecuted_clause",
+      "laya": "vague_record",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "unexecuted_clause",
+        "confidence": 0.5,
+        "probabilities": {
+          "none": 0.17,
+          "unexecuted_clause": 0.6,
+          "platform_gap": 0.12,
+          "stale": 0.1,
+          "vague_record": 0.01
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "vague_record",
+        "probabilities": {
+          "none": 0.0334,
+          "unexecuted_clause": 0.0275,
+          "platform_gap": 0.0178,
+          "stale": 0.0389,
+          "vague_record": 0.8824
+        },
+        "confidence": 0.6764,
+        "answer_confidence": 0.8824,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "unrun_is_named",
+      "jev": 0.52,
+      "laya": 0.9667,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.52
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9667,
+        "confidence": 0.9667,
+        "answer_confidence": 0.9667,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "mutations_can_fail",
+      "jev": 0.91,
+      "laya": 0.958,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.91
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.958,
+        "confidence": 0.958,
+        "answer_confidence": 0.958,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "every_feature_matches_cpu",
+      "jev": 0.95,
+      "laya": 0.9794,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.95
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9794,
+        "confidence": 0.9794,
+        "answer_confidence": 0.9794,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "trim_honoured",
+      "jev": 0.91,
+      "laya": 0.975,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.91
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.975,
+        "confidence": 0.975,
+        "answer_confidence": 0.975,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "unsupported_refuses_by_name",
+      "jev": 0.95,
+      "laya": 0.9715,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.95
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9715,
+        "confidence": 0.9715,
+        "answer_confidence": 0.9715,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "both_backends",
+      "jev": 0.97,
+      "laya": 0.971,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.97
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.971,
+        "confidence": 0.971,
+        "answer_confidence": 0.971,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

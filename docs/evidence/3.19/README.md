@@ -1,6 +1,6 @@
 # 3.19 evidence: GPU masks, clip groups, track mattes and trim paths
 
-Build-plan row `3.19`. **Active, 15 Nov 2026.** Taken on the user's
+Build-plan row `3.19`. **Done, 15 Nov 2026.** Taken on the user's
 instruction ("start with the unblocked pointers"), after 3.18.
 
 ## User decisions (15 Nov 2026)
@@ -210,13 +210,15 @@ Jev and Laya split on all four questions.
   (lumaInverted). The source is not drawn.
 - `GX_GPU_316_BACKEND=dx12|vulkan cargo test -p gx-render-worker --lib
   gpu_engine_draws_track_mattes -- --include-ignored` (RTX 3070 Ti). The
-  fixture is a moving ellipse with a white-to-black gradient at 90% opacity,
+  fixture is a moving ellipse with a white-to-blue gradient at 90% opacity,
   in a group at 50%. It is the shared source of four bands, one per mode, and
   of a consumer inside a clip group. A second source sits inside a clip group
   of its own.
   - Program and Preview at frames 0, 5 and 10, in both working spaces, are
-    within one code of the CPU reference. Strict 4.4 reading: 0.026% of pixels
-    differ, by at most one code.
+    within one code of the CPU reference. Strict 4.4 reading: 0.072% of pixels
+    differ, by at most one code. The gradient runs white to blue, not to
+    black, since grey cannot show a luma weighting with red and blue swapped
+    (mutation M10 below).
   - Alpha 0.9 inside the source, from its own opacity rather than 0.45.
   - The inverse modes are complements, and luma follows the gradient.
   - Clip times matte; a source is clipped by its own clip group.
@@ -228,8 +230,107 @@ Jev and Laya split on all four questions.
   wire.
 - Gate: fmt, clippy -D warnings and npm run check exit 0 (46 Node, 412 Editor, 865 Rust passed, 0 failed, 36 ignored; conformance 591/0/9); hardware worker suite 189/0/0.
 
-### Still open in 3.19
+## Increment 4: trim paths on the GPU, mutations, acceptance
 
-Trim start/end/offset: already honoured at prepare on both paths since 3.13,
-static; a GPU test against the CPU reference is still to be recorded. Then
-the mutations, the Jev and Laya acceptance run, and closing the row.
+### Trim
+
+Trim start, end and offset have been honoured since 3.13, when the paths are
+prepared (`rasterise/lyon.rs`, `trim_window` and `trimmed_stroke`, After
+Effects' Trim Paths as a window on each subpath's normalised length). Both
+paths draw from those prepared paths. Trim is static: it is not an animatable
+property, and animated trim stays with 11.47.
+
+- `GX_GPU_316_BACKEND=dx12|vulkan cargo test -p gx-render-worker --lib
+  gpu_engine_honours_trim -- --include-ignored`. The fixture is 10 px strokes:
+  a whole line; windows 0-50 and 25-75; a closed square at 0-50 turned 75%;
+  a curve at 10-60; a dashed line at 0-75; and a masked line at 0-80.
+  - Program and Preview in both working spaces have 0 differing pixels against
+    the CPU reference.
+  - Lit pixels on the GPU's own frame: whole 3600, 0-50 and 25-75 1800 each
+    (exactly half), in place.
+  - The turned window covers the square's left and top edges and leaves its
+    bottom dark.
+  - The dash pattern and the trim both cut the dashed line (2208 lit), and
+    the masked trim stops at its mask.
+- `cargo test -p gx-render-worker --lib trim_paths`: the 3.13 CPU test. It
+  covers a start after its end drawing the same window, an empty window
+  drawing nothing, and a window wrapping past the end. A scaled stroke
+  refuses by name (`scaled strokeWidth`).
+
+### Mutations
+
+One exact replacement each, run alone against the tests named, and each file
+restored byte-identical (`mutate_319.py` in the session scratchpad). All 15
+make named tests fail.
+
+| # | Mutation | Failing |
+| --- | --- | --- |
+| M1 | subtract masks keep what they cover (CPU twin) | `each_mode_folds_as_after_effects_does`, `gpu_masks_match_the_cpu_twin`, the masked engine test |
+| M2 | the GPU folds difference as add | `gpu_masks_match_the_cpu_twin` |
+| M3 | feather sigma is the whole feather | `feather_is_a_normalised_gaussian_that_softens_the_edge` |
+| M4 | a shrinking expansion grows | `expansion_grows_and_shrinks_the_mask_by_its_band` |
+| M5 | the GPU path draw skips its masks | `gpu_masks_match_the_cpu_twin`, the masked engine test |
+| M6 | the composite ignores a layer's clip | the clip engine test |
+| M7 | a matte takes its effective opacity | the clip and track matte engine tests, the CPU clip test |
+| M8 | the CPU reference draws matte layers | the clip and track matte engine tests, the CPU clip and track matte tests |
+| M9 | a clip child is clipped by its own group | `nearest_clip_group_clips_every_other_descendant`, the clip engine test, the CPU clip test |
+| M10 | the GPU luma weights swap red and blue | the track matte engine test. This mutation first survived: the source was white to black, so grey hid it. With the source white to blue, it fails |
+| M11 | inverted alpha is not inverted (CPU) | the track matte engine test, the CPU track matte test |
+| M12 | an object may be its own track matte | `a_track_matte_refuses_what_it_cannot_draw_as_authored` |
+| M13 | a clip child need not be a child | `a_clip_group_refuses_a_clip_child_it_cannot_clip_with` |
+| M14 | any feather is accepted | `masks_refuse_by_index_only_what_cannot_be_drawn_as_authored` |
+| M15 | trim is ignored | the trim engine test, `trim_paths_cut_the_stroke_to_the_authored_window` |
+
+### Gate
+
+On the final tree: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings` and `npm run check` exit 0 (46 Node, 412 Editor, 865 Rust passed, 0 failed, 37 ignored; conformance 591/0/9). Hardware worker suite (`cargo test -p gx-render-worker --lib -- --include-ignored`): 190/0/0.
+
+## Jev and Laya acceptance (`jev-laya-acceptance.json`)
+
+Run on this record before the final gate. Laya read it whole: 5632 tokens,
+nothing truncated or dropped.
+
+| Question | Jev | Laya |
+| --- | --- | --- |
+| done-when met by execution | 0.80 | 0.98 |
+| evidence names execution | 0.99 | 0.96 |
+| silent substitution risk | 0.35 | 0.97 |
+| weakest point | unexecuted clause (0.5) | vague record |
+| what was not run is named | 0.52 | 0.97 |
+| mutations can fail | 0.91 | 0.96 |
+| every feature matches its CPU reference on the GPU | 0.95 | 0.98 |
+| trim honoured | 0.91 | 0.98 |
+| unsupported combinations refuse by name | 0.95 | 0.97 |
+| both backends | 0.97 | 0.97 |
+
+They split on the silent-substitution risk and on the weakest point; neither
+gives a reason. By hand, against the done-when, clause by clause:
+
+- Masks in every listed mode, with feather and expansion: `gpu_masks_match_the_cpu_twin`
+  and the masked engine test.
+- Clip groups: the clip engine test.
+- Alpha and luma mattes: the track matte engine test.
+- Trim start, end and offset on the GPU, with the windows measured: the trim
+  engine test.
+- Unsupported combinations refuse by name: the validator tests and the
+  conformance parity cases.
+
+At the time of the run, the one step not yet executed was the final gate,
+which runs before the commit (below). What the row does not draw is listed
+under "Not in this row" and refuses by name. The disagreement is reported to
+the user.
+
+## Not in this row
+
+- **11.47 keeps** the Editor tools for masks, clip groups and mattes, pen
+  paths, animated trim, masks that animate, and its golden frames (user
+  decision, 15 Nov 2026).
+- **Refused by name, not drawn:**
+  - a track matte whose source has a track matte of its own;
+  - a matte or clip whose source draws no pixels (a group as matte or clip
+    source would need a precomposed target);
+  - a clip child with a track matte;
+  - masks on objects that draw no pixels.
+- **Mattes and clip children are composited over the whole tile** each frame,
+  one pass each. A scene without them takes no extra pass and allocates
+  nothing. Their cost on the frame budget belongs to 3.21.

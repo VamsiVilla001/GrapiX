@@ -1675,7 +1675,7 @@ fn gpu_engine_clips_groups_by_a_moving_matte_within_one_code_of_the_cpu_referenc
     }
 }
 
-/// 3.19's track-matte fixture: a moving ellipse with a white-to-black
+/// 3.19's track-matte fixture: a moving ellipse with a white-to-blue
 /// gradient at 90%, in a group at 50%, is the shared source of four bands,
 /// one per mode, and of a consumer inside a clip group; a second source sits
 /// inside a clip group of its own.
@@ -1728,9 +1728,11 @@ fn matte_fixture() -> SceneDocument {
                 position: 0.0,
                 color: Rgba::srgb(1.0, 1.0, 1.0, 1.0),
             },
+            // Blue, not black: a luma weighting that swapped red and blue
+            // would still see grey as grey.
             GradientStop {
                 position: 1.0,
-                color: Rgba::srgb(0.0, 0.0, 0.0, 1.0),
+                color: Rgba::srgb(0.0, 0.0, 1.0, 1.0),
             },
         ],
         spread: Default::default(),
@@ -1911,7 +1913,7 @@ fn gpu_engine_draws_track_mattes_in_every_mode_within_one_code_of_the_cpu_refere
         );
         assert!(
             alpha(first, 250, 330) > alpha(first, 450, 330) + 40,
-            "{space:?}: the luma band follows the white-to-black gradient"
+            "{space:?}: the luma band follows the white-to-blue gradient"
         );
         assert!(
             alpha(first, 250, 450) + 40 < alpha(first, 450, 450),
@@ -1937,6 +1939,261 @@ fn gpu_engine_draws_track_mattes_in_every_mode_within_one_code_of_the_cpu_refere
         evidence(
             &format!("mattes-{}.json", space.as_str()),
             &json!({"strict44": strict.iter().map(|(f, (share, worst))| json!({"frame": f, "differingShare": share, "worst": worst})).collect::<Vec<_>>(),
+                    "sources": sources, "adapter": engine.gpu_description()}),
+        );
+    }
+}
+
+/// 3.19's trim fixture: After Effects' Trim Paths on stroked shapes (static
+/// start, end and offset): two windows on a line, a window turned past the
+/// end of a closed square, a curve, a dashed stroke and a masked trim, beside
+/// an untrimmed line to count against.
+fn trim_fixture() -> SceneDocument {
+    use gx_contracts::scene::{
+        BezierPath, FillRule, Mask, MaskMode, ShapeObject, StrokeCap, StrokeJoin, StrokeStyle, Vec2,
+    };
+    let v = |x: f64, y: f64| Vec2 { x, y };
+    let shape = |id: &str,
+                 x: f64,
+                 y: f64,
+                 vertices: Vec<Vec2>,
+                 in_t: Vec<Vec2>,
+                 out_t: Vec<Vec2>,
+                 closed: bool,
+                 trim: Option<(f64, f64, f64)>| {
+        let mut base = ObjectBase::new(id, id);
+        base.x = x;
+        base.y = y;
+        base.stroke = Some(ColorValue::Solid {
+            color: Rgba::srgb(1.0, 1.0, 1.0, 1.0),
+        });
+        base.stroke_width = 10.0;
+        SceneObject::Shape(ShapeObject {
+            base,
+            path: BezierPath {
+                closed,
+                vertices,
+                in_tangents: in_t,
+                out_tangents: out_t,
+            },
+            compound_paths: None,
+            fill_enabled: false,
+            stroke_enabled: true,
+            fill_rule: FillRule::Nonzero,
+            trim_start: trim.map(|t| t.0),
+            trim_end: trim.map(|t| t.1),
+            trim_offset: trim.map(|t| t.2),
+        })
+    };
+    let straight = |n: usize| (vec![v(0.0, 0.0); n], vec![v(0.0, 0.0); n]);
+    let line = || vec![v(0.0, 0.0), v(360.0, 0.0)];
+    let mut doc = lower_third();
+    doc.objects.clear();
+    doc.assets.clear();
+    doc.fonts.clear();
+    doc.timeline.channels.clear();
+    let (i, o) = straight(2);
+    doc.objects.push(shape(
+        "whole",
+        100.0,
+        60.0,
+        line(),
+        i.clone(),
+        o.clone(),
+        false,
+        None,
+    ));
+    doc.objects.push(shape(
+        "first-half",
+        100.0,
+        120.0,
+        line(),
+        i.clone(),
+        o.clone(),
+        false,
+        Some((0.0, 50.0, 0.0)),
+    ));
+    doc.objects.push(shape(
+        "middle",
+        100.0,
+        180.0,
+        line(),
+        i.clone(),
+        o.clone(),
+        false,
+        Some((25.0, 75.0, 0.0)),
+    ));
+    let square = vec![v(0.0, 0.0), v(200.0, 0.0), v(200.0, 200.0), v(0.0, 200.0)];
+    let (i4, o4) = straight(4);
+    doc.objects.push(shape(
+        "wrapped",
+        100.0,
+        260.0,
+        square,
+        i4,
+        o4,
+        true,
+        Some((0.0, 50.0, 75.0)),
+    ));
+    doc.objects.push(shape(
+        "curve",
+        600.0,
+        100.0,
+        vec![v(0.0, 100.0), v(300.0, 100.0)],
+        vec![v(0.0, 0.0), v(-100.0, -150.0)],
+        vec![v(100.0, -150.0), v(0.0, 0.0)],
+        false,
+        Some((10.0, 60.0, 0.0)),
+    ));
+    let mut dashed = shape(
+        "dashed",
+        600.0,
+        300.0,
+        line(),
+        i.clone(),
+        o.clone(),
+        false,
+        Some((0.0, 75.0, 0.0)),
+    );
+    dashed.base_mut().stroke_style = Some(StrokeStyle {
+        join: StrokeJoin::Round,
+        cap: StrokeCap::Round,
+        miter_limit: 4.0,
+        dash: vec![20.0, 15.0],
+        dash_offset: 0.0,
+    });
+    doc.objects.push(dashed);
+    let mut masked = shape(
+        "masked",
+        600.0,
+        400.0,
+        line(),
+        i,
+        o,
+        false,
+        Some((0.0, 80.0, 0.0)),
+    );
+    masked.base_mut().masks = Some(vec![Mask {
+        path: BezierPath {
+            closed: true,
+            vertices: vec![
+                v(-10.0, -20.0),
+                v(150.0, -20.0),
+                v(150.0, 20.0),
+                v(-10.0, 20.0),
+            ],
+            in_tangents: vec![v(0.0, 0.0); 4],
+            out_tangents: vec![v(0.0, 0.0); 4],
+        },
+        mode: MaskMode::Add,
+        feather: 2.0,
+        expansion: 0.0,
+        opacity: 1.0,
+        inverted: false,
+    }]);
+    doc.objects.push(masked);
+    doc
+}
+
+#[test]
+#[ignore = "requires hardware GPU; explicit 3.19 trim gate"]
+fn gpu_engine_honours_trim_paths_within_one_code_of_the_cpu_reference() {
+    for space in [WorkingColorSpace::Srgb, WorkingColorSpace::LinearSrgb] {
+        let (mut engine, ticks) = hardware_engine();
+        let mut doc = trim_fixture();
+        doc.working_color_space = space;
+        let before = RenderWork::snapshot();
+        let pin = publish(&mut engine, doc);
+        // Only the masked shape is a CPU-reference layer; the others are paths.
+        assert_eq!(
+            RenderWork::snapshot()
+                .since(before)
+                .cpu_source_rasterizations,
+            1
+        );
+        let sources = engine.gpu_source_trace(&pin.0, pin.1).unwrap().to_vec();
+        assert_eq!(sources.len(), 7);
+        assert!(sources
+            .iter()
+            .all(|s| s.route == "gpu-vello-coverage-at-prepare"));
+        assert!(matches!(take(&mut engine, &pin), EngineReply::Taken(_)));
+        ticks.store(1, Ordering::Relaxed);
+        let program = engine.emit_frame_settled().unwrap().frame;
+        let preview = engine.take_preview().unwrap();
+        let cpu = engine.prepared_scene(&pin.0, pin.1).unwrap();
+        let mut strict = Vec::new();
+        for (frame, output, name) in [
+            (&*program, OutputTransform::Rec709, "Program"),
+            (&*preview, OutputTransform::Srgb, "Preview"),
+        ] {
+            let reference = cpu.frame_at(0, output).unwrap();
+            assert_within_one_code(frame, &reference, &format!("{space:?} {name}"));
+            strict.push((name, strict_44(frame, &reference)));
+        }
+        // Lit pixels per band of the GPU's own Preview.
+        let lit = |x0: u32, y0: u32, x1: u32, y1: u32| {
+            (y0..y1)
+                .flat_map(|y| (x0..x1).map(move |x| (x, y)))
+                .filter(|&(x, y)| preview.pixels[((y * preview.width + x) * 4 + 3) as usize] >= 128)
+                .count()
+        };
+        let whole = lit(80, 40, 480, 80);
+        let half = lit(80, 100, 480, 140);
+        let middle = lit(80, 160, 480, 200);
+        let ratio = |n: usize| n as f64 / whole as f64;
+        assert!(
+            (3500..=3700).contains(&whole),
+            "{space:?}: the whole line lit {whole}"
+        );
+        assert!(
+            (0.47..0.53).contains(&ratio(half)),
+            "{space:?}: 0-50 lit {half} of {whole}"
+        );
+        assert!(
+            (0.47..0.53).contains(&ratio(middle)),
+            "{space:?}: 25-75 lit {middle} of {whole}"
+        );
+        // 0-50 starts at the line's start; 25-75 leaves its first quarter dark.
+        assert!(
+            lit(100, 100, 180, 140) > 600 && lit(100, 160, 180, 200) == 0,
+            "{space:?}: windows in place"
+        );
+        // Turned by 75%, the square's half window starts on its last edge
+        // (the left, running up) and wraps over the top: the bottom stays dark.
+        assert!(
+            lit(80, 250, 330, 270) > 1500,
+            "{space:?}: the wrapped window covers the top edge"
+        );
+        assert_eq!(
+            lit(120, 450, 280, 470),
+            0,
+            "{space:?}: and not the bottom edge"
+        );
+        assert!(
+            lit(580, 40, 920, 220) > 1000,
+            "{space:?}: the trimmed curve draws"
+        );
+        // The dash pattern and the trim both cut the dashed line.
+        let dashed = lit(580, 280, 980, 320);
+        assert!(
+            (1000..2600).contains(&dashed),
+            "{space:?}: dashed and trimmed lit {dashed}"
+        );
+        // The masked trim ends at the mask (x 150 of the shape).
+        assert!(
+            lit(600, 380, 740, 420) > 1200,
+            "{space:?}: the masked trim draws"
+        );
+        assert_eq!(
+            lit(760, 380, 1000, 420),
+            0,
+            "{space:?}: beyond the mask it does not"
+        );
+        println!("3.19 {space:?} trim: strict 4.4 reading (differing share, worst): {strict:?}");
+        evidence(
+            &format!("trim-{}.json", space.as_str()),
+            &json!({"strict44": strict.iter().map(|(n, (share, worst))| json!({"output": n, "differingShare": share, "worst": worst})).collect::<Vec<_>>(),
+                    "lit": {"whole": whole, "half": half, "middle": middle, "dashed": dashed},
                     "sources": sources, "adapter": engine.gpu_description()}),
         );
     }

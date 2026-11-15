@@ -118,6 +118,19 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-15 — 3.19 done: masks, clip groups, track mattes and trim on the GPU (Claude, on the user's instruction)
+
+**Resume here.** 3.19 is done (evidence `docs/evidence/3.19`). Increment 4 adds a trim engine test: static trim
+start, end and offset on the GPU, byte-identical to the CPU reference on DX12 and Vulkan, with the windows measured
+(0-50 lights exactly half). Mutations: 15 of 15 fail named tests. M10 (GPU luma weights swapped) first survived
+because the matte source was white to black; it is now white to blue and fails. Jev and Laya acceptance:
+done-when met 0.80 / 0.98. They split on silent-substitution risk (Jev 0.35, Laya 0.97) and gave no reasons;
+the hand check found an executed test for every clause, so the row closes, and the split is reported to the user.
+Plan: the 3.19 row gains its done note; 11.47 gains a note that the mask/clip/matte contract and rendering landed in
+3.19 and that it keeps the Editor tools, pen paths, animated trim and masks, and golden frames (user decision). The
+scene module note on 11.47 is updated. Next in the core backend: 3.21's remaining budget (the stats page at 1080p;
+2160p on a quiet machine). Gate: fmt, clippy -D warnings and npm run check exit 0 (46 Node, 412 Editor, 865 Rust passed, 0 failed, 37 ignored; conformance 591/0/9); hardware worker suite 190/0/0.
+
 ## 2026-11-15 — 3.19 increment 3: track mattes (Claude, on the user's instruction)
 
 **Resume here.** User decisions (third round; Jev and Laya split on all four: `docs/evidence/3.19/matte-design-jev-laya.json`):

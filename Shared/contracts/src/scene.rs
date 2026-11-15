@@ -19,9 +19,11 @@
 //! - Per-property keyframe channels, path morphing and trim animation are
 //!   the motion schema (**1.6**) and the timeline (**11.10**). The static
 //!   authored values they animate are here.
-//! - Layer masks are owned by **11.47**, Photoshop layer styles and blending
-//!   options by **11.60** (added 12 October 2026), and asset provenance by
-//!   **11.39**. None of them is carried here yet.
+//! - Layer masks, clip groups and track mattes are carried here since
+//!   **3.19** (contract and rendering, user decisions 15 November 2026);
+//!   **11.47** keeps their Editor tools, pen paths and animated trim.
+//!   Photoshop layer styles and blending options are **11.60** (added 12
+//!   October 2026), and asset provenance is **11.39**.
 //! - 1.x's `src` path on image and mesh is not ported. A scene addresses an
 //!   asset by id and content hash, never by a path (invariant 31).
 //!
