@@ -28,6 +28,9 @@ struct GpuInner {
     device: wgpu::Device,
     queue: wgpu::Queue,
     max_texture_dimension_2d: u32,
+    /// 3.17: the vector drawing backend, built on first use and kept for the
+    /// device's life (building Vello GPU's pipelines takes about a second).
+    drawer: std::sync::Mutex<Option<crate::compositor::draw::GpuDrawer>>,
 }
 
 /// Negotiate a device and the tier it supports.
@@ -98,6 +101,7 @@ fn negotiate_backends(backends: wgpu::Backends) -> Gpu {
             device,
             queue,
             max_texture_dimension_2d,
+            drawer: std::sync::Mutex::new(None),
         }),
         tier,
     }
@@ -132,6 +136,36 @@ impl Gpu {
     /// receives these handles and cannot silently become a compositor.
     pub(crate) fn device_queue(&self) -> Option<(&wgpu::Device, &wgpu::Queue)> {
         self.inner.as_ref().map(|gpu| (&gpu.device, &gpu.queue))
+    }
+
+    /// Draw vector paths into a working-space float texture on this device
+    /// (3.17), at prepare only. `None` without hardware.
+    pub(crate) fn draw_paths(
+        &self,
+        object: &str,
+        paths: &[&crate::rasterise::PreparedPath],
+        origin: [f64; 2],
+        width: u32,
+        height: u32,
+    ) -> Option<Result<wgpu::Texture, gx_contracts::Refusal>> {
+        let gpu = self.inner.as_ref()?;
+        let mut drawer = gpu
+            .drawer
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let drawer = drawer.get_or_insert_with(|| {
+            crate::render_work::gpu_build();
+            crate::compositor::draw::GpuDrawer::new(&gpu.device)
+        });
+        Some(drawer.draw(
+            &gpu.device,
+            &gpu.queue,
+            object,
+            paths,
+            origin,
+            width,
+            height,
+        ))
     }
 
     /// The negotiated tier. The single answer every tier question gets.

@@ -34,7 +34,7 @@ use gx_contracts::validate::validate_scene_document;
 use gx_contracts::{ContentHash, Refusal};
 
 use crate::mesh::{prepare_meshes, AssetBytes, PreparedMeshes};
-use crate::rasterise::{LyonPathRasteriser, PathRasteriser, PreparedPaths, RasterSurface};
+use crate::rasterise::{PathRasteriser, PreparedPaths, RasterSurface, VelloCpuRasteriser};
 use crate::rasterizer::Frame;
 use crate::text::{prepare_texts, PreparedTexts};
 
@@ -151,6 +151,7 @@ impl PreparedScene {
                 index,
                 pad,
                 u32::MAX,
+                None,
             )?;
             effect_layers.push(Some(EffectLayer { source, iterations }));
         }
@@ -392,10 +393,12 @@ fn compose(
                 continue;
             }
             let source = &layer.source;
-            let (w, h) = (
-                source.surface.width() as usize,
-                source.surface.height() as usize,
-            );
+            // Prepared without a GPU, so always drawn on the CPU.
+            let layer_surface = source
+                .surface
+                .as_ref()
+                .expect("a CPU reference layer source is drawn on the CPU");
+            let (w, h) = (source.width as usize, source.height as usize);
             let ctx = crate::effect_chain::EffectContext {
                 origin: source.origin,
                 size: [object.base().width, object.base().height],
@@ -403,7 +406,7 @@ fn compose(
             };
             let mut plan = crate::effect_chain::EffectPlan::layout(effects, &layer.iterations);
             plan.pack(effects, &ctx);
-            let pixels = plan.run(source.surface.pixels(), w, h, &ctx);
+            let pixels = plan.run(layer_surface.pixels(), w, h, &ctx);
             let state = crate::compositor::scene::layer_state(
                 object.base().anchor,
                 resolved,
@@ -430,7 +433,7 @@ fn compose(
             }
             let mut layer = RasterSurface::transparent(surface.width(), surface.height());
             if let Some(object_paths) = by_object.get(id) {
-                LyonPathRasteriser.rasterise_into(object_paths, &mut layer);
+                VelloCpuRasteriser.rasterise_into(object_paths, &mut layer);
             }
             if matches!(object, SceneObject::Text(_)) {
                 crate::text::rasterise_text(texts, id, document, effective, &mut layer)?;
@@ -460,7 +463,7 @@ fn compose(
             continue;
         }
         if let Some(object_paths) = by_object.get(id) {
-            LyonPathRasteriser.rasterise_into(object_paths, &mut surface);
+            VelloCpuRasteriser.rasterise_into(object_paths, &mut surface);
         }
         if matches!(object, SceneObject::Text(_)) {
             crate::text::rasterise_text(texts, id, document, effective, &mut surface)?;
@@ -967,17 +970,28 @@ mod tests {
             &MaterialSupport::fixed_function(),
         )
         .expect("the stroke prepares");
-        let alphas: std::collections::BTreeSet<u8> = prepared
+        let alphas: Vec<u8> = prepared
             .frame(OutputTransform::Srgb)
             .pixels
             .chunks(4)
             .map(|pixel| pixel[3])
             .filter(|alpha| *alpha > 0)
             .collect();
-        assert_eq!(
-            alphas.len(),
-            1,
-            "lit pixels carry several alphas: {alphas:?}"
+        // 3.17: edges are anti-aliased, so they carry partial alphas. Where
+        // the zigzag overlaps itself at its joins it must still composite
+        // once: no pixel exceeds the paint's own alpha, and the stroke's
+        // interior carries exactly that alpha.
+        let once = 128;
+        assert!(
+            alphas.iter().all(|alpha| *alpha <= once),
+            "a pixel composited the stroke twice: max alpha {:?}",
+            alphas.iter().max()
+        );
+        let interior = alphas.iter().filter(|alpha| **alpha == once).count();
+        assert!(
+            interior * 2 > alphas.len(),
+            "most lit pixels are interior: {interior} of {}",
+            alphas.len()
         );
     }
 

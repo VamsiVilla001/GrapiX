@@ -253,6 +253,13 @@ pub struct ObjectBase {
     pub stroke: Option<ColorValue>,
     #[serde(default)]
     pub stroke_width: f64,
+    /// How the stroke turns corners, ends and breaks into dashes (3.17).
+    /// Absent means miter joins (limit 4), butt caps and a solid line, the
+    /// look every stroke had before; read it through
+    /// [`ObjectBase::stroke_style`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub stroke_style: Option<StrokeStyle>,
     /// Bound data paths (object property → data-context path). Opaque here;
     /// the binding contract owns the grammar.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -290,7 +297,73 @@ fn default_scale() -> f64 {
     1.0
 }
 
+/// How a stroke joins its segments. The names are SVG's and CSS's.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum StrokeJoin {
+    #[default]
+    Miter,
+    Round,
+    Bevel,
+}
+
+/// How a stroke ends an open path and each dash. SVG's and CSS's names.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum StrokeCap {
+    #[default]
+    Butt,
+    Round,
+    Square,
+}
+
+/// A stroke's joins, caps and dash pattern (3.17). Lengths are in the
+/// object's own units, like `strokeWidth`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct StrokeStyle {
+    #[serde(default)]
+    pub join: StrokeJoin,
+    #[serde(default)]
+    pub cap: StrokeCap,
+    /// A miter join longer than this many stroke widths becomes a bevel.
+    #[serde(default = "default_miter_limit")]
+    pub miter_limit: f64,
+    /// Alternating dash and gap lengths; empty is a solid line.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dash: Vec<f64>,
+    /// How far into the dash pattern the stroke starts.
+    #[serde(default)]
+    pub dash_offset: f64,
+}
+
+fn default_miter_limit() -> f64 {
+    4.0
+}
+
+impl Default for StrokeStyle {
+    fn default() -> Self {
+        Self {
+            join: StrokeJoin::Miter,
+            cap: StrokeCap::Butt,
+            miter_limit: default_miter_limit(),
+            dash: Vec::new(),
+            dash_offset: 0.0,
+        }
+    }
+}
+
 impl ObjectBase {
+    /// The stroke's joins, caps and dashes; the defaults when the document
+    /// gives none.
+    pub fn stroke_style(&self) -> StrokeStyle {
+        self.stroke_style.clone().unwrap_or_default()
+    }
+
     /// The layer's effect stack, in order; empty when the document gives none.
     pub fn effects(&self) -> &[crate::effect::EffectInstance] {
         self.effects.as_deref().unwrap_or(&[])
@@ -328,6 +401,7 @@ impl ObjectBase {
             fill: None,
             stroke: None,
             stroke_width: 0.0,
+            stroke_style: None,
             bindings: None,
             material_slots: None,
             blend_mode: None,
@@ -2053,6 +2127,13 @@ mod tests {
         base.fill = Some(ColorValue::hex("#102030").unwrap());
         base.stroke = Some(ColorValue::hex("#405060").unwrap());
         base.stroke_width = 3.0;
+        base.stroke_style = Some(StrokeStyle {
+            join: StrokeJoin::Round,
+            cap: StrokeCap::Square,
+            miter_limit: 2.5,
+            dash: vec![6.0, 3.0],
+            dash_offset: 1.5,
+        });
         base.bindings = Some(
             serde_json::json!({ "text": "match.homeScore" })
                 .as_object()

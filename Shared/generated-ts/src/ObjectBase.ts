@@ -4,6 +4,7 @@ import type { ColorValue } from "./ColorValue";
 import type { EffectInstance } from "./EffectInstance";
 import type { JsonValue } from "./serde_json/JsonValue";
 import type { MaterialBinding } from "./MaterialBinding";
+import type { StrokeStyle } from "./StrokeStyle";
 import type { Vec2 } from "./Vec2";
 
 /**
@@ -54,6 +55,13 @@ anchor?: Vec2,
  * string carried no source space, and B.1 forbids inferring one.
  */
 fill?: ColorValue, stroke?: ColorValue, strokeWidth: number,
+/**
+ * How the stroke turns corners, ends and breaks into dashes (3.17).
+ * Absent means miter joins (limit 4), butt caps and a solid line, the
+ * look every stroke had before; read it through
+ * [`ObjectBase::stroke_style`].
+ */
+strokeStyle?: StrokeStyle,
 /**
  * Bound data paths (object property → data-context path). Opaque here;
  * the binding contract owns the grammar.

@@ -5,6 +5,18 @@ renderable JSON fixtures are in `tests/reference-scenes`; authored mappings
 that the renderer cannot draw live in `tests/refusal-scenes` and must refuse.
 A passing baseline comparison does not certify those unsupported mappings.
 
+## 15 November 2026: anti-aliased drawing (3.17)
+
+By user decision the CPU drawing path is now Vello CPU 0.3, with anti-aliased
+coverage; the previous CPU rasteriser had none (a pixel centre was in or out).
+The references were regenerated once with `cargo run -p gx-pixel-gate --
+capture`. The previous PNGs are under `history/2026-11-15-before-3.17` byte for
+byte. Before regeneration: colour-ramp-50 90 differing pixels (worst channel
+delta 124), rate-30 552 (99), rate-59-94 396 (134), rate-60 340 (137); rate-25
+and rate-29-97 unchanged. Only edge pixels moved; the authored-value samples
+below still hold. No comparison threshold is changed. Evidence:
+`docs/evidence/3.17`.
+
 ## 16 October 2026: colour-ramp-50 correction
 
 The previous colour-ramp baseline ignored vector opacity and drew placeholder

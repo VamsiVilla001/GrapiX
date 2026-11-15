@@ -8,6 +8,7 @@
 //! stop or flattening it (invariant 18).
 
 mod lyon;
+mod vello;
 
 use gx_contracts::color::{ColorValue, OutputTransform, WorkingColorSpace};
 use gx_contracts::scene::{ResolvedObject, SceneDocument};
@@ -16,8 +17,13 @@ use gx_contracts::Refusal;
 use crate::colour_pipeline::WorkingRgba;
 use crate::rasterizer::Frame;
 
-pub use lyon::LyonPathRasteriser;
 pub(crate) use lyon::{fill_union, transform};
+pub use vello::VelloCpuRasteriser;
+pub(crate) use vello::{coverage_window, window_transform};
+
+/// The outline geometry types the drawing backends share (3.17).
+pub use vello_cpu::kurbo::BezPath;
+pub use vello_cpu::peniko::Fill as OutlineFill;
 
 /// Cached triangle geometry for the vector content of one published scene.
 ///
@@ -89,13 +95,16 @@ impl PreparedPaths {
     }
 }
 
-/// One filled or stroked, already-tessellated vector draw command.
+/// One vector draw command: an outline in scene coordinates, filled with one
+/// paint under one fill rule (3.17). A stroke arrives already expanded into
+/// its outline, joins, caps and dashes included, so every backend draws the
+/// same geometry and none re-strokes it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreparedPath {
     object_id: String,
     paint: WorkingRgba,
-    vertices: Vec<PathVertex>,
-    indices: Vec<u32>,
+    outline: BezPath,
+    fill_rule: OutlineFill,
     bounds: RasterBounds,
 }
 
@@ -103,15 +112,22 @@ impl PreparedPath {
     pub(crate) fn new(
         object_id: String,
         paint: WorkingRgba,
-        vertices: Vec<PathVertex>,
-        indices: Vec<u32>,
+        outline: BezPath,
+        fill_rule: OutlineFill,
     ) -> Self {
-        let bounds = RasterBounds::from_vertices(&vertices);
+        use vello_cpu::kurbo::Shape;
+        let b = outline.bounding_box();
+        let bounds = RasterBounds {
+            min_x: b.x0 as f32,
+            min_y: b.y0 as f32,
+            max_x: b.x1 as f32,
+            max_y: b.y1 as f32,
+        };
         Self {
             object_id,
             paint,
-            vertices,
-            indices,
+            outline,
+            fill_rule,
             bounds,
         }
     }
@@ -128,14 +144,14 @@ impl PreparedPath {
         self.paint
     }
 
-    /// The cached vertices in scene coordinates.
-    pub fn vertices(&self) -> &[PathVertex] {
-        &self.vertices
+    /// The outline in scene coordinates, filled under [`Self::fill_rule`].
+    pub fn outline(&self) -> &BezPath {
+        &self.outline
     }
 
-    /// Triangle indices into [`Self::vertices`].
-    pub fn indices(&self) -> &[u32] {
-        &self.indices
+    /// The fill rule the outline is filled with.
+    pub fn fill_rule(&self) -> OutlineFill {
+        self.fill_rule
     }
 
     /// Smallest scene-space rectangle that contains this draw command.
@@ -144,7 +160,7 @@ impl PreparedPath {
     }
 }
 
-/// One tessellated vertex in scene coordinates.
+/// One tessellated vertex in scene coordinates (glyph triangles, 3.13).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PathVertex {
     /// Horizontal scene coordinate.
@@ -164,24 +180,6 @@ pub struct RasterBounds {
     pub max_x: f32,
     /// Exclusive upper vertical edge.
     pub max_y: f32,
-}
-
-impl RasterBounds {
-    fn from_vertices(vertices: &[PathVertex]) -> Self {
-        let mut bounds = Self {
-            min_x: f32::INFINITY,
-            min_y: f32::INFINITY,
-            max_x: f32::NEG_INFINITY,
-            max_y: f32::NEG_INFINITY,
-        };
-        for vertex in vertices {
-            bounds.min_x = bounds.min_x.min(vertex.x);
-            bounds.min_y = bounds.min_y.min(vertex.y);
-            bounds.max_x = bounds.max_x.max(vertex.x);
-            bounds.max_y = bounds.max_y.max(vertex.y);
-        }
-        bounds
-    }
 }
 
 /// A premultiplied pixel surface in one working space, produced by a
@@ -351,9 +349,9 @@ impl RasterSurface {
 /// the backend's coverage algorithm changes.
 pub trait PathRasteriser {
     /// Draw prepared paths onto an existing surface, in the order given, each
-    /// path's triangles as one union so overlapping triangles composite once
-    /// (3.13). Tessellation is deliberately absent from this operation: it
-    /// already happened in `PreparedPaths`.
+    /// path's outline once under its fill rule, so overlapping parts of one
+    /// path composite once (3.13). Stroking is deliberately absent from this
+    /// operation: it already happened in `PreparedPaths`.
     fn rasterise_into(&self, paths: &[&PreparedPath], surface: &mut RasterSurface);
 
     /// Render every cached path to a new transparent surface.
@@ -452,12 +450,82 @@ mod tests {
         let prepared = PreparedPaths::prepare(&document, &resolved.effective)
             .expect("the rectangle prepares once");
 
-        let lyon = LyonPathRasteriser;
+        let vello = VelloCpuRasteriser;
         let bounding_boxes = BoundingBoxRasteriser;
         assert_eq!(
-            lyon.rasterise(&prepared, 12, 10),
+            vello.rasterise(&prepared, 12, 10),
             bounding_boxes.rasterise(&prepared, 12, 10),
             "both implementations consume the same prepared scene through PathRasteriser"
+        );
+    }
+
+    fn line(style: gx_contracts::scene::StrokeStyle, length: f64) -> SceneDocument {
+        use gx_contracts::scene::{LineObject, Vec2};
+        let mut base = ObjectBase::new("rule", "Rule");
+        base.stroke = Some(ColorValue::hex("#ffffff").expect("valid colour"));
+        base.stroke_width = 4.0;
+        base.stroke_style = Some(style);
+        document(vec![SceneObject::Line(LineObject {
+            base,
+            points: vec![Vec2 { x: 0.0, y: 5.0 }, Vec2 { x: length, y: 5.0 }],
+        })])
+    }
+
+    fn prepare(document: &SceneDocument) -> Result<PreparedPaths, Refusal> {
+        let resolved = gx_contracts::scene::resolve_hierarchy(&document.objects);
+        PreparedPaths::prepare(document, &resolved.effective)
+    }
+
+    #[test]
+    fn a_dashed_stroke_leaves_its_gaps_empty_and_its_dashes_drawn() {
+        use gx_contracts::scene::StrokeStyle;
+        // Dash 3, gap 3, starting at the line's start: x 0-3 drawn, 3-6 empty.
+        let style = StrokeStyle {
+            dash: vec![3.0, 3.0],
+            ..StrokeStyle::default()
+        };
+        let surface = VelloCpuRasteriser.rasterise(&prepare(&line(style, 12.0)).unwrap(), 12, 10);
+        let alpha = |x: usize| surface.pixels()[5 * 12 + x].a;
+        assert!(alpha(1) > 0.99, "inside the first dash: {}", alpha(1));
+        assert!(alpha(4) < 0.01, "inside the first gap: {}", alpha(4));
+        assert!(alpha(7) > 0.99, "inside the second dash: {}", alpha(7));
+        // The solid default draws the gap.
+        let solid = VelloCpuRasteriser.rasterise(
+            &prepare(&line(StrokeStyle::default(), 12.0)).unwrap(),
+            12,
+            10,
+        );
+        assert!(solid.pixels()[5 * 12 + 4].a > 0.99);
+    }
+
+    #[test]
+    fn a_stroke_style_that_cannot_be_drawn_as_written_is_refused_by_name() {
+        use gx_contracts::scene::StrokeStyle;
+        let refused =
+            |style: StrokeStyle, length: f64, expect: &str| match prepare(&line(style, length)) {
+                Err(Refusal::VectorTessellationFailed { object, detail }) => {
+                    assert_eq!(object, "rule");
+                    assert!(detail.contains(expect), "{detail}");
+                }
+                other => panic!("expected a refusal naming {expect}: {other:?}"),
+            };
+        let dashed = |dash: Vec<f64>| StrokeStyle {
+            dash,
+            ..StrokeStyle::default()
+        };
+        refused(dashed(vec![0.0, 0.0]), 10.0, "no length");
+        refused(dashed(vec![2.0, -1.0]), 10.0, "not negative");
+        refused(dashed(vec![f64::NAN]), 10.0, "finite");
+        refused(dashed(vec![1.0; 65]), 10.0, "at most 64");
+        // A bound checked before any dash is generated (invariant 51).
+        refused(dashed(vec![0.001, 0.001]), 1000.0, "repeats");
+        refused(
+            StrokeStyle {
+                miter_limit: 0.5,
+                ..StrokeStyle::default()
+            },
+            10.0,
+            "miterLimit",
         );
     }
 

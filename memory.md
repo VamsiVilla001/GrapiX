@@ -118,6 +118,20 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-15 — 3.17 increment 1: Vello on GPU and CPU; stroke join, cap and dash (Claude)
+
+**Resume here.** User decisions 15 Nov (Jev and Laya asked first): Vello GPU 0.3 draws, Vello CPU 0.3 is the
+reference, coverage only with colour in float, gate = at most one code value per channel for drawing; then the
+CPU path itself switches to Vello CPU (goldens regenerated once, old ones in
+`tests/baselines/history/2026-11-15-before-3.17`) and the contract gains `ObjectBase.strokeStyle`. Done: paths are
+kurbo outlines, strokes expanded once by `kurbo::stroke` (named refusals for bad dashes and miter limits, a
+100,000-period bound before generating dashes); `rasterise::VelloCpuRasteriser`; `compositor::draw::GpuDrawer`
+(kept in `Gpu`, one submission per path because Vello's queue writes take effect at the next submission);
+`LayerInput.drawn`; text stays on its CPU route until 3.18. **3.17 stays active.** Next: gradients (linear and
+radial, float, both paths), image quads, the in-product benchmark on DX12 and Vulkan, mutations. Evidence
+`docs/evidence/3.17`. Also from this session: the 3.21 batching experiment was not committed (no faster); patch in
+`agent/tmp/gpu-321-batch`.
+
 ## 2026-11-15 — 3.21: layers dispatched over their footprint; 1080p better, row still active (Claude)
 
 **Resume here.** User instruction 15 Nov: target the core backend blockers. 3.21's blocker from msg 340 is

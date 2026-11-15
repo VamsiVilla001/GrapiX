@@ -70,8 +70,9 @@ use gx_contracts::scene::{
     LayerKind, LayerObject, LightKind, LightObject, LineObject, MarkerKind, MarkerObject,
     MeshObject, MeshPrimitiveKind, ObjectBase, PaintObject, PaintStroke, RectObject,
     ResolvedObject, SceneCanvas, SceneDocument, SceneObject, SceneTimeline, ShapeObject, SlabBevel,
-    SlabProperties, TextAlign, TextAutoFit, TextCase, TextDecoration, TextDirection, TextLayout,
-    TextObject, TextOverflow, Vec2, Vec3, VerticalAlign, WritingMode,
+    SlabProperties, StrokeCap, StrokeJoin, StrokeStyle, TextAlign, TextAutoFit, TextCase,
+    TextDecoration, TextDirection, TextLayout, TextObject, TextOverflow, Vec2, Vec3, VerticalAlign,
+    WritingMode,
 };
 use gx_contracts::text_style::{StyleColor, StyleNumber, TextStyle};
 use gx_contracts::{
@@ -208,6 +209,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         LineObject,
         BezierPath,
         FillRule,
+        StrokeJoin,
+        StrokeCap,
+        StrokeStyle,
         ShapeObject,
         BrushPoint,
         BrushBlendMode,

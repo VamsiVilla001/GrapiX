@@ -31,6 +31,15 @@ gltf = "1"
 # MIT/Zlib/Apache-2.0, already in the lockfile. 11.41 encodes headless renders
 # as PNG; a fixed compression level keeps the same pixels the same bytes.
 miniz_oxide = "0.8"
+# Apache-2.0 OR MIT. 3.17 (user decision 15 Nov 2026): the GPU drawing backend.
+# Pinned exactly; it shares wgpu 30 with the compositor and draws coverage only
+# at prepare (invariant 35). Colour and gradients stay in float (3.15).
+vello_gpu = "=0.3.0"
+# Apache-2.0 OR MIT. 3.17 (user decision 15 Nov 2026): the CPU drawing backend
+# and the GPU backend's reference, the same sparse-strip family as vello_gpu.
+# Headless renders and the CPU reference draw with it, so Program and headless
+# agree within one code value.
+vello_cpu = "=0.3.0"
 
 [lib]
 path = "src/lib.rs"

@@ -14,13 +14,19 @@
 use gx_contracts::scene::{resolve_hierarchy, ResolvedObject, SceneDocument, SceneObject, Vec2};
 use gx_contracts::Refusal;
 
-use crate::rasterise::{LyonPathRasteriser, PathRasteriser, PreparedPaths, RasterSurface};
+use crate::rasterise::{PathRasteriser, PreparedPaths, RasterSurface, VelloCpuRasteriser};
 use crate::text::PreparedTexts;
 
 /// An object's layer-space pixels.
 #[derive(Debug, Clone)]
 pub struct LayerSource {
-    pub surface: RasterSurface,
+    pub width: u32,
+    pub height: u32,
+    /// The source drawn on the CPU; `None` when it was drawn on the GPU.
+    pub surface: Option<RasterSurface>,
+    /// 3.17: the source drawn on the GPU at prepare, a working-space float
+    /// texture; `None` when it was drawn on the CPU.
+    pub drawn: Option<wgpu::Texture>,
     /// The layer-space position of texel (0, 0)'s corner, the sampling phase
     /// removed: what a layer's affine maps from.
     pub origin: [f64; 2],
@@ -36,6 +42,7 @@ pub fn prepare_layer_source(
     index: usize,
     pad: u32,
     limit: u32,
+    gpu: Option<&crate::gpu::Gpu>,
 ) -> Result<LayerSource, Refusal> {
     let object = &doc.objects[index];
     let id = object.base().id.clone();
@@ -77,9 +84,9 @@ pub fn prepare_layer_source(
         b[3] = b[3].max(y);
     };
     for path in paths.paths() {
-        for v in path.vertices() {
-            point(f64::from(v.x), f64::from(v.y));
-        }
+        let b = path.bounds();
+        point(f64::from(b.min_x), f64::from(b.min_y));
+        point(f64::from(b.max_x), f64::from(b.max_y));
     }
     if let Some(text) = texts.objects.iter().find(|t| t.object_id == id) {
         for &[x, y] in &text.vertices {
@@ -106,15 +113,32 @@ pub fn prepare_layer_source(
         ));
     }
     let (width, height) = (width.max(1.0) as u32, height.max(1.0) as u32);
+    let object_paths: Vec<_> = paths.paths().iter().collect();
+    let layer_origin = [origin[0] - phase[0], origin[1] - phase[1]];
+    // 3.17: vector objects draw on the GPU when there is one. Text keeps its
+    // CPU glyph route until 3.18.
+    if let (Some(gpu), false) = (gpu, matches!(object, SceneObject::Text(_))) {
+        if let Some(drawn) = gpu.draw_paths(&id, &object_paths, origin, width, height) {
+            return Ok(LayerSource {
+                width,
+                height,
+                surface: None,
+                drawn: Some(drawn?),
+                origin: layer_origin,
+            });
+        }
+    }
     crate::render_work::cpu_source();
     let mut surface = RasterSurface::window(width, height, origin);
-    let object_paths: Vec<_> = paths.paths().iter().collect();
-    LyonPathRasteriser.rasterise_into(&object_paths, &mut surface);
+    VelloCpuRasteriser.rasterise_into(&object_paths, &mut surface);
     if matches!(object, SceneObject::Text(_)) {
         crate::text::rasterise_text(texts, &id, &local, &local_effective, &mut surface)?;
     }
     Ok(LayerSource {
-        surface,
-        origin: [origin[0] - phase[0], origin[1] - phase[1]],
+        width,
+        height,
+        surface: Some(surface),
+        drawn: None,
+        origin: layer_origin,
     })
 }

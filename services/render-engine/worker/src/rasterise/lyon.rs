@@ -8,10 +8,6 @@
 use lyon::algorithms::measure::{PathMeasurements, SampleType};
 use lyon::math::{point, Point};
 use lyon::path::{Event, Path};
-use lyon::tessellation::{
-    BuffersBuilder, FillOptions, FillTessellator, FillVertex, StrokeOptions, StrokeTessellator,
-    StrokeVertex, VertexBuffers,
-};
 
 use gx_contracts::scene::{
     BezierPath, EllipseObject, FillRule, LineObject, PaintObject, PaintStroke, RectObject,
@@ -19,33 +15,7 @@ use gx_contracts::scene::{
 };
 use gx_contracts::Refusal;
 
-use super::{solid_paint, PathRasteriser, PathVertex, PreparedPath, RasterSurface};
-
-/// The production path backend, with `lyon` confined behind [`PathRasteriser`].
-#[derive(Debug, Default, Clone, Copy)]
-pub struct LyonPathRasteriser;
-
-impl PathRasteriser for LyonPathRasteriser {
-    fn rasterise_into(&self, paths: &[&PreparedPath], surface: &mut RasterSurface) {
-        for path in paths {
-            let triangles: Vec<[PathVertex; 3]> = path
-                .indices()
-                .chunks_exact(3)
-                .filter_map(|triangle| {
-                    // Unreachable for geometry made by lyon. The bounds check
-                    // keeps a corrupted cache from becoming an out-of-bounds
-                    // write in the frame loop.
-                    Some([
-                        *path.vertices().get(triangle[0] as usize)?,
-                        *path.vertices().get(triangle[1] as usize)?,
-                        *path.vertices().get(triangle[2] as usize)?,
-                    ])
-                })
-                .collect();
-            fill_union(surface, &triangles, path.paint());
-        }
-    }
-}
+use super::{solid_paint, PathVertex, PreparedPath, RasterSurface};
 
 pub(super) fn prepare_object(
     object: &SceneObject,
@@ -123,6 +93,7 @@ fn prepare_rect(
         &rect.base.fill,
         &rect.base.stroke,
         rect.base.stroke_width,
+        &rect.base.stroke_style(),
         FillRule::Nonzero,
         output,
     )
@@ -167,6 +138,7 @@ fn prepare_ellipse(
         &ellipse.base.fill,
         &ellipse.base.stroke,
         ellipse.base.stroke_width,
+        &ellipse.base.stroke_style(),
         FillRule::Nonzero,
         output,
     )
@@ -196,6 +168,7 @@ fn prepare_line(
         builder.build(),
         &line.base.stroke,
         line.base.stroke_width,
+        &line.base.stroke_style(),
         output,
     )
 }
@@ -229,6 +202,7 @@ fn prepare_shape(
             stroke,
             &shape.base.stroke,
             shape.base.stroke_width,
+            &shape.base.stroke_style(),
             output,
         )?;
     }
@@ -363,6 +337,7 @@ fn prepare_paint_stroke(
         &Some(stroke.color.clone()),
         &None,
         0.0,
+        &gx_contracts::scene::StrokeStyle::default(),
         FillRule::Nonzero,
         output,
     )
@@ -439,17 +414,116 @@ fn append_disc(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn prepare_fill_and_stroke(
     object: &str,
     path: Path,
     fill: &Option<gx_contracts::color::ColorValue>,
     stroke: &Option<gx_contracts::color::ColorValue>,
     stroke_width: f64,
+    stroke_style: &gx_contracts::scene::StrokeStyle,
     fill_rule: FillRule,
     output: &mut Vec<PreparedPath>,
 ) -> Result<(), Refusal> {
     prepare_fill(object, &path, fill, fill_rule, output)?;
-    prepare_stroke(object, path, stroke, stroke_width, output)
+    prepare_stroke(object, path, stroke, stroke_width, stroke_style, output)
+}
+
+/// A lyon path as a kurbo outline, point for point (3.17).
+fn outline(path: &Path) -> super::BezPath {
+    use lyon::path::Event;
+    use vello_cpu::kurbo::Point as K;
+    let p = |q: lyon::math::Point| K::new(f64::from(q.x), f64::from(q.y));
+    let mut out = super::BezPath::new();
+    for event in path.iter() {
+        match event {
+            Event::Begin { at } => out.move_to(p(at)),
+            Event::Line { to, .. } => out.line_to(p(to)),
+            Event::Quadratic { ctrl, to, .. } => out.quad_to(p(ctrl), p(to)),
+            Event::Cubic {
+                ctrl1, ctrl2, to, ..
+            } => out.curve_to(p(ctrl1), p(ctrl2), p(to)),
+            Event::End { close, .. } => {
+                if close {
+                    out.close_path();
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Flattening tolerance for stroke expansion, in scene pixels.
+const STROKE_TOLERANCE: f64 = 0.01;
+/// Most dash periods one stroke may expand into: a bound checked before the
+/// dashes are generated (invariant 51).
+const MOST_DASH_PERIODS: f64 = 100_000.0;
+/// Most entries a dash pattern may have.
+const MOST_DASH_ENTRIES: usize = 64;
+
+/// The authored stroke style as kurbo's, refused by name when it cannot be
+/// drawn as written.
+fn kurbo_stroke(
+    object: &str,
+    path: &super::BezPath,
+    width: f64,
+    style: &gx_contracts::scene::StrokeStyle,
+) -> Result<vello_cpu::kurbo::Stroke, Refusal> {
+    use gx_contracts::scene::{StrokeCap, StrokeJoin};
+    use vello_cpu::kurbo::{Cap, Join, ParamCurveArclen, Stroke};
+    let refuse = |detail: String| Refusal::VectorTessellationFailed {
+        object: object.into(),
+        detail,
+    };
+    if !style.miter_limit.is_finite() || style.miter_limit < 1.0 {
+        return Err(refuse(format!(
+            "strokeStyle.miterLimit {} must be finite and at least 1",
+            style.miter_limit
+        )));
+    }
+    let join = match style.join {
+        StrokeJoin::Miter => Join::Miter,
+        StrokeJoin::Round => Join::Round,
+        StrokeJoin::Bevel => Join::Bevel,
+    };
+    let cap = match style.cap {
+        StrokeCap::Butt => Cap::Butt,
+        StrokeCap::Round => Cap::Round,
+        StrokeCap::Square => Cap::Square,
+    };
+    let stroke = Stroke::new(width)
+        .with_join(join)
+        .with_caps(cap)
+        .with_miter_limit(style.miter_limit);
+    if style.dash.is_empty() {
+        return Ok(stroke);
+    }
+    if style.dash.len() > MOST_DASH_ENTRIES {
+        return Err(refuse(format!(
+            "strokeStyle.dash has {} entries; at most {MOST_DASH_ENTRIES}",
+            style.dash.len()
+        )));
+    }
+    if !style.dash.iter().all(|d| d.is_finite() && *d >= 0.0) || !style.dash_offset.is_finite() {
+        return Err(refuse(
+            "strokeStyle.dash entries and dashOffset must be finite, and the entries not negative"
+                .into(),
+        ));
+    }
+    // An odd pattern repeats twice to alternate dash and gap, as in SVG.
+    let period: f64 =
+        style.dash.iter().sum::<f64>() * if style.dash.len() % 2 == 1 { 2.0 } else { 1.0 };
+    if period <= 0.0 {
+        return Err(refuse("strokeStyle.dash has no length".into()));
+    }
+    let length: f64 = path.segments().map(|s| s.arclen(STROKE_TOLERANCE)).sum();
+    if length / period > MOST_DASH_PERIODS {
+        return Err(refuse(format!(
+            "strokeStyle.dash repeats {:.0} times along the stroke; at most {MOST_DASH_PERIODS}",
+            length / period
+        )));
+    }
+    Ok(stroke.with_dashes(style.dash_offset, style.dash.iter().copied()))
 }
 
 fn prepare_fill(
@@ -462,43 +536,24 @@ fn prepare_fill(
     let Some(paint) = solid_paint(object, "fill", fill.as_ref())? else {
         return Ok(());
     };
-    let mut geometry: VertexBuffers<PathVertex, u32> = VertexBuffers::new();
-    let mut tessellator = FillTessellator::new();
-    let options = match fill_rule {
-        FillRule::Nonzero => FillOptions::default(),
-        FillRule::Evenodd => FillOptions::even_odd(),
+    let rule = match fill_rule {
+        FillRule::Nonzero => super::OutlineFill::NonZero,
+        FillRule::Evenodd => super::OutlineFill::EvenOdd,
     };
-    tessellator
-        .tessellate_path(
-            path,
-            &options,
-            &mut BuffersBuilder::new(&mut geometry, |vertex: FillVertex| PathVertex {
-                x: vertex.position().x,
-                y: vertex.position().y,
-            }),
-        )
-        .map_err(|error| Refusal::VectorTessellationFailed {
-            object: object.into(),
-            detail: error.to_string(),
-        })?;
-    append_fill(object, geometry, paint, output)
+    append_outline(object, outline(path), rule, paint, output);
+    Ok(())
 }
 
-fn append_fill(
+fn append_outline(
     object: &str,
-    geometry: VertexBuffers<PathVertex, u32>,
+    outline: super::BezPath,
+    rule: super::OutlineFill,
     paint: crate::colour_pipeline::WorkingRgba,
     output: &mut Vec<PreparedPath>,
-) -> Result<(), Refusal> {
-    if !geometry.indices.is_empty() {
-        output.push(PreparedPath::new(
-            object.into(),
-            paint,
-            geometry.vertices,
-            geometry.indices,
-        ));
+) {
+    if !outline.elements().is_empty() {
+        output.push(PreparedPath::new(object.into(), paint, outline, rule));
     }
-    Ok(())
 }
 
 fn prepare_stroke(
@@ -506,6 +561,7 @@ fn prepare_stroke(
     path: Path,
     stroke: &Option<gx_contracts::color::ColorValue>,
     stroke_width: f64,
+    stroke_style: &gx_contracts::scene::StrokeStyle,
     output: &mut Vec<PreparedPath>,
 ) -> Result<(), Refusal> {
     let Some(paint) = solid_paint(object, "stroke", stroke.as_ref())? else {
@@ -514,22 +570,19 @@ fn prepare_stroke(
     if stroke_width <= 0.0 {
         return Ok(());
     }
-    let mut geometry: VertexBuffers<PathVertex, u32> = VertexBuffers::new();
-    let mut tessellator = StrokeTessellator::new();
-    tessellator
-        .tessellate_path(
-            &path,
-            &StrokeOptions::default().with_line_width(stroke_width as f32),
-            &mut BuffersBuilder::new(&mut geometry, |vertex: StrokeVertex| PathVertex {
-                x: vertex.position().x,
-                y: vertex.position().y,
-            }),
-        )
-        .map_err(|error| Refusal::VectorTessellationFailed {
-            object: object.into(),
-            detail: error.to_string(),
-        })?;
-    append_fill(object, geometry, paint, output)
+    // The stroke is expanded once here into the outline it covers, joins,
+    // caps and dashes included, and that outline is filled non-zero: every
+    // backend then draws the same geometry (3.17).
+    let centre = outline(&path);
+    let style = kurbo_stroke(object, &centre, stroke_width, stroke_style)?;
+    let expanded = vello_cpu::kurbo::stroke(
+        centre.iter(),
+        &style,
+        &vello_cpu::kurbo::StrokeOpts::default(),
+        STROKE_TOLERANCE,
+    );
+    append_outline(object, expanded, super::OutlineFill::NonZero, paint, output);
+    Ok(())
 }
 
 pub(crate) fn transform(

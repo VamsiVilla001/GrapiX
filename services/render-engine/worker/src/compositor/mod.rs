@@ -21,6 +21,7 @@ use crate::rasterizer::Frame;
 use crate::tiling::{Stage, Tile, TileError, TilePlan};
 #[cfg(test)]
 mod blend_tests;
+pub(crate) mod draw;
 #[cfg(test)]
 pub(crate) mod effect_tests;
 pub mod output;
@@ -59,6 +60,9 @@ pub struct LayerInput {
     pub height: u32,
     pub pixels: Vec<WorkingRgba>,
     pub working_space: WorkingColorSpace,
+    /// 3.17: the source already drawn on this device, a `width` x `height`
+    /// working-space float texture; `pixels` is then empty.
+    pub drawn: Option<wgpu::Texture>,
     pub blend_mode: BlendMode,
     /// The layer's effect stack as a pass plan, packed (3.22). Its passes are
     /// fixed at prepare; a disabled effect packs as identity passes.
@@ -487,28 +491,34 @@ impl PreparedCompositor {
         let layers: Vec<Layer> = inputs
             .iter()
             .map(|input| {
-                let texture = float_texture(
-                    device,
-                    input.width,
-                    input.height,
-                    wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                );
-                let mut bytes = Vec::with_capacity(input.pixels.len() * 16);
-                for p in &input.pixels {
-                    for c in [p.r, p.g, p.b, p.a] {
-                        bytes.extend_from_slice(&c.to_le_bytes());
+                let texture = match &input.drawn {
+                    Some(drawn) => drawn.clone(),
+                    None => {
+                        let texture = float_texture(
+                            device,
+                            input.width,
+                            input.height,
+                            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                        );
+                        let mut bytes = Vec::with_capacity(input.pixels.len() * 16);
+                        for p in &input.pixels {
+                            for c in [p.r, p.g, p.b, p.a] {
+                                bytes.extend_from_slice(&c.to_le_bytes());
+                            }
+                        }
+                        queue.write_texture(
+                            texture.as_image_copy(),
+                            &bytes,
+                            wgpu::TexelCopyBufferLayout {
+                                offset: 0,
+                                bytes_per_row: Some(input.width * 16),
+                                rows_per_image: Some(input.height),
+                            },
+                            texture.size(),
+                        );
+                        texture
                     }
-                }
-                queue.write_texture(
-                    texture.as_image_copy(),
-                    &bytes,
-                    wgpu::TexelCopyBufferLayout {
-                        offset: 0,
-                        bytes_per_row: Some(input.width * 16),
-                        rows_per_image: Some(input.height),
-                    },
-                    texture.size(),
-                );
+                };
                 crate::render_work::gpu_build();
                 let view = texture.create_view(&Default::default());
                 let chain = effect_pipeline
@@ -1247,6 +1257,18 @@ fn validate_input(
     }
     if input.width == 0 || input.height == 0 || input.width > limit || input.height > limit {
         return Err(fail("pixels", format!("source {}x{} must be non-empty and within device limit {limit}; source backend must supply bounded layers", input.width, input.height)));
+    }
+    if let Some(drawn) = &input.drawn {
+        if (drawn.width(), drawn.height()) != (input.width, input.height)
+            || drawn.format() != wgpu::TextureFormat::Rgba32Float
+            || !input.pixels.is_empty()
+        {
+            return Err(fail(
+                "pixels",
+                "a drawn source must be a working-space float texture of its dimensions".into(),
+            ));
+        }
+        return Ok(());
     }
     if input.pixels.len() as u64 != u64::from(input.width) * u64::from(input.height) {
         return Err(fail(

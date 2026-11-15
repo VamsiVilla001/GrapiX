@@ -102,9 +102,14 @@ impl GpuScene {
                 index,
                 pad,
                 limit,
+                Some(gpu),
             )?;
-            let (width, height) = (source.surface.width(), source.surface.height());
-            let surface = source.surface;
+            let (width, height) = (source.width, source.height);
+            let route = if source.drawn.is_some() {
+                "gpu-vello-coverage-at-prepare"
+            } else {
+                "cpu-prepared-source-at-prepare"
+            };
             let origin = source.origin;
             let blend_mode = object.base().blend_mode();
             let instances = object.base().effects();
@@ -126,8 +131,12 @@ impl GpuScene {
                 document_path: path.clone(),
                 width,
                 height,
-                pixels: surface.pixels().to_vec(),
+                pixels: source
+                    .surface
+                    .as_ref()
+                    .map_or_else(Vec::new, |surface| surface.pixels().to_vec()),
                 working_space: doc.working_color_space,
+                drawn: source.drawn,
                 blend_mode,
                 effects,
                 state,
@@ -136,7 +145,7 @@ impl GpuScene {
                 object_id: id.clone(),
                 document_path: path,
                 object_kind: object.kind().into(),
-                route: "cpu-prepared-source-at-prepare",
+                route,
                 width,
                 height,
             });

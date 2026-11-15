@@ -62,6 +62,37 @@ fn take(engine: &mut Engine, pin: &(TakeId, Revision, ContentHash)) -> EngineRep
     }))
 }
 
+/// 3.17's drawing rule (user decision 15 Nov 2026): vector content drawn by
+/// Vello GPU matches the Vello CPU reference to at most one code value per
+/// channel, on any share of pixels. Text and every other route are unchanged
+/// and must match exactly, which this rule also admits; the share is recorded.
+fn assert_within_one_code(actual: &Frame, expected: &Frame, what: &str) {
+    assert_eq!(
+        (actual.width, actual.height),
+        (expected.width, expected.height),
+        "{what}: size"
+    );
+    let mut worst = (0_u8, 0_usize);
+    let mut over = 0_usize;
+    for (i, (a, b)) in actual.pixels.iter().zip(&expected.pixels).enumerate() {
+        let delta = a.abs_diff(*b);
+        over += usize::from(delta > 1);
+        if delta > worst.0 {
+            worst = (delta, i);
+        }
+    }
+    let pixel = worst.1 / 4;
+    let (x, y) = (pixel as u32 % actual.width, pixel as u32 / actual.width);
+    let at = |f: &Frame| f.pixels[pixel * 4..pixel * 4 + 4].to_vec();
+    assert!(
+        worst.0 <= 1,
+        "{what}: worst channel delta {} exceeds one code value at ({x}, {y}): {:?} vs {:?}; {over} channels over one",
+        worst.0,
+        at(actual),
+        at(expected)
+    );
+}
+
 fn difference(actual: &Frame, expected: &Frame) -> serde_json::Value {
     assert_eq!(
         (actual.width, actual.height),
@@ -154,7 +185,9 @@ fn gpu_engine_lower_third_trace_and_output_comparisons() {
         let pin = publish(&mut engine, doc);
         let prepare_work = RenderWork::snapshot().since(before);
         assert_eq!(prepare_work.cpu_full_frame_rasterizations, 0);
-        assert_eq!(prepare_work.cpu_source_rasterizations, 3);
+        // 3.17: the plate and the accent are drawn on the GPU; only the
+        // headline's packaged glyphs are still drawn on the CPU (3.18).
+        assert_eq!(prepare_work.cpu_source_rasterizations, 1);
         assert!(prepare_work.gpu_resource_builds > 0);
         let sources = engine.gpu_source_trace(&pin.0, pin.1).unwrap().to_vec();
         assert_eq!(
@@ -163,6 +196,14 @@ fn gpu_engine_lower_third_trace_and_output_comparisons() {
                 .map(|s| s.object_id.as_str())
                 .collect::<Vec<_>>(),
             ["plate", "headline", "accent"]
+        );
+        assert_eq!(
+            sources.iter().map(|s| s.route).collect::<Vec<_>>(),
+            [
+                "gpu-vello-coverage-at-prepare",
+                "cpu-prepared-source-at-prepare",
+                "gpu-vello-coverage-at-prepare"
+            ]
         );
         assert!(matches!(take(&mut engine, &pin), EngineReply::Taken(_)));
         let mut frames = Vec::new();
@@ -189,13 +230,15 @@ fn gpu_engine_lower_third_trace_and_output_comparisons() {
             let cpu = engine.prepared_scene(&pin.0, pin.1).unwrap();
             let reference_program = cpu.frame_at(scene_frame, OutputTransform::Rec709).unwrap();
             let reference_preview = cpu.frame_at(scene_frame, OutputTransform::Srgb).unwrap();
-            assert_eq!(
-                *program, reference_program,
-                "lower-third Program differs at {space:?}/{scene_frame}"
+            assert_within_one_code(
+                &program,
+                &reference_program,
+                &format!("lower-third Program at {space:?}/{scene_frame}"),
             );
-            assert_eq!(
-                *preview, reference_preview,
-                "lower-third Preview differs at {space:?}/{scene_frame}"
+            assert_within_one_code(
+                &preview,
+                &reference_preview,
+                &format!("lower-third Preview at {space:?}/{scene_frame}"),
             );
             if scene_frame == 100 {
                 if let Some(dir) = std::env::var_os("GX_GPU_316_EVIDENCE_DIR") {
@@ -293,11 +336,10 @@ fn gpu_engine_unchanged_golden_frames_measured_without_rebaselining() {
         comparisons.push(
             json!({"scene": path.file_name().unwrap().to_string_lossy(), "difference": measured}),
         );
-        assert_eq!(
-            *preview,
-            golden,
-            "GPU golden comparison: {}",
-            path.display()
+        assert_within_one_code(
+            &preview,
+            &golden,
+            &format!("GPU golden comparison: {}", path.display()),
         );
         assert_eq!(
             engine.program_frame_trace().unwrap().backend,
@@ -307,7 +349,8 @@ fn gpu_engine_unchanged_golden_frames_measured_without_rebaselining() {
     assert_eq!(comparisons.len(), 6);
     evidence(
         "golden-differences.json",
-        &json!({"adapter": engine.gpu_description(), "comparisons": comparisons, "rebaselined": false}),
+        &json!({"adapter": engine.gpu_description(), "comparisons": comparisons,
+            "rebaselined": "once, 15 Nov 2026, from the Vello CPU path (3.17, user decision); previous goldens in tests/baselines/history/2026-11-15-before-3.17"}),
     );
 }
 
@@ -433,4 +476,193 @@ fn gpu_engine_recovery_rebuilds_only_at_prepare_and_never_falls_back() {
         &json!({"prepareWork": prepare, "resumedFrame": trace, "hardwareLossRefused": "tierTooLow(T2)", "cpuFallback": false}),
     );
     let _ = std::fs::remove_file(path);
+}
+
+/// 3.17's fixture: every stroke join and cap, a dash pattern with an offset,
+/// both fill rules, a rounded rectangle, an ellipse and a polyline, each at a
+/// whole-pixel placement with no rotation or scale. That is where the GPU's
+/// object-local source and the CPU's direct drawing are the same geometry, as
+/// in 3.16's gate; a transformed layer is resampled by the compositor (3.16),
+/// which this row does not change. Shapes start at x = 20 + 100 * i.
+fn vector_fixture() -> SceneDocument {
+    use gx_contracts::scene::{
+        BezierPath, EllipseObject, FillRule, LineObject, ShapeObject, StrokeCap, StrokeJoin,
+        StrokeStyle, Vec2,
+    };
+    let v = |x: f64, y: f64| Vec2 { x, y };
+    let colour = |r: f64, g: f64, b: f64, a: f64| ColorValue::Solid {
+        color: Rgba::srgb(r, g, b, a),
+    };
+    let mut doc = lower_third();
+    doc.objects.clear();
+    doc.assets.clear();
+    doc.fonts.clear();
+    doc.timeline.channels.clear();
+    let zigzag = |id: &str, x: f64, y: f64, join, cap, dash: Vec<f64>| {
+        let mut base = ObjectBase::new(id, id);
+        base.x = x;
+        base.y = y;
+        base.stroke = Some(colour(0.95, 0.85, 0.2, 0.8));
+        base.stroke_width = 9.0;
+        base.stroke_style = Some(StrokeStyle {
+            join,
+            cap,
+            miter_limit: 4.0,
+            dash,
+            dash_offset: 3.0,
+        });
+        SceneObject::Shape(ShapeObject {
+            base,
+            path: BezierPath {
+                closed: false,
+                vertices: vec![v(0.0, 0.0), v(70.0, 10.0), v(10.0, 50.0), v(80.0, 70.0)],
+                in_tangents: vec![v(0.0, 0.0); 4],
+                out_tangents: vec![v(0.0, 0.0); 4],
+            },
+            compound_paths: None,
+            fill_enabled: false,
+            stroke_enabled: true,
+            fill_rule: FillRule::Nonzero,
+            trim_start: None,
+            trim_end: None,
+            trim_offset: None,
+        })
+    };
+    let joins = [StrokeJoin::Miter, StrokeJoin::Round, StrokeJoin::Bevel];
+    let caps = [StrokeCap::Butt, StrokeCap::Round, StrokeCap::Square];
+    for i in 0..3 {
+        doc.objects.push(zigzag(
+            &format!("zigzag-{i}"),
+            20.0 + 100.0 * i as f64,
+            20.0,
+            joins[i],
+            caps[i],
+            Vec::new(),
+        ));
+    }
+    doc.objects.push(zigzag(
+        "dashed",
+        320.0,
+        20.0,
+        StrokeJoin::Round,
+        StrokeCap::Round,
+        vec![12.0, 7.0, 3.0],
+    ));
+    // A star with crossing edges: even-odd leaves its centre open.
+    let star: Vec<Vec2> = (0..5)
+        .map(|k| {
+            let a = std::f64::consts::PI * (0.5 + 0.8 * k as f64);
+            v(40.0 + 38.0 * a.cos(), 40.0 + 38.0 * a.sin())
+        })
+        .collect();
+    for (i, rule) in [FillRule::Evenodd, FillRule::Nonzero]
+        .into_iter()
+        .enumerate()
+    {
+        let id = format!("star-{i}");
+        let mut base = ObjectBase::new(&id, &id);
+        base.x = 20.0 + 100.0 * i as f64;
+        base.y = 120.0;
+        base.fill = Some(colour(0.2, 0.6, 0.95, 1.0));
+        SceneObject::Shape(ShapeObject {
+            base,
+            path: BezierPath {
+                closed: true,
+                vertices: star.clone(),
+                in_tangents: vec![v(0.0, 0.0); 5],
+                out_tangents: vec![v(0.0, 0.0); 5],
+            },
+            compound_paths: None,
+            fill_enabled: true,
+            stroke_enabled: false,
+            fill_rule: rule,
+            trim_start: None,
+            trim_end: None,
+            trim_offset: None,
+        })
+        .pipe(|o| doc.objects.push(o));
+    }
+    let mut base = ObjectBase::new("card", "card");
+    base.x = 230.0;
+    base.y = 125.0;
+    base.width = 80.0;
+    base.height = 50.0;
+    base.fill = Some(colour(0.8, 0.2, 0.3, 0.9));
+    base.stroke = Some(colour(1.0, 1.0, 1.0, 1.0));
+    base.stroke_width = 3.0;
+    doc.objects
+        .push(SceneObject::Rect(RectObject { base, radius: 12.0 }));
+    let mut base = ObjectBase::new("disc", "disc");
+    base.x = 340.0;
+    base.y = 120.0;
+    base.width = 70.0;
+    base.height = 44.0;
+    base.fill = Some(colour(0.3, 0.9, 0.4, 0.6));
+    doc.objects
+        .push(SceneObject::Ellipse(EllipseObject { base }));
+    let mut base = ObjectBase::new("polyline", "polyline");
+    base.x = 430.0;
+    base.y = 30.0;
+    base.stroke = Some(colour(0.9, 0.4, 0.9, 1.0));
+    base.stroke_width = 2.5;
+    doc.objects.push(SceneObject::Line(LineObject {
+        base,
+        points: vec![v(0.0, 0.0), v(40.0, 60.0), v(80.0, 5.0), v(120.0, 90.0)],
+    }));
+    doc
+}
+
+trait Pipe: Sized {
+    fn pipe<R>(self, f: impl FnOnce(Self) -> R) -> R {
+        f(self)
+    }
+}
+impl<T> Pipe for T {}
+
+#[test]
+#[ignore = "requires hardware GPU; explicit 3.17 drawing gate"]
+fn gpu_engine_draws_vector_content_within_one_code_of_the_vello_cpu_reference() {
+    for space in [WorkingColorSpace::Srgb, WorkingColorSpace::LinearSrgb] {
+        let (mut engine, ticks) = hardware_engine();
+        let mut doc = vector_fixture();
+        doc.working_color_space = space;
+        let before = RenderWork::snapshot();
+        let pin = publish(&mut engine, doc);
+        let prepare = RenderWork::snapshot().since(before);
+        assert_eq!(
+            prepare.cpu_source_rasterizations, 0,
+            "every vector source is drawn on the GPU"
+        );
+        let sources = engine.gpu_source_trace(&pin.0, pin.1).unwrap().to_vec();
+        assert_eq!(sources.len(), 9);
+        assert!(sources
+            .iter()
+            .all(|s| s.route == "gpu-vello-coverage-at-prepare"));
+        assert!(matches!(take(&mut engine, &pin), EngineReply::Taken(_)));
+        ticks.store(1, Ordering::Relaxed);
+        let program = engine.emit_frame_settled().unwrap().frame;
+        let preview = engine.take_preview().unwrap();
+        let cpu = engine.prepared_scene(&pin.0, pin.1).unwrap();
+        for (frame, output, name) in [
+            (&*program, OutputTransform::Rec709, "Program"),
+            (&*preview, OutputTransform::Srgb, "Preview"),
+        ] {
+            let reference = cpu.frame_at(0, output).unwrap();
+            assert_within_one_code(frame, &reference, &format!("{space:?} {name}"));
+        }
+        let alpha = |x: u32, y: u32| preview.pixels[((y * preview.width + x) * 4 + 3) as usize];
+        // Anti-aliased: edges carry partial coverage.
+        let partial = preview
+            .pixels
+            .chunks_exact(4)
+            .filter(|p| p[3] > 0 && p[3] < 255)
+            .count();
+        assert!(
+            partial > 200,
+            "{space:?}: only {partial} partial-coverage pixels"
+        );
+        // Even-odd leaves the star's centre open; non-zero fills it.
+        assert_eq!(alpha(60, 160), 0, "{space:?}: even-odd star centre");
+        assert_eq!(alpha(160, 160), 255, "{space:?}: non-zero star centre");
+    }
 }
