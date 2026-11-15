@@ -1620,35 +1620,10 @@ fn drive_material_refusals(report: &mut Report) {
         ),
     );
 
-    // The software path fills glyphs with a solid colour only; a gradient text
-    // fill is refused at validation rather than flattened at frame time.
-    let mut scene = gx_contracts::command::witness::fixture_scene();
-    for object in &mut scene.objects {
-        if object.base().id == "text" {
-            object.base_mut().fill = Some(ColorValue::LinearGradient {
-                angle: 0.0,
-                start_x: 0.0,
-                start_y: 0.0,
-                end_x: 1.0,
-                end_y: 0.0,
-                stops: Vec::new(),
-                spread: Default::default(),
-                coordinate_mode: Default::default(),
-            });
-        }
-    }
     let draws_everything = MaterialSupport {
         depth_modes: DepthMode::ALL.to_vec(),
         ..support(true, true)
     };
-    let found = gx_contracts::validate::validate_scene_document(
-        &scene,
-        &draws_everything,
-        &Default::default(),
-        false,
-    );
-    report.record(PLANE, "UnsupportedPathGradient is produced for a gradient text fill", expect(found.iter().any(|refusal| matches!(&refusal.code, Refusal::UnsupportedPathGradient { object, .. } if object == "text")), format!("a gradient text fill was not refused as UnsupportedPathGradient: {found:?}")));
-
     // 3.13: a Trim Paths value outside its domain refuses at validation rather
     // than being clamped into a window nobody authored.
     let mut trimmed = gx_contracts::command::witness::fixture_scene();
@@ -2082,7 +2057,6 @@ fn is_driven(variant: &str) -> bool {
             | "UnsupportedCullMode"
             | "UnsupportedAlphaMode"
             | "UnsupportedDepthMode"
-            | "UnsupportedPathGradient"
             | "GradientNotDrawable"
             | "ImageNotDrawable"
             | "CommandUnknownField"
@@ -2147,6 +2121,10 @@ fn is_driven(variant: &str) -> bool {
 
 fn limitations() -> &'static [Limitation] {
     &[
+        Limitation {
+            variant: "UnsupportedPathGradient",
+            reason: "since 3.17 and 3.18 every drawn path and text paint draws gradients; only brush paint strokes refuse one, and brush paint objects are refused as a kind first",
+        },
         Limitation {
             variant: "Unauthenticated",
             reason: "the transport refuses it before EnginePeer",

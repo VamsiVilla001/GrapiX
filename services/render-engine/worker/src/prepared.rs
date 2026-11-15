@@ -136,8 +136,8 @@ impl PreparedScene {
         crate::support::refuse_what_the_software_path_cannot_draw(&resolved)?;
 
         let resolution = resolve_hierarchy(&resolved.objects);
-        let paths = PreparedPaths::prepare(&resolved, &resolution.effective)?;
         let texts = prepare_texts(&resolved, asset_bytes)?;
+        let paths = PreparedPaths::prepare(&resolved, &resolution.effective, Some(&texts))?;
         let meshes = prepare_meshes(&resolved, available, asset_bytes, support)?;
         // 3.17: images are decoded once, then drawn as layers.
         let images = crate::image::prepare_images(&resolved, asset_bytes)?;
@@ -168,7 +168,6 @@ impl PreparedScene {
                 &resolved,
                 &resolution.effective,
                 &paths,
-                &texts,
                 0,
                 &effect_layers,
             )?);
@@ -240,7 +239,6 @@ impl PreparedScene {
                     &self.resolved,
                     &self.effective,
                     &self.paths,
-                    &self.texts,
                     0,
                     &self.effect_layers,
                 )
@@ -299,12 +297,11 @@ impl PreparedScene {
             }
         }
         let resolution = resolve_hierarchy(&evaluated.objects);
-        let paths = PreparedPaths::prepare(&evaluated, &resolution.effective)?;
+        let paths = PreparedPaths::prepare(&evaluated, &resolution.effective, Some(&self.texts))?;
         let surface = compose(
             &evaluated,
             &resolution.effective,
             &paths,
-            &self.texts,
             scene_frame,
             &self.effect_layers,
         )?;
@@ -331,12 +328,11 @@ impl PreparedScene {
             }
         }
         let resolution = resolve_hierarchy(&evaluated.objects);
-        let paths = PreparedPaths::prepare(&evaluated, &resolution.effective)?;
+        let paths = PreparedPaths::prepare(&evaluated, &resolution.effective, Some(&self.texts))?;
         compose(
             &evaluated,
             &resolution.effective,
             &paths,
-            &self.texts,
             scene_frame,
             &self.effect_layers,
         )
@@ -382,7 +378,6 @@ fn compose(
     document: &SceneDocument,
     effective: &[ResolvedObject],
     paths: &PreparedPaths,
-    texts: &PreparedTexts,
     scene_frame: u64,
     effect_layers: &[Option<EffectLayer>],
 ) -> Result<RasterSurface, Refusal> {
@@ -448,9 +443,6 @@ fn compose(
             if let Some(object_paths) = by_object.get(id) {
                 VelloCpuRasteriser.rasterise_into(object_paths, &mut layer);
             }
-            if matches!(object, SceneObject::Text(_)) {
-                crate::text::rasterise_text(texts, id, document, effective, &mut layer)?;
-            }
             if !effects.is_empty() {
                 // 3.22: effects act on the layer's own pixels before its
                 // opacity, as After Effects orders them: the paths and glyphs
@@ -477,9 +469,6 @@ fn compose(
         }
         if let Some(object_paths) = by_object.get(id) {
             VelloCpuRasteriser.rasterise_into(object_paths, &mut surface);
-        }
-        if matches!(object, SceneObject::Text(_)) {
-            crate::text::rasterise_text(texts, id, document, effective, &mut surface)?;
         }
     }
     Ok(surface)
@@ -1226,7 +1215,7 @@ mod tests {
                     "3.16",
                 ),
             ),
-            (text_scene, not_drawable("title", "decoration", "3.18")),
+            (text_scene, not_drawable("title", "decoration", "11.51")),
             (
                 document(vec![faded]),
                 not_drawable("faded", "opacity", "3.13"),

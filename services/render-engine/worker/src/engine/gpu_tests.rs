@@ -193,9 +193,9 @@ fn gpu_engine_lower_third_trace_and_output_comparisons() {
         let pin = publish(&mut engine, doc);
         let prepare_work = RenderWork::snapshot().since(before);
         assert_eq!(prepare_work.cpu_full_frame_rasterizations, 0);
-        // 3.17: the plate and the accent are drawn on the GPU; only the
-        // headline's packaged glyphs are still drawn on the CPU (3.18).
-        assert_eq!(prepare_work.cpu_source_rasterizations, 1);
+        // 3.17 and 3.18: the plate, the accent and the headline's glyph
+        // outlines are all drawn on the GPU.
+        assert_eq!(prepare_work.cpu_source_rasterizations, 0);
         assert!(prepare_work.gpu_resource_builds > 0);
         let sources = engine.gpu_source_trace(&pin.0, pin.1).unwrap().to_vec();
         assert_eq!(
@@ -209,7 +209,7 @@ fn gpu_engine_lower_third_trace_and_output_comparisons() {
             sources.iter().map(|s| s.route).collect::<Vec<_>>(),
             [
                 "gpu-vello-coverage-at-prepare",
-                "cpu-prepared-source-at-prepare",
+                "gpu-vello-coverage-at-prepare",
                 "gpu-vello-coverage-at-prepare"
             ]
         );
@@ -358,7 +358,7 @@ fn gpu_engine_unchanged_golden_frames_measured_without_rebaselining() {
     evidence(
         "golden-differences.json",
         &json!({"adapter": engine.gpu_description(), "comparisons": comparisons,
-            "rebaselined": "once, 15 Nov 2026, from the Vello CPU path (3.17, user decision); previous goldens in tests/baselines/history/2026-11-15-before-3.17"}),
+            "rebaselined": "15 Nov 2026 from the Vello CPU path (3.17, user decision; previous in tests/baselines/history/2026-11-15-before-3.17), and colour-ramp-50 again for its text (3.18; previous in tests/baselines/history/2026-11-15-before-3.18)"}),
     );
 }
 
@@ -856,5 +856,303 @@ fn gpu_engine_draws_image_quads_in_every_fit_mode_within_one_code_of_the_cpu_ref
             let alpha = preview.pixels[((y * preview.width + x) * 4 + 3) as usize];
             assert!(alpha > 100, "{space:?}: image {k} centre alpha {alpha}");
         }
+    }
+}
+
+/// 3.18's text fixture: Latin, Telugu, Hindi and mixed-bidi lines, shaped
+/// from packaged faces only, plus a gradient fill and a stroked line.
+fn text_fixture() -> (SceneDocument, Vec<(gx_contracts::ContentHash, Vec<u8>)>) {
+    use gx_contracts::color::{GradientStop, Rgba};
+    use gx_contracts::scene::{AssetKind, AssetLibraryItem, TextLayout, TextObject};
+    const TELUGU: &[u8] = include_bytes!("../../tests/fixtures/NotoSansTelugu-Regular.ttf");
+    const DEVANAGARI: &[u8] = include_bytes!("../../tests/fixtures/NotoSansDevanagari-Regular.ttf");
+    const HEBREW: &[u8] = include_bytes!("../../tests/fixtures/NotoSansHebrew.ttf");
+    const NASTALIQ: &[u8] = include_bytes!("../../tests/fixtures/NotoNastaliqUrdu-Regular.ttf");
+    const NASKH: &[u8] = include_bytes!("../../tests/fixtures/NotoSansArabic-Regular.ttf");
+    // Two Inter definitions over the same file: one falls back to Nastaliq
+    // for Urdu, the other to Naskh.
+    let faces: [(&str, &str, &str, &[u8]); 7] = [
+        ("inter", "inter", "Inter", INTER),
+        ("inter-naskh", "inter", "Inter Naskh", INTER),
+        ("telugu", "telugu", "Noto Sans Telugu", TELUGU),
+        (
+            "devanagari",
+            "devanagari",
+            "Noto Sans Devanagari",
+            DEVANAGARI,
+        ),
+        ("hebrew", "hebrew", "Noto Sans Hebrew", HEBREW),
+        ("nastaliq", "nastaliq", "Noto Nastaliq Urdu", NASTALIQ),
+        ("naskh", "naskh", "Noto Sans Arabic", NASKH),
+    ];
+    let mut doc = lower_third();
+    doc.objects.clear();
+    doc.timeline.channels.clear();
+    doc.assets.clear();
+    doc.fonts.clear();
+    let mut bytes = Vec::new();
+    for (id, asset, family, data) in faces {
+        let hash = gx_asset_plane::content_hash(data);
+        if doc
+            .assets
+            .iter()
+            .any(|a| a.asset_id == format!("asset_font_{asset}"))
+        {
+            doc.fonts
+                .push(font_definition(id, asset, family, Vec::new()));
+            continue;
+        }
+        doc.assets.push(AssetLibraryItem {
+            asset_id: format!("asset_font_{asset}"),
+            name: family.into(),
+            kind: AssetKind::Font,
+            path: format!("fonts/{asset}.ttf"),
+            checksum: Some(hash.clone()),
+            mime_type: Some("font/ttf".into()),
+            size_bytes: Some(data.len() as u64),
+            status: None,
+            provenance: Default::default(),
+            color_space: None,
+        });
+        bytes.push((hash, data.to_vec()));
+        doc.fonts
+            .push(font_definition(id, asset, family, Vec::new()));
+    }
+    for font in &mut doc.fonts {
+        font.fallback_families = match font.font_id.as_str() {
+            "inter" => vec![
+                "Noto Sans Telugu".into(),
+                "Noto Sans Devanagari".into(),
+                "Noto Sans Hebrew".into(),
+                "Noto Nastaliq Urdu".into(),
+            ],
+            "inter-naskh" => vec!["Noto Sans Arabic".into()],
+            _ => Vec::new(),
+        };
+    }
+    let line = |id: &str, value: &str, y: f64| {
+        let mut base = ObjectBase::new(id, id);
+        base.x = 40.0;
+        base.y = y;
+        base.width = 900.0;
+        base.height = 70.0;
+        base.fill = Some(ColorValue::Solid {
+            color: Rgba::srgb(1.0, 1.0, 1.0, 1.0),
+        });
+        TextObject {
+            base,
+            text: value.into(),
+            font_id: "inter".into(),
+            size: 44.0,
+            layout: TextLayout::Paragraph,
+            auto_fit: Default::default(),
+            writing_mode: Default::default(),
+            vertical_align: Default::default(),
+            direction: Default::default(),
+            text_case: Default::default(),
+            decoration: Default::default(),
+            overflow: Default::default(),
+            align: Default::default(),
+            line_height: None,
+            letter_spacing: 0.0,
+            word_spacing: 0.0,
+            paragraph_spacing: 0.0,
+            text_indent: 0.0,
+        }
+    };
+    doc.objects.push(SceneObject::Text(line(
+        "latin",
+        "GrapiX lower third, office",
+        20.0,
+    )));
+    doc.objects.push(SceneObject::Text(line(
+        "telugu",
+        "తెలుగు వార్తలు క్షేత్రం",
+        100.0,
+    )));
+    doc.objects.push(SceneObject::Text(line(
+        "hindi",
+        "हिन्दी समाचार क्षत्रिय",
+        180.0,
+    )));
+    doc.objects.push(SceneObject::Text(line(
+        "bidi",
+        "Score 3 - 2 שלום עולם",
+        260.0,
+    )));
+    let mut gradient = line("gradient", "Gradient title", 340.0);
+    gradient.base.fill = Some(ColorValue::LinearGradient {
+        angle: 0.0,
+        start_x: 0.0,
+        start_y: 0.0,
+        end_x: 0.4,
+        end_y: 0.0,
+        stops: vec![
+            GradientStop {
+                position: 0.0,
+                color: Rgba::srgb(1.0, 0.8, 0.1, 1.0),
+            },
+            GradientStop {
+                position: 1.0,
+                color: Rgba::srgb(0.1, 0.4, 1.0, 1.0),
+            },
+        ],
+        spread: Default::default(),
+        coordinate_mode: Default::default(),
+    });
+    doc.objects.push(SceneObject::Text(gradient));
+    let mut stroked = line("stroked", "Stroked", 420.0);
+    stroked.base.stroke = Some(ColorValue::Solid {
+        color: Rgba::srgb(0.9, 0.1, 0.2, 1.0),
+    });
+    stroked.base.stroke_width = 2.0;
+    doc.objects.push(SceneObject::Text(stroked));
+    // Urdu, right to left: Nastaliq, the same words in Naskh, and a line
+    // mixing Urdu with English and numerals.
+    doc.objects.push(SceneObject::Text(line(
+        "urdu-nastaliq",
+        "اردو خبریں تازہ ترین",
+        500.0,
+    )));
+    let mut naskh = line("urdu-naskh", "اردو خبریں تازہ ترین", 600.0);
+    naskh.font_id = "inter-naskh".into();
+    doc.objects.push(SceneObject::Text(naskh));
+    doc.objects.push(SceneObject::Text(line(
+        "urdu-mixed",
+        "میچ اسکور 3 - 2 Live",
+        700.0,
+    )));
+    (doc, bytes)
+}
+
+fn font_definition(
+    id: &str,
+    asset: &str,
+    family: &str,
+    fallbacks: Vec<String>,
+) -> gx_contracts::font::FontDefinition {
+    use gx_contracts::font::{
+        EmbeddingPolicy, FontDefinition, FontFaceDefinition, FontFormat, FontLoadStatus,
+        FontSource, FontStyle,
+    };
+    FontDefinition {
+        font_id: id.into(),
+        family: family.into(),
+        display_name: family.into(),
+        faces: vec![FontFaceDefinition {
+            face_id: format!("{id}-regular"),
+            family: family.into(),
+            weight: 400,
+            style: FontStyle::Normal,
+            stretch: None,
+            unicode_range: None,
+            source: FontSource::File {
+                asset_id: format!("asset_font_{asset}"),
+                format: FontFormat::Ttf,
+                original_url: None,
+                stylesheet_url: None,
+            },
+            status: Some(FontLoadStatus::Ready),
+            error_message: None,
+        }],
+        fallback_families: fallbacks,
+        embedding_policy: EmbeddingPolicy::Package,
+        license: Some("OFL-1.1".into()),
+        enabled: true,
+        source_label: None,
+        status: FontLoadStatus::Ready,
+        error_message: None,
+    }
+}
+
+/// The share of pixels with any channel off by more than zero, and the worst
+/// delta: what strict 4.4 reads (at most one code value, on at most 0.1%).
+fn strict_44(actual: &Frame, expected: &Frame) -> (f64, u8) {
+    let mut differing = 0usize;
+    let mut worst = 0u8;
+    for (a, b) in actual
+        .pixels
+        .chunks_exact(4)
+        .zip(expected.pixels.chunks_exact(4))
+    {
+        if a[3] == 0 && b[3] == 0 {
+            continue;
+        }
+        let d = a
+            .iter()
+            .zip(b)
+            .map(|(x, y)| x.abs_diff(*y))
+            .max()
+            .unwrap_or(0);
+        worst = worst.max(d);
+        differing += usize::from(d > 0);
+    }
+    (differing as f64 / (actual.pixels.len() / 4) as f64, worst)
+}
+
+#[test]
+#[ignore = "requires hardware GPU; explicit 3.18 text gate"]
+fn gpu_engine_draws_text_in_five_scripts_within_one_code_of_the_cpu_reference() {
+    for space in [WorkingColorSpace::Srgb, WorkingColorSpace::LinearSrgb] {
+        let (mut engine, ticks) = hardware_engine();
+        let (mut doc, bytes) = text_fixture();
+        doc.working_color_space = space;
+        for (hash, data) in bytes {
+            engine.record_verified_asset_bytes(hash, data);
+        }
+        let before = RenderWork::snapshot();
+        let pin = match engine.publish(doc) {
+            PublishReply::Published {
+                take_id,
+                revision,
+                content_hash,
+            } => (take_id, revision, content_hash),
+            other => panic!("the text scene must publish: {other:?}"),
+        };
+        let prepare = RenderWork::snapshot().since(before);
+        assert_eq!(
+            prepare.cpu_source_rasterizations, 0,
+            "every text source is drawn on the GPU"
+        );
+        let sources = engine.gpu_source_trace(&pin.0, pin.1).unwrap().to_vec();
+        assert_eq!(sources.len(), 9);
+        assert!(sources
+            .iter()
+            .all(|s| s.route == "gpu-vello-coverage-at-prepare"));
+        assert!(matches!(take(&mut engine, &pin), EngineReply::Taken(_)));
+        ticks.store(1, Ordering::Relaxed);
+        let program = engine.emit_frame_settled().unwrap().frame;
+        let preview = engine.take_preview().unwrap();
+        let cpu = engine.prepared_scene(&pin.0, pin.1).unwrap();
+        let mut strict = Vec::new();
+        for (frame, output, name) in [
+            (&*program, OutputTransform::Rec709, "Program"),
+            (&*preview, OutputTransform::Srgb, "Preview"),
+        ] {
+            let reference = cpu.frame_at(0, output).unwrap();
+            assert_within_one_code(frame, &reference, &format!("{space:?} {name}"));
+            strict.push((name, strict_44(frame, &reference)));
+        }
+        // Each line put glyph pixels down, anti-aliased.
+        for (k, y) in [20, 100, 180, 260, 340, 420, 500, 600, 700]
+            .into_iter()
+            .enumerate()
+        {
+            let row = |dy: u32| (y + dy) as usize * preview.width as usize;
+            let lit = (10..60)
+                .flat_map(|dy| (40..900).map(move |x| row(dy) + x))
+                .filter(|&i| preview.pixels[i * 4 + 3] > 0)
+                .count();
+            assert!(lit > 500, "{space:?}: line {k} drew {lit} pixels");
+        }
+        println!(
+            "3.18 {space:?}: strict 4.4 reading (differing share, worst): {:?}",
+            strict
+        );
+        evidence(
+            &format!("text-{}.json", space.as_str()),
+            &json!({"strict44": strict.iter().map(|(n, (share, worst))| json!({"output": n, "differingShare": share, "worst": worst})).collect::<Vec<_>>(),
+                    "sources": sources, "adapter": engine.gpu_description()}),
+        );
     }
 }

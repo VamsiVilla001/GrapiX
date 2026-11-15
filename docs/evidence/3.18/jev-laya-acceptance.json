@@ -1,0 +1,279 @@
+{
+  "row": "3.18",
+  "jev": {
+    "model": "jev-1.14.0"
+  },
+  "laya": {
+    "model": "convaiinnovations/laya-multilingual",
+    "package": "laya 0.4.28",
+    "max_len": 8192,
+    "input_tokens": 17326,
+    "output_tokens": 0,
+    "state_tokens": 1859,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "3.18 GPU text: real glyph outlines from packaged fonts",
+    "done_when": "Text shaped by cosmic-text from package-owned font bytes only is drawn on the GPU as glyph outlines, replacing advance rectangles; Latin, Telugu, Hindi and mixed-bidi fixtures match reference glyph pixels within the 4.4 threshold; a missing glyph refuses (invariant 66); no installed system font is read",
+    "evidence_record": "# 3.18 evidence: GPU text, real glyph outlines from packaged fonts\n\nBuild-plan row `3.18`. **Done, 15 Nov 2026.** Taken on the user's instruction\n(\"start with the unblocked pointers\"), after 3.17.\n\n## What changed\n\nText was already shaped by cosmic-text from package-owned font bytes only\n(3.6, 3.13: the system font database is never loaded) and already drawn as\nglyph outlines, not advance rectangles. But the outlines were tessellated into\ntriangles and filled without anti-aliasing on the CPU, the GPU route\nincluded. Now:\n\n- **Outlines are paths.** Each text object's glyph outlines are one\n  `kurbo::BezPath` in the text's own coordinates (`PreparedTextObject.outline`),\n  built once at publish. `PreparedPaths::prepare` places it through the\n  object's transform like any vector shape and fills it non-zero.\n- **One drawing path for everything.** Text is drawn by the 3.17 backends:\n  Vello GPU coverage at prepare on the GPU route\n  (`gpu-vello-coverage-at-prepare`), Vello CPU on the CPU path. The text-only\n  triangle rasteriser (`text::rasterise_texts`, `rasterise::fill_union`,\n  `PathVertex`) is removed.\n- **Fill gradients and strokes.** Because text is a path, a text fill takes a\n  linear or radial gradient by the 3.17 rule (`GradientNotDrawable` for what\n  cannot be drawn as authored), and a text stroke is drawn, joins, caps and\n  dashes included. Both were refused before (owner 3.18); the refusals are\n  lifted. `UnsupportedPathGradient` has no reachable producer left (brush paint\n  objects are refused as a kind first) and is a named limitation in the\n  conformance audit.\n- **Re-owned.** Text vertical alignment, decoration, overflow, point-text\n  alignment and an outline-less glyph still refuse by name; they are layout\n  features outside this row's done-when, now owned by `11.51` (text engine\n  depth) instead of 3.18.\n- **Fixtures (user approval, 15 Nov 2026).** Noto Sans Telugu, Noto Sans\n  Devanagari, Noto Nastaliq Urdu and Noto Sans Arabic, SIL OFL 1.1, downloaded\n  from github.com/notofonts and committed as test fixtures with\n  `tests/fixtures/OFL-Noto.txt`; with the existing Inter and Noto Sans Hebrew.\n- **Golden.** `colour-ramp-50` holds Inter text, now anti-aliased: regenerated\n  (942 pixels differed, worst delta 183, all at glyph edges), the previous one\n  in `tests/baselines/history/2026-11-15-before-3.18`. The other five goldens\n  hold no text and are unchanged. The authored-value samples of\n  `colour_reference` still hold.\n\n## Executed\n\n| Check | Result |\n| --- | --- |\n| `engine::gpu_tests::gpu_engine_draws_text_in_five_scripts_within_one_code_of_the_cpu_reference` (hardware, `GX_GPU_316_BACKEND=dx12` and `=vulkan`) | Nine text objects through the real engine, both working spaces: Latin (Inter, with a ligature), Telugu, Hindi, mixed bidi (Latin, numerals and Hebrew), a gradient fill, a stroke, **Urdu in Nastaliq, the same Urdu in Naskh, and Urdu mixed with English and numerals**. Every source on the GPU route, 0 CPU source rasterisations; each line draws. Against the Vello CPU reference: **0 differing pixels** in Program and Preview on both backends, so strict 4.4 (at most one code value on at most 0.1% of pixels) holds, not only the 3.17 one-code rule |\n| `text::tests::telugu_and_hindi_shape_into_clusters_from_their_packaged_faces` | Telugu and Devanagari conjuncts and vowel signs shape into fewer glyphs than characters, with clusters spanning several characters, from the declared fallback face |\n| `text::tests::urdu_shapes_right_to_left_with_joined_letters_in_nastaliq_and_naskh` | In both styles: every Urdu glyph in a right-to-left run, the first letter drawn furthest right, and a joined beh takes a different glyph from beh alone |\n| `text::tests::a_script_no_declared_font_covers_refuses_instead_of_reaching_for_a_system_font` | Telugu with only Inter declared refuses `FontMissing` (invariant 66); nothing is filled from a system font |\n| `text::tests::text_draws_its_stroke_and_its_gradient_fill` | A stroke-only text draws; a red-to-blue gradient fill is red on the left glyphs and blue on the right |\n| `text::tests` (all 12) and `advanced_shaping_uses_opentype_bidi_and_declared_fallback_only` | Pass, the ligature, bidi and declared fallback included |\n| `engine::gpu_tests` (10, hardware, both backends) | Pass; the lower third's headline now takes the GPU route (0 CPU source rasterisations) |\n| `drawability::tests` | A boxed text gradient draws; an unboxed one refuses `GradientNotDrawable` for \"text fill\"; a text stroke no longer refuses |\n| `cargo run -p gx-pixel-gate -- check` | Exit 0 after the `colour-ramp-50` regeneration |\n\n## Mutations\n\nOne exact replacement each, run alone, files restored byte-identical.\n\n| # | Mutation | Failing |\n| --- | --- | --- |\n| T1 | text paths are not built | the five-script engine test, the lower third, the goldens, the draw-order and glyph-outline tests |\n| T2 | glyph outlines are not flipped to y-down | the golden-frame test (GPU and CPU share the flip, so only the stored reference sees it) |\n| T3 | the declared fallback families are ignored | the five-script engine test, the bidi, Telugu-and-Hindi and Urdu tests |\n| T4 | the text stroke is dropped | `text_draws_its_stroke_and_its_gradient_fill` |\n| T5 | a text fill gradient is not checked | the validator gradient test |\n| T6 | a missing glyph is drawn as notdef | the no-system-font refusal test |\n\n## Not in this row\n\n- Text layout features that still refuse by name, now owned by 11.51:\n  vertical alignment, underline and strikethrough, overflow, point-text\n  alignment.\n- Text, like every layer, is drawn into its object-local source at prepare and\n  resampled by the compositor when rotated, scaled or fractionally placed\n  (3.16); the comparisons above are at whole-pixel placements.\n- Mixed-script bidi in one line with three or more scripts, and Nastaliq's\n  full kashida justification, are not separately tested.\n",
+    "repository_gate": "Hardware GPU engine tests 10/10 on DX12 and on Vulkan; text, contracts, conformance unit suites pass; npm run check runs before the commit."
+  },
+  "questions": {
+    "done_when_met": {
+      "type": "noul",
+      "instructions": "Does the recorded evidence show that this row's done-when was met by execution (tests run, commands run, figures recorded), not merely claimed?",
+      "criteria": {
+        "true": "Every clause of the done-when has executed evidence.",
+        "false": "A clause is unmet, only claimed, or the evidence does not name what was run."
+      }
+    },
+    "evidence_names_execution": {
+      "type": "noul",
+      "instructions": "Does the evidence name specific executed checks (test names, commands, counts, measured figures) rather than describing the feature?",
+      "criteria": {
+        "true": "Specific executed checks are named.",
+        "false": "The evidence describes the feature without naming what was run."
+      }
+    },
+    "silent_substitution_risk": {
+      "type": "noul",
+      "instructions": "Is there a risk that this row ships a silent substitution: something the done-when asks for that is approximated, skipped or deferred without being refused by name?",
+      "criteria": {
+        "true": "Yes, a clause appears approximated, skipped or deferred silently.",
+        "false": "No, every gap is named or refused."
+      }
+    },
+    "weakest": {
+      "type": "choice",
+      "instructions": "What is the weakest point of this row's evidence?",
+      "criteria": {
+        "none": "No weak point: evidence covers every clause with executed checks.",
+        "unexecuted_clause": "A done-when clause has no executed check.",
+        "platform_gap": "A platform the done-when names (e.g. macOS, hardware) was not run.",
+        "stale": "Later changes may have invalidated the recorded evidence.",
+        "vague_record": "The record is too vague to tell what was run."
+      }
+    },
+    "unrun_is_named": {
+      "type": "noul",
+      "instructions": "Does the evidence name every check or step it did not run, rather than leaving a gap unmentioned?",
+      "criteria": {
+        "true": "Everything not run is named in the evidence.",
+        "false": "Some gap is not mentioned in the evidence."
+      }
+    },
+    "mutations_can_fail": {
+      "type": "noul",
+      "instructions": "Do the recorded mutations show that the named checks can fail: each mutation was run alone, made at least one named check fail, and the file was restored identical?",
+      "criteria": {
+        "true": "Each recorded mutation names the check or test that failed and says the file was restored.",
+        "false": "A mutation survived, was not run alone, or does not name what failed."
+      }
+    },
+    "scripts_covered": {
+      "type": "noul",
+      "instructions": "Does the evidence show Latin, Telugu, Hindi and mixed-bidi text, plus Urdu right to left, drawn on the GPU and matching the CPU reference glyph pixels, by named executed tests?",
+      "criteria": {
+        "true": "Each script has a named executed check against the reference.",
+        "false": "A script lacks an executed check."
+      }
+    },
+    "missing_glyph_and_no_system_font": {
+      "type": "noul",
+      "instructions": "Does the evidence show by execution that a missing glyph refuses and that no installed system font is read?",
+      "criteria": {
+        "true": "A named test shows the refusal with no system-font fallback.",
+        "false": "Only claimed."
+      }
+    },
+    "gpu_and_cpu_both_named_backends": {
+      "type": "noul",
+      "instructions": "Does the evidence show the comparisons on both DX12 and Vulkan?",
+      "criteria": {
+        "true": "Named tests ran on both backends.",
+        "false": "Only one backend is shown."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "done_when_met",
+      "jev": 0.87,
+      "laya": 0.9818,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.87
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9818,
+        "confidence": 0.9818,
+        "answer_confidence": 0.9818,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "evidence_names_execution",
+      "jev": 0.99,
+      "laya": 0.959,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.99
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.959,
+        "confidence": 0.959,
+        "answer_confidence": 0.959,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "silent_substitution_risk",
+      "jev": 0.32,
+      "laya": 0.9818,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.32
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9818,
+        "confidence": 0.9818,
+        "answer_confidence": 0.9818,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "weakest",
+      "jev": "none",
+      "laya": "vague_record",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "none",
+        "confidence": 0.34,
+        "probabilities": {
+          "none": 0.47,
+          "unexecuted_clause": 0.25,
+          "platform_gap": 0.22,
+          "stale": 0.05,
+          "vague_record": 0.01
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "vague_record",
+        "probabilities": {
+          "none": 0.0916,
+          "unexecuted_clause": 0.2723,
+          "platform_gap": 0.0486,
+          "stale": 0.0479,
+          "vague_record": 0.5396
+        },
+        "confidence": 0.2553,
+        "answer_confidence": 0.5396,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "unrun_is_named",
+      "jev": 0.33,
+      "laya": 0.9731,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.33
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9731,
+        "confidence": 0.9731,
+        "answer_confidence": 0.9731,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "mutations_can_fail",
+      "jev": 0.97,
+      "laya": 0.9661,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.97
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9661,
+        "confidence": 0.9661,
+        "answer_confidence": 0.9661,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "scripts_covered",
+      "jev": 0.94,
+      "laya": 0.9705,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.94
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9705,
+        "confidence": 0.9705,
+        "answer_confidence": 0.9705,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "missing_glyph_and_no_system_font",
+      "jev": 0.97,
+      "laya": 0.9392,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.97
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9392,
+        "confidence": 0.9392,
+        "answer_confidence": 0.9392,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "gpu_and_cpu_both_named_backends",
+      "jev": 0.98,
+      "laya": 0.977,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.98
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.977,
+        "confidence": 0.977,
+        "answer_confidence": 0.977,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

@@ -118,6 +118,17 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-15 — 3.18 done: GPU text through the Vello path (Claude, on the user's instruction)
+
+**Resume here.** Glyph outlines are one `kurbo::BezPath` per text object (`PreparedTextObject.outline`), placed
+and drawn as prepared paths, so text takes the 3.17 Vello route on GPU and CPU; the triangle text rasteriser is
+gone. Text fill gradients and strokes now draw. Fixtures (user approval): Noto Sans Telugu, Noto Sans Devanagari,
+Noto Nastaliq Urdu, Noto Sans Arabic (OFL, `tests/fixtures/OFL-Noto.txt`). Urdu RTL tested at the user's request in
+both Nastaliq and Naskh. GPU text is byte-identical to the CPU reference on DX12 and Vulkan. `colour-ramp-50`
+regenerated for its text (old one in `tests/baselines/history/2026-11-15-before-3.18`). Text layout features
+(vertical align, decoration, overflow, point align) re-owned to 11.51. Next: 3.19 (masks, clip groups, mattes,
+trim). npm run check exit 0 (853 Rust passed, 0 failed, 32 ignored; conformance 583/0/9; hardware worker suite 177/0/0).
+
 ## 2026-11-15 — 3.17 done: GPU 2D drawing (Claude, on the user's instruction)
 
 **Resume here.** 3.17 is done (evidence `docs/evidence/3.17`, closing sections). Backends rerun today with the

@@ -112,7 +112,7 @@ pub fn prepare_layer_source(
     base.opacity = 1.0;
     base.visible = true;
     let local_effective = resolve_hierarchy(&local.objects).effective;
-    let paths = PreparedPaths::prepare(&local, &local_effective)?;
+    let paths = PreparedPaths::prepare(&local, &local_effective, Some(texts))?;
     let mut bounds: Option<[f64; 4]> = None;
     let mut point = |x: f64, y: f64| {
         let b = bounds.get_or_insert([x, y, x, y]);
@@ -125,14 +125,6 @@ pub fn prepare_layer_source(
         let b = path.bounds();
         point(f64::from(b.min_x), f64::from(b.min_y));
         point(f64::from(b.max_x), f64::from(b.max_y));
-    }
-    if let Some(text) = texts.objects.iter().find(|t| t.object_id == id) {
-        for &[x, y] in &text.vertices {
-            point(
-                f64::from((f64::from(x) + phase[0]) as f32),
-                f64::from((f64::from(y) + phase[1]) as f32),
-            );
-        }
     }
     let b = bounds.unwrap_or([0.0, 0.0, 0.0, 0.0]);
     let pad = f64::from(pad);
@@ -153,9 +145,9 @@ pub fn prepare_layer_source(
     let (width, height) = (width.max(1.0) as u32, height.max(1.0) as u32);
     let object_paths: Vec<_> = paths.paths().iter().collect();
     let layer_origin = [origin[0] - phase[0], origin[1] - phase[1]];
-    // 3.17: vector objects draw on the GPU when there is one. Text keeps its
-    // CPU glyph route until 3.18.
-    if let (Some(gpu), false) = (gpu, matches!(object, SceneObject::Text(_))) {
+    // 3.17: vector objects draw on the GPU when there is one; 3.18: text too,
+    // its glyph outlines being paths.
+    if let Some(gpu) = gpu {
         if let Some(drawn) = gpu.draw_paths(&id, &object_paths, origin, width, height) {
             return Ok(LayerSource {
                 width,
@@ -169,9 +161,6 @@ pub fn prepare_layer_source(
     crate::render_work::cpu_source();
     let mut surface = RasterSurface::window(width, height, origin);
     VelloCpuRasteriser.rasterise_into(&object_paths, &mut surface);
-    if matches!(object, SceneObject::Text(_)) {
-        crate::text::rasterise_text(texts, &id, &local, &local_effective, &mut surface)?;
-    }
     Ok(LayerSource {
         width,
         height,

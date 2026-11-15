@@ -18,7 +18,6 @@ use gx_contracts::Refusal;
 use crate::colour_pipeline::WorkingRgba;
 use crate::rasterizer::Frame;
 
-pub(crate) use lyon::{fill_union, transform};
 pub use paint::{PathGradient, PathPaint};
 pub use vello::VelloCpuRasteriser;
 pub(crate) use vello::{coverage_window, window_origin, window_transform};
@@ -47,6 +46,7 @@ impl PreparedPaths {
     pub fn prepare(
         document: &SceneDocument,
         effective: &[ResolvedObject],
+        texts: Option<&crate::text::PreparedTexts>,
     ) -> Result<Self, Refusal> {
         if document.objects.len() != effective.len() {
             return Err(Refusal::VectorTessellationFailed {
@@ -66,6 +66,12 @@ impl PreparedPaths {
             }
             let first = paths.len();
             lyon::prepare_object(object, resolved, &mut paths)?;
+            // 3.18: a text object's glyph outlines are a path like any other.
+            if let (gx_contracts::scene::SceneObject::Text(text), Some(texts)) = (object, texts) {
+                if let Some(prepared) = texts.objects.iter().find(|t| t.object_id == text.base.id) {
+                    lyon::prepare_text(text, prepared, resolved, &mut paths)?;
+                }
+            }
             // 3.13: the object's effective opacity, already composed through
             // its ancestors, applies to every path it drew. Before this the
             // vector path ignored opacity and drew a 50% rectangle opaque.
@@ -160,15 +166,6 @@ impl PreparedPath {
     pub fn bounds(&self) -> RasterBounds {
         self.bounds
     }
-}
-
-/// One tessellated vertex in scene coordinates (glyph triangles, 3.13).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct PathVertex {
-    /// Horizontal scene coordinate.
-    pub x: f32,
-    /// Vertical scene coordinate.
-    pub y: f32,
 }
 
 /// An axis-aligned rectangle in scene coordinates.
@@ -468,7 +465,7 @@ mod tests {
         base.fill = Some(ColorValue::hex("#2050a0").expect("valid colour"));
         let document = document(vec![SceneObject::Rect(RectObject { base, radius: 0.0 })]);
         let resolved = gx_contracts::scene::resolve_hierarchy(&document.objects);
-        let prepared = PreparedPaths::prepare(&document, &resolved.effective)
+        let prepared = PreparedPaths::prepare(&document, &resolved.effective, None)
             .expect("the rectangle prepares once");
 
         let vello = VelloCpuRasteriser;
@@ -494,7 +491,7 @@ mod tests {
 
     fn prepare(document: &SceneDocument) -> Result<PreparedPaths, Refusal> {
         let resolved = gx_contracts::scene::resolve_hierarchy(&document.objects);
-        PreparedPaths::prepare(document, &resolved.effective)
+        PreparedPaths::prepare(document, &resolved.effective, None)
     }
 
     #[test]

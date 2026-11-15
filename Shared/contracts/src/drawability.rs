@@ -458,19 +458,19 @@ fn text_properties(text: &TextObject, at: &dyn Fn(&str) -> String, found: &mut F
             "verticalAlign",
             "verticalAlign",
             text.vertical_align != VerticalAlign::Top,
-            "3.18",
+            "11.51",
         ),
         (
             "decoration",
             "decoration",
             text.decoration.underline || text.decoration.strikethrough,
-            "3.18",
+            "11.51",
         ),
         (
             "overflow",
             "overflow",
             text.overflow != TextOverflow::Visible,
-            "3.18",
+            "11.51",
         ),
         (
             "textCase",
@@ -492,16 +492,10 @@ fn text_properties(text: &TextObject, at: &dyn Fn(&str) -> String, found: &mut F
         ),
         ("textIndent", "textIndent", text.text_indent != 0.0, "11.51"),
         (
-            "stroke",
-            "stroke",
-            paints(&text.base.stroke) && text.base.stroke_width > 0.0,
-            "3.18",
-        ),
-        (
             "point text align",
             "align",
             text.layout == TextLayout::Point && text.align != TextAlign::Left,
-            "3.18",
+            "11.51",
         ),
     ] {
         if set {
@@ -517,19 +511,18 @@ fn text_properties(text: &TextObject, at: &dyn Fn(&str) -> String, found: &mut F
     }
 }
 
-/// Paths draw linear and radial gradients (3.17) as authored, and refuse one
-/// that cannot be drawn as authored (`ColorValue::gradient_problem`) rather
-/// than reinterpreting it. Text fills cannot carry a gradient until 3.18 and
-/// refuse rather than being flattened to a stop (invariant 18). Only the
-/// paints the object would actually draw are checked; hidden objects are
-/// included, since showing one is an edit away.
+/// Paths (3.17) and text (3.18, its glyph outlines being paths) draw linear
+/// and radial gradients as authored, and refuse one that cannot be drawn as
+/// authored (`ColorValue::gradient_problem`) rather than reinterpreting it.
+/// Only the paints the object would actually draw are checked; hidden objects
+/// are included, since showing one is an edit away.
 fn gradients(object: &SceneObject, at: &dyn Fn(&str) -> String, found: &mut Found) {
     let base = object.base();
     let (fill, stroke) = match object {
         SceneObject::Rect(_) | SceneObject::Ellipse(_) => (Some("fill"), true),
         SceneObject::Line(_) => (None, true),
         SceneObject::Shape(shape) => (shape.fill_enabled.then_some("fill"), shape.stroke_enabled),
-        SceneObject::Text(_) => (Some("text fill"), false),
+        SceneObject::Text(_) => (Some("text fill"), true),
         _ => (None, false),
     };
     let object_box = (base.width, base.height);
@@ -537,16 +530,7 @@ fn gradients(object: &SceneObject, at: &dyn Fn(&str) -> String, found: &mut Foun
         let Some(kind) = gradient_kind(value) else {
             return;
         };
-        if paint == "text fill" {
-            found.push(
-                Refusal::UnsupportedPathGradient {
-                    object: base.id.clone(),
-                    paint: paint.into(),
-                },
-                at(&format!("{field}.type")),
-                serde_json::json!(kind),
-            );
-        } else if let Some(detail) = value.as_ref().and_then(|v| v.gradient_problem(object_box)) {
+        if let Some(detail) = value.as_ref().and_then(|v| v.gradient_problem(object_box)) {
             found.push(
                 Refusal::GradientNotDrawable {
                     object: base.id.clone(),
@@ -864,15 +848,6 @@ mod tests {
                 "point text align",
                 Box::new(|t| t.align = TextAlign::Center),
             ),
-            (
-                "stroke",
-                Box::new(|t| {
-                    t.base.stroke = Some(ColorValue::Solid {
-                        color: Rgba::srgb(1.0, 0.0, 0.0, 1.0),
-                    });
-                    t.base.stroke_width = 2.0;
-                }),
-            ),
         ];
         for (name, set) in cases {
             let mut object = text("t");
@@ -1107,16 +1082,18 @@ mod tests {
             Some(Refusal::GradientNotDrawable { detail, .. }) if detail.contains("needs a box")
         ));
 
-        // Text cannot carry a gradient until 3.18.
+        // 3.18: text draws a gradient fill by the same rule; unboxed, its
+        // object-space gradient has nothing to be a fraction of.
         let mut title = text("t");
+        title.base.width = 200.0;
+        title.base.height = 40.0;
         title.base.fill = Some(gradient());
-        assert_eq!(
+        assert_eq!(refused(vec![SceneObject::Text(title.clone())]), None);
+        title.base.width = 0.0;
+        assert!(matches!(
             refused(vec![SceneObject::Text(title)]),
-            Some(Refusal::UnsupportedPathGradient {
-                object: "t".into(),
-                paint: "text fill".into()
-            })
-        );
+            Some(Refusal::GradientNotDrawable { paint, .. }) if paint == "text fill"
+        ));
 
         // A shape whose fill is disabled never paints it, so it cannot refuse.
         let mut shape = shape(vec![Vec2 { x: 0.0, y: 0.0 }; 2]);

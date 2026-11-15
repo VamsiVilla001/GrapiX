@@ -350,7 +350,7 @@ fn parity_cases() -> Vec<(&'static str, SceneDocument, Refusal)> {
         (
             "text decoration refuses identically in validator and publication wire",
             text,
-            property("title", "decoration", "3.18"),
+            property("title", "decoration", "11.51"),
         ),
         (
             "opacity range refuses identically in validator and publication wire",

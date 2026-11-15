@@ -16,7 +16,7 @@ use gx_contracts::scene::{
 use gx_contracts::Refusal;
 
 use super::paint::{path_paint, ObjectFrame, PathPaint};
-use super::{solid_paint, PathVertex, PreparedPath, RasterSurface};
+use super::{solid_paint, PreparedPath};
 
 pub(super) fn prepare_object(
     object: &SceneObject,
@@ -39,6 +39,57 @@ pub(super) fn prepare_object(
         SceneObject::Paint(paint) => prepare_paint(paint, resolved, output),
         _ => Ok(()),
     }
+}
+
+/// A text object's glyph outlines (3.18), placed by its transform, filled
+/// with its fill and stroked with its stroke, as any other path.
+pub(super) fn prepare_text(
+    text: &gx_contracts::scene::TextObject,
+    prepared: &crate::text::PreparedTextObject,
+    resolved: &ResolvedObject,
+    output: &mut Vec<PreparedPath>,
+) -> Result<(), Refusal> {
+    use vello_cpu::kurbo::{PathEl, Point as K};
+    let base = &text.base;
+    let id = base.id.as_str();
+    let place = |p: K| -> Result<K, Refusal> {
+        let at = transform(&base.anchor, resolved, p.x, p.y)?;
+        Ok(K::new(f64::from(at.x), f64::from(at.y)))
+    };
+    let mut scene = super::BezPath::new();
+    for element in prepared.outline.elements() {
+        scene.push(match *element {
+            PathEl::MoveTo(p) => PathEl::MoveTo(place(p)?),
+            PathEl::LineTo(p) => PathEl::LineTo(place(p)?),
+            PathEl::QuadTo(c, p) => PathEl::QuadTo(place(c)?, place(p)?),
+            PathEl::CurveTo(c1, c2, p) => PathEl::CurveTo(place(c1)?, place(c2)?, place(p)?),
+            PathEl::ClosePath => PathEl::ClosePath,
+        });
+    }
+    let frame = ObjectFrame {
+        anchor: &base.anchor,
+        resolved,
+        width: base.width,
+        height: base.height,
+    };
+    if let Some(paint) = path_paint(id, "text fill", base.fill.as_ref(), &frame)? {
+        append_outline(
+            id,
+            scene.clone(),
+            super::OutlineFill::NonZero,
+            paint,
+            output,
+        );
+    }
+    stroke_outline(
+        id,
+        &scene,
+        &base.stroke,
+        base.stroke_width,
+        &base.stroke_style(),
+        &frame,
+        output,
+    )
 }
 
 fn prepare_rect(
@@ -600,6 +651,27 @@ fn prepare_stroke(
     frame: &ObjectFrame,
     output: &mut Vec<PreparedPath>,
 ) -> Result<(), Refusal> {
+    stroke_outline(
+        object,
+        &outline(&path),
+        stroke,
+        stroke_width,
+        stroke_style,
+        frame,
+        output,
+    )
+}
+
+/// Stroke an outline already in scene coordinates.
+fn stroke_outline(
+    object: &str,
+    centre: &super::BezPath,
+    stroke: &Option<gx_contracts::color::ColorValue>,
+    stroke_width: f64,
+    stroke_style: &gx_contracts::scene::StrokeStyle,
+    frame: &ObjectFrame,
+    output: &mut Vec<PreparedPath>,
+) -> Result<(), Refusal> {
     let Some(paint) = path_paint(object, "stroke", stroke.as_ref(), frame)? else {
         return Ok(());
     };
@@ -609,8 +681,7 @@ fn prepare_stroke(
     // The stroke is expanded once here into the outline it covers, joins,
     // caps and dashes included, and that outline is filled non-zero: every
     // backend then draws the same geometry (3.17).
-    let centre = outline(&path);
-    let style = kurbo_stroke(object, &centre, stroke_width, stroke_style)?;
+    let style = kurbo_stroke(object, centre, stroke_width, stroke_style)?;
     let expanded = vello_cpu::kurbo::stroke(
         centre.iter(),
         &style,
@@ -642,79 +713,4 @@ pub(crate) fn transform(
         });
     }
     Ok(point(scene_x as f32, scene_y as f32))
-}
-
-/// Fill a shape given as triangles with one paint, compositing every covered
-/// pixel exactly once (3.13). A shape is the union of its triangles:
-/// overlapping ones — a stroke's joins, kerned glyphs — must not darken a
-/// semi-transparent paint where they overlap. Coverage is point-sampled at
-/// pixel centres.
-pub(crate) fn fill_union(
-    surface: &mut RasterSurface,
-    triangles: &[[PathVertex; 3]],
-    paint: crate::colour_pipeline::WorkingRgba,
-) {
-    if triangles.is_empty() || paint.a <= 0.0 {
-        return;
-    }
-    let (mut min_x, mut min_y, mut max_x, mut max_y) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
-    for corner in triangles.iter().flatten() {
-        min_x = min_x.min(corner.x);
-        min_y = min_y.min(corner.y);
-        max_x = max_x.max(corner.x);
-        max_y = max_y.max(corner.y);
-    }
-    let origin = surface.origin();
-    let min_x = (f64::from(min_x.floor()) - origin[0]).max(0.0) as u32;
-    let min_y = (f64::from(min_y.floor()) - origin[1]).max(0.0) as u32;
-    let max_x = (f64::from(max_x.ceil()) - origin[0])
-        .min(f64::from(surface.width()))
-        .max(0.0) as u32;
-    let max_y = (f64::from(max_y.ceil()) - origin[1])
-        .min(f64::from(surface.height()))
-        .max(0.0) as u32;
-    if min_x >= max_x || min_y >= max_y {
-        return;
-    }
-    let width = (max_x - min_x) as usize;
-    let mut covered = vec![false; width * (max_y - min_y) as usize];
-    for &[a, b, c] in triangles {
-        let area = edge(a, b, c.x, c.y);
-        if area == 0.0 {
-            continue;
-        }
-        let x0 =
-            (f64::from(a.x.min(b.x).min(c.x).floor()) - origin[0]).max(f64::from(min_x)) as u32;
-        let y0 =
-            (f64::from(a.y.min(b.y).min(c.y).floor()) - origin[1]).max(f64::from(min_y)) as u32;
-        let x1 = (f64::from(a.x.max(b.x).max(c.x).ceil()) - origin[0])
-            .min(f64::from(max_x))
-            .max(0.0) as u32;
-        let y1 = (f64::from(a.y.max(b.y).max(c.y).ceil()) - origin[1])
-            .min(f64::from(max_y))
-            .max(0.0) as u32;
-        for y in y0..y1 {
-            for x in x0..x1 {
-                let sample_x = (origin[0] + f64::from(x) + 0.5) as f32;
-                let sample_y = (origin[1] + f64::from(y) + 0.5) as f32;
-                let ab = edge(a, b, sample_x, sample_y);
-                let bc = edge(b, c, sample_x, sample_y);
-                let ca = edge(c, a, sample_x, sample_y);
-                if (area > 0.0 && ab >= 0.0 && bc >= 0.0 && ca >= 0.0)
-                    || (area < 0.0 && ab <= 0.0 && bc <= 0.0 && ca <= 0.0)
-                {
-                    covered[(y - min_y) as usize * width + (x - min_x) as usize] = true;
-                }
-            }
-        }
-    }
-    for (index, _) in covered.iter().enumerate().filter(|(_, covered)| **covered) {
-        let x = min_x + (index % width) as u32;
-        let y = min_y + (index / width) as u32;
-        surface.composite(x, y, paint);
-    }
-}
-
-fn edge(a: PathVertex, b: PathVertex, x: f32, y: f32) -> f32 {
-    (x - a.x) * (b.y - a.y) - (y - a.y) * (b.x - a.x)
 }

@@ -2312,7 +2312,7 @@ impl Refusal {
             Self::ScenePropertyNotDrawable {
                 object: "audit".into(),
                 property: "decoration".into(),
-                owner: "3.18".into(),
+                owner: "11.51".into(),
             },
             Self::EffectInvalid {
                 object: "audit".into(),

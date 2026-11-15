@@ -6,9 +6,12 @@
 //! OpenType layout all happen once when a scene is published.
 //!
 //! Glyphs are drawn as their real outlines (3.13): each glyph's outline is
-//! taken from the packaged face at publish, tessellated once in the text's own
-//! coordinates, and placed every frame through the same transform as a vector
-//! shape, so rotation, scale and anchor apply to text too. Advance-width
+//! taken from the packaged face at publish, kept as one outline per text
+//! object in the text's own coordinates, and placed through the same
+//! transform as a vector shape, so rotation, scale and anchor apply to text
+//! too. Since 3.18 that outline is an ordinary prepared path
+//! (`rasterise::PreparedPaths`): Vello draws it anti-aliased, on the GPU and on
+//! the CPU, with the text's fill (a gradient too) and stroke. Advance-width
 //! rectangles were a substitution and are gone.
 
 use std::collections::HashMap;
@@ -20,10 +23,8 @@ use gx_contracts::scene::{
     AssetKind, SceneDocument, SceneObject, TextCase, TextDirection, TextLayout,
 };
 use gx_contracts::Refusal;
-use lyon::math::point;
-use lyon::path::Path;
-use lyon::tessellation::{BuffersBuilder, FillOptions, FillTessellator, FillVertex, VertexBuffers};
 use swash::zeno::{Command, Point as OutlinePoint};
+use vello_cpu::kurbo::{BezPath, Point};
 
 use crate::mesh::AssetBytes;
 
@@ -48,134 +49,15 @@ pub struct PreparedTextObject {
     pub glyphs: Vec<PreparedGlyph>,
     pub width: f32,
     pub height: f32,
-    /// Every glyph's outline, tessellated once at publish, in the text's own
-    /// coordinates (origin at the box's top-left, y down).
-    pub vertices: Vec<[f32; 2]>,
-    /// Triangle indices into [`Self::vertices`].
-    pub indices: Vec<u32>,
+    /// Every glyph's outline, built once at publish, in the text's own
+    /// coordinates (origin at the box's top-left, y down), filled non-zero.
+    pub outline: BezPath,
 }
 
 /// Text-side state built once for a published scene.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct PreparedTexts {
     pub objects: Vec<PreparedTextObject>,
-}
-
-/// Rasterise prepared text objects onto the working-space surface. Every
-/// glyph was shaped, outlined and tessellated at publication; this places its
-/// triangles through the object's transform and fills them.
-///
-/// The fill colour is taken from the text object's base.  A gradient fill
-/// would require a fill rule we do not implement in the software path, so it
-/// is refused by name rather than approximated (invariant 18).
-pub fn rasterise_texts(
-    prepared: &PreparedTexts,
-    document: &SceneDocument,
-    effective: &[gx_contracts::scene::ResolvedObject],
-    surface: &mut crate::rasterise::RasterSurface,
-) -> Result<(), Refusal> {
-    rasterise_selected(prepared, None, document, effective, surface)
-}
-
-/// Rasterise one prepared text object, for composing in draw order.
-pub fn rasterise_text(
-    prepared: &PreparedTexts,
-    object_id: &str,
-    document: &SceneDocument,
-    effective: &[gx_contracts::scene::ResolvedObject],
-    surface: &mut crate::rasterise::RasterSurface,
-) -> Result<(), Refusal> {
-    rasterise_selected(prepared, Some(object_id), document, effective, surface)
-}
-
-fn rasterise_selected(
-    prepared: &PreparedTexts,
-    only: Option<&str>,
-    document: &SceneDocument,
-    effective: &[gx_contracts::scene::ResolvedObject],
-    surface: &mut crate::rasterise::RasterSurface,
-) -> Result<(), Refusal> {
-    for text_object in prepared
-        .objects
-        .iter()
-        .filter(|text_object| only.is_none_or(|id| text_object.object_id == id))
-    {
-        let Some(resolved) = effective.iter().find(|r| r.id == text_object.object_id) else {
-            continue;
-        };
-        if !resolved.visible || resolved.opacity <= 0.0 {
-            continue;
-        }
-
-        let authored = document.objects.iter().find_map(|o| match o {
-            SceneObject::Text(t) if t.base.id == text_object.object_id => Some(t),
-            _ => None,
-        });
-        let Some(text) = authored else { continue };
-
-        let fill = match &text.base.fill {
-            Some(gx_contracts::color::ColorValue::Solid { color }) => {
-                crate::colour_pipeline::WorkingRgba::from_source(
-                    *color,
-                    document.working_color_space,
-                )
-            }
-            Some(gx_contracts::color::ColorValue::LinearGradient { .. })
-            | Some(gx_contracts::color::ColorValue::RadialGradient { .. }) => {
-                return Err(Refusal::UnsupportedPathGradient {
-                    object: text_object.object_id.clone(),
-                    paint: "text fill".into(),
-                });
-            }
-            Some(gx_contracts::color::ColorValue::None) | None => {
-                crate::colour_pipeline::WorkingRgba::transparent()
-            }
-        };
-
-        // 3.22: with effects, opacity applies after them (`prepared::compose`).
-        let opacity = if text.base.effects().is_empty() {
-            resolved.opacity as f32
-        } else {
-            1.0
-        };
-        if opacity <= 0.0 {
-            continue;
-        }
-
-        let glyph_fill = crate::colour_pipeline::WorkingRgba {
-            r: fill.r * opacity,
-            g: fill.g * opacity,
-            b: fill.b * opacity,
-            a: fill.a * opacity,
-        };
-        if glyph_fill.a <= 0.0 {
-            continue;
-        }
-
-        // One union per text object, so overlapping glyphs composite once.
-        let mut triangles = Vec::with_capacity(text_object.indices.len() / 3);
-        for triangle in text_object.indices.chunks_exact(3) {
-            let mut corners = [crate::rasterise::PathVertex { x: 0.0, y: 0.0 }; 3];
-            for (corner, &index) in corners.iter_mut().zip(triangle) {
-                let Some(&[x, y]) = text_object.vertices.get(index as usize) else {
-                    return Err(Refusal::VectorTessellationFailed {
-                        object: text_object.object_id.clone(),
-                        detail: "a glyph triangle indexes past its vertices".into(),
-                    });
-                };
-                let at = crate::rasterise::transform(
-                    &text.base.anchor,
-                    resolved,
-                    f64::from(x),
-                    f64::from(y),
-                )?;
-                *corner = crate::rasterise::PathVertex { x: at.x, y: at.y };
-            }
-            triangles.push(corners);
-        }
-        crate::rasterise::fill_union(surface, &triangles, glyph_fill);
-    }
-    Ok(())
 }
 
 /// Shape every text object without consulting system fonts.
@@ -299,8 +181,7 @@ fn shape_object(
     let mut measured_width = 0.0_f32;
     let mut measured_height = 0.0_f32;
     let mut outlines = SwashCache::new();
-    let mut geometry: VertexBuffers<[f32; 2], u32> = VertexBuffers::new();
-    let mut tessellator = FillTessellator::new();
+    let mut outline = BezPath::new();
     for run in buffer.layout_runs() {
         measured_width = measured_width.max(run.line_w);
         measured_height = measured_height.max(run.line_top + run.line_height);
@@ -334,26 +215,13 @@ fn shape_object(
                 return Err(Refusal::ScenePropertyNotDrawable {
                     object: text.base.id.clone(),
                     property: format!("glyph {} has no outline", glyph.glyph_id),
-                    owner: "3.18".into(),
+                    owner: "11.51".into(),
                 });
             };
             if commands.is_empty() {
                 continue; // whitespace
             }
-            let path = outline_path(commands, pen_x, pen_y);
-            tessellator
-                .tessellate_path(
-                    &path,
-                    &FillOptions::non_zero().with_tolerance(0.02),
-                    &mut BuffersBuilder::new(&mut geometry, |vertex: FillVertex| {
-                        let at = vertex.position();
-                        [at.x, at.y]
-                    }),
-                )
-                .map_err(|error| Refusal::VectorTessellationFailed {
-                    object: text.base.id.clone(),
-                    detail: error.to_string(),
-                })?;
+            append_outline(&mut outline, commands, pen_x, pen_y);
         }
     }
 
@@ -363,47 +231,32 @@ fn shape_object(
         glyphs,
         width: measured_width,
         height: measured_height,
-        vertices: geometry.vertices,
-        indices: geometry.indices,
+        outline,
     })
 }
 
-/// A glyph outline as a lyon path in the text's own coordinates. Outlines are
-/// y-up from the glyph's pen position; text space is y-down from the box's
+/// Append a glyph outline in the text's own coordinates. Outlines are y-up
+/// from the glyph's pen position; text space is y-down from the box's
 /// top-left.
-fn outline_path(commands: &[Command], pen_x: f32, pen_y: f32) -> Path {
-    let at = |p: OutlinePoint| point(pen_x + p.x, pen_y - p.y);
-    let mut builder = Path::builder();
+fn append_outline(out: &mut BezPath, commands: &[Command], pen_x: f32, pen_y: f32) {
+    let at = |p: OutlinePoint| Point::new(f64::from(pen_x + p.x), f64::from(pen_y - p.y));
     let mut open = false;
     for command in commands {
         match *command {
             Command::MoveTo(p) => {
-                if open {
-                    builder.end(false);
-                }
-                builder.begin(at(p));
+                out.move_to(at(p));
                 open = true;
             }
-            Command::LineTo(p) if open => {
-                builder.line_to(at(p));
-            }
-            Command::QuadTo(c, p) if open => {
-                builder.quadratic_bezier_to(at(c), at(p));
-            }
-            Command::CurveTo(c1, c2, p) if open => {
-                builder.cubic_bezier_to(at(c1), at(c2), at(p));
-            }
+            Command::LineTo(p) if open => out.line_to(at(p)),
+            Command::QuadTo(c, p) if open => out.quad_to(at(c), at(p)),
+            Command::CurveTo(c1, c2, p) if open => out.curve_to(at(c1), at(c2), at(p)),
             Command::Close if open => {
-                builder.end(true);
+                out.close_path();
                 open = false;
             }
             _ => {}
         }
     }
-    if open {
-        builder.end(false);
-    }
-    builder.build()
 }
 
 /// The primary face's own line spacing in pixels at `size`: ascent plus
@@ -770,8 +623,17 @@ mod tests {
             document.canvas.width,
             document.canvas.height,
         );
-        rasterise_texts(&prepared, document, &resolution.effective, &mut surface)
-            .expect("the text draws");
+        let paths = crate::rasterise::PreparedPaths::prepare(
+            document,
+            &resolution.effective,
+            Some(&prepared),
+        )
+        .expect("the text prepares");
+        crate::rasterise::PathRasteriser::rasterise_into(
+            &crate::rasterise::VelloCpuRasteriser,
+            &paths.paths().iter().collect::<Vec<_>>(),
+            &mut surface,
+        );
         let width = surface.width() as usize;
         let mut bounds = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
         let mut count = 0;
@@ -981,5 +843,222 @@ mod tests {
         };
         assert!(!from_ttf.objects[0].glyphs.is_empty());
         assert_eq!(glyphs(&from_ttf), glyphs(&from_woff2));
+    }
+
+    const TELUGU: &[u8] = include_bytes!("../tests/fixtures/NotoSansTelugu-Regular.ttf");
+    const DEVANAGARI: &[u8] = include_bytes!("../tests/fixtures/NotoSansDevanagari-Regular.ttf");
+
+    /// Inter with a declared fallback to one script face, as an author would
+    /// set a Latin title up to carry another script.
+    fn with_fallback(
+        value: &str,
+        family: &str,
+        bytes: &'static [u8],
+    ) -> (SceneDocument, AssetBytes) {
+        let fonts = vec![
+            font("inter", "Inter", "inter", vec![family.into()]),
+            font("script", family, "script", Vec::new()),
+        ];
+        let document = scene(value, "inter", fonts);
+        let assets = AssetBytes::from([
+            (ContentHash("inter".into()), INTER.to_vec()),
+            (ContentHash("script".into()), bytes.to_vec()),
+        ]);
+        (document, assets)
+    }
+
+    /// 3.18: complex scripts shape through their OpenType tables from the
+    /// packaged face alone: conjuncts and vowel signs become fewer glyphs
+    /// than characters, clusters span several characters, and every glyph
+    /// has a real outline.
+    #[test]
+    fn telugu_and_hindi_shape_into_clusters_from_their_packaged_faces() {
+        for (value, family, bytes) in [
+            ("తెలుగు క్షేత్రం", "Noto Sans Telugu", TELUGU),
+            ("हिन्दी क्षत्रिय", "Noto Sans Devanagari", DEVANAGARI),
+        ] {
+            let (document, assets) = with_fallback(value, family, bytes);
+            let prepared = prepare_texts(&document, &assets).expect("declared fonts shape");
+            let text = &prepared.objects[0];
+            let characters = value.chars().filter(|c| !c.is_whitespace()).count();
+            let drawn = text
+                .glyphs
+                .iter()
+                .filter(|g| g.face_id == "script-regular")
+                .count();
+            assert!(drawn > 0, "{family}: the declared fallback was not used");
+            assert!(
+                drawn < characters,
+                "{family}: {drawn} glyphs for {characters} characters; conjuncts did not form"
+            );
+            assert!(
+                text.glyphs
+                    .iter()
+                    .any(|g| value[g.source_start..g.source_end].chars().count() > 1),
+                "{family}: no glyph cluster spans several characters"
+            );
+            assert!(
+                !text.outline.elements().is_empty(),
+                "{family}: no glyph outline"
+            );
+        }
+    }
+
+    /// Invariant 66: a script the declared fonts cannot draw refuses by name;
+    /// no installed system font is consulted to fill it in.
+    #[test]
+    fn a_script_no_declared_font_covers_refuses_instead_of_reaching_for_a_system_font() {
+        let document = scene(
+            "తెలుగు",
+            "inter",
+            vec![font("inter", "Inter", "inter", Vec::new())],
+        );
+        let assets = AssetBytes::from([(ContentHash("inter".into()), INTER.to_vec())]);
+        assert!(matches!(
+            prepare_texts(&document, &assets),
+            Err(Refusal::FontMissing { font_id }) if font_id == "inter"
+        ));
+    }
+
+    /// The text's paths, drawn on the CPU: what `lit_area` draws.
+    fn drawn(document: &SceneDocument, assets: &AssetBytes) -> crate::rasterise::RasterSurface {
+        let prepared = prepare_texts(document, assets).expect("the text shapes");
+        let resolution = gx_contracts::scene::resolve_hierarchy(&document.objects);
+        let paths = crate::rasterise::PreparedPaths::prepare(
+            document,
+            &resolution.effective,
+            Some(&prepared),
+        )
+        .expect("the text prepares");
+        let mut surface = crate::rasterise::RasterSurface::transparent(
+            document.canvas.width,
+            document.canvas.height,
+        );
+        crate::rasterise::PathRasteriser::rasterise_into(
+            &crate::rasterise::VelloCpuRasteriser,
+            &paths.paths().iter().collect::<Vec<_>>(),
+            &mut surface,
+        );
+        surface
+    }
+
+    /// 3.18: text is a path, so its stroke and a gradient fill are drawn.
+    #[test]
+    fn text_draws_its_stroke_and_its_gradient_fill() {
+        use gx_contracts::color::{ColorValue, GradientStop, Rgba};
+        let assets = AssetBytes::from([(ContentHash("inter".into()), INTER.to_vec())]);
+        let fonts = || vec![font("inter", "Inter", "inter", Vec::new())];
+        // A stroke alone, no fill: the glyph outlines are drawn as strokes.
+        let mut stroked = scene("Stroke", "inter", fonts());
+        if let SceneObject::Text(text) = &mut stroked.objects[0] {
+            text.base.fill = None;
+            text.base.stroke = Some(ColorValue::hex("#ff0000").unwrap());
+            text.base.stroke_width = 2.0;
+        }
+        let lit = drawn(&stroked, &assets)
+            .pixels()
+            .iter()
+            .filter(|p| p.a > 0.5)
+            .count();
+        assert!(lit > 200, "a stroked text drew {lit} pixels");
+        // A red-to-blue gradient across the box: the first glyph is redder
+        // than the last.
+        let mut graded = scene("HHHHHHHHHHHHHHHH", "inter", fonts());
+        if let SceneObject::Text(text) = &mut graded.objects[0] {
+            text.base.fill = Some(ColorValue::LinearGradient {
+                angle: 0.0,
+                start_x: 0.0,
+                start_y: 0.0,
+                end_x: 0.5,
+                end_y: 0.0,
+                stops: vec![
+                    GradientStop {
+                        position: 0.0,
+                        color: Rgba::srgb(1.0, 0.0, 0.0, 1.0),
+                    },
+                    GradientStop {
+                        position: 1.0,
+                        color: Rgba::srgb(0.0, 0.0, 1.0, 1.0),
+                    },
+                ],
+                spread: Default::default(),
+                coordinate_mode: Default::default(),
+            });
+        }
+        let surface = drawn(&graded, &assets);
+        let width = surface.width() as usize;
+        let mean_red_minus_blue = |from: usize, to: usize| {
+            let (mut sum, mut n) = (0.0_f32, 0.0_f32);
+            for (i, p) in surface.pixels().iter().enumerate() {
+                let x = i % width;
+                if p.a > 0.9 && (from..to).contains(&x) {
+                    sum += p.r - p.b;
+                    n += 1.0;
+                }
+            }
+            sum / n.max(1.0)
+        };
+        let (left, right) = (mean_red_minus_blue(0, 60), mean_red_minus_blue(300, 400));
+        assert!(left > 0.5 && right < -0.5, "left {left}, right {right}");
+    }
+
+    const NASTALIQ: &[u8] = include_bytes!("../tests/fixtures/NotoNastaliqUrdu-Regular.ttf");
+    const NASKH: &[u8] = include_bytes!("../tests/fixtures/NotoSansArabic-Regular.ttf");
+
+    /// Urdu, right to left, in Nastaliq and in Naskh, from the packaged face
+    /// alone: every Urdu glyph is in a right-to-left run, the first letter of
+    /// the word is drawn furthest right, and a letter joined to its neighbour
+    /// takes a different (contextual) glyph from the same letter standing
+    /// alone.
+    #[test]
+    fn urdu_shapes_right_to_left_with_joined_letters_in_nastaliq_and_naskh() {
+        for (family, bytes) in [
+            ("Noto Nastaliq Urdu", NASTALIQ),
+            ("Noto Sans Arabic", NASKH),
+        ] {
+            let (document, assets) = with_fallback("اردو خبریں", family, bytes);
+            let prepared = prepare_texts(&document, &assets).expect("declared fonts shape");
+            let text = &prepared.objects[0];
+            let urdu: Vec<_> = text
+                .glyphs
+                .iter()
+                .filter(|g| g.face_id == "script-regular")
+                .collect();
+            assert!(
+                !urdu.is_empty(),
+                "{family}: the declared fallback was not used"
+            );
+            assert!(
+                urdu.iter().all(|g| g.bidi_level % 2 == 1),
+                "{family}: an Urdu glyph is not in a right-to-left run"
+            );
+            let first = urdu
+                .iter()
+                .find(|g| g.source_start == 0)
+                .expect("the first letter");
+            let rightmost = urdu.iter().map(|g| g.x).fold(f32::MIN, f32::max);
+            assert_eq!(
+                first.x, rightmost,
+                "{family}: the first letter is not furthest right"
+            );
+            assert!(!text.outline.elements().is_empty(), "{family}: no outline");
+
+            // Beh joined (initial form) against beh alone (isolated form).
+            let glyph_of_first = |value: &str| {
+                let (document, assets) = with_fallback(value, family, bytes);
+                let prepared = prepare_texts(&document, &assets).expect("shapes");
+                prepared.objects[0]
+                    .glyphs
+                    .iter()
+                    .find(|g| g.source_start == 0)
+                    .expect("first glyph")
+                    .glyph_id
+            };
+            assert_ne!(
+                glyph_of_first("بب"),
+                glyph_of_first("ب"),
+                "{family}: a joined letter did not take its contextual form"
+            );
+        }
     }
 }
