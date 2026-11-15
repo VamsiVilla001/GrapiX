@@ -49,6 +49,11 @@ pub const RECOVERY_JOURNAL_RELATIVE_PATH: &str = "render-engine/recovery.json";
 
 /// One prepared authored scene that can be rebuilt after a worker restart.
 ///
+/// The journal holds one for each take's latest published revision and one
+/// for every earlier revision Program or the cue still names (5.12): a take
+/// published again while an earlier revision is on air keeps that revision
+/// recoverable, because publication is additive (invariant 30).
+///
 /// The prepared form deliberately stays out of the journal: it is derived from
 /// the document, verified assets and current renderer capability. Persisting
 /// that derivative would allow a stale preparation to bypass those checks.
@@ -181,25 +186,34 @@ impl RecoveryState {
                     ),
                 });
             }
-            if self.published.get(&scene.take_id).map(|held| held.revision) != Some(scene.revision)
-            {
+            let Some(held) = self.published.get(&scene.take_id) else {
                 return Err(RecoveryError::InvalidState {
                     detail: format!(
-                        "prepared scene {}/{} is not the published revision",
+                        "prepared scene {}/{} is of a take that is not published",
                         scene.take_id, scene.revision.0
                     ),
                 });
-            }
-            // The bytes behind a pinned hash must still be those bytes: a
-            // journal that disagrees would let a pin load different content.
-            let pinned = self
-                .published
-                .get(&scene.take_id)
-                .map(|held| &held.content_hash);
-            if pinned != Some(&scene.document.content_hash()) {
+            };
+            if scene.revision == held.revision {
+                // The bytes behind a pinned hash must still be those bytes: a
+                // journal that disagrees would let a pin load different
+                // content.
+                if held.content_hash != scene.document.content_hash() {
+                    return Err(RecoveryError::InvalidState {
+                        detail: format!(
+                            "prepared scene {}/{} does not hash to its published pin",
+                            scene.take_id, scene.revision.0
+                        ),
+                    });
+                }
+            } else if scene.revision > held.revision || !self.names(&scene.take_id, scene.revision)
+            {
+                // An earlier revision is kept only while Program or the cue
+                // names it (5.12); anything else is not the published
+                // revision and has no business in the journal.
                 return Err(RecoveryError::InvalidState {
                     detail: format!(
-                        "prepared scene {}/{} does not hash to its published pin",
+                        "prepared scene {}/{} is not the published revision, and neither Program nor the cue names it",
                         scene.take_id, scene.revision.0
                     ),
                 });
@@ -220,19 +234,36 @@ impl RecoveryState {
 
         for (name, state) in [("cued", &self.cued), ("program", &self.program)] {
             if let Some(state) = state {
-                if self.published.get(&state.take_id).map(|held| held.revision)
-                    != Some(state.revision)
-                {
-                    return Err(RecoveryError::InvalidState {
-                        detail: format!(
-                            "{name} state {}/{} is not a published revision",
-                            state.take_id, state.revision.0
-                        ),
-                    });
+                let latest = self.published.get(&state.take_id).map(|held| held.revision);
+                match latest {
+                    Some(latest) if state.revision == latest => {}
+                    // An earlier revision of a published take, which the
+                    // journal must be able to rebuild (5.12).
+                    Some(latest)
+                        if state.revision < latest
+                            && self.prepared_scenes.iter().any(|scene| {
+                                scene.take_id == state.take_id && scene.revision == state.revision
+                            }) => {}
+                    _ => {
+                        return Err(RecoveryError::InvalidState {
+                            detail: format!(
+                                "{name} state {}/{} is not a published revision the journal holds",
+                                state.take_id, state.revision.0
+                            ),
+                        });
+                    }
                 }
             }
         }
         Ok(())
+    }
+
+    /// Whether Program or the cue names this revision of this take.
+    pub fn names(&self, take_id: &TakeId, revision: Revision) -> bool {
+        [&self.program, &self.cued]
+            .into_iter()
+            .flatten()
+            .any(|state| state.take_id == *take_id && state.revision == revision)
     }
 
     /// The next engine incarnation. An exhausted counter is a hard recovery

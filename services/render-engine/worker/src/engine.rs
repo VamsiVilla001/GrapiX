@@ -267,12 +267,36 @@ impl Engine {
     }
 
     /// A deterministic point-in-time recovery snapshot.
+    ///
+    /// It records each published take's latest revision and any earlier
+    /// revision Program or the cue still names (5.12): a take published
+    /// again while an earlier revision is on air keeps that revision
+    /// recoverable.
     pub fn recovery_state(&self) -> RecoveryState {
+        let mut state = RecoveryState {
+            schema_version: crate::recovery::RECOVERY_SCHEMA_VERSION,
+            epoch: self.clock.epoch(),
+            published: self
+                .published
+                .iter()
+                .map(|(take_id, held)| (take_id.clone(), held.clone()))
+                .collect(),
+            prepared_scenes: Vec::new(),
+            verified_assets: self.assets.iter().cloned().collect(),
+            cued: self.cued.clone(),
+            program: self.program.clone(),
+            revision_floors: self.revision_floors.clone(),
+        };
+        // One rule for what the journal keeps, shared with its validation
+        // (invariant 27): the latest revision and any earlier one named.
         let mut prepared_scenes: Vec<_> = self
             .prepared
             .iter()
             .filter(|((take_id, revision), _)| {
-                self.published.get(take_id).map(|held| held.revision) == Some(*revision)
+                self.published.get(take_id).is_some_and(|held| {
+                    held.revision == *revision
+                        || (*revision < held.revision && state.names(take_id, *revision))
+                })
             })
             .map(|((take_id, revision), prepared)| PreparedSceneRecord {
                 take_id: take_id.clone(),
@@ -283,20 +307,8 @@ impl Engine {
         prepared_scenes.sort_by(|left, right| {
             (&left.take_id, left.revision).cmp(&(&right.take_id, right.revision))
         });
-        RecoveryState {
-            schema_version: crate::recovery::RECOVERY_SCHEMA_VERSION,
-            epoch: self.clock.epoch(),
-            published: self
-                .published
-                .iter()
-                .map(|(take_id, held)| (take_id.clone(), held.clone()))
-                .collect(),
-            prepared_scenes,
-            verified_assets: self.assets.iter().cloned().collect(),
-            cued: self.cued.clone(),
-            program: self.program.clone(),
-            revision_floors: self.revision_floors.clone(),
-        }
+        state.prepared_scenes = prepared_scenes;
+        state
     }
 
     fn persist_recovery(&self) -> Result<(), RecoveryError> {
@@ -310,10 +322,12 @@ impl Engine {
     ///
     /// Every asset a journaled scene declares, whatever its kind, is read
     /// back and re-hashed before preparation; `verified_assets` is not
-    /// trusted. A scene with a missing, altered or unreadable asset is
-    /// dropped: it leaves `published` (so no take can reach it through the
-    /// identifier-only path), Program and the cue are cleared only if they
-    /// name it, and its revision becomes the take's floor. A scene whose bytes
+    /// trusted. A take with a missing, altered or unreadable asset in any of
+    /// its journaled revisions (5.12: the latest and any earlier one Program
+    /// or the cue names) is dropped whole, once: it leaves `published` (so no
+    /// take can reach it through the identifier-only path), Program and the
+    /// cue are cleared only if they name it, and its latest revision becomes
+    /// the take's floor. A scene whose bytes
     /// are intact but which no longer prepares still stops the restore, as
     /// before 5.11 (user decision, 8 Nov 2026): the journal is then left as
     /// it was, so a transient fault cannot erase scenes.
@@ -333,8 +347,14 @@ impl Engine {
         let mut dropped = Vec::new();
         let mut prepared = HashMap::new();
         let mut gpu_prepared = HashMap::new();
-        for record in state.prepared_scenes {
-            let mut failure = None;
+        // First every record's bytes are read back, so a take with several
+        // journaled revisions is judged as one: the first bad asset of any of
+        // them drops the take.
+        let mut failed: BTreeMap<TakeId, Refusal> = BTreeMap::new();
+        for record in &state.prepared_scenes {
+            if failed.contains_key(&record.take_id) {
+                continue;
+            }
             for hash in record
                 .document
                 .assets
@@ -351,36 +371,38 @@ impl Engine {
                     }
                 });
                 if let Err(reason) = verdict {
-                    failure = Some(reason.clone());
+                    failed.insert(record.take_id.clone(), reason.clone());
                     break;
                 }
             }
-            if let Some(reason) = failure {
-                let content_hash = published
-                    .remove(&record.take_id)
-                    .map(|held| held.content_hash)
-                    .unwrap_or_else(|| record.document.content_hash());
-                let names = |state: &Option<ProgramState>| {
-                    state
-                        .as_ref()
-                        .is_some_and(|state| state.take_id == record.take_id)
-                };
-                let (was_program, was_cued) = (names(&program), names(&cued));
-                if was_program {
-                    program = None;
-                }
-                if was_cued {
-                    cued = None;
-                }
-                revision_floors.insert(record.take_id.clone(), record.revision);
-                dropped.push(DroppedScene {
-                    take_id: record.take_id,
-                    revision: record.revision,
-                    content_hash,
-                    reason,
-                    was_program,
-                    was_cued,
-                });
+        }
+        for (take_id, reason) in failed {
+            // `validate` guarantees every record belongs to a published take.
+            let held = published
+                .remove(&take_id)
+                .expect("a journaled scene belongs to a published take");
+            let names = |state: &Option<ProgramState>| {
+                state.as_ref().is_some_and(|state| state.take_id == take_id)
+            };
+            let (was_program, was_cued) = (names(&program), names(&cued));
+            if was_program {
+                program = None;
+            }
+            if was_cued {
+                cued = None;
+            }
+            revision_floors.insert(take_id.clone(), held.revision);
+            dropped.push(DroppedScene {
+                take_id,
+                revision: held.revision,
+                content_hash: held.content_hash,
+                reason,
+                was_program,
+                was_cued,
+            });
+        }
+        for record in state.prepared_scenes {
+            if dropped.iter().any(|scene| scene.take_id == record.take_id) {
                 continue;
             }
             let available: HashSet<ContentHash> = asset_bytes.keys().cloned().collect();

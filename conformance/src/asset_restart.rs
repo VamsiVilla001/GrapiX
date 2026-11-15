@@ -12,6 +12,12 @@
 //! them with those reasons, and still serves the scene whose bytes are
 //! intact. A third, whose store cannot be written, refuses each route by
 //! name and keeps nothing.
+//!
+//! Row 5.12 on the first of them: a take is published again while its first
+//! revision is on Program. The edit is Published as revision 2, Program keeps
+//! revision 1 and output is never inhibited, revision 2 can be cued, and
+//! after a kill both revisions are restored, Program is still revision 1 and
+//! revision 2 is taken.
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -231,6 +237,7 @@ pub fn asset_restart_suite<W: RestartableWorker>(
     };
     let font_hash = content_hash(&font);
     both_routes_restore(by_path, chunked, dirs.0, &font, &font_hash, report);
+    republish_on_air(by_path, dirs.0, report);
     damaged_store_drops_by_name(damaged, dirs.1, &font, &font_hash, report);
     unwritable_store_refuses(unwritable, dirs.2, &font_hash, report);
 }
@@ -366,6 +373,134 @@ fn both_routes_restore<W: RestartableWorker>(
             matches!(&again, Ok(summary) if summary.transferred_bytes == 0 && summary.missing.is_empty()),
             format!("5.11: preflight after restart {again:?}"),
         ),
+    );
+}
+
+/// A revision of `id`, edited by `edit`, published as a package by the route
+/// the worker's declared locality negotiates.
+fn publish_edit<W: RestartableWorker>(
+    worker: &mut W,
+    dir: &Path,
+    id: &str,
+    edit: u32,
+) -> Result<Pin, String> {
+    let locality = worker.control().capability().locality;
+    let mut scene = lower_third(id, &[])?;
+    scene.name = format!("{} (edit {edit})", scene.name);
+    let path = dir.join(format!("{}-{edit}.gpxpkg", id.replace('/', "-")));
+    package(&path, &scene, &[])?;
+    let published = publish_package(worker.assets(), locality, &path).map_err(|e| e.to_string());
+    let _ = std::fs::remove_file(&path);
+    let published = published?;
+    pinned(&published.reply).ok_or_else(|| format!("not published: {:?}", published.reply))
+}
+
+/// 5.12, against a real worker: publishing is additive on air.
+fn republish_on_air<W: RestartableWorker>(worker: &mut W, dir: &Path, report: &mut Report) {
+    const ID: &str = "conformance/republish-on-air";
+    let tier = worker.control().capability().device_tier;
+    let first = publish_edit(worker, dir, ID, 1);
+    let Ok(first) = first else {
+        report.record(
+            PLANE,
+            "a take is published and taken before it is published again while on Program",
+            Outcome::Fail(format!("5.12: first publish {first:?}")),
+        );
+        return;
+    };
+    if tier != DeviceTier::T0 {
+        report.record(
+            PLANE,
+            "a take published again while its earlier revision is on Program is accepted and journaled",
+            Outcome::Skip(format!(
+                "the engine is {tier:?}, below T0, so it cannot put revision 1 on Program"
+            )),
+        );
+        return;
+    }
+    let taken = take_outcome(worker.control(), &first);
+    report.record(
+        PLANE,
+        "a take is published and taken before it is published again while on Program",
+        taken,
+    );
+
+    // The edit, while revision 1 is on Program.
+    let second = publish_edit(worker, dir, ID, 2);
+    let program_revision = |worker: &mut W| match worker.control().handle(ClientRequest::Status) {
+        EngineReply::Status(status) => status.program.map(|p| (p.take_id, p.revision)),
+        _ => None,
+    };
+    let journaled = |worker: &W| {
+        RecoveryJournal::open_at(worker.journal())
+            .ok()
+            .and_then(|journal| journal.load().ok().flatten())
+            .map(|state| {
+                state
+                    .prepared_scenes
+                    .into_iter()
+                    .filter(|record| record.take_id == first.0)
+                    .map(|record| record.revision)
+                    .collect::<Vec<_>>()
+            })
+    };
+    let on_air = program_revision(worker);
+    report.record(
+        PLANE,
+        "a take published again while its earlier revision is on Program is Published as the next revision and Program keeps the earlier one",
+        expect(
+            matches!(&second, Ok((id, Revision(2), _)) if *id == first.0)
+                && on_air == Some((first.0.clone(), first.1)),
+            format!("5.12: the edit {second:?}; Program {on_air:?}"),
+        ),
+    );
+    let Ok(second) = second else { return };
+    let kept = journaled(worker);
+    let cued = cue(worker.control(), &second);
+    report.record(
+        PLANE,
+        "the journal holds both revisions and the edit can be cued while revision 1 is on Program",
+        expect(
+            kept.as_deref() == Some(&[Revision(1), Revision(2)])
+                && matches!(cued, EngineReply::Cued(_)),
+            format!("5.12: journaled revisions {kept:?}; cue of the edit {cued:?}"),
+        ),
+    );
+
+    // Killed with revision 1 on Program and revision 2 cued.
+    let epoch_before = worker.control().capability().epoch;
+    let back = worker.kill_and_restart(&mut || Ok(()));
+    let epoch = back.is_ok().then(|| worker.control().capability().epoch);
+    let stderr = worker.stderr();
+    let restored = program_revision(worker);
+    let after = journaled(worker);
+    report.record(
+        PLANE,
+        "after a kill both revisions are restored and Program is still revision 1",
+        expect(
+            back.is_ok()
+                && epoch == Some(Epoch(epoch_before.0 + 1))
+                && !stderr.contains("recovery: dropped")
+                && restored == Some((first.0.clone(), first.1))
+                && after.as_deref() == Some(&[Revision(1), Revision(2)]),
+            format!(
+                "5.12: restart {back:?}, epoch {epoch:?}, Program {restored:?}, journaled {after:?}, stderr {stderr:?}"
+            ),
+        ),
+    );
+    if back.is_err() {
+        return;
+    }
+    let outcome = take_outcome(worker.control(), &second);
+    let now = program_revision(worker);
+    report.record(
+        PLANE,
+        "the edit is taken after the restart and Program moves to it",
+        match outcome {
+            Outcome::Pass if now == Some((second.0.clone(), second.1)) => Outcome::Pass,
+            Outcome::Pass => Outcome::Fail(format!("5.12: taken, but Program is {now:?}")),
+            other => other,
+        },
     );
 }
 

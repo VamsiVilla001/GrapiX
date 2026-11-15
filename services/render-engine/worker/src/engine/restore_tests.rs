@@ -506,3 +506,203 @@ fn a_stored_asset_that_cannot_be_read_drops_its_scene_as_asset_store_failed() {
     assert!(report.contains("restore/held"), "{report}");
     cleanup(&path);
 }
+
+// ---------------------------------------------------------------------------
+// 5.12: publishing is additive on air. A take published again while an
+// earlier revision is on Program (or cued) is accepted, Program is never
+// inhibited, and the journal keeps every revision Program or the cue names.
+// ---------------------------------------------------------------------------
+
+fn on_air(pin: &(TakeId, Revision, ContentHash)) -> ProgramState {
+    ProgramState {
+        take_id: pin.0.clone(),
+        revision: pin.1,
+        committed_frame: 0,
+        scene_frame: 0,
+        playing: true,
+        phase: None,
+        stop_frame: None,
+    }
+}
+
+fn edited(scene: SceneDocument) -> SceneDocument {
+    let mut edited = scene;
+    edited.name = format!("{} (edited)", edited.name);
+    edited
+}
+
+fn journaled_revisions(path: &Path) -> Vec<(TakeId, Revision)> {
+    RecoveryJournal::open_at(path.to_path_buf())
+        .unwrap()
+        .load()
+        .unwrap()
+        .expect("a journal was written")
+        .prepared_scenes
+        .into_iter()
+        .map(|record| (record.take_id, record.revision))
+        .collect()
+}
+
+#[test]
+fn a_take_published_again_while_its_earlier_revision_is_on_program_is_accepted() {
+    let path = journal_path("republish");
+    let first = {
+        let (mut engine, _) = attached(&path);
+        deliver(&mut engine, INTER);
+        let first = publish(&mut engine, scene("restore/air", None));
+        // Revision 1 is on Program, as a Take would leave it.
+        engine.program = Some(on_air(&first));
+        assert!(!engine.output_inhibited());
+
+        // Before 5.12 this publish was refused: the journal check found
+        // Program at a revision that is no longer the published one, and
+        // output was inhibited.
+        let second = publish(&mut engine, edited(scene("restore/air", None)));
+        assert_eq!(second.0, first.0);
+        assert_eq!(second.1, Revision(2));
+        assert!(!engine.output_inhibited(), "Program is never inhibited");
+        assert_eq!(engine.program.as_ref().unwrap().revision, Revision(1));
+
+        // Both revisions are journaled; revision 2 is the published one and
+        // can be cued while revision 1 stays on air.
+        assert_eq!(
+            journaled_revisions(&path),
+            vec![
+                (first.0.clone(), Revision(1)),
+                (first.0.clone(), Revision(2))
+            ]
+        );
+        assert!(matches!(cue(&mut engine, &second), EngineReply::Cued(_)));
+        assert!(
+            matches!(cue(&mut engine, &first), EngineReply::Refused(_)),
+            "a stale revision is still refused for a new cue"
+        );
+        first
+    };
+
+    // Killed with revision 1 on Program and revision 2 cued: both come back.
+    let (restored, outcome) = attached(&path);
+    assert!(outcome.dropped.is_empty(), "{:?}", outcome.dropped);
+    assert_eq!(restored.program.as_ref().unwrap().revision, Revision(1));
+    assert_eq!(restored.cued.as_ref().unwrap().revision, Revision(2));
+    assert!(restored.prepared_scene(&first.0, Revision(1)).is_some());
+    assert!(restored.prepared_scene(&first.0, Revision(2)).is_some());
+    assert_eq!(restored.published[&first.0].revision, Revision(2));
+    cleanup(&path);
+}
+
+#[test]
+fn an_earlier_revision_is_journaled_only_while_program_or_the_cue_names_it() {
+    let path = journal_path("republish-forgets");
+    let (mut engine, _) = attached(&path);
+    deliver(&mut engine, INTER);
+    let first = publish(&mut engine, scene("restore/air", None));
+    engine.program = Some(on_air(&first));
+    publish(&mut engine, edited(scene("restore/air", None)));
+    assert_eq!(journaled_revisions(&path).len(), 2);
+    // Program moves on: nothing names revision 1 any more, so the next
+    // journal write no longer holds it.
+    engine.program = None;
+    publish(&mut engine, edited(edited(scene("restore/air", None))));
+    assert_eq!(
+        journaled_revisions(&path),
+        vec![(first.0.clone(), Revision(3))]
+    );
+    cleanup(&path);
+}
+
+#[test]
+fn the_journal_check_accepts_only_what_it_can_rebuild() {
+    let path = journal_path("republish-validate");
+    let (mut engine, _) = attached(&path);
+    deliver(&mut engine, INTER);
+    let first = publish(&mut engine, scene("restore/air", None));
+    engine.program = Some(on_air(&first));
+    publish(&mut engine, edited(scene("restore/air", None)));
+    let state = engine.recovery_state();
+    state
+        .validate()
+        .expect("the state of a republished take on air is valid");
+
+    // An earlier revision nobody names has no business in the journal.
+    let mut unnamed = state.clone();
+    unnamed.program = None;
+    assert!(
+        matches!(unnamed.validate(), Err(RecoveryError::InvalidState { .. })),
+        "an unreferenced earlier revision is refused"
+    );
+    // Program on an earlier revision the journal does not hold is refused.
+    let mut missing = state.clone();
+    missing
+        .prepared_scenes
+        .retain(|record| record.revision != Revision(1));
+    assert!(matches!(
+        missing.validate(),
+        Err(RecoveryError::InvalidState { .. })
+    ));
+    // Program on a revision newer than the published one is refused, with
+    // revision 1 still named (by the cue) so that is the only fault.
+    let mut ahead = state.clone();
+    ahead.cued = ahead.program.clone();
+    ahead.program.as_mut().unwrap().revision = Revision(3);
+    assert!(matches!(
+        ahead.validate(),
+        Err(RecoveryError::InvalidState { .. })
+    ));
+    cleanup(&path);
+}
+
+#[test]
+fn a_take_with_a_bad_asset_in_any_journaled_revision_is_dropped_whole_and_once() {
+    for damaged in [Revision(1), Revision(2)] {
+        let path = journal_path("republish-drop");
+        let first = {
+            let (mut engine, _) = attached(&path);
+            deliver(&mut engine, INTER);
+            deliver(&mut engine, IMAGE_B);
+            deliver(&mut engine, IMAGE_C);
+            // Revision 1 declares IMAGE_B and revision 2 IMAGE_C, so each
+            // revision has an asset of its own.
+            let first = publish(&mut engine, scene("restore/air", Some(IMAGE_B)));
+            engine.program = Some(on_air(&first));
+            publish(&mut engine, scene("restore/air", Some(IMAGE_C)));
+            publish(&mut engine, scene("restore/other", None));
+            first
+        };
+        let lost = if damaged == Revision(1) {
+            IMAGE_B
+        } else {
+            IMAGE_C
+        };
+        std::fs::remove_file(
+            path.with_file_name("recovery.json.assets")
+                .join(gx_asset_plane::content_hash(lost).0),
+        )
+        .unwrap();
+        let (mut engine, outcome) = attached(&path);
+        // One drop for the take, at its latest revision, naming that Program
+        // was on it; the other take is untouched.
+        assert_eq!(
+            outcome.dropped.len(),
+            1,
+            "{damaged:?}: {:?}",
+            outcome.dropped
+        );
+        assert_eq!(outcome.dropped[0].take_id, first.0);
+        assert_eq!(outcome.dropped[0].revision, Revision(2));
+        assert!(outcome.dropped[0].was_program);
+        assert!(engine.program.is_none());
+        assert!(engine.prepared_scene(&first.0, Revision(1)).is_none());
+        assert!(engine.prepared_scene(&first.0, Revision(2)).is_none());
+        assert!(!engine.published.contains_key(&first.0));
+        assert!(engine
+            .published
+            .contains_key(&TakeId("restore/other".into())));
+        // Publishing it again continues past revision 2.
+        deliver(&mut engine, IMAGE_B);
+        deliver(&mut engine, IMAGE_C);
+        let again = publish(&mut engine, scene("restore/air", Some(IMAGE_C)));
+        assert_eq!(again.1, Revision(3));
+        cleanup(&path);
+    }
+}

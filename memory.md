@@ -118,6 +118,30 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-15 — 5.12 done: publishing is additive on air (Claude)
+
+**Resume here.** Next: 5.10 (the Editor reads locality through an asset-plane read and publishes by
+path when co-located; reworded, Needs 5.8, 5.9, 5.11, 5.12), then 3.21. Open: Panchayati #106, #108,
+#109 (`holds_entry` under the engine lock), #110 (journal schema stays 3). Jev and Laya were NOT run
+on 5.12: their environments were gone from this machine after the scratchpad reset (no `laya` Python
+package, no `@typesafe-ai/sdk` install); reinstalling means a download, so the user is asked first.
+
+**5.12** (`docs/evidence/5.12`). Re-publishing a take while an older revision is on Program or cued
+was refused by the journal check and inhibited output (reproduced on 8 Nov). Now
+`Engine::recovery_state` records each take's latest revision plus any earlier revision Program or the
+cue names (`RecoveryState::names`, the one rule, shared with `validate`); `validate` accepts an earlier
+revision only if it is named, older than the published one, and held by a record, and refuses Program
+or the cue on one the journal cannot rebuild; `restore_state` reads back every record first and drops
+a take whole, once, if any of its revisions has a bad asset (floor = the latest revision). Schema
+stays 3 (same shape, more records). Docs: runbook table.
+
+**Executed.** In process: 4 new restore tests (accepted and journaled, forgotten when unnamed, the
+check refuses what it cannot rebuild, a bad asset in either revision drops the take whole). Real
+worker: 5 new conformance checks (publish, take, publish the edit while revision 1 is on Program ->
+Published as revision 2 and Program still revision 1, journal holds both, cue the edit, forced kill ->
+epoch +1, Program still revision 1, journal still holds both, take the edit). 7 mutations each fail a
+test (one initially survived because a test failed for the wrong reason; fixed). Gate: cargo fmt --check and clippy -D warnings exit 0; npm run check exit 0 (44 Node, 412 Editor, 817 Rust / 0 failed / 26 ignored, conformance 567/0/9)
+
 ## 2026-11-15 — 5.11 review fixed (Claude)
 
 **Resume here.** Next: 5.12 (journal records every revision Program or the cue names), then

@@ -34,7 +34,7 @@ The journal holds:
 | `schemaVersion` | An integer. Only version 3 is understood. |
 | `epoch` | The incarnation that wrote this state. |
 | `published` | Map of take id to the revision that is live, and the content hash it pins. |
-| `preparedScenes` | The scene documents behind those published revisions. |
+| `preparedScenes` | The scene documents behind each take's latest published revision and, since 5.12, behind any earlier revision Program or the cue still names (a take published again while an older revision is on air). An earlier revision nobody names is not kept. |
 | `verifiedAssets` | Content hashes whose verified bytes are in the store beside the journal. |
 | `cued` | The next programme state, if one was cued. |
 | `program` | The current programme state, if a take was active. |
