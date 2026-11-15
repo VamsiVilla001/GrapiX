@@ -539,6 +539,7 @@ mod tests {
                 base: ObjectBase::new("logo", "logo"),
                 asset_id: "missing-asset".into(),
                 fit: Default::default(),
+                slice: None,
             }),
         ]);
         scene.canvas.width = 0;
@@ -550,11 +551,12 @@ mod tests {
             true,
         );
 
-        // The image is also a kind the software path cannot draw yet (3.17).
+        // 3.17: the image draws once its asset is a stored, tagged image; this
+        // one names an asset the scene does not have.
         assert_eq!(found.len(), 4, "expected all four faults, got {found:?}");
         assert!(found
             .iter()
-            .any(|r| matches!(r.code, Refusal::ObjectKindNotDrawable { .. })));
+            .any(|r| matches!(r.code, Refusal::ImageNotDrawable { .. })));
         assert!(found
             .iter()
             .any(|r| matches!(r.code, Refusal::SceneParseFailed { .. })));
@@ -644,6 +646,7 @@ mod tests {
             size_bytes: None,
             status: None,
             provenance: crate::provenance::AssetProvenance::default(),
+            color_space: None,
         });
 
         let authoring = validate_scene_document(
@@ -683,6 +686,7 @@ mod tests {
             size_bytes: None,
             status: None,
             provenance: crate::provenance::AssetProvenance::default(),
+            color_space: None,
         });
 
         for check in [true, false] {

@@ -32,6 +32,7 @@ pub mod emission;
 pub mod engine;
 pub mod gpu;
 pub mod headless;
+pub mod image;
 pub mod layer_source;
 pub mod mesh;
 pub mod metrics;

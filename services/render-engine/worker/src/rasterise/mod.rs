@@ -217,6 +217,22 @@ impl RasterSurface {
     }
 
     /// Width in scene pixels.
+    /// A surface holding `pixels` as they are (3.17: an image's raster).
+    pub(crate) fn from_pixels(
+        width: u32,
+        height: u32,
+        origin: [f64; 2],
+        pixels: Vec<WorkingRgba>,
+    ) -> Self {
+        assert_eq!(pixels.len(), (width * height) as usize);
+        Self {
+            origin,
+            width,
+            height,
+            pixels,
+        }
+    }
+
     pub fn width(&self) -> u32 {
         self.width
     }

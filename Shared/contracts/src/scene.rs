@@ -41,7 +41,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::color::{ColorValue, Rgba, WorkingColorSpace};
+use crate::color::{ColorValue, Rgba, SourceColorSpace, WorkingColorSpace};
 use crate::font::FontDefinition;
 use crate::material::{BlendMode, CullMode, FitMode, MaterialBinding};
 use crate::provenance::AssetProvenance;
@@ -115,6 +115,13 @@ pub struct AssetLibraryItem {
     /// every field empty, but the schema is present in every saved project.
     #[serde(default)]
     pub provenance: AssetProvenance,
+    /// The colour space an image's pixel values are in (3.17, user decision
+    /// 15 Nov 2026). Set at import from the file's own tag when it has one,
+    /// otherwise by the user; never inferred (B.1). An image without one is
+    /// refused by name when drawn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub color_space: Option<SourceColorSpace>,
 }
 
 impl AssetLibraryItem {
@@ -604,6 +611,22 @@ pub struct ImageObject {
     /// vocabulary).
     #[serde(default)]
     pub fit: FitMode,
+    /// Nine-slice insets, in the image's own texels (3.17): the corners keep
+    /// their size, the edges stretch along one axis and the centre along
+    /// both. Required by `fit: nine-slice`, ignored otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub slice: Option<ImageSlice>,
+}
+
+/// Nine-slice insets from each edge of an image, in texels (3.17).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageSlice {
+    pub left: f64,
+    pub top: f64,
+    pub right: f64,
+    pub bottom: f64,
 }
 
 /// A group: a hierarchy container that affects descendants but paints no
@@ -2185,6 +2208,7 @@ mod tests {
                 base: populated_base("image"),
                 asset_id: "asset_logo".into(),
                 fit: FitMode::Cover,
+                slice: None,
             }),
             SceneObject::Line(LineObject {
                 base: populated_base("line"),
@@ -2336,6 +2360,7 @@ mod tests {
                 size_bytes: Some(1024),
                 status: Some(AssetAvailability::Ready),
                 provenance: AssetProvenance::default(),
+                color_space: None,
             }],
             fonts: vec![],
             materials: vec![],
@@ -2370,6 +2395,7 @@ mod tests {
                     base: logo,
                     asset_id: "asset_logo".into(),
                     fit: FitMode::Contain,
+                    slice: None,
                 }),
             ],
         }

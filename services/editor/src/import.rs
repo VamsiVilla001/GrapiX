@@ -71,6 +71,7 @@ pub fn source_asset(source_name: &str, bytes: &[u8]) -> AssetLibraryItem {
             sources: vec![source_name.to_owned()],
             ..AssetProvenance::default()
         },
+        color_space: None,
     }
 }
 

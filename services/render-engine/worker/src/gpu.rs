@@ -138,6 +138,27 @@ impl Gpu {
         self.inner.as_ref().map(|gpu| (&gpu.device, &gpu.queue))
     }
 
+    /// Build an image object's box raster on this device (3.17), at prepare
+    /// only. `None` without hardware.
+    pub(crate) fn draw_image(
+        &self,
+        object: &str,
+        asset: &str,
+        image: &crate::image::DecodedImage,
+        plan: &crate::image::FitPlan,
+    ) -> Option<Result<wgpu::Texture, gx_contracts::Refusal>> {
+        let gpu = self.inner.as_ref()?;
+        let mut drawer = gpu
+            .drawer
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let drawer = drawer.get_or_insert_with(|| {
+            crate::render_work::gpu_build();
+            crate::compositor::draw::GpuDrawer::new(&gpu.device)
+        });
+        Some(drawer.draw_image(&gpu.device, &gpu.queue, object, asset, image, plan))
+    }
+
     /// Draw vector paths into a working-space float texture on this device
     /// (3.17), at prepare only. `None` without hardware.
     pub(crate) fn draw_paths(

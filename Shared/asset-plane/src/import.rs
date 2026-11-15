@@ -171,6 +171,11 @@ pub fn prepare_asset_files(
                 sources: vec![file.file_name.clone()],
                 ..AssetProvenance::default()
             },
+            // 3.17: a PNG's own sRGB chunk tags it; nothing else is read as
+            // a tag, and an untagged image waits for setAssetColorSpace.
+            color_space: (classified.mime == "image/png")
+                .then(|| png_colour_tag(file.bytes))
+                .flatten(),
         });
         batch.sources.push(PreparedAssetSource {
             source: file.file_name.clone(),
@@ -197,6 +202,26 @@ pub fn prepare_asset_files(
         debug_assert_eq!(Some(&stored), batch.assets[index].checksum.as_ref());
     }
     Ok(batch)
+}
+
+/// The colour space a PNG declares for itself, read from its chunks before
+/// the image data (3.17): an `sRGB` chunk is sRGB. Nothing else is taken as
+/// a declaration (a gamma or ICC chunk alone names no standard space here),
+/// so such a PNG stays untagged and is tagged by the user.
+pub fn png_colour_tag(bytes: &[u8]) -> Option<gx_contracts::color::SourceColorSpace> {
+    let mut at = 8;
+    while at + 8 <= bytes.len() {
+        let length = u32::from_be_bytes(bytes[at..at + 4].try_into().ok()?) as usize;
+        let kind = &bytes[at + 4..at + 8];
+        if kind == b"sRGB" {
+            return Some(gx_contracts::color::SourceColorSpace::Srgb);
+        }
+        if kind == b"IDAT" || kind == b"IEND" {
+            return None;
+        }
+        at = at.checked_add(12)?.checked_add(length)?;
+    }
+    None
 }
 
 /// Name a file's format from its bytes: PNG and JPEG images (the formats
@@ -281,6 +306,44 @@ mod tests {
         bytes.extend_from_slice(&height.to_be_bytes());
         bytes.extend_from_slice(&[8, 6, 0, 0, 0]);
         bytes
+    }
+
+    /// A PNG's chunk sequence: signature, IHDR, then `chunks` (type, data),
+    /// CRCs zeroed (the tag reader does not check them).
+    fn chunked(chunks: &[(&[u8; 4], &[u8])]) -> Vec<u8> {
+        let mut bytes = png(4, 2);
+        bytes.extend_from_slice(&[0; 4]);
+        for (kind, data) in chunks {
+            bytes.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            bytes.extend_from_slice(*kind);
+            bytes.extend_from_slice(data);
+            bytes.extend_from_slice(&[0; 4]);
+        }
+        bytes
+    }
+
+    #[test]
+    fn a_png_is_tagged_srgb_only_by_its_own_srgb_chunk_before_its_image_data() {
+        use gx_contracts::color::SourceColorSpace;
+        // 3.17: the sRGB chunk is the PNG's own declaration.
+        let tagged = chunked(&[
+            (b"gAMA", &[0, 0, 177, 143]),
+            (b"sRGB", &[0]),
+            (b"IDAT", &[]),
+        ]);
+        assert_eq!(png_colour_tag(&tagged), Some(SourceColorSpace::Srgb));
+        // A gamma chunk alone names no standard space; nothing is inferred.
+        assert_eq!(
+            png_colour_tag(&chunked(&[(b"gAMA", &[0, 0, 177, 143]), (b"IDAT", &[])])),
+            None
+        );
+        // A chunk after the image data is not read.
+        assert_eq!(
+            png_colour_tag(&chunked(&[(b"IDAT", &[]), (b"sRGB", &[0])])),
+            None
+        );
+        // A truncated file is untagged, not a panic.
+        assert_eq!(png_colour_tag(&tagged[..20]), None);
     }
 
     fn store() -> (AssetStore, std::path::PathBuf) {

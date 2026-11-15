@@ -20,10 +20,10 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::color::ColorValue;
-use crate::material::MaterialKind;
+use crate::material::{FitMode, MaterialKind};
 use crate::scene::{
-    BezierPath, SceneDocument, SceneObject, TextAlign, TextAutoFit, TextCase, TextLayout,
-    TextObject, TextOverflow, VerticalAlign, WritingMode,
+    AssetKind, AssetLibraryItem, BezierPath, ImageObject, SceneDocument, SceneObject, TextAlign,
+    TextAutoFit, TextCase, TextLayout, TextObject, TextOverflow, VerticalAlign, WritingMode,
 };
 use crate::{Refusal, StructuredRefusal};
 
@@ -163,7 +163,6 @@ pub fn drawability_refusals(document: &SceneDocument) -> Vec<StructuredRefusal> 
         // A kind the path cannot draw at all is reported alone: its other
         // properties would only restate it.
         let kind_owner = match object {
-            SceneObject::Image(_) => Some(("image", "3.17")),
             SceneObject::Mesh(_) => Some(("mesh", "11.48")),
             SceneObject::Paint(_) => Some(("paint", "3.17")),
             _ => None,
@@ -181,6 +180,19 @@ pub fn drawability_refusals(document: &SceneDocument) -> Vec<StructuredRefusal> 
                 );
             }
             SceneObject::Text(text) => text_properties(text, &at, &mut found),
+            SceneObject::Image(image) => {
+                if let Some(detail) = image_problem(image, &document.assets) {
+                    found.push(
+                        Refusal::ImageNotDrawable {
+                            object: id.into(),
+                            asset: image.asset_id.clone(),
+                            detail,
+                        },
+                        at("assetId"),
+                        serde_json::json!(image.asset_id),
+                    );
+                }
+            }
             SceneObject::Line(line) if paints(&line.base.fill) => {
                 found.push(
                     property(id, "fill", "3.17"),
@@ -554,6 +566,37 @@ fn gradients(object: &SceneObject, at: &dyn Fn(&str) -> String, found: &mut Foun
     }
 }
 
+/// Why an image object cannot be drawn, from what the document says (3.17);
+/// the engine adds what only the bytes can say (format, size, decoding).
+pub fn image_problem(image: &ImageObject, assets: &[AssetLibraryItem]) -> Option<String> {
+    let Some(asset) = assets.iter().find(|a| a.asset_id == image.asset_id) else {
+        return Some("the asset is not in the scene's asset library".into());
+    };
+    if asset.kind != AssetKind::Image {
+        return Some(format!("the asset is a {:?}, not an image", asset.kind));
+    }
+    if asset.checksum.is_none() {
+        return Some("the asset has no stored bytes yet".into());
+    }
+    if asset.color_space.is_none() {
+        return Some(
+            "the asset has no colour space; tag it (srgb, linear, rec709 or display-p3)".into(),
+        );
+    }
+    if image.fit == FitMode::NineSlice {
+        let Some(slice) = image.slice else {
+            return Some("fit nine-slice needs slice insets".into());
+        };
+        if ![slice.left, slice.top, slice.right, slice.bottom]
+            .iter()
+            .all(|v| v.is_finite() && *v >= 0.0)
+        {
+            return Some("nine-slice insets must be finite and not negative".into());
+        }
+    }
+    None
+}
+
 fn gradient_kind(paint: &Option<ColorValue>) -> Option<&'static str> {
     match paint {
         Some(ColorValue::LinearGradient { .. }) => Some("linear-gradient"),
@@ -692,15 +735,109 @@ mod tests {
     }
 
     #[test]
-    fn kinds_the_software_path_cannot_draw_refuse_with_their_owner() {
-        let image = SceneObject::Image(ImageObject {
-            base: ObjectBase::new("logo", "logo"),
+    fn an_image_draws_only_when_its_asset_is_a_stored_tagged_image() {
+        use crate::color::SourceColorSpace;
+        use crate::provenance::AssetProvenance;
+        use crate::scene::AssetLibraryItem;
+        use crate::ContentHash;
+        let image = |fit, slice| {
+            SceneObject::Image(ImageObject {
+                base: ObjectBase::new("logo", "logo"),
+                asset_id: "a".into(),
+                fit,
+                slice,
+            })
+        };
+        let asset = |kind, stored: bool, tag: Option<SourceColorSpace>| AssetLibraryItem {
             asset_id: "a".into(),
-            fit: Default::default(),
+            name: "a".into(),
+            kind,
+            path: "images/a.png".into(),
+            checksum: stored.then(|| ContentHash("h".into())),
+            mime_type: Some("image/png".into()),
+            size_bytes: None,
+            status: None,
+            provenance: AssetProvenance::default(),
+            color_space: tag,
+        };
+        let detail = |objects: Vec<SceneObject>, assets: Vec<AssetLibraryItem>| {
+            let mut doc = document(objects);
+            doc.assets = assets;
+            match drawability_refusals(&doc)
+                .into_iter()
+                .next()
+                .map(|r| r.code)
+            {
+                Some(Refusal::ImageNotDrawable {
+                    object,
+                    asset,
+                    detail,
+                }) => {
+                    assert_eq!((object.as_str(), asset.as_str()), ("logo", "a"));
+                    Some(detail)
+                }
+                None => None,
+                other => panic!("unexpected {other:?}"),
+            }
+        };
+        let srgb = Some(SourceColorSpace::Srgb);
+        let ok = || vec![asset(AssetKind::Image, true, srgb)];
+        assert_eq!(detail(vec![image(FitMode::Cover, None)], ok()), None);
+        for (objects, assets, expect) in [
+            (
+                vec![image(FitMode::Contain, None)],
+                vec![],
+                "not in the scene",
+            ),
+            (
+                vec![image(FitMode::Contain, None)],
+                vec![asset(AssetKind::Video, true, srgb)],
+                "not an image",
+            ),
+            (
+                vec![image(FitMode::Contain, None)],
+                vec![asset(AssetKind::Image, false, srgb)],
+                "no stored bytes",
+            ),
+            (
+                vec![image(FitMode::Contain, None)],
+                vec![asset(AssetKind::Image, true, None)],
+                "no colour space",
+            ),
+            (
+                vec![image(FitMode::NineSlice, None)],
+                ok(),
+                "needs slice insets",
+            ),
+            (
+                vec![image(
+                    FitMode::NineSlice,
+                    Some(crate::scene::ImageSlice {
+                        left: -1.0,
+                        top: 0.0,
+                        right: 0.0,
+                        bottom: 0.0,
+                    }),
+                )],
+                ok(),
+                "not negative",
+            ),
+        ] {
+            let found = detail(objects, assets).expect("refused");
+            assert!(found.contains(expect), "{found}");
+        }
+    }
+
+    #[test]
+    fn kinds_the_software_path_cannot_draw_refuse_with_their_owner() {
+        let paint = SceneObject::Paint(crate::scene::PaintObject {
+            base: ObjectBase::new("brush", "brush"),
+            strokes: Vec::new(),
+            paint_blend_mode: crate::scene::BrushBlendMode::Normal,
         });
         assert!(matches!(
-            refused(vec![image]),
-            Some(Refusal::ObjectKindNotDrawable { object, kind, owner }) if object == "logo" && kind == "image" && owner == "3.17"
+            refused(vec![paint]),
+            Some(Refusal::ObjectKindNotDrawable { object, kind, owner }) if object == "brush" && kind == "paint" && owner == "3.17"
         ));
     }
 

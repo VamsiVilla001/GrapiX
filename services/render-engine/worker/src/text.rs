@@ -692,6 +692,7 @@ mod tests {
                     size_bytes: None,
                     status: None,
                     provenance: Default::default(),
+                    color_space: None,
                 }),
                 _ => None,
             })

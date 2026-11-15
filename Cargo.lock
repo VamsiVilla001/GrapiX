@@ -2154,6 +2154,7 @@ dependencies = [
  "gx-media-plane",
  "lyon",
  "miniz_oxide 0.8.9",
+ "png 0.17.16",
  "pollster",
  "serde",
  "serde_json",

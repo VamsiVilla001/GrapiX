@@ -118,6 +118,16 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-15 — 3.17 increment 3: tagged image quads in all eight fit modes (Claude)
+
+**Resume here.** User decisions: colour tag on the asset record (`AssetLibraryItem.colorSpace`, filled at import
+from the PNG's sRGB chunk, else `setAssetColorSpace`), PNG only, all eight fit modes, untagged refused.
+`ImageObject.slice` for nine-slice; `ImageNotDrawable` (validator `drawability::image_problem` + engine byte
+checks). `image.rs` decodes and fits; `compositor/image.wgsl` is the GPU twin; images are layers on both paths.
+**3.17 stays active.** Remaining: record the backend benchmark on today's product (or rerun the spike), the 3.17
+mutations, then close the row. Brush paint objects still refuse (not in the done-when). The engine-host `ensure`
+tests fail on this machine because of the stale schema-1 journal in the user's data root (reported, untouched).
+
 ## 2026-11-15 — 3.17 increment 2: linear and radial gradients on paths (Claude)
 
 **Resume here.** Gradients draw on both paths. Semantics defined (none existed): object space = fractions of the

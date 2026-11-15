@@ -40,6 +40,9 @@ vello_gpu = "=0.3.0"
 # Headless renders and the CPU reference draw with it, so Program and headless
 # agree within one code value.
 vello_cpu = "=0.3.0"
+# MIT/Apache-2.0, already in the lockfile (0.17.16, through vello). 3.17 decodes
+# PNG image assets at prepare (user decision 15 Nov 2026: PNG only).
+png = "0.17"
 
 [lib]
 path = "src/lib.rs"

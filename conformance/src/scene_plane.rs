@@ -104,6 +104,7 @@ fn populated_scene(id: &str, asset: Option<ContentHash>) -> SceneDocument {
                 size_bytes: Some(2048),
                 status: None,
                 provenance: Default::default(),
+                color_space: None,
             })
             .into_iter()
             .collect(),

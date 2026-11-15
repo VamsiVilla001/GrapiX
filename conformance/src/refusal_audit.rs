@@ -1459,6 +1459,7 @@ fn drive_engine_store_refusals(report: &mut Report) {
                 size_bytes: Some(bytes.len() as u64),
                 status: None,
                 provenance: Default::default(),
+                color_space: None,
             });
             let open = || RecoveryJournal::open_at(journal.clone()).map_err(|e| e.to_string());
             let mut first = new_engine();
@@ -2083,6 +2084,7 @@ fn is_driven(variant: &str) -> bool {
             | "UnsupportedDepthMode"
             | "UnsupportedPathGradient"
             | "GradientNotDrawable"
+            | "ImageNotDrawable"
             | "CommandUnknownField"
             | "SessionUnknown"
             | "HistoryEmpty"

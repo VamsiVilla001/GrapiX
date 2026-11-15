@@ -1087,6 +1087,7 @@ mod tests {
             size_bytes: Some(2048),
             status: None,
             provenance: provenance.clone(),
+            color_space: None,
         });
         let root = scratch("provenance-round-trip");
         let projects = Projects::at_root(&root);
@@ -1134,6 +1135,7 @@ mod tests {
             size_bytes: Some(bytes.len() as u64),
             status: None,
             provenance: AssetProvenance::default(),
+            color_space: None,
         }
     }
 

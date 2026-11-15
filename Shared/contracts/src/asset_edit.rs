@@ -57,6 +57,7 @@ mod tests {
                 }),
                 ..AssetProvenance::default()
             },
+            color_space: None,
         }
     }
 

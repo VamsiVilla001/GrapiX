@@ -635,6 +635,7 @@ mod tests {
             base: ObjectBase::new("logo", "Logo"),
             asset_id: "old".into(),
             fit: Default::default(),
+            slice: None,
         }));
         scene
             .data_context

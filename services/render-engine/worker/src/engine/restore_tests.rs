@@ -76,6 +76,7 @@ fn scene(id: &str, image: Option<&[u8]>) -> SceneDocument {
             size_bytes: Some(bytes.len() as u64),
             status: None,
             provenance: Default::default(),
+            color_space: None,
         });
     }
     scene

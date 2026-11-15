@@ -740,3 +740,121 @@ fn gpu_engine_draws_vector_content_within_one_code_of_the_vello_cpu_reference() 
         assert_eq!(alpha(160, 160), 255, "{space:?}: non-zero star centre");
     }
 }
+
+/// 3.17's image fixture: one PNG, tagged sRGB on its asset record, drawn by
+/// eight image objects, one per fit mode, at whole-pixel placements.
+fn image_fixture() -> (SceneDocument, Vec<u8>) {
+    use gx_contracts::color::SourceColorSpace;
+    use gx_contracts::material::FitMode;
+    use gx_contracts::scene::{AssetKind, AssetLibraryItem, ImageObject, ImageSlice};
+    // 12 x 8 texels: a hue ramp with a soft alpha border.
+    let (iw, ih) = (12_u32, 8_u32);
+    let mut rgba = Vec::new();
+    for y in 0..ih {
+        for x in 0..iw {
+            let edge = x == 0 || y == 0 || x == iw - 1 || y == ih - 1;
+            rgba.extend_from_slice(&[
+                (x * 21) as u8,
+                (y * 31) as u8,
+                (255 - x * 20) as u8,
+                if edge { 140 } else { 255 },
+            ]);
+        }
+    }
+    let bytes = crate::image::tests::png_bytes(iw, ih, &rgba, true);
+    let mut doc = lower_third();
+    doc.objects.clear();
+    doc.fonts.clear();
+    doc.timeline.channels.clear();
+    doc.assets = vec![AssetLibraryItem {
+        asset_id: "asset_images_ramp".into(),
+        name: "ramp".into(),
+        kind: AssetKind::Image,
+        path: "images/ramp.png".into(),
+        checksum: Some(gx_asset_plane::content_hash(&bytes)),
+        mime_type: Some("image/png".into()),
+        size_bytes: Some(bytes.len() as u64),
+        status: None,
+        provenance: Default::default(),
+        color_space: Some(SourceColorSpace::Srgb),
+    }];
+    let fits = [
+        FitMode::Stretch,
+        FitMode::Contain,
+        FitMode::Cover,
+        FitMode::Crop,
+        FitMode::Tile,
+        FitMode::Original,
+        FitMode::PixelPerfect,
+        FitMode::NineSlice,
+    ];
+    for (k, fit) in fits.into_iter().enumerate() {
+        let id = format!("image-{k}");
+        let mut base = ObjectBase::new(&id, &id);
+        base.x = 20.0 + 110.0 * (k % 4) as f64;
+        base.y = 20.0 + 140.0 * (k / 4) as f64;
+        base.width = 90.0;
+        base.height = 55.0;
+        base.opacity = 0.9;
+        doc.objects.push(SceneObject::Image(ImageObject {
+            base,
+            asset_id: "asset_images_ramp".into(),
+            fit,
+            slice: Some(ImageSlice {
+                left: 3.0,
+                top: 2.0,
+                right: 3.0,
+                bottom: 2.0,
+            }),
+        }));
+    }
+    (doc, bytes)
+}
+
+#[test]
+#[ignore = "requires hardware GPU; explicit 3.17 drawing gate"]
+fn gpu_engine_draws_image_quads_in_every_fit_mode_within_one_code_of_the_cpu_reference() {
+    for space in [WorkingColorSpace::Srgb, WorkingColorSpace::LinearSrgb] {
+        let (mut engine, ticks) = hardware_engine();
+        let (mut doc, bytes) = image_fixture();
+        doc.working_color_space = space;
+        engine.record_verified_asset_bytes(gx_asset_plane::content_hash(&bytes), bytes);
+        let before = RenderWork::snapshot();
+        let pin = match engine.publish(doc) {
+            PublishReply::Published {
+                take_id,
+                revision,
+                content_hash,
+            } => (take_id, revision, content_hash),
+            other => panic!("the image scene must publish: {other:?}"),
+        };
+        let prepare = RenderWork::snapshot().since(before);
+        // Publication also prepares the CPU reference, which builds each
+        // image's layer on the CPU; the GPU sources take the GPU route (the
+        // trace below), so these eight are the reference's alone.
+        assert_eq!(prepare.cpu_source_rasterizations, 8);
+        let sources = engine.gpu_source_trace(&pin.0, pin.1).unwrap().to_vec();
+        assert_eq!(sources.len(), 8);
+        assert!(sources
+            .iter()
+            .all(|s| s.route == "gpu-image-fit-at-prepare"));
+        assert!(matches!(take(&mut engine, &pin), EngineReply::Taken(_)));
+        ticks.store(1, Ordering::Relaxed);
+        let program = engine.emit_frame_settled().unwrap().frame;
+        let preview = engine.take_preview().unwrap();
+        let cpu = engine.prepared_scene(&pin.0, pin.1).unwrap();
+        for (frame, output, name) in [
+            (&*program, OutputTransform::Rec709, "Program"),
+            (&*preview, OutputTransform::Srgb, "Preview"),
+        ] {
+            let reference = cpu.frame_at(0, output).unwrap();
+            assert_within_one_code(frame, &reference, &format!("{space:?} {name}"));
+        }
+        // Every image object put pixels down.
+        for k in 0..8 {
+            let (x, y) = (20 + 110 * (k % 4) + 45, 20 + 140 * (k / 4) + 27);
+            let alpha = preview.pixels[((y * preview.width + x) * 4 + 3) as usize];
+            assert!(alpha > 100, "{space:?}: image {k} centre alpha {alpha}");
+        }
+    }
+}

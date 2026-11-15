@@ -585,6 +585,7 @@ mod tests {
             size_bytes: None,
             status: Some(AssetAvailability::Importing),
             provenance: Default::default(),
+            color_space: None,
         }
     }
 

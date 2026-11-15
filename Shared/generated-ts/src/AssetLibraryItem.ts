@@ -3,6 +3,7 @@ import type { AssetAvailability } from "./AssetAvailability";
 import type { AssetKind } from "./AssetKind";
 import type { AssetProvenance } from "./AssetProvenance";
 import type { ContentHash } from "./ContentHash";
+import type { SourceColorSpace } from "./SourceColorSpace";
 
 /**
  * An asset as the library knows it. Carries **both** addresses: the content
@@ -33,4 +34,11 @@ checksum?: ContentHash, mimeType?: string, sizeBytes?: bigint, status?: AssetAva
  * carries one, and it is always written: a human-made asset may leave
  * every field empty, but the schema is present in every saved project.
  */
-provenance: AssetProvenance, };
+provenance: AssetProvenance,
+/**
+ * The colour space an image's pixel values are in (3.17, user decision
+ * 15 Nov 2026). Set at import from the file's own tag when it has one,
+ * otherwise by the user; never inferred (B.1). An image without one is
+ * refused by name when drawn.
+ */
+colorSpace?: SourceColorSpace, };

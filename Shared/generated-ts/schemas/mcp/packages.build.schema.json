@@ -77,6 +77,17 @@
           ],
           "description": "Content hash — the store address. `None` only while importing."
         },
+        "colorSpace": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceColorSpace"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The colour space an image's pixel values are in (3.17, user decision\n15 Nov 2026). Set at import from the file's own tag when it has one,\notherwise by the user; never inferred (B.1). An image without one is\nrefused by name when drawn."
+        },
         "kind": {
           "$ref": "#/$defs/AssetKind"
         },
@@ -2533,6 +2544,17 @@
           "format": "double",
           "type": "number"
         },
+        "slice": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ImageSlice"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Nine-slice insets, in the image's own texels (3.17): the corners keep\ntheir size, the edges stretch along one axis and the centre along\nboth. Required by `fit: nine-slice`, ignored otherwise."
+        },
         "stroke": {
           "anyOf": [
             {
@@ -2597,6 +2619,34 @@
         "id",
         "name",
         "assetId"
+      ],
+      "type": "object"
+    },
+    "ImageSlice": {
+      "description": "Nine-slice insets from each edge of an image, in texels (3.17).",
+      "properties": {
+        "bottom": {
+          "format": "double",
+          "type": "number"
+        },
+        "left": {
+          "format": "double",
+          "type": "number"
+        },
+        "right": {
+          "format": "double",
+          "type": "number"
+        },
+        "top": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "left",
+        "top",
+        "right",
+        "bottom"
       ],
       "type": "object"
     },

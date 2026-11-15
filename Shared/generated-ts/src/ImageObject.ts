@@ -3,6 +3,7 @@ import type { BlendMode } from "./BlendMode";
 import type { ColorValue } from "./ColorValue";
 import type { EffectInstance } from "./EffectInstance";
 import type { FitMode } from "./FitMode";
+import type { ImageSlice } from "./ImageSlice";
 import type { JsonValue } from "./serde_json/JsonValue";
 import type { MaterialBinding } from "./MaterialBinding";
 import type { StrokeStyle } from "./StrokeStyle";
@@ -22,7 +23,13 @@ assetId: string,
  * How the pixels are mapped into the base box (1.3's single fit
  * vocabulary).
  */
-fit: FitMode, id: string, name: string, visible: boolean, locked: boolean,
+fit: FitMode,
+/**
+ * Nine-slice insets, in the image's own texels (3.17): the corners keep
+ * their size, the edges stretch along one axis and the centre along
+ * both. Required by `fit: nine-slice`, ignored otherwise.
+ */
+slice?: ImageSlice, id: string, name: string, visible: boolean, locked: boolean,
 /**
  * 0–1.
  */

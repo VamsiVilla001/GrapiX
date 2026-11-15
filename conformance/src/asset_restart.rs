@@ -93,6 +93,7 @@ fn lower_third(id: &str, images: &[(&str, &[u8])]) -> Result<SceneDocument, Stri
             size_bytes: Some(bytes.len() as u64),
             status: None,
             provenance: Default::default(),
+            color_space: None,
         });
     }
     Ok(scene)

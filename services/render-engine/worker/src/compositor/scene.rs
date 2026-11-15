@@ -103,12 +103,13 @@ impl GpuScene {
                 pad,
                 limit,
                 Some(gpu),
+                scene.images(),
             )?;
             let (width, height) = (source.width, source.height);
-            let route = if source.drawn.is_some() {
-                "gpu-vello-coverage-at-prepare"
-            } else {
-                "cpu-prepared-source-at-prepare"
+            let route = match (source.drawn.is_some(), object) {
+                (true, SceneObject::Image(_)) => "gpu-image-fit-at-prepare",
+                (true, _) => "gpu-vello-coverage-at-prepare",
+                (false, _) => "cpu-prepared-source-at-prepare",
             };
             let origin = source.origin;
             let blend_mode = object.base().blend_mode();

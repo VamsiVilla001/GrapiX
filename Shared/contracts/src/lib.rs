@@ -379,6 +379,14 @@ pub enum Refusal {
         paint: String,
         detail: String,
     },
+    /// An image object cannot be drawn (3.17): its asset is unknown, not an
+    /// image, not stored, untagged, not a PNG, too large or undecodable, or
+    /// its nine-slice insets are missing or invalid. Nothing is assumed.
+    ImageNotDrawable {
+        object: String,
+        asset: String,
+        detail: String,
+    },
     /// A vector path could not be represented as triangles. The object and
     /// tessellator diagnostic are retained so a malformed path never turns
     /// into an absent or approximate graphic.
@@ -1164,6 +1172,11 @@ impl std::fmt::Display for Refusal {
                 f,
                 "object {object}'s {paint} gradient cannot be drawn as authored: {detail}"
             ),
+            Refusal::ImageNotDrawable {
+                object,
+                asset,
+                detail,
+            } => write!(f, "image {object} (asset {asset}) cannot be drawn: {detail}"),
             Refusal::VectorTessellationFailed { object, detail } => {
                 write!(f, "object {object} could not be tessellated: {detail}")
             }
@@ -1745,6 +1758,11 @@ impl Refusal {
             Self::GradientNotDrawable {
                 object: "audit".into(),
                 paint: "fill".into(),
+                detail: "audit".into(),
+            },
+            Self::ImageNotDrawable {
+                object: "audit".into(),
+                asset: "audit".into(),
                 detail: "audit".into(),
             },
             Self::VectorTessellationFailed {
@@ -2335,6 +2353,7 @@ impl Refusal {
             Self::UnsupportedDepthMode { .. } => "unsupportedDepthMode",
             Self::UnsupportedPathGradient { .. } => "unsupportedPathGradient",
             Self::GradientNotDrawable { .. } => "gradientNotDrawable",
+            Self::ImageNotDrawable { .. } => "imageNotDrawable",
             Self::VectorTessellationFailed { .. } => "vectorTessellationFailed",
             Self::AssetMissing { .. } => "assetMissing",
             Self::ProtocolMismatch { .. } => "protocolMismatch",

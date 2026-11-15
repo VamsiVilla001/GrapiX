@@ -35,6 +35,7 @@ pub struct LayerSource {
 /// Draw object `index` of `doc` into its own padded layer space. `effective`
 /// is the document's resolved state the phase is taken from; `limit` is the
 /// largest texture dimension the source may have.
+#[allow(clippy::too_many_arguments)]
 pub fn prepare_layer_source(
     doc: &SceneDocument,
     effective: &[ResolvedObject],
@@ -43,8 +44,45 @@ pub fn prepare_layer_source(
     pad: u32,
     limit: u32,
     gpu: Option<&crate::gpu::Gpu>,
+    images: &crate::image::PreparedImages,
 ) -> Result<LayerSource, Refusal> {
     let object = &doc.objects[index];
+    // 3.17: an image is its box raster, built from its fit plan in the
+    // object's box coordinates, on the GPU when there is one.
+    if let SceneObject::Image(image) = object {
+        let decoded = images
+            .get(&image.asset_id)
+            .ok_or_else(|| Refusal::ImageNotDrawable {
+                object: image.base.id.clone(),
+                asset: image.asset_id.clone(),
+                detail: "the image was not decoded at prepare".into(),
+            })?;
+        let plan = crate::image::fit_plan(image, (decoded.width, decoded.height), pad, limit)?;
+        if let Some(gpu) = gpu {
+            if let Some(drawn) = gpu.draw_image(&image.base.id, &image.asset_id, decoded, &plan) {
+                return Ok(LayerSource {
+                    width: plan.width,
+                    height: plan.height,
+                    surface: None,
+                    drawn: Some(drawn?),
+                    origin: plan.origin,
+                });
+            }
+        }
+        crate::render_work::cpu_source();
+        return Ok(LayerSource {
+            width: plan.width,
+            height: plan.height,
+            surface: Some(RasterSurface::from_pixels(
+                plan.width,
+                plan.height,
+                plan.origin,
+                plan.raster(decoded),
+            )),
+            drawn: None,
+            origin: plan.origin,
+        });
+    }
     let id = object.base().id.clone();
     let path = format!("objects[{index}]");
     let mut local = doc.clone();

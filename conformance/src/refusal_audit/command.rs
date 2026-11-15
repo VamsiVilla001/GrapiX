@@ -64,6 +64,7 @@ fn fixture() -> SceneDocument {
             base: ObjectBase::new("logo", "Logo"),
             asset_id: "asset1".into(),
             fit: Default::default(),
+            slice: None,
         }),
     ]);
     scene.data_context.extend([

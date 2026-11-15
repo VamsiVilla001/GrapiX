@@ -1092,6 +1092,7 @@ mod tests {
             size_bytes: Some(bytes.len() as u64),
             status: None,
             provenance: Default::default(),
+            color_space: None,
         });
         // A scanner or backup tool holding the entry without sharing it.
         let held = std::fs::OpenOptions::new()

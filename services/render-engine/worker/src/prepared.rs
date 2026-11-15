@@ -69,6 +69,8 @@ pub struct PreparedScene {
     static_frame: OnceLock<RasterSurface>,
     /// Shaped glyph runs, restricted to fonts carried by the scene.
     texts: PreparedTexts,
+    /// 3.17: every image object's decoded image, by asset id.
+    images: crate::image::PreparedImages,
     /// Prepared primitive/glTF geometry, materials, lights and camera.
     meshes: PreparedMeshes,
 }
@@ -137,9 +139,13 @@ impl PreparedScene {
         let paths = PreparedPaths::prepare(&resolved, &resolution.effective)?;
         let texts = prepare_texts(&resolved, asset_bytes)?;
         let meshes = prepare_meshes(&resolved, available, asset_bytes, support)?;
+        // 3.17: images are decoded once, then drawn as layers.
+        let images = crate::image::prepare_images(&resolved, asset_bytes)?;
         let mut effect_layers = Vec::with_capacity(resolved.objects.len());
         for (index, object) in resolved.objects.iter().enumerate() {
-            if object.base().effects().is_empty() {
+            // An object with effects, and every image, is drawn in its own
+            // layer space and warped onto the canvas as the GPU composites it.
+            if object.base().effects().is_empty() && !matches!(object, SceneObject::Image(_)) {
                 effect_layers.push(None);
                 continue;
             }
@@ -152,6 +158,7 @@ impl PreparedScene {
                 pad,
                 u32::MAX,
                 None,
+                &images,
             )?;
             effect_layers.push(Some(EffectLayer { source, iterations }));
         }
@@ -183,6 +190,7 @@ impl PreparedScene {
             paths,
             static_frame,
             texts,
+            images,
             meshes,
         })
     }
@@ -337,6 +345,11 @@ impl PreparedScene {
     /// Glyph runs shaped from packaged fonts only.
     pub fn texts(&self) -> &PreparedTexts {
         &self.texts
+    }
+
+    /// Every image object's decoded image, by asset id (3.17).
+    pub fn images(&self) -> &crate::image::PreparedImages {
+        &self.images
     }
 
     /// Geometry, material assignments, lights and active camera.
@@ -535,6 +548,7 @@ mod tests {
             size_bytes: Some(64),
             status: Some(AssetAvailability::Ready),
             provenance: Default::default(),
+            color_space: None,
         }
     }
 
@@ -854,6 +868,7 @@ mod tests {
             size_bytes: Some(INTER.len() as u64),
             status: Some(AssetAvailability::Ready),
             provenance: Default::default(),
+            color_space: None,
         });
         let mut font = inter();
         if let FontSource::File { asset_id, .. } = &mut font.faces[0].source {
@@ -1257,6 +1272,7 @@ mod tests {
             base: ObjectBase::new("logo", "logo"),
             asset_id: "asset_absent".into(),
             fit: Default::default(),
+            slice: None,
         });
         match PreparedScene::prepare(
             document(vec![image]),

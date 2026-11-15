@@ -156,6 +156,17 @@
           ],
           "description": "Content hash — the store address. `None` only while importing."
         },
+        "colorSpace": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceColorSpace"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The colour space an image's pixel values are in (3.17, user decision\n15 Nov 2026). Set at import from the file's own tag when it has one,\notherwise by the user; never inferred (B.1). An image without one is\nrefused by name when drawn."
+        },
         "kind": {
           "$ref": "#/$defs/AssetKind"
         },
@@ -1625,6 +1636,22 @@
       ],
       "type": "object"
     },
+    "SetAssetColorSpace": {
+      "description": "Tag the colour space an image asset's pixel values are in (3.17):\nwhat an untagged image needs before it can be drawn.",
+      "properties": {
+        "assetId": {
+          "type": "string"
+        },
+        "colorSpace": {
+          "$ref": "#/$defs/SourceColorSpace"
+        }
+      },
+      "required": [
+        "assetId",
+        "colorSpace"
+      ],
+      "type": "object"
+    },
     "SetBinding": {
       "description": "Bind `property` to a data path, or unbind it when `path` is absent.",
       "properties": {
@@ -2310,6 +2337,19 @@
       "properties": {
         "edit": {
           "const": "relinkAsset",
+          "type": "string"
+        }
+      },
+      "required": [
+        "edit"
+      ],
+      "type": "object"
+    },
+    {
+      "$ref": "#/$defs/SetAssetColorSpace",
+      "properties": {
+        "edit": {
+          "const": "setAssetColorSpace",
           "type": "string"
         }
       },

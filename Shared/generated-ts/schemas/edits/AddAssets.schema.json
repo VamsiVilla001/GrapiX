@@ -70,6 +70,17 @@
           ],
           "description": "Content hash — the store address. `None` only while importing."
         },
+        "colorSpace": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceColorSpace"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The colour space an image's pixel values are in (3.17, user decision\n15 Nov 2026). Set at import from the file's own tag when it has one,\notherwise by the user; never inferred (B.1). An image without one is\nrefused by name when drawn."
+        },
         "kind": {
           "$ref": "#/$defs/AssetKind"
         },
@@ -281,6 +292,32 @@
         "name"
       ],
       "type": "object"
+    },
+    "SourceColorSpace": {
+      "description": "What a colour or a texture was authored in. There is no `Unknown`: an\nuntagged source is a defect the importer must refuse, not a value a\nrenderer may guess at (B.1, \"never infer\").",
+      "oneOf": [
+        {
+          "enum": [
+            "display-p3"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "srgb",
+          "description": "IEC 61966-2-1. What a hex literal, a PNG without an ICC profile and\nmost authoring tools mean.",
+          "type": "string"
+        },
+        {
+          "const": "linear",
+          "description": "Already linear — no decode on the way in.",
+          "type": "string"
+        },
+        {
+          "const": "rec709",
+          "description": "ITU-R BT.709 with its own transfer curve. Broadcast source material.",
+          "type": "string"
+        }
+      ]
     }
   },
   "additionalProperties": false,

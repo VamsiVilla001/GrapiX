@@ -508,6 +508,7 @@ mod tests {
                 size_bytes: Some(4),
                 status: Some(AssetAvailability::Ready),
                 provenance: Default::default(),
+                color_space: None,
             }],
             fonts: Vec::new(),
             materials: Vec::new(),

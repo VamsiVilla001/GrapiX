@@ -476,6 +476,7 @@ mod tests {
             size_bytes: Some(FONT.len() as u64),
             status: None,
             provenance: Default::default(),
+            color_space: None,
         });
         scene
     }

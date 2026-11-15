@@ -131,3 +131,57 @@ colour of a pixel whose alpha is code 0 on both sides: such a pixel is
 invisible, and its straight colour is a quotient by an alpha too small to
 show. On Vulkan, one pixel at the transparent end of a gradient had alpha 0 on
 both sides and colour 226 on the CPU against 0 on the GPU.
+
+## Increment 3 (15 Nov 2026): tagged image quads, every fit mode
+
+User decisions, 15 Nov 2026, after Jev and Laya
+(`agent/tmp/gpu-317/design-images-jev-laya.json`): the source colour tag
+lives on the **asset record**, filled at import from the PNG's own `sRGB`
+chunk; **PNG only**; **all eight fit modes**; an untagged asset is **refused
+by name**. Jev: file metadata (0.19, weak), PNG only (0.88), all eight
+(0.62), refuse (0.86). Laya: on each image object, PNG and JPEG, stretch
+only, refuse.
+
+- **Contract.** `AssetLibraryItem.colorSpace` (absent: untagged);
+  `ImageObject.slice` (`ImageSlice`, nine-slice insets in texels); the edit
+  `setAssetColorSpace { assetId, colorSpace }` (an unknown asset refuses
+  `SceneAssetUnknown`), in the witness trace of every edit; the refusal
+  `ImageNotDrawable { object, asset, detail }`, driven by the audit. The
+  validator (`drawability::image_problem`) refuses an unknown, non-image,
+  unstored or untagged asset and missing or negative nine-slice insets; the
+  engine adds what only the bytes say: not a PNG, more than 4096 x 4096
+  texels (checked from the header before decoding, invariant 51), undecodable,
+  insets wider than the image, a raster beyond the device limit.
+- **Import.** `gx_asset_plane::import::png_colour_tag`: a PNG's `sRGB` chunk
+  before its image data tags it sRGB; nothing else is read as a tag (a gamma
+  or ICC chunk alone names no standard space), so such a PNG stays untagged
+  until the user tags it.
+- **Engine.** `image::decode` (8- and 16-bit, grey, grey-alpha, RGB, RGBA,
+  palette expanded) into premultiplied working-space float through the colour
+  pipeline from the tagged space; `image::fit_plan`: per axis a piecewise-linear
+  map from box coordinates to texels (one segment for the scaled modes, three
+  for nine-slice). Stretch fills the box; contain and cover scale uniformly,
+  centred (cover clipped); crop, original and pixel-perfect are native size,
+  centred (original unclipped; pixel-perfect at a whole-pixel offset, rounded
+  half away from zero, sampled nearest); tile repeats from the box's
+  top-left; nine-slice keeps corners at native size (scaled together when the
+  box is shorter than both insets) and stretches edges and centre. Sampling is
+  bilinear with clamped edges, scaled by how much of the pixel the image covers
+  (the pixel's extent mapped into texels), and by the box's coverage when the
+  mode clips. The GPU pass (`compositor/image.wgsl`, in `GpuDrawer`) and the CPU
+  twin (`FitPlan::sample`) do the same f32 operations; the compositor then warps
+  the raster like any layer, and the CPU reference warps it with the same
+  sampler. Route `gpu-image-fit-at-prepare`.
+- **Not drawn yet, named**: brush paint objects still refuse
+  `ObjectKindNotDrawable` (owner 3.17); they are not in this row's done-when.
+
+### Executed
+
+| Check | Result |
+| --- | --- |
+| `image::tests` (4) | Decoding into the tagged space (sRGB 128 is 0.216 linear, linear 128 is 0.502); refusals for a JPEG, a broken PNG and a 4097 x 4097 one; every fit mode's sample values; nine-slice corners, middle mapping, wide insets refused, a short box scaling the corners |
+| `compositor::draw::tests::gpu_image_fit_matches_the_cpu_raster_in_every_fit_mode` (hardware) | A 13 x 7 partly transparent image, every fit mode, boxes 40.5 x 23.25, 9 x 5.5 and 5 x 30: GPU within one 8-bit step of the CPU raster on every float channel |
+| `engine::gpu_tests::gpu_engine_draws_image_quads_in_every_fit_mode_within_one_code_of_the_cpu_reference` (hardware, DX12 and Vulkan) | One sRGB-tagged PNG drawn by eight image objects, one per fit mode, at opacity 0.9, through the real engine in both working spaces: every source on `gpu-image-fit-at-prepare`, Program and Preview within one code value of the CPU reference, each object visible |
+| `drawability::tests::an_image_draws_only_when_its_asset_is_a_stored_tagged_image` | Draws when stored and tagged; refuses each problem with its detail |
+| `import::tests::a_png_is_tagged_srgb_only_by_its_own_srgb_chunk_before_its_image_data` | The sRGB chunk tags; gAMA alone does not; after IDAT is not read; a truncated file is untagged |
+| Conformance (asset plane, real engine) | An image object over the delivered `rate-25.png`, untagged, is refused `ImageNotDrawable` ("no colour space"); the same image with its asset tagged sRGB publishes. `ImageNotDrawable` is driven. (A validator-and-wire parity case is not possible for it: the parity harness holds no asset bytes, so the validator names every referenced image asset `AssetMissing` first.) |

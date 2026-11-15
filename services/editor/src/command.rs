@@ -2346,6 +2346,7 @@ mod tests {
             size_bytes: None,
             status: None,
             provenance: Default::default(),
+            color_space: None,
         });
         let mut bar = ObjectBase::new("bar", "Bar");
         bar.width = 640.0;
@@ -2366,6 +2367,7 @@ mod tests {
             base: logo,
             asset_id: "home-logo".into(),
             fit: Default::default(),
+            slice: None,
         }));
         scene
     }

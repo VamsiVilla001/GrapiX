@@ -25,7 +25,11 @@ pub(crate) struct GpuDrawer {
     resources: vello_gpu::Resources,
     compose: wgpu::ComputePipeline,
     layout: wgpu::BindGroupLayout,
+    /// The image fit pass (`image.wgsl`); its bind layout matches `layout`.
+    fit: wgpu::ComputePipeline,
 }
+
+const FIT_BYTES: u64 = 16 * 8;
 
 /// The compose pass's uniform for one path over one window.
 fn draw_uniform(
@@ -109,7 +113,9 @@ impl GpuDrawer {
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: wgpu::BufferSize::new(DRAW_BYTES),
+                        // The compose and fit passes bind different uniforms
+                        // through this one layout; each shader states its size.
+                        min_binding_size: None,
                     },
                     count: None,
                 },
@@ -132,12 +138,170 @@ impl GpuDrawer {
             compilation_options: Default::default(),
             cache: None,
         });
+        let fit_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("gx-image-fit"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("image.wgsl").into()),
+        });
+        let fit = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("gx-image-fit"),
+            layout: Some(&pipeline_layout),
+            module: &fit_module,
+            entry_point: Some("fit_raster"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
         Self {
             renderer,
             resources,
             compose,
             layout,
+            fit,
         }
+    }
+
+    /// An image object's box raster (3.17): `image` uploaded once as a float
+    /// texture and sampled by `plan` on the GPU into a new working-space float
+    /// texture of the plan's size. Nothing waits for the GPU.
+    pub(crate) fn draw_image(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        object: &str,
+        asset: &str,
+        image: &crate::image::DecodedImage,
+        plan: &crate::image::FitPlan,
+    ) -> Result<wgpu::Texture, Refusal> {
+        let limit = device.limits().max_texture_dimension_2d;
+        if image.width > limit || image.height > limit {
+            return Err(Refusal::ImageNotDrawable {
+                object: object.into(),
+                asset: asset.into(),
+                detail: format!(
+                    "{} x {} texels exceed the device texture limit {limit}",
+                    image.width, image.height
+                ),
+            });
+        }
+        let float_texture = |width: u32, height: u32, label: &'static str| {
+            crate::render_work::gpu_build();
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba32Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_DST
+                    | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            })
+        };
+        let source = float_texture(image.width, image.height, "gx-image-texels");
+        let mut bytes = Vec::with_capacity(image.texels.len() * 16);
+        for p in &image.texels {
+            for c in [p.r, p.g, p.b, p.a] {
+                bytes.extend_from_slice(&c.to_le_bytes());
+            }
+        }
+        queue.write_texture(
+            source.as_image_copy(),
+            &bytes,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(image.width * 16),
+                rows_per_image: Some(image.height),
+            },
+            source.size(),
+        );
+        let (width, height) = (plan.width, plan.height);
+        let stride = width.div_ceil(16) * 16;
+        let raster_bytes = u64::from(stride) * u64::from(height) * 16;
+        crate::render_work::gpu_build();
+        let raster = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("gx-image-raster"),
+            size: raster_bytes.max(16),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let flags = u32::from(plan.tile)
+            | (u32::from(plan.nearest) << 1)
+            | (u32::from(plan.clip.is_some()) << 2);
+        let [cw, ch] = plan.clip.unwrap_or([0.0, 0.0]);
+        let axis = |a: &crate::image::FitAxis| {
+            [
+                [a.k[0], a.k[1], 0.0, 0.0],
+                [a.a[0], a.a[1], a.a[2], 0.0],
+                [a.c[0], a.c[1], a.c[2], 0.0],
+            ]
+        };
+        let mut words: Vec<u32> = vec![width, height, stride, flags];
+        words.extend([plan.origin[0] as f32, plan.origin[1] as f32, cw, ch].map(f32::to_bits));
+        for row in axis(&plan.x).into_iter().chain(axis(&plan.y)) {
+            words.extend(row.map(f32::to_bits));
+        }
+        debug_assert_eq!(words.len() * 4, FIT_BYTES as usize);
+        let uniform_bytes: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
+        crate::render_work::gpu_build();
+        let uniform = wgpu::util::DeviceExt::create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("gx-image-fit"),
+                contents: &uniform_bytes,
+                usage: wgpu::BufferUsages::UNIFORM,
+            },
+        );
+        let view = source.create_view(&Default::default());
+        crate::render_work::gpu_build();
+        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("gx-image-fit"),
+            layout: &self.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: raster.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: uniform.as_entire_binding(),
+                },
+            ],
+        });
+        let texture = float_texture(width, height, "gx-image-source");
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("gx-image-fit"),
+        });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("gx-image-fit"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.fit);
+            pass.set_bind_group(0, &group, &[]);
+            pass.dispatch_workgroups(width.div_ceil(16), height.div_ceil(16), 1);
+        }
+        encoder.copy_buffer_to_texture(
+            wgpu::TexelCopyBufferInfo {
+                buffer: &raster,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(stride * 16),
+                    rows_per_image: Some(height),
+                },
+            },
+            texture.as_image_copy(),
+            texture.size(),
+        );
+        queue.submit([encoder.finish()]);
+        Ok(texture)
     }
 
     /// Draw `paths` into a new working-space float texture of `width` x
@@ -508,6 +672,86 @@ mod tests {
                 &gpu_px[at * 4..at * 4 + 4],
                 surface.pixels()[at]
             );
+        }
+    }
+
+    /// The GPU fit pass and the CPU raster agree, every fit mode, on every
+    /// float channel to within one 8-bit step: same plan, same operations.
+    #[test]
+    #[ignore = "requires hardware GPU; explicit 3.17 drawing gate"]
+    fn gpu_image_fit_matches_the_cpu_raster_in_every_fit_mode() {
+        use crate::image::tests::object;
+        use crate::image::{fit_plan, DecodedImage};
+        use gx_contracts::material::FitMode;
+        use gx_contracts::scene::ImageSlice;
+        let gpu = crate::gpu::negotiate();
+        let (device, queue) = gpu.device_queue().expect("a hardware GPU");
+        // A 13 x 7 image of varied, partly transparent texels.
+        let (iw, ih) = (13_u32, 7_u32);
+        let texels = (0..iw * ih)
+            .map(|k| {
+                let a = 0.3 + 0.7 * ((k * 37 % 11) as f32 / 10.0);
+                WorkingRgba {
+                    r: (k % 5) as f32 / 4.0 * a,
+                    g: (k % 3) as f32 / 2.0 * a,
+                    b: (k % 7) as f32 / 6.0 * a,
+                    a,
+                }
+            })
+            .collect();
+        let image = DecodedImage {
+            width: iw,
+            height: ih,
+            texels,
+        };
+        let slice = Some(ImageSlice {
+            left: 3.0,
+            top: 2.0,
+            right: 4.0,
+            bottom: 2.0,
+        });
+        let mut drawer = GpuDrawer::new(device);
+        for fit in [
+            FitMode::Stretch,
+            FitMode::Contain,
+            FitMode::Cover,
+            FitMode::Crop,
+            FitMode::Tile,
+            FitMode::Original,
+            FitMode::PixelPerfect,
+            FitMode::NineSlice,
+        ] {
+            for (w, h) in [(40.5, 23.25), (9.0, 5.5), (5.0, 30.0)] {
+                let plan = fit_plan(&object(fit, w, h, slice), (iw, ih), 2, 8192).unwrap();
+                let texture = drawer
+                    .draw_image(device, queue, "logo", "a", &image, &plan)
+                    .unwrap();
+                let gpu_px = read_float(device, queue, &texture);
+                let cpu_px = plan.raster(&image);
+                let mut worst = (0.0_f32, 0_usize);
+                for (i, p) in cpu_px.iter().enumerate() {
+                    for (c, cpu) in [p.r, p.g, p.b, p.a].into_iter().enumerate() {
+                        let d = (gpu_px[i * 4 + c] - cpu).abs();
+                        if d > worst.0 {
+                            worst = (d, i);
+                        }
+                    }
+                }
+                let at = worst.1;
+                assert!(
+                    worst.0 <= 1.0 / 255.0,
+                    "{fit:?} {w} x {h}: worst delta {} at ({}, {}): gpu {:?} cpu {:?}",
+                    worst.0,
+                    at as u32 % plan.width,
+                    at as u32 / plan.width,
+                    &gpu_px[at * 4..at * 4 + 4],
+                    cpu_px[at]
+                );
+                assert!(
+                    cpu_px.iter().any(|p| p.a > 0.0),
+                    "{fit:?} {w} x {h} draws something"
+                );
+            }
         }
     }
 }

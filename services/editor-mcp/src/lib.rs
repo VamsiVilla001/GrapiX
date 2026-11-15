@@ -887,6 +887,7 @@ mod tests {
             size_bytes: Some(10),
             status: None,
             provenance: Default::default(),
+            color_space: None,
         });
         let mut base = ObjectBase::new("logo_1", "Logo");
         base.width = 100.0;
@@ -895,6 +896,7 @@ mod tests {
                 base,
                 asset_id: "logo".into(),
                 fit: Default::default(),
+                slice: None,
             }));
         projects.write_scene("news", &s).unwrap();
 
@@ -981,6 +983,7 @@ mod tests {
             base: logo,
             asset_id: "home-logo".into(),
             fit: Default::default(),
+            slice: None,
         }));
         scene.objects.push(SceneObject::Rect(RectObject {
             base: referee,

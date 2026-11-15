@@ -342,6 +342,12 @@ commands! {
             #[ts(optional)]
             pub new_size: Option<u64>,
         },
+        /// Tag the colour space an image asset's pixel values are in (3.17):
+        /// what an untagged image needs before it can be drawn.
+        SetAssetColorSpace = "setAssetColorSpace" {
+            pub asset_id: String,
+            pub color_space: crate::color::SourceColorSpace,
+        },
         SetSceneName = "setSceneName" { pub name: String },
         /// Change the id of a scene that is not bound to a stored origin.
         SetSceneId = "setSceneId" { pub id: String },
@@ -674,6 +680,18 @@ fn apply_edit(
             }
             EditEffect::None
         }
+        SceneEdit::SetAssetColorSpace(p) => {
+            match scene.assets.iter_mut().find(|a| a.asset_id == p.asset_id) {
+                Some(asset) => asset.color_space = Some(p.color_space),
+                None => {
+                    return Err(Refusal::SceneAssetUnknown {
+                        asset_id: p.asset_id.clone(),
+                        object: scene.id.clone(),
+                    })
+                }
+            }
+            EditEffect::None
+        }
         SceneEdit::SetSceneName(p) => {
             let name = p.name.trim();
             if name.is_empty() {
@@ -870,6 +888,7 @@ pub mod witness {
             SceneEdit::UpdateFont(_) => 30,
             SceneEdit::ReplaceFont(_) => 31,
             SceneEdit::SetCanvas(_) => 32,
+            SceneEdit::SetAssetColorSpace(_) => 33,
         }
     }
 
@@ -1010,6 +1029,7 @@ pub mod witness {
             size_bytes: Some(1),
             status: None,
             provenance: crate::provenance::AssetProvenance::default(),
+            color_space: None,
         });
         scene.materials = vec![material("m1"), material("m2")];
         let mut card = ObjectBase::new("card", "Card");
@@ -1229,6 +1249,10 @@ pub mod witness {
                 new_hash: ContentHash("new".into()),
                 new_size: Some(2),
             }),
+            SceneEdit::SetAssetColorSpace(SetAssetColorSpace {
+                asset_id: "asset1".into(),
+                color_space: crate::color::SourceColorSpace::Srgb,
+            }),
             SceneEdit::SetSceneName(SetSceneName {
                 name: "Renamed Witness".into(),
             }),
@@ -1282,6 +1306,7 @@ pub mod witness {
                     size_bytes: Some(1),
                     status: None,
                     provenance: crate::provenance::AssetProvenance::default(),
+                    color_space: None,
                 }],
             }),
             // The font is unused, so it may be switched off as well as renamed.
@@ -1331,6 +1356,7 @@ pub mod witness {
                     size_bytes: Some(1),
                     status: None,
                     provenance: crate::provenance::AssetProvenance::default(),
+                    color_space: None,
                 }],
             }),
             SceneEdit::RemoveFont(RemoveFont {
@@ -1364,6 +1390,7 @@ pub mod witness {
                         }),
                         c2pa_manifest: Some("assets/c2pa/added.c2pa".into()),
                     },
+                    color_space: None,
                 }],
             }),
             // 59.94 is 60000/1001: a rate a float cannot carry, carried exact.

@@ -1124,6 +1124,7 @@ mod tests {
             size_bytes: None,
             status: None,
             provenance: Default::default(),
+            color_space: None,
         });
         let prepared = prepare_meshes(
             &scene,
@@ -1171,6 +1172,7 @@ mod tests {
             size_bytes: None,
             status: None,
             provenance: Default::default(),
+            color_space: None,
         });
         let refused = crate::prepared::PreparedScene::prepare(
             scene,
@@ -1278,6 +1280,7 @@ mod tests {
             size_bytes: None,
             status: None,
             provenance: Default::default(),
+            color_space: None,
         });
         prepare_meshes(
             &scene,
@@ -1383,6 +1386,7 @@ mod tests {
             size_bytes: None,
             status: None,
             provenance: Default::default(),
+            color_space: None,
         });
         let prepared = prepare_meshes(
             &scene,

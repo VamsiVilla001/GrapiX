@@ -61,6 +61,7 @@ fn scene_with_assets(id: &str) -> Result<(SceneDocument, Vec<AssetBytes>), Strin
         size_bytes: Some(png.len() as u64),
         status: None,
         provenance: gx_contracts::provenance::AssetProvenance::default(),
+        color_space: None,
     });
     Ok((
         scene,
@@ -151,8 +152,9 @@ pub fn asset_route_suite<P: EnginePeer>(
     );
 
     // 5.3 into the engine: a second publication sends no byte it already holds.
-    // An image object over the delivered image asset: refused by name until
-    // 3.17 draws images on the GPU, never dropped from the frame.
+    // 3.17: an image object over the delivered image asset draws once the
+    // asset is tagged with its colour space; untagged, it is refused by name,
+    // never assumed sRGB and never dropped from the frame.
     let image = scene_with_assets("conformance/asset-route-image").map(|(mut scene, _)| {
         let mut base = ObjectBase::new("conformance-image", "Image");
         base.width = 320.0;
@@ -161,20 +163,46 @@ pub fn asset_route_suite<P: EnginePeer>(
             base,
             asset_id: "conformance-image".into(),
             fit: Default::default(),
+            slice: None,
         }));
         publish_scene(asset_plane, scene)
     });
     report.record(
         PLANE,
-        "an image object over a delivered image asset is refused by name until 3.17",
+        "an image object over an untagged image asset is refused by name",
         expect(
             matches!(
                 &image,
                 Ok(Ok(PublishReply::Refused(PublishRefusal::PreparationRefused {
-                    cause: Refusal::ObjectKindNotDrawable { kind, owner, .. }
-                }))) if kind == "image" && owner == "3.17"
+                    cause: Refusal::ImageNotDrawable { object, detail, .. }
+                }))) if object == "conformance-image" && detail.contains("no colour space")
             ),
-            format!("5.9: image object publish {image:?}"),
+            format!("3.17: untagged image object publish {image:?}"),
+        ),
+    );
+    let tagged = scene_with_assets("conformance/asset-route-image-tagged").map(|(mut scene, _)| {
+        for asset in &mut scene.assets {
+            if asset.asset_id == "conformance-image" {
+                asset.color_space = Some(gx_contracts::color::SourceColorSpace::Srgb);
+            }
+        }
+        let mut base = ObjectBase::new("conformance-image", "Image");
+        base.width = 320.0;
+        base.height = 180.0;
+        scene.objects.push(SceneObject::Image(ImageObject {
+            base,
+            asset_id: "conformance-image".into(),
+            fit: Default::default(),
+            slice: None,
+        }));
+        publish_scene(asset_plane, scene)
+    });
+    report.record(
+        PLANE,
+        "an image object over a tagged image asset publishes",
+        expect(
+            matches!(&tagged, Ok(Ok(PublishReply::Published { .. }))),
+            format!("3.17: tagged image object publish {tagged:?}"),
         ),
     );
 

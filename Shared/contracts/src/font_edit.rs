@@ -323,6 +323,7 @@ mod tests {
             size_bytes: Some(10),
             status: None,
             provenance: crate::provenance::AssetProvenance::default(),
+            color_space: None,
         }
     }
 

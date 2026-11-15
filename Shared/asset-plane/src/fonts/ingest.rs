@@ -217,6 +217,7 @@ pub(crate) fn font_asset_item(
         size_bytes: Some(size_bytes as u64),
         status: Some(AssetAvailability::Ready),
         provenance,
+        color_space: None,
     }
 }
 
