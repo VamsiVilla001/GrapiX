@@ -68,7 +68,7 @@ pub trait RestartableWorker {
 }
 
 /// A published revision and the pin a take needs.
-type Pin = (TakeId, Revision, ContentHash);
+pub(crate) type Pin = (TakeId, Revision, ContentHash);
 
 fn read(path: &str) -> Result<Vec<u8>, String> {
     std::fs::read(path).map_err(|e| format!("{path}: {e}"))
@@ -178,7 +178,7 @@ fn take(peer: &mut impl EnginePeer, pin: &Pin) -> EngineReply {
 /// Taken passes. Below T0 a prepared revision is refused TierTooLow, a named
 /// skip; Taken there could only come through the identifier-only path,
 /// which means the scene was not restored, so it fails.
-fn take_outcome(peer: &mut impl EnginePeer, pin: &Pin) -> Outcome {
+pub(crate) fn take_outcome(peer: &mut impl EnginePeer, pin: &Pin) -> Outcome {
     let tier = peer.capability().device_tier;
     match (tier, take(peer, pin)) {
         (DeviceTier::T0, EngineReply::Taken(_)) => Outcome::Pass,

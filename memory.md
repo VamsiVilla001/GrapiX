@@ -118,6 +118,31 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-15 — 5.10 done: the Editor publishes by the engine's declared route (Claude)
+
+**Resume here.** Next: 3.21 (GPU frame budget; the per-layer bounding-box dispatch in `composite()` is the
+remaining blocker, a 3.17 item that codex owns). Open: Panchayati #106, #108, #109, #110. Not done on 5.10:
+the live check in the Tauri window (`npm run shells`; the result line should show the route and bytes), and
+Jev and Laya on acceptance (not installed, see 5.12). A co-located engine started by hand without
+`--package-dir` now refuses every Editor publish by name: restart the dev pair once through
+`npm run shells`.
+
+**5.10** (`docs/evidence/5.10`). The engine answers a closed `{"locality":{}}` read on its asset plane from
+the field its capability declares (`AssetPublishPeer::locality`, required, no default;
+`declared_locality`; `LocalityReply`). `gx_asset_plane::publish_as_package` reads it, writes one verified
+package named by content hash into the Editor's folder, publishes it through `publish_package` (by path, 0
+asset bytes; or chunked) and removes it. New `gx_editor::publish` (`package_sources`, `publish_document`,
+`PublishFailure`), no `Locality` in it. The Editor shell's `cmd_publish` uses it; `PublishResult` gains
+`handoff` and `transferredBytes`; `EditorError::WritePackage`. Folder: `GX_EDITOR_PACKAGE_DIR`, else
+`platform::package_exchange_root()`; `tools/launch-shells.mjs` and `gx-engine-host` give the engine the same
+folder. A LAN-declared engine reads no path even if it holds a directory; `gx-render-worker` refuses `--lan`
+with `--package-dir`.
+
+**Executed.** Conformance on three real workers (`--package-dir D`, `--lan`, none) and both mocks: locality
+agreement on both planes, by path 0 bytes and chunked exactly the font, both taken on T0, republish gives
+revision 2, six named refusals, `--lan --package-dir` exits 2. Shell integration tests 6/6 against real
+workers. 9 mutations each fail a check. Gate: cargo fmt --check and clippy -D warnings exit 0; npm run check exit 0 (46 Node, 412 Editor, 837 Rust / 0 failed / 26 ignored, conformance 583/0/9)
+
 ## 2026-11-15 — 5.12 done: publishing is additive on air (Claude)
 
 **Resume here.** Next: 5.10 (the Editor reads locality through an asset-plane read and publishes by

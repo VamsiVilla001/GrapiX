@@ -101,6 +101,15 @@ pub fn cache_root() -> Result<PathBuf, Refusal> {
         })
 }
 
+/// The folder a publisher writes packages into and an engine on the same
+/// machine reads them from by path (5.10): the cache root's `packages`
+/// folder. One folder serves both routes: co-located the engine is started
+/// with it as `--package-dir`, and over a LAN it is the publisher's outbox.
+/// It is never named on the wire.
+pub fn package_exchange_root() -> Result<PathBuf, Refusal> {
+    cache_root().map(|root| root.join("packages"))
+}
+
 /// The log root.
 pub fn log_root() -> Result<PathBuf, Refusal> {
     directories::ProjectDirs::from("com", "GrapiX", "GrapiX")

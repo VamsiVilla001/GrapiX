@@ -12,12 +12,19 @@
 
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { mkdirSync } from "node:fs";
 import { createConnection } from "node:net";
+import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 const CONTROL_PORT = 4400;
 const ASSET_PORT = 4401;
 const ENGINE_READY_TIMEOUT_MS = 20_000;
+// The one folder the Editor writes its packages into and a co-located engine
+// reads them from by path (5.10). The engine is started with it as
+// --package-dir and the Editor is told it as GX_EDITOR_PACKAGE_DIR, so the two
+// agree by construction. Nothing about it goes over the wire.
+const PACKAGE_DIR = resolve("target", "dev-packages");
 
 const children = [];
 let shuttingDown = false;
@@ -37,10 +44,11 @@ function pipe(child, label, colour) {
   }
 }
 
-function start(label, colour, command, args) {
+function start(label, colour, command, args, env = {}) {
   const child = spawn(command, args, {
     stdio: ["ignore", "pipe", "pipe"],
     shell: process.platform === "win32",
+    env: { ...process.env, ...env },
   });
   pipe(child, label, colour);
   child.on("exit", (code, signal) => {
@@ -98,20 +106,22 @@ console.log(`  control plane  127.0.0.1:${CONTROL_PORT}`);
 console.log(`  asset plane    127.0.0.1:${ASSET_PORT}`);
 console.log("");
 
-start("engine", "36", worker, ["--port", String(CONTROL_PORT)]);
+mkdirSync(PACKAGE_DIR, { recursive: true });
+console.log(`  package folder ${PACKAGE_DIR}`);
+start("engine", "36", worker, ["--port", String(CONTROL_PORT), "--package-dir", PACKAGE_DIR]);
 
 if (!(await waitForEngine())) {
   console.error(`the render engine did not answer on ${CONTROL_PORT}; not starting the shells`);
   shutdown(1);
 } else {
   console.log("engine ready — starting shells\n");
-  start("editor", "34", "npx", [
-    "tauri",
-    "dev",
-    "--config",
-    "Editor/shell/tauri.conf.json",
-    "--no-watch",
-  ]);
+  start(
+    "editor",
+    "34",
+    "npx",
+    ["tauri", "dev", "--config", "Editor/shell/tauri.conf.json", "--no-watch"],
+    { GX_EDITOR_PACKAGE_DIR: PACKAGE_DIR },
+  );
   start("playout", "31", "npx", [
     "tauri",
     "dev",

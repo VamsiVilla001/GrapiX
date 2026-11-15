@@ -34,7 +34,7 @@
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeMap;
-use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
 use gx_asset_plane::fonts::ingest::{
@@ -43,11 +43,8 @@ use gx_asset_plane::fonts::ingest::{
 use gx_asset_plane::fonts::link::{prepare_font_link, UreqFontFetcher};
 use gx_asset_plane::fonts::manager::LinkedSource;
 use gx_asset_plane::import::{prepare_asset_files, AssetFileInput, PreparedAssetBatch};
-use gx_asset_plane::package::MAX_PACKAGE_BYTES;
-use gx_asset_plane::{
-    content_hash, publish_assets, publish_scene, AssetBytes, AssetStore, AssetStoreError,
-    AssetTransferClientError, PublishClientError, PublishRefusal, PublishReply,
-};
+use gx_asset_plane::package::{PackageSource, MAX_PACKAGE_BYTES};
+use gx_asset_plane::{content_hash, AssetHandoff, AssetStore, AssetStoreError, PublishRefusal};
 use gx_contracts::animation::{animation_surface, validate_scene_animation, AnimationSurface};
 use gx_contracts::command::{
     parse_command, CommandOutcome, EditorCommand, OpenScene, SaveScene, SaveTarget, SceneSource,
@@ -61,6 +58,7 @@ use gx_contracts::font::EmbeddingPolicy;
 use gx_contracts::platform::service_data_root;
 use gx_contracts::scene::{AssetLibraryItem, SceneDocument};
 use gx_contracts::{ContentHash, Refusal, Revision, TakeId};
+use gx_editor::publish::{package_sources, publish_document, PublishFailure};
 use gx_editor::{CommandError, Projects, Workspace};
 use serde::{Deserialize, Serialize};
 
@@ -82,6 +80,27 @@ pub struct ShellState {
     /// machine without a cache directory can still edit; font ingest then
     /// refuses by name instead of the shell failing to start.
     assets: Mutex<Option<AssetStore>>,
+    /// The folder every publication writes its package into (5.10):
+    /// `GX_EDITOR_PACKAGE_DIR` if set, else the platform's package exchange
+    /// root. Resolved once. A machine with neither can still edit; publishing
+    /// then refuses by name before any socket opens.
+    package_directory: Result<PathBuf, Refusal>,
+}
+
+/// The environment variable that names the Editor's package folder.
+pub const PACKAGE_DIR_ENV: &str = "GX_EDITOR_PACKAGE_DIR";
+
+/// Where this Editor writes packages: the folder a co-located engine is
+/// started with as `--package-dir`, and a LAN publisher's outbox.
+pub fn resolve_package_directory() -> Result<PathBuf, Refusal> {
+    match std::env::var_os(PACKAGE_DIR_ENV) {
+        Some(set) if !set.is_empty() => {
+            std::path::absolute(&set).map_err(|error| Refusal::PlatformDirectoryUnavailable {
+                detail: format!("{PACKAGE_DIR_ENV} cannot be made absolute: {error}"),
+            })
+        }
+        _ => gx_contracts::platform::package_exchange_root(),
+    }
 }
 
 impl ShellState {
@@ -89,7 +108,12 @@ impl ShellState {
         Self {
             workspace: Mutex::new(workspace),
             assets: Mutex::new(None),
+            package_directory: resolve_package_directory(),
         }
+    }
+
+    fn package_directory(&self) -> Result<PathBuf, EditorError> {
+        self.package_directory.clone().map_err(refused)
     }
 
     fn workspace(&self) -> MutexGuard<'_, Workspace> {
@@ -148,6 +172,9 @@ pub enum EditorError {
     ReadFile { path: String, detail: String },
     /// The per-user asset cache could not be opened or read.
     AssetCache { detail: String },
+    /// The package for a publication could not be written into the Editor's
+    /// package folder (5.10).
+    WritePackage { path: String, detail: String },
 }
 
 impl std::fmt::Display for EditorError {
@@ -167,6 +194,9 @@ impl std::fmt::Display for EditorError {
             Self::CommandRefused { detail, .. } => write!(f, "refused: {detail}"),
             Self::ReadFile { path, detail } => write!(f, "cannot read {path}: {detail}"),
             Self::AssetCache { detail } => write!(f, "asset cache unavailable: {detail}"),
+            Self::WritePackage { path, detail } => {
+                write!(f, "cannot write the package {path}: {detail}")
+            }
         }
     }
 }
@@ -276,110 +306,83 @@ pub struct PublishResult {
     pub revision: Revision,
     /// The content hash every cue and take of this revision must pin.
     pub content_hash: ContentHash,
+    /// The route the engine's own declaration negotiated: `localPath` or
+    /// `chunkedUpload`. Reported so the author sees how it was published.
+    pub handoff: AssetHandoff,
+    /// Asset bytes this Editor sent: none by path, the missing difference
+    /// over a LAN.
+    pub transferred_bytes: u64,
 }
 
-/// The verified bytes of every asset `scene` declares by content hash, read
-/// from the Editor's own store (5.9). Each file is re-hashed, so a cache entry
-/// that no longer matches its name refuses the publish by name before anything
-/// is sent; an asset with no content hash cannot be verified by the engine
-/// and is not sent.
-pub fn scene_asset_bytes(
-    scene: &SceneDocument,
-    store: &AssetStore,
-) -> Result<Vec<AssetBytes>, EditorError> {
-    let mut assets = Vec::new();
-    for item in &scene.assets {
-        let Some(hash) = &item.checksum else { continue };
-        if assets.iter().any(|asset: &AssetBytes| &asset.hash == hash) {
-            continue;
+/// An Editor-side failure to publish, as the web layer sees it (5.10).
+///
+/// `directory` is this Editor's package folder when it is known, so a refusal
+/// that is about the folder (an engine started without `--package-dir`, or
+/// with a different one) says where this Editor writes.
+fn publish_error(failure: PublishFailure, directory: Option<&Path>) -> EditorError {
+    match failure {
+        PublishFailure::InvalidEndpoint { endpoint } => EditorError::InvalidEndpoint { endpoint },
+        PublishFailure::Unreachable { endpoint, detail } => {
+            EditorError::Unreachable { endpoint, detail }
         }
-        // The one read-back-and-re-hash (invariant 27, shared with the
-        // engine's restore, 5.11).
-        let bytes = store
-            .read_verified(hash, MAX_PACKAGE_BYTES)
-            .map_err(|error| cache_read_failed(error, hash))?;
-        assets.push(AssetBytes {
-            hash: hash.clone(),
-            bytes,
-        });
-    }
-    Ok(assets)
-}
-
-/// Publish a document and the assets it declares (5.9): preflight and send
-/// only the bytes the engine does not hold, then publish the scene, all on the
-/// one asset-plane address. The engine prepares at publication, so the bytes
-/// must arrive first or the publish refuses `AssetMissing`.
-pub fn publish_with_assets(
-    endpoint: &str,
-    scene: SceneDocument,
-    assets: &[AssetBytes],
-) -> Result<PublishResult, EditorError> {
-    let address: SocketAddr = endpoint.parse().map_err(|_| EditorError::InvalidEndpoint {
-        endpoint: endpoint.to_owned(),
-    })?;
-    if !assets.is_empty() {
-        match publish_assets(address, assets) {
-            Ok(_) => {}
-            Err(AssetTransferClientError::Connect(source)) => {
-                return Err(EditorError::Unreachable {
-                    endpoint: endpoint.to_owned(),
-                    detail: source.to_string(),
-                })
-            }
-            Err(AssetTransferClientError::Refused(cause)) => {
-                return Err(EditorError::PublishRefused {
-                    detail: cause.to_string(),
-                })
-            }
-            Err(other) => {
-                return Err(EditorError::Protocol {
-                    detail: other.to_string(),
-                })
+        PublishFailure::NotSent(refusal) => refused(refusal),
+        PublishFailure::AssetCache { detail } => EditorError::AssetCache { detail },
+        PublishFailure::TransferRefused(cause) => EditorError::PublishRefused {
+            detail: cause.to_string(),
+        },
+        PublishFailure::EngineRefused(refusal) => {
+            let (detail, about_the_folder) = match refusal {
+                PublishRefusal::InvalidPublishRequest { detail } => (detail, false),
+                PublishRefusal::SceneRefused { cause }
+                | PublishRefusal::PreparationRefused { cause } => (cause.to_string(), false),
+                PublishRefusal::PackageRefused { cause } => (
+                    cause.to_string(),
+                    matches!(
+                        cause,
+                        Refusal::PackageDirectoryNotConfigured { .. }
+                            | Refusal::PackagePathOutsideDirectory { .. }
+                    ),
+                ),
+            };
+            EditorError::PublishRefused {
+                detail: match (about_the_folder, directory) {
+                    (true, Some(directory)) => format!(
+                        "{detail}; this Editor writes its packages into {}, which a co-located engine must be started with as --package-dir",
+                        directory.display()
+                    ),
+                    _ => detail,
+                },
             }
         }
+        PublishFailure::WritePackage { path, detail } => EditorError::WritePackage { path, detail },
+        PublishFailure::Protocol { detail } => EditorError::Protocol { detail },
     }
-    publish(endpoint, scene)
 }
 
-/// Publish one complete document and report the revision it became.
+/// Publish a document with its package sources into `directory` and report the
+/// revision it became (5.10): `gx_editor::publish::publish_document` with the
+/// shell's error mapping. The one command path, shared by `cmd_publish` and
+/// the shell's tests (invariant 60).
 ///
 /// Publication is atomic at the far end: the engine either produces a new
-/// immutable revision or refuses the whole document (invariant 30). This
-/// function keeps the two outcomes distinct all the way to the web layer —
-/// an unreachable engine is not a refusal, and a refusal is not a crash.
-pub fn publish(endpoint: &str, scene: SceneDocument) -> Result<PublishResult, EditorError> {
-    let address: SocketAddr = endpoint.parse().map_err(|_| EditorError::InvalidEndpoint {
-        endpoint: endpoint.to_owned(),
-    })?;
-    match publish_scene(address, scene) {
-        Ok(PublishReply::Published {
-            take_id,
-            revision,
-            content_hash,
-        }) => Ok(PublishResult {
-            take_id,
-            revision,
-            content_hash,
-        }),
-        Ok(PublishReply::Refused(PublishRefusal::InvalidPublishRequest { detail })) => {
-            Err(EditorError::PublishRefused { detail })
-        }
-        Ok(PublishReply::Refused(
-            PublishRefusal::SceneRefused { cause }
-            | PublishRefusal::PreparationRefused { cause }
-            | PublishRefusal::PackageRefused { cause },
-        )) => Err(EditorError::PublishRefused {
-            detail: cause.to_string(),
-        }),
-        Err(PublishClientError::Connect(source)) => Err(EditorError::Unreachable {
-            endpoint: endpoint.to_owned(),
-            detail: source.to_string(),
-        }),
-        Err(other) => Err(EditorError::Protocol {
-            detail: other.to_string(),
-        }),
-    }
+/// immutable revision or refuses the whole document (invariant 30). The two
+/// outcomes stay distinct to the web layer: an unreachable engine is not a
+/// refusal, and a refusal is not a crash.
+pub fn publish_with_sources(
+    endpoint: &str,
+    directory: &Path,
+    scene: SceneDocument,
+    sources: &[PackageSource],
+) -> Result<PublishResult, EditorError> {
+    publish_document(endpoint, scene, sources, directory)
+        .map(|published| PublishResult {
+            take_id: published.take_id,
+            revision: published.revision,
+            content_hash: published.content_hash,
+            handoff: published.handoff,
+            transferred_bytes: published.transferred_bytes,
+        })
+        .map_err(|failure| publish_error(failure, Some(directory)))
 }
 
 /// Preview operator values through Rust's one control-value application.
@@ -605,10 +608,13 @@ fn cmd_publish(
         .document(&target)
         .map_err(|error| command_error(error, None))?
         .into_owned();
-    // The asset files are read under the store lock; the network work runs
-    // after it is released.
-    let assets = state.with_asset_store(|store| scene_asset_bytes(&scene, store))?;
-    publish_with_assets(&endpoint, scene, &assets)
+    // The cache files are checked under the store lock; the package is
+    // written and published after it is released.
+    let sources = state.with_asset_store(|store| {
+        package_sources(&scene, store).map_err(|failure| publish_error(failure, None))
+    })?;
+    let directory = state.package_directory()?;
+    publish_with_sources(&endpoint, &directory, scene, &sources)
 }
 
 #[tauri::command]
@@ -1093,7 +1099,9 @@ mod tests {
             .share_mode(0)
             .open(store.cache_path(&hash))
             .unwrap();
-        let refused = scene_asset_bytes(&scene, &store).unwrap_err();
+        let refused = package_sources(&scene, &store)
+            .map_err(|failure| publish_error(failure, None))
+            .unwrap_err();
         drop(held);
         assert!(
             matches!(&refused, EditorError::AssetCache { detail } if detail.contains(&hash.0)),
@@ -1101,7 +1109,7 @@ mod tests {
         );
         assert!(!refused.to_string().contains("engine"), "{refused}");
         // Once the other process lets go, the same publish reads it.
-        assert_eq!(scene_asset_bytes(&scene, &store).unwrap().len(), 1);
+        assert_eq!(package_sources(&scene, &store).unwrap().len(), 1);
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -1423,13 +1431,15 @@ mod tests {
 
     #[test]
     fn an_unparseable_endpoint_is_refused_before_any_socket_opens() {
-        let error = publish(
+        let error = publish_with_sources(
             "not-an-address",
+            Path::new("unused"),
             gx_contracts::scene::new_scene(
                 "demo",
                 "Demo",
                 gx_contracts::color::WorkingColorSpace::NEW_PROJECT,
             ),
+            &[],
         )
         .expect_err("a malformed endpoint cannot be dialled");
         assert!(matches!(error, EditorError::InvalidEndpoint { .. }));

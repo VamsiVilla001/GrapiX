@@ -332,6 +332,11 @@ impl MockEngine {
 }
 
 impl AssetPublishPeer for MockEngine {
+    // 5.10: the field `capability()` declares (see the worker).
+    fn locality(&self) -> Locality {
+        self.locality
+    }
+
     fn publish_scene(&mut self, scene: SceneDocument) -> PublishReply {
         MockEngine::publish_scene(self, scene)
     }
@@ -655,6 +660,22 @@ mod tests {
         assert!(
             e.status().unwrap().program.is_none(),
             "neither refused take reached Program"
+        );
+    }
+
+    #[test]
+    fn the_asset_plane_declares_the_locality_the_capability_does() {
+        // One field, two carriers (5.10): the Editor reads it on the asset
+        // plane, a control client in the capability exchange.
+        for engine in [MockEngine::new(), MockEngine::new().over_lan()] {
+            assert_eq!(
+                AssetPublishPeer::locality(&engine),
+                engine.capability().locality
+            );
+        }
+        assert_eq!(
+            AssetPublishPeer::locality(&MockEngine::new().over_lan()),
+            Locality::Lan
         );
     }
 

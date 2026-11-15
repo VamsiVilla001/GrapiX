@@ -70,6 +70,13 @@ fn main() {
         }
     }
 
+    // 5.10: a LAN-declared engine reads no path, so the two flags together
+    // are a contradiction the operator must resolve, not one to guess at.
+    if lan && package_dir.is_some() {
+        return usage(
+            "--lan declares an engine that is handed assets over the network, so it reads no package path: drop --package-dir",
+        );
+    }
     let locality = if lan {
         Locality::Lan
     } else {

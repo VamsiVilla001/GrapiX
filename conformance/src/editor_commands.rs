@@ -101,6 +101,10 @@ impl EnginePeer for RecordingPeer {
 }
 
 impl AssetPublishPeer for RecordingPeer {
+    fn locality(&self) -> gx_contracts::Locality {
+        AssetPublishPeer::locality(&self.engine)
+    }
+
     fn publish_scene(&mut self, scene: SceneDocument) -> PublishReply {
         let reply = self.engine.publish_scene(scene);
         if let PublishReply::Published {

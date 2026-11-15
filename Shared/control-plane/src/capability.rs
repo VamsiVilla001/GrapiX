@@ -4,6 +4,12 @@
 //! Locality is *declared*, not probed. The engine knows whether its clients
 //! reached it over a pipe or a socket; a client guessing would get it wrong
 //! exactly when it matters, which is during the L0 to L1 move.
+//!
+//! The declaration is made once, in the engine's single locality field. This
+//! exchange carries it to a control client. A publisher that holds no control
+//! client (the Editor, boundary rule R6) reads the same field on the asset
+//! plane, on the address it publishes to (5.10); conformance holds the two
+//! answers equal on real workers and both mocks.
 
 use gx_contracts::material::MaterialSupport;
 use gx_contracts::{ClockSource, DeviceTier, Epoch, Locality, MediaCodec, ReferenceState, Refusal};

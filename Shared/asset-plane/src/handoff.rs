@@ -4,8 +4,11 @@
 //! ADR-001 gives the asset plane two transports: a co-located (L0) engine is
 //! handed a package by local filesystem path; a LAN (L1) engine receives the
 //! content-addressed chunked upload of 5.3/5.9. Which one a publisher uses is
-//! decided here, from the locality the engine declared in its capability
-//! exchange, and nowhere else (boundary rule R9).
+//! decided here, from the locality the engine declared, and nowhere else
+//! (boundary rule R9). The engine declares it once, in one field: the control
+//! plane carries it in `EngineCapability`, and the asset plane answers the
+//! same field to a publisher that holds no control client (5.10), so
+//! [`publish_as_package`] reads it from the address it publishes to.
 //!
 //! Both routes end in the same place. The engine reads and verifies the
 //! package once, re-hashes every declared asset against the scene's content
@@ -16,18 +19,24 @@
 
 use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf, Prefix};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use gx_contracts::package::package_path_components;
 use gx_contracts::scene::SceneDocument;
-use gx_contracts::{Locality, Refusal};
+use gx_contracts::{ContentHash, Locality, Refusal};
+use serde::{Deserialize, Serialize};
 
-use crate::package::{read_package, PackageError, VerifiedPackage};
+use crate::package::{read_package, write_package, PackageError, PackageSource, VerifiedPackage};
 use crate::preflight::{publish_assets, AssetBytes, AssetTransferClientError};
-use crate::publish::{publish_package_path, publish_scene, PublishClientError, PublishReply};
+use crate::publish::{
+    declared_locality, publish_package_path, publish_scene, LocalityReply, PublishClientError,
+    PublishRefusal, PublishReply,
+};
 use crate::store::content_hash;
 
 /// How a publisher hands a package's assets to an engine.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum AssetHandoff {
     /// L0: the engine is told the package's local path and reads it itself.
     LocalPath,
@@ -313,6 +322,116 @@ pub fn publish_package(
     }
 }
 
+/// What publishing one document did (5.10).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DocumentPublication {
+    /// Where the package was written for this publication. It is removed
+    /// afterwards, so this names a file that no longer exists unless
+    /// `removal_failed` says why it does.
+    pub package: PathBuf,
+    /// The content hash of the document as it was packaged. A publisher
+    /// compares it with the hash the engine issued.
+    pub packaged_hash: ContentHash,
+    /// Why the package could not be removed, if it could not: reported, never
+    /// turned into a failed publication. The engine read the package inside
+    /// the request and keeps no path, so a leftover file is inert.
+    pub removal_failed: Option<String>,
+    pub publication: PackagePublication,
+}
+
+/// Why a document publication obtained no reply.
+#[derive(Debug)]
+pub enum DocumentPublishError {
+    /// The engine's declared locality could not be read: nothing was written.
+    Locality(PublishClientError),
+    /// The engine declined to declare it by name. An engine built before 5.10
+    /// answers with its existing refusal.
+    LocalityRefused(PublishRefusal),
+    /// The package could not be written, or did not verify. Nothing was
+    /// offered to the engine.
+    Write(PackageError),
+    Publish(PackagePublishError),
+}
+
+impl std::fmt::Display for DocumentPublishError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Locality(error) => write!(f, "could not read the engine's locality: {error}"),
+            Self::LocalityRefused(refusal) => {
+                write!(f, "the engine did not declare its locality: {refusal:?}")
+            }
+            Self::Write(error) => write!(f, "{error}"),
+            Self::Publish(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for DocumentPublishError {}
+
+/// Distinguishes packages written by one process.
+static PACKAGE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// Publish an authored document to an engine as one verified package (5.10):
+/// the one publisher function for documents, so no caller reads or names a
+/// locality (R9) and none touches the file system (R2).
+///
+/// 1. The engine is asked for its declared locality on `engine`, the address
+///    the publication goes to, so an unreachable or older engine leaves no file
+///    behind.
+/// 2. One package is written into `directory`, named by the document's content
+///    hash, the process and a sequence number, never by user text (a scene id
+///    may contain `/`). The write verifies the package before it appears.
+/// 3. It is published through [`publish_package`]: by path with no asset bytes
+///    to an engine that declares itself co-located, chunked with only the
+///    missing bytes to one that does not.
+/// 4. The package is removed whether the engine published, refused or failed.
+///
+/// `scene` must carry the revision pin a package needs; the engine issues its
+/// own revision.
+pub fn publish_as_package(
+    engine: SocketAddr,
+    directory: &Path,
+    scene: &SceneDocument,
+    sources: &[PackageSource],
+) -> Result<DocumentPublication, DocumentPublishError> {
+    let locality = match declared_locality(engine).map_err(DocumentPublishError::Locality)? {
+        LocalityReply::Declared { locality } => locality,
+        LocalityReply::Refused(refusal) => {
+            return Err(DocumentPublishError::LocalityRefused(refusal))
+        }
+    };
+    let directory = std::path::absolute(directory).map_err(|source| {
+        DocumentPublishError::Write(PackageError::Open {
+            path: directory.to_path_buf(),
+            source,
+        })
+    })?;
+    std::fs::create_dir_all(&directory).map_err(|source| {
+        DocumentPublishError::Write(PackageError::Open {
+            path: directory.clone(),
+            source,
+        })
+    })?;
+    let packaged_hash = scene.content_hash();
+    let package = directory.join(format!(
+        "{}-{}-{}.gpxpkg",
+        packaged_hash.0,
+        std::process::id(),
+        PACKAGE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    write_package(&package, scene, sources, None).map_err(DocumentPublishError::Write)?;
+    let publication = publish_package(engine, locality, &package);
+    let removal_failed = std::fs::remove_file(&package)
+        .err()
+        .map(|error| error.to_string());
+    Ok(DocumentPublication {
+        package,
+        packaged_hash,
+        removal_failed,
+        publication: publication.map_err(DocumentPublishError::Publish)?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -380,8 +499,8 @@ mod tests {
     }
 
     /// A peer that keeps what it is handed, with an optional package directory.
-    #[derive(Default)]
     struct Peer {
+        locality: Locality,
         directory: Option<PathBuf>,
         assets: HashMap<ContentHash, Vec<u8>>,
         published: Vec<SceneDocument>,
@@ -393,6 +512,25 @@ mod tests {
         /// directory read, so a test can take the peer at that moment.
         signal: Option<(Signal, std::sync::mpsc::Sender<()>)>,
         preflight_answers: std::cell::Cell<usize>,
+        /// The `.gpxpkg` files in the package directory each time the engine
+        /// side read it, so a test can see the package existed during the call.
+        seen_in_directory: std::cell::RefCell<Vec<Vec<String>>>,
+    }
+
+    impl Default for Peer {
+        fn default() -> Self {
+            Self {
+                locality: Locality::CoLocated,
+                directory: None,
+                assets: HashMap::new(),
+                published: Vec::new(),
+                store: None,
+                received_unstored: Vec::new(),
+                signal: None,
+                preflight_answers: std::cell::Cell::new(0),
+                seen_in_directory: std::cell::RefCell::new(Vec::new()),
+            }
+        }
     }
 
     #[derive(Clone, Copy, PartialEq)]
@@ -412,6 +550,9 @@ mod tests {
     }
 
     impl AssetPublishPeer for Peer {
+        fn locality(&self) -> Locality {
+            self.locality
+        }
         fn publish_scene(&mut self, scene: SceneDocument) -> PublishReply {
             let content_hash = content_hash(&serde_json::to_vec(&scene).unwrap());
             self.published.push(scene);
@@ -442,6 +583,17 @@ mod tests {
         }
         fn package_directory(&self) -> Option<PathBuf> {
             self.signal_at(Signal::PackageDirectory);
+            if let Some(directory) = &self.directory {
+                let mut names: Vec<String> = fs::read_dir(directory)
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .filter_map(|entry| entry.file_name().into_string().ok())
+                    .filter(|name| name.ends_with(".gpxpkg"))
+                    .collect();
+                names.sort();
+                self.seen_in_directory.borrow_mut().push(names);
+            }
             self.directory.clone()
         }
         fn asset_store(&self) -> Option<Arc<crate::store::AssetStore>> {
@@ -849,6 +1001,271 @@ mod tests {
                 "{locality:?}"
             );
         }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    // ---------------------------------------------------------------------
+    // 5.10: the engine declares its locality on the asset plane, and a
+    // document is published as one package through the route it negotiates.
+    // ---------------------------------------------------------------------
+
+    fn font_sources(root: &Path) -> Vec<PackageSource> {
+        let source = root.join("face.font");
+        fs::write(&source, FONT).unwrap();
+        vec![PackageSource {
+            path: "fonts/face.ttf".into(),
+            source,
+        }]
+    }
+
+    fn packages_in(directory: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(directory)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .filter_map(|entry| entry.file_name().into_string().ok())
+                    .filter(|name| name.ends_with(".gpxpkg"))
+                    .collect()
+            })
+            .unwrap_or_default();
+        names.sort();
+        names
+    }
+
+    /// `<64 hex>-<pid>-<seq>.gpxpkg`
+    fn is_package_name(name: &str) -> bool {
+        let Some(stem) = name.strip_suffix(".gpxpkg") else {
+            return false;
+        };
+        let parts: Vec<&str> = stem.split('-').collect();
+        parts.len() == 3
+            && parts[0].len() == 64
+            && parts[0]
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            && parts[1..]
+                .iter()
+                .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+    }
+
+    #[test]
+    fn a_lan_declared_peer_reads_no_path_even_if_it_holds_a_directory() {
+        let root = directory();
+        let path = package(&root, "forced", &scene(content_hash(FONT)));
+        let (lan, _) = serve(Peer {
+            locality: Locality::Lan,
+            directory: Some(root.clone()),
+            ..Peer::default()
+        });
+        // A forged or stale by-path offer to a LAN-declared engine.
+        let forced = publish_package(lan, Locality::CoLocated, &path).unwrap();
+        assert!(
+            matches!(
+                &forced.reply,
+                PublishReply::Refused(PublishRefusal::PackageRefused {
+                    cause: Refusal::PackageDirectoryNotConfigured { .. }
+                })
+            ),
+            "{forced:?}"
+        );
+        // The same peer, declaring co-located, takes it.
+        let (local, _) = serve(Peer {
+            locality: Locality::CoLocated,
+            directory: Some(root.clone()),
+            ..Peer::default()
+        });
+        let accepted = publish_package(local, Locality::CoLocated, &path).unwrap();
+        assert!(
+            matches!(accepted.reply, PublishReply::Published { .. }),
+            "{accepted:?}"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_document_goes_to_a_co_located_engine_by_path_and_its_package_is_removed() {
+        let root = directory();
+        let folder = root.join("outbox");
+        let scene = scene(content_hash(FONT));
+        let (addr, peer) = serve(Peer {
+            locality: Locality::CoLocated,
+            directory: Some(folder.clone()),
+            ..Peer::default()
+        });
+        // The folder does not exist yet: the publisher makes it.
+        let done = publish_as_package(addr, &folder, &scene, &font_sources(&root)).unwrap();
+        assert_eq!(done.publication.handoff, AssetHandoff::LocalPath);
+        assert_eq!(done.publication.transferred_bytes, 0);
+        assert!(matches!(
+            done.publication.reply,
+            PublishReply::Published { .. }
+        ));
+        assert_eq!(done.packaged_hash, scene.content_hash());
+        assert_eq!(done.removal_failed, None);
+        // The package existed while the engine read it, under a name that is
+        // a hash, never user text, and it is gone afterwards.
+        let peer = peer.lock().unwrap();
+        let seen = peer.seen_in_directory.borrow();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].len(), 1, "one package during the call: {seen:?}");
+        assert!(is_package_name(&seen[0][0]), "{}", seen[0][0]);
+        assert!(seen[0][0].starts_with(&done.packaged_hash.0));
+        assert!(packages_in(&folder).is_empty());
+        assert!(!done.package.exists());
+        // By path the engine moved no asset bytes itself.
+        assert!(peer.assets.contains_key(&content_hash(FONT)));
+        drop(seen);
+        drop(peer);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_document_goes_to_a_lan_engine_chunked_with_exactly_the_missing_bytes() {
+        let root = directory();
+        let folder = root.join("outbox");
+        let scene = scene(content_hash(FONT));
+        let (addr, peer, received) = serve_counted(Peer {
+            locality: Locality::Lan,
+            ..Peer::default()
+        });
+        let done = publish_as_package(addr, &folder, &scene, &font_sources(&root)).unwrap();
+        assert_eq!(done.publication.handoff, AssetHandoff::ChunkedUpload);
+        assert_eq!(done.publication.transferred_bytes, FONT.len() as u64);
+        assert_eq!(received.received_asset_bytes(), FONT.len() as u64);
+        assert!(matches!(
+            done.publication.reply,
+            PublishReply::Published { .. }
+        ));
+        assert_eq!(peer.lock().unwrap().assets[&content_hash(FONT)], FONT);
+        assert!(packages_in(&folder).is_empty());
+        // Publishing the same document again sends nothing the engine holds.
+        let again = publish_as_package(addr, &folder, &scene, &font_sources(&root)).unwrap();
+        assert_eq!(again.publication.transferred_bytes, 0);
+        assert_ne!(again.package, done.package, "never the same name twice");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn every_publication_writes_a_package_of_its_own() {
+        let root = directory();
+        let folder = root.join("outbox");
+        let scene = scene(content_hash(FONT));
+        let (addr, peer) = serve(Peer {
+            locality: Locality::CoLocated,
+            directory: Some(folder.clone()),
+            ..Peer::default()
+        });
+        let sources = font_sources(&root);
+        let first = publish_as_package(addr, &folder, &scene, &sources).unwrap();
+        let second = publish_as_package(addr, &folder, &scene, &sources).unwrap();
+        assert_ne!(first.package, second.package);
+        let peer = peer.lock().unwrap();
+        let seen = peer.seen_in_directory.borrow();
+        let names: Vec<&String> = seen.iter().flatten().collect();
+        assert_eq!(names.len(), 2);
+        assert!(names.iter().all(|name| is_package_name(name)), "{names:?}");
+        assert_ne!(names[0], names[1]);
+        drop(seen);
+        drop(peer);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_source_missing_at_write_time_offers_the_engine_nothing() {
+        let root = directory();
+        let folder = root.join("outbox");
+        let scene = scene(content_hash(FONT));
+        let (addr, peer) = serve(Peer {
+            locality: Locality::CoLocated,
+            directory: Some(folder.clone()),
+            ..Peer::default()
+        });
+        let missing = vec![PackageSource {
+            path: "fonts/face.ttf".into(),
+            source: root.join("no-such-font"),
+        }];
+        let failed = publish_as_package(addr, &folder, &scene, &missing).unwrap_err();
+        assert!(
+            matches!(failed, DocumentPublishError::Write(_)),
+            "{failed:?}"
+        );
+        assert!(peer.lock().unwrap().published.is_empty());
+        assert!(packages_in(&folder).is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn an_unreachable_engine_leaves_no_file_and_no_folder_behind() {
+        let root = directory();
+        let folder = root.join("outbox");
+        // A port nothing listens on.
+        let port = {
+            let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+            listener.local_addr().unwrap().port()
+        };
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+        let failed = publish_as_package(
+            addr,
+            &folder,
+            &scene(content_hash(FONT)),
+            &font_sources(&root),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                failed,
+                DocumentPublishError::Locality(PublishClientError::Connect(_))
+            ),
+            "{failed:?}"
+        );
+        assert!(!folder.exists(), "nothing is written before the read");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn an_engine_that_predates_the_locality_read_is_refused_by_name() {
+        use std::io::{Read, Write};
+        let root = directory();
+        // An engine built before 5.10: it answers every unknown request with
+        // its existing refusal.
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut stream = stream;
+                let mut prefix = [0_u8; 4];
+                if stream.read_exact(&mut prefix).is_err() {
+                    continue;
+                }
+                let mut body = vec![0; u32::from_be_bytes(prefix) as usize];
+                let _ = stream.read_exact(&mut body);
+                let reply = serde_json::to_vec(&PublishReply::Refused(
+                    PublishRefusal::InvalidPublishRequest {
+                        detail: "an asset-plane request must contain exactly one of `scene`, `fetch` or `package`".into(),
+                    },
+                ))
+                .unwrap();
+                let _ = stream.write_all(&(reply.len() as u32).to_be_bytes());
+                let _ = stream.write_all(&reply);
+            }
+        });
+        let failed = publish_as_package(
+            addr,
+            &root.join("outbox"),
+            &scene(content_hash(FONT)),
+            &font_sources(&root),
+        )
+        .unwrap_err();
+        // The old engine's refusal has the shape of a locality refusal, so it
+        // is reported by name, never as a broken protocol.
+        assert!(
+            matches!(
+                failed,
+                DocumentPublishError::LocalityRefused(PublishRefusal::InvalidPublishRequest { .. })
+            ),
+            "{failed:?}"
+        );
+        assert!(!root.join("outbox").exists());
         fs::remove_dir_all(root).unwrap();
     }
 }

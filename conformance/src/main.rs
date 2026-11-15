@@ -8,12 +8,15 @@
 //! printed and counted, because a run that skipped half its checks is not the
 //! same as a clean one (invariant 43).
 
+use gx_asset_plane::AssetPublishServer;
 use gx_conformance::{
-    asset_plane_suite, asset_restart_suite, asset_route_suite, control_plane_delivery_suite,
-    control_plane_fault_suite, control_plane_suite, editor_command_suite, headless_render_suite,
-    locality_suite, media_plane_suite, mock_product_suite, package_handoff_suite,
-    real_engine_scope_suite, refusal_audit_suite, render_preview_suite, scene_plane_suite,
-    scope_enforcement_suite, timing_plane_suite, Outcome, Report, RestartableWorker,
+    asset_locality_agrees, asset_plane_suite, asset_restart_suite, asset_route_suite,
+    control_plane_delivery_suite, control_plane_fault_suite, control_plane_suite,
+    editor_command_suite, editor_publish_suite, headless_render_suite,
+    lan_with_a_package_directory_is_a_usage_error, locality_suite, media_plane_suite,
+    mock_product_suite, package_handoff_suite, real_engine_scope_suite, refusal_audit_suite,
+    render_preview_suite, scene_plane_suite, scope_enforcement_suite, timing_plane_suite, Outcome,
+    Report, RestartableWorker,
 };
 use gx_contracts::{DeviceTier, Locality, RationalRate};
 use gx_control_plane::peer::EnginePeer;
@@ -75,6 +78,8 @@ fn main() {
     // 5.8: one package, by local path to a co-located worker and by chunked
     // upload to a LAN worker.
     run_package_handoff_against_real_engines(&mut report);
+    // 5.10: the Editor's publish, by the route each engine declares.
+    run_editor_publish_against_real_engines(&mut report);
     // 5.11: asset-bearing scenes restored after a kill, by each route, and
     // dropped by name when their stored bytes were removed or altered.
     run_asset_restart_against_real_engines(&mut report);
@@ -192,6 +197,15 @@ fn run_over_transport(report: &mut Report, token: Option<&str>, locality: Locali
             return;
         }
     };
+    // 5.10: the mock's asset plane, bound to the same engine object, answers
+    // the locality its capability declares.
+    let asset_address = AssetPublishServer::bind(addr, server.engine())
+        .and_then(|asset_server| {
+            let address = asset_server.local_addr()?;
+            asset_server.serve_in_background();
+            Ok(address)
+        })
+        .ok();
     server.serve_in_background();
 
     let connected = match token {
@@ -225,6 +239,20 @@ fn run_over_transport(report: &mut Report, token: Option<&str>, locality: Locali
     ));
     control_plane_suite(&mut client, report);
     locality_suite(&client.capability(), locality, report);
+    match asset_address {
+        Some(assets) => asset_locality_agrees(
+            assets,
+            client.capability().locality,
+            match locality {
+                Locality::CoLocated => {
+                    "the asset-plane locality equals the capability's on the co-located mock"
+                }
+                Locality::Lan => "the asset-plane locality equals the capability's on the LAN mock",
+            },
+            report,
+        ),
+        None => report.skip_unavailable("could not bind the mock's asset plane"),
+    }
     // No fault suite here: a client cannot reach through the wire to drop a
     // reference, which is exactly the FaultInjection distinction. It skips by
     // being absent rather than by pretending.
@@ -648,6 +676,56 @@ fn run_asset_restart_against_real_engines(report: &mut Report) {
         Err(StartFailure::Exited(e)) => report.fail_to_start(e),
         Err(StartFailure::Unavailable(e)) => report.skip_unavailable(e),
     }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 5.10 against three real workers: co-located with a package directory (the
+/// Editor's folder), LAN, and co-located with none.
+fn run_editor_publish_against_real_engines(report: &mut Report) {
+    report.set_peer(
+        "real render engines: co-located with the Editor's package folder, LAN, and co-located with none (5.10)",
+    );
+    let Some(worker) = worker_binary() else {
+        report.skip_unavailable("gx-render-worker binary not built");
+        return;
+    };
+    let root = std::env::temp_dir().join(format!(
+        "gx-conformance-editor-publish-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    let folder = root.join("packages");
+    if let Err(e) = std::fs::create_dir_all(&folder) {
+        report.skip_unavailable(format!("could not create the Editor's package folder: {e}"));
+        return;
+    }
+    let started = start_worker(
+        &worker,
+        "editor-publish-local",
+        &["--package-dir".to_owned(), folder.display().to_string()],
+    )
+    .and_then(|local| {
+        start_worker(&worker, "editor-publish-lan", &["--lan".to_owned()]).map(|lan| (local, lan))
+    })
+    .and_then(|(local, lan)| {
+        start_worker(&worker, "editor-publish-bare", &[]).map(|bare| (local, lan, bare))
+    });
+    match started {
+        Ok((mut local, mut lan, mut bare)) => {
+            let (local_assets, lan_assets, bare_assets) = (local.assets, lan.assets, bare.assets);
+            editor_publish_suite(
+                (&mut local.client, local_assets),
+                (&mut lan.client, lan_assets),
+                (&mut bare.client, bare_assets),
+                &folder,
+                &root,
+                report,
+            );
+        }
+        Err(StartFailure::Exited(e)) => report.fail_to_start(e),
+        Err(StartFailure::Unavailable(e)) => report.skip_unavailable(e),
+    }
+    lan_with_a_package_directory_is_a_usage_error(&worker, &folder, report);
     let _ = std::fs::remove_dir_all(&root);
 }
 

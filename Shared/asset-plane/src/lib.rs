@@ -14,8 +14,9 @@ pub mod publish;
 pub mod store;
 pub mod transfer;
 pub use handoff::{
-    handoff_for, open_package_in, publish_package, AssetHandoff, PackagePublication,
-    PackagePublishError, PackagedScene,
+    handoff_for, open_package_in, publish_as_package, publish_package, AssetHandoff,
+    DocumentPublication, DocumentPublishError, PackagePublication, PackagePublishError,
+    PackagedScene,
 };
 pub use preflight::{
     publish_assets, AssetBytes, AssetPublishSummary, AssetTransferClient, AssetTransferClientError,
@@ -23,8 +24,9 @@ pub use preflight::{
     ASSET_TRANSFER_CHUNK_BYTES, MAX_ASSET_FRAME_BYTES,
 };
 pub use publish::{
-    fetch_bytes, publish_scene, AssetPublishPeer, AssetPublishServer, FetchError, FetchReply,
-    PublishClientError, PublishRefusal, PublishReply, PublishRequest, MAX_PUBLISH_FRAME_BYTES,
+    declared_locality, fetch_bytes, publish_scene, AssetPublishPeer, AssetPublishServer,
+    FetchError, FetchReply, LocalityReply, PublishClientError, PublishRefusal, PublishReply,
+    PublishRequest, MAX_PUBLISH_FRAME_BYTES,
 };
 pub use store::{content_hash, read_image_geometry, AssetStore, AssetStoreError, ImageGeometry};
 pub use transfer::Transfer;

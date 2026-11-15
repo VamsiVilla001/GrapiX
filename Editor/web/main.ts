@@ -222,6 +222,17 @@ interface PublishResult {
   revision: number | { 0: number };
   /** The content hash Playout must pin to load this revision (11.38). */
   contentHash: string | { 0: string };
+  /** How the engine's own declaration had this publication reach it (5.10):
+   *  `localPath` (no asset bytes sent) or `chunkedUpload`. */
+  handoff: "localPath" | "chunkedUpload";
+  /** Asset bytes this Editor sent: none by path, the missing difference
+   *  over a LAN. */
+  transferredBytes: number;
+}
+
+/** The route and bytes of a publication, as the log and result line show them. */
+function publishRoute(result: PublishResult): string {
+  return `${result.handoff}, ${result.transferredBytes} asset bytes sent`;
 }
 
 /** The shell's structured errors (`EditorError` in Editor/shell). Every
@@ -553,6 +564,10 @@ function describe(error: unknown): string {
         return `publication refused: ${failure.detail ?? ""}`;
       case "protocol":
         return `asset plane protocol failed: ${failure.detail ?? ""}`;
+      case "writePackage":
+        return `cannot write the package ${failure.path ?? ""}: ${failure.detail ?? ""}`;
+      case "assetCache":
+        return `asset cache unavailable: ${failure.detail ?? ""}`;
       default:
         return `${failure.error}: ${failure.detail ?? ""}`;
     }
@@ -4661,7 +4676,10 @@ async function publishProjectScene(sceneId: string): Promise<void> {
       };
       renderProjectManager();
     }
-    log(`published ${takeId} revision ${revision} hash ${plain(result.contentHash)}`, "good");
+    log(
+      `published ${takeId} revision ${revision} hash ${plain(result.contentHash)} (${publishRoute(result)})`,
+      "good",
+    );
   } catch (error) {
     log(describe(error), "bad");
   }
@@ -4854,9 +4872,9 @@ async function publish(): Promise<void> {
     // reporting "published" without them would leave the operator guessing.
     const contentHash = plain(result.contentHash);
     ui.publishResult.className = "result good";
-    ui.publishResult.textContent = `${takeId} revision ${revision} · hash ${contentHash}`;
+    ui.publishResult.textContent = `${takeId} revision ${revision} · hash ${contentHash} · ${publishRoute(result)}`;
     ui.publishResult.hidden = false;
-    log(`published ${takeId} revision ${revision} hash ${contentHash}`, "good");
+    log(`published ${takeId} revision ${revision} hash ${contentHash} (${publishRoute(result)})`, "good");
   } catch (error) {
     const message = describe(error);
     ui.publishResult.className = "result bad";

@@ -1027,6 +1027,12 @@ impl Engine {
 }
 
 impl AssetPublishPeer for Engine {
+    // 5.10: the field `capability()` declares, read by a publisher that holds
+    // no control client. One field, two carriers (invariants 27, 45).
+    fn locality(&self) -> Locality {
+        self.locality
+    }
+
     fn publish_scene(&mut self, scene: SceneDocument) -> PublishReply {
         self.publish(scene)
     }
@@ -1367,6 +1373,16 @@ mod tests {
     use gx_contracts::phases::{PhaseKind, TimelinePhase};
     use gx_contracts::scene::{ObjectBase, RectObject, SceneCanvas, SceneObject, SceneTimeline};
     use gx_control_plane::message::OutputConfig;
+
+    #[test]
+    fn the_asset_plane_declares_the_locality_the_capability_does() {
+        // One field, two carriers (5.10).
+        for locality in [Locality::CoLocated, Locality::Lan] {
+            let engine = Engine::new(Arc::new(AtomicU64::new(0)), locality);
+            assert_eq!(AssetPublishPeer::locality(&engine), locality);
+            assert_eq!(engine.capability().locality, locality);
+        }
+    }
 
     fn engine() -> Engine {
         // A clock that does not advance on its own: the test drives the frame

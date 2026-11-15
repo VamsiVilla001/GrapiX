@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 use gx_contracts::scene::{parse_scene_document, SceneDocument};
-use gx_contracts::{ContentHash, Refusal, Revision, TakeId};
+use gx_contracts::{ContentHash, Locality, Refusal, Revision, TakeId};
 use serde::{Deserialize, Serialize};
 
 use crate::store::{content_hash, AssetStore};
@@ -46,6 +46,28 @@ pub enum PublishReply {
         content_hash: ContentHash,
     },
     /// The request was rejected as one atomic unit; no partial revision exists.
+    Refused(PublishRefusal),
+}
+
+/// The asset-plane answer to the closed `{"locality":{}}` read (5.10).
+///
+/// The engine declares its locality once, in one field. The control plane
+/// carries it in `EngineCapability`; this read carries the same field to a
+/// publisher that holds no control client (boundary rule R6) and may not
+/// name a `Locality` (R9). Conformance holds the two answers equal on real
+/// workers and both mocks (invariants 27, 45).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "reply",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum LocalityReply {
+    /// The locality the engine declares.
+    Declared { locality: Locality },
+    /// The engine did not take the request. An engine built before 5.10 answers
+    /// with its existing `InvalidPublishRequest`, which a publisher reports by
+    /// name rather than as a broken protocol.
     Refused(PublishRefusal),
 }
 
@@ -80,6 +102,12 @@ pub enum PublishRefusal {
 /// accidentally teach different publication contracts.
 pub trait AssetPublishPeer: Send + 'static {
     fn publish_scene(&mut self, scene: SceneDocument) -> PublishReply;
+
+    /// The locality this peer declares (5.10): the single field its
+    /// capability exchange reads as well. It has no default on purpose, so a
+    /// peer cannot declare by omission, and a default added later would
+    /// defeat the conformance check that holds this equal to the capability.
+    fn locality(&self) -> Locality;
 
     /// The bytes this peer serves under a content hash: images its headless
     /// renders produced (11.41). A peer that renders nothing serves nothing.
@@ -290,6 +318,18 @@ pub fn publish_scene(
     serde_json::from_slice(&header).map_err(PublishClientError::Malformed)
 }
 
+/// Ask an engine for the locality it declares (5.10), on the asset-plane
+/// address a publisher is about to use. Read fresh on every publish: never
+/// configured, never inferred from the address, never probed. Crate-level so
+/// a publisher goes through `handoff::publish_as_package`, which uses the
+/// answer and returns no `Locality` to its caller (R9).
+pub fn declared_locality(engine: SocketAddr) -> Result<LocalityReply, PublishClientError> {
+    let request = serde_json::to_vec(&serde_json::json!({ "locality": {} }))
+        .map_err(PublishClientError::Malformed)?;
+    let (_, header) = exchange(engine, &request)?;
+    serde_json::from_slice(&header).map_err(PublishClientError::Malformed)
+}
+
 /// Offer a package by local path (5.8). Crate-private: a publisher goes
 /// through `handoff::publish_package`, which chooses this route from the
 /// declared locality, so no caller picks a route by hand.
@@ -397,6 +437,8 @@ enum AssetRequest {
     Transfer(crate::preflight::AssetTransferRequest),
     /// A package offered by local path (5.8).
     Package(String),
+    /// The closed read of the engine's declared locality (5.10).
+    Locality,
 }
 
 fn handle_publish<P: AssetPublishPeer>(
@@ -436,10 +478,22 @@ fn handle_publish<P: AssetPublishPeer>(
                 metrics,
             )
         }
+        AssetRequest::Locality => {
+            let declared = locked()?.locality();
+            write_header(&mut stream, &LocalityReply::Declared { locality: declared })
+        }
         AssetRequest::Package(path) => {
             let (directory, store) = {
                 let held = locked()?;
-                (held.package_directory(), held.asset_store())
+                // A LAN-declared engine reads no path (5.10): the handoff its
+                // locality negotiates is the chunked upload, so a by-path
+                // offer is refused by name even if the peer holds a
+                // directory. One rule for the worker and the mock alike.
+                let directory = match crate::handoff::handoff_for(held.locality()) {
+                    crate::handoff::AssetHandoff::LocalPath => held.package_directory(),
+                    crate::handoff::AssetHandoff::ChunkedUpload => None,
+                };
+                (directory, held.asset_store())
             };
             // Read, verified and stored without the peer lock, so a large
             // package never holds up a take.
@@ -544,9 +598,19 @@ fn parse_request(bytes: &[u8]) -> AssetRequest {
     }
     if request.len() != 1 {
         return invalid(
-            "an asset-plane request must contain exactly one of `scene`, `fetch` or `package`"
+            "an asset-plane request must contain exactly one of `scene`, `fetch`, `package` or `locality`"
                 .to_string(),
         );
+    }
+    if let Some(locality) = request.remove("locality") {
+        // Closed: the read takes no argument, so there is nothing to guess.
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Declared {}
+        return match serde_json::from_value::<Declared>(locality) {
+            Ok(Declared {}) => AssetRequest::Locality,
+            Err(error) => invalid(format!("locality request: {error}")),
+        };
     }
     if let Some(package) = request.remove("package") {
         #[derive(Deserialize)]
@@ -572,7 +636,7 @@ fn parse_request(bytes: &[u8]) -> AssetRequest {
     }
     let Some(scene) = request.remove("scene") else {
         return invalid(
-            "an asset-plane request must contain exactly one of `scene`, `fetch` or `package`"
+            "an asset-plane request must contain exactly one of `scene`, `fetch`, `package` or `locality`"
                 .to_string(),
         );
     };
@@ -593,12 +657,25 @@ mod tests {
     use gx_contracts::Revision;
     use std::net::{IpAddr, Ipv4Addr};
 
-    #[derive(Default)]
     struct Peer {
         published: Vec<SceneDocument>,
+        locality: Locality,
+    }
+
+    impl Default for Peer {
+        fn default() -> Self {
+            Self {
+                published: Vec::new(),
+                locality: Locality::CoLocated,
+            }
+        }
     }
 
     impl AssetPublishPeer for Peer {
+        fn locality(&self) -> Locality {
+            self.locality
+        }
+
         fn publish_scene(&mut self, scene: SceneDocument) -> PublishReply {
             let take_id = TakeId(scene.id.clone());
             let content_hash = scene.content_hash();
@@ -609,6 +686,55 @@ mod tests {
                 content_hash,
             }
         }
+    }
+
+    #[test]
+    fn the_locality_read_answers_what_the_peer_declares() {
+        for locality in [Locality::CoLocated, Locality::Lan] {
+            let peer = Arc::new(Mutex::new(Peer {
+                locality,
+                ..Peer::default()
+            }));
+            let server =
+                AssetPublishServer::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0), peer)
+                    .unwrap();
+            let address = server.local_addr().unwrap();
+            let _listener = server.serve_in_background();
+            assert_eq!(
+                declared_locality(address).unwrap(),
+                LocalityReply::Declared { locality }
+            );
+            // On the wire: the same words the capability exchange uses.
+            let (_, header) = exchange(address, br#"{"locality":{}}"#).unwrap();
+            let wire: serde_json::Value = serde_json::from_slice(&header).unwrap();
+            assert_eq!(
+                wire,
+                serde_json::json!({"reply": "declared", "locality": serde_json::to_value(locality).unwrap()})
+            );
+        }
+    }
+
+    #[test]
+    fn the_locality_read_takes_no_argument_and_no_company() {
+        let (server, peer) = server();
+        let address = server.local_addr().expect("address is known");
+        let _listener = server.serve_in_background();
+        for bad in [
+            serde_json::json!({"locality": {"x": 1}}),
+            serde_json::json!({"locality": null}),
+            serde_json::json!({"locality": {}, "scene": {}}),
+            serde_json::json!({"locality": {}, "fetch": {"hash": "00"}}),
+        ] {
+            let reply = request(address, bad.clone());
+            assert!(
+                matches!(
+                    reply,
+                    PublishReply::Refused(PublishRefusal::InvalidPublishRequest { .. })
+                ),
+                "{bad}: {reply:?}"
+            );
+        }
+        assert!(peer.lock().unwrap().published.is_empty());
     }
 
     #[test]

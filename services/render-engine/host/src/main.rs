@@ -29,7 +29,17 @@ fn main() {
         }
     }
 
-    let spawn_args: Vec<String> = Vec::new();
+    // 5.10: an engine this host starts is co-located with the Editor on this
+    // machine, so it is handed the folder the Editor writes its packages into
+    // (its `GX_EDITOR_PACKAGE_DIR`, else the platform's package exchange
+    // root). An engine already running is adopted as it is.
+    let spawn_args = match package_directory() {
+        Ok(directory) => vec!["--package-dir".to_owned(), directory],
+        Err(problem) => {
+            eprintln!("could not name the package folder: {problem}");
+            std::process::exit(1);
+        }
+    };
     let mut supervised = match ensure(&worker, port, &spawn_args) {
         Ok(s) => s,
         Err(e) => {
@@ -59,6 +69,21 @@ fn main() {
     }
 
     println!("leaving the engine running; the host does not stop it");
+}
+
+/// The folder a spawned engine reads packages from by path, created if it
+/// does not exist. The same rule the Editor uses to choose where it writes.
+fn package_directory() -> Result<String, String> {
+    let directory = match std::env::var_os("GX_EDITOR_PACKAGE_DIR") {
+        Some(set) if !set.is_empty() => std::path::absolute(&set).map_err(|e| e.to_string())?,
+        _ => gx_contracts::platform::package_exchange_root().map_err(|e| e.to_string())?,
+    };
+    std::fs::create_dir_all(&directory)
+        .map_err(|e| format!("{} cannot be created: {e}", directory.display()))?;
+    directory
+        .to_str()
+        .map(str::to_owned)
+        .ok_or_else(|| format!("{} is not valid text", directory.display()))
 }
 
 fn default_worker_path() -> String {

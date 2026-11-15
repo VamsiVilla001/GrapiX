@@ -23,6 +23,7 @@ pub mod design_system;
 pub mod fidelity;
 pub mod import;
 pub mod project;
+pub mod publish;
 
 pub use command::{import_into_project, CommandError, Workspace};
 pub use design_system::{
