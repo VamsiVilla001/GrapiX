@@ -571,6 +571,16 @@
           "default": false,
           "type": "boolean"
         },
+        "masks": {
+          "description": "The layer's masks (3.19, user decision 15 Nov 2026), in order, as\nAfter Effects layer masks: they shape the layer's alpha before its\neffects. Read them through [`ObjectBase::masks`]; absent and empty both\nmean none. Static: not animatable yet.",
+          "items": {
+            "$ref": "#/$defs/Mask"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "materialSlots": {
           "additionalProperties": {
             "$ref": "#/$defs/MaterialBinding"
@@ -1535,6 +1545,16 @@
           "default": false,
           "type": "boolean"
         },
+        "masks": {
+          "description": "The layer's masks (3.19, user decision 15 Nov 2026), in order, as\nAfter Effects layer masks: they shape the layer's alpha before its\neffects. Read them through [`ObjectBase::masks`]; absent and empty both\nmean none. Static: not animatable yet.",
+          "items": {
+            "$ref": "#/$defs/Mask"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "materialSlots": {
           "additionalProperties": {
             "$ref": "#/$defs/MaterialBinding"
@@ -2252,6 +2272,16 @@
           "default": false,
           "type": "boolean"
         },
+        "masks": {
+          "description": "The layer's masks (3.19, user decision 15 Nov 2026), in order, as\nAfter Effects layer masks: they shape the layer's alpha before its\neffects. Read them through [`ObjectBase::masks`]; absent and empty both\nmean none. Static: not animatable yet.",
+          "items": {
+            "$ref": "#/$defs/Mask"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "materialSlots": {
           "additionalProperties": {
             "$ref": "#/$defs/MaterialBinding"
@@ -2493,6 +2523,16 @@
         "locked": {
           "default": false,
           "type": "boolean"
+        },
+        "masks": {
+          "description": "The layer's masks (3.19, user decision 15 Nov 2026), in order, as\nAfter Effects layer masks: they shape the layer's alpha before its\neffects. Read them through [`ObjectBase::masks`]; absent and empty both\nmean none. Static: not animatable yet.",
+          "items": {
+            "$ref": "#/$defs/Mask"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "materialSlots": {
           "additionalProperties": {
@@ -2809,6 +2849,16 @@
         "locked": {
           "default": false,
           "type": "boolean"
+        },
+        "masks": {
+          "description": "The layer's masks (3.19, user decision 15 Nov 2026), in order, as\nAfter Effects layer masks: they shape the layer's alpha before its\neffects. Read them through [`ObjectBase::masks`]; absent and empty both\nmean none. Static: not animatable yet.",
+          "items": {
+            "$ref": "#/$defs/Mask"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "materialSlots": {
           "additionalProperties": {
@@ -3174,6 +3224,16 @@
           "default": false,
           "type": "boolean"
         },
+        "masks": {
+          "description": "The layer's masks (3.19, user decision 15 Nov 2026), in order, as\nAfter Effects layer masks: they shape the layer's alpha before its\neffects. Read them through [`ObjectBase::masks`]; absent and empty both\nmean none. Static: not animatable yet.",
+          "items": {
+            "$ref": "#/$defs/Mask"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "materialSlots": {
           "additionalProperties": {
             "$ref": "#/$defs/MaterialBinding"
@@ -3389,6 +3449,16 @@
         "locked": {
           "default": false,
           "type": "boolean"
+        },
+        "masks": {
+          "description": "The layer's masks (3.19, user decision 15 Nov 2026), in order, as\nAfter Effects layer masks: they shape the layer's alpha before its\neffects. Read them through [`ObjectBase::masks`]; absent and empty both\nmean none. Static: not animatable yet.",
+          "items": {
+            "$ref": "#/$defs/Mask"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "materialSlots": {
           "additionalProperties": {
@@ -3619,6 +3689,16 @@
         "markerKind": {
           "$ref": "#/$defs/MarkerKind"
         },
+        "masks": {
+          "description": "The layer's masks (3.19, user decision 15 Nov 2026), in order, as\nAfter Effects layer masks: they shape the layer's alpha before its\neffects. Read them through [`ObjectBase::masks`]; absent and empty both\nmean none. Static: not animatable yet.",
+          "items": {
+            "$ref": "#/$defs/Mask"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "materialSlots": {
           "additionalProperties": {
             "$ref": "#/$defs/MaterialBinding"
@@ -3736,6 +3816,73 @@
         "eventName"
       ],
       "type": "object"
+    },
+    "Mask": {
+      "description": "One layer mask (3.19): a closed path in the object's own coordinates.",
+      "properties": {
+        "expansion": {
+          "default": 0.0,
+          "description": "Grows (positive) or shrinks (negative) the mask outward from its\npath, in pixels.",
+          "format": "double",
+          "type": "number"
+        },
+        "feather": {
+          "default": 0.0,
+          "description": "Softens the edge: a Gaussian blur of the mask's coverage, in pixels\n(the blur's standard deviation is half of it).",
+          "format": "double",
+          "type": "number"
+        },
+        "inverted": {
+          "default": false,
+          "type": "boolean"
+        },
+        "mode": {
+          "$ref": "#/$defs/MaskMode",
+          "default": "add"
+        },
+        "opacity": {
+          "default": 1.0,
+          "format": "double",
+          "type": "number"
+        },
+        "path": {
+          "$ref": "#/$defs/BezierPath"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "MaskMode": {
+      "description": "How a mask combines with the masks above it (3.19), After Effects' modes.",
+      "oneOf": [
+        {
+          "const": "none",
+          "description": "Ignored: the mask is kept but shapes nothing.",
+          "type": "string"
+        },
+        {
+          "const": "add",
+          "description": "Union with the masks above.",
+          "type": "string"
+        },
+        {
+          "const": "subtract",
+          "description": "Removes its area from the masks above.",
+          "type": "string"
+        },
+        {
+          "const": "intersect",
+          "description": "Keeps only where it overlaps the masks above.",
+          "type": "string"
+        },
+        {
+          "const": "difference",
+          "description": "Keeps where exactly one of it and the masks above covers.",
+          "type": "string"
+        }
+      ]
     },
     "MaterialBinding": {
       "description": "What an object's material slot points at.\n\n1.x allowed either a bare material id string *or* an object with\noverrides in the same field. An untagged union like that deserialises by\ntrial, and a shape that nearly matches the wrong arm is accepted silently,\nso only the object form is carried.",
@@ -4013,6 +4160,16 @@
           "default": false,
           "type": "boolean"
         },
+        "masks": {
+          "description": "The layer's masks (3.19, user decision 15 Nov 2026), in order, as\nAfter Effects layer masks: they shape the layer's alpha before its\neffects. Read them through [`ObjectBase::masks`]; absent and empty both\nmean none. Static: not animatable yet.",
+          "items": {
+            "$ref": "#/$defs/Mask"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "materialElements": {
           "description": "Ordered material element names read from the imported model's\nmetadata, so per-element assignment (3.7) has stable names.",
           "items": {
@@ -4267,6 +4424,16 @@
         "locked": {
           "default": false,
           "type": "boolean"
+        },
+        "masks": {
+          "description": "The layer's masks (3.19, user decision 15 Nov 2026), in order, as\nAfter Effects layer masks: they shape the layer's alpha before its\neffects. Read them through [`ObjectBase::masks`]; absent and empty both\nmean none. Static: not animatable yet.",
+          "items": {
+            "$ref": "#/$defs/Mask"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "materialSlots": {
           "additionalProperties": {
@@ -4641,6 +4808,16 @@
         "locked": {
           "default": false,
           "type": "boolean"
+        },
+        "masks": {
+          "description": "The layer's masks (3.19, user decision 15 Nov 2026), in order, as\nAfter Effects layer masks: they shape the layer's alpha before its\neffects. Read them through [`ObjectBase::masks`]; absent and empty both\nmean none. Static: not animatable yet.",
+          "items": {
+            "$ref": "#/$defs/Mask"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "materialSlots": {
           "additionalProperties": {
@@ -5281,6 +5458,16 @@
           "default": false,
           "type": "boolean"
         },
+        "masks": {
+          "description": "The layer's masks (3.19, user decision 15 Nov 2026), in order, as\nAfter Effects layer masks: they shape the layer's alpha before its\neffects. Read them through [`ObjectBase::masks`]; absent and empty both\nmean none. Static: not animatable yet.",
+          "items": {
+            "$ref": "#/$defs/Mask"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "materialSlots": {
           "additionalProperties": {
             "$ref": "#/$defs/MaterialBinding"
@@ -5767,6 +5954,16 @@
         "locked": {
           "default": false,
           "type": "boolean"
+        },
+        "masks": {
+          "description": "The layer's masks (3.19, user decision 15 Nov 2026), in order, as\nAfter Effects layer masks: they shape the layer's alpha before its\neffects. Read them through [`ObjectBase::masks`]; absent and empty both\nmean none. Static: not animatable yet.",
+          "items": {
+            "$ref": "#/$defs/Mask"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "materialSlots": {
           "additionalProperties": {

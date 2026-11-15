@@ -310,7 +310,37 @@ fn parity_cases() -> Vec<(&'static str, SceneDocument, Refusal)> {
     let mut tangents = empty_scene("wire-tangents");
     tangents.objects.push(object(serde_json::json!({ "type": "shape", "id": "path", "name": "path",
         "path": { "closed": false, "vertices": [{"x":0,"y":0},{"x":1,"y":1}], "inTangents": [{"x":0,"y":0}], "outTangents": [{"x":0,"y":0}] } })));
+    // 3.19: a mask feathered past the limit, and a mask on a group, which
+    // draws no pixels of its own.
+    let square = serde_json::json!({ "closed": true, "vertices": [{"x":0,"y":0},{"x":9,"y":0},{"x":9,"y":9}],
+        "inTangents": [{"x":0,"y":0},{"x":0,"y":0},{"x":0,"y":0}], "outTangents": [{"x":0,"y":0},{"x":0,"y":0},{"x":0,"y":0}] });
+    let mut feathered = empty_scene("wire-mask-feather");
+    feathered.objects.push(object(serde_json::json!({ "type": "rect", "id": "masked", "name": "masked", "width": 10, "height": 10,
+        "masks": [{ "path": square }, { "path": square, "mode": "subtract", "feather": 300 }] })));
+    let mut grouped = empty_scene("wire-mask-group");
+    grouped.objects.push(object(
+        serde_json::json!({ "type": "group", "id": "holder", "name": "holder", "childIds": [],
+        "masks": [{ "path": square }] }),
+    ));
     vec![
+        (
+            "an out-of-range mask refuses identically in validator and publication wire",
+            feathered,
+            Refusal::MaskInvalid {
+                object: "masked".into(),
+                index: 1,
+                detail: "feather 300 is outside 0 to 250".into(),
+            },
+        ),
+        (
+            "a mask on a group refuses identically in validator and publication wire",
+            grouped,
+            Refusal::MaskInvalid {
+                object: "holder".into(),
+                index: 0,
+                detail: "a group draws no pixels to mask".into(),
+            },
+        ),
         (
             "gradient fill refuses identically in validator and publication wire",
             fill,

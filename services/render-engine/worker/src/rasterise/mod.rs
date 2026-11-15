@@ -8,6 +8,7 @@
 //! stop or flattening it (invariant 18).
 
 mod lyon;
+pub mod mask;
 pub mod paint;
 mod vello;
 
@@ -18,6 +19,7 @@ use gx_contracts::Refusal;
 use crate::colour_pipeline::WorkingRgba;
 use crate::rasterizer::Frame;
 
+pub(crate) use lyon::{prepare_masks, transform};
 pub use paint::{PathGradient, PathPaint};
 pub use vello::VelloCpuRasteriser;
 pub(crate) use vello::{coverage_window, window_origin, window_transform};

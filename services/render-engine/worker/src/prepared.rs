@@ -145,7 +145,10 @@ impl PreparedScene {
         for (index, object) in resolved.objects.iter().enumerate() {
             // An object with effects, and every image, is drawn in its own
             // layer space and warped onto the canvas as the GPU composites it.
-            if object.base().effects().is_empty() && !matches!(object, SceneObject::Image(_)) {
+            if object.base().effects().is_empty()
+                && object.base().masks().is_empty()
+                && !matches!(object, SceneObject::Image(_))
+            {
                 effect_layers.push(None);
                 continue;
             }

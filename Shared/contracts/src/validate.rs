@@ -569,6 +569,47 @@ mod tests {
     }
 
     #[test]
+    fn a_mask_that_cannot_be_drawn_is_reported_at_its_path_with_its_value() {
+        // 3.19: the Editor sees the same refusal the engine gives at publish,
+        // pointing at the mask.
+        let mask: crate::scene::Mask = serde_json::from_value(serde_json::json!({
+            "path": { "closed": true, "vertices": [{"x":0,"y":0},{"x":9,"y":0},{"x":9,"y":9}],
+                      "inTangents": [{"x":0,"y":0},{"x":0,"y":0},{"x":0,"y":0}],
+                      "outTangents": [{"x":0,"y":0},{"x":0,"y":0},{"x":0,"y":0}] },
+            "feather": 300
+        }))
+        .unwrap();
+        assert_eq!(mask.opacity, 1.0, "opacity defaults to whole");
+        assert_eq!(
+            mask.mode,
+            crate::scene::MaskMode::Add,
+            "mode defaults to add"
+        );
+        let mut base = ObjectBase::new("card", "card");
+        base.masks = Some(vec![mask.clone()]);
+        let found = validate_scene_document(
+            &document(vec![SceneObject::Rect(crate::scene::RectObject {
+                base,
+                radius: 0.0,
+            })]),
+            &MaterialSupport::fixed_function(),
+            &HashSet::new(),
+            true,
+        );
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(
+            found[0].code,
+            Refusal::MaskInvalid {
+                object: "card".into(),
+                index: 0,
+                detail: "feather 300 is outside 0 to 250".into(),
+            }
+        );
+        assert_eq!(found[0].field.as_deref(), Some("objects[0].masks[0]"));
+        assert_eq!(found[0].given, serde_json::to_value(&mask).unwrap());
+    }
+
+    #[test]
     fn an_unresolvable_reference_names_what_it_could_have_been() {
         // 7.7's done-when: structured refusals with allowed values. A font id
         // that does not resolve carries the ids that would have.

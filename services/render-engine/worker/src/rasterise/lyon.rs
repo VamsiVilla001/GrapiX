@@ -18,6 +18,41 @@ use gx_contracts::Refusal;
 use super::paint::{path_paint, ObjectFrame, PathPaint};
 use super::{solid_paint, PreparedPath};
 
+/// An object's masks (3.19), each path placed by `map` from the object's own
+/// coordinates into the layer's.
+pub(crate) fn prepare_masks(
+    object: &str,
+    masks: &[gx_contracts::scene::Mask],
+    map: &dyn Fn(f64, f64) -> Result<Point, Refusal>,
+) -> Result<Vec<super::mask::PreparedMask>, Refusal> {
+    use vello_cpu::kurbo::{Join, Stroke, StrokeOpts};
+    masks
+        .iter()
+        .map(|mask| {
+            let mut builder = Path::builder();
+            append_bezier(&mut builder, &mask.path, object, map)?;
+            let fill = outline(&builder.build());
+            let band = (mask.expansion != 0.0).then(|| {
+                vello_cpu::kurbo::stroke(
+                    fill.iter(),
+                    &Stroke::new(2.0 * mask.expansion.abs()).with_join(Join::Round),
+                    &StrokeOpts::default(),
+                    STROKE_TOLERANCE,
+                )
+            });
+            Ok(super::mask::PreparedMask {
+                fill,
+                band,
+                grow: mask.expansion > 0.0,
+                weights: super::mask::feather_weights(mask.feather),
+                inverted: mask.inverted,
+                opacity: mask.opacity as f32,
+                mode: mask.mode,
+            })
+        })
+        .collect()
+}
+
 pub(super) fn prepare_object(
     object: &SceneObject,
     resolved: &ResolvedObject,

@@ -3,6 +3,7 @@ import type { BlendMode } from "./BlendMode";
 import type { ColorValue } from "./ColorValue";
 import type { EffectInstance } from "./EffectInstance";
 import type { JsonValue } from "./serde_json/JsonValue";
+import type { Mask } from "./Mask";
 import type { MaterialBinding } from "./MaterialBinding";
 import type { StrokeStyle } from "./StrokeStyle";
 import type { Vec2 } from "./Vec2";
@@ -79,6 +80,13 @@ materialSlots?: { [key in string]?: MaterialBinding },
  * round-trips as written. Read it through [`ObjectBase::blend_mode`].
  */
 blendMode?: BlendMode,
+/**
+ * The layer's masks (3.19, user decision 15 Nov 2026), in order, as
+ * After Effects layer masks: they shape the layer's alpha before its
+ * effects. Read them through [`ObjectBase::masks`]; absent and empty both
+ * mean none. Static: not animatable yet.
+ */
+masks?: Array<Mask>,
 /**
  * The layer's effect stack (3.22), applied in order to its own pixels
  * before it is transformed and blended. Read it through

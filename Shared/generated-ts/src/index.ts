@@ -137,6 +137,8 @@ export * from "./LinearWipe.js";
 export * from "./Locality.js";
 export * from "./MarkerKind.js";
 export * from "./MarkerObject.js";
+export * from "./Mask.js";
+export * from "./MaskMode.js";
 export * from "./MaterialBinding.js";
 export * from "./MaterialDefinition.js";
 export * from "./MaterialKind.js";

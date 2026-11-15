@@ -1156,3 +1156,275 @@ fn gpu_engine_draws_text_in_five_scripts_within_one_code_of_the_cpu_reference() 
         );
     }
 }
+
+/// 3.19's mask fixture: an image, a rect, a shape and a text line, each under
+/// masks in its own coordinates (every mode, feather, both expansions,
+/// inversion, opacity).
+fn mask_fixture() -> (SceneDocument, Vec<(gx_contracts::ContentHash, Vec<u8>)>) {
+    use gx_contracts::material::FitMode;
+    use gx_contracts::scene::{
+        AssetKind, AssetLibraryItem, BezierPath, FillRule, Mask, MaskMode, ShapeObject, TextLayout,
+        TextObject, Vec2,
+    };
+    let v = |x: f64, y: f64| Vec2 { x, y };
+    let rect_path = |x0: f64, y0: f64, x1: f64, y1: f64| BezierPath {
+        closed: true,
+        vertices: vec![v(x0, y0), v(x1, y0), v(x1, y1), v(x0, y1)],
+        in_tangents: vec![v(0.0, 0.0); 4],
+        out_tangents: vec![v(0.0, 0.0); 4],
+    };
+    let ellipse_path = |cx: f64, cy: f64, rx: f64, ry: f64| {
+        const K: f64 = 0.552_284_75;
+        BezierPath {
+            closed: true,
+            vertices: vec![
+                v(cx + rx, cy),
+                v(cx, cy + ry),
+                v(cx - rx, cy),
+                v(cx, cy - ry),
+            ],
+            in_tangents: vec![
+                v(0.0, -K * ry),
+                v(K * rx, 0.0),
+                v(0.0, K * ry),
+                v(-K * rx, 0.0),
+            ],
+            out_tangents: vec![
+                v(0.0, K * ry),
+                v(-K * rx, 0.0),
+                v(0.0, -K * ry),
+                v(K * rx, 0.0),
+            ],
+        }
+    };
+    let mask = |path, mode, feather, expansion, opacity, inverted| Mask {
+        path,
+        mode,
+        feather,
+        expansion,
+        opacity,
+        inverted,
+    };
+    let solid = |r: f64, g: f64, b: f64, a: f64| ColorValue::Solid {
+        color: Rgba::srgb(r, g, b, a),
+    };
+    let (mut doc, png) = image_fixture();
+    doc.objects.truncate(1);
+    let SceneObject::Image(image) = &mut doc.objects[0] else {
+        unreachable!()
+    };
+    image.fit = FitMode::Stretch;
+    image.base.x = 600.0;
+    image.base.y = 40.0;
+    image.base.width = 160.0;
+    image.base.height = 120.0;
+    image.base.opacity = 1.0;
+    image.base.masks = Some(vec![mask(
+        ellipse_path(80.0, 60.0, 70.0, 50.0),
+        MaskMode::Add,
+        6.0,
+        0.0,
+        0.9,
+        false,
+    )]);
+    let inter = gx_asset_plane::content_hash(INTER);
+    doc.assets.push(AssetLibraryItem {
+        asset_id: "asset_font_inter".into(),
+        name: "Inter".into(),
+        kind: AssetKind::Font,
+        path: "fonts/inter.ttf".into(),
+        checksum: Some(inter.clone()),
+        mime_type: Some("font/ttf".into()),
+        size_bytes: Some(INTER.len() as u64),
+        status: None,
+        provenance: Default::default(),
+        color_space: None,
+    });
+    doc.fonts = vec![font_definition("inter", "inter", "Inter", Vec::new())];
+    // The rect: a feathered ellipse added, then a shrunk rect subtracted.
+    let mut base = ObjectBase::new("card", "card");
+    base.x = 40.0;
+    base.y = 40.0;
+    base.width = 240.0;
+    base.height = 120.0;
+    base.fill = Some(solid(0.95, 0.5, 0.1, 1.0));
+    base.masks = Some(vec![
+        mask(
+            ellipse_path(120.0, 60.0, 100.0, 50.0),
+            MaskMode::Add,
+            10.0,
+            0.0,
+            1.0,
+            false,
+        ),
+        mask(
+            rect_path(150.0, 0.0, 240.0, 120.0),
+            MaskMode::Subtract,
+            0.0,
+            -6.0,
+            1.0,
+            false,
+        ),
+    ]);
+    doc.objects
+        .push(SceneObject::Rect(RectObject { base, radius: 10.0 }));
+    // The shape: an inverted rect intersected (a hole), then an ellipse at
+    // 70% differenced back into the hole.
+    let mut base = ObjectBase::new("plate", "plate");
+    base.x = 320.0;
+    base.y = 40.0;
+    base.fill = Some(solid(0.1, 0.5, 0.95, 1.0));
+    base.masks = Some(vec![
+        mask(
+            rect_path(20.0, 20.0, 140.0, 100.0),
+            MaskMode::Intersect,
+            0.0,
+            0.0,
+            1.0,
+            true,
+        ),
+        mask(
+            ellipse_path(80.0, 60.0, 40.0, 30.0),
+            MaskMode::Difference,
+            0.0,
+            0.0,
+            0.7,
+            false,
+        ),
+    ]);
+    doc.objects.push(SceneObject::Shape(ShapeObject {
+        base,
+        path: rect_path(0.0, 0.0, 160.0, 120.0),
+        compound_paths: None,
+        fill_enabled: true,
+        stroke_enabled: false,
+        fill_rule: FillRule::Nonzero,
+        trim_start: None,
+        trim_end: None,
+        trim_offset: None,
+    }));
+    // The text: only its first 200 pixels show, grown by 3 and feathered.
+    let mut base = ObjectBase::new("caption", "caption");
+    base.x = 40.0;
+    base.y = 200.0;
+    base.width = 900.0;
+    base.height = 70.0;
+    base.fill = Some(solid(1.0, 1.0, 1.0, 1.0));
+    base.masks = Some(vec![mask(
+        rect_path(0.0, 0.0, 200.0, 70.0),
+        MaskMode::Add,
+        4.0,
+        3.0,
+        1.0,
+        false,
+    )]);
+    doc.objects.push(SceneObject::Text(TextObject {
+        base,
+        text: "Masked caption, office hours".into(),
+        font_id: "inter".into(),
+        size: 44.0,
+        layout: TextLayout::Paragraph,
+        auto_fit: Default::default(),
+        writing_mode: Default::default(),
+        vertical_align: Default::default(),
+        direction: Default::default(),
+        text_case: Default::default(),
+        decoration: Default::default(),
+        overflow: Default::default(),
+        align: Default::default(),
+        line_height: None,
+        letter_spacing: 0.0,
+        word_spacing: 0.0,
+        paragraph_spacing: 0.0,
+        text_indent: 0.0,
+    }));
+    let png_hash = gx_asset_plane::content_hash(&png);
+    (doc, vec![(png_hash, png), (inter, INTER.to_vec())])
+}
+
+#[test]
+#[ignore = "requires hardware GPU; explicit 3.19 mask gate"]
+fn gpu_engine_draws_masked_layers_within_one_code_of_the_cpu_reference() {
+    for space in [WorkingColorSpace::Srgb, WorkingColorSpace::LinearSrgb] {
+        let (mut engine, ticks) = hardware_engine();
+        let (mut doc, bytes) = mask_fixture();
+        doc.working_color_space = space;
+        for (hash, data) in bytes {
+            engine.record_verified_asset_bytes(hash, data);
+        }
+        let before = RenderWork::snapshot();
+        let pin = match engine.publish(doc) {
+            PublishReply::Published {
+                take_id,
+                revision,
+                content_hash,
+            } => (take_id, revision, content_hash),
+            other => panic!("the masked scene must publish: {other:?}"),
+        };
+        let prepare = RenderWork::snapshot().since(before);
+        // A masked object is drawn in its own layer space; the CPU reference
+        // builds those four layers on the CPU, the GPU sources take the GPU
+        // routes below.
+        assert_eq!(prepare.cpu_source_rasterizations, 4);
+        let sources = engine.gpu_source_trace(&pin.0, pin.1).unwrap().to_vec();
+        let routes: Vec<_> = sources.iter().map(|s| s.route).collect();
+        assert_eq!(
+            routes,
+            [
+                "gpu-image-fit-at-prepare",
+                "gpu-vello-coverage-at-prepare",
+                "gpu-vello-coverage-at-prepare",
+                "gpu-vello-coverage-at-prepare"
+            ]
+        );
+        assert!(matches!(take(&mut engine, &pin), EngineReply::Taken(_)));
+        ticks.store(1, Ordering::Relaxed);
+        let program = engine.emit_frame_settled().unwrap().frame;
+        let preview = engine.take_preview().unwrap();
+        let cpu = engine.prepared_scene(&pin.0, pin.1).unwrap();
+        let mut strict = Vec::new();
+        for (frame, output, name) in [
+            (&*program, OutputTransform::Rec709, "Program"),
+            (&*preview, OutputTransform::Srgb, "Preview"),
+        ] {
+            let reference = cpu.frame_at(0, output).unwrap();
+            assert_within_one_code(frame, &reference, &format!("{space:?} {name}"));
+            strict.push((name, strict_44(frame, &reference)));
+        }
+        // The masks landed where their object coordinates put them.
+        let alpha = |x: u32, y: u32| preview.pixels[((y * preview.width + x) * 4 + 3) as usize];
+        assert_eq!(alpha(160, 100), 255, "{space:?}: rect, inside the ellipse");
+        assert_eq!(alpha(240, 100), 0, "{space:?}: rect, subtracted");
+        assert_eq!(alpha(45, 45), 0, "{space:?}: rect, outside the ellipse");
+        assert_eq!(alpha(325, 45), 255, "{space:?}: shape, outside the hole");
+        assert_eq!(alpha(350, 100), 0, "{space:?}: shape, in the hole");
+        assert!(
+            (176..=180).contains(&alpha(400, 100)),
+            "{space:?}: shape, the 70% ellipse differenced back: {}",
+            alpha(400, 100)
+        );
+        assert!(alpha(680, 100) > 200, "{space:?}: image centre");
+        assert_eq!(alpha(605, 45), 0, "{space:?}: image corner, masked off");
+        let lit = |x0: u32, x1: u32| {
+            (200..270)
+                .flat_map(|y| (x0..x1).map(move |x| (x, y)))
+                .filter(|&(x, y)| alpha(x, y) > 0)
+                .count()
+        };
+        assert!(
+            lit(40, 230) > 300,
+            "{space:?}: the caption's first 200 pixels show"
+        );
+        assert_eq!(
+            lit(260, 940),
+            0,
+            "{space:?}: the rest of the caption is masked off"
+        );
+        println!("3.19 {space:?}: strict 4.4 reading (differing share, worst): {strict:?}");
+        evidence(
+            &format!("masks-{}.json", space.as_str()),
+            &json!({"strict44": strict.iter().map(|(n, (share, worst))| json!({"output": n, "differingShare": share, "worst": worst})).collect::<Vec<_>>(),
+                    "sources": sources, "adapter": engine.gpu_description()}),
+        );
+    }
+}

@@ -202,6 +202,18 @@ pub fn drawability_refusals(document: &SceneDocument) -> Vec<StructuredRefusal> 
             }
             _ => {}
         }
+        // 3.19: masks shape the pixels of objects that draw some.
+        if let Some((index, detail)) = mask_problem(object) {
+            found.push(
+                Refusal::MaskInvalid {
+                    object: id.into(),
+                    index,
+                    detail,
+                },
+                at(&format!("masks[{index}]")),
+                serde_json::to_value(base.masks().get(index)).unwrap_or_default(),
+            );
+        }
         // 3.22: every declared effect is drawn, on the GPU and by the CPU
         // reference; none refuses here.
         if base
@@ -548,6 +560,82 @@ fn gradients(object: &SceneObject, at: &dyn Fn(&str) -> String, found: &mut Foun
     if stroke {
         check("stroke", &base.stroke, "stroke");
     }
+}
+
+/// The first mask of `object` that cannot be drawn as authored, if any (3.19).
+pub fn mask_problem(object: &SceneObject) -> Option<(usize, String)> {
+    use crate::scene::{MOST_MASKS, MOST_MASK_EXPANSION, MOST_MASK_FEATHER};
+    let masks = object.base().masks();
+    if masks.is_empty() {
+        return None;
+    }
+    let draws = matches!(
+        object,
+        SceneObject::Rect(_)
+            | SceneObject::Ellipse(_)
+            | SceneObject::Line(_)
+            | SceneObject::Shape(_)
+            | SceneObject::Text(_)
+            | SceneObject::Image(_)
+    );
+    if !draws {
+        return Some((0, format!("a {} draws no pixels to mask", object.kind())));
+    }
+    if masks.len() > MOST_MASKS {
+        return Some((
+            MOST_MASKS,
+            format!("{} masks; at most {MOST_MASKS}", masks.len()),
+        ));
+    }
+    for (index, mask) in masks.iter().enumerate() {
+        let path = &mask.path;
+        if !path.closed || path.vertices.len() < 3 {
+            return Some((
+                index,
+                "a mask path must be closed with at least three vertices".into(),
+            ));
+        }
+        if path.in_tangents.len() != path.vertices.len()
+            || path.out_tangents.len() != path.vertices.len()
+        {
+            return Some((
+                index,
+                "a mask path's tangents must match its vertices".into(),
+            ));
+        }
+        let finite = |v: &crate::scene::Vec2| v.x.is_finite() && v.y.is_finite();
+        if !path
+            .vertices
+            .iter()
+            .chain(&path.in_tangents)
+            .chain(&path.out_tangents)
+            .all(finite)
+        {
+            return Some((index, "a mask path's points must be finite".into()));
+        }
+        if !(mask.feather.is_finite() && (0.0..=MOST_MASK_FEATHER).contains(&mask.feather)) {
+            return Some((
+                index,
+                format!(
+                    "feather {} is outside 0 to {MOST_MASK_FEATHER}",
+                    mask.feather
+                ),
+            ));
+        }
+        if !(mask.expansion.is_finite() && mask.expansion.abs() <= MOST_MASK_EXPANSION) {
+            return Some((
+                index,
+                format!(
+                    "expansion {} is outside -{MOST_MASK_EXPANSION} to {MOST_MASK_EXPANSION}",
+                    mask.expansion
+                ),
+            ));
+        }
+        if !(mask.opacity.is_finite() && (0.0..=1.0).contains(&mask.opacity)) {
+            return Some((index, format!("opacity {} is outside 0 to 1", mask.opacity)));
+        }
+    }
+    None
 }
 
 /// Why an image object cannot be drawn, from what the document says (3.17);
@@ -1302,6 +1390,136 @@ mod tests {
         assert!(
             light_without_responsive_material(&scene).is_err(),
             "unlit material does not respond"
+        );
+    }
+
+    #[test]
+    fn masks_refuse_by_index_only_what_cannot_be_drawn_as_authored() {
+        use crate::scene::{BezierPath, Mask, MaskMode, MOST_MASKS};
+        let v = |x: f64, y: f64| Vec2 { x, y };
+        let good = || Mask {
+            path: BezierPath {
+                closed: true,
+                vertices: vec![v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0)],
+                in_tangents: vec![v(0.0, 0.0); 3],
+                out_tangents: vec![v(0.0, 0.0); 3],
+            },
+            mode: MaskMode::Add,
+            feather: 0.0,
+            expansion: 0.0,
+            opacity: 1.0,
+            inverted: false,
+        };
+        let with = |mut object: SceneObject, masks: Vec<Mask>| {
+            object.base_mut().masks = Some(masks);
+            object
+        };
+        let invalid = |id: &str, index, detail: &str| {
+            Some(Refusal::MaskInvalid {
+                object: id.into(),
+                index,
+                detail: detail.into(),
+            })
+        };
+        // 3.19: drawable masks on each drawing kind refuse nothing, at the
+        // extremes of every range, and an empty list is no mask at all.
+        let mut edge = good();
+        edge.feather = 250.0;
+        edge.expansion = -1000.0;
+        edge.opacity = 0.0;
+        edge.mode = MaskMode::Difference;
+        edge.inverted = true;
+        assert_eq!(refused(vec![with(rect("r"), vec![good(), edge])]), None);
+        assert_eq!(refused(vec![with(rect("r"), Vec::new())]), None);
+        assert_eq!(
+            refused(vec![with(SceneObject::Text(text("t")), vec![good()])]),
+            None
+        );
+        assert_eq!(
+            refused(vec![with(
+                SceneObject::Shape(shape(vec![v(0.0, 0.0); 2])),
+                vec![good()]
+            )]),
+            None
+        );
+        assert_eq!(
+            refused(vec![with(rect("r"), vec![good(); MOST_MASKS])]),
+            None
+        );
+
+        // A group draws no pixels of its own to mask.
+        let group = SceneObject::Group(GroupObject {
+            base: ObjectBase::new("g", "g"),
+            child_ids: Vec::new(),
+        });
+        assert_eq!(
+            refused(vec![with(group, vec![good()])]),
+            invalid("g", 0, "a group draws no pixels to mask")
+        );
+        // One mask too many is named by its index.
+        assert_eq!(
+            refused(vec![with(rect("r"), vec![good(); MOST_MASKS + 1])]),
+            invalid("r", MOST_MASKS, "17 masks; at most 16")
+        );
+        // Each bad mask is named by its index, hidden objects too.
+        let bad = |change: &dyn Fn(&mut Mask)| {
+            let mut mask = good();
+            change(&mut mask);
+            let mut object = with(rect("r"), vec![good(), mask]);
+            object.base_mut().visible = false;
+            refused(vec![object])
+        };
+        assert_eq!(
+            bad(&|m| m.path.closed = false),
+            invalid(
+                "r",
+                1,
+                "a mask path must be closed with at least three vertices"
+            )
+        );
+        assert_eq!(
+            bad(&|m| {
+                m.path.vertices.pop();
+            }),
+            invalid(
+                "r",
+                1,
+                "a mask path must be closed with at least three vertices"
+            )
+        );
+        assert_eq!(
+            bad(&|m| {
+                m.path.in_tangents.pop();
+            }),
+            invalid("r", 1, "a mask path's tangents must match its vertices")
+        );
+        assert_eq!(
+            bad(&|m| m.path.vertices[1].x = f64::NAN),
+            invalid("r", 1, "a mask path's points must be finite")
+        );
+        assert_eq!(
+            bad(&|m| m.path.out_tangents[2].y = f64::INFINITY),
+            invalid("r", 1, "a mask path's points must be finite")
+        );
+        assert_eq!(
+            bad(&|m| m.feather = 250.5),
+            invalid("r", 1, "feather 250.5 is outside 0 to 250")
+        );
+        assert_eq!(
+            bad(&|m| m.feather = -1.0),
+            invalid("r", 1, "feather -1 is outside 0 to 250")
+        );
+        assert_eq!(
+            bad(&|m| m.expansion = 1000.5),
+            invalid("r", 1, "expansion 1000.5 is outside -1000 to 1000")
+        );
+        assert_eq!(
+            bad(&|m| m.opacity = 1.5),
+            invalid("r", 1, "opacity 1.5 is outside 0 to 1")
+        );
+        assert_eq!(
+            bad(&|m| m.opacity = f64::NAN),
+            invalid("r", 1, "opacity NaN is outside 0 to 1")
         );
     }
 }

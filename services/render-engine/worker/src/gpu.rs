@@ -146,6 +146,7 @@ impl Gpu {
         asset: &str,
         image: &crate::image::DecodedImage,
         plan: &crate::image::FitPlan,
+        masks: &[crate::rasterise::mask::PreparedMask],
     ) -> Option<Result<wgpu::Texture, gx_contracts::Refusal>> {
         let gpu = self.inner.as_ref()?;
         let mut drawer = gpu
@@ -156,7 +157,7 @@ impl Gpu {
             crate::render_work::gpu_build();
             crate::compositor::draw::GpuDrawer::new(&gpu.device)
         });
-        Some(drawer.draw_image(&gpu.device, &gpu.queue, object, asset, image, plan))
+        Some(drawer.draw_image(&gpu.device, &gpu.queue, object, asset, image, plan, masks))
     }
 
     /// Draw vector paths into a working-space float texture on this device
@@ -168,6 +169,7 @@ impl Gpu {
         origin: [f64; 2],
         width: u32,
         height: u32,
+        masks: &[crate::rasterise::mask::PreparedMask],
     ) -> Option<Result<wgpu::Texture, gx_contracts::Refusal>> {
         let gpu = self.inner.as_ref()?;
         let mut drawer = gpu
@@ -186,6 +188,7 @@ impl Gpu {
             origin,
             width,
             height,
+            masks,
         ))
     }
 

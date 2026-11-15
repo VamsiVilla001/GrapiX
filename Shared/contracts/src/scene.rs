@@ -286,6 +286,13 @@ pub struct ObjectBase {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub blend_mode: Option<BlendMode>,
+    /// The layer's masks (3.19, user decision 15 Nov 2026), in order, as
+    /// After Effects layer masks: they shape the layer's alpha before its
+    /// effects. Read them through [`ObjectBase::masks`]; absent and empty both
+    /// mean none. Static: not animatable yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub masks: Option<Vec<Mask>>,
     /// The layer's effect stack (3.22), applied in order to its own pixels
     /// before it is transformed and blended. Read it through
     /// [`ObjectBase::effects`]; absent and empty both mean none.
@@ -364,7 +371,59 @@ impl Default for StrokeStyle {
     }
 }
 
+/// How a mask combines with the masks above it (3.19), After Effects' modes.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS, schemars::JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum MaskMode {
+    /// Ignored: the mask is kept but shapes nothing.
+    None,
+    /// Union with the masks above.
+    #[default]
+    Add,
+    /// Removes its area from the masks above.
+    Subtract,
+    /// Keeps only where it overlaps the masks above.
+    Intersect,
+    /// Keeps where exactly one of it and the masks above covers.
+    Difference,
+}
+
+/// One layer mask (3.19): a closed path in the object's own coordinates.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Mask {
+    pub path: BezierPath,
+    #[serde(default)]
+    pub mode: MaskMode,
+    /// Softens the edge: a Gaussian blur of the mask's coverage, in pixels
+    /// (the blur's standard deviation is half of it).
+    #[serde(default)]
+    pub feather: f64,
+    /// Grows (positive) or shrinks (negative) the mask outward from its
+    /// path, in pixels.
+    #[serde(default)]
+    pub expansion: f64,
+    #[serde(default = "default_opacity")]
+    pub opacity: f64,
+    #[serde(default)]
+    pub inverted: bool,
+}
+
+/// Most masks one object may have (3.19).
+pub const MOST_MASKS: usize = 16;
+/// Largest feather, in pixels (3.19).
+pub const MOST_MASK_FEATHER: f64 = 250.0;
+/// Largest expansion either way, in pixels (3.19).
+pub const MOST_MASK_EXPANSION: f64 = 1000.0;
+
 impl ObjectBase {
+    /// The layer's masks, in order; empty when the document gives none.
+    pub fn masks(&self) -> &[Mask] {
+        self.masks.as_deref().unwrap_or(&[])
+    }
+
     /// The stroke's joins, caps and dashes; the defaults when the document
     /// gives none.
     pub fn stroke_style(&self) -> StrokeStyle {
@@ -412,6 +471,7 @@ impl ObjectBase {
             bindings: None,
             material_slots: None,
             blend_mode: None,
+            masks: None,
             effects: None,
         }
     }

@@ -118,6 +118,22 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-15 — 3.19 increment 1: layer masks on the GPU and the CPU (Claude, on the user's instruction)
+
+**Resume here.** User decisions: masks on each object, track matte by explicit source id, clip groups as
+`GroupObject.clipChildId`, static masks and clip shapes drawn at prepare, per-frame matte targets; 3.19 adds the
+contract and rendering, 11.47 keeps the Editor tools, pen paths, animated trim and its goldens. Increment 1 adds
+`ObjectBase.masks` (`Mask`, `MaskMode`; at most 16, feather 0-250, expansion +-1000, opacity 0-1) and
+`Refusal::MaskInvalid` (`drawability::mask_problem`, validator and engine alike, at `objects[i].masks[j]`). The After
+Effects model runs once per mask: coverage, expansion band (grow = union, shrink = multiply by 1 - band),
+Gaussian feather (sigma = feather/2), invert, opacity; fold add/subtract/intersect/difference, `none` skipped, start
+at 0 if the first mask adds else 1; the layer is multiplied before its effects. CPU twin `rasterise/mask.rs`; GPU
+`compositor/mask.wgsl` + `GpuDrawer::apply_masks`. Masked objects take the layer path on the CPU reference.
+Verified: mask unit tests 5/5; GPU passes equal the CPU twin within 1.5/255; masked image, rect, shape and text
+within one code of the CPU reference on DX12 and Vulkan in both working spaces; validator and audit parity cases.
+**3.19 stays active.** Next: clip groups, then track mattes, then trim, mutations, Jev and Laya. Evidence
+`docs/evidence/3.19`. Gate: fmt, clippy -D warnings and npm run check exit 0 (46 Node, 412 Editor, 860 Rust passed, 0 failed, 34 ignored; conformance 587/0/9); hardware worker suite 184/0/0.
+
 ## 2026-11-15 — 3.18 done: GPU text through the Vello path (Claude, on the user's instruction)
 
 **Resume here.** Glyph outlines are one `kurbo::BezPath` per text object (`PreparedTextObject.outline`), placed

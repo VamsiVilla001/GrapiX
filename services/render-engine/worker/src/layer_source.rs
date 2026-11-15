@@ -58,8 +58,15 @@ pub fn prepare_layer_source(
                 detail: "the image was not decoded at prepare".into(),
             })?;
         let plan = crate::image::fit_plan(image, (decoded.width, decoded.height), pad, limit)?;
+        // 3.19: the raster is in box coordinates, as the mask paths are.
+        let masks =
+            crate::rasterise::prepare_masks(&image.base.id, image.base.masks(), &|x, y| {
+                Ok(lyon::math::point(x as f32, y as f32))
+            })?;
         if let Some(gpu) = gpu {
-            if let Some(drawn) = gpu.draw_image(&image.base.id, &image.asset_id, decoded, &plan) {
+            if let Some(drawn) =
+                gpu.draw_image(&image.base.id, &image.asset_id, decoded, &plan, &masks)
+            {
                 return Ok(LayerSource {
                     width: plan.width,
                     height: plan.height,
@@ -70,15 +77,13 @@ pub fn prepare_layer_source(
             }
         }
         crate::render_work::cpu_source();
+        let mut surface =
+            RasterSurface::from_pixels(plan.width, plan.height, plan.origin, plan.raster(decoded));
+        crate::rasterise::mask::apply_masks(&masks, &mut surface);
         return Ok(LayerSource {
             width: plan.width,
             height: plan.height,
-            surface: Some(RasterSurface::from_pixels(
-                plan.width,
-                plan.height,
-                plan.origin,
-                plan.raster(decoded),
-            )),
+            surface: Some(surface),
             drawn: None,
             origin: plan.origin,
         });
@@ -144,11 +149,16 @@ pub fn prepare_layer_source(
     }
     let (width, height) = (width.max(1.0) as u32, height.max(1.0) as u32);
     let object_paths: Vec<_> = paths.paths().iter().collect();
+    // 3.19: the masks, placed as the object's paths are in this local scene.
+    let local_base = local.objects[0].base();
+    let masks = crate::rasterise::prepare_masks(&id, local_base.masks(), &|x, y| {
+        crate::rasterise::transform(&local_base.anchor, &local_effective[0], x, y)
+    })?;
     let layer_origin = [origin[0] - phase[0], origin[1] - phase[1]];
     // 3.17: vector objects draw on the GPU when there is one; 3.18: text too,
     // its glyph outlines being paths.
     if let Some(gpu) = gpu {
-        if let Some(drawn) = gpu.draw_paths(&id, &object_paths, origin, width, height) {
+        if let Some(drawn) = gpu.draw_paths(&id, &object_paths, origin, width, height, &masks) {
             return Ok(LayerSource {
                 width,
                 height,
@@ -161,6 +171,7 @@ pub fn prepare_layer_source(
     crate::render_work::cpu_source();
     let mut surface = RasterSurface::window(width, height, origin);
     VelloCpuRasteriser.rasterise_into(&object_paths, &mut surface);
+    crate::rasterise::mask::apply_masks(&masks, &mut surface);
     Ok(LayerSource {
         width,
         height,

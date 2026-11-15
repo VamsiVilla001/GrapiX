@@ -387,6 +387,14 @@ pub enum Refusal {
         asset: String,
         detail: String,
     },
+    /// A layer mask cannot be drawn as authored (3.19): on an object that
+    /// draws no pixels, too many masks, an open or malformed path, or a
+    /// feather, expansion or opacity out of its range.
+    MaskInvalid {
+        object: String,
+        index: usize,
+        detail: String,
+    },
     /// A vector path could not be represented as triangles. The object and
     /// tessellator diagnostic are retained so a malformed path never turns
     /// into an absent or approximate graphic.
@@ -1177,6 +1185,11 @@ impl std::fmt::Display for Refusal {
                 asset,
                 detail,
             } => write!(f, "image {object} (asset {asset}) cannot be drawn: {detail}"),
+            Refusal::MaskInvalid {
+                object,
+                index,
+                detail,
+            } => write!(f, "object {object}'s mask {index} cannot be drawn: {detail}"),
             Refusal::VectorTessellationFailed { object, detail } => {
                 write!(f, "object {object} could not be tessellated: {detail}")
             }
@@ -1763,6 +1776,11 @@ impl Refusal {
             Self::ImageNotDrawable {
                 object: "audit".into(),
                 asset: "audit".into(),
+                detail: "audit".into(),
+            },
+            Self::MaskInvalid {
+                object: "audit".into(),
+                index: 0,
                 detail: "audit".into(),
             },
             Self::VectorTessellationFailed {
@@ -2354,6 +2372,7 @@ impl Refusal {
             Self::UnsupportedPathGradient { .. } => "unsupportedPathGradient",
             Self::GradientNotDrawable { .. } => "gradientNotDrawable",
             Self::ImageNotDrawable { .. } => "imageNotDrawable",
+            Self::MaskInvalid { .. } => "maskInvalid",
             Self::VectorTessellationFailed { .. } => "vectorTessellationFailed",
             Self::AssetMissing { .. } => "assetMissing",
             Self::ProtocolMismatch { .. } => "protocolMismatch",

@@ -2059,6 +2059,7 @@ fn is_driven(variant: &str) -> bool {
             | "UnsupportedDepthMode"
             | "GradientNotDrawable"
             | "ImageNotDrawable"
+            | "MaskInvalid"
             | "CommandUnknownField"
             | "SessionUnknown"
             | "HistoryEmpty"
