@@ -8,6 +8,7 @@
 //! stop or flattening it (invariant 18).
 
 mod lyon;
+pub mod paint;
 mod vello;
 
 use gx_contracts::color::{ColorValue, OutputTransform, WorkingColorSpace};
@@ -18,8 +19,9 @@ use crate::colour_pipeline::WorkingRgba;
 use crate::rasterizer::Frame;
 
 pub(crate) use lyon::{fill_union, transform};
+pub use paint::{PathGradient, PathPaint};
 pub use vello::VelloCpuRasteriser;
-pub(crate) use vello::{coverage_window, window_transform};
+pub(crate) use vello::{coverage_window, window_origin, window_transform};
 
 /// The outline geometry types the drawing backends share (3.17).
 pub use vello_cpu::kurbo::BezPath;
@@ -76,7 +78,7 @@ impl PreparedPaths {
                 1.0
             };
             for path in &mut paths[first..] {
-                path.paint = path.paint.scaled(opacity);
+                path.paint = path.paint.clone().scaled(opacity);
             }
         }
         // Paints are prepared in linear light and expressed in the scene's
@@ -84,7 +86,7 @@ impl PreparedPaths {
         // (3.15, invariant 35).
         let space = document.working_color_space;
         for path in &mut paths {
-            path.paint = path.paint.linear_to(space);
+            path.paint = path.paint.clone().linear_to(space);
         }
         Ok(Self { paths })
     }
@@ -102,7 +104,7 @@ impl PreparedPaths {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreparedPath {
     object_id: String,
-    paint: WorkingRgba,
+    paint: PathPaint,
     outline: BezPath,
     fill_rule: OutlineFill,
     bounds: RasterBounds,
@@ -111,7 +113,7 @@ pub struct PreparedPath {
 impl PreparedPath {
     pub(crate) fn new(
         object_id: String,
-        paint: WorkingRgba,
+        paint: PathPaint,
         outline: BezPath,
         fill_rule: OutlineFill,
     ) -> Self {
@@ -140,8 +142,8 @@ impl PreparedPath {
     /// Premultiplied paint in the scene's working space, converted by the
     /// colour pipeline at preparation. Tagged authored colour never reaches a
     /// raster backend.
-    pub fn paint(&self) -> WorkingRgba {
-        self.paint
+    pub fn paint(&self) -> &PathPaint {
+        &self.paint
     }
 
     /// The outline in scene coordinates, filled under [`Self::fill_rule`].
@@ -404,9 +406,12 @@ mod tests {
                 let min_y = bounds.min_y.floor().max(0.0) as u32;
                 let max_x = bounds.max_x.ceil().min(width as f32) as u32;
                 let max_y = bounds.max_y.ceil().min(height as f32) as u32;
+                let PathPaint::Solid(paint) = path.paint() else {
+                    continue;
+                };
                 for y in min_y..max_y {
                     for x in min_x..max_x {
-                        surface.composite(x, y, path.paint());
+                        surface.composite(x, y, *paint);
                     }
                 }
             }
@@ -530,29 +535,49 @@ mod tests {
     }
 
     #[test]
-    fn a_gradient_path_is_refused_instead_of_reduced_to_a_flat_colour() {
+    fn a_linear_gradient_fill_runs_from_its_first_stop_to_its_last_across_the_box() {
+        use gx_contracts::color::{GradientStop, Rgba};
+        // 3.17: a gradient is drawn, not refused or flattened. Object space:
+        // from the box's left edge (red) to its right (blue), in linear light.
         let mut base = ObjectBase::new("gradient", "Gradient");
-        base.width = 2.0;
-        base.height = 2.0;
+        base.width = 10.0;
+        base.height = 4.0;
+        base.y = 3.0;
         base.fill = Some(ColorValue::LinearGradient {
             angle: 0.0,
             start_x: 0.0,
             start_y: 0.0,
-            end_x: 2.0,
+            end_x: 1.0,
             end_y: 0.0,
-            stops: vec![],
+            stops: vec![
+                GradientStop {
+                    position: 0.0,
+                    color: Rgba::linear(1.0, 0.0, 0.0, 1.0),
+                },
+                GradientStop {
+                    position: 1.0,
+                    color: Rgba::linear(0.0, 0.0, 1.0, 1.0),
+                },
+            ],
             spread: Default::default(),
             coordinate_mode: Default::default(),
         });
         let document = document(vec![SceneObject::Rect(RectObject { base, radius: 0.0 })]);
-        let resolved = gx_contracts::scene::resolve_hierarchy(&document.objects);
-
-        assert_eq!(
-            PreparedPaths::prepare(&document, &resolved.effective),
-            Err(Refusal::UnsupportedPathGradient {
-                object: "gradient".into(),
-                paint: "fill".into(),
-            })
+        let prepared = prepare(&document).expect("a drawable gradient prepares");
+        let surface = VelloCpuRasteriser.rasterise(&prepared, 12, 10);
+        let at = |x: usize| surface.pixels()[4 * 12 + x];
+        // Pixel centres 0.5 and 9.5 of 10: u = 0.05 and 0.95.
+        assert!(
+            (at(0).r - 0.95).abs() < 1e-4 && (at(0).b - 0.05).abs() < 1e-4,
+            "{:?}",
+            at(0)
         );
+        assert!(
+            (at(9).r - 0.05).abs() < 1e-4 && (at(9).b - 0.95).abs() < 1e-4,
+            "{:?}",
+            at(9)
+        );
+        assert!((at(5).r - at(5).b + 0.1).abs() < 1e-4, "{:?}", at(5));
+        assert_eq!(at(11).a, 0.0, "outside the box");
     }
 }

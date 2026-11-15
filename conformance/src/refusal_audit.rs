@@ -2082,6 +2082,7 @@ fn is_driven(variant: &str) -> bool {
             | "UnsupportedAlphaMode"
             | "UnsupportedDepthMode"
             | "UnsupportedPathGradient"
+            | "GradientNotDrawable"
             | "CommandUnknownField"
             | "SessionUnknown"
             | "HistoryEmpty"

@@ -80,10 +80,54 @@ integration when the row closes.
 
 ### Not in this increment
 
-- Gradients (still refused by name), image quads, the benchmark of the chosen
-  backend in the product, mutations, DX12 and Vulkan both named. Next
-  increments.
+- Image quads, the benchmark of the chosen backend in the product,
+  mutations. Next increments.
 - **Transformed layers.** A rotated, scaled or fractionally placed object is
   drawn into its object-local source and resampled by the compositor (3.16),
   so it is compared with the CPU reference only at whole-pixel placements, as
   3.16's gate was. This row does not change that.
+
+## Increment 2 (15 Nov 2026): linear and radial gradients on paths
+
+Gradients on path fills and strokes are drawn, no longer refused. The contract
+never fixed what a gradient's fields mean (the Editor does not draw them and
+1.x never did), so this increment defines it, following the contract's own
+tests, and refuses by name wherever the meaning would be ambiguous:
+
+- **Object space**: coordinates are fractions of the object's box, (0, 0)
+  top-left to (1, 1) bottom-right. **Scene space** is refused by name: a
+  scene-space gradient stays put while its object moves, and the engine draws
+  each object's source once at prepare.
+- **Linear**: the axis runs from the start point to the end point. A non-zero
+  `angle` beside explicit points is refused by name rather than ignored.
+- **Radial**: elliptical, `t = |(p - centre) / radii|`; a focal point off the
+  centre is refused by name.
+- **Spread**: pad, repeat or reflect. **Stops**: at most 16, positions in 0 to
+  1 and non-decreasing; colours converted to premultiplied working-space
+  colour and interpolated there (`WorkingRgba::mix`, 3.15). A hard stop is two
+  stops at one position.
+- One rule for the validator and the engine (invariant 27):
+  `ColorValue::gradient_problem`, refusing `GradientNotDrawable { object,
+  paint, detail }`, a new refusal driven by the conformance audit. Text fills
+  still refuse `UnsupportedPathGradient` until 3.18; brush paint strokes stay
+  solid.
+- Both backends evaluate the gradient from the same two f32 rows per coverage
+  window, with the same spread, stop search and interpolation, in Rust
+  (`rasterise::paint`) and in WGSL (`compositor/draw.wgsl`).
+
+### Executed
+
+| Check | Result |
+| --- | --- |
+| `compositor::draw::tests::gpu_drawer_matches_the_cpu_backend_within_one_coverage_step` (hardware) | Now also linear pad and repeat, radial reflect and pad, with a hard stop and a stop fading to transparent, over the shapes and across the window at three sizes and origins: within 1/255 of the CPU backend on every float channel |
+| `engine::gpu_tests::gpu_engine_draws_vector_content_within_one_code_of_the_vello_cpu_reference` (hardware, `GX_GPU_316_BACKEND=dx12` and `=vulkan`) | Adds a repeating linear fill with a hard stop on a rounded rect, a reflected radial fill on an ellipse and a linear stroke: within one code value of the Vello CPU reference in both working spaces, on both backends |
+| `engine::gpu_tests` (8, hardware, DX12 and Vulkan) | All pass |
+| `rasterise::tests::a_linear_gradient_fill_runs_from_its_first_stop_to_its_last_across_the_box` | Pixel centres 0.5 and 9.5 of a 10-pixel box carry 0.95/0.05 and 0.05/0.95 of the two stops in linear light; outside the box is empty |
+| `drawability::tests` | A drawable gradient refuses nothing; an angled one refuses `GradientNotDrawable` for fill and stroke, hidden too; unboxed, coincident points, decreasing or out-of-range stops, 17 stops, a zero radius, an off-centre focus and scene space each refuse with their detail; text still refuses `UnsupportedPathGradient` |
+| Conformance refusal audit | `GradientNotDrawable` is driven, and refused identically by the validator and the publication wire for a fill, a hidden fill and a stroke |
+
+**The comparison rule, refined.** The one-code rule does not compare the
+colour of a pixel whose alpha is code 0 on both sides: such a pixel is
+invisible, and its straight colour is a quotient by an alpha too small to
+show. On Vulkan, one pixel at the transparent end of a gradient had alpha 0 on
+both sides and colour 226 on the CPU against 0 on the GPU.

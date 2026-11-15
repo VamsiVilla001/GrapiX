@@ -243,9 +243,13 @@ fn object(value: serde_json::Value) -> SceneObject {
     serde_json::from_value(value).expect("parity object parses")
 }
 
+const ANGLED: &str = "angle 30 is not drawn beside explicit start and end points; set the points";
+
 fn parity_cases() -> Vec<(&'static str, SceneDocument, Refusal)> {
+    // 3.17: paths draw gradients; one with an angle beside explicit end
+    // points cannot be drawn as authored and is refused by both.
     let gradient = || ColorValue::LinearGradient {
-        angle: 0.0,
+        angle: 30.0,
         start_x: 0.0,
         start_y: 0.0,
         end_x: 1.0,
@@ -260,8 +264,9 @@ fn parity_cases() -> Vec<(&'static str, SceneDocument, Refusal)> {
         owner: owner.into(),
     };
     let mut fill = empty_scene("wire-gradient");
-    let mut rect =
-        object(serde_json::json!({ "type": "rect", "id": "gradient", "name": "gradient" }));
+    let mut rect = object(
+        serde_json::json!({ "type": "rect", "id": "gradient", "name": "gradient", "width": 10, "height": 10 }),
+    );
     rect.base_mut().fill = Some(gradient());
     fill.objects.push(rect);
     let mut hidden = fill.clone();
@@ -309,25 +314,28 @@ fn parity_cases() -> Vec<(&'static str, SceneDocument, Refusal)> {
         (
             "gradient fill refuses identically in validator and publication wire",
             fill,
-            Refusal::UnsupportedPathGradient {
+            Refusal::GradientNotDrawable {
                 object: "gradient".into(),
                 paint: "fill".into(),
+                detail: ANGLED.into(),
             },
         ),
         (
             "hidden gradient refuses identically in validator and publication wire",
             hidden,
-            Refusal::UnsupportedPathGradient {
+            Refusal::GradientNotDrawable {
                 object: "gradient".into(),
                 paint: "fill".into(),
+                detail: ANGLED.into(),
             },
         ),
         (
             "gradient stroke refuses identically in validator and publication wire",
             stroke_gradient,
-            Refusal::UnsupportedPathGradient {
+            Refusal::GradientNotDrawable {
                 object: "gradient".into(),
                 paint: "stroke".into(),
+                detail: ANGLED.into(),
             },
         ),
         (

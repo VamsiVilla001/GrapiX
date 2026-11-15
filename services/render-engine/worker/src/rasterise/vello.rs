@@ -8,7 +8,7 @@
 //! pipeline (3.15). The GPU backend does exactly the same with `vello_gpu`,
 //! over the same coverage window, so the two agree to one code value.
 
-use super::{PathRasteriser, PreparedPath, RasterSurface};
+use super::{PathPaint, PathRasteriser, PreparedPath, RasterSurface};
 use vello_cpu::kurbo::Affine;
 use vello_cpu::peniko::color::palette::css::WHITE;
 
@@ -44,6 +44,14 @@ pub(crate) fn coverage_window(
     Some((x, y, w, h))
 }
 
+/// The scene point of a coverage window's first pixel corner.
+pub(crate) fn window_origin(origin: [f64; 2], window: (u32, u32, u32, u32)) -> [f64; 2] {
+    [
+        origin[0] + f64::from(window.0),
+        origin[1] + f64::from(window.1),
+    ]
+}
+
 /// The transform from scene coordinates to a coverage window's pixels.
 pub(crate) fn window_transform(origin: [f64; 2], window: (u32, u32, u32, u32)) -> Affine {
     Affine::translate((
@@ -57,7 +65,7 @@ impl PathRasteriser for VelloCpuRasteriser {
         let origin = surface.origin();
         for path in paths {
             let paint = path.paint();
-            if paint.a <= 0.0 {
+            if !paint.visible() {
                 continue;
             }
             let Some(window) = coverage_window(path, origin, surface.width(), surface.height())
@@ -79,14 +87,23 @@ impl PathRasteriser for VelloCpuRasteriser {
             let mut pixmap = vello_cpu::Pixmap::new(w16, h16);
             ctx.render(&mut pixmap, &mut vello_cpu::Resources::new());
             let bytes = pixmap.data_as_u8_slice();
+            let rows = match paint {
+                PathPaint::Gradient(g) => Some(g.window_rows(window_origin(origin, window))),
+                PathPaint::Solid(_) => None,
+            };
             for j in 0..h {
                 for i in 0..w {
                     let coverage = bytes[((j * w + i) * 4 + 3) as usize];
                     if coverage != 0 {
+                        let colour = match (paint, &rows) {
+                            (PathPaint::Solid(colour), _) => *colour,
+                            (PathPaint::Gradient(g), Some(rows)) => g.colour(rows, i, j),
+                            (PathPaint::Gradient(_), None) => unreachable!("rows built above"),
+                        };
                         surface.composite(
                             x0 + i,
                             y0 + j,
-                            paint.scaled(f32::from(coverage) / 255.0),
+                            colour.scaled(f32::from(coverage) / 255.0),
                         );
                     }
                 }

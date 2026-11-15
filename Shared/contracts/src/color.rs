@@ -319,6 +319,9 @@ impl Rgba {
     }
 }
 
+/// Most stops a drawn gradient may have (3.17).
+pub const MOST_GRADIENT_STOPS: usize = 16;
+
 /// One stop of a gradient.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -425,6 +428,104 @@ impl ColorValue {
             Self::None | Self::Solid { .. } => &[],
             Self::LinearGradient { stops, .. } | Self::RadialGradient { stops, .. } => stops,
         }
+    }
+
+    /// Why this gradient cannot be drawn as authored, if it cannot (3.17);
+    /// `None` for a drawable gradient and for every non-gradient paint. The
+    /// one rule the validator and the engine both apply (invariant 27).
+    /// `object_box` is the object's own width and height, which an
+    /// object-space gradient's coordinates are fractions of.
+    pub fn gradient_problem(&self, object_box: (f64, f64)) -> Option<String> {
+        let (stops, mode) = match self {
+            Self::None | Self::Solid { .. } => return None,
+            Self::LinearGradient {
+                angle,
+                start_x,
+                start_y,
+                end_x,
+                end_y,
+                stops,
+                coordinate_mode,
+                ..
+            } => {
+                if !angle.is_finite() || *angle != 0.0 {
+                    return Some(format!(
+                        "angle {angle} is not drawn beside explicit start and end points; set the points"
+                    ));
+                }
+                if ![start_x, start_y, end_x, end_y]
+                    .iter()
+                    .all(|v| v.is_finite())
+                {
+                    return Some("start and end points must be finite".into());
+                }
+                if start_x == end_x && start_y == end_y {
+                    return Some("start and end points coincide".into());
+                }
+                (stops, coordinate_mode)
+            }
+            Self::RadialGradient {
+                center_x,
+                center_y,
+                radius_x,
+                radius_y,
+                focal_x,
+                focal_y,
+                stops,
+                coordinate_mode,
+                ..
+            } => {
+                if ![center_x, center_y, radius_x, radius_y]
+                    .iter()
+                    .all(|v| v.is_finite())
+                {
+                    return Some("centre and radii must be finite".into());
+                }
+                if *radius_x <= 0.0 || *radius_y <= 0.0 {
+                    return Some(format!("radii {radius_x} x {radius_y} must be positive"));
+                }
+                let off_centre =
+                    |focal: &Option<f64>, centre: f64| focal.is_some_and(|f| f != centre);
+                if off_centre(focal_x, *center_x) || off_centre(focal_y, *center_y) {
+                    return Some("a focal point off the centre is not drawn".into());
+                }
+                (stops, coordinate_mode)
+            }
+        };
+        if stops.len() > MOST_GRADIENT_STOPS {
+            return Some(format!(
+                "{} stops; at most {MOST_GRADIENT_STOPS}",
+                stops.len()
+            ));
+        }
+        let mut last = 0.0;
+        for stop in stops {
+            if !stop.position.is_finite() || !(0.0..=1.0).contains(&stop.position) {
+                return Some(format!("stop position {} is outside 0 to 1", stop.position));
+            }
+            if stop.position < last {
+                return Some("stop positions decrease".into());
+            }
+            last = stop.position;
+        }
+        // A scene-space gradient stays put while its object moves; the
+        // engine draws each object's source once at prepare and moves it per
+        // frame, so it cannot draw one as authored yet.
+        if *mode == GradientCoordinateMode::Scene {
+            return Some("a scene-space gradient is not drawn; use object space".into());
+        }
+        if *mode == GradientCoordinateMode::Object
+            && !(object_box.0.is_finite()
+                && object_box.1.is_finite()
+                && object_box.0 > 0.0
+                && object_box.1 > 0.0)
+        {
+            return Some(format!(
+                "an object-space gradient needs a box; the object is {} x {}",
+                object_box.0, object_box.1
+            ));
+        }
+        None
     }
 
     /// Whether this paint puts any pixels on screen. A gradient with no

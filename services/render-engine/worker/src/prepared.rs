@@ -1137,8 +1137,12 @@ mod tests {
         };
 
         let mut gradient = rect("gradient");
+        // 3.17: an angle beside explicit end points cannot be drawn as
+        // authored.
+        gradient.base_mut().width = 10.0;
+        gradient.base_mut().height = 10.0;
         gradient.base_mut().fill = Some(ColorValue::LinearGradient {
-            angle: 0.0,
+            angle: 30.0,
             start_x: 0.0,
             start_y: 0.0,
             end_x: 1.0,
@@ -1191,9 +1195,12 @@ mod tests {
         let cases = [
             (
                 document(vec![gradient]),
-                Refusal::UnsupportedPathGradient {
+                Refusal::GradientNotDrawable {
                     object: "gradient".into(),
                     paint: "fill".into(),
+                    detail:
+                        "angle 30 is not drawn beside explicit start and end points; set the points"
+                            .into(),
                 },
             ),
             (

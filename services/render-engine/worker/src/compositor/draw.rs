@@ -10,12 +10,13 @@
 //!
 //! This runs only at prepare (invariant 35); the frame path never draws.
 
-use crate::rasterise::{coverage_window, window_transform, PreparedPath};
+use crate::rasterise::{coverage_window, window_origin, window_transform, PathPaint, PreparedPath};
 use gx_contracts::Refusal;
 use vello_gpu::peniko::color::palette::css::WHITE;
 
 const COVERAGE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
-const DRAW_BYTES: u64 = 48;
+/// paint, window, config, two rows, 4 x 4 stop positions, 16 stop colours.
+const DRAW_BYTES: u64 = 16 * 5 + 16 * 4 + 16 * 16;
 
 /// The Vello GPU renderer and the compose pipeline, built once per device:
 /// building Vello's pipelines takes about a second.
@@ -24,6 +25,49 @@ pub(crate) struct GpuDrawer {
     resources: vello_gpu::Resources,
     compose: wgpu::ComputePipeline,
     layout: wgpu::BindGroupLayout,
+}
+
+/// The compose pass's uniform for one path over one window.
+fn draw_uniform(
+    paint: &PathPaint,
+    window_origin: [f64; 2],
+    window: (u32, u32, u32, u32),
+    stride: u32,
+) -> [u8; DRAW_BYTES as usize] {
+    let (x0, y0, w, h) = window;
+    let mut f = [0_f32; DRAW_BYTES as usize / 4];
+    let mut u = [0_u32; 8];
+    u[..4].copy_from_slice(&[x0, y0, w, h]);
+    u[4] = stride;
+    match paint {
+        PathPaint::Solid(c) => f[..4].copy_from_slice(&[c.r, c.g, c.b, c.a]),
+        PathPaint::Gradient(g) => {
+            let rows = g.window_rows(window_origin);
+            u[5] = if g.radial { 2 } else { 1 };
+            u[6] = match g.spread {
+                gx_contracts::color::GradientSpread::Pad => 0,
+                gx_contracts::color::GradientSpread::Repeat => 1,
+                gx_contracts::color::GradientSpread::Reflect => 2,
+            };
+            u[7] = g.stops.len() as u32;
+            f[12..15].copy_from_slice(&rows[..3]);
+            f[16..19].copy_from_slice(&rows[3..]);
+            for (k, (position, c)) in g.stops.iter().enumerate() {
+                f[20 + k] = *position;
+                f[36 + 4 * k..40 + 4 * k].copy_from_slice(&[c.r, c.g, c.b, c.a]);
+            }
+        }
+    }
+    let mut bytes = [0_u8; DRAW_BYTES as usize];
+    for (k, dest) in bytes.chunks_exact_mut(4).enumerate() {
+        let word = if (4..12).contains(&k) {
+            u[k - 4]
+        } else {
+            f[k].to_bits()
+        };
+        dest.copy_from_slice(&word.to_le_bytes());
+    }
+    bytes
 }
 
 impl GpuDrawer {
@@ -132,13 +176,13 @@ impl GpuDrawer {
         });
         for path in paths {
             let paint = path.paint();
-            if paint.a <= 0.0 {
+            if !paint.visible() {
                 continue;
             }
             let Some(window) = coverage_window(path, origin, width, height) else {
                 continue;
             };
-            let (x0, y0, w, h) = window;
+            let (_, _, w, h) = window;
             let (Ok(w16), Ok(h16)) = (u16::try_from(w), u16::try_from(h)) else {
                 return Err(refuse(format!("coverage window {w}x{h} exceeds u16")));
             };
@@ -188,14 +232,7 @@ impl GpuDrawer {
                     vello_gpu::TargetInit::Clear(vello_gpu::ClearSettings::default()),
                 )
                 .map_err(|e| refuse(format!("Vello GPU could not draw the path: {e:?}")))?;
-            let mut bytes = [0_u8; DRAW_BYTES as usize];
-            let words = [paint.r, paint.g, paint.b, paint.a]
-                .map(f32::to_bits)
-                .into_iter()
-                .chain([x0, y0, w, h, stride, 0, 0, 0]);
-            for (word, dest) in words.zip(bytes.chunks_exact_mut(4)) {
-                dest.copy_from_slice(&word.to_le_bytes());
-            }
+            let bytes = draw_uniform(paint, window_origin(origin, window), window, stride);
             crate::render_work::gpu_build();
             let uniform = wgpu::util::DeviceExt::create_buffer_init(
                 device,
@@ -276,8 +313,10 @@ mod tests {
     use super::*;
     use crate::colour_pipeline::WorkingRgba;
     use crate::rasterise::{
-        BezPath, OutlineFill, PathRasteriser, RasterSurface, VelloCpuRasteriser,
+        BezPath, OutlineFill, PathGradient, PathPaint, PathRasteriser, RasterSurface,
+        VelloCpuRasteriser,
     };
+    use gx_contracts::color::GradientSpread;
     use vello_gpu::kurbo::{Affine, Circle, RoundedRect, Shape};
 
     fn read_float(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture) -> Vec<f32> {
@@ -355,10 +394,93 @@ mod tests {
                     OutlineFill::EvenOdd,
                 ),
             ];
-            let paths: Vec<PreparedPath> = shapes
+            // Solid, then each gradient kind and spread: over the shapes,
+            // and each on its own band across the window.
+            let stops = vec![
+                (
+                    0.0,
+                    WorkingRgba {
+                        r: 0.9,
+                        g: 0.1,
+                        b: 0.1,
+                        a: 0.9,
+                    },
+                ),
+                (
+                    0.4,
+                    WorkingRgba {
+                        r: 0.05,
+                        g: 0.3,
+                        b: 0.2,
+                        a: 0.5,
+                    },
+                ),
+                (
+                    0.4,
+                    WorkingRgba {
+                        r: 0.1,
+                        g: 0.1,
+                        b: 0.6,
+                        a: 0.7,
+                    },
+                ),
+                (
+                    1.0,
+                    WorkingRgba {
+                        r: 0.0,
+                        g: 0.0,
+                        b: 0.0,
+                        a: 0.0,
+                    },
+                ),
+            ];
+            // About two gradient periods across the window, so every spread
+            // is exercised.
+            let gradient = |radial: bool, spread: GradientSpread| {
+                let rows = if radial {
+                    let (cx, cy) = (origin[0] + w * 0.5, origin[1] + h * 0.5);
+                    [4.0 / w, 0.0, -cx * 4.0 / w, 0.0, 4.0 / h, -cy * 4.0 / h]
+                } else {
+                    let (a, b) = (1.7 / w, 0.3 / h);
+                    [a, b, -0.4 - a * origin[0] - b * origin[1], 0.0, 0.0, 0.0]
+                };
+                PathPaint::Gradient(Box::new(PathGradient {
+                    radial,
+                    rows,
+                    spread,
+                    stops: stops.clone(),
+                }))
+            };
+            let paints = [
+                PathPaint::Solid(paint),
+                gradient(false, GradientSpread::Pad),
+                gradient(false, GradientSpread::Repeat),
+                gradient(true, GradientSpread::Reflect),
+                gradient(true, GradientSpread::Pad),
+            ];
+            let mut paths: Vec<PreparedPath> = shapes
                 .into_iter()
-                .map(|(outline, rule)| PreparedPath::new("shape".into(), paint, outline, rule))
+                .zip(paints.iter().cycle())
+                .map(|((outline, rule), paint)| {
+                    PreparedPath::new("shape".into(), paint.clone(), outline, rule)
+                })
                 .collect();
+            let band = h / paints.len() as f64;
+            for (k, paint) in paints.iter().enumerate().skip(1) {
+                let top = origin[1] + band * k as f64;
+                let rect = vello_gpu::kurbo::Rect::new(
+                    origin[0] + 1.5,
+                    top,
+                    origin[0] + w - 1.0,
+                    top + band,
+                );
+                paths.push(PreparedPath::new(
+                    "band".into(),
+                    paint.clone(),
+                    rect.to_path(0.01),
+                    OutlineFill::NonZero,
+                ));
+            }
             let refs: Vec<&PreparedPath> = paths.iter().collect();
             let mut drawer = GpuDrawer::new(device);
             let texture = drawer

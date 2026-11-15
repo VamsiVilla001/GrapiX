@@ -370,6 +370,15 @@ pub enum Refusal {
     /// rasteriser cannot carry exactly. It is refused at preparation rather
     /// than reduced to a stop or flat colour (invariant 18).
     UnsupportedPathGradient { object: String, paint: String },
+    /// A path's gradient cannot be drawn as authored (3.17): an angle beside
+    /// explicit end points, a focal point off the centre, a stop out of
+    /// order, a degenerate axis or radius, or an object-space gradient on an
+    /// object with no box. It is refused rather than reinterpreted.
+    GradientNotDrawable {
+        object: String,
+        paint: String,
+        detail: String,
+    },
     /// A vector path could not be represented as triangles. The object and
     /// tessellator diagnostic are retained so a malformed path never turns
     /// into an absent or approximate graphic.
@@ -1147,6 +1156,14 @@ impl std::fmt::Display for Refusal {
                 f,
                 "object {object} carries a {paint} a path rasteriser cannot draw"
             ),
+            Refusal::GradientNotDrawable {
+                object,
+                paint,
+                detail,
+            } => write!(
+                f,
+                "object {object}'s {paint} gradient cannot be drawn as authored: {detail}"
+            ),
             Refusal::VectorTessellationFailed { object, detail } => {
                 write!(f, "object {object} could not be tessellated: {detail}")
             }
@@ -1724,6 +1741,11 @@ impl Refusal {
             Self::UnsupportedPathGradient {
                 object: "audit".into(),
                 paint: "fill".into(),
+            },
+            Self::GradientNotDrawable {
+                object: "audit".into(),
+                paint: "fill".into(),
+                detail: "audit".into(),
             },
             Self::VectorTessellationFailed {
                 object: "audit".into(),
@@ -2312,6 +2334,7 @@ impl Refusal {
             Self::UnsupportedAlphaMode { .. } => "unsupportedAlphaMode",
             Self::UnsupportedDepthMode { .. } => "unsupportedDepthMode",
             Self::UnsupportedPathGradient { .. } => "unsupportedPathGradient",
+            Self::GradientNotDrawable { .. } => "gradientNotDrawable",
             Self::VectorTessellationFailed { .. } => "vectorTessellationFailed",
             Self::AssetMissing { .. } => "assetMissing",
             Self::ProtocolMismatch { .. } => "protocolMismatch",

@@ -15,6 +15,7 @@ use gx_contracts::scene::{
 };
 use gx_contracts::Refusal;
 
+use super::paint::{path_paint, ObjectFrame, PathPaint};
 use super::{solid_paint, PathVertex, PreparedPath, RasterSurface};
 
 pub(super) fn prepare_object(
@@ -22,11 +23,19 @@ pub(super) fn prepare_object(
     resolved: &ResolvedObject,
     output: &mut Vec<PreparedPath>,
 ) -> Result<(), Refusal> {
+    let base = object.base();
+    let frame = ObjectFrame {
+        anchor: &base.anchor,
+        resolved,
+        width: base.width,
+        height: base.height,
+    };
+    let frame = &frame;
     match object {
-        SceneObject::Rect(rect) => prepare_rect(rect, resolved, output),
-        SceneObject::Ellipse(ellipse) => prepare_ellipse(ellipse, resolved, output),
-        SceneObject::Line(line) => prepare_line(line, resolved, output),
-        SceneObject::Shape(shape) => prepare_shape(shape, resolved, output),
+        SceneObject::Rect(rect) => prepare_rect(rect, resolved, frame, output),
+        SceneObject::Ellipse(ellipse) => prepare_ellipse(ellipse, resolved, frame, output),
+        SceneObject::Line(line) => prepare_line(line, resolved, frame, output),
+        SceneObject::Shape(shape) => prepare_shape(shape, resolved, frame, output),
         SceneObject::Paint(paint) => prepare_paint(paint, resolved, output),
         _ => Ok(()),
     }
@@ -35,6 +44,7 @@ pub(super) fn prepare_object(
 fn prepare_rect(
     rect: &RectObject,
     resolved: &ResolvedObject,
+    frame: &ObjectFrame,
     output: &mut Vec<PreparedPath>,
 ) -> Result<(), Refusal> {
     let mut builder = Path::builder();
@@ -95,6 +105,7 @@ fn prepare_rect(
         rect.base.stroke_width,
         &rect.base.stroke_style(),
         FillRule::Nonzero,
+        frame,
         output,
     )
 }
@@ -102,6 +113,7 @@ fn prepare_rect(
 fn prepare_ellipse(
     ellipse: &EllipseObject,
     resolved: &ResolvedObject,
+    frame: &ObjectFrame,
     output: &mut Vec<PreparedPath>,
 ) -> Result<(), Refusal> {
     let mut builder = Path::builder();
@@ -140,6 +152,7 @@ fn prepare_ellipse(
         ellipse.base.stroke_width,
         &ellipse.base.stroke_style(),
         FillRule::Nonzero,
+        frame,
         output,
     )
 }
@@ -147,6 +160,7 @@ fn prepare_ellipse(
 fn prepare_line(
     line: &LineObject,
     resolved: &ResolvedObject,
+    frame: &ObjectFrame,
     output: &mut Vec<PreparedPath>,
 ) -> Result<(), Refusal> {
     if line.points.len() < 2 {
@@ -169,6 +183,7 @@ fn prepare_line(
         &line.base.stroke,
         line.base.stroke_width,
         &line.base.stroke_style(),
+        frame,
         output,
     )
 }
@@ -176,6 +191,7 @@ fn prepare_line(
 fn prepare_shape(
     shape: &ShapeObject,
     resolved: &ResolvedObject,
+    frame: &ObjectFrame,
     output: &mut Vec<PreparedPath>,
 ) -> Result<(), Refusal> {
     let object = shape.base.id.as_str();
@@ -189,7 +205,14 @@ fn prepare_shape(
     }
     let path = builder.build();
     if shape.fill_enabled {
-        prepare_fill(object, &path, &shape.base.fill, shape.fill_rule, output)?;
+        prepare_fill(
+            object,
+            &path,
+            &shape.base.fill,
+            shape.fill_rule,
+            frame,
+            output,
+        )?;
     }
     if shape.stroke_enabled {
         // The fill always covers the whole region; trim is stroke-only.
@@ -203,6 +226,7 @@ fn prepare_shape(
             &shape.base.stroke,
             shape.base.stroke_width,
             &shape.base.stroke_style(),
+            frame,
             output,
         )?;
     }
@@ -316,7 +340,7 @@ fn prepare_paint_stroke(
         &format!("paint stroke {}", stroke.id),
         Some(&stroke.color),
     )?;
-    if paint.is_none() {
+    if paint.is_none_or(|paint| paint.a <= 0.0) {
         return Ok(());
     }
     if stroke.points.is_empty() || stroke.size <= 0.0 {
@@ -331,16 +355,17 @@ fn prepare_paint_stroke(
     for brush in &stroke.points {
         append_disc(&mut builder, anchor, resolved, brush.x, brush.y, radius)?;
     }
-    prepare_fill_and_stroke(
+    let Some(paint) = paint else {
+        return Ok(());
+    };
+    append_outline(
         object,
-        builder.build(),
-        &Some(stroke.color.clone()),
-        &None,
-        0.0,
-        &gx_contracts::scene::StrokeStyle::default(),
-        FillRule::Nonzero,
+        outline(&builder.build()),
+        super::OutlineFill::NonZero,
+        PathPaint::Solid(paint),
         output,
-    )
+    );
+    Ok(())
 }
 
 /// Append one authored bezier path, every point placed by `map`: the scene
@@ -423,10 +448,19 @@ fn prepare_fill_and_stroke(
     stroke_width: f64,
     stroke_style: &gx_contracts::scene::StrokeStyle,
     fill_rule: FillRule,
+    frame: &ObjectFrame,
     output: &mut Vec<PreparedPath>,
 ) -> Result<(), Refusal> {
-    prepare_fill(object, &path, fill, fill_rule, output)?;
-    prepare_stroke(object, path, stroke, stroke_width, stroke_style, output)
+    prepare_fill(object, &path, fill, fill_rule, frame, output)?;
+    prepare_stroke(
+        object,
+        path,
+        stroke,
+        stroke_width,
+        stroke_style,
+        frame,
+        output,
+    )
 }
 
 /// A lyon path as a kurbo outline, point for point (3.17).
@@ -531,9 +565,10 @@ fn prepare_fill(
     path: &Path,
     fill: &Option<gx_contracts::color::ColorValue>,
     fill_rule: FillRule,
+    frame: &ObjectFrame,
     output: &mut Vec<PreparedPath>,
 ) -> Result<(), Refusal> {
-    let Some(paint) = solid_paint(object, "fill", fill.as_ref())? else {
+    let Some(paint) = path_paint(object, "fill", fill.as_ref(), frame)? else {
         return Ok(());
     };
     let rule = match fill_rule {
@@ -548,7 +583,7 @@ fn append_outline(
     object: &str,
     outline: super::BezPath,
     rule: super::OutlineFill,
-    paint: crate::colour_pipeline::WorkingRgba,
+    paint: PathPaint,
     output: &mut Vec<PreparedPath>,
 ) {
     if !outline.elements().is_empty() {
@@ -562,9 +597,10 @@ fn prepare_stroke(
     stroke: &Option<gx_contracts::color::ColorValue>,
     stroke_width: f64,
     stroke_style: &gx_contracts::scene::StrokeStyle,
+    frame: &ObjectFrame,
     output: &mut Vec<PreparedPath>,
 ) -> Result<(), Refusal> {
-    let Some(paint) = solid_paint(object, "stroke", stroke.as_ref())? else {
+    let Some(paint) = path_paint(object, "stroke", stroke.as_ref(), frame)? else {
         return Ok(());
     };
     if stroke_width <= 0.0 {

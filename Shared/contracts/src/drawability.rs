@@ -505,11 +505,12 @@ fn text_properties(text: &TextObject, at: &dyn Fn(&str) -> String, found: &mut F
     }
 }
 
-/// The software path fills and strokes with a solid colour. A gradient needs
-/// a fill rule it does not implement, so it refuses rather than being
-/// flattened to a stop (invariant 18). Only the paints the path would
-/// actually draw are checked; hidden objects are included, since showing one
-/// is an edit away.
+/// Paths draw linear and radial gradients (3.17) as authored, and refuse one
+/// that cannot be drawn as authored (`ColorValue::gradient_problem`) rather
+/// than reinterpreting it. Text fills cannot carry a gradient until 3.18 and
+/// refuse rather than being flattened to a stop (invariant 18). Only the
+/// paints the object would actually draw are checked; hidden objects are
+/// included, since showing one is an edit away.
 fn gradients(object: &SceneObject, at: &dyn Fn(&str) -> String, found: &mut Found) {
     let base = object.base();
     let (fill, stroke) = match object {
@@ -519,29 +520,37 @@ fn gradients(object: &SceneObject, at: &dyn Fn(&str) -> String, found: &mut Foun
         SceneObject::Text(_) => (Some("text fill"), false),
         _ => (None, false),
     };
-    if let Some(paint) = fill {
-        if let Some(kind) = gradient_kind(&base.fill) {
+    let object_box = (base.width, base.height);
+    let mut check = |paint: &str, value: &Option<ColorValue>, field: &str| {
+        let Some(kind) = gradient_kind(value) else {
+            return;
+        };
+        if paint == "text fill" {
             found.push(
                 Refusal::UnsupportedPathGradient {
                     object: base.id.clone(),
                     paint: paint.into(),
                 },
-                at("fill.type"),
+                at(&format!("{field}.type")),
+                serde_json::json!(kind),
+            );
+        } else if let Some(detail) = value.as_ref().and_then(|v| v.gradient_problem(object_box)) {
+            found.push(
+                Refusal::GradientNotDrawable {
+                    object: base.id.clone(),
+                    paint: paint.into(),
+                    detail,
+                },
+                at(field),
                 serde_json::json!(kind),
             );
         }
+    };
+    if let Some(paint) = fill {
+        check(paint, &base.fill, "fill");
     }
     if stroke {
-        if let Some(kind) = gradient_kind(&base.stroke) {
-            found.push(
-                Refusal::UnsupportedPathGradient {
-                    object: base.id.clone(),
-                    paint: "stroke".into(),
-                },
-                at("stroke.type"),
-                serde_json::json!(kind),
-            );
-        }
+        check("stroke", &base.stroke, "stroke");
     }
 }
 
@@ -925,28 +934,43 @@ mod tests {
     }
 
     #[test]
-    fn gradients_on_drawn_paints_refuse_by_paint_even_when_hidden() {
-        let mut fill = rect("r");
-        fill.base_mut().fill = Some(gradient());
+    fn path_gradients_draw_and_refuse_only_what_cannot_be_drawn_as_authored() {
+        // 3.17: a drawable gradient on a boxed path refuses nothing.
+        let mut drawable = rect("r");
+        drawable.base_mut().width = 10.0;
+        drawable.base_mut().height = 10.0;
+        drawable.base_mut().fill = Some(gradient());
+        drawable.base_mut().stroke = Some(gradient());
+        assert_eq!(refused(vec![drawable.clone()]), None);
+
+        // One that cannot be drawn as authored refuses by paint, hidden too.
+        let not_drawable = |paint: &str| Refusal::GradientNotDrawable {
+            object: "r".into(),
+            paint: paint.into(),
+            detail: "angle 30 is not drawn beside explicit start and end points; set the points"
+                .into(),
+        };
+        let mut angled = gradient();
+        if let ColorValue::LinearGradient { angle, .. } = &mut angled {
+            *angle = 30.0;
+        }
+        let mut fill = drawable.clone();
+        fill.base_mut().fill = Some(angled.clone());
         fill.base_mut().visible = false;
-        assert_eq!(
-            refused(vec![fill]),
-            Some(Refusal::UnsupportedPathGradient {
-                object: "r".into(),
-                paint: "fill".into()
-            })
-        );
+        assert_eq!(refused(vec![fill]), Some(not_drawable("fill")));
+        let mut stroke = drawable.clone();
+        stroke.base_mut().stroke = Some(angled);
+        assert_eq!(refused(vec![stroke]), Some(not_drawable("stroke")));
 
-        let mut stroke = rect("r");
-        stroke.base_mut().stroke = Some(gradient());
-        assert_eq!(
-            refused(vec![stroke]),
-            Some(Refusal::UnsupportedPathGradient {
-                object: "r".into(),
-                paint: "stroke".into()
-            })
-        );
+        // An object-space gradient needs a box.
+        let mut unboxed = rect("r");
+        unboxed.base_mut().fill = Some(gradient());
+        assert!(matches!(
+            refused(vec![unboxed]),
+            Some(Refusal::GradientNotDrawable { detail, .. }) if detail.contains("needs a box")
+        ));
 
+        // Text cannot carry a gradient until 3.18.
         let mut title = text("t");
         title.base.fill = Some(gradient());
         assert_eq!(
@@ -959,9 +983,79 @@ mod tests {
 
         // A shape whose fill is disabled never paints it, so it cannot refuse.
         let mut shape = shape(vec![Vec2 { x: 0.0, y: 0.0 }; 2]);
-        shape.base.fill = Some(gradient());
+        let mut bad = gradient();
+        if let ColorValue::LinearGradient { angle, .. } = &mut bad {
+            *angle = 30.0;
+        }
+        shape.base.fill = Some(bad);
         shape.fill_enabled = false;
         assert_eq!(refused(vec![SceneObject::Shape(shape)]), None);
+    }
+
+    #[test]
+    fn a_gradient_problem_names_what_cannot_be_drawn() {
+        use crate::color::{GradientStop, Rgba};
+        let stop = |position| GradientStop {
+            position,
+            color: Rgba::srgb(1.0, 0.0, 0.0, 1.0),
+        };
+        let linear = |stops: Vec<GradientStop>, end_x: f64| ColorValue::LinearGradient {
+            angle: 0.0,
+            start_x: 0.0,
+            start_y: 0.0,
+            end_x,
+            end_y: 0.0,
+            stops,
+            spread: Default::default(),
+            coordinate_mode: Default::default(),
+        };
+        let radial = |radius: f64, focal: Option<f64>| ColorValue::RadialGradient {
+            center_x: 0.5,
+            center_y: 0.5,
+            radius_x: radius,
+            radius_y: 0.5,
+            focal_x: focal,
+            focal_y: None,
+            stops: vec![stop(0.0), stop(1.0)],
+            spread: Default::default(),
+            coordinate_mode: Default::default(),
+        };
+        let b = (10.0, 10.0);
+        assert_eq!(
+            linear(vec![stop(0.0), stop(1.0)], 1.0).gradient_problem(b),
+            None
+        );
+        assert_eq!(radial(0.5, Some(0.5)).gradient_problem(b), None);
+        for (paint, expect) in [
+            (linear(vec![stop(0.0)], 0.0), "coincide"),
+            (linear(vec![stop(0.6), stop(0.2)], 1.0), "decrease"),
+            (linear(vec![stop(1.5)], 1.0), "outside 0 to 1"),
+            (linear(vec![stop(0.5); 17], 1.0), "at most 16"),
+            (radial(0.0, None), "positive"),
+            (radial(0.5, Some(0.2)), "focal point"),
+            (
+                ColorValue::LinearGradient {
+                    angle: 0.0,
+                    start_x: 0.0,
+                    start_y: 0.0,
+                    end_x: 1.0,
+                    end_y: 0.0,
+                    stops: vec![stop(0.0)],
+                    spread: Default::default(),
+                    coordinate_mode: crate::color::GradientCoordinateMode::Scene,
+                },
+                "scene-space",
+            ),
+        ] {
+            let problem = paint.gradient_problem(b).expect("refused");
+            assert!(problem.contains(expect), "{problem}");
+        }
+        assert_eq!(
+            ColorValue::hex("#ffffff")
+                .unwrap()
+                .gradient_problem((0.0, 0.0)),
+            None
+        );
     }
 
     fn shape(tangents: Vec<Vec2>) -> ShapeObject {

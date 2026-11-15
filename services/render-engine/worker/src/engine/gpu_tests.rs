@@ -64,7 +64,8 @@ fn take(engine: &mut Engine, pin: &(TakeId, Revision, ContentHash)) -> EngineRep
 
 /// 3.17's drawing rule (user decision 15 Nov 2026): vector content drawn by
 /// Vello GPU matches the Vello CPU reference to at most one code value per
-/// channel, on any share of pixels. Text and every other route are unchanged
+/// channel, on any share of pixels, the colour of a pixel transparent on both
+/// sides excepted. Text and every other route are unchanged
 /// and must match exactly, which this rule also admits; the share is recorded.
 fn assert_within_one_code(actual: &Frame, expected: &Frame, what: &str) {
     assert_eq!(
@@ -75,6 +76,13 @@ fn assert_within_one_code(actual: &Frame, expected: &Frame, what: &str) {
     let mut worst = (0_u8, 0_usize);
     let mut over = 0_usize;
     for (i, (a, b)) in actual.pixels.iter().zip(&expected.pixels).enumerate() {
+        // A pixel whose alpha is code 0 on both sides is invisible; its
+        // straight colour is a quotient by an alpha too small to show, and is
+        // not compared.
+        let alpha = i - i % 4 + 3;
+        if i % 4 != 3 && actual.pixels[alpha] == 0 && expected.pixels[alpha] == 0 {
+            continue;
+        }
         let delta = a.abs_diff(*b);
         over += usize::from(delta > 1);
         if delta > worst.0 {
@@ -609,6 +617,72 @@ fn vector_fixture() -> SceneDocument {
         base,
         points: vec![v(0.0, 0.0), v(40.0, 60.0), v(80.0, 5.0), v(120.0, 90.0)],
     }));
+    // Gradients (3.17), object space: a repeating linear fill with a hard
+    // stop, a reflected radial fill, and a linear stroke.
+    use gx_contracts::color::{GradientSpread, GradientStop};
+    let stops = vec![
+        GradientStop {
+            position: 0.0,
+            color: Rgba::srgb(1.0, 0.2, 0.1, 1.0),
+        },
+        GradientStop {
+            position: 0.5,
+            color: Rgba::srgb(0.1, 0.3, 1.0, 0.6),
+        },
+        GradientStop {
+            position: 0.5,
+            color: Rgba::srgb(0.9, 0.9, 0.2, 1.0),
+        },
+        GradientStop {
+            position: 1.0,
+            color: Rgba::srgb(0.0, 0.0, 0.0, 0.0),
+        },
+    ];
+    let linear = |spread| ColorValue::LinearGradient {
+        angle: 0.0,
+        start_x: 0.1,
+        start_y: 0.0,
+        end_x: 0.6,
+        end_y: 0.3,
+        stops: stops.clone(),
+        spread,
+        coordinate_mode: Default::default(),
+    };
+    let mut base = ObjectBase::new("linear", "linear");
+    base.x = 20.0;
+    base.y = 230.0;
+    base.width = 150.0;
+    base.height = 80.0;
+    base.fill = Some(linear(GradientSpread::Repeat));
+    doc.objects
+        .push(SceneObject::Rect(RectObject { base, radius: 6.0 }));
+    let mut base = ObjectBase::new("radial", "radial");
+    base.x = 200.0;
+    base.y = 230.0;
+    base.width = 140.0;
+    base.height = 90.0;
+    base.fill = Some(ColorValue::RadialGradient {
+        center_x: 0.5,
+        center_y: 0.5,
+        radius_x: 0.3,
+        radius_y: 0.25,
+        focal_x: None,
+        focal_y: None,
+        stops: stops.clone(),
+        spread: GradientSpread::Reflect,
+        coordinate_mode: Default::default(),
+    });
+    doc.objects
+        .push(SceneObject::Ellipse(EllipseObject { base }));
+    let mut base = ObjectBase::new("ringed", "ringed");
+    base.x = 370.0;
+    base.y = 235.0;
+    base.width = 110.0;
+    base.height = 70.0;
+    base.stroke = Some(linear(GradientSpread::Pad));
+    base.stroke_width = 8.0;
+    doc.objects
+        .push(SceneObject::Rect(RectObject { base, radius: 20.0 }));
     doc
 }
 
@@ -634,7 +708,7 @@ fn gpu_engine_draws_vector_content_within_one_code_of_the_vello_cpu_reference() 
             "every vector source is drawn on the GPU"
         );
         let sources = engine.gpu_source_trace(&pin.0, pin.1).unwrap().to_vec();
-        assert_eq!(sources.len(), 9);
+        assert_eq!(sources.len(), 12);
         assert!(sources
             .iter()
             .all(|s| s.route == "gpu-vello-coverage-at-prepare"));

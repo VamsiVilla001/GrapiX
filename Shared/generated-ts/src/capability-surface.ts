@@ -175,6 +175,7 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
     "unsupportedAlphaMode",
     "unsupportedDepthMode",
     "unsupportedPathGradient",
+    "gradientNotDrawable",
     "vectorTessellationFailed",
     "unknownOutputAdapter",
     "sceneMaterialUnknown",

@@ -118,6 +118,18 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-15 — 3.17 increment 2: linear and radial gradients on paths (Claude)
+
+**Resume here.** Gradients draw on both paths. Semantics defined (none existed): object space = fractions of the
+box; linear from start to end; radial elliptical; pad/repeat/reflect; at most 16 non-decreasing stops,
+interpolated premultiplied in the working space. Refused by name (`GradientNotDrawable`, new, one rule
+`ColorValue::gradient_problem` for validator and engine): non-zero angle beside points, off-centre focus, scene
+space, bad stops, degenerate axis or radius, unboxed object. Text fills keep `UnsupportedPathGradient` (3.18).
+`rasterise::paint` (CPU) and `compositor/draw.wgsl` (GPU) evaluate the same f32 rows. The one-code comparison now
+skips the colour of a pixel transparent on both sides. **3.17 stays active.** Next: image quads, which need user
+decisions first (where the source colour tag lives, formats, fit modes), then the in-product benchmark and
+mutations. Evidence `docs/evidence/3.17`.
+
 ## 2026-11-15 — 3.17 increment 1: Vello on GPU and CPU; stroke join, cap and dash (Claude)
 
 **Resume here.** User decisions 15 Nov (Jev and Laya asked first): Vello GPU 0.3 draws, Vello CPU 0.3 is the
