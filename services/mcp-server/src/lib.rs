@@ -493,6 +493,70 @@ mod tests {
         }
     }
 
+    /// 8.1: no hand-written schema. The checked-in directory holds exactly the
+    /// registry's tools, every file equal to what the contracts generate for
+    /// that tool, installed or not, so a stray or edited file fails here and
+    /// in `npm run codegen:check`.
+    #[test]
+    fn every_checked_in_tool_schema_is_one_the_registry_generates() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../Shared/generated-ts/schemas/mcp");
+        let mut files: Vec<String> = std::fs::read_dir(&dir)
+            .expect("the generated MCP schema directory exists")
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .map(|name| {
+                name.strip_suffix(".schema.json")
+                    .unwrap_or_else(|| panic!("{name} is not a generated tool schema"))
+                    .to_owned()
+            })
+            .collect();
+        files.sort();
+        let mut tools: Vec<String> = ToolRegistry::all()
+            .iter()
+            .map(|tool| tool.name.to_owned())
+            .collect();
+        tools.sort();
+        assert_eq!(files, tools, "one schema file per registry tool, no other");
+        for tool in ToolRegistry::all() {
+            let stored: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(dir.join(format!("{}.schema.json", tool.name))).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                stored,
+                gx_contracts::mcp::input_schema(tool.input).unwrap(),
+                "{} differs from what the contracts generate",
+                tool.name
+            );
+        }
+    }
+
+    /// 8.1: the tool schema is versioned with the protocol. The capability
+    /// surface an agent reads, the registry and the checked-in TypeScript all
+    /// carry the one number.
+    #[test]
+    fn the_tool_schema_is_versioned_with_the_protocol() {
+        let surface = gx_contracts::mcp::capability_surface();
+        assert_eq!(surface.schema_version, gx_contracts::PROTOCOL_VERSION);
+        assert_eq!(surface.protocol_version, gx_contracts::PROTOCOL_VERSION);
+        let ts = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../Shared/generated-ts/src/capability-surface.ts"),
+        )
+        .unwrap();
+        for key in ["schemaVersion", "protocolVersion"] {
+            assert!(
+                ts.contains(&format!("\"{key}\": {},", gx_contracts::PROTOCOL_VERSION)),
+                "the generated capability surface does not carry {key} {}",
+                gx_contracts::PROTOCOL_VERSION
+            );
+        }
+        let server = Server::new(Vec::new());
+        let reply = call(&server, "system.capability", serde_json::Value::Null).unwrap();
+        let surface = reply.result.expect("a surface");
+        assert_eq!(surface["schemaVersion"], gx_contracts::PROTOCOL_VERSION);
+    }
+
     #[test]
     fn tools_list_only_advertises_installed_handlers() {
         let server = Server::new(Vec::new());

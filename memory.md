@@ -118,6 +118,27 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-16 — 8.1 done: every MCP tool lists its generated schema (Claude, on the user's MCP direction)
+
+**Resume here.** 8.1 was reopened on 13 Oct (no `tools/list` entry carried an `inputSchema`) and left active by Codex on
+19 Oct until the shared gate passed. Its reopen condition is met by tests that already existed, so this entry adds two
+checks and the evidence (`docs/evidence/8.1`): `every_checked_in_tool_schema_is_one_the_registry_generates` (the schema
+directory holds exactly the registry's 31 tools and no other file; each file equals what the contracts generate, installed
+or not) and `the_tool_schema_is_versioned_with_the_protocol` (`schemaVersion` and `protocolVersion` are both
+`PROTOCOL_VERSION`, 5 today, in the surface, the registry and the checked-in TypeScript). Existing: the whole-registry
+`tools_list_returns_the_whole_registry_under_the_spec_field`, the rmcp wire test, the shipped-binary stdio test, and
+`npm run codegen:check`. A search finds no `inputSchema` in any TypeScript. Mutations: 6 of 6 fail named tests (a hand-edited
+schema file, a hand-built listing, the wire listing none, the version, the shipped binary, a stray hand-written file).
+Jev and Laya: done-when met 0.95 / 0.90; they split on silent-substitution risk (0.27 / 0.93) and the weakest point
+without reasons, as on 3.19; the hand check found the one clause covered, and the split is reported to the user.
+Gate: fmt, clippy -D warnings and npm run check exit 0 (46 Node, 412 Editor, 877 Rust passed, 0 failed, 37 ignored;
+conformance 591/0/9). No contract or wire change.
+**Not done, by name:** `outputSchema` (codegen has input schemas only); no shipped Program MCP binary; 8.14's three tiers
+and the every-tool Cue/Take conformance test; 8.12 (`if_revision` and idempotency keys on MCP writes: no crate depends on
+`gx-write-semantics`, and what `if_revision` should check on a stored scene is a design decision for the user).
+**3.21 stays active** and cannot be measured today: other apps hold 4.9 of the 8 GB of GPU memory (Discord, Chrome,
+WebView2) at 41% utilisation, so 2160p needs a quiet machine; the stats page at 1080p was 13.1 ms p99 on 15 Nov.
+
 ## 2026-11-16 — The render features through the Editor MCP (Claude, on the user's instruction)
 
 **Resume here.** The user said "write each module MCP accessible"; asked which job that meant, they chose "render

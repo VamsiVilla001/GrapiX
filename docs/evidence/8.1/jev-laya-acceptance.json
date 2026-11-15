@@ -1,0 +1,302 @@
+{
+  "jev": {
+    "model": "jev-1.14.0"
+  },
+  "laya": {
+    "model": "convaiinnovations/laya-multilingual",
+    "max_len": 8192,
+    "input_tokens": 15191,
+    "output_tokens": 0,
+    "state_tokens": 1452,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "8.1 Tool schema generated from contracts; versioned alongside protocol",
+    "done_when": "No hand-written schema (every listed tool carries its generated JSON Schema as inputSchema, checked by a test over every tool).",
+    "evidence_record": "# 8.1 — Tool schema generated from contracts\n\nBuild-plan row `8.1`. Done when: **no hand-written schema**; the row's work is\n\"tool schema generated from contracts; versioned alongside the protocol\".\n\nReopened 13 October 2026 because none of the 30 `tools/list` entries carried an\n`inputSchema` (each named a type). The plan's condition to close it again:\n\"every listed tool carries its generated JSON Schema as `inputSchema`, checked\nby a test over every tool\". Codex made the schemas generated on 19 October and\nleft the row active until the shared gate passed; it passes now (below).\n\n## Where the schema comes from\n\n`gx_contracts::mcp::input_schema(descriptor.input)` builds each tool's schema\nfrom the Rust payload type (`schemars`), and `npm run codegen` writes the same\nvalue to `Shared/generated-ts/schemas/mcp/<tool>.schema.json`. The registry\n(`ToolRegistry::all()`) holds 31 tools today (30 at the reopening). `Server::listed_tools` builds\n`tools/list` from that one function, for the in-process API and for the rmcp\nwire alike. `services/schema-mcp` is a reader of the generated files and\nholds no schema of its own.\n\n## Executed\n\n- `cargo test -p gx-mcp-server` (17 passed, 0 failed), including:\n  - `tools_list_returns_the_whole_registry_under_the_spec_field`: for every\n    one of the 31 registry tools, `tools/list` carries an `inputSchema` equal to\n    `input_schema(descriptor.input)`, of `\"type\": \"object\"`, and equal to the\n    checked-in `schemas/mcp/<tool>.schema.json`.\n  - `wire::tests::tools_list_carries_the_generated_schema_and_the_registry_entry`:\n    the same over the rmcp wire, with the registry entry under\n    `_meta[\"dev.grapix/tool\"]` and `readOnlyHint` from the tool's effect.\n  - **new** `every_checked_in_tool_schema_is_one_the_registry_generates`: the\n    schema directory holds exactly the 31 registry tools and no other file, and\n    each file equals what the contracts generate for its tool whether or not a\n    server installs a handler for it (so the Program tools, which have no\n    shipped binary yet, are covered too).\n  - **new** `the_tool_schema_is_versioned_with_the_protocol`: the capability\n    surface's `schemaVersion` and `protocolVersion` are both\n    `PROTOCOL_VERSION` (5 today), the checked-in `capability-surface.ts` carries\n    the same two numbers, and `system.capability` over the server answers it.\n- `cargo test -p gx-editor-mcp --test stdio_surface`: the shipped\n  `gx-editor-mcp` binary, a real handshake, `tools/list`: every advertised\n  tool's `inputSchema` equals the generated one, is a usable JSON Schema, and\n  rejects a non-object argument.\n- `cargo test -p gx-playout-mcp --test surface` (3 passed): the Program-side tools\n  answer through the same server; their schemas are covered by the directory\n  test above.\n- `npm run codegen:check` (in `npm run check`): the generated tree is not stale.\n- GATE_RESULT\n\n## Mutations\n\nOne exact change each, run alone against the tests named, each file restored\nbyte-identical (`mutate_81.py` in the session scratchpad):\n\n| # | Mutation | Failing |\n| --- | --- | --- |\n| S1 | a generated schema file is edited by hand | `every_checked_in_tool_schema_is_one_the_registry_generates`, `tools_list_returns_the_whole_registry_under_the_spec_field` |\n| S2 | `tools/list` builds its schema by hand | `tools_list_returns_the_whole_registry_under_the_spec_field`, `wire::tests::tools_list_carries_the_generated_schema_and_the_registry_entry` |\n| S3 | the wire lists no `inputSchema` | `wire::tests::tools_list_carries_the_generated_schema_and_the_registry_entry` |\n| S4 | the schema version is not the protocol version | `the_tool_schema_is_versioned_with_the_protocol` |\n| S5 | the shipped binary lists a hand-built schema | `shipped_stdio_tools_list_carries_usable_generated_schemas` |\n| S6 | a hand-written schema file is added beside the generated ones | `every_checked_in_tool_schema_is_one_the_registry_generates` |\n\n## Not in this row\n\n- **`outputSchema`.** Codegen emits input schemas only; a tool's result type has\n  no schema. The done-when does not ask for one.\n- **No shipped Program MCP binary.** The Program tools' schemas are generated and\n  checked, but no process lists them over a wire yet (8.14's transport half\n  covered the Editor).\n- **The three tiers** (read, author on a draft handle, propose) and the\n  every-tool Cue/Take conformance test are 8.14's, not this row's.\n- **`if_revision` and idempotency keys** on writes are 8.12's.\n"
+  },
+  "questions": {
+    "done_when_met": {
+      "type": "noul",
+      "instructions": "Does the recorded evidence show that this row's done-when was met by execution (tests run, commands run, figures recorded), not merely claimed?",
+      "criteria": {
+        "true": "Every clause of the done-when has executed evidence.",
+        "false": "A clause is unmet, only claimed, or the evidence does not name what was run."
+      }
+    },
+    "evidence_names_execution": {
+      "type": "noul",
+      "instructions": "Does the evidence name specific executed checks (test names, commands, counts, measured figures) rather than describing the feature?",
+      "criteria": {
+        "true": "Specific executed checks are named.",
+        "false": "The evidence describes the feature without naming what was run."
+      }
+    },
+    "silent_substitution_risk": {
+      "type": "noul",
+      "instructions": "Is there a risk that this row ships a silent substitution: something the done-when asks for that is approximated, skipped or deferred without being refused by name?",
+      "criteria": {
+        "true": "Yes, a clause appears approximated, skipped or deferred silently.",
+        "false": "No, every gap is named or refused."
+      }
+    },
+    "weakest": {
+      "type": "choice",
+      "instructions": "What is the weakest point of this row's evidence?",
+      "criteria": {
+        "none": "No weak point: evidence covers every clause with executed checks.",
+        "unexecuted_clause": "A done-when clause has no executed check.",
+        "platform_gap": "A platform the done-when names (e.g. macOS, hardware) was not run.",
+        "stale": "Later changes may have invalidated the recorded evidence.",
+        "vague_record": "The record is too vague to tell what was run."
+      }
+    },
+    "unrun_is_named": {
+      "type": "noul",
+      "instructions": "Does the evidence name every check or step it did not run, rather than leaving a gap unmentioned?",
+      "criteria": {
+        "true": "Everything not run is named in the evidence.",
+        "false": "Some gap is not mentioned in the evidence."
+      }
+    },
+    "mutations_can_fail": {
+      "type": "noul",
+      "instructions": "Do the recorded mutations show that the named checks can fail: each mutation was run alone, made at least one named check fail, and the file was restored identical?",
+      "criteria": {
+        "true": "Each recorded mutation names the check or test that failed and says the file was restored.",
+        "false": "A mutation survived, was not run alone, or does not name what failed."
+      }
+    },
+    "every_tool_has_generated_schema": {
+      "type": "noul",
+      "instructions": "Does the evidence show by named executed tests, over every tool in the registry, that tools/list carries the generated JSON Schema as inputSchema?",
+      "criteria": {
+        "true": "A named test covers every registry tool.",
+        "false": "Only some tools are covered, or it is only claimed."
+      }
+    },
+    "no_hand_written_schema": {
+      "type": "noul",
+      "instructions": "Does the evidence show that no hand-written schema exists, including that a hand-edited or stray schema file would be caught?",
+      "criteria": {
+        "true": "Mutations show a hand edit and a stray file fail named tests.",
+        "false": "It is only claimed that no schema is hand-written."
+      }
+    },
+    "versioned_with_protocol": {
+      "type": "noul",
+      "instructions": "Does the evidence show by execution that the tool schema is versioned alongside the protocol?",
+      "criteria": {
+        "true": "A named test ties the schema version to the protocol version, with a failing mutation.",
+        "false": "Only claimed."
+      }
+    },
+    "over_the_wire": {
+      "type": "noul",
+      "instructions": "Does the evidence show the schemas arrive over a real MCP wire (the shipped binary or the rmcp transport), not only in process?",
+      "criteria": {
+        "true": "A named test lists tools over the wire and checks the schemas.",
+        "false": "Only in-process."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "done_when_met",
+      "jev": 0.95,
+      "laya": 0.9036,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.95
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9036,
+        "confidence": 0.9036,
+        "answer_confidence": 0.9036,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "evidence_names_execution",
+      "jev": 0.98,
+      "laya": 0.827,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.98
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.827,
+        "confidence": 0.827,
+        "answer_confidence": 0.827,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "silent_substitution_risk",
+      "jev": 0.27,
+      "laya": 0.9335,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.27
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9335,
+        "confidence": 0.9335,
+        "answer_confidence": 0.9335,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "weakest",
+      "jev": "none",
+      "laya": "vague_record",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "none",
+        "confidence": 0.6,
+        "probabilities": {
+          "none": 0.68,
+          "unexecuted_clause": 0.03,
+          "platform_gap": 0.14,
+          "stale": 0.15,
+          "vague_record": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "vague_record",
+        "probabilities": {
+          "none": 0.0779,
+          "unexecuted_clause": 0.0598,
+          "platform_gap": 0.0146,
+          "stale": 0.0286,
+          "vague_record": 0.819
+        },
+        "confidence": 0.5686,
+        "answer_confidence": 0.819,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "unrun_is_named",
+      "jev": 0.59,
+      "laya": 0.8898,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.59
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.8898,
+        "confidence": 0.8898,
+        "answer_confidence": 0.8898,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "mutations_can_fail",
+      "jev": 0.95,
+      "laya": 0.8656,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.95
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.8656,
+        "confidence": 0.8656,
+        "answer_confidence": 0.8656,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "every_tool_has_generated_schema",
+      "jev": 0.96,
+      "laya": 0.799,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.96
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.799,
+        "confidence": 0.799,
+        "answer_confidence": 0.799,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "no_hand_written_schema",
+      "jev": 0.95,
+      "laya": 0.9064,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.95
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9064,
+        "confidence": 0.9064,
+        "answer_confidence": 0.9064,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "versioned_with_protocol",
+      "jev": 0.97,
+      "laya": 0.8689,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.97
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.8689,
+        "confidence": 0.8689,
+        "answer_confidence": 0.8689,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "over_the_wire",
+      "jev": 0.97,
+      "laya": 0.8756,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.97
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.8756,
+        "confidence": 0.8756,
+        "answer_confidence": 0.8756,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

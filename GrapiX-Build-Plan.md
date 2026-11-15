@@ -252,7 +252,7 @@ its done-when failed (`memory.md`, 13 October). They are `active` again.
   sphere and torus are triangulated grids, tested by counts and a silhouette.
 - `8.1`: none of the 30 `tools/list` entries carries an `inputSchema`; each
   names a type instead. **Closes again when** every listed tool carries its
-  generated JSON Schema as `inputSchema`, checked by a test over every tool.
+  generated JSON Schema as `inputSchema`, checked by a test over every tool. **Closed 16 Nov 2026** (`docs/evidence/8.1`).
 - `8.9`: `tools/call render.preview` returns a raw `pixels` number array and
   ignores the requested frame. **Closes again when** it answers with an MCP
   image content block (PNG) for the requested frame, or a named refusal,
@@ -351,7 +351,7 @@ Deliberately before the UI. The application becomes fully operable and automatab
 
 | Step | Work | Track | Needs | Done when |
 |---|---|---|---|---|
-| `8.1` | Tool schema generated from contracts; versioned alongside protocol v3 | BE | 0.9 | No hand-written schema |
+| `8.1` | Tool schema generated from contracts; versioned alongside protocol v3 | BE | 0.9 | No hand-written schema (Done 16 Nov 2026: every one of the 31 registry tools lists the schema the contracts generate, equal to its checked-in file, in process, over the rmcp wire and over the shipped binary; the schema directory holds exactly the registry's tools and no other file; the schema is versioned with PROTOCOL_VERSION; 6 of 6 mutations fail named tests; evidence `docs/evidence/8.1`.) |
 | `8.2` | system.capability — supported enums, tier, versions, build hash | BE | 1.10 | An agent never has to guess |
 | `8.3` | project, scenes, objects | BE | 7.1 | Full property surface reachable |
 | `8.4` | materials, assets, fonts | BE | 7.1 | Including relink and usage lookup |
