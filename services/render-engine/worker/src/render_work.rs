@@ -15,6 +15,10 @@ pub struct RenderWork {
     pub gpu_output_dispatches: u64,
     /// 3.22 effect-step dispatches (one per effect per layer per frame).
     pub gpu_effect_dispatches: u64,
+    /// Tile pixels the layer dispatches covered: each layer runs over its
+    /// footprint and the previous layer's on the tile, not the whole tile
+    /// (3.21).
+    pub gpu_layer_pixels: u64,
 }
 
 thread_local! { static WORK: Cell<RenderWork> = Cell::new(RenderWork::default()); }
@@ -33,6 +37,7 @@ impl RenderWork {
             gpu_layer_dispatches: self.gpu_layer_dispatches - before.gpu_layer_dispatches,
             gpu_output_dispatches: self.gpu_output_dispatches - before.gpu_output_dispatches,
             gpu_effect_dispatches: self.gpu_effect_dispatches - before.gpu_effect_dispatches,
+            gpu_layer_pixels: self.gpu_layer_pixels - before.gpu_layer_pixels,
         }
     }
 }
@@ -61,6 +66,9 @@ pub(crate) fn gpu_output_dispatch(count: usize) {
 }
 pub(crate) fn gpu_effect_dispatch(count: usize) {
     record(|w| w.gpu_effect_dispatches += count as u64);
+}
+pub(crate) fn gpu_layer_area(pixels: u64) {
+    record(|w| w.gpu_layer_pixels += pixels);
 }
 
 #[derive(Debug, Clone, Serialize)]

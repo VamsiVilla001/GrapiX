@@ -118,6 +118,13 @@ struct Layer {
     object_id: String,
     document_path: String,
     mode: u32,
+    /// The size of the texture the composite pass samples (the effect
+    /// chain's output when there is one): what bounds the layer's footprint.
+    source: (u32, u32),
+    /// The mode changes the backdrop where the source is transparent
+    /// (`BlendMode::acts_on_whole_backdrop`), so it is dispatched over the
+    /// whole tile.
+    whole_backdrop: bool,
     view: wgpu::TextureView,
     chain: Option<EffectChain>,
 }
@@ -180,7 +187,8 @@ fn write_curve(bytes: &mut Vec<u8>, effect: &crate::effects::PackedEffect) {
 struct TileResources {
     tile: Tile,
     targets: [wgpu::Texture; 2],
-    clear: wgpu::BindGroup,
+    /// Clears target 0 and target 1.
+    clear: [wgpu::BindGroup; 2],
     uniforms: Vec<wgpu::Buffer>,
     groups: Vec<wgpu::BindGroup>,
     readback: wgpu::Buffer,
@@ -221,7 +229,138 @@ pub struct PreparedCompositor {
     // Validate the entire frame before writing any GPU state. Reused scratch
     // keeps matrix construction out of the allocator on the frame path.
     uniform_scratch: Vec<[u8; UNIFORM_BYTES]>,
+    /// Each layer's dispatch region per tile for this frame (tile-major): the
+    /// hull of its footprint and the previous layer's, as written into its
+    /// uniform. Prepared once, rewritten per frame.
+    region_scratch: Vec<Region>,
+    /// Test-only: dispatch every layer over its whole tile, the 3.16
+    /// behaviour, so a test can show the footprint dispatch changes no bit.
+    #[cfg(test)]
+    full_tile_dispatch: bool,
     submitted: bool,
+}
+
+/// A tile-local pixel rectangle `[x, x + width) x [y, y + height)`. A layer is
+/// dispatched only over its region; outside it, the layer's source is zero.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct Region {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl Region {
+    fn full(tile: Tile) -> Self {
+        Self {
+            x: 0,
+            y: 0,
+            width: tile.render_bounds.width,
+            height: tile.render_bounds.height,
+        }
+    }
+
+    fn is_empty(self) -> bool {
+        self.width == 0 || self.height == 0
+    }
+
+    fn area(self) -> u64 {
+        u64::from(self.width) * u64::from(self.height)
+    }
+
+    /// The smallest rectangle holding both; an empty region adds nothing.
+    pub(crate) fn hull(self, other: Self) -> Self {
+        if other.is_empty() {
+            return self;
+        }
+        if self.is_empty() {
+            return other;
+        }
+        let x = self.x.min(other.x);
+        let y = self.y.min(other.y);
+        Self {
+            x,
+            y,
+            width: (self.x + self.width).max(other.x + other.width) - x,
+            height: (self.y + self.height).max(other.y + other.height) - y,
+        }
+    }
+}
+
+/// Pixels of margin around a footprint, in tile pixels and in source pixels:
+/// they absorb the f32 rounding of the shader's own coordinate maths, so a
+/// pixel outside the region samples nothing there either.
+const REGION_MARGIN: f64 = 2.0;
+
+/// The tile pixels a layer can change this frame. A layer that does nothing
+/// (opacity not above zero, as the shader tests it) changes none; a
+/// whole-backdrop mode can change every pixel; otherwise it is the axis-aligned
+/// hull of the layer's source rectangle, widened by the bilinear footprint and
+/// [`REGION_MARGIN`], mapped onto the tile.
+pub(crate) fn layer_region(
+    stage: Stage,
+    tile: Tile,
+    state: LayerState,
+    source: (u32, u32),
+    whole_backdrop: bool,
+) -> Region {
+    if state.opacity.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
+        return Region::default();
+    }
+    if whole_backdrop {
+        return Region::full(tile);
+    }
+    let [a, b, c, d, tx, ty] = state.affine;
+    // The same tile-local offsets the uniforms subtract (invariant 38): a
+    // source point (sx, sy) lands on tile pixel coordinate
+    // (a*sx + c*sy - dx, b*sx + d*sy - dy).
+    let dx = (stage.origin.x - tx) + f64::from(tile.render_bounds.x);
+    let dy = (stage.origin.y - ty) + f64::from(tile.render_bounds.y);
+    // The shader's bilinear taps reach a texel only for source coordinates in
+    // (-0.5, size + 0.5); widen by the margin in source pixels as well.
+    let lo = -0.5 - REGION_MARGIN;
+    let (hx, hy) = (
+        f64::from(source.0) + 0.5 + REGION_MARGIN,
+        f64::from(source.1) + 0.5 + REGION_MARGIN,
+    );
+    let corners = [(lo, lo), (hx, lo), (lo, hy), (hx, hy)];
+    let (mut min_x, mut max_x, mut min_y, mut max_y) = (
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+    );
+    for (sx, sy) in corners {
+        let px = a * sx + c * sy - dx;
+        let py = b * sx + d * sy - dy;
+        min_x = min_x.min(px);
+        max_x = max_x.max(px);
+        min_y = min_y.min(py);
+        max_y = max_y.max(py);
+    }
+    // Pixel i is sampled at its centre i + 0.5; widen by the margin in tile
+    // pixels and clamp in f64 before any integer conversion.
+    let span = |min: f64, max: f64, size: u32| -> (u32, u32) {
+        let size = f64::from(size);
+        let first = (min - 0.5 - REGION_MARGIN).floor().clamp(0.0, size);
+        let end = (max + 0.5 + REGION_MARGIN).ceil().clamp(0.0, size);
+        if end > first {
+            (first as u32, (end - first) as u32)
+        } else {
+            (0, 0)
+        }
+    };
+    let (x, width) = span(min_x, max_x, tile.render_bounds.width);
+    let (y, height) = span(min_y, max_y, tile.render_bounds.height);
+    if width == 0 || height == 0 {
+        return Region::default();
+    }
+    Region {
+        x,
+        y,
+        width,
+        height,
+    }
 }
 
 impl PreparedCompositor {
@@ -280,7 +419,11 @@ impl PreparedCompositor {
                     mapping(&input.object_id, &input.document_path, field, detail)
                 })?;
                 let mode = crate::blend::mode_index(input.blend_mode);
-                uniform_scratch.push(pack_uniform(&geometry, key(mode, *tile, input.state)));
+                uniform_scratch.push(pack_uniform(
+                    &geometry,
+                    key(mode, *tile, input.state),
+                    Region::full(*tile),
+                ));
             }
         }
         crate::render_work::gpu_build();
@@ -376,6 +519,10 @@ impl PreparedCompositor {
                     object_id: input.object_id.clone(),
                     document_path: input.document_path.clone(),
                     mode: crate::blend::mode_index(input.blend_mode),
+                    source: chain.as_ref().map_or((input.width, input.height), |chain| {
+                        (chain.width, chain.height)
+                    }),
+                    whole_backdrop: input.blend_mode.acts_on_whole_backdrop(),
                     view,
                     chain,
                 }
@@ -436,7 +583,13 @@ impl PreparedCompositor {
                             ],
                         })
                     };
-                let clear = group(&views[1], 1, 0, &clear_uniform);
+                // Both targets start each frame transparent: a layer writes
+                // only its region, so the target it writes must already hold
+                // the frame's state outside it.
+                let clear = [
+                    group(&views[1], 1, 0, &clear_uniform),
+                    group(&views[0], 0, 1, &clear_uniform),
+                ];
                 let uniforms: Vec<_> = (0..layers.len())
                     .map(|i| make_uniform(&uniform_scratch[tile_index * layers.len() + i]))
                     .collect();
@@ -476,7 +629,10 @@ impl PreparedCompositor {
             composite_pipeline,
             effect_pipeline,
             curve_scratch: Vec::with_capacity(crate::effects::CURVE_FLOATS * 4),
+            region_scratch: vec![Region::default(); uniform_scratch.len()],
             uniform_scratch,
+            #[cfg(test)]
+            full_tile_dispatch: false,
             submitted: false,
         })
     }
@@ -518,14 +674,39 @@ impl PreparedCompositor {
                 actual: states.len(),
             });
         }
+        // Layer i reads target i % 2 (the whole state after layer i - 1) and
+        // writes target (i + 1) % 2, which still holds the state after layer
+        // i - 2. The two differ only where layer i - 1 could change pixels, its
+        // footprint. So layer i is dispatched over the hull of its own
+        // footprint and the previous layer's: inside, it writes the new state
+        // (keeping the backdrop bit for bit where its source is zero); outside,
+        // neither layer changes anything and the target is already right. Both
+        // targets start the frame cleared, so layer 0 has no predecessor.
         for (tile_index, tile) in self.tiles.iter().enumerate() {
+            let mut previous = Region::default();
             for (i, (state, layer)) in states.iter().zip(&self.layers).enumerate() {
                 let geometry =
                     uniforms(self.stage, tile.tile, *state).map_err(|(field, detail)| {
                         mapping(&layer.object_id, &layer.document_path, field, detail)
                     })?;
+                let footprint = layer_region(
+                    self.stage,
+                    tile.tile,
+                    *state,
+                    layer.source,
+                    layer.whole_backdrop,
+                );
+                let region = footprint.hull(previous);
+                previous = footprint;
+                #[cfg(test)]
+                let region = if self.full_tile_dispatch {
+                    Region::full(tile.tile)
+                } else {
+                    region
+                };
+                self.region_scratch[tile_index * states.len() + i] = region;
                 self.uniform_scratch[tile_index * states.len() + i] =
-                    pack_uniform(&geometry, key(layer.mode, tile.tile, *state));
+                    pack_uniform(&geometry, key(layer.mode, tile.tile, *state), region);
             }
         }
         for (tile_index, tile) in self.tiles.iter().enumerate() {
@@ -585,23 +766,33 @@ impl PreparedCompositor {
             }
         }
         crate::render_work::gpu_effect_dispatch(effect_dispatches);
-        for tile in &self.tiles {
+        // Each layer is dispatched over its region only (see the uniform loop
+        // above). Both targets start the frame cleared; one pass per tile.
+        let mut layer_pixels = 0_u64;
+        for (tile_index, tile) in self.tiles.iter().enumerate() {
             let bounds = tile.tile.render_bounds;
+            let regions = &self.region_scratch[tile_index * states.len()..][..states.len()];
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("gx-composite-tile"),
                 timestamp_writes: None,
             });
             pass.set_pipeline(&self.clear_pipeline);
-            pass.set_bind_group(0, &tile.clear, &[]);
-            pass.dispatch_workgroups(bounds.width.div_ceil(16), bounds.height.div_ceil(16), 1);
-            pass.set_pipeline(&self.composite_pipeline);
-            for group in &tile.groups {
-                pass.set_bind_group(0, group, &[]);
+            for clear in &tile.clear {
+                pass.set_bind_group(0, clear, &[]);
                 pass.dispatch_workgroups(bounds.width.div_ceil(16), bounds.height.div_ceil(16), 1);
+            }
+            pass.set_pipeline(&self.composite_pipeline);
+            for (group, region) in tile.groups.iter().zip(regions) {
+                pass.set_bind_group(0, group, &[]);
+                // An empty region dispatches no workgroup; the layer is still
+                // one recorded dispatch.
+                pass.dispatch_workgroups(region.width.div_ceil(16), region.height.div_ceil(16), 1);
+                layer_pixels += region.area();
             }
         }
         self.queue.submit([encoder.finish()]);
         crate::render_work::gpu_dispatch(self.tiles.len() * states.len());
+        crate::render_work::gpu_layer_area(layer_pixels);
         self.submitted = true;
         Ok(CompositeSubmission {
             tiles: self.tiles.len(),
@@ -811,15 +1002,21 @@ pub(crate) fn layer_rows(
     })
 }
 
-/// One layer's uniform: three f32 vec4s of geometry and opacity, then one
-/// u32 vec4 key (3.20: blend mode, Dissolve seed, tile stage pixel).
-const UNIFORM_BYTES: usize = 64;
+/// One layer's uniform: three f32 vec4s of geometry and opacity, one u32
+/// vec4 key (3.20: blend mode, Dissolve seed, tile stage pixel), then one u32
+/// vec4 dispatch region (x, y, width, height on the tile).
+const UNIFORM_BYTES: usize = 80;
 
 // Explicit little-endian packing keeps unsafe code and a layout-cast dependency
 // out of the worker.
-fn pack_uniform(geometry: &[f32; 12], key: [u32; 4]) -> [u8; UNIFORM_BYTES] {
+fn pack_uniform(geometry: &[f32; 12], key: [u32; 4], region: Region) -> [u8; UNIFORM_BYTES] {
     let mut bytes = [0; UNIFORM_BYTES];
-    let words = geometry.iter().map(|v| v.to_bits()).chain(key);
+    let words = geometry.iter().map(|v| v.to_bits()).chain(key).chain([
+        region.x,
+        region.y,
+        region.width,
+        region.height,
+    ]);
     for (word, dest) in words.zip(bytes.chunks_exact_mut(4)) {
         dest.copy_from_slice(&word.to_le_bytes());
     }

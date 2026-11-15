@@ -1,0 +1,10 @@
+== bench-head-dx12.log
+  scorebug     1920x1080 emit 3.3/5.5 settled 7.2/10.6 ringFull 0 behind 1 disp/frame 23
+  stats-page   1920x1080 emit 4.3/6.0 settled 14.4/15.6 ringFull 12 behind 13 disp/frame 69
+  lower-third  3840x2160 emit 0.0/7.7 settled 453.2/628.8 ringFull 333 behind 78 disp/frame 0
+== bench-after-dx12.log
+  scorebug     1920x1080 emit 3.3/4.7 settled 5.7/8.8 ringFull 0 behind 1 disp/frame 23
+  stats-page   1920x1080 emit 4.5/6.7 settled 11.2/13.1 ringFull 0 behind 1 disp/frame 71
+  lower-third  3840x2160 emit 0.0/8.2 settled 298.0/380.0 ringFull 325 behind 47 disp/frame 0
+  scorebug     3840x2160 emit 0.0/7.8 settled 301.7/414.9 ringFull 325 behind 48 disp/frame 2
+  stats-page   3840x2160 emit 0.0/8.0 settled 693.1/862.5 ringFull 337 behind 86 disp/frame 3

@@ -348,3 +348,281 @@ fn gpu_stage_above_actual_texture_limit_has_no_seam() {
         near(p, expected);
     }
 }
+
+// 3.21: each layer is dispatched over its footprint on the tile, not the
+// whole tile. These tests hold the footprint conservative (every pixel the
+// layer can touch is inside it) and the result bit-identical to the whole-tile
+// dispatch.
+
+/// A small deterministic generator, so the cases are the same on every run.
+struct Lcg(u64);
+impl Lcg {
+    fn next(&mut self) -> f64 {
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (self.0 >> 11) as f64 / (1u64 << 53) as f64
+    }
+    fn range(&mut self, lo: f64, hi: f64) -> f64 {
+        lo + (hi - lo) * self.next()
+    }
+}
+
+fn random_state(rng: &mut Lcg, stage_w: f64, stage_h: f64) -> LayerState {
+    let angle = rng.range(-3.2, 3.2);
+    // A quarter of the cases magnify strongly: there half a source pixel of
+    // bilinear reach is many tile pixels, beyond any tile-space margin.
+    let most = if rng.next() < 0.25 { 60.0 } else { 4.0 };
+    let (sx, sy) = (rng.range(0.05, most), rng.range(0.05, most));
+    let shear = if rng.next() < 0.3 {
+        rng.range(-1.0, 1.0)
+    } else {
+        0.0
+    };
+    let (sin, cos) = angle.sin_cos();
+    LayerState {
+        affine: [
+            cos * sx,
+            sin * sx,
+            -sin * sy + shear * cos * sx,
+            cos * sy + shear * sin * sx,
+            rng.range(-0.3 * stage_w, 1.3 * stage_w),
+            rng.range(-0.3 * stage_h, 1.3 * stage_h),
+        ],
+        opacity: if rng.next() < 0.1 {
+            0.0
+        } else {
+            rng.range(0.05, 1.0) as f32
+        },
+        seed: (rng.next() * 1e9) as u32,
+    }
+}
+
+#[test]
+fn a_layer_region_holds_every_pixel_its_source_can_reach() {
+    // Brute force: on every tile of a multi-tile plan, each pixel whose centre
+    // maps into the bilinear footprint of the source lies inside the region.
+    let mut s = stage(97, 61);
+    s.origin = StageOrigin {
+        x: 1e9 + 0.37,
+        y: -5e8,
+    };
+    let plan = TilePlan::new(s, 40).unwrap();
+    assert!(plan.tiles().len() > 1);
+    let mut rng = Lcg(321);
+    let mut checked = 0_u64;
+    for case in 0..400 {
+        let source = (
+            1 + (rng.next() * 30.0) as u32,
+            1 + (rng.next() * 30.0) as u32,
+        );
+        let mut state = random_state(&mut rng, 97.0, 61.0);
+        state.affine[4] += s.origin.x;
+        state.affine[5] += s.origin.y;
+        let [a, b, c, d, tx, ty] = state.affine;
+        let det = a * d - b * c;
+        for tile in plan.tiles() {
+            let region = layer_region(s, *tile, state, source, false);
+            let r = tile.render_bounds;
+            assert!(region.x + region.width <= r.width && region.y + region.height <= r.height);
+            if state.opacity.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
+                assert!(
+                    region.is_empty(),
+                    "case {case}: a layer that does nothing has no region"
+                );
+                continue;
+            }
+            for y in 0..r.height {
+                for x in 0..r.width {
+                    // The stage point at this pixel centre, back into source
+                    // space, in f64 (the shader's f32 is inside the margin).
+                    let px = s.origin.x + f64::from(r.x + x) + 0.5 - tx;
+                    let py = s.origin.y + f64::from(r.y + y) + 0.5 - ty;
+                    let u = (d * px - c * py) / det;
+                    let v = (-b * px + a * py) / det;
+                    let reaches = u > -0.5
+                        && u < f64::from(source.0) + 0.5
+                        && v > -0.5
+                        && v < f64::from(source.1) + 0.5;
+                    let inside = x >= region.x
+                        && x < region.x + region.width
+                        && y >= region.y
+                        && y < region.y + region.height;
+                    assert!(
+                        !reaches || inside,
+                        "case {case} tile {r:?}: pixel ({x}, {y}) reaches the source but is outside {region:?}"
+                    );
+                    checked += u64::from(reaches);
+                }
+            }
+        }
+    }
+    assert!(
+        checked > 10_000,
+        "the cases must exercise the footprint: {checked}"
+    );
+}
+
+#[test]
+fn a_layer_region_is_tight_empty_or_whole_as_the_layer_requires() {
+    let s = stage(400, 300);
+    let plan = TilePlan::new(s, 4096).unwrap();
+    let tile = plan.tiles()[0];
+    let at = |x: f64, y: f64| LayerState {
+        affine: [1.0, 0.0, 0.0, 1.0, x, y],
+        opacity: 1.0,
+        seed: 0,
+    };
+    // A 10 x 10 layer at (100, 50): its pixels plus a few of margin.
+    let r = layer_region(s, tile, at(100.0, 50.0), (10, 10), false);
+    assert!(
+        r.x <= 100 && r.y <= 50 && r.x + r.width >= 110 && r.y + r.height >= 60,
+        "{r:?}"
+    );
+    assert!(
+        r.width <= 10 + 12 && r.height <= 10 + 12,
+        "the region stays tight: {r:?}"
+    );
+    // Off the tile, at zero opacity, or a NaN opacity: nothing to dispatch.
+    assert!(layer_region(s, tile, at(1000.0, 50.0), (10, 10), false).is_empty());
+    assert!(layer_region(s, tile, at(-50.0, -50.0), (10, 10), false).is_empty());
+    for opacity in [0.0, -0.0, f32::NAN] {
+        let state = LayerState {
+            opacity,
+            ..at(100.0, 50.0)
+        };
+        assert!(layer_region(s, tile, state, (10, 10), false).is_empty());
+        assert!(
+            layer_region(s, tile, state, (10, 10), true).is_empty(),
+            "a hidden stencil must not clear the backdrop"
+        );
+    }
+    // A whole-backdrop mode changes pixels where its source is transparent.
+    assert_eq!(
+        layer_region(s, tile, at(1000.0, 50.0), (10, 10), true),
+        Region::full(tile)
+    );
+    // A huge scale clamps to the tile; it never wraps or overflows.
+    let huge = LayerState {
+        affine: [1e12, 0.0, 0.0, 1e12, -5e11, -5e11],
+        opacity: 1.0,
+        seed: 0,
+    };
+    assert_eq!(
+        layer_region(s, tile, huge, (1, 1), false),
+        Region::full(tile)
+    );
+}
+
+/// One layer per mode in `modes`, with soft, uneven coverage so edges and
+/// interiors both blend.
+fn equivalence_layers(
+    space: WorkingColorSpace,
+    modes: &[BlendMode],
+    rng: &mut Lcg,
+) -> Vec<LayerInput> {
+    let mut out = Vec::new();
+    for (n, mode) in modes.iter().enumerate() {
+        let (w, h) = (
+            3 + (rng.next() * 60.0) as u32,
+            3 + (rng.next() * 40.0) as u32,
+        );
+        let mut input = layer(
+            &format!("l{n}"),
+            Rgba::srgb(rng.next(), rng.next(), rng.next(), rng.range(0.2, 1.0)),
+            space,
+            w,
+            h,
+        );
+        for (i, p) in input.pixels.iter_mut().enumerate() {
+            let k = ((i * 37 % 11) as f32 + 1.0) / 11.0;
+            *p = p.scaled(k);
+        }
+        input.blend_mode = *mode;
+        out.push(input);
+    }
+    out
+}
+
+fn assert_bit_identical(a: &CompositeReference, b: &CompositeReference, what: &str) {
+    assert_eq!(a.pixels.len(), b.pixels.len());
+    let bits = |p: &WorkingRgba| [p.r.to_bits(), p.g.to_bits(), p.b.to_bits(), p.a.to_bits()];
+    for (i, (x, y)) in a.pixels.iter().zip(&b.pixels).enumerate() {
+        assert_eq!(
+            bits(x),
+            bits(y),
+            "{what}: pixel {i} differs: {x:?} vs {y:?}"
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires hardware GPU; explicit 3.21 execution gate"]
+fn gpu_footprint_dispatch_is_bit_identical_to_the_whole_tile() {
+    let gpu = hardware();
+    let mut rng = Lcg(2160);
+    let limit = gpu
+        .device_queue()
+        .unwrap()
+        .0
+        .limits()
+        .max_texture_dimension_2d;
+    // Every mode in turn; and, twice over, only the modes that keep the
+    // backdrop where the source is zero. A whole-backdrop layer is dispatched
+    // over the whole tile and so repairs both targets; without one, a pixel
+    // left stale in either target survives to the output.
+    let local: Vec<BlendMode> = BlendMode::ALL
+        .iter()
+        .copied()
+        .filter(|mode| !mode.acts_on_whole_backdrop())
+        .collect();
+    let local_twice: Vec<BlendMode> = local.iter().chain(local.iter().rev()).copied().collect();
+    // One tile, and a stage past the texture limit (two tiles, a seam).
+    for (w, h) in [(320_u32, 180_u32), (limit + 37, 24)] {
+        for (space, modes) in [
+            (WorkingColorSpace::Srgb, &BlendMode::ALL[..]),
+            (WorkingColorSpace::LinearSrgb, &BlendMode::ALL[..]),
+            (WorkingColorSpace::Srgb, &local_twice[..]),
+            (WorkingColorSpace::LinearSrgb, &local_twice[..]),
+        ] {
+            let inputs = equivalence_layers(space, modes, &mut rng);
+            let mut footprint =
+                PreparedCompositor::prepare(&gpu, stage(w, h), space, &inputs).unwrap();
+            let mut whole = PreparedCompositor::prepare(&gpu, stage(w, h), space, &inputs).unwrap();
+            whole.full_tile_dispatch = true;
+            for frame in 0..6 {
+                let mut states: Vec<_> = inputs
+                    .iter()
+                    .map(|_| random_state(&mut rng, f64::from(w.min(400)), f64::from(h)))
+                    .collect();
+                if w > 400 {
+                    // Some layers across the seam between the two tiles.
+                    for state in states.iter_mut().step_by(3) {
+                        state.affine[4] = f64::from(limit) + rng.range(-40.0, 10.0);
+                    }
+                }
+                let before = crate::render_work::RenderWork::snapshot();
+                footprint.composite(&states).unwrap();
+                let a = footprint.readback_reference().unwrap();
+                let footprint_work = crate::render_work::RenderWork::snapshot().since(before);
+                let before = crate::render_work::RenderWork::snapshot();
+                whole.composite(&states).unwrap();
+                let b = whole.readback_reference().unwrap();
+                let whole_work = crate::render_work::RenderWork::snapshot().since(before);
+                assert_bit_identical(&a, &b, &format!("{w}x{h} {space:?} frame {frame}"));
+                assert_eq!(
+                    footprint_work.gpu_layer_dispatches,
+                    whole_work.gpu_layer_dispatches
+                );
+                assert!(
+                    footprint_work.gpu_layer_pixels < whole_work.gpu_layer_pixels,
+                    "the footprint dispatch covers fewer pixels: {} vs {}",
+                    footprint_work.gpu_layer_pixels,
+                    whole_work.gpu_layer_pixels
+                );
+                assert_eq!(footprint_work.gpu_resource_builds, 0);
+            }
+        }
+    }
+}

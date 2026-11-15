@@ -121,3 +121,60 @@ Program could not hold cadence. It now runs and passes: Program alone 150
 frames (0 late, 0 missed); with 7 headless 1080p renders issued back to back,
 171 frames (0 late, 0 missed). Gate: `npm run check` exit 0, conformance 387
 passed / 0 failed / 8 skipped.
+
+## 15 Nov 2026: each layer dispatched over its footprint (Claude)
+
+The first of the two costs above. `composite()` no longer dispatches every
+layer over the whole tile. `layer_region` gives the tile pixels a layer can
+change (the hull of its warped source rectangle, widened by the bilinear reach
+and a 2 px margin in source and tile space; nothing for a layer at zero
+opacity; the whole tile for the four `acts_on_whole_backdrop` modes). Layer i
+is dispatched over the hull of its own footprint and layer i - 1's, because
+the target it writes still holds the state before layer i - 1. Both targets
+are cleared at frame start. The shader keeps the backdrop bit for bit where the
+source is exactly zero. `RenderWork.gpuLayerPixels` counts the pixels
+dispatched. The row stays **active**.
+
+**Executed.**
+
+- `compositor::tests::gpu_footprint_dispatch_is_bit_identical_to_the_whole_tile`
+  (hardware): every blend mode, and the non-whole-backdrop modes twice over, in
+  both working spaces, on one tile and on a two-tile stage past the texture
+  limit, six random frames each (rotation, shear, scale up to 60x, zero
+  opacity): every working-space float is bit-identical to the whole-tile
+  dispatch, with fewer pixels dispatched and no resource built.
+- `a_layer_region_holds_every_pixel_its_source_can_reach` (400 random cases on
+  a multi-tile stage at a distant origin, brute force over every pixel) and
+  `a_layer_region_is_tight_empty_or_whole_as_the_layer_requires`.
+- `cargo test -p gx-render-worker -- --include-ignored`: 161 passed, 0 failed,
+  0 ignored, on the hardware GPU. That includes the byte-exact CPU-reference
+  gates of 3.16, 3.20 and 3.22.
+- Mutations, one exact replacement each, run alone, files restored
+  byte-identical: no bilinear widening or margin; the previous layer's
+  footprint left out of the region; only one target cleared; whole-backdrop
+  modes given a footprint; the shader ignoring the region origin. Each fails a
+  named test. A sixth, removing the shader's zero-source early-out, fails
+  nothing: the whole-tile reference runs the same shader, so the test cannot
+  see it. It is recorded as not killed.
+
+**Measured** (release, RTX 3070 Ti, DX12/FXC, same method as above, both builds
+on 15 Nov 2026, the committed tree `b89448b` first; settled p50 / p99 in ms;
+`footprint-2026-11-15/`):
+
+| Workload | Before | After | Layer pixels per frame |
+|---|---|---|---|
+| lower-third 1080p | (row not captured) | 5.3 / 6.9 | 0.44 M (whole tile: 6.2 M) |
+| scorebug 1080p | 7.2 / 10.6 | 5.7 / 8.8 | 0.51 M (47.7 M) |
+| stats-page 1080p | 14.4 / 15.6, ring full 12 | 11.2 / 13.1, ring full 0 | 6.95 M (147 M) |
+
+The stats page at 1080p is still over 10 ms although it now dispatches about
+5% of the pixels, so its remaining cost is not layer area: about 6 ms over the
+lower third for 68 more layers, roughly 85 us per layer dispatch. That is the
+next thing to remove (fewer passes: several layers per dispatch).
+
+**2160p was not measurable on 15 Nov.** The committed tree itself took 453 /
+629 ms on the 2160p lower third and then failed the scorebug with a 5 s
+readback timeout; the new code took 298 to 863 ms. On 7 Nov the same
+workloads took 20 to 44 ms. Other applications held about 5.2 GB of the 8 GB
+of GPU memory during these runs (nvidia-smi), which is the likely cause and
+was not proved. The 2160p budget needs a rerun on a quiet machine.

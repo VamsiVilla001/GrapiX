@@ -118,6 +118,23 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-15 — 3.21: layers dispatched over their footprint; 1080p better, row still active (Claude)
+
+**Resume here.** User instruction 15 Nov: target the core backend blockers. 3.21's blocker from msg 340 is
+removed: `composite()` dispatches each layer over the hull of its footprint and the previous layer's
+(`compositor::layer_region`, `Region::hull`), both targets cleared per frame, whole-backdrop modes over the
+whole tile, zero-source early-out in `composite.wgsl`; `RenderWork.gpuLayerPixels`. Bit-identical to the
+whole-tile dispatch (hardware test, every blend mode, two tiles); worker suite 161/0/0 with hardware; five
+mutations fail named tests, one (the early-out) is not killed. Evidence `docs/evidence/3.21` (15 Nov section).
+
+**Numbers** (release, DX12, same day, before then after, settled p99): scorebug 1080p 10.6 to 8.8 ms; stats
+page 1080p 15.6 to 13.1 ms and the ring no longer fills. **Still owed:** stats page 1080p (about 85 us per
+layer dispatch remains; needs several layers per dispatch) and all of 2160p, which could not be measured:
+the committed tree itself took 453 ms and then timed out at 2160p with 5.2 GB of the 8 GB of GPU memory held
+by other applications. Rerun `program_holds_the_frame_budget_on_the_reference_workloads` (release,
+`GX_GPU_316_BACKEND=dx12`) on a quiet machine before any 2160p claim. Do not run two GPU jobs at once: an
+overlapping run failed with a 5 s readback timeout.
+
 ## 2026-11-15 — Jev and Laya run on 5.12 and 5.10 (Claude)
 
 **Resume here.** Jev and Laya are reinstalled outside the repo in `D:\Project KK\ai-tools\` (README.txt there:
