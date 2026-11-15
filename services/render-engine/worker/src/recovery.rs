@@ -89,7 +89,9 @@ pub struct RecoveryState {
 /// A journaled scene a restore dropped because its asset bytes were missing,
 /// altered or unreadable in the engine's store (5.11). The engine starts
 /// without it; Cue, Take and Render of the take are refused with `reason`
-/// until it is published again.
+/// until it is published again or the engine restarts (the reason lives in
+/// memory and in `<journal>.dropped.json`; the journal keeps the take's
+/// revision floor).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DroppedScene {

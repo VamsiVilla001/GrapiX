@@ -124,6 +124,10 @@ pub trait AssetPublishPeer: Send + 'static {
 struct PeerAssets<P> {
     peer: Arc<Mutex<P>>,
     store: Option<Arc<AssetStore>>,
+    /// The longest asset the store keeps. A restore reads entries back with
+    /// the same limit, so a longer one is refused here, by name, instead of
+    /// being acknowledged and dropped at the next start (5.11 review).
+    most_bytes: u64,
 }
 
 impl<P: AssetPublishPeer> crate::preflight::VerifiedAssets for PeerAssets<P> {
@@ -138,6 +142,16 @@ impl<P: AssetPublishPeer> crate::preflight::VerifiedAssets for PeerAssets<P> {
         // Written before the peer is held: a large asset's durable write
         // never waits on, or delays, the peer's frames (ADR-001).
         if let Some(store) = &self.store {
+            let length = bytes.len() as u64;
+            if length > self.most_bytes {
+                return Ok(Err(Refusal::AssetStoreFailed {
+                    hash: hash.clone(),
+                    detail: format!(
+                        "the asset is {length} bytes, more than the {} the engine's store keeps",
+                        self.most_bytes
+                    ),
+                }));
+            }
             if let Err(error) = store.promote_verified(hash, &bytes) {
                 return Ok(Err(error.into_refusal(hash)));
             }
@@ -417,6 +431,7 @@ fn handle_publish<P: AssetPublishPeer>(
                 &PeerAssets {
                     peer: Arc::clone(&peer),
                     store,
+                    most_bytes: crate::package::MAX_PACKAGE_BYTES,
                 },
                 metrics,
             )
@@ -594,6 +609,42 @@ mod tests {
                 content_hash,
             }
         }
+    }
+
+    #[test]
+    fn an_asset_longer_than_the_store_keeps_is_refused_by_name_and_not_stored() {
+        use crate::preflight::VerifiedAssets;
+        let root = std::env::temp_dir().join(format!("gx-publish-most-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let store = Arc::new(AssetStore::at_root(root.clone()));
+        let assets = PeerAssets {
+            peer: Arc::new(Mutex::new(Peer::default())),
+            store: Some(Arc::clone(&store)),
+            most_bytes: 8,
+        };
+        let long = vec![3_u8; 9];
+        let hash = crate::content_hash(&long);
+        let refused = assets.accept(&hash, long).unwrap();
+        assert!(
+            matches!(&refused, Err(Refusal::AssetStoreFailed { hash: named, detail })
+                if *named == hash && detail.contains('9') && detail.contains('8')),
+            "{refused:?}"
+        );
+        assert!(
+            !store.holds_entry(&hash, 9),
+            "a refused asset is not stored"
+        );
+        // At the limit it is stored; the peer here keeps no bytes, which is
+        // its own refusal, not the store's.
+        let exact = vec![4_u8; 8];
+        let exact_hash = crate::content_hash(&exact);
+        let taken = assets.accept(&exact_hash, exact).unwrap();
+        assert!(
+            !matches!(&taken, Err(Refusal::AssetStoreFailed { .. })),
+            "{taken:?}"
+        );
+        assert!(store.holds_entry(&exact_hash, 8));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     fn scene_json() -> serde_json::Value {

@@ -120,6 +120,34 @@ impl std::fmt::Display for AtomicWriteError {
     }
 }
 
+impl AtomicWriteError {
+    /// This failure in words without any path: the step that failed and the
+    /// operating-system cause. For a message that leaves the machine, where a
+    /// store's location is nobody's business but its owner's (the 5.11
+    /// review; the 5.8 review's rule). [`std::fmt::Display`] keeps the paths,
+    /// for the log of the process that owns them.
+    pub fn without_path(&self) -> String {
+        match self {
+            Self::NoParentDirectory(_) => {
+                "the destination has no parent directory to write into".to_owned()
+            }
+            Self::CreateTemporary { source, .. } => {
+                format!("could not create a temporary file: {source}")
+            }
+            Self::Write { source, .. } => format!("could not write the temporary file: {source}"),
+            Self::Sync { source, .. } => format!("could not flush the file to disk: {source}"),
+            Self::Rename {
+                attempts, source, ..
+            } => format!(
+                "could not rename the temporary file into place after {attempts} attempt(s): {source}"
+            ),
+            Self::SyncDirectory { source, .. } => {
+                format!("wrote the file but could not flush its directory: {source}")
+            }
+        }
+    }
+}
+
 impl std::error::Error for AtomicWriteError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
@@ -631,5 +659,49 @@ mod tests {
             other => panic!("expected a rename failure, got {other:?}"),
         }
         assert_eq!(attempts, RENAME_ATTEMPTS);
+    }
+
+    #[test]
+    fn every_failure_is_described_without_its_paths() {
+        let secret = PathBuf::from(r"C:\Users\someone\AppData\Roaming\store\.tmp-secret");
+        let other = PathBuf::from(r"C:\Users\someone\AppData\Roaming\store\target-secret");
+        let cause = || io::Error::from(io::ErrorKind::PermissionDenied);
+        let failures = [
+            AtomicWriteError::NoParentDirectory(secret.clone()),
+            AtomicWriteError::CreateTemporary {
+                path: secret.clone(),
+                source: cause(),
+            },
+            AtomicWriteError::Write {
+                path: secret.clone(),
+                source: cause(),
+            },
+            AtomicWriteError::Sync {
+                path: secret.clone(),
+                source: cause(),
+            },
+            AtomicWriteError::Rename {
+                from: secret.clone(),
+                to: other,
+                attempts: 6,
+                source: cause(),
+            },
+            AtomicWriteError::SyncDirectory {
+                path: secret,
+                source: cause(),
+            },
+        ];
+        for failure in &failures {
+            // The paths are in the Display, so the check below can fail.
+            assert!(
+                failure.to_string().contains("secret"),
+                "{failure} should name its path"
+            );
+            let described = failure.without_path();
+            assert!(!described.contains("secret"), "{described}");
+            assert!(!described.contains("Users"), "{described}");
+        }
+        assert!(failures[4].without_path().contains("6 attempt(s)"));
+        assert!(failures[1].without_path().contains(&cause().to_string()));
     }
 }

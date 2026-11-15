@@ -138,7 +138,9 @@ impl AssetStoreError {
             Self::CreateCacheDirectory { source, .. } => {
                 format!("could not create the store: {source}")
             }
-            Self::WriteCache { source, .. } => format!("could not write the entry: {source}"),
+            Self::WriteCache { source, .. } => {
+                format!("could not write the entry: {}", source.without_path())
+            }
             Self::ReadCache { source, .. } => format!("could not read the entry: {source}"),
             Self::CacheHashMismatch { actual, .. } => {
                 format!("the entry written does not hash to its name; it holds {actual}")
@@ -293,14 +295,7 @@ impl AssetStore {
             return Err(oversized(metadata.len()));
         }
         let file = fs::File::open(&path).map_err(read_error)?;
-        let reserve = usize::try_from(metadata.len()).unwrap_or(usize::MAX);
-        let mut bytes = Vec::new();
-        bytes
-            .try_reserve_exact(reserve)
-            .map_err(|error| read_error(io::Error::other(error.to_string())))?;
-        file.take(most.saturating_add(1))
-            .read_to_end(&mut bytes)
-            .map_err(read_error)?;
+        let bytes = read_at_most(file, metadata.len(), most).map_err(read_error)?;
         let length = u64::try_from(bytes.len()).expect("usize fits u64");
         if length > most {
             return Err(oversized(length));
@@ -362,7 +357,12 @@ impl AssetStore {
             }
         })?;
 
-        if path.exists() && hash_file(&path)? == expected {
+        // Already stored only if a plain file at the name verifies: a link
+        // whose target has the right bytes is no entry (`holds_entry` and
+        // `read_verified` agree), so it is replaced like any damaged one.
+        let is_plain_file =
+            fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.file_type().is_file());
+        if is_plain_file && hash_file(&path)? == expected {
             return Ok(expected);
         }
 
@@ -501,6 +501,21 @@ fn image_refusal(what: &str) -> Refusal {
     Refusal::NotImplemented {
         what: format!("image geometry refused: {what}"),
     }
+}
+
+/// Everything `reader` yields, up to `most` + 1 bytes: one more than the
+/// reader may hold, so a caller can tell an entry that grew after its length
+/// was read from one that fits, and never holds more than that (invariant 51).
+/// `expected` is the length the metadata gave, reserved up front.
+fn read_at_most(reader: impl Read, expected: u64, most: u64) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(usize::try_from(expected).unwrap_or(usize::MAX))
+        .map_err(|error| io::Error::other(error.to_string()))?;
+    reader
+        .take(most.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    Ok(bytes)
 }
 
 fn hash_file(path: &Path) -> Result<ContentHash, AssetStoreError> {
@@ -755,7 +770,13 @@ mod tests {
         // A file the traversal would reach, if the hash became a path.
         fs::write(root.join("evil"), b"outside the store").unwrap();
         let store = AssetStore::at_root(store_root);
-        for name in ["../evil", "EVIL", "", &"A".repeat(64)] {
+        // A real entry whose upper-case spelling a case-insensitive file
+        // system would open: only the address check keeps it from being read.
+        let bytes = b"stored asset bytes".to_vec();
+        let real = content_hash(&bytes);
+        store.promote_verified(&real, &bytes).unwrap();
+        let shouting = ContentHash(real.0.to_uppercase());
+        for name in ["../evil", "EVIL", "", &"A".repeat(64), &shouting.0] {
             let hash = ContentHash(name.to_owned());
             assert!(
                 matches!(
@@ -765,7 +786,74 @@ mod tests {
                 "{name}"
             );
             assert!(!store.holds_entry(&hash, 17));
+            assert!(!store.holds_entry(&hash, bytes.len() as u64));
         }
+        assert!(store.holds_entry(&real, bytes.len() as u64));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_read_never_holds_more_than_one_byte_past_what_it_may() {
+        // A reader that has grown since its length was read.
+        let grown = io::Cursor::new(vec![7_u8; 100]);
+        let read = read_at_most(grown, 10, 20).unwrap();
+        assert_eq!(read.len(), 21, "most + 1, so the caller can refuse it");
+        let fits = read_at_most(io::Cursor::new(vec![7_u8; 20]), 20, 20).unwrap();
+        assert_eq!(fits.len(), 20);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_link_at_an_entry_name_is_replaced_not_trusted() {
+        use std::os::windows::fs::symlink_file;
+        let root = temporary_directory();
+        let store = AssetStore::at_root(root.join("store"));
+        let bytes = b"bytes behind a link".to_vec();
+        let hash = content_hash(&bytes);
+        store.promote_verified(&hash, &bytes).unwrap();
+        // The entry becomes a link to a file holding the right bytes.
+        let target = root.join("target.bin");
+        fs::write(&target, &bytes).unwrap();
+        let entry = store.cache_path(&hash);
+        fs::remove_file(&entry).unwrap();
+        if symlink_file(&target, &entry).is_err() {
+            // No symlink privilege here; the replacement rule is the same code.
+            fs::remove_dir_all(root).unwrap();
+            return;
+        }
+        assert!(!store.holds_entry(&hash, bytes.len() as u64));
+        // Storing the bytes again heals it: a plain file takes the name.
+        store.promote_verified(&hash, &bytes).unwrap();
+        assert!(store.holds_entry(&hash, bytes.len() as u64));
+        assert_eq!(store.read_verified(&hash, 1 << 20).unwrap(), bytes);
+        assert!(fs::symlink_metadata(&entry).unwrap().file_type().is_file());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_failed_write_is_told_without_the_stores_paths() {
+        let root = temporary_directory();
+        let store = AssetStore::at_root(root.join("store"));
+        let bytes = b"bytes".to_vec();
+        let hash = content_hash(&bytes);
+        // The entry's name is a directory: the store exists, the rename fails.
+        fs::create_dir_all(store.cache_path(&hash)).unwrap();
+        let error = store.promote_verified(&hash, &bytes).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                AssetStoreError::WriteCache { .. } | AssetStoreError::ReadCache { .. }
+            ),
+            "{error:?}"
+        );
+        let refusal = error.into_refusal(&hash);
+        let Refusal::AssetStoreFailed { detail, .. } = &refusal else {
+            panic!("{refusal:?}");
+        };
+        let shown = root.to_str().unwrap();
+        assert!(!detail.contains(shown), "{detail}");
+        assert!(!detail.contains(".gxtmp"), "{detail}");
+        assert!(!detail.contains("store"), "{detail}");
         fs::remove_dir_all(root).unwrap();
     }
 

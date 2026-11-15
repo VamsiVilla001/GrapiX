@@ -118,6 +118,38 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-15 — 5.11 review fixed (Claude)
+
+**Resume here.** Next: 5.12 (journal records every revision Program or the cue names), then
+5.10, then 3.21. Open follow-ups from this review: Panchayati #109 (`holds_entry` stats under
+the engine lock) and #110 (schema stays 3 though `revisionFloors` was added); both need the
+user's call. #106 and #108 are still open.
+
+**Review of d5b5c0d** (five lenses, three refuters per finding; `docs/evidence/5.11/README.md`,
+last section). Fixed:
+- `AssetStoreFailed` carried the store's and the temporary file's paths when an atomic write failed:
+  `gx_fs::AtomicWriteError::without_path`, used by `AssetStoreError::into_refusal`.
+- A link at a store entry name whose target had the right bytes was trusted by `store_bytes` and
+  never replaced: the "already stored" shortcut now needs a plain file (mutation run: the new
+  test fails with the old condition).
+- The Editor blamed "the engine's asset store" for its own cache read failures: `cache_read_failed`
+  maps them to `EditorError::AssetCache`.
+- An asset over 4 GiB was acknowledged on the chunked route and dropped at every restart:
+  `PeerAssets::accept` refuses it by name (`most_bytes`, the restore's limit).
+- Weak tests: the uppercase-hash probe now uses a real entry's upper-case name; `read_at_most`
+  extracted and tested; a held (unreadable) entry drops a scene as `AssetStoreFailed` at restore,
+  in a unit test and in the refusal audit through `EnginePeer`.
+- The runbook and code comments said a dropped take is refused with its reason "until published
+  again"; after one more restart it is `UnknownTake` (reproduced; the test pins it). Docs corrected.
+
+**Executed.** `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --locked -- -D warnings`
+exit 0; `npm run check` exit 0 (44 Node, 412 Editor, 813 Rust / 0 failed / 26 ignored, conformance
+562/0/9).
+
+**Refuted and kept** (verifiers, 2 of 3 or more): a failed drop-report write still rewrites the
+journal; a transient read error drops the scene (disclosed design risk); the untested stderr budget;
+the restore test that writes its own store entry.
+
 ## 2026-11-08 — 5.11 done: restart after asset-bearing publishes (Claude)
 
 **Resume here.** Next: 5.12 (re-publish a take while an older revision of it is on Program;

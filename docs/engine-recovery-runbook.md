@@ -77,9 +77,16 @@ recovery: every dropped scene is listed in <journal path>.dropped.json
 
 A Cue, Take or Render of a dropped take is refused with the same reason
 (`AssetMissing`, `AssetHashMismatch` or `AssetStoreFailed`) until the take is
-published again. `gx-engine-host` does not keep a running worker's stderr, so
-`recovery.json.dropped.json` is where every dropped scene is named. It holds
-the latest restore that dropped anything, with its epoch.
+published again or the worker restarts. The reason is kept in memory only: after
+the next restart the take is unknown (`UnknownTake`), and only the report and
+the take's revision floor in the journal remember it. `gx-engine-host` does
+not keep a running worker's stderr, so `recovery.json.dropped.json` is where
+every dropped scene is named. It holds the latest restore that dropped
+anything, with its epoch, and a restore that drops something else replaces it.
+If the report itself cannot be written (a read-only file, or a program holding
+it open), stderr says "the drop report could not be written", the engine
+starts anyway, and the report on disk is the stale one from an earlier
+restore: compare its epoch with the engine's.
 
 **Cause.** A stored asset was removed, altered or could not be read. Every
 scene declaring it is dropped; scenes whose bytes are intact are restored. A
@@ -95,6 +102,11 @@ named a dropped scene, it is cleared; otherwise it survives.
    the dropped one (never reused).
 3. Re-cue or re-take as needed, then send `ConfigureOutput` to re-arm output.
 
+`AssetStoreFailed` on a restore means the entry could not be read: another
+program holds it open without sharing it (a scanner or a backup tool), or the
+entry is longer than the store keeps. The cause is in the detail. Publishing
+again repairs it once the program lets go.
+
 A scene whose bytes are intact but which can no longer be prepared (for
 example after a capability change) still stops the restore, as before 5.11:
 the worker refuses to start and leaves the journal untouched. Use the
@@ -109,7 +121,14 @@ path.
 
 **Action.** Check disk space and permissions on the directory beside the
 journal (`recovery.json.assets`), then publish again. Nothing was kept, so
-nothing needs cleaning up.
+nothing needs cleaning up. An asset longer than 4 GiB is refused this way
+too, with its length in the detail: the store keeps no more than a restart
+can read back.
+
+The journal has schema 3 before and after 5.11, but a journal written after a
+drop has an extra `revisionFloors` field. A build from before 5.11 refuses it
+as a decode error (`unknown field revisionFloors`), not as an unsupported
+schema. To roll back, use the corrupt-journal procedure below.
 
 The store only grows in 5.11: files of dropped scenes and assets no scene
 uses stay until the store is cleaned (a follow-up).

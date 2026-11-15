@@ -31,8 +31,9 @@ The critic's gaps, all applied:
 - the Editor's two read-back copies go through `read_verified` (invariant 27);
 - the store location is checked independently of the derivation under test;
 - the lock-independence test signals at the transfer's Begin;
-- `AssetMissing` and `AssetStoreFailed` are driven through `EnginePeer` in
-  the refusal audit.
+- `AssetMissing` is driven through `EnginePeer` in the refusal audit
+  (corrected by the review below: `AssetStoreFailed` was driven only by a
+  direct call on an engine with no journal).
 
 ## What was built
 
@@ -130,3 +131,31 @@ Each mutation was one exact replacement in one file, run alone; each file was re
 - **Wire visibility.** Output inhibition cannot be observed over the wire on
   these free-running workers (`live_allowed` is false either way). It is
   proved by the in-process tests.
+
+## Review of d5b5c0d (15 Nov 2026) and its fixes
+
+A five-lens review with three refuters per finding confirmed, or the author
+checked by hand, the following. Fixed in the commit after d5b5c0d:
+
+| Finding | Fix | Check that fails without it |
+| --- | --- | --- |
+| `AssetStoreFailed` put the store's and the temporary file's paths on the wire when an atomic write failed (the existing tests only reached the arm where the store path is a file) | `AtomicWriteError::without_path`; `into_refusal` uses it | `every_failure_is_described_without_its_paths`, `a_failed_write_is_told_without_the_stores_paths` |
+| A link at an entry name whose target had the right bytes was never replaced, so re-sending could not heal it and the refusal reason was false | `store_bytes` takes the "already stored" shortcut only for a plain file | `a_link_at_an_entry_name_is_replaced_not_trusted` (mutation run: fails with the old condition) |
+| The Editor blamed "the engine's asset store" for its own cache read failures | `cache_read_failed` maps them to `AssetCache` | `a_failed_read_of_the_editors_own_cache_is_never_blamed_on_the_engine`, `publishing_from_a_cache_entry_another_process_holds_names_the_cache` |
+| An asset over 4 GiB was acknowledged on the chunked route and dropped at every restart | `PeerAssets::accept` refuses it by name with the same limit the restore reads with | `an_asset_longer_than_the_store_keeps_is_refused_by_name_and_not_stored` |
+| The uppercase probe could not fail, `is_sha256` had no test of its own, the read bound was untested | probe against a real entry's uppercase name; `read_at_most` extracted and tested | `read_verified_never_makes_a_path_of_a_hash_that_is_not_a_content_address`, `a_read_never_holds_more_than_one_byte_past_what_it_may` |
+| No test saw an `AssetStoreFailed` drop; the audit's call reached a branch the worker never takes | an entry held without sharing is dropped at restore as `AssetStoreFailed` (unit test and the refusal audit through `EnginePeer`) | `a_stored_asset_that_cannot_be_read_drops_its_scene_as_asset_store_failed`, the audit check |
+| The runbook and code comments promised the dropped reason "until published again"; after one more restart it is `UnknownTake` | documents corrected; the test pins the behaviour | same test |
+
+Refuted by the verifiers and kept: a failed drop-report write still rewrites
+the journal (the done-when forbids refusing to start, and the epoch must
+advance), a transient read error drops the scene (a disclosed design risk;
+a bounded retry stays optional hardening), the untested stderr budget, and
+the test that writes its own store entry (the asset port writes it in
+production; its ordering is tested in `gx_asset_plane`).
+
+Not fixed, to bring to the user: the journal keeps schema 3 with an extra
+field, so a pre-5.11 build refuses a journal written after a drop as a decode
+error (documented above); and `holds_entry` stats a file under the engine lock
+on preflight, accept and publish (36 us each in the reviewer's measurement;
+hundreds of assets would hold the lock for milliseconds).

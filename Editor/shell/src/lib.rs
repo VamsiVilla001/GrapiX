@@ -45,8 +45,8 @@ use gx_asset_plane::fonts::manager::LinkedSource;
 use gx_asset_plane::import::{prepare_asset_files, AssetFileInput, PreparedAssetBatch};
 use gx_asset_plane::package::MAX_PACKAGE_BYTES;
 use gx_asset_plane::{
-    content_hash, publish_assets, publish_scene, AssetBytes, AssetStore, AssetTransferClientError,
-    PublishClientError, PublishRefusal, PublishReply,
+    content_hash, publish_assets, publish_scene, AssetBytes, AssetStore, AssetStoreError,
+    AssetTransferClientError, PublishClientError, PublishRefusal, PublishReply,
 };
 use gx_contracts::animation::{animation_surface, validate_scene_animation, AnimationSurface};
 use gx_contracts::command::{
@@ -180,6 +180,19 @@ fn refused(cause: Refusal) -> EditorError {
     }
 }
 
+/// An Editor-side read of its own per-user asset cache that failed. A missing
+/// or altered entry keeps its refusal's name. Anything else is the cache's
+/// fault, not the engine's, so it is the cache error and never
+/// `AssetStoreFailed`, which names the engine's own store (the 5.11 review).
+fn cache_read_failed(error: AssetStoreError, hash: &ContentHash) -> EditorError {
+    match error.into_refusal(hash) {
+        Refusal::AssetStoreFailed { detail, .. } => EditorError::AssetCache {
+            detail: format!("{hash}: {detail}"),
+        },
+        other => refused(other),
+    }
+}
+
 /// A refused ingest keeps its refusal's name and says which input it was.
 fn ingest_refused(refusal: FontIngestRefusal) -> EditorError {
     EditorError::CommandRefused {
@@ -284,7 +297,7 @@ pub fn scene_asset_bytes(
         // engine's restore, 5.11).
         let bytes = store
             .read_verified(hash, MAX_PACKAGE_BYTES)
-            .map_err(|error| refused(error.into_refusal(hash)))?;
+            .map_err(|error| cache_read_failed(error, hash))?;
         assets.push(AssetBytes {
             hash: hash.clone(),
             bytes,
@@ -822,7 +835,7 @@ fn cmd_font_bytes(
     let bytes = state.with_asset_store(|store| {
         store
             .read_verified(&checksum, MAX_PACKAGE_BYTES)
-            .map_err(|error| refused(error.into_refusal(&checksum)))
+            .map_err(|error| cache_read_failed(error, &checksum))
     })?;
     Ok(tauri::ipc::Response::new(bytes))
 }
@@ -996,6 +1009,101 @@ mod tests {
     use gx_contracts::control::ControlField;
 
     use super::*;
+
+    #[test]
+    fn a_failed_read_of_the_editors_own_cache_is_never_blamed_on_the_engine() {
+        let hash = content_hash(b"cache entry");
+        let held = AssetStoreError::ReadCache {
+            path: "secret-cache-entry".into(),
+            source: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+        };
+        let error = cache_read_failed(held, &hash);
+        match &error {
+            EditorError::AssetCache { detail } => {
+                assert!(detail.contains(&hash.0), "{detail}");
+                assert!(!detail.contains("secret"), "{detail}");
+            }
+            other => panic!("expected the cache error, got {other:?}"),
+        }
+        assert!(!error.to_string().contains("engine"), "{error}");
+
+        // An entry too long to read is the cache's problem too.
+        let grown = AssetStoreError::Refusal(Refusal::AssetStoreFailed {
+            hash: hash.clone(),
+            detail: "the entry is 9 bytes, more than the 8 it may hold".into(),
+        });
+        assert!(matches!(
+            cache_read_failed(grown, &hash),
+            EditorError::AssetCache { .. }
+        ));
+
+        // A missing or altered entry keeps its name.
+        let missing = AssetStoreError::Refusal(Refusal::AssetMissing { hash: hash.clone() });
+        assert!(matches!(
+            cache_read_failed(missing, &hash),
+            EditorError::CommandRefused {
+                cause: Refusal::AssetMissing { .. },
+                ..
+            }
+        ));
+        let altered = AssetStoreError::Refusal(Refusal::AssetHashMismatch {
+            expected: hash.clone(),
+            actual: content_hash(b"other"),
+        });
+        assert!(matches!(
+            cache_read_failed(altered, &hash),
+            EditorError::CommandRefused {
+                cause: Refusal::AssetHashMismatch { .. },
+                ..
+            }
+        ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn publishing_from_a_cache_entry_another_process_holds_names_the_cache() {
+        use gx_contracts::scene::{new_scene, AssetKind, AssetLibraryItem};
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let root = std::env::temp_dir().join(format!("gx-shell-held-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let store = AssetStore::at_root(root.clone());
+        let bytes = b"a cached asset".to_vec();
+        let hash = content_hash(&bytes);
+        store.promote_verified(&hash, &bytes).unwrap();
+        let mut scene = new_scene(
+            "shell/held",
+            "Held",
+            gx_contracts::color::WorkingColorSpace::LinearSrgb,
+        );
+        scene.assets.push(AssetLibraryItem {
+            asset_id: "held".into(),
+            name: "Held".into(),
+            kind: AssetKind::Image,
+            path: "images/held.png".into(),
+            checksum: Some(hash.clone()),
+            mime_type: None,
+            size_bytes: Some(bytes.len() as u64),
+            status: None,
+            provenance: Default::default(),
+        });
+        // A scanner or backup tool holding the entry without sharing it.
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(store.cache_path(&hash))
+            .unwrap();
+        let refused = scene_asset_bytes(&scene, &store).unwrap_err();
+        drop(held);
+        assert!(
+            matches!(&refused, EditorError::AssetCache { detail } if detail.contains(&hash.0)),
+            "expected the cache error, got {refused:?}"
+        );
+        assert!(!refused.to_string().contains("engine"), "{refused}");
+        // Once the other process lets go, the same publish reads it.
+        assert_eq!(scene_asset_bytes(&scene, &store).unwrap().len(), 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn the_font_link_box_classifies_direct_files_stylesheets_and_adobe_kits() {

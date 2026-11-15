@@ -1410,10 +1410,11 @@ fn drive_asset_refusals(report: &mut Report) {
 }
 
 /// 5.11, through an in-process engine with a journal: a cue of a take a
-/// restore dropped because its stored bytes were removed is refused
-/// `AssetMissing`, and an engine with no store refuses bytes it could not
-/// keep `AssetStoreFailed`. The same, against real workers killed and
-/// restarted, is the asset restart suite.
+/// restore dropped is refused with the reason the store gave: `AssetMissing`
+/// for stored bytes that were removed and `AssetStoreFailed` for an entry
+/// another process holds so that it cannot be read. An engine with no store
+/// also refuses bytes it could not keep `AssetStoreFailed`. The same,
+/// against real workers killed and restarted, is the asset restart suite.
 fn drive_engine_store_refusals(report: &mut Report) {
     use gx_asset_plane::AssetPublishPeer;
     use gx_contracts::scene::{new_scene, AssetKind, AssetLibraryItem};
@@ -1426,7 +1427,6 @@ fn drive_engine_store_refusals(report: &mut Report) {
     let root =
         std::env::temp_dir().join(format!("gx-refusal-audit-restore-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
-    let journal = root.join("recovery.json");
     let bytes = b"refusal audit asset bytes".to_vec();
     let hash = gx_asset_plane::content_hash(&bytes);
     let new_engine = || {
@@ -1435,66 +1435,100 @@ fn drive_engine_store_refusals(report: &mut Report) {
             gx_contracts::Locality::CoLocated,
         )
     };
-    let restored_cue = (|| {
-        let mut scene = new_scene(
-            "audit/restore",
-            "Audit restore",
-            gx_contracts::color::WorkingColorSpace::LinearSrgb,
-        );
-        scene.assets.push(AssetLibraryItem {
-            asset_id: "audit".into(),
-            name: "Audit".into(),
-            kind: AssetKind::Image,
-            path: "images/audit.png".into(),
-            checksum: Some(hash.clone()),
-            mime_type: None,
-            size_bytes: Some(bytes.len() as u64),
-            status: None,
-            provenance: Default::default(),
-        });
-        let open = || RecoveryJournal::open_at(journal.clone()).map_err(|e| e.to_string());
-        let mut first = new_engine();
-        first
-            .attach_recovery_journal(open()?)
-            .map_err(|e| e.to_string())?;
-        first
-            .asset_store()
-            .ok_or("no store")?
-            .promote_verified(&hash, &bytes)
-            .map_err(|e| e.to_string())?;
-        first
-            .accept_verified_asset(hash.clone(), bytes.clone())
-            .map_err(|e| e.to_string())?;
-        let gx_asset_plane::PublishReply::Published {
-            take_id,
-            revision,
-            content_hash,
-        } = first.publish_scene(scene)
-        else {
-            return Err("the audit scene did not publish".to_owned());
+    // Publishes a scene declaring the asset, kills the engine, damages the
+    // store with `damage` (which may hand back a file to keep open during the
+    // restore) and cues the take on the restored engine.
+    let restored_cue =
+        |journal_file: &str,
+         damage: &dyn Fn(&std::path::Path) -> Result<Option<std::fs::File>, String>|
+         -> Result<EngineReply, String> {
+            let journal = root.join(journal_file);
+            let store_entry = root.join(format!("{journal_file}.assets")).join(&hash.0);
+            let mut scene = new_scene(
+                "audit/restore",
+                "Audit restore",
+                gx_contracts::color::WorkingColorSpace::LinearSrgb,
+            );
+            scene.assets.push(AssetLibraryItem {
+                asset_id: "audit".into(),
+                name: "Audit".into(),
+                kind: AssetKind::Image,
+                path: "images/audit.png".into(),
+                checksum: Some(hash.clone()),
+                mime_type: None,
+                size_bytes: Some(bytes.len() as u64),
+                status: None,
+                provenance: Default::default(),
+            });
+            let open = || RecoveryJournal::open_at(journal.clone()).map_err(|e| e.to_string());
+            let mut first = new_engine();
+            first
+                .attach_recovery_journal(open()?)
+                .map_err(|e| e.to_string())?;
+            first
+                .asset_store()
+                .ok_or("no store")?
+                .promote_verified(&hash, &bytes)
+                .map_err(|e| e.to_string())?;
+            first
+                .accept_verified_asset(hash.clone(), bytes.clone())
+                .map_err(|e| e.to_string())?;
+            let gx_asset_plane::PublishReply::Published {
+                take_id,
+                revision,
+                content_hash,
+            } = first.publish_scene(scene)
+            else {
+                return Err("the audit scene did not publish".to_owned());
+            };
+            drop(first);
+            let held = damage(&store_entry)?;
+            let mut restored = new_engine();
+            restored
+                .attach_recovery_journal(open()?)
+                .map_err(|e| e.to_string())?;
+            drop(held);
+            Ok(restored.handle(ClientRequest::Cue(CueRequest {
+                take_id,
+                revision,
+                content_hash: Some(content_hash),
+                at: TakeAt::NextOpportunity,
+            })))
         };
-        drop(first);
-        std::fs::remove_file(root.join("recovery.json.assets").join(&hash.0))
-            .map_err(|e| e.to_string())?;
-        let mut restored = new_engine();
-        restored
-            .attach_recovery_journal(open()?)
-            .map_err(|e| e.to_string())?;
-        Ok(restored.handle(ClientRequest::Cue(CueRequest {
-            take_id,
-            revision,
-            content_hash: Some(content_hash),
-            at: TakeAt::NextOpportunity,
-        })))
-    })();
+    let removed = restored_cue("recovery.json", &|entry| {
+        std::fs::remove_file(entry).map_err(|e| e.to_string())?;
+        Ok(None)
+    });
     report.record(
         PLANE,
         "AssetMissing is produced for a cue of a take a restore dropped because its stored bytes were removed",
         expect(
-            matches!(&restored_cue, Ok(EngineReply::Refused(Refusal::AssetMissing { hash: missing })) if *missing == hash),
-            format!("the cue after the restore was {restored_cue:?}"),
+            matches!(&removed, Ok(EngineReply::Refused(Refusal::AssetMissing { hash: missing })) if *missing == hash),
+            format!("the cue after the restore was {removed:?}"),
         ),
     );
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // A scanner or backup tool holding the entry without sharing it.
+        let unreadable = restored_cue("unreadable.json", &|entry| {
+            std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(0)
+                .open(entry)
+                .map(Some)
+                .map_err(|e| e.to_string())
+        });
+        report.record(
+            PLANE,
+            "AssetStoreFailed is produced for a cue of a take a restore dropped because its stored bytes could not be read",
+            expect(
+                matches!(&unreadable, Ok(EngineReply::Refused(Refusal::AssetStoreFailed { hash: named, detail }))
+                    if *named == hash && detail.contains("could not read the entry") && !detail.contains("unreadable.json")),
+                format!("the cue after the restore was {unreadable:?}"),
+            ),
+        );
+    }
     let bare = new_engine().accept_verified_asset(hash.clone(), bytes);
     report.record(
         PLANE,

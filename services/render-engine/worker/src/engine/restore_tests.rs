@@ -444,3 +444,65 @@ fn a_dropped_take_is_refused_with_its_reason_and_continues_its_revisions_when_re
     assert!(state.revision_floors.is_empty());
     cleanup(&path);
 }
+
+/// An entry another process holds without sharing it (a scanner, a backup
+/// tool) cannot be read back: the scene is dropped as `AssetStoreFailed`
+/// with the operating-system cause, never a path, and the engine still
+/// starts. The refusal lasts until the next restart, as documented.
+#[cfg(windows)]
+#[test]
+fn a_stored_asset_that_cannot_be_read_drops_its_scene_as_asset_store_failed() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let path = journal_path("held");
+    let kept = {
+        let (mut first, _) = attached(&path);
+        deliver(&mut first, INTER);
+        deliver(&mut first, IMAGE_B);
+        publish(&mut first, scene("restore/held", Some(IMAGE_B)))
+    };
+    let hash_b = gx_asset_plane::content_hash(IMAGE_B);
+    let entry = path.with_file_name("recovery.json.assets").join(&hash_b.0);
+    let held = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(&entry)
+        .unwrap();
+    let (mut engine, outcome) = attached(&path);
+    drop(held);
+    assert_eq!(outcome.dropped.len(), 1, "{:?}", outcome.dropped);
+    let reason = &outcome.dropped[0].reason;
+    let Refusal::AssetStoreFailed { hash, detail } = reason else {
+        panic!("expected AssetStoreFailed, got {reason:?}");
+    };
+    assert_eq!(*hash, hash_b);
+    assert!(detail.contains("could not read the entry"), "{detail}");
+    assert!(!detail.contains("recovery.json.assets"), "{detail}");
+    // Cue and Render of the dropped take are refused with that reason.
+    assert!(matches!(
+        cue(&mut engine, &kept),
+        EngineReply::Refused(Refusal::AssetStoreFailed { hash, .. }) if hash == hash_b
+    ));
+    assert!(matches!(
+        render(&mut engine, &kept),
+        Some(EngineReply::Refused(Refusal::AssetStoreFailed { hash, .. })) if hash == hash_b
+    ));
+    assert!(engine.output_inhibited());
+    // The report names it durably.
+    let report = std::fs::read_to_string(path.with_file_name("recovery.json.dropped.json"))
+        .expect("the drop report was written");
+    assert!(report.contains("assetStoreFailed"), "{report}");
+    drop(engine);
+    // One restart later the reason is gone from memory: the take is unknown
+    // until it is published again, and the report still names it.
+    let (mut again, second) = attached(&path);
+    assert!(second.dropped.is_empty());
+    assert!(matches!(
+        cue(&mut again, &kept),
+        EngineReply::Refused(Refusal::UnknownTake { .. })
+    ));
+    let report = std::fs::read_to_string(path.with_file_name("recovery.json.dropped.json"))
+        .expect("the report of the restore that dropped it remains");
+    assert!(report.contains("restore/held"), "{report}");
+    cleanup(&path);
+}

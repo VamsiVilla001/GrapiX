@@ -113,7 +113,10 @@ pub struct Engine {
     /// engine is handed it. `None` until a journal is attached.
     asset_store: Option<Arc<AssetStore>>,
     /// Takes the last restore dropped, and why (5.11). Cue, Take and Render
-    /// of one are refused with that reason until it is published again.
+    /// of one are refused with that reason until it is published again or
+    /// the engine restarts: the reason is kept in memory only, so after the
+    /// next restart the take is unknown, its revision floor and
+    /// `<journal>.dropped.json` keeping the record.
     dropped: BTreeMap<TakeId, DroppedScene>,
     /// The last revision of each dropped take, journaled, so publishing it
     /// again continues from there (5.11, invariant 61).
@@ -946,7 +949,8 @@ impl Engine {
     }
 
     /// A take the last restore dropped is refused with why (5.11), until it
-    /// is published again.
+    /// is published again or the engine restarts (the reason is not
+    /// journaled; the drop report and the revision floor are).
     fn check_not_dropped(&self, take_id: &TakeId) -> Result<(), Refusal> {
         match self.dropped.get(take_id) {
             Some(dropped) if !self.published.contains_key(take_id) => Err(dropped.reason.clone()),
