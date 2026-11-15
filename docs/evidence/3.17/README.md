@@ -1,8 +1,7 @@
 # 3.17 evidence: GPU 2D drawing (paths, strokes, gradients and images)
 
-Build-plan row `3.17`. **Active.** This file records the increments as they
-land; the row is done only when every clause of its done-when has executed
-evidence here.
+Build-plan row `3.17`. **Done, 15 Nov 2026** (closing sections at the end).
+The increments are recorded in order.
 
 ## Decisions (user, 15 Nov 2026)
 
@@ -185,3 +184,96 @@ only, refuse.
 | `drawability::tests::an_image_draws_only_when_its_asset_is_a_stored_tagged_image` | Draws when stored and tagged; refuses each problem with its detail |
 | `import::tests::a_png_is_tagged_srgb_only_by_its_own_srgb_chunk_before_its_image_data` | The sRGB chunk tags; gAMA alone does not; after IDAT is not read; a truncated file is untagged |
 | Conformance (asset plane, real engine) | An image object over the delivered `rate-25.png`, untagged, is refused `ImageNotDrawable` ("no colour space"); the same image with its asset tagged sRGB publishes. `ImageNotDrawable` is driven. (A validator-and-wire parity case is not possible for it: the parity harness holds no asset bytes, so the validator names every referenced image asset `AssetMissing` first.) |
+
+## Backend measurements recorded with the product (15 Nov 2026)
+
+The spike (`tools/vello-spike`) rerun today on the same three reference
+workloads, 1080p, RTX 3070 Ti, 30 samples after 5 warm-ups, dynamic display
+list, no readback. Its executable is the one built on 7 Nov 2026: a fresh
+`--locked` build refused, because the worker's new dependencies would change
+the spike's own lockfile, which was left as it is. That binary pins the same
+Vello GPU 0.3, Vello CPU 0.3 and lyon versions the product uses; only its
+"worker CPU" column is the old rasteriser. Raw reports:
+`agent/tmp/gpu-317/2026-11-15/{dx12,vulkan}/report.json` (untracked scratch).
+
+| Backend | DX12 p50 / p99 ms (lower third, scorebug, full panel) | Vulkan p50 / p99 ms | Worst delta against Vello CPU |
+| --- | --- | --- | --- |
+| **Vello GPU 0.3 (chosen)** | 0.36 / 0.40, 0.74 / 3.95, 2.90 / 6.21 | 0.22 / 0.26, 0.28 / 0.33, 2.08 / 2.38 | 1 code value on every workload (0.06%, 0.16%, 1.74% of pixels) |
+| lyon on GPU, 4x MSAA | 23.91 / 28.56, 80.13 / 85.67, 127.27 / 161.24 | 0.32 / 0.34, 1.55 / 2.24, 3.30 / 3.59 | 102, 71, 248 code values |
+| Vello classic 0.11 | 0.99 / 1.61, 2.11 / 6.47, 2.94 / 6.87 | 0.75 / 0.97, 0.73 / 0.96, 5.17 / 9.28 | not measured against Vello CPU here |
+
+Vello GPU is the fastest backend on both APIs and the only one within one code
+value of its CPU reference. lyon on DX12 was far slower today than on 7 Nov
+(1.15 to 5.73 ms p50); that is recorded as measured, not explained. In the
+product the drawing runs once per object at prepare, never per frame.
+
+## Mutations (15 Nov 2026)
+
+One exact replacement each, run alone against the hardware drawing tests (or
+the contracts or asset-plane tests named), files restored byte-identical.
+
+| # | Mutation | Failing |
+| --- | --- | --- |
+| D1 | the GPU compose ignores coverage | the drawer test, the vector, lower-third and golden engine tests |
+| D2 | the CPU coverage is divided by 256 | the lower-third engine test, two rasteriser tests |
+| D3 | the CPU reflect spread repeats instead | the drawer test, the vector engine test |
+| D4 | the GPU stop interpolation drops its weight | the drawer test, the vector engine test |
+| D5 | the CPU pixel-perfect fit filters bilinearly | **none: equivalent.** Pixel-perfect places the image at a whole-pixel offset at scale 1, so every raster pixel centre is a texel centre and bilinear sampling returns that texel. |
+| D6 | the GPU tile clamps instead of wrapping | the GPU image test, the image engine test |
+| D7 | a round join is drawn as a miter | `joins_and_caps_cover_the_areas_their_names_say` |
+| D8 | the dash-count bound is skipped | the stroke refusal test |
+| D9 | a gradient angle is ignored | the validator gradient test |
+| D10 | an untagged image is drawn | the validator image test |
+| D11 | the import ignores the sRGB chunk | the import tag test |
+| D12 | the GPU image pass ignores image coverage | the GPU image test, the image engine test |
+
+`rasterise::tests::joins_and_caps_cover_the_areas_their_names_say` was added
+for D7, which changes both backends alike and so cannot be caught by a
+GPU-against-CPU comparison: a sharp V covers bevel < round < miter, and a
+24-pixel segment 4 wide covers 96 (butt) < round < 112 (square).
+
+## Done (15 Nov 2026)
+
+Every clause of the done-when has executed evidence above: fills, strokes with
+joins, caps and dashes, linear and radial gradients and tagged image quads draw
+on the GPU with anti-aliasing and match their CPU reference within the drawing
+threshold the user set for this row (at most one code value per channel, the
+colour of a pixel transparent on both sides excepted), on DX12 and Vulkan;
+gradients on paths are no longer refused; lyon-on-GPU and Vello are
+benchmarked on the reference workloads and Vello GPU is recorded as the
+backend with its measurements. Gate: npm run check exit 0 (849 Rust passed, 0 failed, 31 ignored; conformance 584/0/9; hardware worker suite 171/0/0).
+
+**Found at the final gate and fixed.** The conformance timed run "headless
+renders while Program runs add no late or missed Program frame" (invariant 14)
+had one late Program frame in two of three runs after this row's last change:
+Program alone 150 frames 0 late, with 5 or 6 headless renders 159 or 177
+frames, 1 late. It runs against a debug worker, and headless renders now draw
+full frames with Vello CPU, which is heavier than the old rasteriser and was
+unoptimised there. Headless renders run after the engine releases its lock, so
+this was CPU contention, not blocking. The workspace now builds `vello_cpu`,
+`vello_common`, `fearless_simd` and `kurbo` at `opt-level = 3` in debug
+(`Cargo.toml`); the product's own code stays debug. After it: three runs out of
+three pass, 584 passed, 0 failed, 9 skipped.
+
+**Not part of this row, named:** text fills still refuse gradients
+(`UnsupportedPathGradient`, owner 3.18, GPU text); brush paint objects still
+refuse `ObjectKindNotDrawable` (owner 3.17 in the validator, outside this
+done-when); scene-space gradients and off-centre radial foci refuse
+`GradientNotDrawable` by name; JPEG and other formats refuse
+`ImageNotDrawable`. A rotated, scaled or fractionally placed object is drawn
+into its object-local source and resampled by the compositor (3.16).
+
+## Jev and Laya on acceptance (15 Nov 2026)
+
+Same typed questions as 5.12 and 5.10, plus three for this row, with the plan's
+done-when, the user's threshold decision, this README in full and the gate
+(`jev-laya-acceptance.json`; Laya 6043 state tokens, not truncated). Jev
+`jev-1.14.0`, confidences: `done_when_met` 0.97, `evidence_names_execution`
+0.99, `silent_substitution_risk` 0.29, `weakest` none, `unrun_is_named` 0.54,
+`mutations_can_fail` 0.38, threshold applied as decided 0.93, both backends
+0.98, benchmark clause 0.95. Laya answered 0.91 or more to every yes/no
+question and named an unexecuted clause; as on 5.12 and 5.10 it carries no
+signal here. Read by hand: Jev's low `mutations_can_fail` is right under that
+question's wording (every mutation must fail a check), because D5 does not; it
+is recorded above as equivalent, with the reason.
+

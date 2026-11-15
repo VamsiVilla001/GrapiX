@@ -520,6 +520,69 @@ mod tests {
     }
 
     #[test]
+    fn joins_and_caps_cover_the_areas_their_names_say() {
+        use gx_contracts::scene::{LineObject, StrokeCap, StrokeJoin, StrokeStyle, Vec2};
+        // A sharp V (joins) and an open segment (caps), each drawn alone; the
+        // painted coverage orders as the geometry does.
+        let area = |points: Vec<Vec2>, style: StrokeStyle| -> f32 {
+            let mut base = ObjectBase::new("rule", "Rule");
+            base.stroke = Some(ColorValue::hex("#ffffff").expect("valid colour"));
+            base.stroke_width = 4.0;
+            base.stroke_style = Some(style);
+            let mut doc = document(vec![SceneObject::Line(LineObject { base, points })]);
+            doc.canvas.width = 64;
+            doc.canvas.height = 64;
+            let surface = VelloCpuRasteriser.rasterise(&prepare(&doc).unwrap(), 64, 64);
+            surface.pixels().iter().map(|p| p.a).sum()
+        };
+        let v = |x, y| Vec2 { x, y };
+        let vee = || vec![v(10.0, 10.0), v(32.0, 40.0), v(54.0, 10.0)];
+        let join = |join| {
+            area(
+                vee(),
+                StrokeStyle {
+                    join,
+                    miter_limit: 10.0,
+                    ..StrokeStyle::default()
+                },
+            )
+        };
+        let (miter, round, bevel) = (
+            join(StrokeJoin::Miter),
+            join(StrokeJoin::Round),
+            join(StrokeJoin::Bevel),
+        );
+        assert!(
+            bevel < round && round < miter,
+            "bevel {bevel} < round {round} < miter {miter}"
+        );
+        let segment = || vec![v(20.0, 32.0), v(44.0, 32.0)];
+        let cap = |cap| {
+            area(
+                segment(),
+                StrokeStyle {
+                    cap,
+                    ..StrokeStyle::default()
+                },
+            )
+        };
+        let (butt, round, square) = (
+            cap(StrokeCap::Butt),
+            cap(StrokeCap::Round),
+            cap(StrokeCap::Square),
+        );
+        assert!((butt - 96.0).abs() < 0.5, "butt: 24 x 4 = {butt}");
+        assert!(
+            (square - 112.0).abs() < 0.5,
+            "square adds 2 x 2 x 4: {square}"
+        );
+        assert!(
+            butt < round && round < square,
+            "butt {butt} < round {round} < square {square}"
+        );
+    }
+
+    #[test]
     fn a_stroke_style_that_cannot_be_drawn_as_written_is_refused_by_name() {
         use gx_contracts::scene::StrokeStyle;
         let refused =

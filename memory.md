@@ -118,6 +118,16 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-15 — 3.17 done: GPU 2D drawing (Claude, on the user's instruction)
+
+**Resume here.** 3.17 is done (evidence `docs/evidence/3.17`, closing sections). Backends rerun today with the
+7 Nov spike binary (a `--locked` rebuild would change the spike's lockfile; left alone): Vello GPU fastest on DX12
+and Vulkan and the only backend within one code of its reference. Mutations: 11 of 12 fail named tests; D5
+(pixel-perfect filtering) is equivalent. Added `joins_and_caps_cover_the_areas_their_names_say`. Next in the core
+backend: 3.18 (GPU text, now unblocked: needs 3.6, 3.16, 3.17) and 3.19 (masks, clip groups, mattes, trim), and
+3.21's remaining budget (stats page 1080p, 2160p on a quiet machine). Text gradients stay with 3.18; brush paint
+objects still refuse. npm run check exit 0 (849 Rust passed, 0 failed, 31 ignored; conformance 584/0/9; hardware worker suite 171/0/0).
+
 ## 2026-11-15 — 3.17 increment 3: tagged image quads in all eight fit modes (Claude)
 
 **Resume here.** User decisions: colour tag on the asset record (`AssetLibraryItem.colorSpace`, filled at import

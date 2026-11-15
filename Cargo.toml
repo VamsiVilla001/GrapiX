@@ -72,3 +72,16 @@ widestring       = "1.2"
 [profile.release]
 lto = "thin"
 panic = "abort"
+
+# 3.17: the CPU drawing backend runs optimised even in debug builds. Headless
+# renders draw full frames with it beside a live Program; unoptimised, a burst
+# of them starved the Program thread of a frame in the debug conformance timed
+# run (invariant 14). Only these crates; the product's own code stays debug.
+[profile.dev.package.vello_cpu]
+opt-level = 3
+[profile.dev.package.vello_common]
+opt-level = 3
+[profile.dev.package.fearless_simd]
+opt-level = 3
+[profile.dev.package.kurbo]
+opt-level = 3

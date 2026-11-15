@@ -1,0 +1,280 @@
+{
+  "row": "3.17",
+  "jev": {
+    "model": "jev-1.14.0"
+  },
+  "laya": {
+    "model": "convaiinnovations/laya-multilingual",
+    "package": "laya 0.4.28",
+    "max_len": 8192,
+    "input_tokens": 55028,
+    "output_tokens": 0,
+    "state_tokens": 6043,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "3.17 GPU 2D drawing: paths, strokes, gradients and images",
+    "done_when": "Fills, strokes (joins, caps, dashes), linear and radial gradients and tagged image quads draw on the GPU with anti-aliasing and match their CPU reference within the 4.4 threshold; gradients are no longer refused; lyon-on-GPU and Vello are benchmarked on the reference workloads and the chosen drawing backend is recorded with its measurements",
+    "user_decision_on_threshold": "For this row the user decided (15 Nov 2026) that drawing passes at most one code value per channel on any share of pixels, replacing strict 4.4 for drawing only.",
+    "evidence_record": "# 3.17 evidence: GPU 2D drawing (paths, strokes, gradients and images)\n\nBuild-plan row `3.17`. **Done, 15 Nov 2026** (closing sections at the end).\nThe increments are recorded in order.\n\n## Decisions (user, 15 Nov 2026)\n\nAsked of Jev (`jev-1.14.0`) and Laya (`laya-multilingual` 0.4.28,\n`max_len=8192`, no truncation) first; answers in\n`agent/tmp/gpu-317/design-jev-laya.json` (untracked scratch), summarised here.\n\n| Question | Jev | Laya | Decided |\n| --- | --- | --- | --- |\n| Drawing backend | Vello GPU 0.3 (0.96) | Vello GPU 0.3 | **Vello GPU 0.3** |\n| Reference | Vello CPU 0.3 (0.96) | Vello CPU 0.3 | **Vello CPU 0.3** |\n| Gate | float tie-aware (0.38) | strict 4.4 | **At most one code value per channel on any share of pixels, for drawing only** |\n| Colour precision | float target (0.50) | convert 8-bit | **Vello for coverage only; colour and gradients in float in the working space** |\n| User decision needed | yes (0.85) | yes (0.86) | asked |\n\nThen, when the old CPU rasteriser turned out to have no anti-aliasing at all\n(a pixel was in or out), the user decided: **the CPU path switches to Vello\nCPU** (headless renders, the CPU reference and the pixel gate), the six\ngoldens are regenerated once, and **stroke join, cap and dash are added to\nthe contract** now.\n\nThe Vello GPU 0.3, Vello classic 0.11 and lyon-on-GPU measurements behind the\nchoice are codex's 7 Nov spike (`tools/vello-spike`, raw DX12 report in\n`agent/tmp/gpu-317/dx12/report.json`): 1080p p50 / p99 per frame, dynamic,\nno readback, Vello GPU 0.52 / 0.67 (lower third), 0.92 / 4.63 (scorebug),\n2.86 / 8.23 ms (full panel); lyon 1.15 / 1.66, 6.26 / 19.65, 5.73 / 6.74 ms;\nVello classic 1.70 / 2.46, 2.29 / 11.29, 3.64 / 15.37 ms. Against Vello CPU,\nVello GPU's worst channel delta was 1 code value on every workload; lyon's 71\nto 248, Vello classic's 33 to 197. These are recorded again with the product\nintegration when the row closes.\n\n## Increment 1 (15 Nov 2026): Vello on both paths, strokes with joins, caps and dashes\n\n- **Contract.** `ObjectBase.strokeStyle` (`StrokeStyle`: `join` miter, round\n  or bevel; `cap` butt, round or square; `miterLimit`, default 4; `dash`;\n  `dashOffset`). Absent means miter, butt, solid: every existing scene draws as\n  before and serialises unchanged. TS and JSON Schema generated.\n- **Paths.** A prepared path is now an outline (`kurbo::BezPath`, scene\n  coordinates) filled under its fill rule. A stroke is expanded once at prepare\n  by `kurbo::stroke`, joins, caps and dashes included, and filled non-zero, so\n  the GPU and the CPU draw the same geometry. lyon still builds the authored\n  outline and measures trim (3.19); its tessellator no longer draws.\n- **Refused by name** (`VectorTessellationFailed` naming the object): a miter\n  limit below 1 or not finite; a dash entry negative or not finite; a dash\n  pattern with no length; more than 64 dash entries; a dash pattern that would\n  repeat more than 100,000 times along the stroke, checked before any dash is\n  generated (invariant 51).\n- **CPU backend** (`rasterise::VelloCpuRasteriser`): Vello CPU fills each path\n  in white over its coverage window; the 8-bit alpha left is the coverage; the\n  path's paint, already in the working space, is composited in float scaled by\n  it. Colour never passes through Vello's 8-bit pipeline (3.15).\n- **GPU backend** (`compositor::draw::GpuDrawer`, built once per device and\n  kept in `Gpu`): Vello GPU draws the same coverage over the same window into\n  an 8-bit target; `draw.wgsl` composites the paint in float into the layer\n  source, which the compositor samples directly (`LayerInput.drawn`). One\n  queue submission per path: Vello uploads each scene's strips with queue\n  writes, and two paths recorded into one encoder both read the last path's\n  strips (found by the drawer test below). Vector objects take the route\n  `gpu-vello-coverage-at-prepare`; text keeps its CPU glyph route until 3.18.\n  Nothing draws on the frame path (invariant 35).\n- **Goldens regenerated once** from the Vello CPU path; the previous six are\n  in `tests/baselines/history/2026-11-15-before-3.17` byte for byte.\n\n### Executed\n\n| Check | Result |\n| --- | --- |\n| `compositor::draw::tests::gpu_drawer_matches_the_cpu_backend_within_one_coverage_step` (hardware) | Two paths (a rounded rect non-zero, a circle even-odd), at 40x30, 300x200 at origin (-17, 230), 700x90 at (5, -3): every float channel of the GPU drawer within 1/255 of the CPU backend |\n| `engine::gpu_tests::gpu_engine_draws_vector_content_within_one_code_of_the_vello_cpu_reference` (hardware) | Every join and cap, a dash pattern with an offset, both fill rules, rounded rect, ellipse, polyline, through the real engine in both working spaces: 0 CPU source rasterisations, all nine sources on the GPU route, Program and Preview within one code value of the Vello CPU reference, more than 200 anti-aliased pixels, even-odd leaves a star's centre open and non-zero fills it |\n| `engine::gpu_tests` (7, hardware) | The lower third (plate and accent on the GPU, headline on the CPU, one CPU source rasterisation) and all six goldens within one code value of the CPU reference |\n| `rasterise::tests` | A dashed stroke leaves its gap empty and draws its dashes; the six refusals above, each naming the object |\n| `prepared::tests::a_semi_transparent_stroke_composites_each_pixel_once` | Rewritten for anti-aliasing: no pixel exceeds the paint's own alpha where the zigzag overlaps itself, and most lit pixels carry exactly that alpha |\n| `cargo run -p gx-pixel-gate -- check` | Before regeneration: colour-ramp-50 90 differing pixels (worst delta 124), rate-30 552 (99), rate-59-94 396 (134), rate-60 340 (137), rate-25 and rate-29-97 unchanged; after, exit 0 |\n| `colour_reference` | The authored-value samples of the colour ramp still hold |\n\n### Not in this increment\n\n- Image quads, the benchmark of the chosen backend in the product,\n  mutations. Next increments.\n- **Transformed layers.** A rotated, scaled or fractionally placed object is\n  drawn into its object-local source and resampled by the compositor (3.16),\n  so it is compared with the CPU reference only at whole-pixel placements, as\n  3.16's gate was. This row does not change that.\n\n## Increment 2 (15 Nov 2026): linear and radial gradients on paths\n\nGradients on path fills and strokes are drawn, no longer refused. The contract\nnever fixed what a gradient's fields mean (the Editor does not draw them and\n1.x never did), so this increment defines it, following the contract's own\ntests, and refuses by name wherever the meaning would be ambiguous:\n\n- **Object space**: coordinates are fractions of the object's box, (0, 0)\n  top-left to (1, 1) bottom-right. **Scene space** is refused by name: a\n  scene-space gradient stays put while its object moves, and the engine draws\n  each object's source once at prepare.\n- **Linear**: the axis runs from the start point to the end point. A non-zero\n  `angle` beside explicit points is refused by name rather than ignored.\n- **Radial**: elliptical, `t = |(p - centre) / radii|`; a focal point off the\n  centre is refused by name.\n- **Spread**: pad, repeat or reflect. **Stops**: at most 16, positions in 0 to\n  1 and non-decreasing; colours converted to premultiplied working-space\n  colour and interpolated there (`WorkingRgba::mix`, 3.15). A hard stop is two\n  stops at one position.\n- One rule for the validator and the engine (invariant 27):\n  `ColorValue::gradient_problem`, refusing `GradientNotDrawable { object,\n  paint, detail }`, a new refusal driven by the conformance audit. Text fills\n  still refuse `UnsupportedPathGradient` until 3.18; brush paint strokes stay\n  solid.\n- Both backends evaluate the gradient from the same two f32 rows per coverage\n  window, with the same spread, stop search and interpolation, in Rust\n  (`rasterise::paint`) and in WGSL (`compositor/draw.wgsl`).\n\n### Executed\n\n| Check | Result |\n| --- | --- |\n| `compositor::draw::tests::gpu_drawer_matches_the_cpu_backend_within_one_coverage_step` (hardware) | Now also linear pad and repeat, radial reflect and pad, with a hard stop and a stop fading to transparent, over the shapes and across the window at three sizes and origins: within 1/255 of the CPU backend on every float channel |\n| `engine::gpu_tests::gpu_engine_draws_vector_content_within_one_code_of_the_vello_cpu_reference` (hardware, `GX_GPU_316_BACKEND=dx12` and `=vulkan`) | Adds a repeating linear fill with a hard stop on a rounded rect, a reflected radial fill on an ellipse and a linear stroke: within one code value of the Vello CPU reference in both working spaces, on both backends |\n| `engine::gpu_tests` (8, hardware, DX12 and Vulkan) | All pass |\n| `rasterise::tests::a_linear_gradient_fill_runs_from_its_first_stop_to_its_last_across_the_box` | Pixel centres 0.5 and 9.5 of a 10-pixel box carry 0.95/0.05 and 0.05/0.95 of the two stops in linear light; outside the box is empty |\n| `drawability::tests` | A drawable gradient refuses nothing; an angled one refuses `GradientNotDrawable` for fill and stroke, hidden too; unboxed, coincident points, decreasing or out-of-range stops, 17 stops, a zero radius, an off-centre focus and scene space each refuse with their detail; text still refuses `UnsupportedPathGradient` |\n| Conformance refusal audit | `GradientNotDrawable` is driven, and refused identically by the validator and the publication wire for a fill, a hidden fill and a stroke |\n\n**The comparison rule, refined.** The one-code rule does not compare the\ncolour of a pixel whose alpha is code 0 on both sides: such a pixel is\ninvisible, and its straight colour is a quotient by an alpha too small to\nshow. On Vulkan, one pixel at the transparent end of a gradient had alpha 0 on\nboth sides and colour 226 on the CPU against 0 on the GPU.\n\n## Increment 3 (15 Nov 2026): tagged image quads, every fit mode\n\nUser decisions, 15 Nov 2026, after Jev and Laya\n(`agent/tmp/gpu-317/design-images-jev-laya.json`): the source colour tag\nlives on the **asset record**, filled at import from the PNG's own `sRGB`\nchunk; **PNG only**; **all eight fit modes**; an untagged asset is **refused\nby name**. Jev: file metadata (0.19, weak), PNG only (0.88), all eight\n(0.62), refuse (0.86). Laya: on each image object, PNG and JPEG, stretch\nonly, refuse.\n\n- **Contract.** `AssetLibraryItem.colorSpace` (absent: untagged);\n  `ImageObject.slice` (`ImageSlice`, nine-slice insets in texels); the edit\n  `setAssetColorSpace { assetId, colorSpace }` (an unknown asset refuses\n  `SceneAssetUnknown`), in the witness trace of every edit; the refusal\n  `ImageNotDrawable { object, asset, detail }`, driven by the audit. The\n  validator (`drawability::image_problem`) refuses an unknown, non-image,\n  unstored or untagged asset and missing or negative nine-slice insets; the\n  engine adds what only the bytes say: not a PNG, more than 4096 x 4096\n  texels (checked from the header before decoding, invariant 51), undecodable,\n  insets wider than the image, a raster beyond the device limit.\n- **Import.** `gx_asset_plane::import::png_colour_tag`: a PNG's `sRGB` chunk\n  before its image data tags it sRGB; nothing else is read as a tag (a gamma\n  or ICC chunk alone names no standard space), so such a PNG stays untagged\n  until the user tags it.\n- **Engine.** `image::decode` (8- and 16-bit, grey, grey-alpha, RGB, RGBA,\n  palette expanded) into premultiplied working-space float through the colour\n  pipeline from the tagged space; `image::fit_plan`: per axis a piecewise-linear\n  map from box coordinates to texels (one segment for the scaled modes, three\n  for nine-slice). Stretch fills the box; contain and cover scale uniformly,\n  centred (cover clipped); crop, original and pixel-perfect are native size,\n  centred (original unclipped; pixel-perfect at a whole-pixel offset, rounded\n  half away from zero, sampled nearest); tile repeats from the box's\n  top-left; nine-slice keeps corners at native size (scaled together when the\n  box is shorter than both insets) and stretches edges and centre. Sampling is\n  bilinear with clamped edges, scaled by how much of the pixel the image covers\n  (the pixel's extent mapped into texels), and by the box's coverage when the\n  mode clips. The GPU pass (`compositor/image.wgsl`, in `GpuDrawer`) and the CPU\n  twin (`FitPlan::sample`) do the same f32 operations; the compositor then warps\n  the raster like any layer, and the CPU reference warps it with the same\n  sampler. Route `gpu-image-fit-at-prepare`.\n- **Not drawn yet, named**: brush paint objects still refuse\n  `ObjectKindNotDrawable` (owner 3.17); they are not in this row's done-when.\n\n### Executed\n\n| Check | Result |\n| --- | --- |\n| `image::tests` (4) | Decoding into the tagged space (sRGB 128 is 0.216 linear, linear 128 is 0.502); refusals for a JPEG, a broken PNG and a 4097 x 4097 one; every fit mode's sample values; nine-slice corners, middle mapping, wide insets refused, a short box scaling the corners |\n| `compositor::draw::tests::gpu_image_fit_matches_the_cpu_raster_in_every_fit_mode` (hardware) | A 13 x 7 partly transparent image, every fit mode, boxes 40.5 x 23.25, 9 x 5.5 and 5 x 30: GPU within one 8-bit step of the CPU raster on every float channel |\n| `engine::gpu_tests::gpu_engine_draws_image_quads_in_every_fit_mode_within_one_code_of_the_cpu_reference` (hardware, DX12 and Vulkan) | One sRGB-tagged PNG drawn by eight image objects, one per fit mode, at opacity 0.9, through the real engine in both working spaces: every source on `gpu-image-fit-at-prepare`, Program and Preview within one code value of the CPU reference, each object visible |\n| `drawability::tests::an_image_draws_only_when_its_asset_is_a_stored_tagged_image` | Draws when stored and tagged; refuses each problem with its detail |\n| `import::tests::a_png_is_tagged_srgb_only_by_its_own_srgb_chunk_before_its_image_data` | The sRGB chunk tags; gAMA alone does not; after IDAT is not read; a truncated file is untagged |\n| Conformance (asset plane, real engine) | An image object over the delivered `rate-25.png`, untagged, is refused `ImageNotDrawable` (\"no colour space\"); the same image with its asset tagged sRGB publishes. `ImageNotDrawable` is driven. (A validator-and-wire parity case is not possible for it: the parity harness holds no asset bytes, so the validator names every referenced image asset `AssetMissing` first.) |\n\n## Backend measurements recorded with the product (15 Nov 2026)\n\nThe spike (`tools/vello-spike`) rerun today on the same three reference\nworkloads, 1080p, RTX 3070 Ti, 30 samples after 5 warm-ups, dynamic display\nlist, no readback. Its executable is the one built on 7 Nov 2026: a fresh\n`--locked` build refused, because the worker's new dependencies would change\nthe spike's own lockfile, which was left as it is. That binary pins the same\nVello GPU 0.3, Vello CPU 0.3 and lyon versions the product uses; only its\n\"worker CPU\" column is the old rasteriser. Raw reports:\n`agent/tmp/gpu-317/2026-11-15/{dx12,vulkan}/report.json` (untracked scratch).\n\n| Backend | DX12 p50 / p99 ms (lower third, scorebug, full panel) | Vulkan p50 / p99 ms | Worst delta against Vello CPU |\n| --- | --- | --- | --- |\n| **Vello GPU 0.3 (chosen)** | 0.36 / 0.40, 0.74 / 3.95, 2.90 / 6.21 | 0.22 / 0.26, 0.28 / 0.33, 2.08 / 2.38 | 1 code value on every workload (0.06%, 0.16%, 1.74% of pixels) |\n| lyon on GPU, 4x MSAA | 23.91 / 28.56, 80.13 / 85.67, 127.27 / 161.24 | 0.32 / 0.34, 1.55 / 2.24, 3.30 / 3.59 | 102, 71, 248 code values |\n| Vello classic 0.11 | 0.99 / 1.61, 2.11 / 6.47, 2.94 / 6.87 | 0.75 / 0.97, 0.73 / 0.96, 5.17 / 9.28 | not measured against Vello CPU here |\n\nVello GPU is the fastest backend on both APIs and the only one within one code\nvalue of its CPU reference. lyon on DX12 was far slower today than on 7 Nov\n(1.15 to 5.73 ms p50); that is recorded as measured, not explained. In the\nproduct the drawing runs once per object at prepare, never per frame.\n\n## Mutations (15 Nov 2026)\n\nOne exact replacement each, run alone against the hardware drawing tests (or\nthe contracts or asset-plane tests named), files restored byte-identical.\n\n| # | Mutation | Failing |\n| --- | --- | --- |\n| D1 | the GPU compose ignores coverage | the drawer test, the vector, lower-third and golden engine tests |\n| D2 | the CPU coverage is divided by 256 | the lower-third engine test, two rasteriser tests |\n| D3 | the CPU reflect spread repeats instead | the drawer test, the vector engine test |\n| D4 | the GPU stop interpolation drops its weight | the drawer test, the vector engine test |\n| D5 | the CPU pixel-perfect fit filters bilinearly | **none: equivalent.** Pixel-perfect places the image at a whole-pixel offset at scale 1, so every raster pixel centre is a texel centre and bilinear sampling returns that texel. |\n| D6 | the GPU tile clamps instead of wrapping | the GPU image test, the image engine test |\n| D7 | a round join is drawn as a miter | `joins_and_caps_cover_the_areas_their_names_say` |\n| D8 | the dash-count bound is skipped | the stroke refusal test |\n| D9 | a gradient angle is ignored | the validator gradient test |\n| D10 | an untagged image is drawn | the validator image test |\n| D11 | the import ignores the sRGB chunk | the import tag test |\n| D12 | the GPU image pass ignores image coverage | the GPU image test, the image engine test |\n\n`rasterise::tests::joins_and_caps_cover_the_areas_their_names_say` was added\nfor D7, which changes both backends alike and so cannot be caught by a\nGPU-against-CPU comparison: a sharp V covers bevel < round < miter, and a\n24-pixel segment 4 wide covers 96 (butt) < round < 112 (square).\n\n## Done (15 Nov 2026)\n\nEvery clause of the done-when has executed evidence above: fills, strokes with\njoins, caps and dashes, linear and radial gradients and tagged image quads draw\non the GPU with anti-aliasing and match their CPU reference within the drawing\nthreshold the user set for this row (at most one code value per channel, the\ncolour of a pixel transparent on both sides excepted), on DX12 and Vulkan;\ngradients on paths are no longer refused; lyon-on-GPU and Vello are\nbenchmarked on the reference workloads and Vello GPU is recorded as the\nbackend with its measurements. Gate: gate recorded in the commit.\n\n**Not part of this row, named:** text fills still refuse gradients\n(`UnsupportedPathGradient`, owner 3.18, GPU text); brush paint objects still\nrefuse `ObjectKindNotDrawable` (owner 3.17 in the validator, outside this\ndone-when); scene-space gradients and off-centre radial foci refuse\n`GradientNotDrawable` by name; JPEG and other formats refuse\n`ImageNotDrawable`. A rotated, scaled or fractionally placed object is drawn\ninto its object-local source and resampled by the compositor (3.16).\n",
+    "repository_gate": "npm run check exit 0 (848 Rust passed, 0 failed; conformance 584/0/9) before the final commit; hardware worker suite 171/0/0."
+  },
+  "questions": {
+    "done_when_met": {
+      "type": "noul",
+      "instructions": "Does the recorded evidence show that this row's done-when was met by execution (tests run, commands run, figures recorded), not merely claimed?",
+      "criteria": {
+        "true": "Every clause of the done-when has executed evidence.",
+        "false": "A clause is unmet, only claimed, or the evidence does not name what was run."
+      }
+    },
+    "evidence_names_execution": {
+      "type": "noul",
+      "instructions": "Does the evidence name specific executed checks (test names, commands, counts, measured figures) rather than describing the feature?",
+      "criteria": {
+        "true": "Specific executed checks are named.",
+        "false": "The evidence describes the feature without naming what was run."
+      }
+    },
+    "silent_substitution_risk": {
+      "type": "noul",
+      "instructions": "Is there a risk that this row ships a silent substitution: something the done-when asks for that is approximated, skipped or deferred without being refused by name?",
+      "criteria": {
+        "true": "Yes, a clause appears approximated, skipped or deferred silently.",
+        "false": "No, every gap is named or refused."
+      }
+    },
+    "weakest": {
+      "type": "choice",
+      "instructions": "What is the weakest point of this row's evidence?",
+      "criteria": {
+        "none": "No weak point: evidence covers every clause with executed checks.",
+        "unexecuted_clause": "A done-when clause has no executed check.",
+        "platform_gap": "A platform the done-when names (e.g. macOS, hardware) was not run.",
+        "stale": "Later changes may have invalidated the recorded evidence.",
+        "vague_record": "The record is too vague to tell what was run."
+      }
+    },
+    "unrun_is_named": {
+      "type": "noul",
+      "instructions": "Does the evidence name every check or step it did not run, rather than leaving a gap unmentioned?",
+      "criteria": {
+        "true": "Everything not run is named in the evidence.",
+        "false": "Some gap is not mentioned in the evidence."
+      }
+    },
+    "mutations_can_fail": {
+      "type": "noul",
+      "instructions": "Do the recorded mutations show that the named checks can fail: each mutation was run alone, made at least one named check fail, and the file was restored identical?",
+      "criteria": {
+        "true": "Each recorded mutation names the check or test that failed and says the file was restored.",
+        "false": "A mutation survived, was not run alone, or does not name what failed."
+      }
+    },
+    "threshold_applied_as_decided": {
+      "type": "noul",
+      "instructions": "The user replaced strict 4.4 with \"at most one code value per channel, for drawing only\" for this row. Does the evidence apply that rule consistently, and say where it differs from 4.4?",
+      "criteria": {
+        "true": "The rule is stated, applied in the named tests, and its one refinement (transparent pixels) is explained.",
+        "false": "The rule is applied inconsistently or silently relaxed."
+      }
+    },
+    "gpu_and_cpu_both_named_backends": {
+      "type": "noul",
+      "instructions": "Does the evidence show the comparisons on both DX12 and Vulkan?",
+      "criteria": {
+        "true": "Named tests ran on both backends.",
+        "false": "Only one backend is shown."
+      }
+    },
+    "benchmark_clause_met": {
+      "type": "noul",
+      "instructions": "Is the clause \"lyon-on-GPU and Vello are benchmarked on the reference workloads and the chosen drawing backend is recorded with its measurements\" met by executed measurements, with what ran stated honestly?",
+      "criteria": {
+        "true": "Measured, recorded, and the binary used is stated.",
+        "false": "Not measured, or what ran is unclear."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "done_when_met",
+      "jev": 0.97,
+      "laya": 0.9603,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.97
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9603,
+        "confidence": 0.9603,
+        "answer_confidence": 0.9603,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "evidence_names_execution",
+      "jev": 0.99,
+      "laya": 0.9147,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.99
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9147,
+        "confidence": 0.9147,
+        "answer_confidence": 0.9147,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "silent_substitution_risk",
+      "jev": 0.29,
+      "laya": 0.945,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.29
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.945,
+        "confidence": 0.945,
+        "answer_confidence": 0.945,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "weakest",
+      "jev": "none",
+      "laya": "unexecuted_clause",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "none",
+        "confidence": 0.34,
+        "probabilities": {
+          "none": 0.47,
+          "unexecuted_clause": 0.03,
+          "platform_gap": 0.11,
+          "stale": 0.38,
+          "vague_record": 0.01
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "unexecuted_clause",
+        "probabilities": {
+          "none": 0.2487,
+          "unexecuted_clause": 0.2859,
+          "platform_gap": 0.1542,
+          "stale": 0.1905,
+          "vague_record": 0.1206
+        },
+        "confidence": 0.0286,
+        "answer_confidence": 0.2859,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "unrun_is_named",
+      "jev": 0.54,
+      "laya": 0.9158,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.54
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9158,
+        "confidence": 0.9158,
+        "answer_confidence": 0.9158,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "mutations_can_fail",
+      "jev": 0.38,
+      "laya": 0.9265,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.38
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9265,
+        "confidence": 0.9265,
+        "answer_confidence": 0.9265,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "threshold_applied_as_decided",
+      "jev": 0.93,
+      "laya": 0.9582,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.93
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9582,
+        "confidence": 0.9582,
+        "answer_confidence": 0.9582,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "gpu_and_cpu_both_named_backends",
+      "jev": 0.98,
+      "laya": 0.9233,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.98
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9233,
+        "confidence": 0.9233,
+        "answer_confidence": 0.9233,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "benchmark_clause_met",
+      "jev": 0.95,
+      "laya": 0.9601,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.95
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9601,
+        "confidence": 0.9601,
+        "answer_confidence": 0.9601,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}
