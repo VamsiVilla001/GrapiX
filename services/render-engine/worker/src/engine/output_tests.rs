@@ -250,9 +250,20 @@ fn evidence(name: &str, data: &Value) {
 #[test]
 #[ignore = "requires hardware GPU; 3.21 output-encode byte-identity gate"]
 fn gpu_output_encode_equals_the_cpu_encode_of_the_same_pixels() {
-    for space in [WorkingColorSpace::Srgb, WorkingColorSpace::LinearSrgb] {
+    // The lower third is mostly transparent with soft edges; the stats page is
+    // an opaque full-screen frame, so both the division path and the opaque
+    // path of the encode are compared byte for byte.
+    for (space, doc) in [WorkingColorSpace::Srgb, WorkingColorSpace::LinearSrgb]
+        .into_iter()
+        .flat_map(|space| {
+            [
+                (space, lower_third(1920, 1080)),
+                (space, stats_page(1920, 1080)),
+            ]
+        })
+    {
         let (mut engine, _ticks) = hardware_engine();
-        let mut doc = lower_third(1920, 1080);
+        let mut doc = doc;
         doc.working_color_space = space;
         let pin = publish(&mut engine, doc);
         let scene = engine

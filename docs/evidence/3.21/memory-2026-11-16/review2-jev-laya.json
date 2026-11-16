@@ -1,0 +1,201 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 48411,
+    "output_tokens": 0,
+    "state_tokens": 8012,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "3.21 at 1080p50: p99 <= 10 ms end to end for a lower third, a scorebug and a stats page on DX12 on the reference GPU; frames byte-identical to the CPU encode (one quantisation).",
+    "evidence": "### 16 Nov 2026, continued: the stats page's remaining frame (Claude)\n\nThree changes, each measured on its own (release, DX12, three runs each,\nsettled p50 / p99 of the 1080p stats page, ms):\n\n| Change | Stats page | Why |\n| --- | --- | --- |\n| after the memory fix (above) | 9.9-10.2 / 11.5-13.1 | |\n| **the output encode**: the exact refinement loops stop when a step does not move the code, and an opaque pixel (alpha exactly 1) takes its code from the threshold search alone | 8.0-8.1 / 9.8-10.5 | an opaque pixel ran 48 of the 64-bit exact checks per pixel; `r / 1` is exact, and a further refinement step re-tests the same threshold, so both are exact and byte-identical |\n| **the readback copy**: both surfaces copied in one parallel pass of eight chunks | 7.9-8.4 / 9.2-10.2 | the two surfaces were copied one after the other |\n| **one uniform buffer per tile**, every layer's uniform at a 256-byte-aligned offset, written once per frame | 6.3-6.7 / 8.1-33.6 | 71 buffers and 71 queue writes per frame |\n\nThe profile after the encode change: the stats page's output stage fell from\n5.1 to 3.0 ms, the same as the lower third's, so the encode no longer depends on\nhow much of the frame is opaque.\n\n**Six runs after all three** (`memory-2026-11-16/frame-budget-dx12-final-run*.json`):\n\n| Run | Lower third | Scorebug | Stats page |\n| --- | --- | --- | --- |\n| 1 | 5.1 / 7.5 | 5.2 / 14.5 | 6.3 / 15.9 |\n| 2 | 5.1 / 6.3 | 5.3 / 7.0 | 6.5 / 33.6 |\n| 3 | 5.5 / 8.1 | 5.5 / 7.3 | 6.7 / 11.5 |\n| 4 | 5.2 / 7.8 | 5.5 / 7.5 | 6.3 / 8.1 |\n| 5 | 4.9 / 6.5 | 5.4 / 6.6 | 6.3 / 10.8 |\n| 6 | 5.2 / 7.0 | 5.1 / 6.2 | 6.6 / 8.7 |\n\nThe medians are steady and well inside 10 ms; the p99 of 100 settled frames\nis the second-worst frame, and on this machine it follows what the other\napplications are doing on the GPU (nvidia-smi between runs read 5%, 40% and 60%\nutilisation; one stats-page frame took 47 ms). The scorebug, which is lighter,\nwas hit the same way in run 1. **3.21 stays active**: at 1080p the stats page\nmeets p99 \u2264 10 ms in three of six runs on this shared GPU, and no claim is made\nthat it holds. What would settle it is a run on the reference GPU with nothing\nelse on it, which is the same condition 3.23 needs.\n\n**Executed.** `cargo test -p gx-render-worker --lib -- --include-ignored\n--test-threads=1 --skip program_holds_the_frame_budget`: 190 passed, 0 failed\n(hardware). `gpu_output_encode_equals_the_cpu_encode_of_the_same_pixels` now\ncompares the opaque stats page as well as the lower third, byte for byte, in\nboth working spaces. Mutations, one at a time, files restored byte-identical\n(`mutate_321b.py`): the opaque path reading the other output table, the opaque\npath truncating instead of searching, the Rust twin off by one, every layer\nbinding the first uniform, only the first uniform uploaded, Program and Preview\nswapped in the copy. Each fails named tests. The loop exit is an exact\nequivalence (a step that does not move the code re-tests the same threshold),\nso no mutation of it that keeps the code correct can fail a test; one that\nbreaks it is caught by the same GPU comparisons.\n",
+    "code_diff": "diff --git a/services/render-engine/worker/src/compositor/mod.rs b/services/render-engine/worker/src/compositor/mod.rs\nindex 33d7d82..9963ff8 100644\n--- a/services/render-engine/worker/src/compositor/mod.rs\n+++ b/services/render-engine/worker/src/compositor/mod.rs\n@@ -209,7 +209,11 @@ struct TileResources {\n     targets: [wgpu::Texture; 2],\n     /// Clears target 0 and target 1.\n     clear: [wgpu::BindGroup; 2],\n-    uniforms: Vec<wgpu::Buffer>,\n+    /// 3.21: every layer's uniform in one buffer, layer i at\n+    /// `i * uniform_stride`, written with one call per frame. One buffer and\n+    /// one queue write per layer cost the 71-layer stats page about half a\n+    /// millisecond of CPU per frame.\n+    uniforms: wgpu::Buffer,\n     groups: Vec<wgpu::BindGroup>,\n     /// 3.19: one matte target per clip child, in `mattes` order, each\n     /// composited over the whole tile from a never-written zero backdrop.\n@@ -263,6 +267,11 @@ pub struct PreparedCompositor {\n     // Validate the entire frame before writing any GPU state. Reused scratch\n     // keeps matrix construction out of the allocator on the frame path.\n     uniform_scratch: Vec<[u8; UNIFORM_BYTES]>,\n+    /// One tile's layer uniforms laid out at `uniform_stride`, as uploaded.\n+    uniform_upload: Vec<u8>,\n+    /// Bytes between layer uniforms: `UNIFORM_BYTES` rounded up to the\n+    /// device's uniform offset alignment.\n+    uniform_stride: usize,\n     /// Each layer's dispatch region per tile for this frame (tile-major): the\n     /// hull of its footprint and the previous layer's, as written into its\n     /// uniform. Prepared once, rewritten per frame.\n@@ -474,6 +483,8 @@ impl PreparedCompositor {\n         let mut mattes: Vec<usize> = (0..inputs.len()).filter(|&i| inputs[i].matte).collect();\n         mattes.sort_by_key(|&i| depth(i));\n         let slot = |layer: usize| mattes.iter().position(|&m| m == layer);\n+        let uniform_stride = UNIFORM_BYTES\n+            .next_multiple_of(device.limits().min_uniform_buffer_offset_alignment as usize);\n         let mut uniform_scratch = Vec::with_capacity(uniform_count);\n         for tile in plan.tiles() {\n             for input in inputs {\n@@ -688,7 +699,7 @@ impl PreparedCompositor {\n                 let bind = |src: &wgpu::TextureView,\n                             dst: &wgpu::TextureView,\n                             out: &wgpu::TextureView,\n-                            uniform: &wgpu::Buffer,\n+                            uniform: wgpu::BindingResource<'_>,\n                             clip: &wgpu::TextureView,\n                             track: &wgpu::TextureView| {\n                     crate::render_work::gpu_build();\n@@ -710,7 +721,7 @@ impl PreparedCompositor {\n                             },\n                             wgpu::BindGroupEntry {\n                                 binding: 3,\n-                                resource: uniform.as_entire_binding(),\n+                                resource: uniform,\n                             },\n                             wgpu::BindGroupEntry {\n                                 binding: 4,\n@@ -726,7 +737,7 @@ impl PreparedCompositor {\n                 let group = |src: &wgpu::TextureView,\n                              dst: usize,\n                              out: usize,\n-                             uniform: &wgpu::Buffer,\n+                             uniform: wgpu::BindingResource<'_>,\n                              clip: Option<usize>,\n                              track: Option<(usize, f32)>| {\n                     bind(\n@@ -742,12 +753,34 @@ impl PreparedCompositor {\n                 // only its region, so the target it writes must already hold\n                 // the frame's state outside it.\n                 let clear = [\n-                    group(&views[1], 1, 0, &clear_uniform, None, None),\n-                    group(&views[0], 0, 1, &clear_uniform, None, None),\n+                    group(\n+                        &views[1],\n+                        1,\n+                        0,\n+                        clear_uniform.as_entire_binding(),\n+                        None,\n+                        None,\n+                    ),\n+                    group(\n+                        &views[0],\n+                        0,\n+                        1,\n+                        clear_uniform.as_entire_binding(),\n+                        None,\n+                        None,\n+                    ),\n                 ];\n-                let uniforms: Vec<_> = (0..layers.len())\n-                    .map(|i| make_uniform(&uniform_scratch[tile_index * layers.len() + i]))\n-                    .collect();\n+                let mut initial = vec![0u8; layers.len().max(1) * uniform_stride];\n+                for i in 0..layers.len() {\n+                    initial[i * uniform_stride..][..UNIFORM_BYTES]\n+                        .copy_from_slice(&uniform_scratch[tile_index * layers.len() + i]);\n+                }\n+                crate::render_work::gpu_build();\n+                let uniforms = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {\n+                    label: Some(\"gx-compositor-uniform\"),\n+                    contents: &initial,\n+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,\n+                });\n                 let groups = layers\n                     .iter()\n                     .enumerate()\n@@ -756,7 +789,11 @@ impl PreparedCompositor {\n                             layer.sampled(),\n                             i % 2,\n                             (i + 1) % 2,\n-                            &uniforms[i],\n+                            wgpu::BindingResource::Buffer(wgpu::BufferBinding {\n+                                buffer: &uniforms,\n+                                offset: (i * uniform_stride) as u64,\n+                                size: wgpu::BufferSize::new(UNIFORM_BYTES as u64),\n+                            }),\n                             layer.clip,\n                             layer.track,\n                         )\n@@ -776,7 +813,7 @@ impl PreparedCompositor {\n                                 .as_ref()\n                                 .expect(\"a scene with mattes has a zero backdrop\"),\n                             &matte_views[k],\n-                            &matte_uniforms[k],\n+                            matte_uniforms[k].as_entire_binding(),\n                             clip_view(layer.clip),\n                             &no_clip_view,\n                         )\n@@ -822,6 +859,8 @@ impl PreparedCompositor {\n             curve_scratch: Vec::with_capacity(crate::effects::CURVE_FLOATS * 4),\n             region_scratch: vec![Region::default(); uniform_scratch.len()],\n             uniform_scratch,\n+            uniform_upload: vec![0; inputs.len().max(1) * uniform_stride],\n+            uniform_stride,\n             #[cfg(test)]\n             full_tile_dispatch: false,\n             submitted: false,\n@@ -933,11 +972,15 @@ impl PreparedCompositor {\n             }\n         }\n         for (tile_index, tile) in self.tiles.iter().enumerate() {\n-            for (i, uniform) in tile.uniforms.iter().enumerate() {\n+            for i in 0..states.len() {\n+                self.uniform_upload[i * self.uniform_stride..][..UNIFORM_BYTES]\n+                    .copy_from_slice(&self.uniform_scratch[tile_index * states.len() + i]);\n+            }\n+            if !states.is_empty() {\n                 self.queue.write_buffer(\n-                    uniform,\n+                    &tile.uniforms,\n                     0,\n-                    &self.uniform_scratch[tile_index * states.len() + i],\n+                    &self.uniform_upload[..states.len() * self.uniform_stride],\n                 );\n             }\n             for (k, uniform) in tile.matte_uniforms.iter().enumerate() {\ndiff --git a/services/render-engine/worker/src/compositor/output.rs b/services/render-engine/worker/src/compositor/output.rs\nindex 009cfeb..e332fee 100644\n--- a/services/render-engine/worker/src/compositor/output.rs\n+++ b/services/render-engine/worker/src/compositor/output.rs\n@@ -145,6 +145,13 @@ pub fn channel_code(table: &[u32], r: f32, a: f32) -> u8 {\n     if a.to_bits() & 0x7fff_ffff == 0 {\n         return 0;\n     }\n+    // As in the shader: an opaque pixel's code is the search alone.\n+    if a.to_bits() == 1.0f32.to_bits() {\n+        return table[1..]\n+            .iter()\n+            .take_while(|&&t| r >= f32::from_bits(t))\n+            .count() as u8;\n+    }\n     let x = r / a;\n     let mut code = table[1..]\n         .iter()\n@@ -563,8 +570,7 @@ impl OutputRing {\n             .get_mapped_range()\n             .map_err(|e| CompositorError::Readback(e.to_string()))\n             .map(|view| {\n-                copy_parallel(&view[..split], &mut program);\n-                copy_parallel(&view[split..], &mut preview);\n+                copy_parallel(&view[..split], &view[split..], &mut program, &mut preview);\n                 debug_assert_eq!(program.len(), split);\n                 Delivered {\n                     tag: slot.tag,\n@@ -606,12 +612,20 @@ impl OutputRing {\n /// threads. Reading from readback memory is bandwidth-bound per core; four\n /// readers move a 2160p surface in a few milliseconds where one takes about\n /// ten.\n-fn copy_parallel(src: &[u8], dst: &mut [u8]) {\n-    const CHUNKS: usize = 4;\n-    debug_assert_eq!(src.len(), dst.len());\n-    let chunk = src.len().div_ceil(CHUNKS).max(1);\n+/// Copy both surfaces out of the mapped slot in one parallel pass (3.21): one\n+/// scope over eight chunks rather than two scopes of four, so the second\n+/// surface does not wait for the first and the spawns are paid once.\n+fn copy_parallel(program_src: &[u8], preview_src: &[u8], program: &mut [u8], preview: &mut [u8]) {\n+    const CHUNKS_EACH: usize = 4;\n+    debug_assert_eq!(program_src.len(), program.len());\n+    debug_assert_eq!(preview_src.len(), preview.len());\n+    let chunk = program_src.len().div_ceil(CHUNKS_EACH).max(1);\n     std::thread::scope(|scope| {\n-        for (s, d) in src.chunks(chunk).zip(dst.chunks_mut(chunk)) {\n+        for (s, d) in program_src\n+            .chunks(chunk)\n+            .zip(program.chunks_mut(chunk))\n+            .chain(preview_src.chunks(chunk).zip(preview.chunks_mut(chunk)))\n+        {\n             scope.spawn(move || d.copy_from_slice(s));\n         }\n     });\ndiff --git a/services/render-engine/worker/src/compositor/output.wgsl b/services/render-engine/worker/src/compositor/output.wgsl\nindex a7e4049..89380f1 100644\n--- a/services/render-engine/worker/src/compositor/output.wgsl\n+++ b/services/render-engine/worker/src/compositor/output.wgsl\n@@ -164,15 +164,29 @@ fn channel_code(base: u32, r: f32, a: f32) -> u32 {\n     if ((a_bits & 0x7fffffffu) == 0u) {\n         return 0u;\n     }\n+    // An opaque pixel's straight value is r itself (r / 1 is exact), so the\n+    // exact float comparisons of the search settle its code alone: no\n+    // division to correct, no integer rule. Most of a full-screen graphic.\n+    if (a_bits == 0x3f800000u) {\n+        return search(base, r);\n+    }\n     var code = search(base, r / a);\n+    // The candidate is at most a few codes off. Each loop stops as soon as a\n+    // step does not move the code: a further step would test the same\n+    // threshold again and agree, so stopping is exact and saves the 64-bit\n+    // rule's cost on almost every pixel.\n     for (var i = 0u; i < 4u; i = i + 1u) {\n         if (code < 255u && quotient_reaches(r_bits, a_bits, tables[base + code + 1u])) {\n             code = code + 1u;\n+        } else {\n+            break;\n         }\n     }\n     for (var i = 0u; i < 4u; i = i + 1u) {\n         if (code > 0u && !quotient_reaches(r_bits, a_bits, tables[base + code])) {\n             code = code - 1u;\n+        } else {\n+            break;\n         }\n     }\n     return code;\ndiff --git a/services/render-engine/worker/src/engine/output_tests.rs b/services/render-engine/worker/src/engine/output_tests.rs\nindex 8c18c76..36e4bf1 100644\n--- a/services/render-engine/worker/src/engine/output_tests.rs\n+++ b/services/render-engine/worker/src/engine/output_tests.rs\n@@ -250,9 +250,20 @@ fn evidence(name: &str, data: &Value) {\n #[test]\n #[ignore = \"requires hardware GPU; 3.21 output-encode byte-identity gate\"]\n fn gpu_output_encode_equals_the_cpu_encode_of_the_same_pixels() {\n-    for space in [WorkingColorSpace::Srgb, WorkingColorSpace::LinearSrgb] {\n+    // The lower third is mostly transparent with soft edges; the stats page is\n+    // an opaque full-screen frame, so both the division path and the opaque\n+    // path of the encode are compared byte for byte.\n+    for (space, doc) in [WorkingColorSpace::Srgb, WorkingColorSpace::LinearSrgb]\n+        .into_iter()\n+        .flat_map(|space| {\n+            [\n+                (space, lower_third(1920, 1080)),\n+                (space, stats_page(1920, 1080)),\n+            ]\n+        })\n+    {\n         let (mut engine, _ticks) = hardware_engine();\n-        let mut doc = lower_third(1920, 1080);\n+        let mut doc = doc;\n         doc.working_color_space = space;\n         let pin = publish(&mut engine, doc);\n         let scene = engine\n"
+  },
+  "questions": {
+    "byte_exact_kept": {
+      "type": "noul",
+      "instructions": "Do the encode changes keep the output byte-identical to the CPU encode, as shown by executed tests?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No, or not shown."
+      }
+    },
+    "opaque_path_correct": {
+      "type": "noul",
+      "instructions": "Is skipping the division and the exact rule for alpha exactly 1 correct for every value, including NaN, negative, zero and infinity?",
+      "criteria": {
+        "true": "Yes, the float comparisons settle it.",
+        "false": "No, some value is coded differently."
+      }
+    },
+    "uniform_layout_safe": {
+      "type": "noul",
+      "instructions": "Is one uniform buffer per tile with 256-byte-aligned offsets, written once per frame, safe with frames in flight?",
+      "criteria": {
+        "true": "Yes, queue writes are ordered with the submissions.",
+        "false": "No, a frame in flight can read the next frame values."
+      }
+    },
+    "row_status": {
+      "type": "choice",
+      "instructions": "What status should 3.21 have?",
+      "criteria": {
+        "stays_active": "Active: p99 met in 3 of 6 runs on a shared GPU, not shown to hold.",
+        "done": "Done: the medians are well inside 10 ms."
+      }
+    },
+    "weakest_point": {
+      "type": "choice",
+      "instructions": "Weakest point?",
+      "criteria": {
+        "shared_gpu_tails": "The p99 is set by other applications on a shared GPU.",
+        "loop_exit_not_mutation_tested": "The loop exit cannot be killed by a mutation.",
+        "p99_of_100": "The p99 of 100 frames is the second-worst frame.",
+        "none": "None."
+      }
+    },
+    "must_fix": {
+      "type": "noul",
+      "instructions": "Is there a defect to fix before committing?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "byte_exact_kept",
+      "jev": 0.92,
+      "laya": 0.9278,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.92
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9278,
+        "confidence": 0.9278,
+        "answer_confidence": 0.9278,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "opaque_path_correct",
+      "jev": 0.65,
+      "laya": 0.9313,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.65
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9313,
+        "confidence": 0.9313,
+        "answer_confidence": 0.9313,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "uniform_layout_safe",
+      "jev": 0.47,
+      "laya": 0.9461,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.47
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9461,
+        "confidence": 0.9461,
+        "answer_confidence": 0.9461,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "row_status",
+      "jev": "stays_active",
+      "laya": "done",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "stays_active",
+        "confidence": 0.98,
+        "probabilities": {
+          "stays_active": 0.99,
+          "done": 0.01
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "done",
+        "probabilities": {
+          "stays_active": 0.3156,
+          "done": 0.6844
+        },
+        "confidence": 0.1005,
+        "answer_confidence": 0.6844,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "weakest_point",
+      "jev": "shared_gpu_tails",
+      "laya": "shared_gpu_tails",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "shared_gpu_tails",
+        "confidence": 0.91,
+        "probabilities": {
+          "shared_gpu_tails": 0.93,
+          "loop_exit_not_mutation_tested": 0.05,
+          "p99_of_100": 0.02,
+          "none": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "shared_gpu_tails",
+        "probabilities": {
+          "shared_gpu_tails": 0.4998,
+          "loop_exit_not_mutation_tested": 0.0783,
+          "p99_of_100": 0.1406,
+          "none": 0.2812
+        },
+        "confidence": 0.1497,
+        "answer_confidence": 0.4998,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "must_fix",
+      "jev": 0.53,
+      "laya": 0.9309,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.53
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9309,
+        "confidence": 0.9309,
+        "answer_confidence": 0.9309,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

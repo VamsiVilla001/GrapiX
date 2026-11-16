@@ -280,3 +280,73 @@ is contradicted by the measurements; the stats page is still over budget, so
 the row stays active; the cause was not read from a memory counter, which is
 stated above. The plan change is the user's decision. The splits are reported
 to the user.
+
+### 16 Nov 2026, continued: the stats page's remaining frame (Claude)
+
+Three changes, each measured on its own (release, DX12, three runs each,
+settled p50 / p99 of the 1080p stats page, ms):
+
+| Change | Stats page | Why |
+| --- | --- | --- |
+| after the memory fix (above) | 9.9-10.2 / 11.5-13.1 | |
+| **the output encode**: the exact refinement loops stop when a step does not move the code, and an opaque pixel (alpha exactly 1) takes its code from the threshold search alone | 8.0-8.1 / 9.8-10.5 | an opaque pixel ran 48 of the 64-bit exact checks per pixel; `r / 1` is exact, and a further refinement step re-tests the same threshold, so both are exact and byte-identical |
+| **the readback copy**: both surfaces copied in one parallel pass of eight chunks | 7.9-8.4 / 9.2-10.2 | the two surfaces were copied one after the other |
+| **one uniform buffer per tile**, every layer's uniform at a 256-byte-aligned offset, written once per frame | 6.3-6.7 / 8.1-33.6 | 71 buffers and 71 queue writes per frame |
+
+The profile after the encode change: the stats page's output stage fell from
+5.1 to 3.0 ms, the same as the lower third's, so the encode no longer depends on
+how much of the frame is opaque.
+
+**Six runs after all three** (`memory-2026-11-16/frame-budget-dx12-final-run*.json`):
+
+| Run | Lower third | Scorebug | Stats page |
+| --- | --- | --- | --- |
+| 1 | 5.1 / 7.5 | 5.2 / 14.5 | 6.3 / 15.9 |
+| 2 | 5.1 / 6.3 | 5.3 / 7.0 | 6.5 / 33.6 |
+| 3 | 5.5 / 8.1 | 5.5 / 7.3 | 6.7 / 11.5 |
+| 4 | 5.2 / 7.8 | 5.5 / 7.5 | 6.3 / 8.1 |
+| 5 | 4.9 / 6.5 | 5.4 / 6.6 | 6.3 / 10.8 |
+| 6 | 5.2 / 7.0 | 5.1 / 6.2 | 6.6 / 8.7 |
+
+The medians are steady and well inside 10 ms; the p99 of 100 settled frames
+is the second-worst frame, and on this machine it follows what the other
+applications are doing on the GPU (nvidia-smi between runs read 5%, 40% and 60%
+utilisation; one stats-page frame took 47 ms). The scorebug, which is lighter,
+was hit the same way in run 1. **3.21 stays active**: at 1080p the stats page
+meets p99 ≤ 10 ms in three of six runs on this shared GPU, and no claim is made
+that it holds. What would settle it is a run on the reference GPU with nothing
+else on it, which is the same condition 3.23 needs.
+
+**Executed.** `cargo test -p gx-render-worker --lib -- --include-ignored
+--test-threads=1 --skip program_holds_the_frame_budget`: 190 passed, 0 failed
+(hardware). `gpu_output_encode_equals_the_cpu_encode_of_the_same_pixels` now
+compares the opaque stats page as well as the lower third, byte for byte, in
+both working spaces. Mutations, one at a time, files restored byte-identical
+(`mutate_321b.py`): the opaque path reading the other output table, the opaque
+path truncating instead of searching, the Rust twin off by one, every layer
+binding the first uniform, only the first uniform uploaded, Program and Preview
+swapped in the copy. Each fails named tests. The loop exit is an exact
+equivalence (a step that does not move the code re-tests the same threshold),
+so no mutation of it that keeps the code correct can fail a test; one that
+breaks it is caught by the same GPU comparisons.
+
+**Jev and Laya on these changes** (`memory-2026-11-16/review2-jev-laya.json`;
+Laya read 8012 tokens, not truncated):
+
+| Question | Jev | Laya |
+| --- | --- | --- |
+| byte-identical to the CPU encode, shown by tests | 0.92 | 0.93 |
+| the opaque path is right for every value | 0.65 | 0.93 |
+| one uniform buffer is safe with frames in flight | 0.47 | 0.95 |
+| 3.21's status | stays active (0.98) | done |
+| weakest point | shared-GPU tails (0.91) | shared-GPU tails |
+| a defect to fix first | 0.53 | 0.93 |
+
+By hand. The opaque path: `r / 1` is `r` exactly in IEEE arithmetic, NaN,
+signed zero and infinities included, so the float comparisons of the search
+give the CPU's code; the Rust twin's test now also covers -0.1, -0, 0, plus and
+minus infinity, 2, the smallest normal and the smallest subnormal at alpha 1,
+and passes. The uniform buffer: a queue write takes effect at the next
+submission, after every frame already submitted, which is the ordering the 71
+separate buffers had. No defect found; the row stays active for the reason both
+name. The splits are reported to the user.

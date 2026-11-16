@@ -145,6 +145,13 @@ pub fn channel_code(table: &[u32], r: f32, a: f32) -> u8 {
     if a.to_bits() & 0x7fff_ffff == 0 {
         return 0;
     }
+    // As in the shader: an opaque pixel's code is the search alone.
+    if a.to_bits() == 1.0f32.to_bits() {
+        return table[1..]
+            .iter()
+            .take_while(|&&t| r >= f32::from_bits(t))
+            .count() as u8;
+    }
     let x = r / a;
     let mut code = table[1..]
         .iter()
@@ -563,8 +570,7 @@ impl OutputRing {
             .get_mapped_range()
             .map_err(|e| CompositorError::Readback(e.to_string()))
             .map(|view| {
-                copy_parallel(&view[..split], &mut program);
-                copy_parallel(&view[split..], &mut preview);
+                copy_parallel(&view[..split], &view[split..], &mut program, &mut preview);
                 debug_assert_eq!(program.len(), split);
                 Delivered {
                     tag: slot.tag,
@@ -606,12 +612,20 @@ impl OutputRing {
 /// threads. Reading from readback memory is bandwidth-bound per core; four
 /// readers move a 2160p surface in a few milliseconds where one takes about
 /// ten.
-fn copy_parallel(src: &[u8], dst: &mut [u8]) {
-    const CHUNKS: usize = 4;
-    debug_assert_eq!(src.len(), dst.len());
-    let chunk = src.len().div_ceil(CHUNKS).max(1);
+/// Copy both surfaces out of the mapped slot in one parallel pass (3.21): one
+/// scope over eight chunks rather than two scopes of four, so the second
+/// surface does not wait for the first and the spawns are paid once.
+fn copy_parallel(program_src: &[u8], preview_src: &[u8], program: &mut [u8], preview: &mut [u8]) {
+    const CHUNKS_EACH: usize = 4;
+    debug_assert_eq!(program_src.len(), program.len());
+    debug_assert_eq!(preview_src.len(), preview.len());
+    let chunk = program_src.len().div_ceil(CHUNKS_EACH).max(1);
     std::thread::scope(|scope| {
-        for (s, d) in src.chunks(chunk).zip(dst.chunks_mut(chunk)) {
+        for (s, d) in program_src
+            .chunks(chunk)
+            .zip(program.chunks_mut(chunk))
+            .chain(preview_src.chunks(chunk).zip(preview.chunks_mut(chunk)))
+        {
             scope.spawn(move || d.copy_from_slice(s));
         }
     });
@@ -684,6 +698,16 @@ mod tests {
                 (0.5, 0.25),
                 (1.0, 1.0),
                 (f32::NAN, 1.0),
+                // The opaque path's edges: negative, signed zero, infinities
+                // and over-range values at alpha exactly 1.
+                (-0.1, 1.0),
+                (-0.0, 1.0),
+                (0.0, 1.0),
+                (f32::INFINITY, 1.0),
+                (f32::NEG_INFINITY, 1.0),
+                (2.0, 1.0),
+                (f32::MIN_POSITIVE, 1.0),
+                (1.0e-45, 1.0),
             ]);
             for (r, a) in cases {
                 let pixel = WorkingRgba { r, g: r, b: r, a };

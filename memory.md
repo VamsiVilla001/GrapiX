@@ -118,6 +118,20 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-16 — 3.21: the 1080p stats page's frame cut to 6.5 ms p50; p99 met in 3 of 6 runs on a shared GPU (Claude)
+
+**Resume here.** 3.21 stays active. Three exact changes: the output encode's refinement loops stop when a step does not
+move the code and an opaque pixel takes its code from the search alone (byte-identical; output stage 5.1 to 3.0 ms on
+the stats page); both readback surfaces are copied in one parallel pass; one uniform buffer per tile, written once per
+frame. Stats page settled p50 about 10 to 6.5 ms; p99 over six runs 15.9, 33.6, 11.5, 8.1, 10.8, 8.7 (the tails follow
+other applications' GPU use, 5 to 60% between runs); lower third and scorebug p99 about 6 to 8 ms. The row needs a run
+on the reference GPU with nothing else on it, as 3.23 does. Hardware worker suite 190/0 (benchmarks skipped); six
+mutations fail named tests; Jev and Laya reviewed (they agree the tails are the weakest point; Jev unsure on the
+opaque path and the uniform layout, checked by hand and the twin test widened). **Next: the MCP edit gaps**: design is
+run (both agree to leave out layerId, 2D material slots and the 3D fields, which the engine refuses; Jev's answers
+taken on the four splits: width/height/zIndex as ObjectField, setEffects replacing the list, refuse on kinds that
+draw nothing). Evidence `docs/evidence/3.21` (16 Nov, continued).
+
 ## 2026-11-16 — 3.21: 2160p to V2 (3.23); a DX12 regression from 3.17 found and removed (Claude)
 
 **Resume here.** User instruction 16 Nov: 4K is a V2 option, 1080p first. Done: 3.21's done-when now reads 1080p50;

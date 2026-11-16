@@ -164,15 +164,29 @@ fn channel_code(base: u32, r: f32, a: f32) -> u32 {
     if ((a_bits & 0x7fffffffu) == 0u) {
         return 0u;
     }
+    // An opaque pixel's straight value is r itself (r / 1 is exact), so the
+    // exact float comparisons of the search settle its code alone: no
+    // division to correct, no integer rule. Most of a full-screen graphic.
+    if (a_bits == 0x3f800000u) {
+        return search(base, r);
+    }
     var code = search(base, r / a);
+    // The candidate is at most a few codes off. Each loop stops as soon as a
+    // step does not move the code: a further step would test the same
+    // threshold again and agree, so stopping is exact and saves the 64-bit
+    // rule's cost on almost every pixel.
     for (var i = 0u; i < 4u; i = i + 1u) {
         if (code < 255u && quotient_reaches(r_bits, a_bits, tables[base + code + 1u])) {
             code = code + 1u;
+        } else {
+            break;
         }
     }
     for (var i = 0u; i < 4u; i = i + 1u) {
         if (code > 0u && !quotient_reaches(r_bits, a_bits, tables[base + code])) {
             code = code - 1u;
+        } else {
+            break;
         }
     }
     return code;

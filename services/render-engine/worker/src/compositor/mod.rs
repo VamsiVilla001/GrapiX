@@ -209,7 +209,11 @@ struct TileResources {
     targets: [wgpu::Texture; 2],
     /// Clears target 0 and target 1.
     clear: [wgpu::BindGroup; 2],
-    uniforms: Vec<wgpu::Buffer>,
+    /// 3.21: every layer's uniform in one buffer, layer i at
+    /// `i * uniform_stride`, written with one call per frame. One buffer and
+    /// one queue write per layer cost the 71-layer stats page about half a
+    /// millisecond of CPU per frame.
+    uniforms: wgpu::Buffer,
     groups: Vec<wgpu::BindGroup>,
     /// 3.19: one matte target per clip child, in `mattes` order, each
     /// composited over the whole tile from a never-written zero backdrop.
@@ -263,6 +267,11 @@ pub struct PreparedCompositor {
     // Validate the entire frame before writing any GPU state. Reused scratch
     // keeps matrix construction out of the allocator on the frame path.
     uniform_scratch: Vec<[u8; UNIFORM_BYTES]>,
+    /// One tile's layer uniforms laid out at `uniform_stride`, as uploaded.
+    uniform_upload: Vec<u8>,
+    /// Bytes between layer uniforms: `UNIFORM_BYTES` rounded up to the
+    /// device's uniform offset alignment.
+    uniform_stride: usize,
     /// Each layer's dispatch region per tile for this frame (tile-major): the
     /// hull of its footprint and the previous layer's, as written into its
     /// uniform. Prepared once, rewritten per frame.
@@ -474,6 +483,8 @@ impl PreparedCompositor {
         let mut mattes: Vec<usize> = (0..inputs.len()).filter(|&i| inputs[i].matte).collect();
         mattes.sort_by_key(|&i| depth(i));
         let slot = |layer: usize| mattes.iter().position(|&m| m == layer);
+        let uniform_stride = UNIFORM_BYTES
+            .next_multiple_of(device.limits().min_uniform_buffer_offset_alignment as usize);
         let mut uniform_scratch = Vec::with_capacity(uniform_count);
         for tile in plan.tiles() {
             for input in inputs {
@@ -688,7 +699,7 @@ impl PreparedCompositor {
                 let bind = |src: &wgpu::TextureView,
                             dst: &wgpu::TextureView,
                             out: &wgpu::TextureView,
-                            uniform: &wgpu::Buffer,
+                            uniform: wgpu::BindingResource<'_>,
                             clip: &wgpu::TextureView,
                             track: &wgpu::TextureView| {
                     crate::render_work::gpu_build();
@@ -710,7 +721,7 @@ impl PreparedCompositor {
                             },
                             wgpu::BindGroupEntry {
                                 binding: 3,
-                                resource: uniform.as_entire_binding(),
+                                resource: uniform,
                             },
                             wgpu::BindGroupEntry {
                                 binding: 4,
@@ -726,7 +737,7 @@ impl PreparedCompositor {
                 let group = |src: &wgpu::TextureView,
                              dst: usize,
                              out: usize,
-                             uniform: &wgpu::Buffer,
+                             uniform: wgpu::BindingResource<'_>,
                              clip: Option<usize>,
                              track: Option<(usize, f32)>| {
                     bind(
@@ -742,12 +753,34 @@ impl PreparedCompositor {
                 // only its region, so the target it writes must already hold
                 // the frame's state outside it.
                 let clear = [
-                    group(&views[1], 1, 0, &clear_uniform, None, None),
-                    group(&views[0], 0, 1, &clear_uniform, None, None),
+                    group(
+                        &views[1],
+                        1,
+                        0,
+                        clear_uniform.as_entire_binding(),
+                        None,
+                        None,
+                    ),
+                    group(
+                        &views[0],
+                        0,
+                        1,
+                        clear_uniform.as_entire_binding(),
+                        None,
+                        None,
+                    ),
                 ];
-                let uniforms: Vec<_> = (0..layers.len())
-                    .map(|i| make_uniform(&uniform_scratch[tile_index * layers.len() + i]))
-                    .collect();
+                let mut initial = vec![0u8; layers.len().max(1) * uniform_stride];
+                for i in 0..layers.len() {
+                    initial[i * uniform_stride..][..UNIFORM_BYTES]
+                        .copy_from_slice(&uniform_scratch[tile_index * layers.len() + i]);
+                }
+                crate::render_work::gpu_build();
+                let uniforms = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("gx-compositor-uniform"),
+                    contents: &initial,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
                 let groups = layers
                     .iter()
                     .enumerate()
@@ -756,7 +789,11 @@ impl PreparedCompositor {
                             layer.sampled(),
                             i % 2,
                             (i + 1) % 2,
-                            &uniforms[i],
+                            wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                buffer: &uniforms,
+                                offset: (i * uniform_stride) as u64,
+                                size: wgpu::BufferSize::new(UNIFORM_BYTES as u64),
+                            }),
                             layer.clip,
                             layer.track,
                         )
@@ -776,7 +813,7 @@ impl PreparedCompositor {
                                 .as_ref()
                                 .expect("a scene with mattes has a zero backdrop"),
                             &matte_views[k],
-                            &matte_uniforms[k],
+                            matte_uniforms[k].as_entire_binding(),
                             clip_view(layer.clip),
                             &no_clip_view,
                         )
@@ -822,6 +859,8 @@ impl PreparedCompositor {
             curve_scratch: Vec::with_capacity(crate::effects::CURVE_FLOATS * 4),
             region_scratch: vec![Region::default(); uniform_scratch.len()],
             uniform_scratch,
+            uniform_upload: vec![0; inputs.len().max(1) * uniform_stride],
+            uniform_stride,
             #[cfg(test)]
             full_tile_dispatch: false,
             submitted: false,
@@ -933,11 +972,15 @@ impl PreparedCompositor {
             }
         }
         for (tile_index, tile) in self.tiles.iter().enumerate() {
-            for (i, uniform) in tile.uniforms.iter().enumerate() {
+            for i in 0..states.len() {
+                self.uniform_upload[i * self.uniform_stride..][..UNIFORM_BYTES]
+                    .copy_from_slice(&self.uniform_scratch[tile_index * states.len() + i]);
+            }
+            if !states.is_empty() {
                 self.queue.write_buffer(
-                    uniform,
+                    &tile.uniforms,
                     0,
-                    &self.uniform_scratch[tile_index * states.len() + i],
+                    &self.uniform_upload[..states.len() * self.uniform_stride],
                 );
             }
             for (k, uniform) in tile.matte_uniforms.iter().enumerate() {
