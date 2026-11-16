@@ -89,7 +89,15 @@ fn negotiate_backends(backends: wgpu::Backends) -> Gpu {
         required_features: wgpu::Features::empty(),
         required_limits: wgpu::Limits::default(),
         experimental_features: wgpu::ExperimentalFeatures::disabled(),
-        memory_hints: wgpu::MemoryHints::Performance,
+        // 3.21: small suballocation blocks (8 to 64 MB, not 128 to 256 MB).
+        // On a GPU whose memory other applications mostly hold, this
+        // process's residency budget is small, and D3D12 makes whole heaps
+        // resident. With 256 MB blocks the frame's targets, sources and output
+        // buffers spread over more heap than the budget, and the heaps were
+        // paged on every submission: the 1080p stats page composited in 67 ms
+        // on DX12 (1.5 ms with this hint; Vulkan was not affected). Measured
+        // in `docs/evidence/3.21`.
+        memory_hints: wgpu::MemoryHints::MemoryUsage,
         trace: wgpu::Trace::Off,
     }))
     .expect("a hardware adapter that negotiated must open a device");

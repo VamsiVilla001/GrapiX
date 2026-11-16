@@ -421,18 +421,43 @@ fn the_readback_ring_refuses_instead_of_stalling() {
     );
 }
 
-/// The row's budget: lower third, scorebug (about 20 live text fields) and
-/// full-screen stats page at 1080p50 and 2160p50, p99 ≤ 10 ms end to end.
-/// "End to end" here is emit wall time (the loop's cost) plus the ring's
-/// submit-to-delivery latency (the picture's age), reported separately and
-/// summed.
+/// 3.21's budget: lower third, scorebug (about 20 live text fields) and
+/// full-screen stats page at 1080p50, p99 ≤ 10 ms end to end. 2160p50 is a V2
+/// option by user decision (16 Nov 2026), row 3.23, measured by
+/// [`program_holds_the_frame_budget_at_2160p`].
 #[test]
 #[ignore = "requires hardware GPU; 3.21 frame budget on the reference workloads"]
 fn program_holds_the_frame_budget_on_the_reference_workloads() {
+    frame_budget(
+        &[(1920, 1080)],
+        "frame-budget.json",
+        Some(REGRESSION_CEILING_P50),
+    );
+}
+
+/// A settled p50 no 1080p reference workload may exceed, asserted on every
+/// run: twice the budget, far above the 5 to 10 ms these take on a busy
+/// reference GPU, far below the 94 ms the stats page took on DX12 when its
+/// GPU memory was spread over too many heaps (16 Nov 2026). It catches that
+/// class of regression without making the row's budget a flaky assertion.
+const REGRESSION_CEILING_P50: u64 = 20_000;
+
+/// 3.23 (V2): the same three workloads at 2160p50.
+#[test]
+#[ignore = "requires hardware GPU; 3.23 (V2) frame budget at 2160p"]
+fn program_holds_the_frame_budget_at_2160p() {
+    frame_budget(&[(3840, 2160)], "frame-budget-2160p.json", None);
+}
+
+/// Settled p99 of each reference workload at each size, against 10 ms.
+/// "End to end" here is emit wall time (the loop's cost) plus the ring's
+/// submit-to-delivery latency (the picture's age), reported separately, and
+/// the settled per-frame time as the figure the budget is held to.
+fn frame_budget(sizes: &[(u32, u32)], evidence_name: &str, ceiling_p50: Option<u64>) {
     let assert_budget = std::env::var_os("GX_GPU_321_ASSERT_BUDGET").is_some();
     let mut rows = Vec::new();
     let mut failures = Vec::new();
-    for (width, height) in [(1920u32, 1080u32), (3840, 2160)] {
+    for &(width, height) in sizes {
         for (name, doc) in [
             ("lower-third", lower_third(width, height)),
             ("scorebug", scorebug(width, height)),
@@ -482,6 +507,13 @@ fn program_holds_the_frame_budget_on_the_reference_workloads() {
             latency.sort_unstable();
             settled_micros.sort_unstable();
             let end_to_end_p99 = percentile(&settled_micros, 0.99);
+            if let Some(ceiling) = ceiling_p50 {
+                let p50 = percentile(&settled_micros, 0.5);
+                assert!(
+                    p50 < ceiling,
+                    "{name} {width}x{height}: settled p50 {p50} us is over the {ceiling} us regression ceiling"
+                );
+            }
             let row = json!({
                 "workload": name, "width": width, "height": height, "rate": "50",
                 "adapter": adapter, "framesMeasured": frames,
@@ -510,7 +542,7 @@ fn program_holds_the_frame_budget_on_the_reference_workloads() {
         }
     }
     evidence(
-        "frame-budget.json",
+        evidence_name,
         &json!({
             "method": "loop paced at 20 ms like the clock pump, clock advanced one frame per emit_frame; then 100 settled frames (submit, GPU, readback, copy, waited for) as the per-frame end-to-end figure; emit wall time plus ring submit-to-delivery latency; 50 warm-up frames then 300 measured; debug or release as built",
             "profile": if cfg!(debug_assertions) { "debug" } else { "release" },

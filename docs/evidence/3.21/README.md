@@ -178,3 +178,105 @@ readback timeout; the new code took 298 to 863 ms. On 7 Nov the same
 workloads took 20 to 44 ms. Other applications held about 5.2 GB of the 8 GB
 of GPU memory during these runs (nvidia-smi), which is the likely cause and
 was not proved. The 2160p budget needs a rerun on a quiet machine.
+
+## 16 Nov 2026: 2160p to V2, and a DX12 regression from 3.17 found and removed (Claude)
+
+**User decision, 16 Nov 2026.** "Check why 3.21 is blocked on hardware. If
+it's because of 4K, then 4K is a V2 option. First let's work on 1080p." It was
+4K: the 2160p runs time out or take 300 to 900 ms while other applications hold
+about 5 GB of the 8 GB of GPU memory and keep the GPU about 40% busy (Parsec,
+Chrome, Discord, WebView2, the Codex desktop app; nvidia-smi), and 2160p was
+over budget even on 7 Nov (19.7 to 44 ms). The done-when now reads 1080p50;
+2160p50 is row **3.23 (V2)**, measured by the new
+`program_holds_the_frame_budget_at_2160p`.
+`program_holds_the_frame_budget_on_the_reference_workloads` is 1080p only.
+
+**What 1080p showed today.** At HEAD (2d20672), release, DX12, settled
+p50 / p99: lower third 5.8 / 10.9 ms, scorebug 6.7 / 30.0 ms, **stats page
+94.3 / 211.9 ms** (15 Nov: 11.2 / 13.1). The same benchmark on the 15 Nov tree
+(f27de37, exported with `git archive`) gave the stats page 10.3 / 11.9 ms on
+the same machine the same hour. Bisected over the commits that built (the two
+intermediate 3.17 commits do not compile their tests): 028720a (3.17 done) is
+slow at 89.8 ms p50, so the cause entered with 3.17, when vector sources began
+to be drawn on the GPU at prepare.
+
+**Isolating it** (temporary profiling, never committed: per-stage times, each
+GPU submission waited for; 1080p stats page alone; composite GPU / output GPU,
+ms):
+
+| Variant | Composite | Output |
+| --- | --- | --- |
+| HEAD, DX12 | 66.9 | 18.6 |
+| HEAD, DX12, no layer dispatched at all | 27.7 | 16.7 |
+| HEAD, **Vulkan** | 1.07 | 4.6 |
+| HEAD, DX12, sources prepared on the CPU (no GPU drawing) | 1.38 | 5.2 |
+| ... CPU sources plus 1.5 GB of extra buffers allocated after prepare | 1.46 | 5.3 |
+| ... CPU sources plus large storage buffers allocated and freed before | 1.49 | 5.3 |
+| HEAD, DX12, GPU drawer created but nothing drawn on it | 1.44 | 5.3 |
+| HEAD, DX12, drawer dropped and the device drained after prepare | 67.6 | 19.0 |
+| HEAD, DX12, no path drawn and no copy (only each layer's storage buffer) | 67.6 | 16.7 |
+| ... the same with each layer's storage buffer 16 bytes | 1.40 | 4.4 |
+| HEAD, DX12, one reused scratch buffer instead of one per layer | 67.1 | 18.8 |
+| HEAD, DX12, **`MemoryHints::MemoryUsage`** | **1.49** | **5.1** |
+
+Two clears of 2 x 33 MB taking 27.7 ms, and the output pass slowed sixfold
+with no change to its work, is the rate of memory reached over PCIe. The
+allocator reported only 213 MB allocated (640 MB reserved), so the process is
+not short of memory; what changed is where it sits. wgpu suballocates DX12
+memory in 128 to 256 MB heaps; D3D12 makes whole heaps resident; with other
+applications holding most of the card, this process's residency budget is
+small. The per-layer storage buffers that GPU drawing allocates at prepare
+opened more heaps, the frame's targets, sources and output buffers were spread
+across them, and the heaps were paged on every submission. That reading fits
+every row above (Vulkan manages memory differently; 16-byte buffers open no
+heap; buffers that are never touched again are simply evicted) and was not
+proved directly: the per-process GPU memory counters could not be read in this
+session (process and counter queries hang on this machine).
+
+**The fix.** `gpu.rs` requests the device with `MemoryHints::MemoryUsage`
+(8 to 64 MB blocks). One line, no change to any pass.
+
+**Measured after the fix** (release, DX12/FXC, three runs, settled p50 / p99 in
+ms; `memory-2026-11-16/frame-budget-dx12-run*.json`):
+
+| Workload | Run 1 | Run 2 | Run 3 | Budget |
+| --- | --- | --- | --- | --- |
+| lower third 1080p | 5.6 / 7.5 | 5.5 / 6.9 | 5.4 / 6.7 | met |
+| scorebug 1080p | 5.7 / 7.1 | 5.7 / 7.0 | 5.9 / 7.9 | met |
+| stats page 1080p | 9.9 / 11.5 | 10.1 / 12.1 | 10.2 / 13.1 | **not met** |
+
+The regression is gone (stats page 94 to 10 ms at p50, scorebug p99 30 to 7 ms)
+and the two lighter workloads meet the budget. **3.21 stays active:** the stats
+page is 1.5 to 3 ms over at p99. Its frame, from the profile with the fix:
+evaluate 0.4 ms, composite CPU about 1 ms, composite GPU 1.5 ms, output pass and
+readback about 5 ms (3 ms on the lower third), the copy out of the mapped slot
+1.9 ms.
+
+**Regression guard.** The 1080p benchmark now asserts, on every run, that each
+workload's settled p50 is under 20 ms (twice the budget): with the hint
+reverted to `Performance` it fails ("stats-page 1920x1080: settled p50
+89339 us is over the 20000 us regression ceiling"); restored, it passes
+(10.0 ms). The 10 ms budget itself stays an opt-in assertion
+(`GX_GPU_321_ASSERT_BUDGET`), as before. `cargo test -p gx-render-worker --lib
+-- --include-ignored --test-threads=1` with the fix: 192 passed, 0 failed.
+
+**Jev and Laya on the fix** (`memory-2026-11-16/review-jev-laya.json`; Laya read
+4153 tokens, not truncated):
+
+| Question | Jev | Laya |
+| --- | --- | --- |
+| the evidence supports memory placement as the cause | 0.91 | 0.95 |
+| which fix to keep | `MemoryUsage` hint (1.0) | `MemoryUsage` hint |
+| the fix makes a workload slower | 0.21 | 0.94 |
+| the ceiling is a real, non-flaky guard | 0.92 | 0.88 |
+| 2160p to 3.23 follows the user's decision | 0.97 | 0.98 |
+| 3.21's status | stays active (0.92) | done |
+| weakest point | cause not proved directly (0.59) | none |
+| must the user approve first | 0.23 | 0.81 |
+
+By hand: every workload is faster with the fix (lower third p99 10.9 to about
+7, scorebug 30.0 to about 7.3, stats page 212 to about 12), so Laya's "slower"
+is contradicted by the measurements; the stats page is still over budget, so
+the row stays active; the cause was not read from a memory counter, which is
+stated above. The plan change is the user's decision. The splits are reported
+to the user.

@@ -118,6 +118,26 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-16 — 3.21: 2160p to V2 (3.23); a DX12 regression from 3.17 found and removed (Claude)
+
+**Resume here.** User instruction 16 Nov: 4K is a V2 option, 1080p first. Done: 3.21's done-when now reads 1080p50;
+2160p50 is new row 3.23 (V2), `program_holds_the_frame_budget_at_2160p`. **3.21 stays active**: the 1080p stats page
+is 11.5 to 13.1 ms p99 (lower third about 7, scorebug about 7.3: met). Next for 3.21: the output encode pass (about
+5 ms on an opaque frame; its exact refinement loops never break early, and alpha 1 needs no division), then the
+1.9 ms copy out of the mapped slot. Then the MCP edit gaps.
+
+**Found.** At HEAD the DX12 1080p stats page took 94 ms p50 (15 Nov: 11.2), scorebug p99 30 ms. Bisected to 3.17
+(028720a slow, f27de37 fast, same machine and hour). Temporary profiling (never committed) isolated it: Vulkan 1.1 ms
+composite, CPU-prepared sources 1.4 ms, two clears alone 27.7 ms on DX12; the trigger was the per-layer storage buffers
+GPU drawing allocates at prepare (16-byte ones: fast). Reading: wgpu suballocates DX12 memory in 128 to 256 MB heaps,
+D3D12 makes whole heaps resident, other apps hold about 5 GB of the 8 GB, so the frame's heaps were paged every
+submission. Not proved by a counter (process and GPU counter queries hang in this session). **Fix:** `gpu.rs` requests
+`MemoryHints::MemoryUsage` (8 to 64 MB blocks). Guard: the 1080p benchmark asserts settled p50 < 20 ms every run;
+reverting the hint fails it (89 ms). Hardware worker suite 192/0. npm run check exit 0 (46 Node, 412 Editor, 895 Rust
+passed, 0 failed, 38 ignored; conformance 594/0/9). Jev and Laya agree on the cause, the fix and the plan change; they
+split on the row status (Jev active, Laya done; by hand active) and Laya's "a workload got slower" is contradicted by
+every measurement. Evidence `docs/evidence/3.21` (16 Nov section, `memory-2026-11-16/`).
+
 ## 2026-11-16 — 8.12 done: ifRevision and idempotency keys on the Editor MCP writes (Claude, on the user's decision)
 
 **Resume here.** User instruction 16 Nov: Jev and Laya agree design and acceptance, and review everything built;
