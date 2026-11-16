@@ -133,6 +133,36 @@ pub fn connect(
     endpoint: &str,
     token: Option<String>,
 ) -> Result<OperatorView, PlayoutError> {
+    let token_supplied = token.is_some();
+    let result = connect_unlogged(state, endpoint, token);
+    match &result {
+        Ok(view) => tracing::info!(
+            event = "operator.connect",
+            epoch = view.status.epoch.0,
+            frame = view.status.current_frame,
+            result = "connected",
+            endpoint,
+            token_supplied,
+            tier = ?view.status.device_tier,
+            clock = ?view.status.clock,
+            reference = ?view.status.reference,
+        ),
+        Err(error) => tracing::info!(
+            event = "operator.connect",
+            result = "failed",
+            detail = %error,
+            endpoint,
+            token_supplied,
+        ),
+    }
+    result
+}
+
+fn connect_unlogged(
+    state: &Connection,
+    endpoint: &str,
+    token: Option<String>,
+) -> Result<OperatorView, PlayoutError> {
     let address: SocketAddr = endpoint
         .parse()
         .map_err(|_| PlayoutError::InvalidEndpoint {
@@ -158,6 +188,50 @@ pub fn connect(
     read_status(client)
 }
 
+/// 2.12: one operator command and what came of it, at info. The take, its
+/// revision and pinned hash, and when it was asked for; the frame the engine
+/// committed, or the refusal code and the reason. Never the credential.
+fn record(
+    event: &'static str,
+    take_id: Option<&TakeId>,
+    revision: Option<Revision>,
+    content_hash: Option<&ContentHash>,
+    at: Option<&TakeAt>,
+    outcome: Result<Option<u64>, &PlayoutError>,
+) {
+    let take_id = take_id.map(|t| t.0.as_str());
+    let revision = revision.map(|r| r.0);
+    let content_hash = content_hash.map(|h| h.0.as_str());
+    let at = at.map(|at| format!("{at:?}"));
+    match outcome {
+        Ok(frame) => tracing::info!(
+            event,
+            frame,
+            result = "committed",
+            take_id,
+            revision,
+            content_hash,
+            at = at.as_deref(),
+        ),
+        Err(error) => {
+            let refusal = match error {
+                PlayoutError::Refused { refusal, .. } => Some(refusal.code_name()),
+                _ => None,
+            };
+            tracing::info!(
+                event,
+                result = if refusal.is_some() { "refused" } else { "failed" },
+                refusal,
+                detail = %error,
+                take_id,
+                revision,
+                content_hash,
+                at = at.as_deref(),
+            );
+        }
+    }
+}
+
 fn read_status(client: &mut Client) -> Result<OperatorView, PlayoutError> {
     match client.handle(ClientRequest::Status) {
         EngineReply::Status(status) => Ok(OperatorView::of(status)),
@@ -179,7 +253,10 @@ fn with_client<T>(
 
 /// Current status and the clock indicator derived from it.
 pub fn status(state: &Connection) -> Result<OperatorView, PlayoutError> {
-    with_client(state, read_status)
+    let result = with_client(state, read_status);
+    // A poll: debug, so the default info log is not filled by the status bar.
+    tracing::debug!(event = "operator.status", ok = result.is_ok());
+    result
 }
 
 fn committed(reply: EngineReply, expected: &'static str) -> Result<TakeCommitted, PlayoutError> {
@@ -202,7 +279,8 @@ pub fn cue(
     content_hash: Option<ContentHash>,
     at: TakeAt,
 ) -> Result<TakeCommitted, PlayoutError> {
-    with_client(state, |client| {
+    let note = (take_id.clone(), content_hash.clone(), at);
+    let result = with_client(state, |client| {
         committed(
             client.handle(ClientRequest::Cue(CueRequest {
                 take_id,
@@ -212,7 +290,16 @@ pub fn cue(
             })),
             "a cue commitment",
         )
-    })
+    });
+    record(
+        "operator.cue",
+        Some(&note.0),
+        Some(revision),
+        note.1.as_ref(),
+        Some(&note.2),
+        result.as_ref().map(|c| Some(c.frame)),
+    );
+    result
 }
 
 /// Take a published revision to Program, pinned as `cue` is.
@@ -223,7 +310,8 @@ pub fn take(
     content_hash: Option<ContentHash>,
     at: TakeAt,
 ) -> Result<TakeCommitted, PlayoutError> {
-    with_client(state, |client| {
+    let note = (take_id.clone(), content_hash.clone(), at);
+    let result = with_client(state, |client| {
         committed(
             client.handle(ClientRequest::Take(TakeRequest {
                 take_id,
@@ -233,17 +321,35 @@ pub fn take(
             })),
             "a take commitment",
         )
-    })
+    });
+    record(
+        "operator.take",
+        Some(&note.0),
+        Some(revision),
+        note.1.as_ref(),
+        Some(&note.2),
+        result.as_ref().map(|c| Some(c.frame)),
+    );
+    result
 }
 
 /// Clear Program.
 pub fn clear(state: &Connection, at: TakeAt) -> Result<TakeCommitted, PlayoutError> {
-    with_client(state, |client| {
+    let result = with_client(state, |client| {
         committed(
             client.handle(ClientRequest::Clear(ClearRequest { at })),
             "a clear commitment",
         )
-    })
+    });
+    record(
+        "operator.clear",
+        None,
+        None,
+        None,
+        Some(&at),
+        result.as_ref().map(|c| Some(c.frame)),
+    );
+    result
 }
 /// Enter one authored phase on the scene currently pinned to Program.
 pub fn phase(
@@ -251,7 +357,8 @@ pub fn phase(
     phase: String,
     at: TakeAt,
 ) -> Result<PhaseCommitted, PlayoutError> {
-    with_client(state, |client| {
+    let name = phase.clone();
+    let result = with_client(state, |client| {
         match client.handle(ClientRequest::Phase(PhaseRequest { phase, at })) {
             EngineReply::PhaseCommitted(committed) => Ok(committed),
             EngineReply::Refused(refusal) => Err(PlayoutError::refused(refusal)),
@@ -259,7 +366,28 @@ pub fn phase(
                 detail: format!("expected a phase commitment, got {other:?}"),
             }),
         }
-    })
+    });
+    match &result {
+        Ok(committed) => tracing::info!(
+            event = "operator.phase",
+            frame = committed.committed.frame,
+            result = "committed",
+            phase = name.as_str(),
+            at = ?at,
+        ),
+        Err(error) => tracing::info!(
+            event = "operator.phase",
+            result = "refused",
+            refusal = match error {
+                PlayoutError::Refused { refusal, .. } => Some(refusal.code_name()),
+                _ => None,
+            },
+            detail = %error,
+            phase = name.as_str(),
+            at = ?at,
+        ),
+    }
+    result
 }
 
 /// What an output configuration actually became.
@@ -283,7 +411,8 @@ pub fn configure_output(
     live: bool,
     accept_free_run: bool,
 ) -> Result<OutputState, PlayoutError> {
-    with_client(state, |client| {
+    let requested = (adapter.clone(), live, accept_free_run);
+    let result = with_client(state, |client| {
         match client.handle(ClientRequest::ConfigureOutput(OutputConfig {
             adapter,
             live,
@@ -295,7 +424,30 @@ pub fn configure_output(
                 detail: format!("expected an output configuration, got {other:?}"),
             }),
         }
-    })
+    });
+    match &result {
+        Ok(state) => tracing::info!(
+            event = "operator.configure_output",
+            result = "configured",
+            adapter = state.adapter.as_str(),
+            live = state.live,
+            requested_live = requested.1,
+            accept_free_run = requested.2,
+        ),
+        Err(error) => tracing::info!(
+            event = "operator.configure_output",
+            result = "refused",
+            refusal = match error {
+                PlayoutError::Refused { refusal, .. } => Some(refusal.code_name()),
+                _ => None,
+            },
+            detail = %error,
+            adapter = requested.0.as_str(),
+            requested_live = requested.1,
+            accept_free_run = requested.2,
+        ),
+    }
+    result
 }
 
 // ---------------------------------------------------------------------------
@@ -397,6 +549,9 @@ fn scheduled(frame: Option<u64>) -> TakeAt {
 
 /// Build and run the Playout window.
 pub fn run() {
+    // 2.12: Playout's log, kept until the window closes.
+    let _log = gx_telemetry::sink::init_process_logging("playout", "shell");
+    tracing::info!(event = "playout.start", version = env!("CARGO_PKG_VERSION"));
     tauri::Builder::default()
         .manage(Connection::default())
         .invoke_handler(tauri::generate_handler![
@@ -416,6 +571,135 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- 2.12: the operator's commands are on record -------------------------
+
+    fn logged(label: &str, body: impl FnOnce()) -> Vec<serde_json::Value> {
+        use tracing_subscriber::layer::SubscriberExt;
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "gx-playout-log-{label}-{}-{nanos}",
+            std::process::id()
+        ));
+        let guard =
+            gx_telemetry::sink::start(gx_telemetry::sink::LogConfig::new("playout", "shell", &dir))
+                .unwrap();
+        let subscriber = tracing_subscriber::registry().with(guard.layer());
+        tracing::subscriber::with_default(subscriber, body);
+        guard.finish().unwrap();
+        let mut records = Vec::new();
+        for entry in std::fs::read_dir(dir.join("playout")).unwrap().flatten() {
+            for line in std::fs::read_to_string(entry.path()).unwrap().lines() {
+                records.push(serde_json::from_str(line).unwrap());
+            }
+        }
+        let _ = std::fs::remove_dir_all(dir);
+        records
+    }
+
+    fn event<'a>(
+        records: &'a [serde_json::Value],
+        name: &str,
+        result: &str,
+    ) -> &'a serde_json::Value {
+        records
+            .iter()
+            .find(|r| r["event"] == name && r["fields"]["result"] == result)
+            .unwrap_or_else(|| panic!("no {name} {result} in {records:#?}"))
+    }
+
+    #[test]
+    fn a_command_before_connecting_and_a_bad_endpoint_are_on_record_without_the_token() {
+        let records = logged("unconnected", || {
+            let state = Connection::default();
+            let _ = take(
+                &state,
+                TakeId("lower-third".into()),
+                Revision(3),
+                Some(ContentHash("b".repeat(64))),
+                TakeAt::NextOpportunity,
+            );
+            let _ = connect(&state, "not an address", None);
+            let _ = connect(&state, "127.0.0.1:1", Some("gx1.not-a-real-secret".into()));
+        });
+        let take = event(&records, "operator.take", "failed");
+        assert_eq!(take["fields"]["take_id"], "lower-third");
+        assert_eq!(take["fields"]["revision"], 3);
+        assert_eq!(take["fields"]["content_hash"], "b".repeat(64));
+        assert!(take["fields"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("not connected"));
+        let failed: Vec<_> = records
+            .iter()
+            .filter(|r| r["event"] == "operator.connect" && r["fields"]["result"] == "failed")
+            .collect();
+        assert_eq!(failed.len(), 2, "{records:#?}");
+        assert_eq!(failed[1]["fields"]["token_supplied"], true);
+        let text = records.iter().map(|r| r.to_string()).collect::<String>();
+        assert!(
+            !text.contains("not-a-real-secret"),
+            "the token reached the log"
+        );
+    }
+
+    #[test]
+    fn a_take_committed_and_refused_through_a_real_transport_is_on_record() {
+        let mut engine = gx_mock_engine::MockEngine::new();
+        engine.publish(
+            TakeId("scorebug".into()),
+            Revision(2),
+            ContentHash("c".repeat(64)),
+        );
+        let server =
+            gx_control_transport::Server::bind("127.0.0.1:0".parse().unwrap(), None, engine)
+                .unwrap();
+        let address = server.local_addr().unwrap();
+        std::thread::spawn(move || server.serve());
+        let records = logged("committed", || {
+            let state = Connection::default();
+            connect(&state, &address.to_string(), None).expect("connected");
+            take(
+                &state,
+                TakeId("scorebug".into()),
+                Revision(2),
+                Some(ContentHash("c".repeat(64))),
+                TakeAt::NextOpportunity,
+            )
+            .expect("taken");
+            let _ = take(
+                &state,
+                TakeId("scorebug".into()),
+                Revision(9),
+                Some(ContentHash("c".repeat(64))),
+                TakeAt::NextOpportunity,
+            );
+            let _ = status(&state);
+            clear(&state, TakeAt::NextOpportunity).expect("cleared");
+        });
+        let connected = event(&records, "operator.connect", "connected");
+        assert!(connected["epoch"].as_u64().is_some(), "{connected}");
+        assert_eq!(connected["fields"]["token_supplied"], false);
+        let taken = event(&records, "operator.take", "committed");
+        assert_eq!(taken["fields"]["take_id"], "scorebug");
+        assert!(
+            taken["frame"].as_u64().is_some(),
+            "the committed frame: {taken}"
+        );
+        let refused = event(&records, "operator.take", "refused");
+        assert_eq!(refused["fields"]["revision"], 9);
+        assert!(refused["refusal"].as_str().is_some(), "{refused}");
+        let cleared = event(&records, "operator.clear", "committed");
+        assert!(cleared["frame"].as_u64().is_some());
+        let poll = records
+            .iter()
+            .find(|r| r["event"] == "operator.status")
+            .expect("the poll is recorded");
+        assert_eq!(poll["level"], "debug");
+    }
 
     #[test]
     fn an_absent_frame_is_next_opportunity_never_now() {

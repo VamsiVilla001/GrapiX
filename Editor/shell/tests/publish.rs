@@ -79,6 +79,8 @@ impl Drop for Scratch {
 fn start_worker(binary: &Path, scratch: &Path, asset: u16, extra: &[String]) -> Option<KillOnDrop> {
     let child = KillOnDrop(
         Command::new(binary)
+            // 2.12: a test process logs to a scratch folder, not the operator's log root.
+            .env("GX_LOG_DIR", std::env::temp_dir().join("gx-test-logs"))
             .args([
                 "--port",
                 &free_port().to_string(),

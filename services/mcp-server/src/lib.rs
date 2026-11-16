@@ -246,6 +246,63 @@ impl Server {
     /// Call one tool through the scope gate. Both the in-process API and the
     /// MCP wire dispatch from here, so there is one gate on every path.
     pub fn call_tool(&self, name: &str, args: serde_json::Value) -> Result<ToolOutput, Refusal> {
+        // 2.12 (ADR-0004): every call, on every path, is on record at the one
+        // gate: the tool, its effect, its revision and retry key, how large
+        // its arguments were, how long it took and what came of it. Never
+        // the arguments themselves: a batch or an SVG is the store's to keep.
+        let started = std::time::Instant::now();
+        let args_bytes = args.to_string().len();
+        let if_revision = args.get("ifRevision").and_then(serde_json::Value::as_u64);
+        let idempotency_key = args
+            .get("idempotencyKey")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned);
+        let descriptor = gx_contracts::mcp::TOOLS
+            .iter()
+            .find(|tool| tool.name == name);
+        let effect = descriptor.map(|tool| match tool.effect {
+            gx_contracts::mcp::ToolEffect::Read => "read",
+            gx_contracts::mcp::ToolEffect::Write => "write",
+        });
+        let scope = descriptor
+            .and_then(|tool| tool.required_scope)
+            .map(|scope| format!("{scope:?}"));
+        let result = self.call_tool_unlogged(name, args);
+        let duration_us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
+        match &result {
+            Ok(_) => tracing::info!(
+                event = "mcp.call",
+                tool = name,
+                effect,
+                scope = scope.as_deref(),
+                result = "ok",
+                if_revision,
+                idempotency_key = idempotency_key.as_deref(),
+                args_bytes,
+                duration_us,
+            ),
+            Err(refusal) => tracing::info!(
+                event = "mcp.call",
+                tool = name,
+                effect,
+                scope = scope.as_deref(),
+                result = "refused",
+                refusal = refusal.code_name(),
+                detail = %refusal,
+                if_revision,
+                idempotency_key = idempotency_key.as_deref(),
+                args_bytes,
+                duration_us,
+            ),
+        }
+        result
+    }
+
+    fn call_tool_unlogged(
+        &self,
+        name: &str,
+        args: serde_json::Value,
+    ) -> Result<ToolOutput, Refusal> {
         let handler = self.authorised_handler(name)?;
         let value = handler.handle(args)?;
         Ok(if handler.returns_call_tool_result() {

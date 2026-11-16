@@ -1,0 +1,193 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 32475,
+    "output_tokens": 0,
+    "state_tokens": 5369,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "2.12 slice 2 (engine host, Playout shell, Editor shell, MCP servers); the row stays active",
+    "adr_catalogue": "Editor: start/stop, project and scene opened/saved/created/deleted, every edit batch (command, target, revision before and after, result), every refusal, publishes, imports. Playout: start/stop, connection and authentication (never the token), every operator command with page, take, revision, hash and result, output configuration. MCP: start/stop, every tools/call (tool, scope, correlation id, idempotency key, result or refusal, duration), scope denials.",
+    "evidence": "## The engine host, Playout, the Editor and the MCP servers (16 Nov 2026)\n\n- **Engine host** (`host/src/main.rs`): `host.start` (port, worker path),\n  `host.engine_ready` (adopted or spawned, epoch, frame, tier, clock,\n  reference, live allowed), `host.exit`, and `host.failed` with the reason\n  before any exit; the log is written out before the process ends.\n- **Playout shell** (`Playout/shell/src/lib.rs`): `operator.connect` (endpoint,\n  whether a token was supplied, never the token; epoch, frame, tier, clock,\n  reference), `operator.cue`, `operator.take`, `operator.clear`,\n  `operator.phase`, `operator.configure_output`, each with the take, revision,\n  pinned hash and when it was asked for, and the committed frame, or `refused`\n  with the refusal code, or `failed` with the reason; `operator.status` polls\n  at debug; `playout.start` in `run()`.\n- **Editor shell** (`Editor/shell/src/lib.rs`): `editor.command` for every\n  command through `execute` (the one the Tauri layer calls): its name, target\n  (session or project/scene), the `ifRevision` named, the revision produced,\n  how many edits, the effects, or the refusal code; `editor.publish` with the\n  take, revision, pinned hash and hand-off, or the failure; `editor.start`.\n- **MCP servers** (`services/mcp-server/src/lib.rs`): `mcp.call` for every\n  `tools/call` on every path, at the one scope gate: tool, effect, `ok` or\n  `refused` with the code, `ifRevision`, idempotency key, argument size and\n  duration, never the arguments; `editor-mcp` writes `mcp.start` and logs to a\n  file only, since its stdout is the protocol.\n- Every test that launches a product binary (ten sites in the MCP, host,\n  Editor and conformance tests) now gives it `GX_LOG_DIR` in the temp folder,\n  so the gate does not write into the operator's log root.\n\n**Executed.** `cargo test -p gx-engine-host --test log_file` (2: the shipped\nhost adopting a running worker records the engine it found and finishes its\nlog; one that cannot ensure an engine records why before it exits);\n`cargo test -p gx-playout-shell --lib` (5, two new: a take before connecting,\na bad endpoint and a malformed token on record with no token text; a take\ncommitted and one refused, and a clear, through the real control transport to\na mock engine, with the committed frame, the refusal code, and the status poll\nat debug); `cargo test -p gx-editor-shell --lib every_editor_command` (an\napplied edit with its target and effects, a refused edit with its code, the\nopen); `cargo test -p gx-editor-mcp --test log_file` (the shipped binary over\nstdio: `mcp.start`, a successful write with its idempotency key and duration,\na refusal with `projectNotFound`, and every stdout line JSON-RPC).\n\n**Mutations** (`mutate_212b.py`), one at a time, restored byte-identical: the\nhost not recording the engine it found; a Playout take not recorded; the\ntoken a caller passes written to the log; an MCP call not recorded; an Editor\ncommand not recorded. 5 of 5 fail named tests (a first version of the token\nmutation injected a constant into a record no test read for secrets, and\nsurvived; the realistic leak, logging the caller's token, fails).\n",
+    "code_diff": "diff --git a/Playout/shell/src/lib.rs b/Playout/shell/src/lib.rs\nindex 76b02db..6d71a0c 100644\n--- a/Playout/shell/src/lib.rs\n+++ b/Playout/shell/src/lib.rs\n@@ -132,6 +132,36 @@ pub fn connect(\n     state: &Connection,\n     endpoint: &str,\n     token: Option<String>,\n+) -> Result<OperatorView, PlayoutError> {\n+    let token_supplied = token.is_some();\n+    let result = connect_unlogged(state, endpoint, token);\n+    match &result {\n+        Ok(view) => tracing::info!(\n+            event = \"operator.connect\",\n+            epoch = view.status.epoch.0,\n+            frame = view.status.current_frame,\n+            result = \"connected\",\n+            endpoint,\n+            token_supplied,\n+            tier = ?view.status.device_tier,\n+            clock = ?view.status.clock,\n+            reference = ?view.status.reference,\n+        ),\n+        Err(error) => tracing::info!(\n+            event = \"operator.connect\",\n+            result = \"failed\",\n+            detail = %error,\n+            endpoint,\n+            token_supplied,\n+        ),\n+    }\n+    result\n+}\n+\n+fn connect_unlogged(\n+    state: &Connection,\n+    endpoint: &str,\n+    token: Option<String>,\n ) -> Result<OperatorView, PlayoutError> {\n     let address: SocketAddr = endpoint\n         .parse()\n@@ -158,6 +188,50 @@ pub fn connect(\n     read_status(client)\n }\n \n+/// 2.12: one operator command and what came of it, at info. The take, its\n+/// revision and pinned hash, and when it was asked for; the frame the engine\n+/// committed, or the refusal code and the reason. Never the credential.\n+fn record(\n+    event: &'static str,\n+    take_id: Option<&TakeId>,\n+    revision: Option<Revision>,\n+    content_hash: Option<&ContentHash>,\n+    at: Option<&TakeAt>,\n+    outcome: Result<Option<u64>, &PlayoutError>,\n+) {\n+    let take_id = take_id.map(|t| t.0.as_str());\n+    let revision = revision.map(|r| r.0);\n+    let content_hash = content_hash.map(|h| h.0.as_str());\n+    let at = at.map(|at| format!(\"{at:?}\"));\n+    match outcome {\n+        Ok(frame) => tracing::info!(\n+            event,\n+            frame,\n+            result = \"committed\",\n+            take_id,\n+            revision,\n+            content_hash,\n+            at = at.as_deref(),\n+        ),\n+        Err(error) => {\n+            let refusal = match error {\n+                PlayoutError::Refused { refusal, .. } => Some(refusal.code_name()),\n+                _ => None,\n+            };\n+            tracing::info!(\n+                event,\n+                result = if refusal.is_some() { \"refused\" } else { \"failed\" },\n+                refusal,\n+                detail = %error,\n+                take_id,\n+                revision,\n+                content_hash,\n+                at = at.as_deref(),\n+            );\n+        }\n+    }\n+}\n+\n fn read_status(client: &mut Client) -> Result<OperatorView, PlayoutError> {\n     match client.handle(ClientRequest::Status) {\n         EngineReply::Status(status) => Ok(OperatorView::of(status)),\n@@ -179,7 +253,10 @@ fn with_client<T>(\n \n /// Current status and the clock indicator derived from it.\n pub fn status(state: &Connection) -> Result<OperatorView, PlayoutError> {\n-    with_client(state, read_status)\n+    let result = with_client(state, read_status);\n+    // A poll: debug, so the default info log is not filled by the status bar.\n+    tracing::debug!(event = \"operator.status\", ok = result.is_ok());\n+    result\n }\n \n fn committed(reply: EngineReply, expected: &'static str) -> Result<TakeCommitted, PlayoutError> {\n@@ -202,7 +279,8 @@ pub fn cue(\n     content_hash: Option<ContentHash>,\n     at: TakeAt,\n ) -> Result<TakeCommitted, PlayoutError> {\n-    with_client(state, |client| {\n+    let note = (take_id.clone(), content_hash.clone(), at);\n+    let result = with_client(state, |client| {\n         committed(\n             client.handle(ClientRequest::Cue(CueRequest {\n                 take_id,\n@@ -212,7 +290,16 @@ pub fn cue(\n             })),\n             \"a cue commitment\",\n         )\n-    })\n+    });\n+    record(\n+        \"operator.cue\",\n+        Some(&note.0),\n+        Some(revision),\n+        note.1.as_ref(),\n+        Some(&note.2),\n+        result.as_ref().map(|c| Some(c.frame)),\n+    );\n+    result\n }\n \n /// Take a published revision to Program, pinned as `cue` is.\n@@ -223,7 +310,8 @@ pub fn take(\n     content_hash: Option<ContentHash>,\n     at: TakeAt,\n ) -> Result<TakeCommitted, PlayoutError> {\n-    with_client(state, |client| {\n+    let note = (take_id.clone(), content_hash.clone(), at);\n+    let result = with_client(state, |client| {\n         committed(\n             client.handle(ClientRequest::Take(TakeRequest {\n                 take_id,\n@@ -233,17 +321,35 @@ pub fn take(\n             })),\n             \"a take commitment\",\n         )\n-    })\n+    });\n+    record(\n+        \"operator.take\",\n+        Some(&note.0),\n+        Some(revision),\n+        note.1.as_ref(),\n+        Some(&note.2),\n+        result.as_ref().map(|c| Some(c.frame)),\n+    );\n+    result\n }\n \n /// Clear Program.\n pub fn clear(state: &Connection, at: TakeAt) -> Result<TakeCommitted, PlayoutError> {\n-    with_client(state, |client| {\n+    let result = with_client(state, |client| {\n         committed(\n             client.handle(ClientRequest::Clear(ClearRequest { at })),\n             \"a clear commitment\",\n         )\n-    })\n+    });\n+    record(\n+        \"operator.clear\",\n+        None,\n+        None,\n+        None,\n+        Some(&at),\n+        result.as_ref().map(|c| Some(c.frame)),\n+    );\n+    result\n }\n /// Enter one authored phase on the scene currently pinned to Program.\n pub fn phase(\n@@ -251,7 +357,8 @@ pub fn phase(\n     phase: String,\n     at: TakeAt,\n ) -> Result<PhaseCommitted, PlayoutError> {\n-    with_client(state, |client| {\n+    let name = phase.clone();\n+    let result = with_client(state, |client| {\n         match client.handle(ClientRequest::Phase(PhaseRequest { phase, at })) {\n             EngineReply::PhaseCommitted(committed) => Ok(committed),\n             EngineReply::Refused(refusal) => Err(PlayoutError::refused(refusal)),\n@@ -259,7 +366,28 @@ pub fn phase(\n                 detail: format!(\"expected a phase commitment, got {other:?}\"),\n             }),\n         }\n-    })\n+    });\n+    match &result {\n+        Ok(committed) => tracing::info!(\n+            event = \"operator.phase\",\n+            frame = committed.committed.frame,\n+            result = \"committed\",\n+            phase = name.as_str(),\n+            at = ?at,\n+        ),\n+        Err(error) => tracing::info!(\n+            event = \"operator.phase\",\n+            result = \"refused\",\n+            refusal = match error {\n+                PlayoutError::Refused { refusal, .. } => Some(refusal.code_name()),\n+                _ => None,\n+            },\n+            detail = %error,\n+            phase = name.as_str(),\n+            at = ?at,\n+        ),\n+    }\n+    result\n }\n \n /// What an output configuration actually became.\n@@ -283,7 +411,8 @@ pub fn configure_output(\n     live: bool,\n     accept_free_run: bool,\n ) -> Result<OutputState, PlayoutError> {\n-    with_client(state, |client| {\n+    let requested = (adapter.clone(), live, accept_free_run);\n+    let result = with_client(state, |client| {\n         match client.handle(ClientRequest::ConfigureOutput(OutputConfig {\n             adapter,\n             live,\n@@ -295,7 +424,30 @@ pub fn configure_output(\n                 detail: format!(\"expected an output configuration, got {other:?}\"),\n             }),\n         }\n-    })\n+    });\n+    match &result {\n+        Ok(state) => tracing::info!(\n+            event = \"operator.configure_output\",\n+            result = \"configured\",\n+            adapter = state.adapter.as_str(),\n+            live = state.live,\n+            requested_live = requested.1,\n+            accept_free_run = requested.2,\n+        ),\n+        Err(error) => tracing::info!(\n+            event = \"operator.configure_output\",\n+            result = \"refused\",\n+            refusal = match error {\n+                PlayoutError::Refused { refusal, .. } => Some(refusal.code_name()),\n+                _ => None,\n+            },\n+            detail = %error,\n+            adapter = requested.0.as_str(),\n+            requested_live = requested.1,\n+            accept_free_run = requested.2,\n+        ),\n+    }\n+    result\n }\n \n // ---------------------------------------------------------------------------\n@@ -397,6 +549,9 @@ fn scheduled(frame: Option<u64>) -> TakeAt {\n \n /// Build and run the Playout window.\n pub fn run() {\n+    // 2.12: Playout's log, kept until the window closes.\n+    let _log = gx_telemetry::sink::init_process_logging(\"playout\", \"shell\");\n+    tracing::info!(event = \"playout.start\", version = env!(\"CARGO_PKG_VERSION\"));\n     tauri::Builder::default()\n         .manage(Connection::default())\n         .invoke_handler(tauri::generate_handler![\n@@ -417,6 +572,135 @@ pub fn run() {\n mod tests {\n     use super::*;\n \n+    // --- 2.12: the operator's commands are on record -----------------"
+  },
+  "questions": {
+    "slice_covers_catalogue": {
+      "type": "noul",
+      "instructions": "For these processes, does the slice log the ADR catalogue events, apart from the stop records and correlation ids (named as later work)?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No, a catalogue event is missing."
+      }
+    },
+    "token_never_logged": {
+      "type": "noul",
+      "instructions": "Can a Playout credential reach the log through this code?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No, only whether one was supplied."
+      }
+    },
+    "mcp_args_not_logged": {
+      "type": "noul",
+      "instructions": "Is it right to log argument size, ifRevision and the idempotency key rather than the arguments?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "tests_real": {
+      "type": "noul",
+      "instructions": "Do the tests drive the real code paths (shipped binaries, a real transport) rather than calling the loggers directly?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "weakest": {
+      "type": "choice",
+      "instructions": "Weakest point?",
+      "criteria": {
+        "no_stop_records": "No stop records for the shells and the worker.",
+        "no_conformance_read": "No conformance run reads every file yet.",
+        "scene_page_missing": "Playout records the take but not the page.",
+        "none": "None."
+      }
+    },
+    "must_fix": {
+      "type": "noul",
+      "instructions": "A defect to fix before committing?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "slice_covers_catalogue",
+      "jev": 0.57,
+      "laya": 0.963,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.57
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.963,
+        "confidence": 0.963,
+        "answer_confidence": 0.963,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "token_never_logged",
+      "jev": 0.19,
+      "laya": 0.913,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.19
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.913,
+        "confidence": 0.913,
+        "answer_confidence": 0.913,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "mcp_args_not_logged",
+      "jev": 0.91,
+      "laya": 0.9518,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.91
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9518,
+        "confidence": 0.9518,
+        "answer_confidence": 0.9518,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "tests_real",
+      "jev": 0.9,
+      "laya": 0.9556,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.9
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9556,
+        "confidence": 0.9556,
+        "answer_confidence": 0.9556,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "weakest",
+      "jev": "scene_page_missing",
+      "laya": "no_stop_records",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "scene_page_missing",
+        "confidence": 0.29,
+        "probabilities": {
+          "no_stop_records": 0.31,
+          "no_conformance_read": 0.14,
+          "scene_page_missing": 0.47,
+          "none": 0.08
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "no_stop_records",
+        "probabilities": {
+          "no_stop_records": 0.4089,
+          "no_conformance_read": 0.1651,
+          "scene_page_missing": 0.2749,
+          "none": 0.1511
+        },
+        "confidence": 0.0597,
+        "answer_confidence": 0.4089,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "must_fix",
+      "jev": 0.37,
+      "laya": 0.9295,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.37
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9295,
+        "confidence": 0.9295,
+        "answer_confidence": 0.9295,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

@@ -289,10 +289,67 @@ pub fn execute(
     workspace: &mut Workspace,
     command: EditorCommand,
 ) -> Result<CommandOutcome, EditorError> {
+    // 2.12: every command and what came of it is on record: its name, the
+    // scene it addressed, the revision it named and the one it produced, its
+    // effects, or the refusal. Not the edits themselves: the scene keeps them.
+    let name = command.name();
+    let (target, if_revision, edits) = match &command {
+        EditorCommand::EditScene(edit) => (
+            Some(match &edit.target {
+                gx_contracts::command::SceneTarget::Session { session } => {
+                    format!("session:{}", session.0)
+                }
+                gx_contracts::command::SceneTarget::Stored { project, scene_id } => {
+                    format!("{project}/{scene_id}")
+                }
+            }),
+            edit.if_revision.map(|r| r.0),
+            Some(edit.edits.len()),
+        ),
+        _ => (None, None, None),
+    };
     let file = scene_file(&command);
-    workspace
+    let result = workspace
         .execute(command)
-        .map_err(|error| command_error(error, file))
+        .map_err(|error| command_error(error, file));
+    match &result {
+        Ok(outcome) => {
+            let effects: Vec<String> = outcome
+                .effects
+                .iter()
+                .map(|effect| {
+                    serde_json::to_value(effect)
+                        .ok()
+                        .and_then(|v| v.get("effect").and_then(|e| e.as_str()).map(str::to_owned))
+                        .unwrap_or_else(|| "unknown".to_owned())
+                })
+                .collect();
+            tracing::info!(
+                event = "editor.command",
+                command = name,
+                result = "applied",
+                target = target.as_deref(),
+                if_revision,
+                revision = outcome.revision.map(|r| r.0),
+                edits,
+                effects = ?effects,
+            );
+        }
+        Err(error) => tracing::info!(
+            event = "editor.command",
+            command = name,
+            result = "refused",
+            refusal = match error {
+                EditorError::CommandRefused { cause, .. } => Some(cause.code_name()),
+                _ => None,
+            },
+            detail = %error,
+            target = target.as_deref(),
+            if_revision,
+            edits,
+        ),
+    }
+    result
 }
 
 /// What a successful publication produced.
@@ -374,7 +431,8 @@ pub fn publish_with_sources(
     scene: SceneDocument,
     sources: &[PackageSource],
 ) -> Result<PublishResult, EditorError> {
-    publish_document(endpoint, scene, sources, directory)
+    let scene_id = scene.id.clone();
+    let result = publish_document(endpoint, scene, sources, directory)
         .map(|published| PublishResult {
             take_id: published.take_id,
             revision: published.revision,
@@ -382,7 +440,29 @@ pub fn publish_with_sources(
             handoff: published.handoff,
             transferred_bytes: published.transferred_bytes,
         })
-        .map_err(|failure| publish_error(failure, Some(directory)))
+        .map_err(|failure| publish_error(failure, Some(directory)));
+    // 2.12: a publication and what came of it.
+    match &result {
+        Ok(published) => tracing::info!(
+            event = "editor.publish",
+            result = "published",
+            scene = scene_id.as_str(),
+            endpoint,
+            take_id = published.take_id.0.as_str(),
+            revision = published.revision.0,
+            content_hash = published.content_hash.0.as_str(),
+            handoff = ?published.handoff,
+            transferred_bytes = published.transferred_bytes,
+        ),
+        Err(error) => tracing::info!(
+            event = "editor.publish",
+            result = "failed",
+            detail = %error,
+            scene = scene_id.as_str(),
+            endpoint,
+        ),
+    }
+    result
 }
 
 /// Preview operator values through Rust's one control-value application.
@@ -976,6 +1056,9 @@ fn cmd_asset_bytes(
 
 /// Build and run the Editor window.
 pub fn run() {
+    // 2.12: the Editor's log, kept until the window closes.
+    let _log = gx_telemetry::sink::init_process_logging("editor", "shell");
+    tracing::info!(event = "editor.start", version = env!("CARGO_PKG_VERSION"));
     let workspace = Workspace::new(projects().ok());
     tauri::Builder::default()
         .manage(ShellState::new(workspace))
@@ -1015,6 +1098,93 @@ mod tests {
     use gx_contracts::control::ControlField;
 
     use super::*;
+
+    /// 2.12: a command applied and a command refused, each on record with its
+    /// name, target, effects or refusal code.
+    #[test]
+    fn every_editor_command_and_its_answer_is_on_record() {
+        use tracing_subscriber::layer::SubscriberExt;
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("gx-editor-log-{}-{nanos}", std::process::id()));
+        let guard =
+            gx_telemetry::sink::start(gx_telemetry::sink::LogConfig::new("editor", "shell", &dir))
+                .unwrap();
+        let subscriber = tracing_subscriber::registry().with(guard.layer());
+        tracing::subscriber::with_default(subscriber, || {
+            let mut workspace = Workspace::new(None);
+            let opened = execute(
+                &mut workspace,
+                EditorCommand::OpenScene(gx_contracts::command::OpenScene {
+                    source: gx_contracts::command::SceneSource::New {
+                        id: "card".into(),
+                        name: "Card".into(),
+                    },
+                }),
+            )
+            .expect("a new scene opens");
+            let session = opened.session.expect("a session").session;
+            execute(
+                &mut workspace,
+                EditorCommand::EditScene(EditScene {
+                    target: gx_contracts::command::SceneTarget::Session { session },
+                    edits: vec![SceneEdit::CreateObject(CreateObject {
+                        kind: "rect".into(),
+                        name: "Bar".into(),
+                    })],
+                    module: None,
+                    if_revision: None,
+                }),
+            )
+            .expect("the edit applies");
+            let _ = execute(
+                &mut workspace,
+                EditorCommand::EditScene(EditScene {
+                    target: gx_contracts::command::SceneTarget::Session { session },
+                    edits: vec![SceneEdit::CreateObject(CreateObject {
+                        kind: "no-such-kind".into(),
+                        name: "X".into(),
+                    })],
+                    module: None,
+                    if_revision: None,
+                }),
+            );
+        });
+        guard.finish().unwrap();
+        let mut records: Vec<serde_json::Value> = Vec::new();
+        for entry in std::fs::read_dir(dir.join("editor")).unwrap().flatten() {
+            for line in std::fs::read_to_string(entry.path()).unwrap().lines() {
+                records.push(serde_json::from_str(line).unwrap());
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        let applied = records
+            .iter()
+            .find(|r| {
+                r["event"] == "editor.command"
+                    && r["fields"]["command"] == "editScene"
+                    && r["fields"]["result"] == "applied"
+            })
+            .unwrap_or_else(|| panic!("no applied edit in {records:#?}"));
+        assert_eq!(applied["fields"]["edits"], 1);
+        assert!(applied["fields"]["target"]
+            .as_str()
+            .is_some_and(|t| t.starts_with("session:")));
+        assert!(applied["fields"]["effects"]
+            .as_str()
+            .is_some_and(|e| e.contains("objectCreated")));
+        let refused = records
+            .iter()
+            .find(|r| r["event"] == "editor.command" && r["fields"]["result"] == "refused")
+            .unwrap_or_else(|| panic!("no refused edit in {records:#?}"));
+        assert!(refused["refusal"].as_str().is_some(), "{refused}");
+        assert!(records
+            .iter()
+            .any(|r| r["event"] == "editor.command" && r["fields"]["command"] == "openScene"));
+    }
 
     #[test]
     fn a_failed_read_of_the_editors_own_cache_is_never_blamed_on_the_engine() {

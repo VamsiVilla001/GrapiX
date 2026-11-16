@@ -118,6 +118,17 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-16 — 2.12: host, Playout, Editor and MCP log through the sink; 2.12 still active (Claude)
+
+**Resume here.** Queue (user, 16 Nov: "add 12.11 to the queue", already last): rest of 2.12, then 2.13, 2.14, 2.15,
+12.11. Done in 2.12 now: the engine worker (earlier), the engine host (`host.start`, `host.engine_ready`,
+`host.exit`, `host.failed`), the Playout shell (`operator.connect` never with the token, `operator.cue/take/clear/
+phase/configure_output` with committed frame or refusal, polls at debug), the Editor shell (`editor.command` for every
+command through `execute`, `editor.publish`), every MCP server at the one gate (`mcp.call`, never the arguments;
+`editor-mcp` logs to a file, stdout is the protocol). Ten test launch sites now set `GX_LOG_DIR` to the temp folder.
+Tests per process, 5 of 5 more mutations. **Still in 2.12:** a conformance run reading every process's file; stop
+records (no shutdown hook in the shells or the worker).
+
 ## 2026-11-16 — 2.12 active: the render engine worker logs through the sink (Claude)
 
 **Resume here.** 2.12's first slice: `services/render-engine/worker/src/log.rs` names the engine's events;

@@ -1993,10 +1993,12 @@ dependencies = [
  "gx-contracts",
  "gx-editor",
  "gx-mcp-server",
+ "gx-telemetry",
  "gx-write-semantics",
  "jsonschema",
  "serde",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]
@@ -2007,11 +2009,14 @@ dependencies = [
  "gx-contracts",
  "gx-editor",
  "gx-project-store",
+ "gx-telemetry",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2021,7 +2026,10 @@ dependencies = [
  "gx-contracts",
  "gx-control-plane",
  "gx-control-transport",
+ "gx-telemetry",
  "parking_lot",
+ "serde_json",
+ "tracing",
 ]
 
 [[package]]
@@ -2036,6 +2044,7 @@ name = "gx-mcp-server"
 version = "0.1.0"
 dependencies = [
  "gx-contracts",
+ "gx-telemetry",
  "hyper",
  "hyper-util",
  "rmcp",
@@ -2043,6 +2052,8 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-util",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2126,10 +2137,14 @@ dependencies = [
  "gx-contracts",
  "gx-control-plane",
  "gx-control-transport",
+ "gx-mock-engine",
+ "gx-telemetry",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

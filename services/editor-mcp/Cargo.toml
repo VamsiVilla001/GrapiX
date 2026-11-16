@@ -17,6 +17,8 @@ gx-contracts = { workspace = true }
 gx-mcp-server = { path = "../mcp-server" }
 gx-editor = { path = "../editor" }
 gx-write-semantics = { workspace = true }
+gx-telemetry = { workspace = true }
+tracing = "0.1"
 serde = { workspace = true }
 serde_json = { workspace = true }
 

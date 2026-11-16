@@ -88,6 +88,8 @@ fn kill_worker_on(_port: u16) {}
 fn start_worker(binary: &PathBuf, port: u16) -> KillOnDrop {
     let child = KillOnDrop(
         Command::new(binary)
+            // 2.12: a test process logs to a scratch folder, not the operator's log root.
+            .env("GX_LOG_DIR", std::env::temp_dir().join("gx-test-logs"))
             .args(["--port", &port.to_string()])
             // Detach stdio so the long-lived worker does not hold the test
             // harness's output pipe open after the test process wants to exit.
@@ -119,8 +121,11 @@ fn the_host_adopts_an_engine_it_did_not_start() {
     // A "stranger's" engine, started outside the host entirely.
     let _foreign = start_worker(&binary, port);
 
-    let mut supervised =
-        ensure(binary.to_str().unwrap(), port, &[]).expect("ensure adopts the running engine");
+    let mut supervised = {
+        quiet_logs();
+        ensure(binary.to_str().unwrap(), port, &[])
+    }
+    .expect("ensure adopts the running engine");
 
     assert_eq!(
         supervised.provenance(),
@@ -142,8 +147,11 @@ fn the_host_spawns_when_nothing_is_listening() {
     };
     let _guard = PORT_LOCK.lock();
     let port = free_port();
-    let mut supervised = ensure(binary.to_str().unwrap(), port, &[])
-        .expect("ensure spawns an engine when none is running");
+    let mut supervised = {
+        quiet_logs();
+        ensure(binary.to_str().unwrap(), port, &[])
+    }
+    .expect("ensure spawns an engine when none is running");
 
     assert_eq!(supervised.provenance(), Provenance::Spawned);
     assert!(supervised.status().is_some());
@@ -154,8 +162,11 @@ fn the_host_spawns_when_nothing_is_listening() {
     // again must find the *same* engine still running (Adopted), not a fresh
     // one (Spawned). If dropping the supervisor had killed it, ensure would
     // have had to spawn a replacement.
-    let mut again = ensure(binary.to_str().unwrap(), port, &[])
-        .expect("the engine must still be there after the supervisor dropped");
+    let mut again = {
+        quiet_logs();
+        ensure(binary.to_str().unwrap(), port, &[])
+    }
+    .expect("the engine must still be there after the supervisor dropped");
     assert_eq!(
         again.provenance(),
         Provenance::Adopted,
@@ -177,4 +188,10 @@ fn ensure_refuses_a_reserved_port() {
     // before any socket exists, and ensure must not paper over that.
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 4200);
     assert!(check_bind(addr, None).is_err(), "4200 must stay refused");
+}
+
+/// 2.12: a worker that `ensure` spawns inherits this test's environment, so it
+/// logs to a scratch folder rather than the operator's log root.
+fn quiet_logs() {
+    std::env::set_var("GX_LOG_DIR", std::env::temp_dir().join("gx-test-logs"));
 }

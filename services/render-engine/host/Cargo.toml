@@ -9,9 +9,12 @@ rust-version.workspace = true
 gx-contracts = { workspace = true }
 gx-control-plane = { workspace = true }
 gx-control-transport = { workspace = true }
+gx-telemetry = { workspace = true }
+tracing = "0.1"
 
 [dev-dependencies]
 parking_lot = "0.12"
+serde_json = { workspace = true }
 
 [lib]
 path = "src/lib.rs"

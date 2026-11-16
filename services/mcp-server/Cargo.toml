@@ -17,6 +17,7 @@ name = "gx_mcp_server"
 path = "src/lib.rs"
 
 [dependencies]
+tracing = "0.1"
 gx-contracts = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -34,4 +35,6 @@ hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio", "service"] }
 
 [dev-dependencies]
+gx-telemetry = { workspace = true }
+tracing-subscriber = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "io-util", "macros", "time"] }

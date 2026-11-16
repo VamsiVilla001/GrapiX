@@ -361,6 +361,8 @@ pub fn lan_with_a_package_directory_is_a_usage_error(
     report: &mut Report,
 ) {
     let ran = std::process::Command::new(worker)
+        // 2.12: a test process logs to a scratch folder, not the operator's log root.
+        .env("GX_LOG_DIR", std::env::temp_dir().join("gx-test-logs"))
         .args(["--lan", "--package-dir"])
         .arg(folder)
         .stdin(std::process::Stdio::null())

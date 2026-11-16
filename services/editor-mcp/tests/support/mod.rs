@@ -127,6 +127,8 @@ impl Session {
     /// Launch the binary. No message is sent.
     pub fn launch(root: &Path) -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_gx-editor-mcp"))
+            // 2.12: a test process logs to a scratch folder, not the operator's log root.
+            .env("GX_LOG_DIR", std::env::temp_dir().join("gx-test-logs"))
             .arg("--root")
             .arg(root)
             .stdin(Stdio::piped())
@@ -246,6 +248,8 @@ pub struct HttpProcess {
 impl HttpProcess {
     pub fn launch(root: &Path) -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_gx-editor-mcp"))
+            // 2.12: a test process logs to a scratch folder, not the operator's log root.
+            .env("GX_LOG_DIR", std::env::temp_dir().join("gx-test-logs"))
             .arg("--root")
             .arg(root)
             .args(["--http", "0"])

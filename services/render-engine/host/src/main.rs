@@ -7,6 +7,18 @@
 
 use gx_control_plane::bind::ENGINE_CONTROL_PORT;
 use gx_engine_host::{ensure, Provenance};
+use gx_telemetry::sink::LogGuard;
+
+/// Stop for a reason the operator must act on: on record and on stderr, with
+/// the log written out before the exit (2.12).
+fn fail(log: &mut Option<LogGuard>, detail: String) -> ! {
+    eprintln!("{detail}");
+    tracing::error!(event = "host.failed", detail = detail.as_str());
+    if let Some(guard) = log.take() {
+        let _ = guard.finish();
+    }
+    std::process::exit(1);
+}
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -29,46 +41,81 @@ fn main() {
         }
     }
 
+    // 2.12: the host's log, from here on.
+    let mut log = gx_telemetry::sink::init_process_logging("engine", "host");
+    tracing::info!(
+        event = "host.start",
+        version = env!("CARGO_PKG_VERSION"),
+        port,
+        worker = worker.as_str(),
+    );
+
     // 5.10: an engine this host starts is co-located with the Editor on this
     // machine, so it is handed the folder the Editor writes its packages into
     // (its `GX_EDITOR_PACKAGE_DIR`, else the platform's package exchange
     // root). An engine already running is adopted as it is.
     let spawn_args = match package_directory() {
         Ok(directory) => vec!["--package-dir".to_owned(), directory],
-        Err(problem) => {
-            eprintln!("could not name the package folder: {problem}");
-            std::process::exit(1);
-        }
+        Err(problem) => fail(
+            &mut log,
+            format!("could not name the package folder: {problem}"),
+        ),
     };
     let mut supervised = match ensure(&worker, port, &spawn_args) {
         Ok(s) => s,
-        Err(e) => {
-            eprintln!("could not ensure an engine on port {port}: {e}");
-            std::process::exit(1);
-        }
+        Err(e) => fail(
+            &mut log,
+            format!("could not ensure an engine on port {port}: {e}"),
+        ),
     };
 
     match supervised.provenance() {
         Provenance::Adopted => println!("adopted the engine already running on {port}"),
         Provenance::Spawned => println!("started a render worker on {port}"),
     }
+    let provenance = match supervised.provenance() {
+        Provenance::Adopted => "adopted",
+        Provenance::Spawned => "spawned",
+    };
 
     match supervised.status() {
-        Some(status) => println!(
-            "  tier {:?} clock {:?} reference {:?} frame {} live {}",
-            status.device_tier,
-            status.clock,
-            status.reference,
-            status.current_frame,
-            status.live_allowed
-        ),
-        None => {
-            eprintln!("  the engine is up but did not answer status");
-            std::process::exit(1);
+        Some(status) => {
+            println!(
+                "  tier {:?} clock {:?} reference {:?} frame {} live {}",
+                status.device_tier,
+                status.clock,
+                status.reference,
+                status.current_frame,
+                status.live_allowed
+            );
+            tracing::info!(
+                event = "host.engine_ready",
+                epoch = status.epoch.0,
+                frame = status.current_frame,
+                port,
+                provenance,
+                tier = ?status.device_tier,
+                clock = ?status.clock,
+                reference = ?status.reference,
+                live_allowed = status.live_allowed,
+            );
         }
+        None => fail(
+            &mut log,
+            format!("  the engine on port {port} ({provenance}) is up but did not answer status"),
+        ),
     }
 
     println!("leaving the engine running; the host does not stop it");
+    tracing::info!(
+        event = "host.exit",
+        port,
+        provenance,
+        detail = "the engine is left running"
+    );
+    if let Some(guard) = log.take() {
+        let _ = guard.finish();
+    }
 }
 
 /// The folder a spawned engine reads packages from by path, created if it

@@ -25,6 +25,8 @@ path = "src/main.rs"
 tauri-build = { workspace = true }
 
 [dependencies]
+gx-telemetry = { workspace = true }
+tracing = "0.1"
 gx-contracts = { workspace = true }
 gx-asset-plane = { workspace = true }
 gx-project-store = { workspace = true }
@@ -33,3 +35,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tauri = { workspace = true }
 tauri-plugin-dialog = { workspace = true }
+
+[dev-dependencies]
+tracing-subscriber = "0.3"

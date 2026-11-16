@@ -284,6 +284,8 @@ fn run_against_real_engine(report: &mut Report) {
         std::process::id()
     ));
     let child = std::process::Command::new(&worker)
+        // 2.12: a test process logs to a scratch folder, not the operator's log root.
+        .env("GX_LOG_DIR", std::env::temp_dir().join("gx-test-logs"))
         .args([
             "--port",
             &port.to_string(),
@@ -372,6 +374,8 @@ fn run_scope_against_real_engine(report: &mut Report) {
         std::process::id()
     ));
     let child = std::process::Command::new(&worker)
+        // 2.12: a test process logs to a scratch folder, not the operator's log root.
+        .env("GX_LOG_DIR", std::env::temp_dir().join("gx-test-logs"))
         .args([
             "--port",
             &port.to_string(),
@@ -479,6 +483,8 @@ fn start_worker_in(
     ];
     args.extend_from_slice(extra);
     let mut child = std::process::Command::new(worker)
+        // 2.12: a test process logs to a scratch folder, not the operator's log root.
+        .env("GX_LOG_DIR", std::env::temp_dir().join("gx-test-logs"))
         .args(&args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())

@@ -32,3 +32,10 @@ gx-control-transport = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tauri = { workspace = true }
+gx-telemetry = { workspace = true }
+tracing = "0.1"
+
+[dev-dependencies]
+# 2.12: the operator log tests serve a mock engine over the real transport.
+gx-mock-engine = { path = "../../mocks/mock-engine" }
+tracing-subscriber = "0.3"

@@ -28,7 +28,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             _ => return Err(USAGE.into()),
         }
     }
-    let projects = gx_editor::Projects::at_root(root.ok_or(USAGE)?);
+    let root = root.ok_or(USAGE)?;
+    // 2.12: this server's log, to a file: stdout carries the MCP protocol.
+    let _log = gx_telemetry::sink::init_process_logging("mcp", "editor-mcp");
+    tracing::info!(
+        event = "mcp.start",
+        version = env!("CARGO_PKG_VERSION"),
+        root = %root.display(),
+        transport = if http.is_some() { "http" } else { "stdio" },
+        http_port = http,
+    );
+    let projects = gx_editor::Projects::at_root(root);
     let server = gx_editor_mcp::server(projects);
     match http {
         Some(port) => server.serve_http(port, |addr| {
