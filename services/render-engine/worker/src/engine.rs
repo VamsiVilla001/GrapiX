@@ -1130,10 +1130,15 @@ impl EnginePeer for Engine {
     }
 
     fn handle(&mut self, request: ClientRequest) -> EngineReply {
-        // 2.12: every request and its answer is on record.
+        // 2.12: every request and its answer is on record. A render is
+        // logged where it is answered (`handle_detached`), because the
+        // control transport reaches it there without passing through here.
+        let render = matches!(request, ClientRequest::Render(_));
         let note = crate::log::RequestNote::of(&request);
         let reply = self.handle_unlogged(request);
-        crate::log::request(&note, &reply, self.clock.epoch().0);
+        if !render {
+            crate::log::request(&note, &reply, self.clock.epoch().0);
+        }
         reply
     }
 
@@ -1145,8 +1150,17 @@ impl EnginePeer for Engine {
         let ClientRequest::Render(req) = request else {
             return Handled::Reply(self.handle(request));
         };
+        // 2.12: a render and its answer are on record, refused here or drawn
+        // after the engine is released.
+        let note = crate::log::RequestNote::render(&req);
+        let epoch = self.clock.epoch().0;
+        let refused = |refusal| {
+            let reply = EngineReply::Refused(refusal);
+            crate::log::request(&note, &reply, epoch);
+            Handled::Reply(reply)
+        };
         if let Err(refusal) = self.check_not_dropped(&req.take_id) {
-            return Handled::Reply(EngineReply::Refused(refusal));
+            return refused(refusal);
         }
         let held = self.published.get(&req.take_id).cloned();
         let scene = self
@@ -1157,14 +1171,16 @@ impl EnginePeer for Engine {
             .as_ref()
             .map(|scene| scene.document().timeline.duration_frames);
         if let Err(refusal) = check_render(&req, held.as_ref(), duration) {
-            return Handled::Reply(EngineReply::Refused(refusal));
+            return refused(refusal);
         }
         let (Some(held), Some(scene)) = (held, scene) else {
             unreachable!("check_render refuses a render with no held revision or scene");
         };
         let images = Arc::clone(&self.rendered);
         Handled::Detached(Box::new(move || {
-            answer_render(req, held.content_hash, &scene, &images)
+            let reply = answer_render(req, held.content_hash, &scene, &images);
+            crate::log::request(&note, &reply, epoch);
+            reply
         }))
     }
 
@@ -1743,6 +1759,85 @@ mod tests {
                 "the frame path wrote no heartbeat: {records:#?}"
             );
         }
+    }
+
+    /// The clock passes frames while the render loop is away: the next frame
+    /// the engine emits says how many, through the frame path itself.
+    #[test]
+    fn frames_the_clock_passed_are_on_record_from_the_frame_path() {
+        let records = logged("missed", || {
+            let source = Arc::new(AtomicU64::new(0));
+            let mut e = Engine::new(Arc::clone(&source), Locality::CoLocated);
+            let first = e.emit_frame_settled().expect("a frame").sample.frame;
+            source.fetch_add(5, Ordering::Relaxed);
+            let next = e.emit_frame_settled().expect("a frame").sample;
+            assert_eq!(next.frame, first + 5);
+            assert_eq!(next.missed_before, 4);
+        });
+        let missed: Vec<_> = records
+            .iter()
+            .filter(|r| r["event"] == "frame.missed")
+            .collect();
+        assert_eq!(missed.len(), 1, "{records:#?}");
+        assert_eq!(missed[0]["level"], "warn");
+        assert_eq!(missed[0]["fields"]["missed"], 4);
+        assert!(missed[0]["frame"].as_u64().is_some());
+    }
+
+    /// The control transport hands a headless render to the engine by
+    /// `handle_detached`, and an in-process caller by `handle`: by either
+    /// way a render drawn and a render refused are each on record once.
+    #[test]
+    fn a_headless_render_is_on_record_once_by_either_entry() {
+        use gx_control_plane::render::RenderRequest;
+        let records = logged("render", || {
+            let mut e = engine();
+            let PublishReply::Published {
+                take_id,
+                revision,
+                content_hash,
+            } = e.publish(animated_scene())
+            else {
+                panic!("the animated scene publishes");
+            };
+            let request = |frame| {
+                ClientRequest::Render(RenderRequest {
+                    take_id: take_id.clone(),
+                    revision,
+                    content_hash: Some(content_hash.clone()),
+                    frame,
+                })
+            };
+            // As the transport does: validated while held, drawn after.
+            assert!(matches!(
+                e.handle_detached(request(10)).finish(),
+                EngineReply::Rendered(_)
+            ));
+            assert!(matches!(
+                e.handle_detached(request(101)).finish(),
+                EngineReply::Refused(Refusal::RenderFrameOutOfRange { .. })
+            ));
+            // As an in-process caller does.
+            assert!(matches!(e.handle(request(20)), EngineReply::Rendered(_)));
+            assert!(matches!(
+                e.handle(request(102)),
+                EngineReply::Refused(Refusal::RenderFrameOutOfRange { .. })
+            ));
+        });
+        let renders: Vec<_> = records
+            .iter()
+            .filter(|r| r["event"] == "render.request")
+            .collect();
+        assert_eq!(renders.len(), 4, "one record a request: {records:#?}");
+        let results: Vec<_> = renders
+            .iter()
+            .map(|r| r["fields"]["result"].as_str().unwrap())
+            .collect();
+        assert_eq!(results, ["rendered", "refused", "rendered", "refused"]);
+        assert_eq!(renders[1]["refusal"], "renderFrameOutOfRange");
+        assert_eq!(renders[0]["fields"]["take_id"], "animated");
+        assert_eq!(renders[0]["fields"]["revision"], 1);
+        assert!(renders.iter().all(|r| r["level"] == "info"));
     }
 
     pub(super) fn animated_scene() -> SceneDocument {

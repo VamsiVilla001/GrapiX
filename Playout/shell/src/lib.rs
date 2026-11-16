@@ -549,10 +549,10 @@ fn scheduled(frame: Option<u64>) -> TakeAt {
 
 /// Build and run the Playout window.
 pub fn run() {
-    // 2.12: Playout's log, kept until the window closes.
-    let _log = gx_telemetry::sink::init_process_logging("playout", "shell");
+    // 2.12: Playout's log, from here until the window closes.
+    let mut log = gx_telemetry::sink::init_process_logging("playout", "shell");
     tracing::info!(event = "playout.start", version = env!("CARGO_PKG_VERSION"));
-    tauri::Builder::default()
+    let built = tauri::Builder::default()
         .manage(Connection::default())
         .invoke_handler(tauri::generate_handler![
             cmd_connect,
@@ -564,13 +564,81 @@ pub fn run() {
             cmd_configure_output,
             cmd_default_endpoint,
         ])
-        .run(tauri::generate_context!())
-        .expect("the Playout shell failed to start");
+        .build(tauri::generate_context!());
+    let app = match built {
+        Ok(app) => app,
+        Err(error) => {
+            tracing::error!(event = "playout.failed", detail = %error);
+            stopped(&mut log, "the shell failed to start");
+            panic!("the Playout shell failed to start: {error}");
+        }
+    };
+    app.run(move |_app, event| {
+        if let tauri::RunEvent::Exit = event {
+            stopped(&mut log, "the window closed");
+        }
+    });
+}
+
+/// Playout's last record, then its log written out (2.12). Called when the
+/// window has closed: the event loop does not return to `run`, so nothing
+/// after it would be reached.
+fn stopped(log: &mut Option<gx_telemetry::sink::LogGuard>, reason: &str) {
+    tracing::info!(event = "playout.stop", reason);
+    if let Some(guard) = log.take() {
+        let _ = guard.finish();
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 2.12: closing the window leaves `playout.stop` and then the sink's own
+    /// `log.stop` as the file's last two records.
+    #[test]
+    fn closing_writes_a_stop_record_and_ends_the_log() {
+        use tracing_subscriber::layer::SubscriberExt;
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("gx-playout-stop-{}-{nanos}", std::process::id()));
+        let guard =
+            gx_telemetry::sink::start(gx_telemetry::sink::LogConfig::new("playout", "shell", &dir))
+                .unwrap();
+        let subscriber = tracing_subscriber::registry().with(guard.layer());
+        let mut log = Some(guard);
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!(event = "playout.start");
+            stopped(&mut log, "the window closed");
+        });
+        assert!(log.is_none(), "the log is finished, not left to a drop");
+        let mut events = Vec::new();
+        for entry in std::fs::read_dir(dir.join("playout")).unwrap().flatten() {
+            for line in std::fs::read_to_string(entry.path()).unwrap().lines() {
+                let record: serde_json::Value = serde_json::from_str(line).unwrap();
+                events.push((
+                    record["event"].as_str().unwrap().to_owned(),
+                    record["fields"]["reason"].as_str().map(str::to_owned),
+                ));
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        let last: Vec<_> = events.iter().rev().take(2).rev().cloned().collect();
+        assert_eq!(
+            last,
+            vec![
+                (
+                    "playout.stop".to_owned(),
+                    Some("the window closed".to_owned())
+                ),
+                ("log.stop".to_owned(), None),
+            ],
+            "{events:?}"
+        );
+    }
 
     // --- 2.12: the operator's commands are on record -------------------------
 

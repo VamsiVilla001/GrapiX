@@ -118,6 +118,35 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-16 — 2.12 done: every process logs through the sink, and a conformance run reads each file (Claude)
+
+**Resume here.** 2.12 is done; next is **2.13** (correlation ids end to end; front-end capture through `cmd_log`), then
+2.14, 2.15, 12.11. Design for 2.13, from reading the code (nothing built yet): both front ends have one bridge (Editor's
+`shell()` in `Editor/src/command-client.ts` with 30 call sites in `Editor/web/main.ts`; Playout's `invoke()` in
+`Playout/web/main.js`), so a correlation id is minted there per call and sent as a Tauri invoke header; the sink lifts
+`corr` from an event's fields already; the control envelope's `MessageId` is a free-form string, so it can carry the id to
+the engine without a protocol bump. Open for 2.13: how the engine's own events inherit the id (a thread-local set by the
+transport around `handle_detached`, or a tracing span the layer reads).
+
+What 2.12 added in this last slice: the control transport records `control.connected`, `control.authenticated` (subject,
+role, scopes, never the credential), `control.refused` (no credential, a credential that does not verify by a fixed word, a
+scope not granted with who asked) and `control.disconnected`; a headless render served over the wire is on record (it
+reached the engine through `handle_detached`, past `handle`, and was never logged); the shells write `editor.stop` /
+`playout.stop` and finish their log on `RunEvent::Exit`; the Editor MCP server writes `mcp.stop`; `conformance/src/
+process_logs.rs` reads the worker, the protected worker, the host and the MCP server by pid and then every file of the run
+(schema, sequence, anomalies against heartbeats, no credential). **A dropped control `Client` never closed its socket**
+(its reader thread held the other half): fixed (`Client` closes on drop), found by the new transport test hanging.
+
+Verified: 16 of 16 mutations fail named checks (one survived its first check, the poll-at-default-level one, and the check
+was strengthened); conformance 610/0/9; both real windows launched with `GX_LOG_DIR` and closed with `CloseMainWindow`
+(`editor.stop`/`playout.stop` then `log.stop`, exit 0). `npm run check` exit 0 (46 Node, 412 Editor, 924 Rust passed, 0 failed, 38 ignored; conformance 610/0/9).
+
+**Named gaps.** A killed or Ctrl+C'd engine writes no `engine.stop` (needs the `ctrlc` crate, a download: the user's
+approval) — new row **2.16**, which also has a start report its predecessor's unfinished log. The shells are not in the
+automated conformance run (no window there). `cargo test -p gx-engine-host --test ensure` fails two tests on this machine
+because the user's own recovery journal (`%APPDATA%\GrapiX\GrapiX\data\render-engine\recovery.json`) is schema 1 and the
+worker wants 3; it is the user's file and was left alone; the repository gate excludes that crate.
+
 ## 2026-11-16 — 2.12: host, Playout, Editor and MCP log through the sink; 2.12 still active (Claude)
 
 **Resume here.** Queue (user, 16 Nov: "add 12.11 to the queue", already last): rest of 2.12, then 2.13, 2.14, 2.15,

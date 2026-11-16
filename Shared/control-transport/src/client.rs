@@ -49,6 +49,16 @@ pub struct Client {
     request_count: u64,
 }
 
+impl Drop for Client {
+    /// A client that goes away ends its connection. Its reader thread holds
+    /// the other half of the same socket, so without this the connection
+    /// stayed open, with a thread waiting at each end, until the process
+    /// exited: the engine never saw (or logged, 2.12) the client leave.
+    fn drop(&mut self) {
+        self.writer.close();
+    }
+}
+
 impl Client {
     /// Connect over TCP, retaining the established API.
     pub fn connect(addr: SocketAddr) -> io::Result<Self> {

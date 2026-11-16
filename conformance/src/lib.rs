@@ -14,6 +14,7 @@ mod editor_commands;
 mod editor_publish;
 mod headless;
 mod package_handoff;
+mod process_logs;
 mod refusal_audit;
 mod scene_plane;
 mod scope;
@@ -25,6 +26,10 @@ pub use editor_publish::{
 };
 pub use headless::{headless_render_suite, render_preview_suite};
 pub use package_handoff::package_handoff_suite;
+pub use process_logs::{
+    engine_log_suite, host_log_suite, logged, mcp_log_suite, protected_engine_log_suite,
+    remove_run_logs, run_log_directory, run_log_suite,
+};
 pub use refusal_audit::refusal_audit_suite;
 pub use scene_plane::{mock_product_suite, scene_plane_suite};
 pub use scope::{real_engine_scope_suite, scope_enforcement_suite};

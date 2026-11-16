@@ -497,9 +497,7 @@ struct Run {
 }
 
 fn run_mock(binary: &std::path::Path, args: &[&str]) -> Option<Run> {
-    let output = Command::new(binary)
-        // 2.12: a test process logs to a scratch folder, not the operator's log root.
-        .env("GX_LOG_DIR", std::env::temp_dir().join("gx-test-logs"))
+    let output = crate::logged(&mut Command::new(binary))
         .args(args)
         .stdin(Stdio::null())
         .output()
@@ -532,9 +530,7 @@ pub fn mock_product_suite(report: &mut Report) {
         return;
     };
 
-    let spawned = Command::new(&engine_binary)
-        // 2.12: a test process logs to a scratch folder, not the operator's log root.
-        .env("GX_LOG_DIR", std::env::temp_dir().join("gx-test-logs"))
+    let spawned = crate::logged(&mut Command::new(&engine_binary))
         .args([
             "--port",
             &control.to_string(),

@@ -1,0 +1,253 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 56221,
+    "output_tokens": 0,
+    "state_tokens": 6948,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "2.12 (the whole row, at its last slice): every process logs through the sink",
+    "done_when": "In a conformance run each process writes its file; every ADR-0004 info-catalogue event appears when its action is driven; a late frame and a refusal each produce their record; the default level is every state change and anomaly at info plus a once-a-second engine heartbeat (user decision 16 Nov 2026)",
+    "adr_catalogue_engine": "Engine: start and stop (version, adapter, backend, tier), epoch, recovery restore, each publish received and prepared or refused, each Cue, Take, Update, Continue, Out and Clear accepted or refused with the committed frame, output armed, disarmed or failed, clock source and reference changes, frame anomalies, heartbeat.",
+    "evidence_earlier_slices": "Earlier slices, in their own sections of the same record: the render engine worker (requests, publishes, late and missed frames, heartbeat, clock changes); the engine host, Playout shell, Editor shell and the MCP servers, each tested through real code paths, 10 launch sites given a scratch log folder, mutations 6 of 6 and 5 of 5 caught.",
+    "evidence_this_slice": "## Slice 3 \u2014 the transport's records, stop records, and the conformance read (16 Nov 2026)\n\n**Built.**\n\n- **Control transport** (`Shared/control-transport/src/server.rs`): a connection\n  is on record from accept to close: `control.connected` (peer address, whether\n  the engine requires a credential), `control.authenticated` (subject, role and\n  scopes the credential proved; never the credential), `control.refused` for\n  every request the transport answers before the engine sees it (no credential,\n  a credential that does not verify, a scope the credential lacks; with the\n  request, the refusal code and who asked), and `control.disconnected` (requests\n  served, and why it ended). A credential that does not verify is recorded by a\n  fixed word (`macMismatch`, `unknownPrefix`, ...), not by the error's own text,\n  because an unknown-prefix error quotes what was presented.\n- **A defect the new test found:** a dropped control `Client` never closed its\n  socket. Its reader thread held the other half of the connection, so the\n  engine kept a thread and an open connection per departed client until the\n  process ended, and could never log the client leaving. `Client` now closes its\n  connection when dropped (`ControlWriteHalf::close`, shutdown both directions\n  on TCP and Unix sockets; a Windows named pipe has no such call and closes with\n  its halves). The first run of the test hung on exactly this; it now has a\n  20-second watchdog.\n- **A gap I found reading the path:** the transport hands a headless render to the\n  engine through `handle_detached`, which does not pass through `handle`, so a\n  render served over the wire was never logged. It is now recorded where it is\n  answered (refused while the engine is held, or drawn after it is released),\n  once, whichever entry reaches it.\n- **Stop records.** Both windowed shells write `editor.stop` / `playout.stop`\n  and finish their log when the window closes (`RunEvent::Exit`; Tauri's event\n  loop does not return to `run`, so nothing after it would be reached). The\n  Editor MCP server writes `mcp.stop` when its client closes or its transport\n  fails. The engine host already wrote `host.exit`. The engine worker writes\n  `engine.stop` when its listener ends by its own code.\n- **The conformance run reads every process's file**\n  (`conformance/src/process_logs.rs`, 16 new checks): every launch in the run\n  logs into one scratch folder at the default level; the run then reads back, by\n  pid, the render worker it drove (file opens with `log.start` and `engine.start`\n  for that control address; a committed take with its take, revision and frame; a\n  refused request with its code and detail; a publish and a headless render; a\n  client connecting and leaving; heartbeats a second apart and no status poll\n  written), the protected worker (the credential accepted by subject, role and\n  scopes; a request outside its scopes with who asked), the engine host it runs\n  against that engine (start, the engine it adopted with its epoch, exit, log\n  finished), and the Editor MCP server it starts and speaks to (start, a call\n  answered with tool, scope, duration and idempotency key, a call refused with\n  `projectNotFound`, stop, and a stdout that carries only JSON-RPC). Then every\n  file of the run: each line parses and has the schema's fields; no sequence\n  gap that a `log.lost` does not state; every late or missed frame a heartbeat\n  counts has its own record; no credential the run used, and no `gx1.` token, in\n  any file.\n\n**Executed.**\n\n- `cargo test -p gx-control-transport --lib log_tests` (1): three clients on a\n  protected server (none, a credential made with another secret, one that may cue\n  but not take) leave `control.connected` x3, one `control.authenticated`\n  (`cue-operator`, `[Cue]`), `control.refused` for the missing credential\n  (`unauthenticated`), the wrong one (`macMismatch`), and the take outside the\n  scope (`scopeNotGranted`, subject and role), and `control.disconnected` x3 with\n  the request count; no credential, MAC or payload text in any line.\n- `cargo test -p gx-render-worker --lib -- on_record emitting_frames_writes`\n  (6): the four earlier tests, plus frames the clock passed on record from the\n  frame path itself (`frame.missed` at warn, 4 missed), and a headless render on\n  record once by either entry (4 requests: rendered, refused, rendered, refused).\n- `cargo test -p gx-editor-shell -p gx-playout-shell --lib closing_writes` (2):\n  closing writes the product's stop record and finishes the log (`*.stop` then\n  `log.stop` are the file's last two records).\n- `cargo test -p gx-conformance --lib process_logs` (4): the file-name parser, the\n  sequence-gap rule, the heartbeat/anomaly agreement rule and the schema rule\n  each accept a whole file and refuse a broken one.\n- `npm run conformance`: **610 passed, 0 failed, 9 skipped** (was 594/0/9: the 16\n  new checks pass, the skip count is unchanged). \"Every late frame ... has its own\n  record\" ran against a file with late frames (a skip is reported when none\n  occur).\n- **Live, on the real windows** (not part of the automated run: a conformance run\n  opens no window). The shipped `gx-editor.exe` and `gx-playout.exe`, started with\n  `GX_LOG_DIR` in a scratch folder and closed with `CloseMainWindow` (a graceful\n  close), write: Editor `log.start`, `editor.start`, `editor.command` (`openScene`,\n  from the live front end), `editor.stop` (\"the window closed\"), `log.stop`\n  (lastSeq 4), exit 0; Playout `log.start`, `playout.start`, `operator.connect`\n  (its front end tried the default engine address and was refused, on record),\n  `playout.stop`, `log.stop`, exit 0. A force-terminated Editor (exit 15) leaves its\n  file whole up to its last record and no stop record, as a kill must.\n\n**Mutations** (`mutate_212c.py`), one at a time, restored byte-identical: 16 of 16 fail a named check (after the C3 check was strengthened):\n\n| Mutation | Failing check |\n| --- | --- |\n| T1 a scope denial not recorded | `log_tests` |\n| T2 a refused credential recorded with the error's text | `log_tests` |\n| T3 a departed client does not end its connection | `log_tests` (the watchdog) |\n| T4 the presented credential written when it verifies | `log_tests` |\n| W1 a render drawn after release not recorded | `a_headless_render_is_on_record_once_by_either_entry` |\n| W2 an in-process render recorded twice | the same |\n| W3 the frame path writes no anomalies | `frames_the_clock_passed_are_on_record_from_the_frame_path` |\n| S1 the Editor leaves its log unfinished on close | `closing_writes_a_stop_record_and_ends_the_log` |\n| S2 Playout writes no stop record | the same |\n| C1 the MCP server writes no stop record | conformance: the MCP file \"does not end with mcp.stop and log.stop\" |\n| C2 the engine does not record a client leaving | conformance: \"no control.disconnected for a client that left\" |\n| C3 a status poll written at the default level | conformance: \"a debug record at the default level\". The first version of this check looked only for debug-level records, so the mutation (the poll written at info) **survived**; it now looks for the poll events themselves, and the mutation fails it |\n| C4 the host does not say it is leaving | conformance: the host file \"ends with log.stop, not host.exit\" |\n| C5 a late frame counted and not written | conformance: \"every late frame and missed frame a heartbeat counts has its own record\" |\n| C6 the heartbeat written every frame | conformance: \"two heartbeats less than a second apart\" |\n| C7 the engine writes the control secret it was started with | conformance: \"no credential the run used is in any log file\" |\n\n**Named gaps (not closed by this row).**\n\n1. **A killed or interrupted engine writes no `engine.stop`.** The worker writes it\n   only when its listener ends by its own code. Ctrl+C and a forced kill end a\n   Windows process without running any of our code; catching Ctrl+C needs a\n   console-control handler, which the crate's `#![forbid(unsafe_code)]` rules out\n   by hand and which the `ctrlc` crate would give (a download, not in the lock\n   file, so not added without the user's approval). Today a stopped engine's last\n   record is its last heartbeat, at most a second before it ended, and the next\n   start's `log.start`/`engine.start` follows it. Closing this needs either that\n   crate or an orderly-stop request on the control plane. The one path that does\n   write `engine.stop` (the listener ending on a persistent accept failure) is\n   built and reviewed but no test drives it: that failure cannot be produced on\n   demand.\n2. **The windowed shells are covered by unit tests and the live launch above, not by\n   the automated conformance run.** The run opens no window.\n3. **`cargo test -p gx-engine-host --test ensure` fails two tests on this machine,\n   before and after this work:** they start a worker with no\n   `--recovery-journal`, so it reads the user's own journal at\n   `%APPDATA%\\GrapiX\\GrapiX\\data\\render-engine\\recovery.json`, written by an\n   older worker (schema 1; the worker supports 3). The journal is the user's and is\n   left alone; the repository gate excludes `gx-engine-host` (`test:rust:host`) for\n   this kind of reason.\n4. The take page and the import report's per-substitution detail are not in the\n   logs yet; they travel with the correlation id in `2.13`.\n",
+    "code_diff_this_slice": "diff --git a/Editor/shell/src/lib.rs b/Editor/shell/src/lib.rs\nindex e74f9f4..1855184 100644\n--- a/Editor/shell/src/lib.rs\n+++ b/Editor/shell/src/lib.rs\n@@ -1056,11 +1056,11 @@ fn cmd_asset_bytes(\n \n /// Build and run the Editor window.\n pub fn run() {\n-    // 2.12: the Editor's log, kept until the window closes.\n-    let _log = gx_telemetry::sink::init_process_logging(\"editor\", \"shell\");\n+    // 2.12: the Editor's log, from here until the window closes.\n+    let mut log = gx_telemetry::sink::init_process_logging(\"editor\", \"shell\");\n     tracing::info!(event = \"editor.start\", version = env!(\"CARGO_PKG_VERSION\"));\n     let workspace = Workspace::new(projects().ok());\n-    tauri::Builder::default()\n+    let built = tauri::Builder::default()\n         .manage(ShellState::new(workspace))\n         .plugin(tauri_plugin_dialog::init())\n         .invoke_handler(tauri::generate_handler![\n@@ -1088,8 +1088,30 @@ pub fn run() {\n             cmd_project_assets,\n             cmd_asset_bytes,\n         ])\n-        .run(tauri::generate_context!())\n-        .expect(\"the Editor shell failed to start\");\n+        .build(tauri::generate_context!());\n+    let app = match built {\n+        Ok(app) => app,\n+        Err(error) => {\n+            tracing::error!(event = \"editor.failed\", detail = %error);\n+            stopped(&mut log, \"the shell failed to start\");\n+            panic!(\"the Editor shell failed to start: {error}\");\n+        }\n+    };\n+    app.run(move |_app, event| {\n+        if let tauri::RunEvent::Exit = event {\n+            stopped(&mut log, \"the window closed\");\n+        }\n+    });\n+}\n+\n+/// The Editor's last record, then its log written out (2.12). Called when the\n+/// window has closed: the event loop does not return to `run`, so nothing\n+/// after it would be reached.\n+fn stopped(log: &mut Option<gx_telemetry::sink::LogGuard>, reason: &str) {\n+    tracing::info!(event = \"editor.stop\", reason);\n+    if let Some(guard) = log.take() {\n+        let _ = guard.finish();\n+    }\n }\n \n #[cfg(test)]\n@@ -1099,6 +1121,52 @@ mod tests {\n \n     use super::*;\n \n+    /// 2.12: closing the window leaves `editor.stop` and then the sink's own\n+    /// `log.stop` as the file's last two records.\n+    #[test]\n+    fn closing_writes_a_stop_record_and_ends_the_log() {\n+        use tracing_subscriber::layer::SubscriberExt;\n+        let nanos = std::time::SystemTime::now()\n+            .duration_since(std::time::UNIX_EPOCH)\n+            .unwrap()\n+            .as_nanos();\n+        let dir =\n+            std::env::temp_dir().join(format!(\"gx-editor-stop-{}-{nanos}\", std::process::id()));\n+\ndiff --git a/Playout/shell/src/lib.rs b/Playout/shell/src/lib.rs\nindex 6d71a0c..ad8bc3c 100644\n--- a/Playout/shell/src/lib.rs\n+++ b/Playout/shell/src/lib.rs\n@@ -549,10 +549,10 @@ fn scheduled(frame: Option<u64>) -> TakeAt {\n \n /// Build and run the Playout window.\n pub fn run() {\n-    // 2.12: Playout's log, kept until the window closes.\n-    let _log = gx_telemetry::sink::init_process_logging(\"playout\", \"shell\");\n+    // 2.12: Playout's log, from here until the window closes.\n+    let mut log = gx_telemetry::sink::init_process_logging(\"playout\", \"shell\");\n     tracing::info!(event = \"playout.start\", version = env!(\"CARGO_PKG_VERSION\"));\n-    tauri::Builder::default()\n+    let built = tauri::Builder::default()\n         .manage(Connection::default())\n         .invoke_handler(tauri::generate_handler![\n             cmd_connect,\n@@ -564,14 +564,82 @@ pub fn run() {\n             cmd_configure_output,\n             cmd_default_endpoint,\n         ])\n-        .run(tauri::generate_context!())\n-        .expect(\"the Playout shell failed to start\");\n+        .build(tauri::generate_context!());\n+    let app = match built {\n+        Ok(app) => app,\n+        Err(error) => {\n+            tracing::error!(event = \"playout.failed\", detail = %error);\n+            stopped(&mut log, \"the shell failed to start\");\n+            panic!(\"the Playout shell failed to start: {error}\");\n+        }\n+    };\n+    app.run(move |_app, event| {\n+        if let tauri::RunEvent::Exit = event {\n+            stopped(&mut log, \"the window closed\");\n+        }\n+    });\n+}\n+\n+/// Playout's last record, then its log written out (2.12). Called when the\n+/// window has closed: the event loop does not return to `run`, so nothing\n+/// after it would be reached.\n+fn stopped(log: &mut Option<gx_telemetry::sink::LogGuard>, reason: &str) {\n+    tracing::info!(event = \"playout.stop\", reason);\n+    if let Some(guard) = log.take() {\n+        let _ = guard.finish();\n+    }\n }\n \n #[cfg(test)]\n mod tests {\n     use super::*;\n \n+    /// 2.12: closing the window leaves `playout.stop` and then the sink's own\n+    /// `log.stop` as the file's last two records.\n+    #[test]\n+    fn closing_writes_a_stop_record_and_ends_the_log() {\n+        use tracing_subscriber::layer::SubscriberExt;\n+        let nanos = std::time::SystemTime::now()\n+            .duration_since(std::time::UNIX_EPOCH)\n+            .unwrap()\n+            .as_nanos();\n+        let dir =\n+            std::env::temp_dir().join(format!(\"gx-playout-stop-{}-{nanos}\", std::process::id()));\n+        let guard =\n+            gx_telemetry::sink::start(gx_telemet\ndiff --git a/Shared/control-plane/src/bind.rs b/Shared/control-plane/src/bind.rs\nindex 5dd554c..69ff780 100644\n--- a/Shared/control-plane/src/bind.rs\n+++ b/Shared/control-plane/src/bind.rs\n@@ -157,6 +157,27 @@ macro_rules! impl_write {\n     };\n }\n \n+impl ControlWriteHalf {\n+    /// End the connection from this side. On TCP and on a Unix-domain socket\n+    /// this shuts both directions, so the read half held by another thread\n+    /// stops waiting and the peer sees the connection close at once. A\n+    /// Windows named pipe has no such call: it closes when both halves have\n+    /// been dropped.\n+    pub fn close(&self) {\n+        match self {\n+            Self::Tcp(stream) => {\n+                let _ = stream.shutdown(std::net::Shutdown::Both);\n+            }\n+            #[cfg(windows)]\n+            Self::Local(_) => {}\n+            #[cfg(unix)]\n+            Self::Local(stream) => {\n+                let _ = stream.shutdown(std::net::Shutdown::Both);\n+            }\n+        }\n+    }\n+}\n+\n impl_read!(ControlStream);\n impl_write!(ControlStream);\n impl_read!(ControlReadHalf);\n\ndiff --git a/Shared/control-transport/src/client.rs b/Shared/control-transport/src/client.rs\nindex d3b0a43..afc757f 100644\n--- a/Shared/control-transport/src/client.rs\n+++ b/Shared/control-transport/src/client.rs\n@@ -49,6 +49,16 @@ pub struct Client {\n     request_count: u64,\n }\n \n+impl Drop for Client {\n+    /// A client that goes away ends its connection. Its reader thread holds\n+    /// the other half of the same socket, so without this the connection\n+    /// stayed open, with a thread waiting at each end, until the process\n+    /// exited: the engine never saw (or logged, 2.12) the client leave.\n+    fn drop(&mut self) {\n+        self.writer.close();\n+    }\n+}\n+\n impl Client {\n     /// Connect over TCP, retaining the established API.\n     pub fn connect(addr: SocketAddr) -> io::Result<Self> {\n\ndiff --git a/Shared/control-transport/src/server.rs b/Shared/control-transport/src/server.rs\nindex 5982796..da724cb 100644\n--- a/Shared/control-transport/src/server.rs\n+++ b/Shared/control-transport/src/server.rs\n@@ -131,17 +131,15 @@ impl<P: EnginePeer + Send + 'static> Server<P> {\n                 Ok(stream) => {\n                     let peer = Arc::clone(&self.peer);\n                     let secret = self.secret.clone();\n-                    thread::spawn(move || {\n-                        if let Err(error) = handle_connection(stream, peer, secret) {\n-                            eprintln!(\"control connection closed: {error}\");\n-                        }\n-                    });\n+                    thread::spawn(move || serve_connection(stream, peer, secret));\n                 }\n                 Err(error) if is_transient(&error) => {\n-                    eprintln!(\"accept failed, continuing: {error}\")\n+                    eprintln!(\"accept failed, continuing: {error}\");\n+                    tracing::warn!(event = \"control.accept_failed\", detail = %error);\n                 }\n                 Err(error) => {\n                     eprintln!(\"listener stopping: {error}\");\n+                    tracing::error!(event = \"control.listener_stopped\", detail = %error);\n                     return;\n                 }\n             }\n@@ -187,10 +185,98 @@ fn write_frame<T: serde::Serialize>(stream: &mut ControlStream, message: &T) ->\n     write_bytes(stream, &frame)\n }\n \n+/// Who is on the other end, for the log: a TCP address, or `local` for a\n+/// named pipe or a Unix-domain socket, which have none.\n+fn peer_name(stream: &ControlStream) -> String {\n+    match stream {\n+        ControlStream::Tcp(tcp) => tcp\n+            .peer_addr()\n+            .map_or_else(|_| \"tcp\".to_owned(), |address| address.to_string()),\n+        #[cfg(any(windows, unix))]\n+        ControlStream::Lo"
+  },
+  "questions": {
+    "done_when_met": {
+      "type": "noul",
+      "instructions": "Does the recorded evidence show that this row's done-when was met by execution: each process writes its file in a conformance run, every catalogue event appears when its action is driven, a late frame and a refusal each produce their record, and the default level is every state change and anomaly at info plus a once-a-second engine heartbeat?",
+      "criteria": {
+        "true": "Every clause has executed evidence.",
+        "false": "A clause is unmet, only claimed, or the evidence does not name what was run."
+      }
+    },
+    "every_process_read": {
+      "type": "noul",
+      "instructions": "Does the conformance run read back the log file of each process it starts (render worker, protected render worker, engine host, Editor MCP server), and are the two windowed shells covered by a launched real window?",
+      "criteria": {
+        "true": "Each process, including the windowed shells, is read back from its own file.",
+        "false": "A process is not read back from its own file."
+      }
+    },
+    "credential_cannot_reach_log": {
+      "type": "noul",
+      "instructions": "Can a credential (a control-port secret, a presented token, an operator token) reach any log file through this code?",
+      "criteria": {
+        "true": "Yes, a code path can write a credential.",
+        "false": "No, the code and the checks prevent it."
+      }
+    },
+    "silent_substitution_risk": {
+      "type": "noul",
+      "instructions": "Is there a silent substitution: an event or a process the done-when or the ADR catalogue asks for that is approximated, skipped or deferred without being named?",
+      "criteria": {
+        "true": "Yes, something is approximated or skipped silently.",
+        "false": "No, every gap is named."
+      }
+    },
+    "engine_stop_gap_named": {
+      "type": "noul",
+      "instructions": "The engine writes a stop record only when it ends by its own code. A killed engine or one ended by Ctrl+C writes none, and its last record is its last heartbeat. Is this gap named in the evidence with its reason and what would close it?",
+      "criteria": {
+        "true": "The gap, its reason and the way to close it are named.",
+        "false": "The gap is not named, or its reason is missing."
+      }
+    },
+    "mutations_can_fail": {
+      "type": "noul",
+      "instructions": "Do the recorded mutations show that the named checks can fail: each mutation was run alone, made at least one named check fail, and the file was restored identical?",
+      "criteria": {
+        "true": "Each recorded mutation names the failing check and says the file was restored.",
+        "false": "A mutation survived, was not run alone, or does not name what failed."
+      }
+    },
+    "weakest": {
+      "type": "choice",
+      "instructions": "What is the weakest point of this row's evidence?",
+      "criteria": {
+        "none": "No weak point.",
+        "unexecuted_clause": "A done-when clause has no executed check.",
+        "engine_stop": "The engine has no stop record when killed or interrupted.",
+        "shells_not_in_conformance": "The shells are covered by a manual live launch and not by the automated run.",
+        "stale": "Later changes may have invalidated the evidence.",
+        "vague_record": "The record is too vague to tell what was run."
+      }
+    },
+    "must_fix": {
+      "type": "noul",
+      "instructions": "Is there a defect in this slice to fix before committing?",
+      "criteria": {
+        "true": "Yes, a defect should be fixed first.",
+        "false": "No defect found."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "done_when_met",
+      "jev": 0.8,
+      "laya": 0.9611,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.8
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9611,
+        "confidence": 0.9611,
+        "answer_confidence": 0.9611,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "every_process_read",
+      "jev": 0.41,
+      "laya": 0.9061,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.41
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9061,
+        "confidence": 0.9061,
+        "answer_confidence": 0.9061,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "credential_cannot_reach_log",
+      "jev": 0.19,
+      "laya": 0.9587,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.19
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9587,
+        "confidence": 0.9587,
+        "answer_confidence": 0.9587,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "silent_substitution_risk",
+      "jev": 0.28,
+      "laya": 0.9705,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.28
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9705,
+        "confidence": 0.9705,
+        "answer_confidence": 0.9705,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "engine_stop_gap_named",
+      "jev": 0.98,
+      "laya": 0.9522,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.98
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9522,
+        "confidence": 0.9522,
+        "answer_confidence": 0.9522,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "mutations_can_fail",
+      "jev": 0.96,
+      "laya": 0.9143,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.96
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9143,
+        "confidence": 0.9143,
+        "answer_confidence": 0.9143,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "weakest",
+      "jev": "engine_stop",
+      "laya": "shells_not_in_conformance",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "engine_stop",
+        "confidence": 0.88,
+        "probabilities": {
+          "none": 0,
+          "unexecuted_clause": 0.03,
+          "engine_stop": 0.9,
+          "shells_not_in_conformance": 0.07,
+          "stale": 0,
+          "vague_record": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "shells_not_in_conformance",
+        "probabilities": {
+          "none": 0.1276,
+          "unexecuted_clause": 0.1293,
+          "engine_stop": 0.1712,
+          "shells_not_in_conformance": 0.2435,
+          "stale": 0.2204,
+          "vague_record": 0.108
+        },
+        "confidence": 0.025,
+        "answer_confidence": 0.2435,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "must_fix",
+      "jev": 0.39,
+      "laya": 0.9128,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.39
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9128,
+        "confidence": 0.9128,
+        "answer_confidence": 0.9128,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

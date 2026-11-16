@@ -131,17 +131,15 @@ impl<P: EnginePeer + Send + 'static> Server<P> {
                 Ok(stream) => {
                     let peer = Arc::clone(&self.peer);
                     let secret = self.secret.clone();
-                    thread::spawn(move || {
-                        if let Err(error) = handle_connection(stream, peer, secret) {
-                            eprintln!("control connection closed: {error}");
-                        }
-                    });
+                    thread::spawn(move || serve_connection(stream, peer, secret));
                 }
                 Err(error) if is_transient(&error) => {
-                    eprintln!("accept failed, continuing: {error}")
+                    eprintln!("accept failed, continuing: {error}");
+                    tracing::warn!(event = "control.accept_failed", detail = %error);
                 }
                 Err(error) => {
                     eprintln!("listener stopping: {error}");
+                    tracing::error!(event = "control.listener_stopped", detail = %error);
                     return;
                 }
             }
@@ -187,10 +185,98 @@ fn write_frame<T: serde::Serialize>(stream: &mut ControlStream, message: &T) -> 
     write_bytes(stream, &frame)
 }
 
+/// Who is on the other end, for the log: a TCP address, or `local` for a
+/// named pipe or a Unix-domain socket, which have none.
+fn peer_name(stream: &ControlStream) -> String {
+    match stream {
+        ControlStream::Tcp(tcp) => tcp
+            .peer_addr()
+            .map_or_else(|_| "tcp".to_owned(), |address| address.to_string()),
+        #[cfg(any(windows, unix))]
+        ControlStream::Local(_) => "local".to_owned(),
+    }
+}
+
+/// Why a presented credential was refused, as a fixed word. Never the
+/// error's own text: an unknown prefix quotes what was presented, and a
+/// credential, even a wrong one, is never written to a log (invariant 54).
+fn token_fault(error: &crate::TokenError) -> &'static str {
+    match error {
+        crate::TokenError::UnknownPrefix { .. } => "unknownPrefix",
+        crate::TokenError::MalformedToken => "malformedToken",
+        crate::TokenError::InvalidPayloadEncoding => "invalidPayloadEncoding",
+        crate::TokenError::InvalidPayload => "invalidPayload",
+        crate::TokenError::InvalidClaims(_) => "invalidClaims",
+        crate::TokenError::WrongMacLength { .. } => "wrongMacLength",
+        crate::TokenError::InvalidMacEncoding => "invalidMacEncoding",
+        crate::TokenError::MacMismatch => "macMismatch",
+    }
+}
+
+/// Serve one connection from accept to close, with both ends of its life on
+/// record (2.12, ADR-0004): who connected, and when and why it ended.
+fn serve_connection<P: EnginePeer>(
+    stream: ControlStream,
+    peer: Arc<Mutex<P>>,
+    secret: Option<String>,
+) {
+    let from = peer_name(&stream);
+    tracing::info!(
+        event = "control.connected",
+        peer = from.as_str(),
+        protected = secret.is_some(),
+    );
+    let mut requests = 0u64;
+    match handle_connection(stream, peer, secret, &mut requests) {
+        Ok(()) => tracing::info!(
+            event = "control.disconnected",
+            peer = from.as_str(),
+            requests,
+            reason = "closed by the client",
+        ),
+        Err(error) => {
+            eprintln!("control connection closed: {error}");
+            tracing::warn!(
+                event = "control.disconnected",
+                peer = from.as_str(),
+                requests,
+                reason = %error,
+            );
+        }
+    }
+}
+
+/// A request the transport answered itself, before the engine saw it: one
+/// from a connection that has not proved who it is, or one outside the scopes
+/// its credential grants (5.7). On record with who asked, never with a
+/// credential.
+fn log_refusal(
+    request: &'static str,
+    refusal: &Refusal,
+    authentication: Option<&ConnectionAuthorization>,
+) {
+    let (subject, role) = match authentication {
+        Some(ConnectionAuthorization::Authenticated(claims)) => (
+            Some(claims.subject.as_str()),
+            Some(format!("{:?}", claims.role)),
+        ),
+        _ => (None, None),
+    };
+    tracing::info!(
+        event = "control.refused",
+        request,
+        refusal = refusal.code_name(),
+        detail = %refusal,
+        subject,
+        role = role.as_deref(),
+    );
+}
+
 fn handle_connection<P: EnginePeer>(
     mut stream: ControlStream,
     peer: Arc<Mutex<P>>,
     secret: Option<String>,
+    requests: &mut u64,
 ) -> io::Result<()> {
     let mut inbound = SequenceTracker::new();
     let outbound = AtomicU64::new(0);
@@ -232,6 +318,7 @@ fn handle_connection<P: EnginePeer>(
             }
         }
 
+        *requests += 1;
         let (reply, events) = match envelope.payload {
             ClientRequest::Authenticate { token: presented } => {
                 let verified =
@@ -244,14 +331,33 @@ fn handle_connection<P: EnginePeer>(
                         });
                 match verified {
                     Ok(authorization) => {
+                        // Who this connection is from now on: the subject,
+                        // role and scopes its credential proved, never the
+                        // credential.
+                        if let ConnectionAuthorization::Authenticated(claims) = &authorization {
+                            tracing::info!(
+                                event = "control.authenticated",
+                                subject = claims.subject.as_str(),
+                                role = ?claims.role,
+                                scopes = ?claims.scopes,
+                            );
+                        }
                         authentication = Some(authorization);
                         (EngineReply::Authenticated, Vec::new())
                     }
-                    Err(_) => (EngineReply::Refused(Refusal::Unauthenticated), Vec::new()),
+                    Err(error) => {
+                        tracing::info!(
+                            event = "control.refused",
+                            request = "authenticate",
+                            refusal = Refusal::Unauthenticated.code_name(),
+                            detail = token_fault(&error),
+                        );
+                        (EngineReply::Refused(Refusal::Unauthenticated), Vec::new())
+                    }
                 }
             }
             request if authentication.is_none() => {
-                let _ = request;
+                log_refusal(request.name(), &Refusal::Unauthenticated, None);
                 (EngineReply::Refused(Refusal::Unauthenticated), Vec::new())
             }
             // 5.7: an out-of-scope request is answered here, so the engine is
@@ -266,6 +372,7 @@ fn handle_connection<P: EnginePeer>(
                     .map(|granted| granted.authorise(&request))
                     .and_then(Result::err)
                     .expect("the guard saw a refusal");
+                log_refusal(request.name(), &refusal, authentication.as_ref());
                 (EngineReply::Refused(refusal), Vec::new())
             }
             request => {
@@ -291,5 +398,173 @@ fn handle_connection<P: EnginePeer>(
             let event_envelope = Envelope::new(MessageId(format!("event.{index}")), next(), event);
             write_frame(&mut stream, &event_envelope)?;
         }
+    }
+}
+
+#[cfg(test)]
+mod log_tests {
+    //! 2.12: what the transport answers itself is on record: who connected,
+    //! who they proved to be, every request refused before the engine saw
+    //! it, and how the connection ended. Never a credential.
+
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+    use gx_contracts::auth::{Role, Scope};
+    use gx_contracts::{ContentHash, RationalRate, Revision, TakeId};
+    use gx_control_plane::intent::{TakeAt, TakeRequest};
+    use gx_mock_engine::MockEngine;
+    use tracing_subscriber::layer::SubscriberExt;
+
+    use super::*;
+    use crate::Client;
+
+    const SECRET: &str = "transport-log-test-secret-0123456789";
+
+    fn take() -> ClientRequest {
+        ClientRequest::Take(TakeRequest {
+            take_id: TakeId("t".into()),
+            revision: Revision(1),
+            content_hash: Some(ContentHash("a".repeat(64))),
+            at: TakeAt::NextOpportunity,
+        })
+    }
+
+    #[test]
+    fn connections_credentials_and_refusals_are_on_record_without_a_credential() {
+        let mut engine = MockEngine::new().genlocked(RationalRate::P29_97);
+        engine.publish(TakeId("t".into()), Revision(1), ContentHash("a".repeat(64)));
+        let server = Server::bind(
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            Some(SECRET),
+            engine,
+        )
+        .expect("bind loopback");
+        let addr = server.local_addr().expect("local addr");
+
+        let wrong = Token::mint(
+            "intruder",
+            Role::Playout,
+            vec![Scope::Take],
+            "another-secret-0123456789abcdef",
+        )
+        .expect("mint");
+        let cue_only =
+            Token::mint("cue-operator", Role::Playout, vec![Scope::Cue], SECRET).expect("mint");
+        let (wrong_text, cue_text) = (wrong.as_str().to_owned(), cue_only.as_str().to_owned());
+
+        // Three clients, one after another: no credential, a credential made
+        // with another secret, and a valid one that may cue but not take.
+        let clients = std::thread::spawn(move || {
+            assert!(Client::connect(addr).is_err(), "no credential is refused");
+            assert!(
+                Client::connect_with_token(addr, wrong).is_err(),
+                "a credential from another secret is refused"
+            );
+            let mut operator = Client::connect_with_token(addr, cue_only).expect("authenticated");
+            let refused = operator.handle(take());
+            assert!(
+                matches!(
+                    refused,
+                    EngineReply::Refused(Refusal::ScopeNotGranted { .. })
+                ),
+                "{refused:?}"
+            );
+        });
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("gx-transport-log-{}-{nanos}", std::process::id()));
+        let guard =
+            gx_telemetry::sink::start(gx_telemetry::sink::LogConfig::new("engine", "worker", &dir))
+                .unwrap();
+        // Served one connection after another on one thread, under this
+        // test's own log: each client that goes away must end its connection
+        // at the server, or the next is never accepted.
+        let dispatch = tracing::Dispatch::new(tracing_subscriber::registry().with(guard.layer()));
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            tracing::dispatcher::with_default(&dispatch, || {
+                for _ in 0..3 {
+                    let stream = server.listener.accept().expect("accept");
+                    serve_connection(stream, Arc::clone(&server.peer), server.secret.clone());
+                }
+            });
+            let _ = done.send(());
+        });
+        clients.join().expect("the clients ran");
+        finished
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .expect("a client that went away did not end its connection at the server");
+        guard.finish().unwrap();
+
+        let mut text = String::new();
+        let mut records: Vec<serde_json::Value> = Vec::new();
+        for entry in std::fs::read_dir(dir.join("engine")).unwrap().flatten() {
+            let file = std::fs::read_to_string(entry.path()).unwrap();
+            records.extend(file.lines().map(|line| serde_json::from_str(line).unwrap()));
+            text.push_str(&file);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let of = |event: &str| -> Vec<&serde_json::Value> {
+            records.iter().filter(|r| r["event"] == event).collect()
+        };
+        let connected = of("control.connected");
+        assert_eq!(connected.len(), 3, "{records:#?}");
+        assert!(connected.iter().all(|r| r["fields"]["protected"] == true));
+        assert!(connected[0]["fields"]["peer"]
+            .as_str()
+            .is_some_and(|peer| peer.starts_with("127.0.0.1:")));
+
+        let refused = of("control.refused");
+        // No credential: the capability exchange is refused, by name.
+        assert!(
+            refused
+                .iter()
+                .any(|r| r["fields"]["request"] == "capability"
+                    && r["refusal"] == "unauthenticated"
+                    && r["fields"]["subject"].is_null()),
+            "{refused:#?}"
+        );
+        // A credential that does not verify: refused with the fault's name.
+        assert!(
+            refused
+                .iter()
+                .any(|r| r["fields"]["request"] == "authenticate"
+                    && r["refusal"] == "unauthenticated"
+                    && r["fields"]["detail"] == "macMismatch"),
+            "{refused:#?}"
+        );
+        // A valid credential without the take scope: refused before the
+        // engine, with who asked.
+        let scope = refused
+            .iter()
+            .find(|r| r["fields"]["request"] == "take")
+            .unwrap_or_else(|| panic!("no take refusal in {refused:#?}"));
+        assert_eq!(scope["refusal"], "scopeNotGranted");
+        assert_eq!(scope["fields"]["subject"], "cue-operator");
+        assert_eq!(scope["fields"]["role"], "Playout");
+
+        let authenticated = of("control.authenticated");
+        assert_eq!(authenticated.len(), 1, "only the credential that verified");
+        assert_eq!(authenticated[0]["fields"]["subject"], "cue-operator");
+        assert_eq!(authenticated[0]["fields"]["scopes"], "[Cue]");
+
+        let closed = of("control.disconnected");
+        assert_eq!(closed.len(), 3, "{records:#?}");
+        // authenticate, capability, take: three requests on the last one.
+        assert_eq!(closed[2]["fields"]["requests"], 3);
+        assert_eq!(closed[2]["fields"]["reason"], "closed by the client");
+
+        for secret in [SECRET, wrong_text.as_str(), cue_text.as_str()] {
+            assert!(!text.contains(secret), "a credential reached the log");
+        }
+        // Not even a part of one: the MAC and the payload are both absent.
+        let mac = cue_text.rsplit('.').next().unwrap();
+        let payload = cue_text.split('.').nth(1).unwrap();
+        assert!(!text.contains(mac) && !text.contains(payload));
     }
 }

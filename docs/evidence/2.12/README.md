@@ -1,13 +1,14 @@
-# 2.12 — Every process logs through the sink (in progress)
+# 2.12 — Every process logs through the sink
 
 Build-plan row `2.12` (ADR-0004). Done when: in a conformance run each process
 writes its file; every ADR-0004 info-catalogue event appears when its action is
 driven; a late frame and a refusal each produce their record; the default level
 is every state change and anomaly at info plus a once-a-second engine
-heartbeat. **Active.** Done: the render engine worker, the engine host, the Playout
-shell, the Editor shell and every MCP server (at their one gate). Still to do:
-a conformance run that reads every process's file, and stop records for the
-shells and the worker (none of them has a clean-shutdown hook yet).
+heartbeat. Done in three slices (16 Nov 2026): the render engine worker; the
+engine host, Playout shell, Editor shell and MCP servers; then the control
+transport's own records, the stop records, and a conformance run that reads every
+process's file (**Slice 3**, last section). Named gaps that stay open are listed
+there.
 
 ## The render engine worker (16 Nov 2026)
 
@@ -138,3 +139,153 @@ the reading is the GPU this machine shares with other applications (see
 3.21); it is recorded rather than explained away. Final gate: `npm run check`
 exit 0 (46 Node, 412 Editor, 915 Rust passed, 0 failed, 38 ignored;
 conformance 594/0/9); clippy `-D warnings` and fmt clean.
+
+## Slice 3 — the transport's records, stop records, and the conformance read (16 Nov 2026)
+
+**Built.**
+
+- **Control transport** (`Shared/control-transport/src/server.rs`): a connection
+  is on record from accept to close: `control.connected` (peer address, whether
+  the engine requires a credential), `control.authenticated` (subject, role and
+  scopes the credential proved; never the credential), `control.refused` for
+  every request the transport answers before the engine sees it (no credential,
+  a credential that does not verify, a scope the credential lacks; with the
+  request, the refusal code and who asked), and `control.disconnected` (requests
+  served, and why it ended). A credential that does not verify is recorded by a
+  fixed word (`macMismatch`, `unknownPrefix`, ...), not by the error's own text,
+  because an unknown-prefix error quotes what was presented.
+- **A defect the new test found:** a dropped control `Client` never closed its
+  socket. Its reader thread held the other half of the connection, so the
+  engine kept a thread and an open connection per departed client until the
+  process ended, and could never log the client leaving. `Client` now closes its
+  connection when dropped (`ControlWriteHalf::close`, shutdown both directions
+  on TCP and Unix sockets; a Windows named pipe has no such call and closes with
+  its halves). The first run of the test hung on exactly this; it now has a
+  20-second watchdog.
+- **A gap I found reading the path:** the transport hands a headless render to the
+  engine through `handle_detached`, which does not pass through `handle`, so a
+  render served over the wire was never logged. It is now recorded where it is
+  answered (refused while the engine is held, or drawn after it is released),
+  once, whichever entry reaches it.
+- **Stop records.** Both windowed shells write `editor.stop` / `playout.stop`
+  and finish their log when the window closes (`RunEvent::Exit`; Tauri's event
+  loop does not return to `run`, so nothing after it would be reached). The
+  Editor MCP server writes `mcp.stop` when its client closes or its transport
+  fails. The engine host already wrote `host.exit`. The engine worker writes
+  `engine.stop` when its listener ends by its own code.
+- **The conformance run reads every process's file**
+  (`conformance/src/process_logs.rs`, 16 new checks): every launch in the run
+  logs into one scratch folder at the default level; the run then reads back, by
+  pid, the render worker it drove (file opens with `log.start` and `engine.start`
+  for that control address; a committed take with its take, revision and frame; a
+  refused request with its code and detail; a publish and a headless render; a
+  client connecting and leaving; heartbeats a second apart and no status poll
+  written), the protected worker (the credential accepted by subject, role and
+  scopes; a request outside its scopes with who asked), the engine host it runs
+  against that engine (start, the engine it adopted with its epoch, exit, log
+  finished), and the Editor MCP server it starts and speaks to (start, a call
+  answered with tool, scope, duration and idempotency key, a call refused with
+  `projectNotFound`, stop, and a stdout that carries only JSON-RPC). Then every
+  file of the run: each line parses and has the schema's fields; no sequence
+  gap that a `log.lost` does not state; every late or missed frame a heartbeat
+  counts has its own record; no credential the run used, and no `gx1.` token, in
+  any file.
+
+**Executed.**
+
+- `cargo test -p gx-control-transport --lib log_tests` (1): three clients on a
+  protected server (none, a credential made with another secret, one that may cue
+  but not take) leave `control.connected` x3, one `control.authenticated`
+  (`cue-operator`, `[Cue]`), `control.refused` for the missing credential
+  (`unauthenticated`), the wrong one (`macMismatch`), and the take outside the
+  scope (`scopeNotGranted`, subject and role), and `control.disconnected` x3 with
+  the request count; no credential, MAC or payload text in any line.
+- `cargo test -p gx-render-worker --lib -- on_record emitting_frames_writes`
+  (6): the four earlier tests, plus frames the clock passed on record from the
+  frame path itself (`frame.missed` at warn, 4 missed), and a headless render on
+  record once by either entry (4 requests: rendered, refused, rendered, refused).
+- `cargo test -p gx-editor-shell -p gx-playout-shell --lib closing_writes` (2):
+  closing writes the product's stop record and finishes the log (`*.stop` then
+  `log.stop` are the file's last two records).
+- `cargo test -p gx-conformance --lib process_logs` (4): the file-name parser, the
+  sequence-gap rule, the heartbeat/anomaly agreement rule and the schema rule
+  each accept a whole file and refuse a broken one.
+- `npm run conformance`: **610 passed, 0 failed, 9 skipped** (was 594/0/9: the 16
+  new checks pass, the skip count is unchanged). "Every late frame ... has its own
+  record" ran against a file with late frames (a skip is reported when none
+  occur).
+- **Live, on the real windows** (not part of the automated run: a conformance run
+  opens no window). The shipped `gx-editor.exe` and `gx-playout.exe`, started with
+  `GX_LOG_DIR` in a scratch folder and closed with `CloseMainWindow` (a graceful
+  close), write: Editor `log.start`, `editor.start`, `editor.command` (`openScene`,
+  from the live front end), `editor.stop` ("the window closed"), `log.stop`
+  (lastSeq 4), exit 0; Playout `log.start`, `playout.start`, `operator.connect`
+  (its front end tried the default engine address and was refused, on record),
+  `playout.stop`, `log.stop`, exit 0. A force-terminated Editor (exit 15) leaves its
+  file whole up to its last record and no stop record, as a kill must.
+
+**Mutations** (`mutate_212c.py`), one at a time, restored byte-identical: 16 of 16 fail a named check (after the C3 check was strengthened):
+
+| Mutation | Failing check |
+| --- | --- |
+| T1 a scope denial not recorded | `log_tests` |
+| T2 a refused credential recorded with the error's text | `log_tests` |
+| T3 a departed client does not end its connection | `log_tests` (the watchdog) |
+| T4 the presented credential written when it verifies | `log_tests` |
+| W1 a render drawn after release not recorded | `a_headless_render_is_on_record_once_by_either_entry` |
+| W2 an in-process render recorded twice | the same |
+| W3 the frame path writes no anomalies | `frames_the_clock_passed_are_on_record_from_the_frame_path` |
+| S1 the Editor leaves its log unfinished on close | `closing_writes_a_stop_record_and_ends_the_log` |
+| S2 Playout writes no stop record | the same |
+| C1 the MCP server writes no stop record | conformance: the MCP file "does not end with mcp.stop and log.stop" |
+| C2 the engine does not record a client leaving | conformance: "no control.disconnected for a client that left" |
+| C3 a status poll written at the default level | conformance: "a debug record at the default level". The first version of this check looked only for debug-level records, so the mutation (the poll written at info) **survived**; it now looks for the poll events themselves, and the mutation fails it |
+| C4 the host does not say it is leaving | conformance: the host file "ends with log.stop, not host.exit" |
+| C5 a late frame counted and not written | conformance: "every late frame and missed frame a heartbeat counts has its own record" |
+| C6 the heartbeat written every frame | conformance: "two heartbeats less than a second apart" |
+| C7 the engine writes the control secret it was started with | conformance: "no credential the run used is in any log file" |
+
+**Named gaps (not closed by this row).**
+
+1. **A killed or interrupted engine writes no `engine.stop`.** The worker writes it
+   only when its listener ends by its own code. Ctrl+C and a forced kill end a
+   Windows process without running any of our code; catching Ctrl+C needs a
+   console-control handler, which the crate's `#![forbid(unsafe_code)]` rules out
+   by hand and which the `ctrlc` crate would give (a download, not in the lock
+   file, so not added without the user's approval). Today a stopped engine's last
+   record is its last heartbeat, at most a second before it ended, and the next
+   start's `log.start`/`engine.start` follows it. Closing this needs either that
+   crate or an orderly-stop request on the control plane. The one path that does
+   write `engine.stop` (the listener ending on a persistent accept failure) is
+   built and reviewed but no test drives it: that failure cannot be produced on
+   demand.
+2. **The windowed shells are covered by unit tests and the live launch above, not by
+   the automated conformance run.** The run opens no window.
+3. **`cargo test -p gx-engine-host --test ensure` fails two tests on this machine,
+   before and after this work:** they start a worker with no
+   `--recovery-journal`, so it reads the user's own journal at
+   `%APPDATA%\GrapiX\GrapiX\data\render-engine\recovery.json`, written by an
+   older worker (schema 1; the worker supports 3). The journal is the user's and is
+   left alone; the repository gate excludes `gx-engine-host` (`test:rust:host`) for
+   this kind of reason.
+4. The take page and the import report's per-substitution detail are not in the
+   logs yet; they travel with the correlation id in `2.13`.
+
+**Jev and Laya on this slice** (`jev-laya-slice3.json`; Laya is laya-multilingual at
+max_len 8192, 6948 tokens, not truncated). Laya answers about 0.95 to nearly every
+yes/no question whatever its polarity, so a split is decided by hand.
+
+| Question | Jev | Laya | Decided |
+| --- | --- | --- | --- |
+| the done-when met by execution | 0.80 | 0.96 | yes |
+| the engine-stop gap is named, with its reason and its remedy | 0.98 | 0.95 | yes |
+| the mutations can fail | 0.96 | 0.91 | yes |
+| every process, shells included, is read back from its own file | 0.41 | 0.91 | **no, for the automated run**: the shells are covered by unit tests and a live launch (named gap 2). Jev is right. |
+| a credential can reach a log | 0.19 | 0.96 | no: Jev is right. No path writes one; mutations T2, T4 and C7 (and P2 earlier) show the checks catch one |
+| a silent substitution | 0.28 | 0.97 | no: Jev is right; the engine stop, the shells, the stale journal and the take page are each named |
+| weakest point | engine stop | shells not in conformance | both are named gaps (1 and 2) |
+| a defect to fix before committing | 0.39 | 0.91 | my own review found two: a fixed 300 ms sleep before reading the engine's file (now a bounded wait for the record, up to five seconds), and a check that a mutation survived (C3, strengthened) |
+
+**Gate.** `npm run check` exit 0 (46 Node, 412 Editor, 924 Rust passed, 0 failed, 38 ignored; conformance
+610/0/9); `cargo fmt --all --check` and `cargo clippy --workspace --all-targets
+-- -D warnings` clean.

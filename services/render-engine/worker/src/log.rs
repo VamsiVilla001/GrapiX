@@ -62,16 +62,27 @@ impl RequestNote {
                 note.at = Some(format!("{:?}", r.at));
             }
             ClientRequest::ConfigureOutput(config) => note.output = Some(format!("{config:?}")),
-            ClientRequest::Render(r) => {
-                note.take_id = Some(r.take_id.0.clone());
-                note.revision = Some(r.revision.0);
-            }
+            ClientRequest::Render(r) => return Self::render(r),
             ClientRequest::Authenticate { .. }
             | ClientRequest::Capability
             | ClientRequest::Status
             | ClientRequest::Performance => {}
         }
         note
+    }
+
+    /// A headless render, noted where it is answered: the control transport
+    /// hands a render to the engine by `handle_detached`, not by `handle`.
+    pub(crate) fn render(request: &gx_control_plane::render::RenderRequest) -> Self {
+        Self {
+            kind: "render",
+            take_id: Some(request.take_id.0.clone()),
+            revision: Some(request.revision.0),
+            content_hash: None,
+            at: None,
+            phase: None,
+            output: None,
+        }
     }
 
     /// Whether this request is a poll, logged at `debug` only.

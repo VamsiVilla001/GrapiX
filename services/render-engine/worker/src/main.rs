@@ -227,6 +227,15 @@ fn main() {
     asset_server.serve_in_background();
     println!("ctrl-c to stop");
     server.serve();
+    // The listener returns only when it can no longer accept (invariant 50):
+    // the engine is ending by its own code, and says so before it does (2.12).
+    tracing::error!(
+        event = "engine.stop",
+        reason = "the control listener stopped"
+    );
+    if let Some(guard) = log.take() {
+        let _ = guard.finish();
+    }
 }
 
 /// Advance the shared frame counter at the configured rational rate.

@@ -1056,11 +1056,11 @@ fn cmd_asset_bytes(
 
 /// Build and run the Editor window.
 pub fn run() {
-    // 2.12: the Editor's log, kept until the window closes.
-    let _log = gx_telemetry::sink::init_process_logging("editor", "shell");
+    // 2.12: the Editor's log, from here until the window closes.
+    let mut log = gx_telemetry::sink::init_process_logging("editor", "shell");
     tracing::info!(event = "editor.start", version = env!("CARGO_PKG_VERSION"));
     let workspace = Workspace::new(projects().ok());
-    tauri::Builder::default()
+    let built = tauri::Builder::default()
         .manage(ShellState::new(workspace))
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
@@ -1088,8 +1088,30 @@ pub fn run() {
             cmd_project_assets,
             cmd_asset_bytes,
         ])
-        .run(tauri::generate_context!())
-        .expect("the Editor shell failed to start");
+        .build(tauri::generate_context!());
+    let app = match built {
+        Ok(app) => app,
+        Err(error) => {
+            tracing::error!(event = "editor.failed", detail = %error);
+            stopped(&mut log, "the shell failed to start");
+            panic!("the Editor shell failed to start: {error}");
+        }
+    };
+    app.run(move |_app, event| {
+        if let tauri::RunEvent::Exit = event {
+            stopped(&mut log, "the window closed");
+        }
+    });
+}
+
+/// The Editor's last record, then its log written out (2.12). Called when the
+/// window has closed: the event loop does not return to `run`, so nothing
+/// after it would be reached.
+fn stopped(log: &mut Option<gx_telemetry::sink::LogGuard>, reason: &str) {
+    tracing::info!(event = "editor.stop", reason);
+    if let Some(guard) = log.take() {
+        let _ = guard.finish();
+    }
 }
 
 #[cfg(test)]
@@ -1098,6 +1120,52 @@ mod tests {
     use gx_contracts::control::ControlField;
 
     use super::*;
+
+    /// 2.12: closing the window leaves `editor.stop` and then the sink's own
+    /// `log.stop` as the file's last two records.
+    #[test]
+    fn closing_writes_a_stop_record_and_ends_the_log() {
+        use tracing_subscriber::layer::SubscriberExt;
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("gx-editor-stop-{}-{nanos}", std::process::id()));
+        let guard =
+            gx_telemetry::sink::start(gx_telemetry::sink::LogConfig::new("editor", "shell", &dir))
+                .unwrap();
+        let subscriber = tracing_subscriber::registry().with(guard.layer());
+        let mut log = Some(guard);
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!(event = "editor.start");
+            stopped(&mut log, "the window closed");
+        });
+        assert!(log.is_none(), "the log is finished, not left to a drop");
+        let mut events = Vec::new();
+        for entry in std::fs::read_dir(dir.join("editor")).unwrap().flatten() {
+            for line in std::fs::read_to_string(entry.path()).unwrap().lines() {
+                let record: serde_json::Value = serde_json::from_str(line).unwrap();
+                events.push((
+                    record["event"].as_str().unwrap().to_owned(),
+                    record["fields"]["reason"].as_str().map(str::to_owned),
+                ));
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        let last: Vec<_> = events.iter().rev().take(2).rev().cloned().collect();
+        assert_eq!(
+            last,
+            vec![
+                (
+                    "editor.stop".to_owned(),
+                    Some("the window closed".to_owned())
+                ),
+                ("log.stop".to_owned(), None),
+            ],
+            "{events:?}"
+        );
+    }
 
     /// 2.12: a command applied and a command refused, each on record with its
     /// name, target, effects or refusal code.

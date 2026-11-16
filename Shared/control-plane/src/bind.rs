@@ -157,6 +157,27 @@ macro_rules! impl_write {
     };
 }
 
+impl ControlWriteHalf {
+    /// End the connection from this side. On TCP and on a Unix-domain socket
+    /// this shuts both directions, so the read half held by another thread
+    /// stops waiting and the peer sees the connection close at once. A
+    /// Windows named pipe has no such call: it closes when both halves have
+    /// been dropped.
+    pub fn close(&self) {
+        match self {
+            Self::Tcp(stream) => {
+                let _ = stream.shutdown(std::net::Shutdown::Both);
+            }
+            #[cfg(windows)]
+            Self::Local(_) => {}
+            #[cfg(unix)]
+            Self::Local(stream) => {
+                let _ = stream.shutdown(std::net::Shutdown::Both);
+            }
+        }
+    }
+}
+
 impl_read!(ControlStream);
 impl_write!(ControlStream);
 impl_read!(ControlReadHalf);

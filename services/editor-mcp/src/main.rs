@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let root = root.ok_or(USAGE)?;
     // 2.12: this server's log, to a file: stdout carries the MCP protocol.
-    let _log = gx_telemetry::sink::init_process_logging("mcp", "editor-mcp");
+    let mut log = gx_telemetry::sink::init_process_logging("mcp", "editor-mcp");
     tracing::info!(
         event = "mcp.start",
         version = env!("CARGO_PKG_VERSION"),
@@ -40,14 +40,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let projects = gx_editor::Projects::at_root(root);
     let server = gx_editor_mcp::server(projects);
-    match http {
+    let served = match http {
         Some(port) => server.serve_http(port, |addr| {
             eprintln!(
                 "gx-editor-mcp listening on http://{addr}{}",
                 gx_mcp_server::HTTP_PATH
             );
-        })?,
-        None => server.serve_stdio()?,
+        }),
+        None => server.serve_stdio(),
+    };
+    // 2.12: the server's last record, then its log written out. A stdio
+    // server ends when its client closes the connection.
+    match &served {
+        Ok(()) => tracing::info!(
+            event = "mcp.stop",
+            reason = if http.is_some() {
+                "the listener ended"
+            } else {
+                "the client closed the connection"
+            },
+        ),
+        Err(error) => tracing::error!(
+            event = "mcp.stop",
+            reason = "the transport failed",
+            detail = %error,
+        ),
     }
+    if let Some(guard) = log.take() {
+        let _ = guard.finish();
+    }
+    served?;
     Ok(())
 }

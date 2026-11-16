@@ -18,6 +18,9 @@ use gx_conformance::{
     render_preview_suite, scene_plane_suite, scope_enforcement_suite, timing_plane_suite, Outcome,
     Report, RestartableWorker,
 };
+use gx_conformance::{
+    engine_log_suite, host_log_suite, mcp_log_suite, protected_engine_log_suite, run_log_suite,
+};
 use gx_contracts::{DeviceTier, Locality, RationalRate};
 use gx_control_plane::peer::EnginePeer;
 use gx_control_transport::{Client, Server};
@@ -106,10 +109,29 @@ fn main() {
     report.set_peer("plane contract, no peer");
     refusal_audit_suite(&mut report);
 
+    // 2.12: every process this run started wrote its own log file. The MCP
+    // server is started here; the engines and the host were read where they
+    // ran. Then every file of the run, whoever wrote it.
+    report.set_peer("every process this run started, read from its own log file (2.12)");
+    mcp_log_suite(&mut report);
+    run_log_suite(&[CONFORMANCE_TOKEN, REAL_ENGINE_SECRET], &mut report);
+
     print_report(&report);
 
     if !report.is_conformant() {
+        println!(
+            "the run's process logs are kept in {}",
+            gx_conformance::run_log_directory().display()
+        );
         std::process::exit(1);
+    }
+    if std::env::var_os("GX_CONFORMANCE_KEEP_LOGS").is_some() {
+        println!(
+            "the run's process logs are kept in {}",
+            gx_conformance::run_log_directory().display()
+        );
+    } else {
+        gx_conformance::remove_run_logs();
     }
 }
 
@@ -165,6 +187,9 @@ fn print_report(report: &Report) {
 
 /// A token used only by this runner.
 const CONFORMANCE_TOKEN: &str = "conformance-token-0123456789abcd";
+
+/// The control-port secret the protected real worker is started with (5.7).
+const REAL_ENGINE_SECRET: &str = "conformance-real-engine-secret-0123456789";
 
 /// Start a loopback server carrying a mock, then run the control-plane suite
 /// through a real client against it.
@@ -283,9 +308,7 @@ fn run_against_real_engine(report: &mut Report) {
         "gx-conformance-worker-{}-{port}/recovery.json",
         std::process::id()
     ));
-    let child = std::process::Command::new(&worker)
-        // 2.12: a test process logs to a scratch folder, not the operator's log root.
-        .env("GX_LOG_DIR", std::env::temp_dir().join("gx-test-logs"))
+    let child = gx_conformance::logged(&mut std::process::Command::new(&worker))
         .args([
             "--port",
             &port.to_string(),
@@ -313,6 +336,7 @@ fn run_against_real_engine(report: &mut Report) {
     // Whatever happens below, the engine the suite started is stopped when the
     // guard drops. This is the conformance harness ending its own fixture, not
     // a product stopping an engine.
+    let pid = child.id();
     let _guard = KillOnDrop(&mut child);
 
     // Wait for the engine to answer the capability exchange.
@@ -353,6 +377,15 @@ fn run_against_real_engine(report: &mut Report) {
     asset_route_suite(&mut client, asset_addr, report);
     // Headless render (11.41) runs last: its timed run puts a scene on Program.
     headless_render_suite(&mut client, asset_addr, report);
+
+    // 2.12: the engine host, run beside this engine, adopts it and says so in
+    // its own file; then this engine's file holds what the suites above drove.
+    let epoch = client.status().map(|status| status.epoch.0);
+    host_log_suite(&worker, port, epoch, report);
+    // The engine sees this client leave and writes it; the suite reads its
+    // file once that record is there.
+    drop(client);
+    engine_log_suite(pid, addr, report);
 }
 
 /// The worker binary. Cargo places a binary run via `cargo run` directly in
@@ -360,7 +393,7 @@ fn run_against_real_engine(report: &mut Report) {
 /// look in the executable's own directory and its parent.
 /// Start the real worker with a control-port secret and run the 5.7 checks.
 fn run_scope_against_real_engine(report: &mut Report) {
-    const SECRET: &str = "conformance-real-engine-secret-0123456789";
+    const SECRET: &str = REAL_ENGINE_SECRET;
     report.set_peer("real render engine, protected by a token (5.7)");
     let Some(worker) = worker_binary() else {
         report.skip_unavailable("gx-render-worker binary not built");
@@ -373,9 +406,7 @@ fn run_scope_against_real_engine(report: &mut Report) {
         "gx-conformance-scope-{}-{port}/recovery.json",
         std::process::id()
     ));
-    let child = std::process::Command::new(&worker)
-        // 2.12: a test process logs to a scratch folder, not the operator's log root.
-        .env("GX_LOG_DIR", std::env::temp_dir().join("gx-test-logs"))
+    let child = gx_conformance::logged(&mut std::process::Command::new(&worker))
         .args([
             "--port",
             &port.to_string(),
@@ -399,6 +430,7 @@ fn run_scope_against_real_engine(report: &mut Report) {
             return;
         }
     };
+    let pid = child.id();
     let _guard = KillOnDrop(&mut child);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
     while std::net::TcpStream::connect(addr).is_err() {
@@ -409,6 +441,9 @@ fn run_scope_against_real_engine(report: &mut Report) {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     real_engine_scope_suite(addr, SECRET, report);
+    // 2.12: who that suite proved to be, and what it was refused, is in the
+    // engine's own file.
+    protected_engine_log_suite(pid, report);
 }
 
 /// A worker the harness started, stopped when this drops.
@@ -482,9 +517,7 @@ fn start_worker_in(
         journal.display().to_string(),
     ];
     args.extend_from_slice(extra);
-    let mut child = std::process::Command::new(worker)
-        // 2.12: a test process logs to a scratch folder, not the operator's log root.
-        .env("GX_LOG_DIR", std::env::temp_dir().join("gx-test-logs"))
+    let mut child = gx_conformance::logged(&mut std::process::Command::new(worker))
         .args(&args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())

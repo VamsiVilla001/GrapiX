@@ -183,6 +183,17 @@ and recovery journal, into one archive for a bug report.
 | `2.14` | Diagnostic bundle (`gx-diag` and a shell menu item) | A bundle from a conformance run holds every process's log, the as-run log and the versions, and no credential |
 | `12.11` | As-run record (existing row), written as section 5 says: synced per record, hash-chained, separate file | The existing done-when, plus: removing or editing one line is detected at that line |
 
+## As built, row 2.12 (16 November 2026)
+
+Every process writes its own file through the sink (engine worker, engine host, Playout and Editor shells, Editor MCP
+server), and the control transport records its connections, credentials and refusals. Stop records: the shells write
+`editor.stop` and `playout.stop` when their window closes, the MCP server writes `mcp.stop` when its transport ends and the
+host writes `host.exit`. **A killed or Ctrl+C'd engine writes no `engine.stop`**: ending a Windows process that way runs no
+code of ours, and catching Ctrl+C needs a console handler (the `ctrlc` crate, a download needing the user's approval;
+`#![forbid(unsafe_code)]` rules out writing one by hand). Row `2.16` closes this, and has the next start of a process name
+its predecessor's log as unfinished, so a killed process is never mistaken for a running one. Evidence:
+`docs/evidence/2.12/README.md`.
+
 ## Jev and Laya on the design (`docs/evidence/logging/design-jev-laya.json`)
 
 | Question | Jev | Laya |
