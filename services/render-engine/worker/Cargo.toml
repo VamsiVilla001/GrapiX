@@ -11,6 +11,8 @@ gx-asset-plane = { workspace = true }
 gx-control-plane = { workspace = true }
 gx-control-transport = { workspace = true }
 serde_json = { workspace = true }
+tracing = "0.1"
+gx-telemetry = { workspace = true }
 serde = { workspace = true }
 ts-rs = { workspace = true }
 cosmic-text = "0.15"
@@ -50,3 +52,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "gx-render-worker"
 path = "src/main.rs"
+
+[dev-dependencies]
+# 2.12: the engine log tests install the sink as a scoped subscriber.
+tracing-subscriber = "0.3"

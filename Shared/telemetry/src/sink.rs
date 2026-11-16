@@ -259,6 +259,31 @@ pub fn init_logging(config: LogConfig) -> io::Result<LogGuard> {
     Ok(guard)
 }
 
+/// Where logs go: `GX_LOG_DIR` when it is set (tests, the conformance
+/// harness, an operator who wants logs on another drive), otherwise the
+/// platform log root (`gx_contracts::platform::log_root`).
+pub fn log_directory() -> io::Result<PathBuf> {
+    if let Some(dir) = std::env::var_os("GX_LOG_DIR") {
+        return Ok(PathBuf::from(dir));
+    }
+    gx_contracts::platform::log_root().map_err(|refusal| io::Error::other(refusal.to_string()))
+}
+
+/// Start this process's log and install it, or say on stderr why not and
+/// carry on: a logging fault never stops a product, and never takes a graphic
+/// off air (ADR-0004, user decision 16 Nov 2026).
+pub fn init_process_logging(product: &str, process: &str) -> Option<LogGuard> {
+    let started = log_directory()
+        .and_then(|directory| init_logging(LogConfig::new(product, process, directory)));
+    match started {
+        Ok(guard) => Some(guard),
+        Err(error) => {
+            eprintln!("{product} {process}: the log could not be started ({error}); running without a log file");
+            None
+        }
+    }
+}
+
 impl JsonLayer {
     /// Number one event and offer it to the queue; never waits.
     fn offer(

@@ -118,6 +118,20 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-16 — 2.12 active: the render engine worker logs through the sink (Claude)
+
+**Resume here.** 2.12's first slice: `services/render-engine/worker/src/log.rs` names the engine's events;
+`Engine::handle` logs every request and answer (`program.cue/take/clear/phase`, `output.configure`, `render.request`
+at info with result, committed frame, take, revision, hash, refusal; polls at debug); `publish.accepted/refused`;
+`frame.late`, `frame.missed` (warn); `engine.heartbeat` once a second (totals, Program, clock, reference) and
+`clock.changed`; `main.rs` starts the sink first (`init_process_logging`, `GX_LOG_DIR` or log root; a sink that cannot
+start is reported and the engine runs on), writes `engine.start` (epoch, clock, tier, adapter, rate, addresses) and
+`recovery.restored`, and logs fatal start-up errors before exiting. Tests: 4 in process, 1 on the shipped binary
+(`tests/log_file.rs`); 6 of 6 mutations (one survived until the heartbeat test was tightened). Jev found the slice
+incomplete against the ADR catalogue (no epoch or clock at start, no clock changes): fixed. **Not done:**
+`engine.stop` (no shutdown hook), the engine host, the Editor and Playout shells and services, both MCP servers, a
+conformance check over every process's file; then 2.13, 2.14, 2.15, 12.11.
+
 ## 2026-11-16 — 2.11 done: the JSON Lines log sink; ADR-0004 accepted (Claude, on the user's decisions)
 
 **Resume here.** The user accepted ADR-0004 and decided: build now; default verbosity every state change and

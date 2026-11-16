@@ -1,0 +1,216 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 50505,
+    "output_tokens": 0,
+    "state_tokens": 7174,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "2.12 every process logs through the sink; this slice is the render engine worker only, the row stays active",
+    "evidence": "# 2.12 \u2014 Every process logs through the sink (in progress)\n\nBuild-plan row `2.12` (ADR-0004). Done when: in a conformance run each process\nwrites its file; every ADR-0004 info-catalogue event appears when its action is\ndriven; a late frame and a refusal each produce their record; the default level\nis every state change and anomaly at info plus a once-a-second engine\nheartbeat. **Active.** Done so far: the render engine worker. Still to do: the\nengine host, the Editor and Playout shells and services, both MCP servers, and\na conformance check over all of their files.\n\n## The render engine worker (16 Nov 2026)\n\n- `services/render-engine/worker/src/log.rs` names every engine event once:\n  `program.cue`, `program.take`, `program.clear`, `program.phase`,\n  `output.configure` and `render.request` at info with `result`\n  (`committed`, `configured`, `rendered`, `refused`), the committed `frame`,\n  the take, revision and pinned hash, and for a refusal its `refusal` code and\n  detail; `engine.capability`, `engine.status` and `engine.performance` (polls)\n  at debug; `publish.accepted` and `publish.refused`; `frame.late` (info) and\n  `frame.missed` (warn, with how many); `engine.heartbeat` once a second\n  (frame, rendered, late, missed, dropped, what is on Program, output\n  inhibited).\n- `Engine::handle` (the control plane's one entry) notes each request,\n  answers it, and logs the answer; the frame path logs anomalies and the\n  heartbeat where the engine already measures them; the asset plane's publish\n  is logged with its result.\n- `main.rs` starts the sink first (`gx_telemetry::sink::init_process_logging`,\n  `GX_LOG_DIR` or the platform log root; a sink that cannot start is reported\n  and the engine runs on, by the user's rule that a logging fault never stops\n  Program), writes `engine.start` (version, tier, live capability, adapter,\n  rate, locality, the bound control and asset addresses, whether a token is\n  required, the log directory) and `recovery.restored`, and sends every fatal\n  start-up error to the log as well as stderr before exiting.\n\n**Executed.**\n\n- `cargo test -p gx-render-worker --lib -- on_record emitting_frames_writes`\n  (4): a take, an unknown take, a status poll and a clear through\n  `Engine::handle` leave `program.take committed` (take, revision, hash,\n  frame, epoch), `program.take refused` (`unknownTake`, the detail),\n  `program.clear committed` and `engine.status` at debug; a publish accepted\n  and one refused (a non-finite position) are both on record; an on-time frame\n  writes nothing, a late one `frame.late` with its render time, a run of three\n  missed frames `frame.missed`; the heartbeat writes once a second, not once a\n  call, and three frames emitted inside a second write exactly one.\n- `cargo test -p gx-render-worker --test log_file`: the shipped binary,\n  started with `GX_LOG_DIR`, writes `log.start`, `engine.start` (tier, rate,\n  the 127.0.0.1 control address) and a heartbeat from its live frame path.\n- Mutations (`mutate_212.py`), one at a time, restored byte-identical: a\n  request not logged, a late frame not logged, the frame path's heartbeat\n  replaced by a fresh one each frame (survived the first test; the test was\n  tightened to exactly one heartbeat a second), a poll logged at info, a\n  publish not logged, `engine.start` renamed. 6 of 6 fail named tests.\n\n**Not yet shown.** The call from the frame path to the anomaly log is not\nmutation-tested (the late-frame test calls the logger directly; a late frame\ncannot be forced on demand). No conformance check reads the engine's file yet.\n",
+    "log_module": "\nuse std::time::{Duration, Instant};\n\nuse gx_asset_plane::publish::PublishReply;\nuse gx_control_plane::message::{ClientRequest, EngineReply};\n\nuse crate::metrics::FrameSample;\n\npub(crate) struct RequestNote {\n    kind: &'static str,\n    take_id: Option<String>,\n    revision: Option<u64>,\n    content_hash: Option<String>,\n    at: Option<String>,\n    phase: Option<String>,\n    output: Option<String>,\n}\n\nimpl RequestNote {\n    pub(crate) fn of(request: &ClientRequest) -> Self {\n        let mut note = Self {\n            kind: request.name(),\n            take_id: None,\n            revision: None,\n            content_hash: None,\n            at: None,\n            phase: None,\n            output: None,\n        };\n        match request {\n            ClientRequest::Cue(r) => {\n                note.take_id = Some(r.take_id.0.clone());\n                note.revision = Some(r.revision.0);\n                note.content_hash = r.content_hash.as_ref().map(|h| h.0.clone());\n                note.at = Some(format!(\"{:?}\", r.at));\n            }\n            ClientRequest::Take(r) => {\n                note.take_id = Some(r.take_id.0.clone());\n                note.revision = Some(r.revision.0);\n                note.content_hash = r.content_hash.as_ref().map(|h| h.0.clone());\n                note.at = Some(format!(\"{:?}\", r.at));\n            }\n            ClientRequest::Clear(r) => note.at = Some(format!(\"{:?}\", r.at)),\n            ClientRequest::Phase(r) => {\n                note.phase = Some(r.phase.clone());\n                note.at = Some(format!(\"{:?}\", r.at));\n            }\n            ClientRequest::ConfigureOutput(config) => note.output = Some(format!(\"{config:?}\")),\n            ClientRequest::Render(r) => {\n                note.take_id = Some(r.take_id.0.clone());\n                note.revision = Some(r.revision.0);\n            }\n            ClientRequest::Authenticate { .. }\n            | ClientRequest::Capability\n            | ClientRequest::Status\n            | ClientRequest::Performance => {}\n        }\n        note\n    }\n\n    fn is_read(&self) -> bool {\n        matches!(self.kind, \"capability\" | \"status\" | \"performance\")\n    }\n}\n\npub(crate) fn request(note: &RequestNote, reply: &EngineReply, epoch: u64) {\n    let (result, frame, refusal, detail) = match reply {\n        EngineReply::Cued(c) | EngineReply::Taken(c) | EngineReply::Cleared(c) => {\n            (\"committed\", Some(c.frame), None, None)\n        }\n        EngineReply::PhaseCommitted(p) => (\"committed\", Some(p.committed.frame), None, None),\n        EngineReply::Refused(r) => (\"refused\", None, Some(r.code_name()), Some(r.to_string())),\n        EngineReply::OutputConfigured { .. } => (\"configured\", None, None, None),\n        EngineReply::Rendered(_) => (\"rendered\", None, None, None),\n        _ => (\"answered\", None, None, None),\n    };\n    let event = event_name(note.kind);\n    if note.is_read() {\n        tracing::debug!(event, epoch, result, refusal, request = note.kind);\n        return;\n    }\n    let take_id = note.take_id.as_deref();\n    let content_hash = note.content_hash.as_deref();\n    let at = note.at.as_deref();\n    let phase = note.phase.as_deref();\n    let output = note.output.as_deref();\n    match refusal {\n        Some(refusal) => tracing::info!(\n            event,\n            epoch,\n            result,\n            refusal,\n            detail = detail.as_deref(),\n            take_id,\n            revision = note.revision,\n            content_hash,\n            at,\n            phase,\n            output,\n        ),\n        None => tracing::info!(\n            event,\n            epoch,\n            frame,\n            result,\n            take_id,\n            revision = note.revision,\n            content_hash,\n            at,\n            phase,\n            output,\n        ),\n    }\n}\n\nfn event_name(kind: &str) -> &'static str {\n    match kind {\n        \"cue\" => \"program.cue\",\n        \"take\" => \"program.take\",\n        \"clear\" => \"program.clear\",\n        \"phase\" => \"program.phase\",\n        \"configureOutput\" => \"output.configure\",\n        \"render\" => \"render.request\",\n        \"capability\" => \"engine.capability\",\n        \"status\" => \"engine.status\",\n        \"performance\" => \"engine.performance\",\n        \"authenticate\" => \"engine.authenticate\",\n        _ => \"engine.request\",\n    }\n}\n\npub(crate) fn publish(take_id: &str, reply: &PublishReply) {\n    match reply {\n        PublishReply::Published {\n            take_id,\n            revision,\n            content_hash,\n        } => tracing::info!(\n            event = \"publish.accepted\",\n            take_id = take_id.0.as_str(),\n            revision = revision.0,\n            content_hash = content_hash.0.as_str(),\n        ),\n        PublishReply::Refused(refusal) => tracing::info!(\n            event = \"publish.refused\",\n            take_id,\n            refusal = ?refusal,\n        ),\n    }\n}\n\npub(crate) fn frame(sample: &FrameSample, epoch: u64) {\n    if sample.missed_before > 0 {\n        tracing::warn!(\n            event = \"frame.missed\",\n            epoch,\n            frame = sample.frame,\n            missed = sample.missed_before,\n        );\n    }\n    if sample.late {\n        tracing::info!(\n            event = \"frame.late\",\n            epoch,\n            frame = sample.frame,\n            render_us = sample.render_nanos / 1_000,\n            interval_us = sample.interval_nanos / 1_000,\n        );\n    }\n}\n\n#[derive(Debug)]\npub(crate) struct Heartbeat {\n    last: Option<Instant>,\n}\n\npub(crate) const HEARTBEAT: Duration = Duration::from_secs(1);\n\npub(crate) struct Totals {\n    pub epoch: u64,\n    pub frame: u64,\n    pub rendered: u64,\n    pub late: u64,\n    pub missed: u64,\n    pub dropped: u64,\n    pub program: Option<String>,\n    pub output_inhibited: bool,\n}\n\nimpl Heartbeat {\n    pub(crate) fn new() -> Self {\n        Self { last: None }\n    }\n\n    pub(crate) fn beat(&mut self, now: Instant, totals: impl FnOnce() -> Totals) -> bool {\n        if self\n            .last\n            .is_some_and(|last| now.duration_since(last) < HEARTBEAT)\n        {\n            return false;\n        }\n        self.last = Some(now);\n        let t = totals();\n        tracing::info!(\n            event = \"engine.heartbeat\",\n            epoch = t.epoch,\n            frame = t.frame,\n            rendered = t.rendered,\n            late = t.late,\n            missed = t.missed,\n            dropped = t.dropped,\n            program = t.program.as_deref(),\n            output_inhibited = t.output_inhibited,\n        );\n        true\n    }\n}\n",
+    "main_diff": "diff --git a/services/render-engine/worker/src/main.rs b/services/render-engine/worker/src/main.rs\nindex a875a83..85167e3 100644\n--- a/services/render-engine/worker/src/main.rs\n+++ b/services/render-engine/worker/src/main.rs\n@@ -82,6 +82,8 @@ fn main() {\n     } else {\n         Locality::CoLocated\n     };\n+    // 2.12: the engine's log, from here on. Kept for the life of the process.\n+    let mut log = gx_telemetry::sink::init_process_logging(\"engine\", \"worker\");\n \n     // The clock pump owns the passage of time. The engine observes the shared\n     // counter; nothing on the control plane can write it (ADR-002).\n@@ -125,17 +127,19 @@ fn main() {\n     };\n     let recovery = match recovery {\n         Ok(recovery) => recovery,\n-        Err(error) => {\n-            eprintln!(\"cannot open recovery journal: {error}\");\n-            std::process::exit(1);\n-        }\n+        Err(error) => fatal(\n+            &mut log,\n+            \"recovery.open_failed\",\n+            format!(\"cannot open recovery journal: {error}\"),\n+        ),\n     };\n     match engine.attach_recovery_journal(recovery) {\n         Ok(restored) => report_drops(&restored),\n-        Err(error) => {\n-            eprintln!(\"cannot restore recovery journal: {error}\");\n-            std::process::exit(1);\n-        }\n+        Err(error) => fatal(\n+            &mut log,\n+            \"recovery.restore_failed\",\n+            format!(\"cannot restore recovery journal: {error}\"),\n+        ),\n     }\n \n     println!(\"RENDER ENGINE - real device, engine-owned clock\");\n@@ -158,30 +162,55 @@ fn main() {\n         None => return usage(\"--port leaves no asset-plane port\"),\n     };\n     let asset_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), asset_port);\n-    let server = Server::bind(addr, token.as_deref(), engine).unwrap_or_else(|error| {\n-        eprintln!(\"cannot serve control plane: {error}\");\n-        std::process::exit(1);\n-    });\n+    let adapter = engine.gpu_description();\n+    let server = match Server::bind(addr, token.as_deref(), engine) {\n+        Ok(server) => server,\n+        Err(error) => fatal(\n+            &mut log,\n+            \"engine.bind_failed\",\n+            format!(\"cannot serve control plane: {error}\"),\n+        ),\n+    };\n     let shared_engine = server.engine();\n-    let asset_server = AssetPublishServer::bind(asset_addr, Arc::clone(&shared_engine))\n-        .unwrap_or_else(|error| {\n-            eprintln!(\"cannot serve asset plane: {error}\");\n-            std::process::exit(1);\n-        });\n-    match server.local_addr() {\n-        Ok(bound) => println!(\"  listening on {bound}\"),\n-        Err(e) => {\n-            eprintln!(\"cannot read local address: {e}\");\n-            std::process::exit(1);\n-        }\n-    }\n-    match asset_server.local_addr() {\n-        Ok(bound) => println!(\"  asset publication on {bound}\"),\n-        Err(error) => {\n-            eprintln!(\"cannot read asset-plane address: {error}\");\n-            std::process::exit(1);\n-        }\n-    }\n+    let asset_server = match AssetPublishServer::bind(asset_addr, Arc::clone(&shared_engine)) {\n+        Ok(server) => server,\n+        Err(error) => fatal(\n+            &mut log,\n+            \"engine.bind_failed\",\n+            format!(\"cannot serve asset plane: {error}\"),\n+        ),\n+    };\n+    let control = match server.local_addr() {\n+        Ok(bound) => bound,\n+        Err(e) => fatal(\n+            &mut log,\n+            \"engine.bind_failed\",\n+            format!(\"cannot read local address: {e}\"),\n+        ),\n+    };\n+    println!(\"  listening on {control}\");\n+    let assets = match asset_server.local_addr() {\n+        Ok(bound) => bound,\n+        Err(error) => fatal(\n+            &mut log,\n+            \"engine.bind_failed\",\n+            format!(\"cannot read asset-plane address: {error}\"),\n+        ),\n+    };\n+    println!(\"  asset publication on {assets}\");\n+    tracing::info!(\n+        event = \"engine.start\",\n+        version = env!(\"CARGO_PKG_VERSION\"),\n+        tier = ?tier,\n+        live_capable = tier.live_capable(),\n+        adapter = adapter.as_deref(),\n+        rate = format!(\"{}/{}\", rate.num, rate.den).as_str(),\n+        locality = ?locality,\n+        control = %control,\n+        assets = %assets,\n+        token_required = token.is_some(),\n+        log_directory = log.as_ref().map(|g| g.directory().display().to_string()).as_deref(),\n+    );\n     spawn_render_loop(shared_engine, frame_source);\n     asset_server.serve_in_background();\n     println!(\"ctrl-c to stop\");\n@@ -225,12 +254,21 @@ fn spawn_render_loop(engine: Arc<Mutex<Engine>>, frame_source: Arc<AtomicU64>) {\n             }\n             let Ok(mut engine) = engine.lock() else {\n                 eprintln!(\"render loop stopping: engine lock poisoned\");\n+                tracing::error!(\n+                    event = \"engine.render_loop_stopped\",\n+                    detail = \"engine lock poisoned\"\n+                );\n                 return;\n             };\n             match engine.emit_frame() {\n                 Ok(emission) => emitted = emission.sample.frame,\n                 Err(error) => {\n                     eprintln!(\"output emission failed at frame {current}: {error}\");\n+                    tracing::error!(\n+                        event = \"output.emit_failed\",\n+                        frame = current,\n+                        detail = %error,\n+                    );\n                     emitted = current;\n                 }\n             }\n@@ -270,8 +308,24 @@ fn parse_publish(spec: &str) -> Option<(TakeId, Revision, ContentHash)> {\n /// Name, on stderr, the scenes a restore dropped (5.11). The engine host does\n /// not drain a running worker's stderr, so the lines stop at a small budget\n /// and point to the drop report beside the journal, which names every one.\n+/// Stop the process for a reason the operator must act on: on record, on\n+/// stderr, and with the log written out before the exit.\n+fn fatal(log: &mut Option<gx_telemetry::sink::LogGuard>, event: &str, detail: String) ->"
+  },
+  "questions": {
+    "engine_slice_complete": {
+      "type": "noul",
+      "instructions": "For the engine worker alone, is every ADR-0004 info-catalogue engine event logged and shown by an executed test?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No, some engine event is missing or untested."
+      }
+    },
+    "program_safe": {
+      "type": "noul",
+      "instructions": "Can the logging added to the frame path delay a Program frame noticeably?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No: anomalies and a 1 s heartbeat only, through a queue that never waits."
+      }
+    },
+    "polls_right_level": {
+      "type": "noul",
+      "instructions": "Is logging capability, status and performance polls at debug right?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "fatal_logged": {
+      "type": "noul",
+      "instructions": "Is every start-up failure of the worker on record before it exits?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "row_stays_active": {
+      "type": "noul",
+      "instructions": "Should 2.12 stay active?",
+      "criteria": {
+        "true": "Yes, other processes are not done.",
+        "false": "No."
+      }
+    },
+    "weakest": {
+      "type": "choice",
+      "instructions": "Weakest point of this slice?",
+      "criteria": {
+        "frame_call_not_mutation_tested": "The frame path call to the anomaly log is not mutation-tested.",
+        "usage_errors_not_logged": "Argument errors before the sink starts go to stderr only.",
+        "none": "None."
+      }
+    },
+    "must_fix": {
+      "type": "noul",
+      "instructions": "A defect to fix before committing?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "engine_slice_complete",
+      "jev": 0.33,
+      "laya": 0.9785,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.33
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9785,
+        "confidence": 0.9785,
+        "answer_confidence": 0.9785,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "program_safe",
+      "jev": 0.19,
+      "laya": 0.9697,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.19
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9697,
+        "confidence": 0.9697,
+        "answer_confidence": 0.9697,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "polls_right_level",
+      "jev": 0.88,
+      "laya": 0.9721,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.88
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9721,
+        "confidence": 0.9721,
+        "answer_confidence": 0.9721,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "fatal_logged",
+      "jev": 0.8,
+      "laya": 0.9778,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.8
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9778,
+        "confidence": 0.9778,
+        "answer_confidence": 0.9778,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "row_stays_active",
+      "jev": 0.96,
+      "laya": 0.9811,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.96
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9811,
+        "confidence": 0.9811,
+        "answer_confidence": 0.9811,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "weakest",
+      "jev": "frame_call_not_mutation_tested",
+      "laya": "usage_errors_not_logged",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "frame_call_not_mutation_tested",
+        "confidence": 0.88,
+        "probabilities": {
+          "frame_call_not_mutation_tested": 0.92,
+          "usage_errors_not_logged": 0.08,
+          "none": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "usage_errors_not_logged",
+        "probabilities": {
+          "frame_call_not_mutation_tested": 0.2785,
+          "usage_errors_not_logged": 0.3933,
+          "none": 0.3282
+        },
+        "confidence": 0.009,
+        "answer_confidence": 0.3933,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "must_fix",
+      "jev": 0.58,
+      "laya": 0.9647,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.58
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9647,
+        "confidence": 0.9647,
+        "answer_confidence": 0.9647,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

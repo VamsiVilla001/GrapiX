@@ -130,6 +130,8 @@ pub struct Engine {
     /// The clock frame Program was last emitted for, so frames the render
     /// loop never reached are counted as missed rather than vanishing.
     last_emitted: Option<u64>,
+    /// 2.12: the once-a-second record that the engine is running.
+    heartbeat: crate::log::Heartbeat,
     /// Headless renders' images, served on the asset plane by content hash.
     rendered: Arc<Mutex<RenderedImages>>,
     outputs: OutputAdapterRegistry,
@@ -198,6 +200,7 @@ impl Engine {
             emitter: FrameEmitter::new(),
             metrics: FrameMetrics::with_window(rate, 60),
             last_emitted: None,
+            heartbeat: crate::log::Heartbeat::new(),
             rendered: Arc::new(Mutex::new(RenderedImages::with_capacity(64))),
             outputs: OutputAdapterRegistry::standard(
                 std::env::temp_dir().join("grapix-render-output"),
@@ -831,6 +834,28 @@ impl Engine {
             missed_before,
         };
         self.metrics.record(sample);
+        // 2.12: a late frame and frames the clock passed are on record, and a
+        // heartbeat each second says the engine is running and how.
+        let epoch = self.clock.epoch().0;
+        crate::log::frame(&sample, epoch);
+        let (metrics, program_state, inhibited) =
+            (&self.metrics, &self.program, self.output_inhibited);
+        let (clock, reference) = (self.clock.source(), self.clock.reference());
+        self.heartbeat
+            .beat(std::time::Instant::now(), || crate::log::Totals {
+                epoch,
+                frame: frame_number,
+                rendered: metrics.total_rendered(),
+                late: metrics.total_late(),
+                missed: metrics.total_missed(),
+                dropped: metrics.total_dropped(),
+                program: program_state
+                    .as_ref()
+                    .map(|p| format!("{}@{}", p.take_id.0, p.revision.0)),
+                output_inhibited: inhibited,
+                clock: format!("{clock:?}"),
+                reference: format!("{reference:?}"),
+            });
         if !self.output_inhibited {
             self.outputs
                 .emit(&self.selected_output, frame_number, Arc::clone(&program))?;
@@ -1034,7 +1059,10 @@ impl AssetPublishPeer for Engine {
     }
 
     fn publish_scene(&mut self, scene: SceneDocument) -> PublishReply {
-        self.publish(scene)
+        let take_id = scene.id.clone();
+        let reply = self.publish(scene);
+        crate::log::publish(&take_id, &reply);
+        reply
     }
 
     // 5.9: the asset plane re-hashed these bytes before handing them over.
@@ -1102,6 +1130,52 @@ impl EnginePeer for Engine {
     }
 
     fn handle(&mut self, request: ClientRequest) -> EngineReply {
+        // 2.12: every request and its answer is on record.
+        let note = crate::log::RequestNote::of(&request);
+        let reply = self.handle_unlogged(request);
+        crate::log::request(&note, &reply, self.clock.epoch().0);
+        reply
+    }
+
+    /// A headless render is validated while the engine is held and drawn
+    /// after it is released: the prepared scene is shared, so Program's
+    /// render loop never waits on it (invariant 14). Every other request is
+    /// answered in place.
+    fn handle_detached(&mut self, request: ClientRequest) -> Handled {
+        let ClientRequest::Render(req) = request else {
+            return Handled::Reply(self.handle(request));
+        };
+        if let Err(refusal) = self.check_not_dropped(&req.take_id) {
+            return Handled::Reply(EngineReply::Refused(refusal));
+        }
+        let held = self.published.get(&req.take_id).cloned();
+        let scene = self
+            .prepared
+            .get(&(req.take_id.clone(), req.revision))
+            .cloned();
+        let duration = scene
+            .as_ref()
+            .map(|scene| scene.document().timeline.duration_frames);
+        if let Err(refusal) = check_render(&req, held.as_ref(), duration) {
+            return Handled::Reply(EngineReply::Refused(refusal));
+        }
+        let (Some(held), Some(scene)) = (held, scene) else {
+            unreachable!("check_render refuses a render with no held revision or scene");
+        };
+        let images = Arc::clone(&self.rendered);
+        Handled::Detached(Box::new(move || {
+            answer_render(req, held.content_hash, &scene, &images)
+        }))
+    }
+
+    fn drain_events(&mut self) -> Vec<EngineEvent> {
+        std::mem::take(&mut self.events)
+    }
+}
+
+impl Engine {
+    /// Answer one request; [`EnginePeer::handle`] logs it (2.12).
+    fn handle_unlogged(&mut self, request: ClientRequest) -> EngineReply {
         let persists = matches!(
             &request,
             ClientRequest::Cue(_)
@@ -1275,41 +1349,6 @@ impl EnginePeer for Engine {
         }
         reply
     }
-
-    /// A headless render is validated while the engine is held and drawn
-    /// after it is released: the prepared scene is shared, so Program's
-    /// render loop never waits on it (invariant 14). Every other request is
-    /// answered in place.
-    fn handle_detached(&mut self, request: ClientRequest) -> Handled {
-        let ClientRequest::Render(req) = request else {
-            return Handled::Reply(self.handle(request));
-        };
-        if let Err(refusal) = self.check_not_dropped(&req.take_id) {
-            return Handled::Reply(EngineReply::Refused(refusal));
-        }
-        let held = self.published.get(&req.take_id).cloned();
-        let scene = self
-            .prepared
-            .get(&(req.take_id.clone(), req.revision))
-            .cloned();
-        let duration = scene
-            .as_ref()
-            .map(|scene| scene.document().timeline.duration_frames);
-        if let Err(refusal) = check_render(&req, held.as_ref(), duration) {
-            return Handled::Reply(EngineReply::Refused(refusal));
-        }
-        let (Some(held), Some(scene)) = (held, scene) else {
-            unreachable!("check_render refuses a render with no held revision or scene");
-        };
-        let images = Arc::clone(&self.rendered);
-        Handled::Detached(Box::new(move || {
-            answer_render(req, held.content_hash, &scene, &images)
-        }))
-    }
-
-    fn drain_events(&mut self) -> Vec<EngineEvent> {
-        std::mem::take(&mut self.events)
-    }
 }
 
 /// How the GPU readback ring delivered Program (3.21), for the frame-timing
@@ -1456,6 +1495,254 @@ mod tests {
         let revision = Revision(1);
         engine.publish_identifier(take_id.clone(), revision, pin());
         (take_id, revision)
+    }
+
+    // --- 2.12: what the engine writes to its log --------------------------------
+
+    /// Run `body` with this thread's events going to a fresh sink; return the
+    /// lines it wrote, parsed.
+    fn logged(label: &str, body: impl FnOnce()) -> Vec<serde_json::Value> {
+        use tracing_subscriber::layer::SubscriberExt;
+        let dir = std::env::temp_dir().join(format!(
+            "gx-engine-log-{label}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let guard =
+            gx_telemetry::sink::start(gx_telemetry::sink::LogConfig::new("engine", "worker", &dir))
+                .unwrap();
+        let subscriber = tracing_subscriber::registry().with(guard.layer());
+        tracing::subscriber::with_default(subscriber, body);
+        guard.finish().unwrap();
+        let mut records = Vec::new();
+        for entry in std::fs::read_dir(dir.join("engine")).unwrap().flatten() {
+            for line in std::fs::read_to_string(entry.path()).unwrap().lines() {
+                records.push(serde_json::from_str(line).unwrap());
+            }
+        }
+        let _ = std::fs::remove_dir_all(dir);
+        records
+    }
+
+    fn find<'a>(
+        records: &'a [serde_json::Value],
+        event: &str,
+        result: &str,
+    ) -> &'a serde_json::Value {
+        records
+            .iter()
+            .find(|r| r["event"] == event && r["fields"]["result"] == result)
+            .unwrap_or_else(|| panic!("no {event} {result} in {records:#?}"))
+    }
+
+    #[test]
+    fn every_program_request_and_its_answer_is_on_record() {
+        let records = logged("requests", || {
+            let mut e = engine();
+            let (take_id, revision) = published(&mut e);
+            let _ = e.handle(ClientRequest::Take(TakeRequest {
+                take_id: take_id.clone(),
+                revision,
+                content_hash: Some(pin()),
+                at: TakeAt::NextOpportunity,
+            }));
+            let _ = e.handle(ClientRequest::Take(TakeRequest {
+                take_id: TakeId("nope".into()),
+                revision: Revision(1),
+                content_hash: Some(pin()),
+                at: TakeAt::NextOpportunity,
+            }));
+            let _ = e.handle(ClientRequest::Status);
+            let _ = e.handle(ClientRequest::Clear(ClearRequest {
+                at: TakeAt::NextOpportunity,
+            }));
+        });
+        let taken = find(&records, "program.take", "committed");
+        assert_eq!(taken["level"], "info");
+        assert_eq!(taken["fields"]["take_id"], "take/101");
+        assert_eq!(taken["fields"]["revision"], 1);
+        assert_eq!(taken["fields"]["content_hash"], "a".repeat(64));
+        assert!(
+            taken["frame"].as_u64().is_some(),
+            "the committed frame: {taken}"
+        );
+        assert!(taken["epoch"].as_u64().is_some());
+        let refused = find(&records, "program.take", "refused");
+        assert_eq!(refused["refusal"], "unknownTake");
+        assert_eq!(refused["fields"]["take_id"], "nope");
+        assert!(refused["fields"]["detail"]
+            .as_str()
+            .is_some_and(|d| d.contains("nope")));
+        let cleared = find(&records, "program.clear", "committed");
+        assert!(cleared["frame"].as_u64().is_some());
+        // A poll is recorded at debug, so the default info filter leaves it out.
+        let status = records
+            .iter()
+            .find(|r| r["event"] == "engine.status")
+            .expect("the poll is recorded");
+        assert_eq!(status["level"], "debug");
+    }
+
+    #[test]
+    fn a_publish_accepted_and_refused_is_on_record() {
+        let records = logged("publish", || {
+            let mut e = engine();
+            let _ = AssetPublishPeer::publish_scene(&mut e, animated_scene());
+            // A position that is not a number cannot be drawn: refused at publish.
+            let mut broken = animated_scene();
+            broken.objects[0].base_mut().x = f64::NAN;
+            let _ = AssetPublishPeer::publish_scene(&mut e, broken);
+        });
+        let accepted = records
+            .iter()
+            .find(|r| r["event"] == "publish.accepted")
+            .unwrap_or_else(|| panic!("no publish.accepted in {records:#?}"));
+        assert!(accepted["fields"]["content_hash"]
+            .as_str()
+            .is_some_and(|h| h.len() == 64));
+        assert!(
+            records.iter().any(|r| r["event"] == "publish.refused"),
+            "the refused publish is on record: {records:#?}"
+        );
+    }
+
+    #[test]
+    fn a_late_frame_a_missed_run_and_the_heartbeat_are_on_record() {
+        let records = logged("frames", || {
+            let on_time = crate::metrics::FrameSample {
+                frame: 10,
+                render_nanos: 5_000_000,
+                interval_nanos: 20_000_000,
+                late: false,
+                drops_so_far: 0,
+                missed_before: 0,
+            };
+            crate::log::frame(&on_time, 3);
+            crate::log::frame(
+                &crate::metrics::FrameSample {
+                    frame: 11,
+                    render_nanos: 23_500_000,
+                    late: true,
+                    ..on_time
+                },
+                3,
+            );
+            crate::log::frame(
+                &crate::metrics::FrameSample {
+                    frame: 15,
+                    missed_before: 3,
+                    ..on_time
+                },
+                3,
+            );
+            let mut heartbeat = crate::log::Heartbeat::new();
+            let start = std::time::Instant::now();
+            let totals = || crate::log::Totals {
+                epoch: 3,
+                frame: 15,
+                rendered: 13,
+                late: 1,
+                missed: 3,
+                dropped: 0,
+                program: Some("take/101@1".into()),
+                output_inhibited: false,
+                clock: "FreeRun".into(),
+                reference: "None".into(),
+            };
+            assert!(heartbeat.beat(start, totals));
+            assert!(!heartbeat.beat(start + std::time::Duration::from_millis(400), totals));
+            assert!(heartbeat.beat(start + std::time::Duration::from_millis(1_050), totals));
+            // The reference locks between two heartbeats: on record as a change.
+            assert!(
+                heartbeat.beat(start + std::time::Duration::from_millis(2_100), || {
+                    crate::log::Totals {
+                        reference: "Locked".into(),
+                        ..totals()
+                    }
+                })
+            );
+        });
+        let frames: Vec<&serde_json::Value> = records
+            .iter()
+            .filter(|r| r["event"].as_str().is_some_and(|e| e.starts_with("frame.")))
+            .collect();
+        assert_eq!(
+            frames.len(),
+            2,
+            "an on-time frame writes nothing: {frames:#?}"
+        );
+        let late = frames
+            .iter()
+            .find(|r| r["event"] == "frame.late")
+            .expect("frame.late");
+        assert_eq!(
+            (late["frame"].as_u64(), late["fields"]["render_us"].as_u64()),
+            (Some(11), Some(23_500))
+        );
+        let missed = frames
+            .iter()
+            .find(|r| r["event"] == "frame.missed")
+            .expect("frame.missed");
+        assert_eq!(
+            (
+                missed["level"].as_str(),
+                missed["fields"]["missed"].as_u64()
+            ),
+            (Some("warn"), Some(3))
+        );
+        let beats: Vec<_> = records
+            .iter()
+            .filter(|r| r["event"] == "engine.heartbeat")
+            .collect();
+        assert_eq!(beats.len(), 3, "one a second, not one a call");
+        assert_eq!(beats[0]["fields"]["program"], "take/101@1");
+        assert_eq!(beats[0]["fields"]["missed"], 3);
+        assert_eq!(beats[0]["fields"]["clock"], "FreeRun");
+        let changed: Vec<_> = records
+            .iter()
+            .filter(|r| r["event"] == "clock.changed")
+            .collect();
+        assert_eq!(
+            changed.len(),
+            1,
+            "only the beat that saw a change: {records:#?}"
+        );
+        assert_eq!(
+            (
+                changed[0]["fields"]["from_reference"].as_str(),
+                changed[0]["fields"]["to_reference"].as_str()
+            ),
+            (Some("None"), Some("Locked"))
+        );
+    }
+
+    #[test]
+    fn emitting_frames_writes_a_heartbeat() {
+        // The heartbeat comes from the live frame path itself, not only from
+        // a helper a test can call.
+        let started = std::time::Instant::now();
+        let records = logged("emit", || {
+            let mut e = engine();
+            for _ in 0..3 {
+                let _ = e.emit_frame_settled();
+            }
+        });
+        let beats = records
+            .iter()
+            .filter(|r| r["event"] == "engine.heartbeat")
+            .count();
+        // Three frames inside a second are one heartbeat, not one a frame.
+        if started.elapsed() < crate::log::HEARTBEAT {
+            assert_eq!(beats, 1, "{records:#?}");
+        } else {
+            assert!(
+                beats >= 1,
+                "the frame path wrote no heartbeat: {records:#?}"
+            );
+        }
     }
 
     pub(super) fn animated_scene() -> SceneDocument {

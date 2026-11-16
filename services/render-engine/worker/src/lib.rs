@@ -35,6 +35,7 @@ pub mod gpu;
 pub mod headless;
 pub mod image;
 pub mod layer_source;
+pub(crate) mod log;
 pub mod mesh;
 pub mod metrics;
 pub mod output_adapter;

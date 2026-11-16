@@ -82,6 +82,8 @@ fn main() {
     } else {
         Locality::CoLocated
     };
+    // 2.12: the engine's log, from here on. Kept for the life of the process.
+    let mut log = gx_telemetry::sink::init_process_logging("engine", "worker");
 
     // The clock pump owns the passage of time. The engine observes the shared
     // counter; nothing on the control plane can write it (ADR-002).
@@ -125,17 +127,19 @@ fn main() {
     };
     let recovery = match recovery {
         Ok(recovery) => recovery,
-        Err(error) => {
-            eprintln!("cannot open recovery journal: {error}");
-            std::process::exit(1);
-        }
+        Err(error) => fatal(
+            &mut log,
+            "recovery.open_failed",
+            format!("cannot open recovery journal: {error}"),
+        ),
     };
     match engine.attach_recovery_journal(recovery) {
         Ok(restored) => report_drops(&restored),
-        Err(error) => {
-            eprintln!("cannot restore recovery journal: {error}");
-            std::process::exit(1);
-        }
+        Err(error) => fatal(
+            &mut log,
+            "recovery.restore_failed",
+            format!("cannot restore recovery journal: {error}"),
+        ),
     }
 
     println!("RENDER ENGINE - real device, engine-owned clock");
@@ -158,30 +162,67 @@ fn main() {
         None => return usage("--port leaves no asset-plane port"),
     };
     let asset_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), asset_port);
-    let server = Server::bind(addr, token.as_deref(), engine).unwrap_or_else(|error| {
-        eprintln!("cannot serve control plane: {error}");
-        std::process::exit(1);
-    });
+    let adapter = engine.gpu_description();
+    // The epoch, clock source and reference this run starts with, from the
+    // engine's own status answer, so the start record says which run it is.
+    let start_status = match gx_control_plane::EnginePeer::handle(
+        &mut engine,
+        gx_control_plane::message::ClientRequest::Status,
+    ) {
+        gx_control_plane::message::EngineReply::Status(status) => Some(status),
+        _ => None,
+    };
+    let server = match Server::bind(addr, token.as_deref(), engine) {
+        Ok(server) => server,
+        Err(error) => fatal(
+            &mut log,
+            "engine.bind_failed",
+            format!("cannot serve control plane: {error}"),
+        ),
+    };
     let shared_engine = server.engine();
-    let asset_server = AssetPublishServer::bind(asset_addr, Arc::clone(&shared_engine))
-        .unwrap_or_else(|error| {
-            eprintln!("cannot serve asset plane: {error}");
-            std::process::exit(1);
-        });
-    match server.local_addr() {
-        Ok(bound) => println!("  listening on {bound}"),
-        Err(e) => {
-            eprintln!("cannot read local address: {e}");
-            std::process::exit(1);
-        }
-    }
-    match asset_server.local_addr() {
-        Ok(bound) => println!("  asset publication on {bound}"),
-        Err(error) => {
-            eprintln!("cannot read asset-plane address: {error}");
-            std::process::exit(1);
-        }
-    }
+    let asset_server = match AssetPublishServer::bind(asset_addr, Arc::clone(&shared_engine)) {
+        Ok(server) => server,
+        Err(error) => fatal(
+            &mut log,
+            "engine.bind_failed",
+            format!("cannot serve asset plane: {error}"),
+        ),
+    };
+    let control = match server.local_addr() {
+        Ok(bound) => bound,
+        Err(e) => fatal(
+            &mut log,
+            "engine.bind_failed",
+            format!("cannot read local address: {e}"),
+        ),
+    };
+    println!("  listening on {control}");
+    let assets = match asset_server.local_addr() {
+        Ok(bound) => bound,
+        Err(error) => fatal(
+            &mut log,
+            "engine.bind_failed",
+            format!("cannot read asset-plane address: {error}"),
+        ),
+    };
+    println!("  asset publication on {assets}");
+    tracing::info!(
+        event = "engine.start",
+        epoch = start_status.as_ref().map(|s| s.epoch.0),
+        clock = start_status.as_ref().map(|s| format!("{:?}", s.clock)).as_deref(),
+        reference = start_status.as_ref().map(|s| format!("{:?}", s.reference)).as_deref(),
+        version = env!("CARGO_PKG_VERSION"),
+        tier = ?tier,
+        live_capable = tier.live_capable(),
+        adapter = adapter.as_deref(),
+        rate = format!("{}/{}", rate.num, rate.den).as_str(),
+        locality = ?locality,
+        control = %control,
+        assets = %assets,
+        token_required = token.is_some(),
+        log_directory = log.as_ref().map(|g| g.directory().display().to_string()).as_deref(),
+    );
     spawn_render_loop(shared_engine, frame_source);
     asset_server.serve_in_background();
     println!("ctrl-c to stop");
@@ -225,12 +266,21 @@ fn spawn_render_loop(engine: Arc<Mutex<Engine>>, frame_source: Arc<AtomicU64>) {
             }
             let Ok(mut engine) = engine.lock() else {
                 eprintln!("render loop stopping: engine lock poisoned");
+                tracing::error!(
+                    event = "engine.render_loop_stopped",
+                    detail = "engine lock poisoned"
+                );
                 return;
             };
             match engine.emit_frame() {
                 Ok(emission) => emitted = emission.sample.frame,
                 Err(error) => {
                     eprintln!("output emission failed at frame {current}: {error}");
+                    tracing::error!(
+                        event = "output.emit_failed",
+                        frame = current,
+                        detail = %error,
+                    );
                     emitted = current;
                 }
             }
@@ -270,8 +320,24 @@ fn parse_publish(spec: &str) -> Option<(TakeId, Revision, ContentHash)> {
 /// Name, on stderr, the scenes a restore dropped (5.11). The engine host does
 /// not drain a running worker's stderr, so the lines stop at a small budget
 /// and point to the drop report beside the journal, which names every one.
+/// Stop the process for a reason the operator must act on: on record, on
+/// stderr, and with the log written out before the exit.
+fn fatal(log: &mut Option<gx_telemetry::sink::LogGuard>, event: &str, detail: String) -> ! {
+    eprintln!("{detail}");
+    tracing::error!(event, detail = detail.as_str());
+    if let Some(guard) = log.take() {
+        let _ = guard.finish();
+    }
+    std::process::exit(1);
+}
+
 fn report_drops(restored: &Restored) {
     let count = restored.dropped.len();
+    tracing::info!(
+        event = "recovery.restored",
+        dropped = count,
+        scenes = ?restored.dropped,
+    );
     if count == 0 {
         return;
     }
