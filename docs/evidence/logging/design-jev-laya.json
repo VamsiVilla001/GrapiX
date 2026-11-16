@@ -1,0 +1,341 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 6009,
+    "output_tokens": 0,
+    "state_tokens": 605,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "user_request_16_nov": "Write a debugging model for the backend and the front end, so any issue faced can be debugged. When the application is finished we need a log of whatever is being run, as it is a broadcast. Everything being logged is a good thing, so nothing is randomly flagged. Jev and Laya agree design and acceptance and review what is built.",
+    "facts": [
+      "Processes: render engine worker and host, Editor (Tauri shell, TypeScript front end, editor service), Playout (Tauri shell, JavaScript front end), editor MCP and playout MCP servers. Program output is a 50 fps clock; nothing may stall it (invariant 14).",
+      "gx-telemetry (rows 0.5, 2.10 done) has typed audit and operations events, a Redacted type so credentials never reach a log line, and init() that writes formatted text to stdout. No product depends on it; the engine prints plain eprintln lines; the front ends log nothing; there is no log file anywhere.",
+      "platform::log_root() names the per-user log directory. Row 12.11 (as-run record, first-release scope, pending, its dependencies done) asks every accepted or refused Cue, Take, Update, Continue, Out and Clear to write one record to a JSON Lines audit sink with sequence, intent id, operator identity and scope, page, revision, hash, target, result and the engine-committed frame, and replaying a fixture show's records to match the engine's committed events.",
+      "Control-plane intents carry an id; the Editor front end calls the shell through one execute command and a few read commands; Playout through cmd_cue, cmd_take, cmd_clear, cmd_phase, cmd_configure_output."
+    ],
+    "proposal": "One event schema in gx-telemetry: JSON Lines with UTC time, monotonic time, per-process sequence, process, pid, level, event name, correlation id, typed sanitised fields, engine epoch and frame where known. Each process writes its own file under log_root, through a bounded queue drained by a writer thread so the frame path never waits on disk; on overflow the count of lost events is itself written as a record, never a silent gap. Every state change, command, refusal, connection, publish and frame-timing anomaly is logged at info; debug and trace are opt-in. Front ends forward errors, unhandled rejections and every shell call (start, end, refusal, duration) through one log command with a correlation id that follows the action into the engine. The as-run log is separate: append-only, flushed and synced per record, hash-chained so a missing or edited line is detectable, not rotated during a show. Operational logs rotate by size and keep 30 days. One command makes a sanitised diagnostic bundle."
+  },
+  "questions": {
+    "format": {
+      "type": "choice",
+      "instructions": "What format should logs use?",
+      "criteria": {
+        "json_lines": "Structured JSON Lines, one event per line, stable field names.",
+        "plain_text": "Human-readable text lines."
+      }
+    },
+    "topology": {
+      "type": "choice",
+      "instructions": "Where should events go?",
+      "criteria": {
+        "per_process_files_one_schema": "Each process writes its own file under log_root with the shared schema; a correlation id joins them.",
+        "central_collector": "Every process sends events to one collector process that writes them.",
+        "stdout_only": "Stdout only; the launcher captures it."
+      }
+    },
+    "overflow": {
+      "type": "choice",
+      "instructions": "What happens when logging cannot keep up?",
+      "criteria": {
+        "bounded_queue_log_the_loss": "Bounded queue; the frame path never waits; lost events are counted and the count is written as a record.",
+        "block_until_written": "Wait until each event is written.",
+        "drop_silently": "Drop what does not fit."
+      }
+    },
+    "as_run": {
+      "type": "choice",
+      "instructions": "How should the broadcast as-run log be kept?",
+      "criteria": {
+        "separate_durable_hash_chained": "A separate append-only file, synced per record and hash-chained, never dropped: the record of what went to air.",
+        "same_stream": "The same stream and queue as operational logs."
+      }
+    },
+    "frontend": {
+      "type": "choice",
+      "instructions": "How should the front ends log?",
+      "criteria": {
+        "forward_through_shell": "Errors, unhandled rejections and every shell call go through one log command into the shell's file, with the action's correlation id.",
+        "console_only": "Browser console only."
+      }
+    },
+    "verbosity": {
+      "type": "choice",
+      "instructions": "What is logged by default?",
+      "criteria": {
+        "all_state_changes_info": "Every command, refusal, state change and anomaly at info; debug and trace opt-in.",
+        "trace_always": "Everything at trace level always.",
+        "errors_only": "Errors and warnings only."
+      }
+    },
+    "retention": {
+      "type": "choice",
+      "instructions": "How long are logs kept?",
+      "criteria": {
+        "rotate_30_days_as_run_kept": "Operational logs rotate by size and are kept 30 days; the as-run log is never rotated during a show and is kept until archived.",
+        "keep_everything": "Keep every log forever."
+      }
+    },
+    "bundle": {
+      "type": "choice",
+      "instructions": "How is an issue reported?",
+      "criteria": {
+        "one_command_bundle": "One command collects the recent logs of every process, versions, capability and sanitised configuration.",
+        "manual": "The user finds and sends files by hand."
+      }
+    },
+    "needs_user": {
+      "type": "noul",
+      "instructions": "Must the user approve this design before implementation?",
+      "criteria": {
+        "true": "Yes, product choices are made the user's request does not cover.",
+        "false": "No, it follows from the user's request, rows 2.10 and 12.11 and the invariants."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "format",
+      "jev": "json_lines",
+      "laya": "json_lines",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "json_lines",
+        "confidence": 1,
+        "probabilities": {
+          "json_lines": 1,
+          "plain_text": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "json_lines",
+        "probabilities": {
+          "json_lines": 0.5753,
+          "plain_text": 0.4247
+        },
+        "confidence": 0.0164,
+        "answer_confidence": 0.5753,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "topology",
+      "jev": "per_process_files_one_schema",
+      "laya": "per_process_files_one_schema",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "per_process_files_one_schema",
+        "confidence": 1,
+        "probabilities": {
+          "per_process_files_one_schema": 1,
+          "central_collector": 0,
+          "stdout_only": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "per_process_files_one_schema",
+        "probabilities": {
+          "per_process_files_one_schema": 0.477,
+          "central_collector": 0.2783,
+          "stdout_only": 0.2447
+        },
+        "confidence": 0.041,
+        "answer_confidence": 0.477,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "overflow",
+      "jev": "bounded_queue_log_the_loss",
+      "laya": "bounded_queue_log_the_loss",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "bounded_queue_log_the_loss",
+        "confidence": 1,
+        "probabilities": {
+          "bounded_queue_log_the_loss": 1,
+          "block_until_written": 0,
+          "drop_silently": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "bounded_queue_log_the_loss",
+        "probabilities": {
+          "bounded_queue_log_the_loss": 0.8036,
+          "block_until_written": 0.0674,
+          "drop_silently": 0.129
+        },
+        "confidence": 0.4341,
+        "answer_confidence": 0.8036,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "as_run",
+      "jev": "separate_durable_hash_chained",
+      "laya": "separate_durable_hash_chained",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "separate_durable_hash_chained",
+        "confidence": 1,
+        "probabilities": {
+          "separate_durable_hash_chained": 1,
+          "same_stream": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "separate_durable_hash_chained",
+        "probabilities": {
+          "separate_durable_hash_chained": 0.6468,
+          "same_stream": 0.3532
+        },
+        "confidence": 0.0631,
+        "answer_confidence": 0.6468,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "frontend",
+      "jev": "forward_through_shell",
+      "laya": "forward_through_shell",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "forward_through_shell",
+        "confidence": 1,
+        "probabilities": {
+          "forward_through_shell": 1,
+          "console_only": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "forward_through_shell",
+        "probabilities": {
+          "forward_through_shell": 0.5718,
+          "console_only": 0.4282
+        },
+        "confidence": 0.0149,
+        "answer_confidence": 0.5718,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "verbosity",
+      "jev": "all_state_changes_info",
+      "laya": "trace_always",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "all_state_changes_info",
+        "confidence": 1,
+        "probabilities": {
+          "all_state_changes_info": 1,
+          "trace_always": 0,
+          "errors_only": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "trace_always",
+        "probabilities": {
+          "all_state_changes_info": 0.1101,
+          "trace_always": 0.541,
+          "errors_only": 0.3489
+        },
+        "confidence": 0.1419,
+        "answer_confidence": 0.541,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "retention",
+      "jev": "rotate_30_days_as_run_kept",
+      "laya": "rotate_30_days_as_run_kept",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "rotate_30_days_as_run_kept",
+        "confidence": 1,
+        "probabilities": {
+          "rotate_30_days_as_run_kept": 1,
+          "keep_everything": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "rotate_30_days_as_run_kept",
+        "probabilities": {
+          "rotate_30_days_as_run_kept": 0.8266,
+          "keep_everything": 0.1734
+        },
+        "confidence": 0.3346,
+        "answer_confidence": 0.8266,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "bundle",
+      "jev": "one_command_bundle",
+      "laya": "one_command_bundle",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "one_command_bundle",
+        "confidence": 1,
+        "probabilities": {
+          "one_command_bundle": 1,
+          "manual": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "one_command_bundle",
+        "probabilities": {
+          "one_command_bundle": 0.9103,
+          "manual": 0.0897
+        },
+        "confidence": 0.5645,
+        "answer_confidence": 0.9103,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "needs_user",
+      "jev": 0.66,
+      "laya": 0.7112,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.66
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.7112,
+        "confidence": 0.7112,
+        "answer_confidence": 0.7112,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

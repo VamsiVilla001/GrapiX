@@ -1,0 +1,218 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 22815,
+    "output_tokens": 0,
+    "state_tokens": 3215,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "request": "Write a debugging model for backend and front end, where if any issues faced can be debugged. When the application is finished we need a log of whatever is being run, as it is a broadcast. Everything being logged is a good thing, so nothing randomly is flagged.",
+    "deliverable": "A proposed ADR (the debugging model) and proposed plan rows; implementation waits for the user to accept, as Jev and Laya both said the user should approve first.",
+    "adr": "# GrapiX debugging model and broadcast logging\n\nDate: 16 November 2026. Status: **Proposed**. Nothing in this ADR is built yet\nbeyond what \"Today\" lists; `GrapiX-Build-Plan.md` remains the only\nimplementation plan, and the rows proposed at the end enter it when the user\naccepts this design.\n\n## The request (user, 16 November 2026)\n\n> Write a debugging model for backend and front end, where if any issues faced\n> can be debugged. Also when the application is finished, we need to have a\n> log of whatever is being run, as it's a broadcast. Everything being logged is\n> a good thing, so nothing randomly is flagged.\n\nTwo needs, kept apart on purpose:\n\n1. **Debugging.** When something goes wrong on any machine, in any product, an\n   engineer can find out what happened from the logs alone: what each process\n   did, in order, joined across processes by the action that caused it.\n2. **The broadcast record (as-run).** What went to air, when, at whose\n   command, and what the engine actually committed, kept as a record that\n   cannot silently lose or change a line.\n\n\"Nothing randomly flagged\" is read as: the logs are complete enough that every\nalarm, refusal or odd frame can be explained by what is in them, and nothing\nappears without a cause on record.\n\n## Today\n\n- `gx-telemetry` (rows 0.5, 2.10) has typed audit and operations events and\n  `Redacted`, which keeps credentials out of every log line (invariant 54).\n  `init()` writes formatted text to stdout. No product depends on it.\n- The render engine prints plain `eprintln!` lines; the Editor and Playout\n  front ends log nothing; there is no log file anywhere.\n- `platform::log_root()` names the per-user log directory.\n- Row `12.11` (as-run record, first-release scope) is pending; its\n  dependencies (2.9, 2.10, 6.2) are done. It names a \"JSON Lines audit sink\"\n  that was never built.\n\n## Decision (proposed)\n\n### 1. One event, one schema\n\nEvery log line in every process is one JSON object on one line (JSON Lines),\nbuilt by `gx-telemetry`, never by `format!`:\n\n| Field | Meaning |\n| --- | --- |\n| `ts` | UTC wall time, RFC 3339 with microseconds |\n| `mono` | nanoseconds since the process started (orders events when the wall clock jumps) |\n| `seq` | per-process sequence, from 1, no gaps; a gap means lost lines |\n| `process`, `pid`, `version`, `build` | which binary, which run, which build |\n| `level` | `error`, `warn`, `info`, `debug`, `trace` |\n| `event` | a stable dotted name (`take.committed`, `edit.refused`, `frame.late`), defined once in `gx-telemetry` |\n| `corr` | the correlation id of the action that caused it, when there is one |\n| `epoch`, `frame` | the engine epoch and frame, when the event is about Program |\n| `fields` | the event's typed fields; secrets only through `Redacted` |\n| `refusal` | the named refusal code and detail, when the event is a refusal |\n\nField names are defined once, as the existing `frame_span` and `take_span`\nare, so a search or a dashboard breaks loudly on a rename rather than silently.\n\n### 2. One file per process, joined by a correlation id\n\nEach process writes its own file:\n`<log_root>/<product>/<process>-<UTC start>-<pid>.jsonl`. There is no central\ncollector to fail, and a crashed process still leaves its own file. A\n**correlation id** is minted where an action starts (a front-end click, an MCP\ncall, a control-plane intent) and carried with it: the Tauri command, the MCP\nrequest, the control-plane intent id, and every engine record that action\ncauses. Following one id across files reconstructs one action end to end.\n\n### 3. Logging never stalls Program\n\nEvents go into a bounded in-memory queue; one writer thread per process\ndrains it to disk. The frame path never waits for a disk (invariant 14). If\nthe queue is full, events are counted, not written, and as soon as there is\nroom a `log.lost` record states how many and between which sequence numbers:\nthe loss is itself on record, never a silent gap, and `seq` shows it too. A\nwriter that cannot write at all (disk full) says so on stderr and in the\nengine's status, so the operator learns that logging stopped.\n\n### 4. What is logged, by default\n\nEvery **state change, command, refusal, connection change, publish,\nconfiguration change and anomaly** is logged at `info`, in every process,\nalways. That is the \"log everything\" the request asks for, at the level of\nwhat happened. Per-frame detail is not written for every frame by default; the\nengine instead writes:\n\n- every **late, missed or repeated** Program frame individually (`frame.late`,\n  `frame.missed`), with its frame number and timing;\n- a **heartbeat** once a second (`engine.heartbeat`: frames emitted, late,\n  missed, ring state, GPU and output health), so the log is continuous and a\n  quiet minute is visibly quiet rather than missing.\n\n`debug` and `trace` (every frame's span, every layer) are switched on per\nprocess (`GX_LOG`, as `RUST_LOG`) for deep debugging, never in a show by\ndefault.\n\nThe catalogue of `info` events, by component:\n\n| Component | Logged at `info` |\n| --- | --- |\n| Engine | start and stop (version, adapter, backend, tier), epoch, recovery restore, each publish received and prepared or refused, each Cue, Take, Update, Continue, Out and Clear accepted or refused with the committed frame, output armed, disarmed or failed, clock source and reference changes, frame anomalies, heartbeat |\n| Editor shell and service | start and stop, project and scene opened, saved, created, deleted, every edit batch (command name, target, revision before and after, result), every refusal, publish attempts and results, imports with their reports |\n| Playout shell and service | start and stop, connection and authentication (never the token), every operator command with page, take, revision and hash and its result, output configuration |\n| MCP servers | start and stop, every `tools/call` (tool, scope, correlation id, idempotency key, result or refusal, duration), scope denials |\n| Front ends | every shell call (start, end, result or refusal, duration), uncaught errors, unhandled promise rejections, `console.error`, page load and reload |\n\n### 5. The as-run log (row 12.11)\n\nA separate file per channel and day, `<log_root>/as-run/<channel>-<date>.jsonl`,\nwritten by Playout from what the engine reports as committed:\n\n- **Contents:** every Cue, Take, Update, Continue, Out and Clear, accepted or\n  refused, with the 12.11 fields (sequence, intent id, operator identity and\n  scope, page, revision, content hash, channel and layer, result, the\n  engine-committed frame and its timecode), plus Program events that matter on\n  air: output started or stopped, a device error, a late or missed frame while\n  a graphic was up.\n- **Durable:** each record is flushed and synced before the command's result\n  is shown to the operator. It never goes through the bounded queue, so it is\n  never one of the \"lost\" events; if it cannot be written, the operator is\n  told at once.\n- **Tamper-evident:** each record carries the SHA-256 of the record before it,\n  so a removed, reordered or edited line breaks the chain where it happened.\n- **Kept:** never rotated during a show; kept until an operator archives it.\n\n### 6. Front ends\n\nBoth front ends install handlers for uncaught errors, unhandled promise\nrejections and `console.error`, and wrap every shell call so its start, end,\nresult and duration are logged with a correlation id. All of it goes through\none shell command (`cmd_log`) into the shell's own file. The browser's\ndeveloper tools stay available in development builds.\n\n### 7. Retention\n\nOperational logs rotate by size (proposed 50 MB per file) and are kept 30\ndays. As-run logs are kept until archived (above).\n\n### 8. The diagnostic bundle\n\nOne command (`gx-diag`, and a menu item in each shell) collects the last N\nhours of every process's log, the as-run log, versions and build hashes, the\ncapability surface, the device and adapter, and the sanitised configuration\nand recovery journal, into one archive for a bug report.\n\n### 9. How an issue is debugged\n\n1. The operator or author sees an error. Every error shown in a UI carries the\n   action's correlation id and refusal code.\n2. Open the bundle (or `<log_root>`) and search every file for that `corr`:\n   the front end's call, the shell's command, the MCP or control-plane\n   request, the engine's acceptance or refusal, in order.\n3. For anything about Program, the engine's `frame.*` events and heartbeat\n   around that time show cadence and output health; the as-run log shows what\n   was on air.\n4. If more detail is needed, reproduce with `GX_LOG=debug` (or `trace` for\n   one process) and the same steps.\n5. `seq` gaps and `log.lost` records say whether anything is missing from the\n   picture.\n\n## Rows proposed for the build plan\n\n| Row | Work | Done when |\n| --- | --- | --- |\n| `2.11` | Structured JSON Lines log sink in `gx-telemetry`: the schema above, one file per process, bounded queue and writer thread, `log.lost`, size rotation and 30-day retention | A test floods the sink faster than it writes: the frame path never waits, every written line parses, `seq` has no gaps except those a `log.lost` record states; no credential appears in any line |\n| `2.12` | Every process uses it: engine, host, Editor and Playout shells and services, both MCP servers; the info catalogue above; engine heartbeat and frame anomalies | Each process writes its file in a conformance run; every catalogue event appears when its action is driven; a late frame and a refusal each produce their record |\n| `2.13` | Correlation ids end to end, and front-end capture through `cmd_log` | One Editor edit and one Playout take, driven from each front end, can each be followed by one id from the front end's call through the shell, the MCP or control plane and the engine |\n| `2.14` | Diagnostic bundle (`gx-diag` and a shell menu item) | A bundle from a conformance run holds every process's log, the as-run log and the versions, and no credential |\n| `12.11` | As-run record (existing row), written as section 5 says: synced per record, hash-chained, separate file | The existing done-when, plus: removing or editing one line is detected at that line |\n\n## Jev and Laya on the design (`docs/evidence/logging/design-jev-laya.json`)\n\n| Question | Jev | Laya |\n| --- | --- | --- |\n| format | JSON Lines (1.0) | JSON Lines |\n| where events go | one file per process, one schema (1.0) | same |\n| when logging cannot keep up | bounded queue, the loss logged (1.0) | same |\n| the as-run log | separate, synced, hash-chained (1.0) | same |\n| front ends | through the shell (1.0) | same |\n| default verbosity | every state change at info (1.0) | trace always |\n| retention | 30 days, as-run kept (1.0) | same |\n| issue reports | one-command bundle (1.0) | same |\n| must the user approve first | 0.66 | 0.71 |\n\nThey agree on everything but the default verbosity, and both say the user\nshould approve before it is built. On verbosity, this ADR proposes Jev's\nanswer with the heartbeat and every frame anomaly at `info`: tracing every\nlayer of every frame at 50 fps would cost disk and CPU next to the Program\nclock and bury the events that explain an incident, while state changes,\nanomalies and a once-a-second heartbeat already account for everything that\nhappened. The user decides.\n"
+  },
+  "questions": {
+    "covers_backend": {
+      "type": "noul",
+      "instructions": "Does the model say how an issue in any backend process (engine, shells, services, MCP servers) is debugged from the logs?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "covers_frontend": {
+      "type": "noul",
+      "instructions": "Does the model say how front-end issues are captured and traced into the backend?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "broadcast_log": {
+      "type": "noul",
+      "instructions": "Does the model give a complete, durable record of what went to air that cannot silently lose or change a line?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "nothing_unexplained": {
+      "type": "noul",
+      "instructions": "Would an alarm, refusal or odd frame be explainable from these logs, with any loss of log lines itself on record?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "program_safe": {
+      "type": "noul",
+      "instructions": "Does the model keep logging from ever stalling the Program clock?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "rows_testable": {
+      "type": "noul",
+      "instructions": "Are the proposed rows done-whens checkable by execution?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "weakest": {
+      "type": "choice",
+      "instructions": "Weakest point?",
+      "criteria": {
+        "operator_identity_source": "Operator identity for the as-run log depends on 2.9 scopes, not a named login.",
+        "disk_full": "A full disk stops logging; the as-run refuses commands only by telling the operator.",
+        "verbosity_choice": "Default verbosity is still the user's choice.",
+        "none": "None."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "covers_backend",
+      "jev": 0.96,
+      "laya": 0.9305,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.96
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9305,
+        "confidence": 0.9305,
+        "answer_confidence": 0.9305,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "covers_frontend",
+      "jev": 0.97,
+      "laya": 0.9185,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.97
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9185,
+        "confidence": 0.9185,
+        "answer_confidence": 0.9185,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "broadcast_log",
+      "jev": 0.87,
+      "laya": 0.9226,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.87
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9226,
+        "confidence": 0.9226,
+        "answer_confidence": 0.9226,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "nothing_unexplained",
+      "jev": 0.92,
+      "laya": 0.9121,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.92
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9121,
+        "confidence": 0.9121,
+        "answer_confidence": 0.9121,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "program_safe",
+      "jev": 0.95,
+      "laya": 0.9227,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.95
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9227,
+        "confidence": 0.9227,
+        "answer_confidence": 0.9227,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "rows_testable",
+      "jev": 0.92,
+      "laya": 0.934,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.92
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.934,
+        "confidence": 0.934,
+        "answer_confidence": 0.934,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "weakest",
+      "jev": "operator_identity_source",
+      "laya": "verbosity_choice",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "operator_identity_source",
+        "confidence": 0.53,
+        "probabilities": {
+          "operator_identity_source": 0.65,
+          "disk_full": 0.21,
+          "verbosity_choice": 0.12,
+          "none": 0.02
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "verbosity_choice",
+        "probabilities": {
+          "operator_identity_source": 0.0688,
+          "disk_full": 0.1124,
+          "verbosity_choice": 0.468,
+          "none": 0.3508
+        },
+        "confidence": 0.1685,
+        "answer_confidence": 0.468,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

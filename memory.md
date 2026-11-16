@@ -118,6 +118,22 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-16 — The debugging model and broadcast logging: ADR-0004 proposed, not built (Claude, on the user's instruction)
+
+**Resume here.** User instruction 16 Nov: a debugging model for backend and front end, and a log of everything run,
+as it is a broadcast. Written as `docs/adr/0004-debugging-and-broadcast-logging.md`, **Proposed**: one JSON Lines
+schema in `gx-telemetry`, one file per process under `log_root`, a bounded queue that never stalls Program and logs
+its own losses (`log.lost`, `seq`), correlation ids from the front end through the shell, MCP or control plane into
+the engine, front ends logging through `cmd_log`, every state change and anomaly at info plus a 1 s engine heartbeat,
+the as-run log (12.11) separate, synced per record and hash-chained, 30-day retention, a one-command diagnostic
+bundle. Proposed rows 2.11 to 2.14 and 12.11's addition are in the ADR, **not yet in the plan or tracker**. Jev and
+Laya agree on 7 of 8 design questions (split: default verbosity, Jev info plus heartbeat, Laya trace always) and
+**both say the user should approve before it is built** (0.66, 0.71); acceptance of the written model 0.87 to 0.97.
+Open questions for the user are in the ADR (verbosity, operator identity, what to do when the as-run cannot be
+written, retention). **Found:** today no product depends on `gx-telemetry`, the engine prints `eprintln!`, the front
+ends log nothing, and there is no log file anywhere; 12.11's "JSON Lines audit sink" was never built. No code
+changed.
+
 ## 2026-11-16 — The MCP edit gaps filled: size, draw order, blend, anchor, effects, compound paths (Claude, on the user's instruction)
 
 **Resume here.** User instruction 16 Nov: fill the gaps in the MCP edits. Done: `setObjectField` gains `width`,
