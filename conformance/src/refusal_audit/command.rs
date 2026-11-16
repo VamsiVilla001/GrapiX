@@ -95,6 +95,7 @@ fn refuse_edit(
         target: SceneTarget::Session { session },
         edits,
         module: None,
+        if_revision: None,
     }));
     let after = workspace.view(session).ok();
     (
@@ -266,6 +267,7 @@ fn drive_session_refusals(report: &mut Report, workspace: &mut Workspace, sessio
             target: SceneTarget::Session { session },
             edits: vec![edit],
             module: Some(module),
+            if_revision: None,
         })
     };
     let outcome = conflict.map(|history| {
@@ -552,6 +554,7 @@ fn drive_binding_refusals(
             data_context: scene.data_context.clone(),
         })],
         module: None,
+        if_revision: None,
     }));
     report.record(
         PLANE,
@@ -568,6 +571,7 @@ fn drive_binding_refusals(
         target: SceneTarget::Session { session },
         edits: vec![set_binding("card", "x", Some("headline"))],
         module: None,
+        if_revision: None,
     }));
     let (refusal, unchanged) = edit(
         workspace,
@@ -970,6 +974,7 @@ fn drive_store_refusals(report: &mut Report, workspace: &mut Workspace, scratch:
     let result = workspace.execute(EditorCommand::DeleteScene(DeleteScene {
         project: PROJECT.into(),
         scene_id: "no-such-scene".into(),
+        if_revision: None,
     }));
     report.record(
         PLANE,
@@ -1033,6 +1038,105 @@ fn drive_store_refusals(report: &mut Report, workspace: &mut Workspace, scratch:
             matches!(&refusal, Some(Refusal::SceneIdBound { project, scene_id }) if project == PROJECT && scene_id == STORED)
                 && unchanged,
             format!("expected stored scene id bound, got {refusal:?} (unchanged: {unchanged})"),
+        ),
+    );
+}
+
+/// 8.12's refusals, driven over the shipped Editor MCP server's JSON-RPC: the
+/// surface that requires `ifRevision` and holds the idempotency ledger.
+pub(super) fn drive_write_semantics_refusals(report: &mut Report) {
+    let scratch = match Scratch::create("write-semantics") {
+        Ok(scratch) => scratch,
+        Err(error) => {
+            report.record(
+                PLANE,
+                "write-semantics refusal fixture root is writable",
+                Outcome::Fail(format!("cannot create the write-semantics root: {error}")),
+            );
+            return;
+        }
+    };
+    let projects = Projects::at_root(scratch.path());
+    let seeded = projects.create_project(PROJECT).and_then(|()| {
+        projects.write_scene(
+            PROJECT,
+            &gx_contracts::scene::new_scene(
+                STORED,
+                "Stored",
+                gx_contracts::color::WorkingColorSpace::NEW_PROJECT,
+            ),
+        )
+    });
+    if let Err(error) = seeded {
+        report.record(
+            PLANE,
+            "write-semantics refusal fixture is stored",
+            Outcome::Fail(format!("cannot seed the write-semantics fixture: {error}")),
+        );
+        return;
+    }
+    let server = gx_editor_mcp::server(projects.clone());
+    let rpc = |tool: &str, arguments: serde_json::Value| -> serde_json::Value {
+        let line = format!(
+            "{}\n",
+            serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": { "name": tool, "arguments": arguments } })
+        );
+        let mut output = Vec::new();
+        match server.serve(std::io::Cursor::new(line), &mut output) {
+            Ok(()) => serde_json::from_slice(&output).unwrap_or(serde_json::Value::Null),
+            Err(error) => serde_json::json!({ "transport": error.to_string() }),
+        }
+    };
+    let target = serde_json::json!({ "target": "stored", "project": PROJECT, "sceneId": STORED });
+    let rename = |name: &str| serde_json::json!([{ "edit": "setSceneName", "name": name }]);
+    let stored_name = || {
+        projects
+            .read_scene(PROJECT, STORED)
+            .map(|scene| scene.name)
+            .unwrap_or_default()
+    };
+
+    let missing = rpc(
+        "scenes.edit",
+        serde_json::json!({ "target": target, "edits": rename("Unread") }),
+    );
+    report.record(
+        PLANE,
+        "RevisionRequired is produced for a stored scenes.edit naming no ifRevision",
+        expect(
+            missing["error"]["data"]["code"]["refusal"] == "revisionRequired"
+                && stored_name() == "Stored",
+            format!("expected revisionRequired with nothing written, got {missing}"),
+        ),
+    );
+
+    let keyed = |name: &str| serde_json::json!({ "target": target, "edits": rename(name), "ifRevision": 0, "idempotencyKey": "audit-op" });
+    let first = rpc("scenes.edit", keyed("First"));
+    let reused = rpc("scenes.edit", keyed("Second"));
+    report.record(
+        PLANE,
+        "IdempotencyKeyReused is produced for a key sent again with other arguments",
+        expect(
+            first["error"].is_null()
+                && reused["error"]["data"]["code"]["refusal"] == "idempotencyKeyReused"
+                && stored_name() == "First",
+            format!(
+                "expected the first write kept and the reuse refused, got {first} then {reused}"
+            ),
+        ),
+    );
+
+    let stale = rpc(
+        "scenes.edit",
+        serde_json::json!({ "target": target, "edits": rename("Stale"), "ifRevision": 0 }),
+    );
+    report.record(
+        PLANE,
+        "RevisionMismatch is produced for a stored scenes.edit naming a stale ifRevision",
+        expect(
+            stale["error"]["data"]["code"]["refusal"] == "revisionMismatch"
+                && stored_name() == "First",
+            format!("expected revisionMismatch with nothing written, got {stale}"),
         ),
     );
 }

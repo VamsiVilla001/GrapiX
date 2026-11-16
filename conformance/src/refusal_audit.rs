@@ -61,6 +61,7 @@ pub fn refusal_audit_suite(report: &mut Report) {
     drive_playout_refusals(report);
     drive_editor_refusals(report);
     command::drive_command_refusals(report);
+    command::drive_write_semantics_refusals(report);
     drawability::drive_wire_refusals(report);
     record_surface_limitations(report);
 }
@@ -1992,6 +1993,8 @@ fn is_driven(variant: &str) -> bool {
     matches!(
         variant,
         "RevisionMismatch"
+            | "RevisionRequired"
+            | "IdempotencyKeyReused"
             | "RevisionUnpinned"
             | "RevisionHashMismatch"
             | "TierTooLow"

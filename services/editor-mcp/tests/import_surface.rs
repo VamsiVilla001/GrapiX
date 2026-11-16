@@ -124,7 +124,10 @@ fn an_svg_is_imported_with_every_tier_named_and_its_source_kept() {
             serde_json::json!({ "project": "news", "scene_id": "brand" }),
         )],
     );
-    assert_eq!(again[0]["result"], serde_json::to_value(&stored).unwrap());
+    // `scenes.get` reports a never-edited scene at revision 0 (8.12).
+    let mut read = stored.clone();
+    read.revision.get_or_insert(gx_contracts::Revision(0));
+    assert_eq!(again[0]["result"], serde_json::to_value(&read).unwrap());
 
     // The source bytes are in the project under the report's hash.
     let hash: ContentHash =

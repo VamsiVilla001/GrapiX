@@ -1,0 +1,350 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 7603,
+    "output_tokens": 0,
+    "state_tokens": 759,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "user_request_16_nov": "8.12 shall have if_revision. Jev and Laya agree design and acceptance first. The row: if_revision, idempotency keys, batch-as-one-undo. Done when: a retry after a timeout does not duplicate. ADR-0002 D.1 principle 4: every write takes if_revision and returns the new revision; a batch is one transaction and one undo entry. ADR D.4: idempotency keys on writes so a retried call after a timeout does not duplicate an object. The plan reopens 8.12 until the editor MCP edit path takes both through gx-write-semantics and the retry-after-timeout test runs against that path.",
+    "facts": [
+      "gx-write-semantics (Shared/write-semantics) already has guarded(current, if_revision) -> next revision or RevisionMismatch{expected, actual}, a bounded IdempotencyLedger with once(key, operation), and a Batch type. No crate depends on it.",
+      "Every MCP write is CommandTool<P>: it parses the tool payload strictly, builds a fresh Workspace over the on-disk project store, runs Workspace::execute and returns the outcome. The MCP server process holds no state between calls. A stdio MCP server is started per client session, so a client that times out and reconnects can reach a new process.",
+      "scenes.edit with a Stored target does read_scene, apply_edits, then write_scene (an atomic file replace) only when the document changed; there is no lock, so two writers can both read revision N and the last one silently wins. The Editor shell's Save of a session opened from a stored scene also calls write_scene and overwrites whatever is stored.",
+      "SceneDocument.revision is Option<Revision>, documented as the monotonic authoring revision and the optimistic-concurrency token (0.8). Nothing ever increments it. The content hash leaves it out. Publishing pins a clone to Revision(1) if absent and the engine issues its own Take revision, so the published Take revision is a different counter owned by Playout.",
+      "A batch (EditScene.edits) is already atomic and one undo entry in a session; against a stored scene it is applied to one in-memory copy and written once, so it lands whole or not at all.",
+      "Refusal::RevisionMismatch {expected, actual} already exists with the code revisionMismatch; Revision::check_write is the one comparison.",
+      "scenes.create refuses an existing id and scenes.import refuses an existing id, so a retried create after a lost reply is refused by name rather than duplicated; scenes.delete of an absent scene is reported, never treated as success."
+    ],
+    "proposal": "Token: SceneDocument.revision, absent read as 0, bumped by exactly 1 on every stored write by any writer (MCP edit, Editor Save to origin). EditScene and DeleteScene gain if_revision; a Stored target must carry it, a Session target must not. The write is read-check-write under a per-store lock so the check and the write are one step; a stale write is refused revisionMismatch with the current revision, nothing written. Every MCP write also takes an optional idempotency key; the server records the key, a hash of the tool and arguments, and the first result in a bounded durable ledger in the project store, returns the first result for a repeat with the same arguments, and refuses a repeat with different arguments by name. The result of scenes.edit, scenes.create and scenes.delete carries the new revision."
+  },
+  "questions": {
+    "token": {
+      "type": "choice",
+      "instructions": "What should if_revision compare against for a stored scene?",
+      "criteria": {
+        "authoring_revision": "SceneDocument.revision, bumped by one on every stored write by any writer; absent reads as 0.",
+        "separate_counter": "A new edit counter kept beside the scene in the project store, leaving SceneDocument.revision for publishing.",
+        "published_revision": "The published Take revision that Cue and Take pin."
+      }
+    },
+    "required": {
+      "type": "choice",
+      "instructions": "Must a write to a stored scene carry if_revision?",
+      "criteria": {
+        "required_on_stored": "Required for a Stored target: a missing if_revision is refused by name, so no agent overwrites blind by omission.",
+        "optional_last_write_wins": "Optional: when omitted the write is unconditional."
+      }
+    },
+    "where_it_lives": {
+      "type": "choice",
+      "instructions": "Where should the revision check and bump live?",
+      "criteria": {
+        "in_the_store_write": "In the Editor's stored-scene write path, called by the command executor, so the MCP edit and the Editor's own save share one rule and one lock.",
+        "mcp_wrapper_only": "In the MCP tool wrapper only; the Editor's own writes stay unguarded.",
+        "two_copies": "Implement the check in the MCP wrapper and again in the Editor."
+      }
+    },
+    "editor_save": {
+      "type": "choice",
+      "instructions": "What should the Editor's Save of a session opened from a stored scene do?",
+      "criteria": {
+        "check_and_bump": "Refuse with revisionMismatch if the stored scene moved on since the session read it, and bump the revision when it saves.",
+        "bump_only": "Always overwrite but bump the revision, so agents notice.",
+        "unchanged": "Leave Save as it is: last write wins and the revision is not touched."
+      }
+    },
+    "ledger": {
+      "type": "choice",
+      "instructions": "Where should the idempotency ledger live?",
+      "criteria": {
+        "durable_in_project_store": "A bounded file in the project store, written atomically, so a retry that reaches a restarted or second server process still gets the first result.",
+        "in_memory_per_process": "In the MCP server process memory, lost when the process restarts."
+      }
+    },
+    "key_reuse": {
+      "type": "choice",
+      "instructions": "What should a repeated idempotency key with different arguments do?",
+      "criteria": {
+        "refuse_by_name": "Refuse with a named refusal; the key belongs to the first request.",
+        "return_first_result": "Return the first result regardless of the new arguments.",
+        "execute_again": "Treat it as a new write."
+      }
+    },
+    "crash_window": {
+      "type": "choice",
+      "instructions": "A write can land and the process die before the ledger records it. Which makes a retry safe?",
+      "criteria": {
+        "revision_guard_covers_it": "The retried edit carries the same if_revision, which is now stale, so it is refused revisionMismatch and never applied twice; creates refuse an existing id.",
+        "ledger_must_be_in_the_same_file": "Only storing the key inside the scene file itself makes it safe."
+      }
+    },
+    "which_tools": {
+      "type": "choice",
+      "instructions": "Which MCP writes take which guard?",
+      "criteria": {
+        "revision_on_edit_and_delete_key_on_all": "scenes.edit and scenes.delete take if_revision; every write tool takes an idempotency key; creates have no revision to check.",
+        "revision_on_all": "Every write takes if_revision, including creates.",
+        "key_only": "Only idempotency keys, no if_revision."
+      }
+    },
+    "needs_user": {
+      "type": "noul",
+      "instructions": "Must the user approve this design before implementation?",
+      "criteria": {
+        "true": "Yes, it makes a product choice the recorded user decisions do not cover.",
+        "false": "No, it follows from ADR-0002 D.1 and D.4, the plan's reopening condition and the user's instruction that 8.12 shall have if_revision."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "token",
+      "jev": "authoring_revision",
+      "laya": "published_revision",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "authoring_revision",
+        "confidence": 1,
+        "probabilities": {
+          "authoring_revision": 1,
+          "separate_counter": 0,
+          "published_revision": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "published_revision",
+        "probabilities": {
+          "authoring_revision": 0.3193,
+          "separate_counter": 0.0555,
+          "published_revision": 0.6252
+        },
+        "confidence": 0.2549,
+        "answer_confidence": 0.6252,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "required",
+      "jev": "required_on_stored",
+      "laya": "required_on_stored",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "required_on_stored",
+        "confidence": 0.98,
+        "probabilities": {
+          "required_on_stored": 0.99,
+          "optional_last_write_wins": 0.01
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "required_on_stored",
+        "probabilities": {
+          "required_on_stored": 0.8855,
+          "optional_last_write_wins": 0.1145
+        },
+        "confidence": 0.4865,
+        "answer_confidence": 0.8855,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "where_it_lives",
+      "jev": "in_the_store_write",
+      "laya": "mcp_wrapper_only",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "in_the_store_write",
+        "confidence": 1,
+        "probabilities": {
+          "in_the_store_write": 1,
+          "mcp_wrapper_only": 0,
+          "two_copies": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "mcp_wrapper_only",
+        "probabilities": {
+          "in_the_store_write": 0.1912,
+          "mcp_wrapper_only": 0.4251,
+          "two_copies": 0.3837
+        },
+        "confidence": 0.0465,
+        "answer_confidence": 0.4251,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "editor_save",
+      "jev": "check_and_bump",
+      "laya": "unchanged",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "check_and_bump",
+        "confidence": 1,
+        "probabilities": {
+          "check_and_bump": 1,
+          "bump_only": 0,
+          "unchanged": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "unchanged",
+        "probabilities": {
+          "check_and_bump": 0.2207,
+          "bump_only": 0.1423,
+          "unchanged": 0.637
+        },
+        "confidence": 0.1824,
+        "answer_confidence": 0.637,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "ledger",
+      "jev": "durable_in_project_store",
+      "laya": "durable_in_project_store",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "durable_in_project_store",
+        "confidence": 1,
+        "probabilities": {
+          "durable_in_project_store": 1,
+          "in_memory_per_process": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "durable_in_project_store",
+        "probabilities": {
+          "durable_in_project_store": 0.872,
+          "in_memory_per_process": 0.128
+        },
+        "confidence": 0.448,
+        "answer_confidence": 0.872,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "key_reuse",
+      "jev": "refuse_by_name",
+      "laya": "return_first_result",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "refuse_by_name",
+        "confidence": 1,
+        "probabilities": {
+          "refuse_by_name": 1,
+          "return_first_result": 0,
+          "execute_again": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "return_first_result",
+        "probabilities": {
+          "refuse_by_name": 0.0687,
+          "return_first_result": 0.8408,
+          "execute_again": 0.0905
+        },
+        "confidence": 0.5019,
+        "answer_confidence": 0.8408,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "crash_window",
+      "jev": "revision_guard_covers_it",
+      "laya": "ledger_must_be_in_the_same_file",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "revision_guard_covers_it",
+        "confidence": 1,
+        "probabilities": {
+          "revision_guard_covers_it": 1,
+          "ledger_must_be_in_the_same_file": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "ledger_must_be_in_the_same_file",
+        "probabilities": {
+          "revision_guard_covers_it": 0.4841,
+          "ledger_must_be_in_the_same_file": 0.5159
+        },
+        "confidence": 0.0007,
+        "answer_confidence": 0.5159,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "which_tools",
+      "jev": "revision_on_edit_and_delete_key_on_all",
+      "laya": "revision_on_edit_and_delete_key_on_all",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "revision_on_edit_and_delete_key_on_all",
+        "confidence": 0.94,
+        "probabilities": {
+          "revision_on_edit_and_delete_key_on_all": 0.96,
+          "revision_on_all": 0.04,
+          "key_only": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "revision_on_edit_and_delete_key_on_all",
+        "probabilities": {
+          "revision_on_edit_and_delete_key_on_all": 0.5185,
+          "revision_on_all": 0.3282,
+          "key_only": 0.1533
+        },
+        "confidence": 0.0955,
+        "answer_confidence": 0.5185,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "needs_user",
+      "jev": 0.29,
+      "laya": 0.9723,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.29
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9723,
+        "confidence": 0.9723,
+        "answer_confidence": 0.9723,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

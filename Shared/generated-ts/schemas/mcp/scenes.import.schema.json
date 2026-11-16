@@ -4,6 +4,12 @@
   "additionalProperties": false,
   "description": "Import an SVG into a new stored scene through the four-tier\npipeline (7.2). The source is adopted into the project by content\nhash; the report is an `Imported` effect. Refuses an existing id.",
   "properties": {
+    "idempotencyKey": {
+      "description": "Optional. A fresh string per logical write. Repeating the call with the same key and the same arguments returns the first answer without writing again, so a retry after a timeout cannot duplicate. The same key with other arguments refuses idempotencyKeyReused.",
+      "maxLength": 128,
+      "minLength": 1,
+      "type": "string"
+    },
     "name": {
       "description": "The scene's display name; the source file's stem when absent.",
       "type": [

@@ -38,11 +38,15 @@ pub mod validate;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-/// Wire protocol version 5 (11.41): the headless `render` request and its
-/// `rendered` reply, and Program frames the render loop missed in the
-/// performance report. Version 4 (11.38) pinned cue and take to a content
-/// hash. A mismatch is an error code, never a negotiation.
-pub const PROTOCOL_VERSION: u32 = 5;
+/// Wire protocol version 6 (8.12): a write to a stored scene names the
+/// revision it read (`ifRevision`), a stored write answers with the new one,
+/// and every Editor MCP write takes an `idempotencyKey`. The MCP tool schema
+/// is versioned with it (8.1), so an agent built for 5 learns it must change.
+/// Version 5 (11.41) added the headless `render` request and its `rendered`
+/// reply, and Program frames the render loop missed in the performance report.
+/// Version 4 (11.38) pinned cue and take to a content hash. A mismatch is an
+/// error code, never a negotiation.
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// Stable identity of a published scene. Survives every republish.
 #[derive(
@@ -333,11 +337,23 @@ pub enum MediaCodec {
     rename_all_fields = "camelCase"
 )]
 pub enum Refusal {
-    /// The take's revision does not match what is published.
+    /// A write named a revision that is not current: a published take's
+    /// revision, or (8.12) the authoring revision of the stored scene it
+    /// edits or deletes. `actual` is the revision that is current now, so the
+    /// loser re-reads and retries instead of overwriting blind.
     RevisionMismatch {
         expected: Revision,
         actual: Revision,
     },
+    /// A write to a stored scene named no `ifRevision` (8.12). Omitting it
+    /// would make the write unconditional, and an agent that forgets must
+    /// not overwrite another writer's work by omission.
+    RevisionRequired { tool: String },
+    /// An idempotency key was reused with a different request (8.12). The key
+    /// belongs to the first request; answering the second with the first's
+    /// result would be a silent substitution, and executing it would defeat
+    /// the key.
+    IdempotencyKeyReused { key: String },
     /// A cue or take named a revision but no content hash. Playout loads a
     /// revision only by its pinned hash (invariant 61).
     RevisionUnpinned { take_id: TakeId, revision: Revision },
@@ -1067,6 +1083,14 @@ impl std::fmt::Display for Refusal {
                     expected.0, actual.0
                 )
             }
+            Refusal::RevisionRequired { tool } => write!(
+                f,
+                "{tool} on a stored scene must name ifRevision, the revision it read; read the scene and send its revision"
+            ),
+            Refusal::IdempotencyKeyReused { key } => write!(
+                f,
+                "idempotency key {key:?} was already used for a different request; a key belongs to one request, so send a new key for a new write"
+            ),
             Refusal::RevisionUnpinned { take_id, revision } => write!(
                 f,
                 "{take_id} revision {} names no content hash; revisions load only by pinned hash",
@@ -1749,6 +1773,12 @@ impl Refusal {
                 expected: Revision(1),
                 actual: Revision(0),
             },
+            Self::RevisionRequired {
+                tool: "scenes.edit".into(),
+            },
+            Self::IdempotencyKeyReused {
+                key: "audit".into(),
+            },
             Self::RevisionUnpinned {
                 take_id: TakeId("audit".into()),
                 revision: Revision(1),
@@ -2384,6 +2414,8 @@ impl Refusal {
     pub const fn code_name(&self) -> &'static str {
         match self {
             Self::RevisionMismatch { .. } => "revisionMismatch",
+            Self::RevisionRequired { .. } => "revisionRequired",
+            Self::IdempotencyKeyReused { .. } => "idempotencyKeyReused",
             Self::RevisionUnpinned { .. } => "revisionUnpinned",
             Self::RevisionHashMismatch { .. } => "revisionHashMismatch",
             Self::TierTooLow { .. } => "tierTooLow",

@@ -1980,6 +1980,7 @@ dependencies = [
  "gx-contracts",
  "gx-fs",
  "gx-project-store",
+ "gx-write-semantics",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -1992,6 +1993,7 @@ dependencies = [
  "gx-contracts",
  "gx-editor",
  "gx-mcp-server",
+ "gx-write-semantics",
  "jsonschema",
  "serde",
  "serde_json",
@@ -2179,9 +2181,11 @@ name = "gx-write-semantics"
 version = "0.1.0"
 dependencies = [
  "gx-contracts",
+ "gx-fs",
  "parking_lot",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
 ]
 
 [[package]]

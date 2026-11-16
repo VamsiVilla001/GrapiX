@@ -23,13 +23,14 @@
 
 use std::marker::PhantomData;
 
-use gx_contracts::command::{parse_strict, EditorCommand};
+use gx_contracts::command::{parse_strict, DeleteScene, EditScene, EditorCommand, SceneTarget};
 use gx_contracts::mcp::{ProjectRef as ProjectRefArgs, SceneRef};
 use gx_contracts::scene::resolve_hierarchy;
 use gx_contracts::validate::preflight;
-use gx_contracts::Refusal;
+use gx_contracts::{Refusal, Revision};
 use gx_editor::{CommandError, Projects, Workspace};
 use gx_mcp_server::ToolHandler;
+use gx_write_semantics::{fingerprint, IdempotencyKey, LedgerFile};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -135,6 +136,16 @@ pub fn server(projects: Projects) -> gx_mcp_server::Server {
 ///
 /// Each call runs on a fresh workspace over the store, so it addresses stored
 /// scenes only; a `Session` target refuses `SessionUnknown`.
+///
+/// **Write semantics (8.12), once, for every write here.** `ifRevision` is part
+/// of the two commands that change an existing stored scene (`editScene`,
+/// `deleteScene`), checked by the Editor's store under its write lock; this
+/// handler only insists it is present, so an agent cannot overwrite blind by
+/// omission (`revisionRequired`). `idempotencyKey` is not part of any command:
+/// it is stripped here, and a retry with the same key and arguments returns the
+/// first answer from a ledger kept in the project store, so it survives a
+/// restarted server process (`idempotencyKeyReused` for the same key on other
+/// arguments).
 pub struct CommandTool<P> {
     projects: Projects,
     payload: PhantomData<fn() -> P>,
@@ -153,16 +164,84 @@ impl<P> ToolHandler for CommandTool<P>
 where
     P: DeserializeOwned + Serialize + Into<EditorCommand>,
 {
-    fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
-        let command = parse_strict::<P>(args)?.into();
-        let outcome = Workspace::new(Some(self.projects.clone()))
-            .execute(command)
-            .map_err(|error| match error {
-                CommandError::Refused(refusal) => refusal,
-                CommandError::Store(error) => Refusal::from(error),
-            })?;
-        to_value(outcome)
+    fn handle(&self, mut args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
+        let key = take_idempotency_key(&mut args)?;
+        let command: EditorCommand = parse_strict::<P>(args.clone())?.into();
+        require_revision(&command)?;
+        let name = command.name();
+        let projects = self.projects.clone();
+        let run = move || {
+            Workspace::new(Some(projects))
+                .execute(command)
+                .map_err(|error| match error {
+                    CommandError::Refused(refusal) => refusal,
+                    CommandError::Store(error) => Refusal::from(error),
+                })
+                .and_then(to_value)
+        };
+        match key {
+            None => run(),
+            Some(key) => LedgerFile::new(self.projects.root().join(IDEMPOTENCY_LEDGER))
+                .once(key, &fingerprint(name, &args), run)
+                .map(|answer| answer.result),
+        }
     }
+}
+
+/// The file in the project store that remembers each key's first answer.
+const IDEMPOTENCY_LEDGER: &str = ".idempotency.json";
+
+/// The longest idempotency key accepted: enough for a UUID or a content hash,
+/// short enough that a ledger of them stays small.
+const IDEMPOTENCY_KEY_MAX: usize = 128;
+
+/// Remove `idempotencyKey` from the arguments and return it. It names the
+/// request; it is not part of the command, so it must be gone before the strict
+/// parse (which would refuse it as an unknown key) and before the request is
+/// fingerprinted (a retry sends the same key, and the key is not the request).
+fn take_idempotency_key(args: &mut serde_json::Value) -> Result<Option<IdempotencyKey>, Refusal> {
+    let Some(object) = args.as_object_mut() else {
+        return Ok(None);
+    };
+    let Some(key) = object.remove("idempotencyKey") else {
+        return Ok(None);
+    };
+    match key {
+        serde_json::Value::String(key)
+            if !key.is_empty()
+                && key.chars().count() <= IDEMPOTENCY_KEY_MAX
+                && !key.chars().any(char::is_control) =>
+        {
+            Ok(Some(IdempotencyKey(key)))
+        }
+        other => Err(Refusal::SceneParseFailed {
+            detail: format!(
+                "arguments do not match the tool's input schema: idempotencyKey must be a \
+                 string of 1 to {IDEMPOTENCY_KEY_MAX} characters with no control characters, got {other}"
+            ),
+        }),
+    }
+}
+
+/// An agent changing or deleting a stored scene must say which revision it
+/// read. The Editor itself may write unconditionally (a person saving or
+/// deleting from the project panel), so the command leaves the field optional
+/// and this surface requires it.
+fn require_revision(command: &EditorCommand) -> Result<(), Refusal> {
+    let tool = match command {
+        EditorCommand::EditScene(EditScene {
+            target: SceneTarget::Stored { .. },
+            if_revision: None,
+            ..
+        }) => "scenes.edit",
+        EditorCommand::DeleteScene(DeleteScene {
+            if_revision: None, ..
+        }) => "scenes.delete",
+        _ => return Ok(()),
+    };
+    Err(Refusal::RevisionRequired {
+        tool: tool.to_owned(),
+    })
 }
 
 // --- project (8.3) ---------------------------------------------------------
@@ -195,11 +274,14 @@ pub struct SceneGet(pub Projects);
 impl ToolHandler for SceneGet {
     fn handle(&self, args: serde_json::Value) -> Result<serde_json::Value, Refusal> {
         let args: SceneRef = parse(args)?;
-        to_value(
-            self.0
-                .read_scene(&args.project, &args.scene_id)
-                .map_err(Refusal::from)?,
-        )
+        let mut scene = self
+            .0
+            .read_scene(&args.project, &args.scene_id)
+            .map_err(Refusal::from)?;
+        // A scene never written since revisions began has none stored; read
+        // it as 0, which is what `ifRevision` must name to write it.
+        scene.revision.get_or_insert(Revision(0));
+        to_value(scene)
     }
 }
 
@@ -536,9 +618,16 @@ mod tests {
         scene_id: &str,
         edits: serde_json::Value,
     ) -> Result<serde_json::Value, Refusal> {
+        // Each edit names the revision it read, as an agent must (8.12).
+        let read = projects
+            .stored_revision("news", scene_id)
+            .ok()
+            .flatten()
+            .map_or(0, |revision| revision.0);
         CommandTool::<EditScene>::new(projects.clone()).handle(serde_json::json!({
             "target": { "target": "stored", "project": "news", "sceneId": scene_id },
             "edits": edits,
+            "ifRevision": read,
         }))
     }
 
@@ -604,11 +693,15 @@ mod tests {
 
         let delete_scene = CommandTool::<DeleteScene>::new(projects.clone());
         delete_scene
-            .handle(serde_json::json!({ "project": "news", "sceneId": "lower-third" }))
+            .handle(
+                serde_json::json!({ "project": "news", "sceneId": "lower-third", "ifRevision": 0 }),
+            )
             .unwrap();
         assert!(projects.list_scenes("news").unwrap().is_empty());
         assert!(matches!(
-            delete_scene.handle(serde_json::json!({ "project": "news", "sceneId": "lower-third" })),
+            delete_scene.handle(
+                serde_json::json!({ "project": "news", "sceneId": "lower-third", "ifRevision": 0 })
+            ),
             Err(Refusal::SceneNotStored { .. })
         ));
     }

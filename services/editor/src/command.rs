@@ -48,7 +48,8 @@ use gx_contracts::design_system::{
     MotionPreset, PresetParam,
 };
 use gx_contracts::scene::{new_scene, parse_scene_document, SceneDocument};
-use gx_contracts::Refusal;
+use gx_contracts::{Refusal, Revision};
+use gx_write_semantics::guarded;
 
 use crate::{EditorError, Projects};
 
@@ -290,9 +291,12 @@ impl Workspace {
         match command {
             EditorCommand::OpenScene(p) => self.open(p.source),
             EditorCommand::CloseScene(p) => self.close(p.session, p.force),
-            EditorCommand::EditScene(p) => {
-                self.edit(p.target, &p.edits, p.module.unwrap_or(EditorModule::Scene))
-            }
+            EditorCommand::EditScene(p) => self.edit(
+                p.target,
+                &p.edits,
+                p.module.unwrap_or(EditorModule::Scene),
+                p.if_revision,
+            ),
             EditorCommand::Undo(p) => {
                 self.step_history(p.session, HistoryDirection::Undo, p.module)
             }
@@ -305,7 +309,9 @@ impl Workspace {
             EditorCommand::DuplicateScene(p) => {
                 self.duplicate_scene(p.project, p.source_scene_id, p.scene_id, p.name)
             }
-            EditorCommand::DeleteScene(p) => self.delete_scene(p.project, p.scene_id),
+            EditorCommand::DeleteScene(p) => {
+                self.delete_scene(p.project, p.scene_id, p.if_revision)
+            }
             EditorCommand::SaveTakePage(p) => self.save_take_page(p.project, p.page),
             EditorCommand::ConfirmDesignSystem(p) => {
                 self.confirm_design_system(p.project, p.commit)
@@ -340,6 +346,7 @@ impl Workspace {
                             report: outcome.report,
                         },
                     ],
+                    revision: Some(Revision(0)),
                 })
             }
         }
@@ -423,6 +430,7 @@ impl Workspace {
                             report: outcome.report,
                         },
                     ],
+                    revision: None,
                 });
             }
             SceneSource::Project { project, scene_id } => {
@@ -437,6 +445,7 @@ impl Workspace {
                         effects: vec![EditEffect::SessionOpened {
                             session: existing.key,
                         }],
+                        revision: None,
                     });
                 }
                 let document = self
@@ -458,6 +467,7 @@ impl Workspace {
                     .view(),
             ),
             effects: vec![EditEffect::SessionOpened { session: key }],
+            revision: None,
         })
     }
 
@@ -495,6 +505,7 @@ impl Workspace {
         Ok(CommandOutcome {
             session: None,
             effects: vec![EditEffect::SessionClosed { session: key }],
+            revision: None,
         })
     }
 
@@ -503,9 +514,19 @@ impl Workspace {
         target: SceneTarget,
         edits: &[SceneEdit],
         module: EditorModule,
+        if_revision: Option<Revision>,
     ) -> Result<CommandOutcome, CommandError> {
         match target {
             SceneTarget::Session { session: key } => {
+                // An open session has no stored revision to compare. Taking
+                // the field and ignoring it would let a caller believe a
+                // concurrency check ran that did not (invariant 18).
+                if if_revision.is_some() {
+                    return Err(Refusal::CommandUnknownField {
+                        path: "ifRevision".into(),
+                    }
+                    .into());
+                }
                 let index = self.index(key)?;
                 let origin = self.sessions[index].origin.clone();
                 let design_system = self.design_system_for(origin.as_ref(), edits)?;
@@ -525,13 +546,22 @@ impl Workspace {
                 Ok(CommandOutcome {
                     session: Some(session.view()),
                     effects,
+                    revision: None,
                 })
             }
             SceneTarget::Stored { project, scene_id } => {
                 let origin = SceneOrigin { project, scene_id };
+                // 8.12: the read, the revision check and the write are one
+                // step, so a stale batch cannot land between them.
+                let _write = self.projects()?.lock_scenes(&origin.project)?;
                 let mut document = self
                     .projects()?
                     .read_scene(&origin.project, &origin.scene_id)?;
+                let current = document.revision.unwrap_or(Revision(0));
+                let next = match if_revision {
+                    Some(expected) => guarded(current, expected)?,
+                    None => current.next(),
+                };
                 let design_system = self.design_system_for(Some(&origin), edits)?;
                 let presets = self.presets_for(Some(&origin), edits)?;
                 let context = EditContext {
@@ -540,13 +570,20 @@ impl Workspace {
                     presets: presets.as_deref(),
                 };
                 let (before, mut effects) = apply_edits(&mut document, edits, &context)?;
-                if document != before {
+                // A batch that changed nothing writes nothing and answers the
+                // revision it found; the revision moves only with the content.
+                let revision = if document != before {
+                    document.revision = Some(next);
                     self.projects()?.write_scene(&origin.project, &document)?;
                     effects.push(EditEffect::Stored { origin });
-                }
+                    next
+                } else {
+                    current
+                };
                 Ok(CommandOutcome {
                     session: None,
                     effects,
+                    revision: Some(revision),
                 })
             }
         }
@@ -652,11 +689,13 @@ impl Workspace {
         Ok(CommandOutcome {
             session: Some(session.view()),
             effects: vec![EditEffect::None],
+            revision: None,
         })
     }
 
     fn save(&mut self, key: SessionKey, to: SaveTarget) -> Result<CommandOutcome, CommandError> {
         let index = self.index(key)?;
+        let mut saved_revision = None;
         let effect = match to {
             SaveTarget::Origin => {
                 let session = &self.sessions[index];
@@ -666,6 +705,11 @@ impl Workspace {
                     .ok_or(Refusal::SessionUnbound { session: key })?;
                 require_scene_name(&session.document)?;
                 let projects = self.projects()?;
+                // 8.12: a save is a write like any other. It is refused when
+                // the stored scene moved on since this session read it, so an
+                // agent's edit is never overwritten blind. The session keeps
+                // its work, which still saves to a file.
+                let _write = projects.lock_scenes(&origin.project)?;
                 // Update, never create: a bound scene whose stored copy has
                 // gone is reported, not silently recreated.
                 if !scene_exists(projects, &origin.project, &origin.scene_id)? {
@@ -675,10 +719,22 @@ impl Workspace {
                     }
                     .into());
                 }
-                projects.write_scene(&origin.project, &session.document)?;
+                let read = session.document.revision.unwrap_or(Revision(0));
+                let current = projects
+                    .stored_revision(&origin.project, &origin.scene_id)?
+                    .unwrap_or(read);
+                let next = guarded(current, read)?;
+                let mut document = session.document.clone();
+                document.revision = Some(next);
+                projects.write_scene(&origin.project, &document)?;
                 let session = &mut self.sessions[index];
+                // Replay rebuilds the document from the base, so both carry
+                // the revision this save produced.
+                session.document.revision = Some(next);
+                session.base.revision = Some(next);
                 session.dirty = false;
                 session.project_dirty = false;
+                saved_revision = Some(next);
                 EditEffect::Stored { origin }
             }
             SaveTarget::Project { project } => {
@@ -688,10 +744,12 @@ impl Workspace {
                 let scene_id = session.document.id.clone();
                 // Create, never overwrite: a scene already stored under this
                 // id is another graphic, and replacing it would lose it.
+                let _write = projects.lock_scenes(&project)?;
                 if scene_exists(projects, &project, &scene_id)? {
                     return Err(Refusal::SceneAlreadyExists { project, scene_id }.into());
                 }
                 projects.write_scene(&project, &session.document)?;
+                saved_revision = Some(session.document.revision.unwrap_or(Revision(0)));
                 let origin = SceneOrigin { project, scene_id };
                 let session = &mut self.sessions[index];
                 session.origin = Some(origin.clone());
@@ -712,6 +770,7 @@ impl Workspace {
         Ok(CommandOutcome {
             session: Some(self.sessions[index].view()),
             effects: vec![effect],
+            revision: saved_revision,
         })
     }
 
@@ -727,6 +786,7 @@ impl Workspace {
         Ok(CommandOutcome {
             session: None,
             effects: vec![EditEffect::ProjectCreated { project }],
+            revision: None,
         })
     }
 
@@ -741,6 +801,7 @@ impl Workspace {
         let space = projects.settings(&project)?.working_color_space;
         let document = new_scene(&scene_id, name.trim(), space);
         require_scene_name(&document)?;
+        let _write = projects.lock_scenes(&project)?;
         if scene_exists(projects, &project, &scene_id)? {
             return Err(Refusal::SceneAlreadyExists { project, scene_id }.into());
         }
@@ -750,6 +811,8 @@ impl Workspace {
             effects: vec![EditEffect::Stored {
                 origin: SceneOrigin { project, scene_id },
             }],
+            // A new scene is at revision 0; its first edit names that.
+            revision: Some(Revision(0)),
         })
     }
 
@@ -776,6 +839,7 @@ impl Workspace {
         duplicate.name = name.trim().to_owned();
         duplicate.revision = None;
         require_scene_name(&duplicate)?;
+        let _write = projects.lock_scenes(&project)?;
         if scene_exists(projects, &project, &scene_id)? {
             return Err(Refusal::SceneAlreadyExists { project, scene_id }.into());
         }
@@ -785,6 +849,7 @@ impl Workspace {
             effects: vec![EditEffect::Stored {
                 origin: SceneOrigin { project, scene_id },
             }],
+            revision: Some(Revision(0)),
         })
     }
 
@@ -799,6 +864,7 @@ impl Workspace {
         &mut self,
         project: String,
         scene_id: String,
+        if_revision: Option<Revision>,
     ) -> Result<CommandOutcome, CommandError> {
         let origin = SceneOrigin { project, scene_id };
         let bound = self
@@ -816,12 +882,21 @@ impl Workspace {
             }
         }
         let projects = self.projects()?;
+        // 8.12: with `ifRevision` the delete is a compare-and-swap too, so a
+        // scene is never deleted by a caller that has not seen its latest edit.
+        let _write = projects.lock_scenes(&origin.project)?;
         if !scene_exists(projects, &origin.project, &origin.scene_id)? {
             return Err(Refusal::SceneNotStored {
                 project: origin.project,
                 scene_id: origin.scene_id,
             }
             .into());
+        }
+        if let Some(expected) = if_revision {
+            let current = projects
+                .stored_revision(&origin.project, &origin.scene_id)?
+                .unwrap_or(expected);
+            guarded(current, expected)?;
         }
         projects.delete_scene(&origin.project, &origin.scene_id)?;
         let session = bound.map(|index| {
@@ -833,6 +908,7 @@ impl Workspace {
         Ok(CommandOutcome {
             session,
             effects: vec![EditEffect::Stored { origin }],
+            revision: None,
         })
     }
 
@@ -858,6 +934,7 @@ impl Workspace {
                 project,
                 page_id: page.page_id,
             }],
+            revision: None,
         })
     }
 
@@ -941,6 +1018,7 @@ impl Workspace {
                 preset_id,
                 phase,
             }],
+            revision: None,
         })
     }
 
@@ -960,6 +1038,7 @@ impl Workspace {
                 project,
                 version: system.version,
             }],
+            revision: None,
         })
     }
 }
@@ -1214,6 +1293,7 @@ mod tests {
             target: SceneTarget::Session { session },
             edits,
             module: None,
+            if_revision: None,
         })
     }
 
@@ -1225,6 +1305,7 @@ mod tests {
             },
             edits,
             module: None,
+            if_revision: None,
         })
     }
 
@@ -1516,6 +1597,7 @@ mod tests {
             target: SceneTarget::Session { session },
             edits,
             module: Some(module),
+            if_revision: None,
         })
     }
 
@@ -2151,6 +2233,7 @@ mod tests {
             EditorCommand::DeleteScene(DeleteScene {
                 project: "news".into(),
                 scene_id: "b".into(),
+                if_revision: None,
             })
         };
         run(&mut workspace, delete());
@@ -2232,6 +2315,7 @@ mod tests {
             EditorCommand::DeleteScene(DeleteScene {
                 project: "news".into(),
                 scene_id: "b".into(),
+                if_revision: None,
             })
         };
         assert!(matches!(
@@ -2719,5 +2803,285 @@ mod tests {
                 }]
             );
         }
+    }
+
+    // --- write semantics (8.12) ---------------------------------------------
+
+    fn guarded_edit(scene_id: &str, read: u64, edits: Vec<SceneEdit>) -> EditorCommand {
+        EditorCommand::EditScene(EditScene {
+            target: SceneTarget::Stored {
+                project: "news".into(),
+                scene_id: scene_id.into(),
+            },
+            edits,
+            module: None,
+            if_revision: Some(Revision(read)),
+        })
+    }
+
+    fn stored_revision(workspace: &Workspace, scene_id: &str) -> Option<Revision> {
+        stored_scene(workspace, scene_id).revision
+    }
+
+    #[test]
+    fn a_stored_batch_is_one_revision_and_a_stale_one_lands_nothing() {
+        let (_scratch, mut workspace) = with_store("revision-batch");
+        // A batch of three edits moves the revision by one, not three.
+        let outcome = run(
+            &mut workspace,
+            guarded_edit(
+                "b",
+                0,
+                vec![
+                    rename_scene("One"),
+                    SceneEdit::CreateObject(CreateObject {
+                        kind: "rect".into(),
+                        name: "Card".into(),
+                    }),
+                    rename_scene("Two"),
+                ],
+            ),
+        );
+        assert_eq!(outcome.revision, Some(Revision(1)));
+        assert_eq!(stored_revision(&workspace, "b"), Some(Revision(1)));
+        let after = stored_scene(&workspace, "b");
+
+        // The writer that read 0 has lost; it learns 1 is current.
+        let stale = refusal(
+            &mut workspace,
+            guarded_edit("b", 0, vec![rename_scene("Late")]),
+        );
+        assert_eq!(
+            stale,
+            Refusal::RevisionMismatch {
+                expected: Revision(0),
+                actual: Revision(1),
+            }
+        );
+        assert_eq!(stored_scene(&workspace, "b"), after, "nothing landed");
+
+        // A batch that changes nothing writes nothing and answers the
+        // revision it found.
+        let unchanged = run(
+            &mut workspace,
+            guarded_edit("b", 1, vec![rename_scene("Two")]),
+        );
+        assert_eq!(unchanged.revision, Some(Revision(1)));
+        assert_eq!(stored_scene(&workspace, "b"), after);
+
+        // The Editor's own unconditional write still moves the revision, so
+        // an agent holding 1 cannot overwrite it blind afterwards.
+        run(
+            &mut workspace,
+            stored_edit("b", vec![rename_scene("Three")]),
+        );
+        assert_eq!(stored_revision(&workspace, "b"), Some(Revision(2)));
+        assert!(matches!(
+            refusal(
+                &mut workspace,
+                guarded_edit("b", 1, vec![rename_scene("Four")])
+            ),
+            Refusal::RevisionMismatch {
+                actual: Revision(2),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn a_session_target_names_no_revision() {
+        let (_scratch, mut workspace) = with_store("revision-session");
+        let session = open(
+            &mut workspace,
+            SceneSource::Project {
+                project: "news".into(),
+                scene_id: "b".into(),
+            },
+        );
+        let refused = refusal(
+            &mut workspace,
+            EditorCommand::EditScene(EditScene {
+                target: SceneTarget::Session { session },
+                edits: vec![rename_scene("X")],
+                module: None,
+                if_revision: Some(Revision(0)),
+            }),
+        );
+        assert_eq!(
+            refused,
+            Refusal::CommandUnknownField {
+                path: "ifRevision".into()
+            }
+        );
+        assert_eq!(name_of(&workspace, session), "B", "nothing was applied");
+    }
+
+    #[test]
+    fn saving_over_a_scene_an_agent_changed_is_refused_and_the_work_still_saves_to_a_file() {
+        let (_scratch, mut workspace) = with_store("revision-save");
+        let session = open(
+            &mut workspace,
+            SceneSource::Project {
+                project: "news".into(),
+                scene_id: "b".into(),
+            },
+        );
+        run(&mut workspace, edit(session, vec![rename_scene("Mine")]));
+
+        // An agent edits the stored scene while the session is open.
+        run(
+            &mut workspace,
+            guarded_edit("b", 0, vec![rename_scene("Agent")]),
+        );
+        let refused = refusal(&mut workspace, save(session, SaveTarget::Origin));
+        assert_eq!(
+            refused,
+            Refusal::RevisionMismatch {
+                expected: Revision(0),
+                actual: Revision(1),
+            }
+        );
+        assert_eq!(
+            stored_scene(&workspace, "b").name,
+            "Agent",
+            "not overwritten"
+        );
+
+        // The session's work is not lost: it still saves to a file, and the
+        // stored scene is left as the agent made it.
+        let file = std::env::temp_dir().join(format!("gx-812-save-{}.gpx", std::process::id()));
+        run(
+            &mut workspace,
+            save(
+                session,
+                SaveTarget::File {
+                    path: file.display().to_string(),
+                },
+            ),
+        );
+        assert!(std::fs::read_to_string(&file).unwrap().contains("\"Mine\""));
+        let _ = std::fs::remove_file(&file);
+        // A new scene saved into the project starts at revision 0.
+        let copy = open(
+            &mut workspace,
+            SceneSource::New {
+                id: "b-mine".into(),
+                name: "Mine".into(),
+            },
+        );
+        let saved = run(
+            &mut workspace,
+            save(
+                copy,
+                SaveTarget::Project {
+                    project: "news".into(),
+                },
+            ),
+        );
+        assert_eq!(saved.revision, Some(Revision(0)));
+
+        // A session that read the current revision saves, and the save moves
+        // it on, both on disk and in the session (so a second save works).
+        let fresh = open(
+            &mut workspace,
+            SceneSource::Project {
+                project: "news".into(),
+                scene_id: "b-mine".into(),
+            },
+        );
+        run(&mut workspace, edit(fresh, vec![rename_scene("Mine 2")]));
+        let first = run(&mut workspace, save(fresh, SaveTarget::Origin));
+        assert_eq!(first.revision, Some(Revision(1)));
+        run(&mut workspace, edit(fresh, vec![rename_scene("Mine 3")]));
+        // Undo and redo replay from the session's base; the base carries the
+        // saved revision too, so the replayed document still saves.
+        run(
+            &mut workspace,
+            EditorCommand::Undo(gx_contracts::command::Undo {
+                session: fresh,
+                module: None,
+            }),
+        );
+        run(
+            &mut workspace,
+            EditorCommand::Redo(gx_contracts::command::Redo {
+                session: fresh,
+                module: None,
+            }),
+        );
+        let second = run(&mut workspace, save(fresh, SaveTarget::Origin));
+        assert_eq!(second.revision, Some(Revision(2)));
+        assert_eq!(stored_scene(&workspace, "b-mine").name, "Mine 3");
+    }
+
+    #[test]
+    fn a_delete_naming_a_stale_revision_keeps_the_scene() {
+        let (_scratch, mut workspace) = with_store("revision-delete");
+        run(
+            &mut workspace,
+            guarded_edit("b", 0, vec![rename_scene("Edited")]),
+        );
+        let delete = |read: u64| {
+            EditorCommand::DeleteScene(DeleteScene {
+                project: "news".into(),
+                scene_id: "b".into(),
+                if_revision: Some(Revision(read)),
+            })
+        };
+        assert!(matches!(
+            refusal(&mut workspace, delete(0)),
+            Refusal::RevisionMismatch {
+                actual: Revision(1),
+                ..
+            }
+        ));
+        assert_eq!(stored_scene(&workspace, "b").name, "Edited");
+        run(&mut workspace, delete(1));
+        assert!(workspace
+            .document(&SceneTarget::Stored {
+                project: "news".into(),
+                scene_id: "b".into(),
+            })
+            .is_err());
+    }
+
+    #[test]
+    fn writers_released_together_on_one_revision_land_exactly_once_per_round() {
+        // Eight writers, each with its own workspace over the one store, are
+        // released at once against the same revision, fifty times. The lock
+        // makes each read-check-write one step, so every round lands exactly
+        // one write and moves the revision by one. Without it two writers can
+        // read the same revision and both "land", the second silently undoing
+        // the first.
+        let (scratch, _workspace) = with_store("revision-race");
+        let root = scratch.projects().root().to_path_buf();
+        for round in 0..50u64 {
+            let barrier = std::sync::Barrier::new(8);
+            let landed: usize = std::thread::scope(|scope| {
+                let handles: Vec<_> = (0..8)
+                    .map(|writer| {
+                        let (root, barrier) = (root.clone(), &barrier);
+                        scope.spawn(move || {
+                            let mut workspace = Workspace::new(Some(Projects::at_root(root)));
+                            barrier.wait();
+                            workspace
+                                .execute(guarded_edit(
+                                    "b",
+                                    round,
+                                    vec![rename_scene(&format!("Round {round} writer {writer}"))],
+                                ))
+                                .is_ok() as usize
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|handle| handle.join().unwrap())
+                    .sum()
+            });
+            assert_eq!(landed, 1, "round {round}: exactly one writer lands");
+        }
+        let workspace = Workspace::new(Some(Projects::at_root(&root)));
+        assert_eq!(stored_revision(&workspace, "b"), Some(Revision(50)));
     }
 }

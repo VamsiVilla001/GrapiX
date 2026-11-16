@@ -8,8 +8,8 @@
 import type { CapabilitySurface } from "./CapabilitySurface.js";
 
 export const CAPABILITY_SURFACE: CapabilitySurface = {
-  "schemaVersion": 5,
-  "protocolVersion": 5,
+  "schemaVersion": 6,
+  "protocolVersion": 6,
   "enums": [
     {
       "name": "BlendMode",
@@ -165,6 +165,8 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
   ],
   "refusals": [
     "revisionMismatch",
+    "revisionRequired",
+    "idempotencyKeyReused",
     "revisionUnpinned",
     "revisionHashMismatch",
     "tierTooLow",
@@ -363,7 +365,7 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
       "requiredScope": "author",
       "input": "CreateProject",
       "output": "CommandOutcome",
-      "summary": "Create a project. Refuses if it already exists."
+      "summary": "Create a project. Refuses if it already exists (projectAlreadyExists). Takes an optional idempotencyKey: the same key and arguments return the first answer without writing again; the same key on other arguments refuses idempotencyKeyReused."
     },
     {
       "name": "scenes.get",
@@ -390,7 +392,7 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
       "requiredScope": "author",
       "input": "CreateScene",
       "output": "CommandOutcome",
-      "summary": "Create an empty scene. Refuses until the project exists, and refuses an existing scene id."
+      "summary": "Create an empty scene. Refuses until the project exists, and refuses an existing scene id. Takes an optional idempotencyKey: the same key and arguments return the first answer without writing again; the same key on other arguments refuses idempotencyKeyReused."
     },
     {
       "name": "scenes.delete",
@@ -399,7 +401,7 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
       "requiredScope": "author",
       "input": "DeleteScene",
       "output": "CommandOutcome",
-      "summary": "Delete a stored scene. Refuses a scene that is not stored."
+      "summary": "Delete a stored scene. Needs ifRevision, the revision read from scenes.get: a stale one refuses revisionMismatch naming the current revision, a missing one revisionRequired. Refuses a scene that is not stored (sceneNotStored). Takes an optional idempotencyKey: the same key and arguments return the first answer without writing again; the same key on other arguments refuses idempotencyKeyReused."
     },
     {
       "name": "scenes.edit",
@@ -408,7 +410,7 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
       "requiredScope": "author",
       "input": "EditScene",
       "output": "CommandOutcome",
-      "summary": "Apply one ordered, atomic batch of scene edits to a stored scene. Objects, keyframes, presets, phases, controls, text styles, bindings, materials and asset relinks are edits; the whole batch lands or none of it does."
+      "summary": "Apply one ordered, atomic batch of scene edits to a stored scene. Objects, keyframes, presets, phases, controls, text styles, bindings, materials and asset relinks are edits; the whole batch lands or none of it does. Needs ifRevision, the revision read from scenes.get: a stale one refuses revisionMismatch naming the current revision and writes nothing, a missing one revisionRequired. The result carries the new revision; a batch that changes nothing returns the revision it found. Takes an optional idempotencyKey: the same key and arguments return the first answer without writing again; the same key on other arguments refuses idempotencyKeyReused."
     },
     {
       "name": "scenes.import",
@@ -417,7 +419,7 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
       "requiredScope": "author",
       "input": "ImportScene",
       "output": "CommandOutcome",
-      "summary": "Import an SVG into a new stored scene through the four-tier pipeline (7.2). The outcome's imported effect is the report naming every substitution; the source is retained in the project by content hash. Refuses an existing scene id, and stores nothing on any refusal."
+      "summary": "Import an SVG into a new stored scene through the four-tier pipeline (7.2). The outcome's imported effect is the report naming every substitution; the source is retained in the project by content hash. Refuses an existing scene id, and stores nothing on any refusal. Takes an optional idempotencyKey: the same key and arguments return the first answer without writing again; the same key on other arguments refuses idempotencyKeyReused."
     },
     {
       "name": "objects.list",
@@ -489,7 +491,7 @@ export const CAPABILITY_SURFACE: CapabilitySurface = {
       "requiredScope": "configureOutput",
       "input": "ConfirmDesignSystem",
       "output": "CommandOutcome",
-      "summary": "Confirm a draft as a new version, naming who confirmed it. Admin-scoped: an author works inside the system and cannot change it."
+      "summary": "Confirm a draft as a new version, naming who confirmed it. Admin-scoped: an author works inside the system and cannot change it. Takes an optional idempotencyKey: the same key and arguments return the first answer without writing again; the same key on other arguments refuses idempotencyKeyReused."
     },
     {
       "name": "designsystem.import",

@@ -27,7 +27,7 @@ use crate::scene::{
     AssetLibraryItem, BezierPath, DataContext, Mask, SceneDocument, StrokeStyle, TrackMatte,
 };
 use crate::text_style::{self, TextStyle};
-use crate::{asset_edit, font_edit, material_edit, ContentHash, RationalRate, Refusal};
+use crate::{asset_edit, font_edit, material_edit, ContentHash, RationalRate, Refusal, Revision};
 
 /// Declares one wire enum together with its named payload structs.
 ///
@@ -208,12 +208,22 @@ commands! {
         CloseScene = "closeScene" { pub session: SessionKey, pub force: bool },
         /// Apply an ordered, atomic edit batch to one document. One batch is
         /// one undo entry, tagged with the module that issued it.
+        ///
+        /// Against a stored scene the batch is a compare-and-swap (8.12):
+        /// `if_revision` is the revision the caller read, the write lands only
+        /// if that is still the stored scene's revision, and the outcome
+        /// carries the new one. The MCP surface requires it for a stored
+        /// target; a session target has no stored revision and must not name
+        /// one.
         EditScene = "editScene" {
             pub target: SceneTarget,
             pub edits: Vec<SceneEdit>,
             #[serde(default, skip_serializing_if = "Option::is_none")]
             #[ts(optional)]
             pub module: Option<EditorModule>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub if_revision: Option<Revision>,
         },
         /// Reverse the latest applied batch, or the latest one `module` issued.
         Undo = "undo" {
@@ -242,8 +252,16 @@ commands! {
             pub scene_id: String,
             pub name: String,
         },
-        /// Delete a stored scene.
-        DeleteScene = "deleteScene" { pub project: String, pub scene_id: String },
+        /// Delete a stored scene. With `if_revision` the scene is deleted only
+        /// if it is still the revision the caller read (8.12); the MCP surface
+        /// requires it, so an agent never deletes work it has not seen.
+        DeleteScene = "deleteScene" {
+            pub project: String,
+            pub scene_id: String,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub if_revision: Option<Revision>,
+        },
         /// Store an operator take page.
         SaveTakePage = "saveTakePage" { pub project: String, pub page: TakePage },
         /// Confirm a design-system draft as the project's next version.
@@ -576,6 +594,12 @@ pub struct CommandOutcome {
     #[ts(optional)]
     pub session: Option<SessionView>,
     pub effects: Vec<EditEffect>,
+    /// The stored scene's revision after this command (8.12), for a command
+    /// that addressed a stored scene. A batch that changed nothing answers the
+    /// revision it found, unchanged. Absent for a command that stored nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub revision: Option<Revision>,
 }
 
 /// Apply an ordered edit batch atomically.
@@ -1018,6 +1042,7 @@ pub mod witness {
                 target: SceneTarget::Session { session },
                 edits: scene_edits(),
                 module: Some(EditorModule::Inspector),
+                if_revision: None,
             }),
             // One module-scoped undo and one project-level redo, so both
             // scopes run over the wire.
@@ -1062,6 +1087,7 @@ pub mod witness {
             EditorCommand::DeleteScene(DeleteScene {
                 project: "witness-project".into(),
                 scene_id: "copy".into(),
+                if_revision: Some(Revision(0)),
             }),
             EditorCommand::ImportScene(ImportScene {
                 project: "witness-project".into(),
@@ -1828,6 +1854,7 @@ mod tests {
                     path: None,
                 })],
                 module: None,
+                if_revision: None,
             })
         );
     }

@@ -118,6 +118,58 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-16 — 8.12 done: ifRevision and idempotency keys on the Editor MCP writes (Claude, on the user's decision)
+
+**Resume here.** User instruction 16 Nov: Jev and Laya agree design and acceptance, and review everything built;
+8.12 shall have `if_revision`; check why 3.21 is blocked on hardware, and if it is 4K, 4K becomes a V2 option and
+1080p comes first; then fill the gaps in the MCP edits. **Next: 3.21 at 1080p** (the stats page, 13.1 ms p99 on
+15 Nov; the plan change moving 2160p to V2 is the user's decision of 16 Nov and still has to be written into the
+plan), **then the MCP edit gaps** (object width and height, effects, blend mode, z-order, layer membership,
+material, anchor, compound paths). Jev and Laya run on the design, on the code as built, and on the acceptance of
+each.
+
+**What.** `EditScene` and `DeleteScene` carry `if_revision` (the stored scene's `SceneDocument.revision`, absent =
+0). A stored edit takes `Projects::lock_scenes` (`gx_fs::FileLock`, an OS lock on `<project>/.scenes.lock`, so it
+holds across the shell and every MCP process), reads, checks with `gx_write_semantics::guarded`, applies, and
+writes at the next revision as one step; a batch is one revision; a no-op answers the revision it found. The
+Editor's own writes bump it too. Save to origin refuses `revisionMismatch` when an agent moved the stored scene on
+(the session still saves to a file) and carries the new revision into the session and its base. A session target
+naming a revision refuses `commandUnknownField` at `ifRevision`. Over MCP, stored `scenes.edit` and `scenes.delete`
+require it (`revisionRequired`, new). Every Editor MCP write (`project.create`, `scenes.create/delete/edit/import`,
+`designsystem.commit`) takes an optional `idempotencyKey`, stripped before the strict parse and fingerprinted
+(SHA-256, canonical JSON); the ledger is `gx_write_semantics::LedgerFile` at `<root>/.idempotency.json`, locked for
+lookup, run and record; the same key on other arguments refuses `idempotencyKeyReused` (new); refusals are not
+recorded; 256 answers or 2 MB. `CommandOutcome.revision` carries the revision; `scenes.get` reports 0 for a
+never-edited scene. **Wire protocol 6** (`PROTOCOL_VERSION`; the tool schema is versioned with it by 8.1).
+
+**Verified by execution.** `write_semantics_surface` (6, shipped binary): a retry after a lost reply through a new
+process returns the first answer and writes one object; racing retries get one answer; four processes racing on
+one revision land once; stale and missing revisions refused with nothing written; a keyed create retried is
+answered; every write lists the key. Editor executor (5 new, incl. eight workspaces released by a barrier, 50
+rounds, one write per round). write-semantics 12, gx-fs lock 2. Conformance refusal audit drives both new refusals
+and a stale revision over JSON-RPC. 13 of 13 mutations fail named tests, including removing the lock. Gate: npm run
+check exit 0 (46 Node, 412 Editor, 895 Rust passed, 0 failed, 37 ignored; conformance 594/0/9); clippy -D warnings
+and fmt clean. Evidence `docs/evidence/8.12`.
+
+**Jev and Laya.** Design: they split on six of nine (token, where the check lives, Save, key reuse, the crash
+window, must the user approve 0.29/0.97); decided by hand for Jev's answers, reasons in the evidence. Code review:
+Laya answered about 0.95 to every yes/no either way round, so it did not discriminate; Jev was unsure on deadlock
+(0.44) and a blocking defect (0.54); the hand check found no lock cycle and no blocking defect. Acceptance: both
+say the done-when is met (0.97/0.92); they split on what was not run, and the record now names the Editor app.
+All splits are for the user. **The one behaviour a person sees:** the Editor's Save now refuses over an agent's
+newer edit.
+
+**Not done, by name.** `designsystem.commit` has no revision guard (a retry without a key, or in the crash window,
+makes a second version); a damaged scene file has no revision to check; the lock wait is unbounded; the Editor's
+own delete sends no revision; Program-side writes take no key; a replay carries no marker; the running Editor app
+was not driven.
+
+**3.21, checked.** The hardware block is 2160p only: other applications hold 5.2 of the 8 GB of GPU memory and
+keep it 41% busy (Parsec, Chrome, Discord, WebView2, the Codex desktop app), and the 2160p runs time out; 2160p
+was over budget even on 7 Nov (19.7 to 44 ms). 1080p is not blocked by hardware: the stats page misses by about
+3 ms (15 Nov profile, medians: GPU wait 6.0 ms against a 3.2 ms floor the 3-layer lower third also pays, composite
+CPU 1.4 ms, frame copy 1.8 ms, evaluate 0.35 ms).
+
 ## 2026-11-16 — 8.1 done: every MCP tool lists its generated schema (Claude, on the user's MCP direction)
 
 **Resume here.** 8.1 was reopened on 13 Oct (no `tools/list` entry carried an `inputSchema`) and left active by Codex on

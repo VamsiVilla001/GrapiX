@@ -60,13 +60,15 @@ fn gradient(angle: f64) -> serde_json::Value {
     })
 }
 
-fn edit(id: u64, edits: serde_json::Value) -> serde_json::Value {
+/// `scenes.edit` on the stored scene, naming the revision the agent read.
+fn edit(id: u64, revision: u64, edits: serde_json::Value) -> serde_json::Value {
     call(
         id,
         "scenes.edit",
         serde_json::json!({
             "target": { "target": "stored", "project": "news", "sceneId": "bug" },
             "edits": edits,
+            "ifRevision": revision,
         }),
     )
 }
@@ -108,7 +110,7 @@ fn the_shipped_editor_mcp_authors_the_render_features_and_refuses_what_cannot_be
         { "edit": "setStroke", "objectIds": ["shape-1"], "width": 6.0,
           "style": { "join": "round", "cap": "round", "miterLimit": 4.0, "dash": [12.0, 6.0], "dashOffset": 0.0 } },
     ]);
-    let built = shipped_session(&root, &[edit(1, build)]);
+    let built = shipped_session(&root, &[edit(1, 0, build)]);
     assert!(built[0]["error"].is_null(), "refused: {}", built[0]);
     let effects = built[0]["result"]["effects"].as_array().expect("effects");
     assert_eq!(
@@ -220,7 +222,7 @@ fn the_shipped_editor_mcp_authors_the_render_features_and_refuses_what_cannot_be
     ];
     let mut session = Session::start(&root);
     for (index, (code, bad)) in refused.iter().enumerate() {
-        let reply = session.call(&edit(10 + index as u64, serde_json::json!([bad])));
+        let reply = session.call(&edit(10 + index as u64, 1, serde_json::json!([bad])));
         assert!(
             reply["result"].is_null(),
             "{code}: the edit was accepted: {reply}"
@@ -239,6 +241,7 @@ fn the_shipped_editor_mcp_authors_the_render_features_and_refuses_what_cannot_be
     // trim "begin" that became no trim at all is the failure this prevents.
     let misspelt = session.call(&edit(
         29,
+        1,
         serde_json::json!([{ "edit": "setTrim", "objectId": "shape-1", "begin": 10.0 }]),
     ));
     assert!(misspelt["result"].is_null(), "{misspelt}");
@@ -252,6 +255,7 @@ fn the_shipped_editor_mcp_authors_the_render_features_and_refuses_what_cannot_be
     // One bad edit refuses the whole batch: the good edit before it is not kept.
     let atomic = session.call(&edit(
         30,
+        1,
         serde_json::json!([
             { "edit": "setPaint", "objectIds": ["rect-1"], "slot": "fill",
               "paint": { "type": "solid", "color": { "r": 0.0, "g": 1.0, "b": 0.0, "a": 1.0, "space": "srgb" } } },

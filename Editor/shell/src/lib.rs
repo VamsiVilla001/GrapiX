@@ -1279,6 +1279,7 @@ mod tests {
                         name: "X".into(),
                     })],
                     module: None,
+                    if_revision: None,
                 }),
             );
             // `text` is the one creatable kind with a scene-level
@@ -1322,6 +1323,7 @@ mod tests {
                     }),
                 ],
                 module: None,
+                if_revision: None,
             }),
         )
         .expect("the template is authored");

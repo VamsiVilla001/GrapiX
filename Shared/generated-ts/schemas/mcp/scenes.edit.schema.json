@@ -1683,6 +1683,12 @@
       ],
       "type": "object"
     },
+    "Revision": {
+      "description": "Publish revision. Exact-match only: a take against a stale revision is\nrefused, never coerced (invariant 17).",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
     "Rgba": {
       "description": "A colour, with the space it was authored in.\n\nComponents are 0–1 floats rather than 8-bit bytes because the working\nspace is linear and 8 bits of linear has visible banding in the shadows.",
       "properties": {
@@ -3039,13 +3045,29 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Apply an ordered, atomic edit batch to one document. One batch is\none undo entry, tagged with the module that issued it.",
+  "description": "Apply an ordered, atomic edit batch to one document. One batch is\none undo entry, tagged with the module that issued it.\n\nAgainst a stored scene the batch is a compare-and-swap (8.12):\n`if_revision` is the revision the caller read, the write lands only\nif that is still the stored scene's revision, and the outcome\ncarries the new one. The MCP surface requires it for a stored\ntarget; a session target has no stored revision and must not name\none.",
   "properties": {
     "edits": {
       "items": {
         "$ref": "#/$defs/SceneEdit"
       },
       "type": "array"
+    },
+    "idempotencyKey": {
+      "description": "Optional. A fresh string per logical write. Repeating the call with the same key and the same arguments returns the first answer without writing again, so a retry after a timeout cannot duplicate. The same key with other arguments refuses idempotencyKeyReused.",
+      "maxLength": 128,
+      "minLength": 1,
+      "type": "string"
+    },
+    "ifRevision": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Revision"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "module": {
       "anyOf": [

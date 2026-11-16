@@ -393,6 +393,7 @@ pub fn editor_command_suite(report: &mut Report) {
                 kind: "rect".into(),
                 name: "Card".into(),
             })],
+            if_revision: None,
         }))
         .expect("drawable session authoring succeeds");
     let published = match workspace.document(&target) {

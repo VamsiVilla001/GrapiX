@@ -260,7 +260,7 @@ its done-when failed (`memory.md`, 13 October). They are `active` again.
 - `8.12`: `cargo tree -i gx-write-semantics` shows no dependent; no MCP edit
   carries `if_revision` or an idempotency key. **Closes again when** the
   editor MCP edit path takes both through `gx-write-semantics` and the
-  retry-after-timeout test runs against that path.
+  retry-after-timeout test runs against that path. **Closed 16 Nov 2026** (`docs/evidence/8.12`).
 
 Done steps that need a reopened step keep their state, because their own
 done-when was not contradicted: `4.1` and `7.4` (need `3.13`) and `11.20`
@@ -362,7 +362,7 @@ Deliberately before the UI. The application becomes fully operable and automatab
 | `8.9` | render.preview returning a real frame | BE | 3.11 | An agent can see its own output |
 | `8.10` | packages.* | BE | 7.6 | Publish returns Take ID and revision |
 | `8.11` | playout.* and outputs.*, scope-gated | BE | 6.5 | author token refused on take and configure |
-| `8.12` | if_revision, idempotency keys, batch-as-one-undo | BE | 0.8 | Retry after timeout does not duplicate |
+| `8.12` | if_revision, idempotency keys, batch-as-one-undo | BE | 0.8 | Retry after timeout does not duplicate (Done 16 Nov 2026, user decision that 8.12 has if_revision: stored scenes.edit and scenes.delete take ifRevision, checked in the Editor store under a cross-process lock through gx-write-semantics and required over MCP; every Editor MCP write takes an idempotencyKey replayed from a ledger in the project store; a retry after a lost reply through a new server process returns the first answer and writes once, over the shipped binary; Save refuses over an agent's newer edit; wire protocol 6; 13 of 13 mutations fail named tests; evidence `docs/evidence/8.12`.) |
 | `8.13` | Scope enforcement tests | BE | 8.11 | Every scope violation covered |
 | `8.14` | Tiered MCP surface: read, author on draft handles, propose | BE | 8.13, 11.36, 11.38 | Three tiers. **Read:** scenes, assets, bindings, tokens and engine status. **Author:** 11.36 commands only, on a stateless draft handle. **Propose:** submit a changeset to Playout's approval queue (13.7). Targets the MCP 2026-07-28 specification, verified against the official spec and the Rust SDK before coding. A conformance test enumerates every MCP tool and asserts that none reachable by an author- or agent-scoped token can Cue, Take, Continue, Clear or configure outputs, while 8.11's operator-scoped tools stay behind their scopes (invariant 65). An author tool cannot modify a published revision; an unknown schema version is refused (the server fails closed) |
 

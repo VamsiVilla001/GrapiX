@@ -101,6 +101,7 @@ fn a_refusal_over_http_is_the_same_structured_error() {
         serde_json::json!({
             "target": { "target": "stored", "project": "news", "sceneId": "scorebug" },
             "edits": [{ "edit": "setBinding", "objectId": "bar", "property": "y", "path": "match.away.score" }],
+            "ifRevision": 0,
         }),
     ));
     let owned = stateless_headers("scenes.edit");

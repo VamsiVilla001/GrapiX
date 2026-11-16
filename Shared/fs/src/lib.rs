@@ -8,9 +8,11 @@
 #![forbid(unsafe_code)]
 
 pub mod atomic;
+pub mod lock;
 pub mod watch;
 
 pub use atomic::{
     write_atomic, write_atomic_verified, write_atomic_with, AtomicWriteError, VerifiedWriteError,
 };
+pub use lock::FileLock;
 pub use watch::{watch_directory, FileWatcher, WatchError, WatchEvent, WatchStream};

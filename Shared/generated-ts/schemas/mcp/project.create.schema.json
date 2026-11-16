@@ -4,6 +4,12 @@
   "additionalProperties": false,
   "description": "Create an empty project in the store.",
   "properties": {
+    "idempotencyKey": {
+      "description": "Optional. A fresh string per logical write. Repeating the call with the same key and the same arguments returns the first answer without writing again, so a retry after a timeout cannot duplicate. The same key with other arguments refuses idempotencyKeyReused.",
+      "maxLength": 128,
+      "minLength": 1,
+      "type": "string"
+    },
     "project": {
       "type": "string"
     }

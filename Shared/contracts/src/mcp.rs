@@ -184,6 +184,22 @@ pub struct OutputConfig {
     pub accept_free_run: bool,
 }
 
+/// The inputs whose tools take an `idempotencyKey` (8.12): the six writes that
+/// run an Editor command. The key is not part of any command, so it is added
+/// here, in the one place that generates a tool's schema, and a test holds
+/// every such tool to it.
+pub const IDEMPOTENT_INPUTS: &[&str] = &[
+    "CreateProject",
+    "CreateScene",
+    "DeleteScene",
+    "EditScene",
+    "ImportScene",
+    "ConfirmDesignSystem",
+];
+
+/// The longest `idempotencyKey` a write accepts, in characters.
+pub const IDEMPOTENCY_KEY_MAX: usize = 128;
+
 /// Generate the actual handler input, rather than a second JSON description.
 /// Unknown input names fail closed; the exhaustive registry test catches an
 /// added tool whose input has not been connected here.
@@ -231,6 +247,14 @@ pub fn input_schema(input: &str) -> Result<serde_json::Value, Refusal> {
     // The MCP seam uses parse_strict even where serde's underlying contract
     // tolerates unknown fields. Express that seam's top-level closure too.
     value["additionalProperties"] = serde_json::Value::Bool(false);
+    if IDEMPOTENT_INPUTS.contains(&input) {
+        value["properties"]["idempotencyKey"] = serde_json::json!({
+            "type": "string",
+            "minLength": 1,
+            "maxLength": IDEMPOTENCY_KEY_MAX,
+            "description": "Optional. A fresh string per logical write. Repeating the call with the same key and the same arguments returns the first answer without writing again, so a retry after a timeout cannot duplicate. The same key with other arguments refuses idempotencyKeyReused."
+        });
+    }
     Ok(value)
 }
 
@@ -273,13 +297,13 @@ pub const TOOLS: &[ToolDescriptor] = &[
     // names an `EditorCommand` payload and runs through the Editor's one
     // command executor (11.36, invariant 60).
     tool("project.list", "project", ToolEffect::Read, Scope::Author, "()", "ProjectList", "The projects this store holds."),
-    tool("project.create", "project", ToolEffect::Write, Scope::Author, "CreateProject", "CommandOutcome", "Create a project. Refuses if it already exists."),
+    tool("project.create", "project", ToolEffect::Write, Scope::Author, "CreateProject", "CommandOutcome", "Create a project. Refuses if it already exists (projectAlreadyExists). Takes an optional idempotencyKey: the same key and arguments return the first answer without writing again; the same key on other arguments refuses idempotencyKeyReused."),
     tool("scenes.get", "scenes", ToolEffect::Read, Scope::Author, "SceneRef", "SceneDocument", "One scene document, whole."),
     tool("scenes.list", "scenes", ToolEffect::Read, Scope::Author, "ProjectRef", "SceneList", "The scene ids in a project."),
-    tool("scenes.create", "scenes", ToolEffect::Write, Scope::Author, "CreateScene", "CommandOutcome", "Create an empty scene. Refuses until the project exists, and refuses an existing scene id."),
-    tool("scenes.delete", "scenes", ToolEffect::Write, Scope::Author, "DeleteScene", "CommandOutcome", "Delete a stored scene. Refuses a scene that is not stored."),
-    tool("scenes.edit", "scenes", ToolEffect::Write, Scope::Author, "EditScene", "CommandOutcome", "Apply one ordered, atomic batch of scene edits to a stored scene. Objects, keyframes, presets, phases, controls, text styles, bindings, materials and asset relinks are edits; the whole batch lands or none of it does."),
-    tool("scenes.import", "scenes", ToolEffect::Write, Scope::Author, "ImportScene", "CommandOutcome", "Import an SVG into a new stored scene through the four-tier pipeline (7.2). The outcome's imported effect is the report naming every substitution; the source is retained in the project by content hash. Refuses an existing scene id, and stores nothing on any refusal."),
+    tool("scenes.create", "scenes", ToolEffect::Write, Scope::Author, "CreateScene", "CommandOutcome", "Create an empty scene. Refuses until the project exists, and refuses an existing scene id. Takes an optional idempotencyKey: the same key and arguments return the first answer without writing again; the same key on other arguments refuses idempotencyKeyReused."),
+    tool("scenes.delete", "scenes", ToolEffect::Write, Scope::Author, "DeleteScene", "CommandOutcome", "Delete a stored scene. Needs ifRevision, the revision read from scenes.get: a stale one refuses revisionMismatch naming the current revision, a missing one revisionRequired. Refuses a scene that is not stored (sceneNotStored). Takes an optional idempotencyKey: the same key and arguments return the first answer without writing again; the same key on other arguments refuses idempotencyKeyReused."),
+    tool("scenes.edit", "scenes", ToolEffect::Write, Scope::Author, "EditScene", "CommandOutcome", "Apply one ordered, atomic batch of scene edits to a stored scene. Objects, keyframes, presets, phases, controls, text styles, bindings, materials and asset relinks are edits; the whole batch lands or none of it does. Needs ifRevision, the revision read from scenes.get: a stale one refuses revisionMismatch naming the current revision and writes nothing, a missing one revisionRequired. The result carries the new revision; a batch that changes nothing returns the revision it found. Takes an optional idempotencyKey: the same key and arguments return the first answer without writing again; the same key on other arguments refuses idempotencyKeyReused."),
+    tool("scenes.import", "scenes", ToolEffect::Write, Scope::Author, "ImportScene", "CommandOutcome", "Import an SVG into a new stored scene through the four-tier pipeline (7.2). The outcome's imported effect is the report naming every substitution; the source is retained in the project by content hash. Refuses an existing scene id, and stores nothing on any refusal. Takes an optional idempotencyKey: the same key and arguments return the first answer without writing again; the same key on other arguments refuses idempotencyKeyReused."),
     tool("objects.list", "objects", ToolEffect::Read, Scope::Author, "SceneRef", "ObjectList", "Every object, with its full authored property surface."),
     tool("objects.hierarchy", "objects", ToolEffect::Read, Scope::Author, "SceneRef", "HierarchyResolution", "Resolved transforms and refused edges."),
     // materials, assets, fonts (8.4). Read here; their mutations are
@@ -293,7 +317,7 @@ pub const TOOLS: &[ToolDescriptor] = &[
     // inside the system and may not change it (Part G). Import writes nothing:
     // it proposes a draft, so it is a read that keeps the admin scope.
     tool("designsystem.get", "designsystem", ToolEffect::Read, Scope::Author, "ProjectRef", "DesignSystem", "The active design system and its version, for one project."),
-    tool("designsystem.commit", "designsystem", ToolEffect::Write, Scope::ConfigureOutput, "ConfirmDesignSystem", "CommandOutcome", "Confirm a draft as a new version, naming who confirmed it. Admin-scoped: an author works inside the system and cannot change it."),
+    tool("designsystem.commit", "designsystem", ToolEffect::Write, Scope::ConfigureOutput, "ConfirmDesignSystem", "CommandOutcome", "Confirm a draft as a new version, naming who confirmed it. Admin-scoped: an author works inside the system and cannot change it. Takes an optional idempotencyKey: the same key and arguments return the first answer without writing again; the same key on other arguments refuses idempotencyKeyReused."),
     tool("designsystem.import", "designsystem", ToolEffect::Read, Scope::ConfigureOutput, "DesignSystemImport", "DesignSystemDraft", "Propose a draft from a source document. Returns the draft and everything the source held that tokens cannot express. Never commits."),
     tool("designsystem.list_versions", "designsystem", ToolEffect::Read, Scope::Author, "ProjectRef", "DesignSystemVersions", "Every confirmed version, with the source and the human behind each."),
     // validate (8.8) and render (8.9).

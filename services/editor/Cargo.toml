@@ -17,6 +17,7 @@ gx-contracts = { workspace = true }
 gx-project-store = { workspace = true }
 gx-asset-plane = { workspace = true }
 gx-fs = { workspace = true }
+gx-write-semantics = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }

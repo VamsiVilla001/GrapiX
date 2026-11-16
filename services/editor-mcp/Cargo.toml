@@ -16,6 +16,7 @@ rust-version.workspace = true
 gx-contracts = { workspace = true }
 gx-mcp-server = { path = "../mcp-server" }
 gx-editor = { path = "../editor" }
+gx-write-semantics = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

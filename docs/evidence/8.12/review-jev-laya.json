@@ -1,0 +1,261 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 43849,
+    "output_tokens": 0,
+    "state_tokens": 5424,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "8.12 if_revision, idempotency keys, batch-as-one-undo. Done when: a retry after a timeout does not duplicate. The user decided 8.12 shall have if_revision and asked that Jev and Laya review everything built.",
+    "design_decided": "Token = SceneDocument.revision (absent = 0), bumped by one per stored write. MCP requires ifRevision on stored scenes.edit and scenes.delete (revisionRequired); the Editor command leaves it optional and checks it when present. The check runs in the Editor store write path under a cross-process file lock (gx_fs::FileLock over File::lock). Editor Save to origin refuses revisionMismatch when the stored scene moved on. Idempotency key: optional on the six Editor MCP writes, stripped before the strict parse, ledger in <store root>/.idempotency.json locked across lookup, execute and record; same key with other arguments refuses idempotencyKeyReused; refusals are not recorded.",
+    "code": {
+      "editor_stored_edit": "SceneTarget::Stored { project, scene_id } => {\n                let origin = SceneOrigin { project, scene_id };\n                let _write = self.projects()?.lock_scenes(&origin.project)?;\n                let mut document = self\n                    .projects()?\n                    .read_scene(&origin.project, &origin.scene_id)?;\n                let current = document.revision.unwrap_or(Revision(0));\n                let next = match if_revision {\n                    Some(expected) => guarded(current, expected)?,\n                    None => current.next(),\n                };\n                let design_system = self.design_system_for(Some(&origin), edits)?;\n                let presets = self.presets_for(Some(&origin), edits)?;\n                let context = EditContext {\n                    design_system: design_system.as_ref(),\n                    origin: Some(&origin),\n                    presets: presets.as_deref(),\n                };\n                let (before, mut effects) = apply_edits(&mut document, edits, &context)?;\n                let revision = if document != before {\n                    document.revision = Some(next);\n                    self.projects()?.write_scene(&origin.project, &document)?;\n                    effects.push(EditEffect::Stored { origin });\n                    next\n                } else {\n                    current\n                };\n                Ok(CommandOutcome {\n                    session: None,\n                    effects,\n                    revision: Some(revision),\n                })\n            }\n        }\n    }\n\n",
+      "editor_save_origin": "            SaveTarget::Origin => {\n                let session = &self.sessions[index];\n                let origin = session\n                    .origin\n                    .clone()\n                    .ok_or(Refusal::SessionUnbound { session: key })?;\n                require_scene_name(&session.document)?;\n                let projects = self.projects()?;\n                let _write = projects.lock_scenes(&origin.project)?;\n                if !scene_exists(projects, &origin.project, &origin.scene_id)? {\n                    return Err(Refusal::SceneNotStored {\n                        project: origin.project,\n                        scene_id: origin.scene_id,\n                    }\n                    .into());\n                }\n                let read = session.document.revision.unwrap_or(Revision(0));\n                let current = projects\n                    .stored_revision(&origin.project, &origin.scene_id)?\n                    .unwrap_or(read);\n                let next = guarded(current, read)?;\n                let mut document = session.document.clone();\n                document.revision = Some(next);\n                projects.write_scene(&origin.project, &document)?;\n                let session = &mut self.sessions[index];\n                session.document.revision = Some(next);\n                session.base.revision = Some(next);\n                session.dirty = false;\n                session.project_dirty = false;\n                saved_revision = Some(next);\n                EditEffect::Stored { origin }\n            }\n",
+      "editor_delete_check": "        let _write = projects.lock_scenes(&origin.project)?;\n        if !scene_exists(projects, &origin.project, &origin.scene_id)? {\n            return Err(Refusal::SceneNotStored {\n                project: origin.project,\n                scene_id: origin.scene_id,\n            }\n            .into());\n        }\n        if let Some(expected) = if_revision {\n            let current = projects\n                .stored_revision(&origin.project, &origin.scene_id)?\n                .unwrap_or(expected);\n            guarded(current, expected)?;\n        }\n        projects.delete_scene(&origin.project, &origin.scene_id)?;\n",
+      "store_lock_and_revision": "    pub fn lock_scenes(&self, project: &str) -> Result<SceneLock, EditorError> {\n        self.require_project(project)?;\n        let path = self.project_directory(project).join(\".scenes.lock\");\n        gx_fs::FileLock::exclusive(&path)\n            .map(|held| SceneLock { _held: held })\n            .map_err(|source| EditorError::Io { path, source })\n    }\n\n    pub fn stored_revision(\n        &self,\n        project: &str,\n        scene_id: &str,\n    ) -> Result<Option<Revision>, EditorError> {\n        self.require_project(project)?;\n        require_component(scene_id, |id| Refusal::SceneIdInvalid { id })?;\n        let path = self.scene_path(project, scene_id);\n        let bytes = std::fs::read(&path).map_err(|source| EditorError::Io { path, source })?;\n        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {\n            return Ok(None);\n        };\n        Ok(Some(Revision(\n            value\n                .get(\"revision\")\n                .and_then(serde_json::Value::as_u64)\n                .unwrap_or(0),\n        )))\n    }\n\n",
+      "mcp_command_tool": "    fn handle(&self, mut args: serde_json::Value) -> Result<serde_json::Value, Refusal> {\n        let key = take_idempotency_key(&mut args)?;\n        let command: EditorCommand = parse_strict::<P>(args.clone())?.into();\n        require_revision(&command)?;\n        let name = command.name();\n        let projects = self.projects.clone();\n        let run = move || {\n            Workspace::new(Some(projects))\n                .execute(command)\n                .map_err(|error| match error {\n                    CommandError::Refused(refusal) => refusal,\n                    CommandError::Store(error) => Refusal::from(error),\n                })\n                .and_then(to_value)\n        };\n        match key {\n            None => run(),\n            Some(key) => LedgerFile::new(self.projects.root().join(IDEMPOTENCY_LEDGER))\n                .once(key, &fingerprint(name, &args), run)\n                .map(|answer| answer.result),\n        }\n    }\n}\n\nconst IDEMPOTENCY_LEDGER: &str = \".idempotency.json\";\n\nconst IDEMPOTENCY_KEY_MAX: usize = 128;\n\nfn take_idempotency_key(args: &mut serde_json::Value) -> Result<Option<IdempotencyKey>, Refusal> {\n    let Some(object) = args.as_object_mut() else {\n        return Ok(None);\n    };\n    let Some(key) = object.remove(\"idempotencyKey\") else {\n        return Ok(None);\n    };\n    match key {\n        serde_json::Value::String(key)\n            if !key.is_empty()\n                && key.chars().count() <= IDEMPOTENCY_KEY_MAX\n                && !key.chars().any(char::is_control) =>\n        {\n            Ok(Some(IdempotencyKey(key)))\n        }\n        other => Err(Refusal::SceneParseFailed {\n            detail: format!(\n                \"arguments do not match the tool's input schema: idempotencyKey must be a \\\n                 string of 1 to {IDEMPOTENCY_KEY_MAX} characters with no control characters, got {other}\"\n            ),\n        }),\n    }\n}\n\nfn require_revision(command: &EditorCommand) -> Result<(), Refusal> {\n    let tool = match command {\n        EditorCommand::EditScene(EditScene {\n            target: SceneTarget::Stored { .. },\n            if_revision: None,\n            ..\n        }) => \"scenes.edit\",\n        EditorCommand::DeleteScene(DeleteScene {\n            if_revision: None, ..\n        }) => \"scenes.delete\",\n        _ => return Ok(()),\n    };\n    Err(Refusal::RevisionRequired {\n        tool: tool.to_owned(),\n    })\n}\n\n",
+      "ledger_once": "    pub fn once<T>(\n        &mut self,\n        key: IdempotencyKey,\n        request: &str,\n        operation: impl FnOnce() -> Result<T, Refusal>,\n    ) -> Result<Once, Refusal>\n    where\n        T: Serialize,\n    {\n        if let Some(entry) = self.entries.iter().find(|entry| entry.key == key) {\n            if entry.request != request {\n                return Err(Refusal::IdempotencyKeyReused { key: key.0 });\n            }\n            return Ok(Once {\n                result: entry.result.clone(),\n                replayed: true,\n            });\n        }\n        let result = operation()?;\n        let value = serde_json::to_value(result).map_err(|error| Refusal::TransportFailed {\n            detail: format!(\"a write's result could not be recorded: {error}\"),\n        })?;\n        self.record(key, request.to_owned(), value.clone());\n        Ok(Once {\n            result: value,\n            replayed: false,\n        })\n    }\n}\n\n",
+      "ledger_file_once": "    pub fn once<T: Serialize>(\n        &self,\n        key: IdempotencyKey,\n        request: &str,\n        operation: impl FnOnce() -> Result<T, Refusal>,\n    ) -> Result<Once, Refusal> {\n        let failed = |what: &str, error: &dyn std::fmt::Display| Refusal::TransportFailed {\n            detail: format!(\"the idempotency ledger {what}: {error}\"),\n        };\n        let mut lock_path = self.path.clone().into_os_string();\n        lock_path.push(\".lock\");\n        let _held = gx_fs::FileLock::exclusive(std::path::Path::new(&lock_path))\n            .map_err(|error| failed(\"could not be locked\", &error))?;\n        let mut ledger = match std::fs::read(&self.path) {\n            Ok(bytes) => serde_json::from_slice::<IdempotencyLedger>(&bytes).map_err(|error| {\n                failed(\"could not be read; delete it to start a new one\", &error)\n            })?,\n            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {\n                IdempotencyLedger::with_capacity(self.capacity)\n            }\n            Err(error) => return Err(failed(\"could not be read\", &error)),\n        };\n        ledger.capacity = self.capacity;\n        let answer = ledger.once(key, request, operation)?;\n        if !answer.replayed {\n            let bytes = serde_json::to_vec(&ledger)\n                .map_err(|error| failed(\"could not be written\", &error))?;\n            gx_fs::write_atomic(&self.path, &bytes)\n                .map_err(|error| failed(\"could not be written\", &error))?;\n        }\n        Ok(answer)\n    }\n}\n\n"
+    },
+    "tests_run": [
+      "services/editor-mcp/tests/write_semantics_surface.rs (6, shipped binary): a retry after a lost reply through a new process returns the first answer and leaves one object; same key other arguments refused; stale and missing revision refused with nothing written; a 3-edit batch is one revision; four processes racing on revision 0 land exactly once; three processes retrying one key concurrently get one answer and one write; a keyed create retried is answered; every Editor write lists idempotencyKey and edit/delete list ifRevision.",
+      "gx-editor (4 new): batch is one revision, stale lands nothing, no-op answers the found revision, unconditional Editor write still bumps; a session target naming ifRevision is refused CommandUnknownField; Save over an agent edit is refused and the session still saves to a file; save moves the revision in session and base so undo/redo then save works; stale delete keeps the scene.",
+      "gx-write-semantics (5 new): key reuse refused without running; refusals not recorded; fingerprint ignores key order but not edit order; byte bound evicts oldest; a new LedgerFile instance replays; a damaged ledger refuses loudly.",
+      "gx-fs lock (2): four threads never overlap; released on drop."
+    ]
+  },
+  "questions": {
+    "lock_covers_read_check_write": {
+      "type": "noul",
+      "instructions": "In editor_stored_edit, is the lock held from before the read until after the write, so a stale batch cannot land?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No, a writer can slip between read and write."
+      }
+    },
+    "stale_checked_before_apply": {
+      "type": "noul",
+      "instructions": "Is a stale ifRevision refused before any edit is applied or written?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "save_refuses_overwrite": {
+      "type": "noul",
+      "instructions": "Does editor_save_origin refuse when the stored revision differs from the one the session read, and keep the session revision in step after a save?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "retry_cannot_duplicate": {
+      "type": "noul",
+      "instructions": "Given mcp_command_tool and ledger_file_once, can a retry with the same key and arguments ever execute the write a second time while the ledger file is intact?",
+      "criteria": {
+        "true": "Yes, a duplicate is possible.",
+        "false": "No, it replays the first answer."
+      }
+    },
+    "key_reuse_safe": {
+      "type": "noul",
+      "instructions": "Is a reused key with different arguments refused rather than answered with the first result?",
+      "criteria": {
+        "true": "Yes, refused.",
+        "false": "No."
+      }
+    },
+    "deadlock_risk": {
+      "type": "noul",
+      "instructions": "Can the ledger lock and the project scene lock deadlock (taken in opposite orders on two paths)?",
+      "criteria": {
+        "true": "Yes, a deadlock is possible.",
+        "false": "No, every path takes ledger then scene, or scene alone."
+      }
+    },
+    "weakest_point": {
+      "type": "choice",
+      "instructions": "Which is the weakest point of this implementation?",
+      "criteria": {
+        "crash_window": "A crash after the write and before the ledger save makes the retry refused revisionMismatch instead of replayed.",
+        "damaged_stored_revision": "stored_revision treats an unreadable scene file as having no revision and lets the write through.",
+        "unbounded_lock_wait": "FileLock waits without a bound, so a hung writer blocks others.",
+        "editor_delete_unguarded": "The Editor's own delete still runs without ifRevision.",
+        "none": "No real weakness."
+      }
+    },
+    "must_fix_before_acceptance": {
+      "type": "noul",
+      "instructions": "Is there a defect in this code that must be fixed before the row is accepted?",
+      "criteria": {
+        "true": "Yes, a defect must be fixed.",
+        "false": "No defect blocks acceptance; the weak points are named limitations."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "lock_covers_read_check_write",
+      "jev": 0.8,
+      "laya": 0.969,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.8
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.969,
+        "confidence": 0.969,
+        "answer_confidence": 0.969,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "stale_checked_before_apply",
+      "jev": 0.89,
+      "laya": 0.9434,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.89
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9434,
+        "confidence": 0.9434,
+        "answer_confidence": 0.9434,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "save_refuses_overwrite",
+      "jev": 0.9,
+      "laya": 0.9544,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.9
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9544,
+        "confidence": 0.9544,
+        "answer_confidence": 0.9544,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "retry_cannot_duplicate",
+      "jev": 0.24,
+      "laya": 0.9549,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.24
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9549,
+        "confidence": 0.9549,
+        "answer_confidence": 0.9549,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "key_reuse_safe",
+      "jev": 0.97,
+      "laya": 0.9541,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.97
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9541,
+        "confidence": 0.9541,
+        "answer_confidence": 0.9541,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "deadlock_risk",
+      "jev": 0.44,
+      "laya": 0.9552,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.44
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9552,
+        "confidence": 0.9552,
+        "answer_confidence": 0.9552,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "weakest_point",
+      "jev": "crash_window",
+      "laya": "damaged_stored_revision",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "crash_window",
+        "confidence": 0.21,
+        "probabilities": {
+          "crash_window": 0.37,
+          "damaged_stored_revision": 0.11,
+          "unbounded_lock_wait": 0.33,
+          "editor_delete_unguarded": 0.18,
+          "none": 0.01
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "damaged_stored_revision",
+        "probabilities": {
+          "crash_window": 0.004,
+          "damaged_stored_revision": 0.907,
+          "unbounded_lock_wait": 0.0098,
+          "editor_delete_unguarded": 0.0626,
+          "none": 0.0167
+        },
+        "confidence": 0.753,
+        "answer_confidence": 0.907,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "must_fix_before_acceptance",
+      "jev": 0.54,
+      "laya": 0.9248,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.54
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9248,
+        "confidence": 0.9248,
+        "answer_confidence": 0.9248,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

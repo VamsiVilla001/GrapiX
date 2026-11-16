@@ -3,11 +3,29 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:grapix:schema:commands:DeleteScene",
   "title": "DeleteScene",
+  "$defs": {
+    "Revision": {
+      "description": "Publish revision. Exact-match only: a take against a stale revision is\nrefused, never coerced (invariant 17).",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
   "additionalProperties": false,
-  "description": "Delete a stored scene.",
+  "description": "Delete a stored scene. With `if_revision` the scene is deleted only\nif it is still the revision the caller read (8.12); the MCP surface\nrequires it, so an agent never deletes work it has not seen.",
   "properties": {
     "command": {
       "const": "deleteScene"
+    },
+    "ifRevision": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Revision"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "project": {
       "type": "string"

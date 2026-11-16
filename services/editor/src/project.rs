@@ -22,6 +22,14 @@ use gx_contracts::project::{ProjectSettings, PROJECT_SETTINGS_FILE};
 use gx_contracts::scene::{parse_scene_document, AssetLibraryItem, SceneDocument};
 use gx_contracts::ContentHash;
 use gx_contracts::Refusal;
+use gx_contracts::Revision;
+
+/// The write lock on one project's scenes, held until it drops
+/// ([`Projects::lock_scenes`]).
+#[derive(Debug)]
+pub struct SceneLock {
+    _held: gx_fs::FileLock,
+}
 
 /// What the Editor service can fail at.
 #[derive(Debug)]
@@ -531,6 +539,46 @@ impl Projects {
         let scene = parse_scene_document(&bytes).map_err(EditorError::Refused)?;
         self.require_working_space(project, &scene)?;
         Ok(scene)
+    }
+
+    /// Take the write lock for one project's scenes (8.12).
+    ///
+    /// A stored write that checks a revision is a compare-and-swap only if no
+    /// other writer can land between its read and its write. The writers are
+    /// the Editor shell and every MCP server process, so this is a lock on a
+    /// file, which holds across processes. Hold it for the whole of a
+    /// read-check-write, and for a create's exists-then-write. It is released
+    /// when the value drops, and by the operating system if the process dies.
+    pub fn lock_scenes(&self, project: &str) -> Result<SceneLock, EditorError> {
+        self.require_project(project)?;
+        let path = self.project_directory(project).join(".scenes.lock");
+        gx_fs::FileLock::exclusive(&path)
+            .map(|held| SceneLock { _held: held })
+            .map_err(|source| EditorError::Io { path, source })
+    }
+
+    /// A stored scene's authoring revision (8.12), read without validating the
+    /// document: absent is 0, and a file that cannot be read as a scene has no
+    /// revision to compare, which is `None`. A scene whose file is damaged can
+    /// therefore still be saved over, as it could before revisions existed.
+    pub fn stored_revision(
+        &self,
+        project: &str,
+        scene_id: &str,
+    ) -> Result<Option<Revision>, EditorError> {
+        self.require_project(project)?;
+        require_component(scene_id, |id| Refusal::SceneIdInvalid { id })?;
+        let path = self.scene_path(project, scene_id);
+        let bytes = std::fs::read(&path).map_err(|source| EditorError::Io { path, source })?;
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+            return Ok(None);
+        };
+        Ok(Some(Revision(
+            value
+                .get("revision")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0),
+        )))
     }
 
     /// The scene ids in a project, sorted.

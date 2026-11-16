@@ -204,7 +204,7 @@ fn the_shipped_editor_mcp_discovers_bindings_and_refuses_bad_paths_by_name() {
         call(
             id,
             "scenes.edit",
-            serde_json::json!({ "target": { "target": "stored", "project": "news", "sceneId": "scorebug" }, "edits": edits }),
+            serde_json::json!({ "target": { "target": "stored", "project": "news", "sceneId": "scorebug" }, "edits": edits, "ifRevision": 0 }),
         )
     };
 

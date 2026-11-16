@@ -1,0 +1,302 @@
+{
+  "jev": {
+    "model": "jev-1.14.0"
+  },
+  "laya": {
+    "model": "convaiinnovations/laya-multilingual",
+    "max_len": 8192,
+    "input_tokens": 42111,
+    "output_tokens": 0,
+    "state_tokens": 4145,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "8.12 if_revision, idempotency keys, batch-as-one-undo",
+    "done_when": "Retry after timeout does not duplicate. Reopening condition: the editor MCP edit path takes if_revision and idempotency keys through gx-write-semantics and the retry-after-timeout test runs against that path. User decision: 8.12 has if_revision.",
+    "evidence_record": "# 8.12 — if_revision, idempotency keys, batch-as-one-undo\n\nBuild-plan row `8.12`. Done when: **a retry after a timeout does not\nduplicate.** Reopened because no crate depended on `gx-write-semantics` and no\nMCP edit carried `if_revision` or an idempotency key; it closes again \"when the\neditor MCP edit path takes both through `gx-write-semantics` and the\nretry-after-timeout test runs against that path\". The user decided on 16 Nov\n2026 that 8.12 has `if_revision`, and that Jev and Laya agree the design and\nthe acceptance and review what is built.\n\n## What a write does now\n\n- **`ifRevision` (Editor command, checked in the store).** `editScene` and\n  `deleteScene` carry `ifRevision`, the stored scene's authoring revision the\n  caller read (`SceneDocument.revision`; absent reads as 0). A stored edit\n  takes the project's write lock, reads the scene, checks the revision with\n  `gx_write_semantics::guarded`, applies the batch, and writes it at the next\n  revision, all as one step. A stale revision is refused `revisionMismatch`\n  naming the current one, before any edit is applied, and nothing is written.\n  A batch is one write and one revision however many edits it holds; a batch\n  that changes nothing writes nothing and answers the revision it found. The\n  Editor's own unconditional writes (a person's Save, a create) also move the\n  revision, so an agent holding an old one cannot overwrite them blind.\n- **Required over MCP.** `scenes.edit` on a stored scene and `scenes.delete`\n  refuse `revisionRequired` without it. The command keeps it optional: the\n  Editor's project panel deletes without one.\n- **The Editor's Save to its origin** is refused `revisionMismatch` when the\n  stored scene moved on since the session read it (an agent edited it), so the\n  agent's work is not overwritten; the session keeps its work, which still\n  saves to a file. A save moves the revision in the session and its history\n  base, so undo, redo and a second save still work.\n- **A session target names no revision** (`commandUnknownField` at\n  `ifRevision`): an open session has no stored revision, and accepting the\n  field would let a caller believe a check ran.\n- **`idempotencyKey` (every Editor MCP write).** `project.create`,\n  `scenes.create`, `scenes.delete`, `scenes.edit`, `scenes.import` and\n  `designsystem.commit` take an optional key. The handler strips it before the\n  strict parse and fingerprints the rest of the request (SHA-256 over the\n  command name and canonical JSON). The ledger lives in the project store\n  (`<root>/.idempotency.json`, `gx_write_semantics::LedgerFile`) and is locked\n  for the whole of lookup, execution and record, so a retry that reaches a\n  restarted or second server process, or arrives while the first attempt is\n  still running, replays the first answer. The same key with other arguments is\n  refused `idempotencyKeyReused`. A refused write is not recorded. The ledger\n  keeps 256 answers or 2 MB, oldest first out.\n- **Results carry the revision.** `CommandOutcome.revision` is the stored\n  scene's revision after a command that addressed one (0 for a new scene);\n  `scenes.get` reports a never-edited scene at revision 0.\n- **The lock** is `gx_fs::FileLock` (`File::lock`, an OS lock on\n  `<project>/.scenes.lock`), so it holds across the Editor shell and every MCP\n  process and is released if a process dies. Lock order is always ledger then\n  scene, or scene alone.\n- **Wire protocol 6.** The stored-scene write is now a compare-and-swap that an\n  agent built for 5 must change for, and the tool schema is versioned with the\n  protocol (8.1), so `PROTOCOL_VERSION` is 6.\n\n## Design, agreed by Jev and Laya first (`design-jev-laya.json`)\n\n| Question | Jev | Laya | Decided |\n| --- | --- | --- | --- |\n| what `ifRevision` compares against | authoring revision (1.0) | published revision | **authoring revision** |\n| required on a stored write | required (0.98) | required | required |\n| where the check lives | in the store write (1.0) | MCP wrapper only | **in the store write** |\n| the Editor's Save | check and bump (1.0) | unchanged | **check and bump** |\n| where the ledger lives | durable in the store (1.0) | durable in the store | durable |\n| a reused key with other arguments | refuse by name (1.0) | return the first result | **refuse by name** |\n| the crash window | the revision guard covers it (1.0) | the ledger must be in the scene file | **revision guard** (see below) |\n| which writes take which guard | revision on edit and delete, key on all (0.94) | same | same |\n| must the user approve | 0.29 | 0.97 | see below |\n\nDecided by hand where they split. The published Take revision is issued by the\nengine at publish and is owned by Playout; an unpublished scene has none, and\n`SceneDocument.revision` is documented as the authoring token, so it is the\ntoken. A check in the MCP wrapper only would leave the Editor's own writes able\nto overwrite an agent's blind, and two copies would be invariant 27. Leaving\nSave unchanged is the silent loss of an agent's edit (invariant 18). Returning\nthe first result for a different request is a silent substitution. Keeping the\nledger inside each scene file does not cover creates or project writes; the\nrevision guard turns the crash window into a refusal rather than a duplicate\nfor every write but one (named below). On \"must the user approve\": the user\nasked for `if_revision` and delegated the design to Jev and Laya; the one\nbehaviour a person sees, Save refusing over an agent's newer edit, is reported\nto the user.\n\n## Code review by Jev and Laya (`review-jev-laya.json`)\n\nRun on the code as built (the stored edit, Save, delete, the store lock, the\nMCP handler, both ledgers), with the tests that had run. Laya read it whole:\n5424 tokens, not truncated.\n\n| Question | Jev | Laya |\n| --- | --- | --- |\n| the lock covers read, check and write | 0.80 | 0.97 |\n| a stale revision is refused before applying | 0.89 | 0.94 |\n| Save refuses an overwrite and keeps the session in step | 0.90 | 0.95 |\n| a retry with the same key can duplicate | 0.24 | 0.95 |\n| a reused key is refused | 0.97 | 0.95 |\n| the two locks can deadlock | 0.44 | 0.96 |\n| weakest point | crash window (0.21) | damaged stored revision |\n| a defect must be fixed first | 0.54 | 0.92 |\n\nLaya answered about 0.95 to every yes/no question, whichever way it was put\n(that a duplicate is possible, and that it is not), so its answers do not\ndiscriminate here. Jev was unsure on the deadlock and on a blocking defect.\nChecked by hand:\n\n- **Deadlock.** The ledger lock is taken only by a keyed MCP write, before the\n  command runs; the scene lock only inside a stored edit, a save, a create, a\n  duplicate or a delete, none of which takes the ledger lock or a second scene\n  lock. No path takes them in the other order, so there is no cycle.\n- **Duplicate on retry.** With the ledger intact, the lookup and the execution\n  are one call under the ledger lock, so a key seen before replays. The race\n  tests run this across processes.\n- **Blocking defect.** None found. Two weak points are real and are named under\n  \"Not in this row\": the crash window for `designsystem.commit`, and a damaged\n  scene file having no revision to check.\n\n## Verified by execution\n\n- `cargo test -p gx-editor-mcp --test write_semantics_surface` (6 passed), the\n  shipped `gx-editor-mcp` binary over stdio with a real handshake:\n  - **the done-when**: `a_retry_after_a_lost_reply_returns_the_first_answer_and_writes_once`.\n    A keyed `scenes.edit` that creates an object lands; its reply is read off\n    the pipe and dropped, and the process exits. The same request through a new\n    process returns the first answer value for value, the scene still holds one\n    object, and the revision is 1. The same key with other arguments is\n    refused `idempotencyKeyReused` and writes nothing; a new key is a new write.\n  - `a_retry_racing_the_first_attempt_waits_for_it_and_replays_it`: three\n    processes send one keyed request at once; all get one answer, one object.\n  - `writers_racing_on_one_revision_land_exactly_once`: four processes write at\n    revision 0 at once; one lands, three are refused `revisionMismatch`.\n  - `a_stale_or_missing_revision_writes_nothing_and_says_which_is_current`: no\n    `ifRevision` on `scenes.edit` or `scenes.delete` refuses `revisionRequired`;\n    a batch of three edits is revision 1; a stale edit is refused naming\n    \"expected 0, got 1\" with the stored scene unchanged; a stale delete keeps\n    the scene; `scenes.get` reports revision 1; a current delete removes it.\n  - `a_create_retried_with_its_key_is_answered_not_refused`: a keyed\n    `scenes.create` retried through a new process gets its first answer\n    (revision 0); unkeyed it is refused `sceneAlreadyExists`; an empty key is\n    refused by name before anything runs.\n  - `every_editor_write_lists_the_key_and_the_revision_in_its_schema`: in\n    `tools/list`, every write lists `idempotencyKey`; edit and delete list\n    `ifRevision`.\n- `cargo test -p gx-editor --lib` (84 passed), the Editor command executor:\n  a stored batch is one revision and a stale one lands nothing; a no-op batch\n  answers the revision it found; the Editor's own write moves the revision; a\n  session target naming a revision is refused; Save over an agent's edit is\n  refused and the session still saves to a file; a save moves the revision in\n  the session and its base, so undo, redo and a second save work; a stale\n  delete keeps the scene; and\n  `writers_released_together_on_one_revision_land_exactly_once_per_round`\n  (eight workspaces on one store, released by a barrier, 50 rounds: one write\n  per round, revision 50).\n- `cargo test -p gx-write-semantics` (12) and `cargo test -p gx-fs` (17): a key\n  reused for another request is refused and runs nothing; a refusal is not\n  recorded; the fingerprint ignores key order but not edit order; the byte\n  bound evicts the oldest and keeps the newest; a new `LedgerFile` over the same\n  path replays; a damaged ledger refuses loudly; four threads never hold the\n  file lock together, and it is released on drop.\n- Conformance refusal audit, over the Editor MCP server's JSON-RPC:\n  `RevisionRequired`, `IdempotencyKeyReused` and a stale-revision\n  `RevisionMismatch` are each produced with nothing written.\n- `cargo tree -i gx-write-semantics` now shows `gx-editor` and `gx-editor-mcp`\n  (the plan's reopening condition was that it showed none).\n- npm run check exit 0 before the last test was added (46 Node, 412 Editor,\n  894 Rust passed, 0 failed, 37 ignored; conformance 594/0/9);\n  `cargo clippy --workspace --all-targets -D warnings` and `cargo fmt --all`\n  clean. Re-run after the last test: see `memory.md`.\n\n**Batch as one undo.** Unchanged and still held: a batch is applied to one\ncandidate and lands whole or not at all (`apply_edits`), is one undo entry in a\nsession (the existing history tests), and is now one revision against the store.\n\n## Mutations\n\nOne exact replacement each, run alone against the tests named, each file\nrestored byte-identical (`mutate_812.py` in the session scratchpad). All 13 fail.\n\n| # | Mutation | Failing |\n| --- | --- | --- |\n| W1 | a stored edit ignores a stale `ifRevision` | the batch test, the in-process race |\n| W2 | a stored write does not move the revision | the batch, delete and save tests |\n| W3 | a no-op batch still writes and moves the revision | `a_stored_batch_is_one_revision_and_a_stale_one_lands_nothing` |\n| W4 | the stored edit takes no lock | `writers_released_together_on_one_revision_land_exactly_once_per_round` |\n| W5 | Save overwrites a scene an agent changed | `saving_over_a_scene_an_agent_changed_is_refused_and_the_work_still_saves_to_a_file` |\n| W6 | Save leaves the session base at the old revision | the same |\n| W7 | a delete ignores its `ifRevision` | `a_delete_naming_a_stale_revision_keeps_the_scene` |\n| W8 | the MCP surface does not require `ifRevision` | `a_stale_or_missing_revision_writes_nothing_and_says_which_is_current` |\n| W9 | a reused key is answered with the first result | `a_key_reused_for_another_request_is_refused_and_runs_nothing` |\n| W10 | the ledger is not saved to its file | the lost-reply, racing-retry and keyed-create wire tests |\n| W11 | the ledger lock is released before the write runs | `a_retry_racing_the_first_attempt_waits_for_it_and_replays_it` |\n| W12 | the tool schema does not list `idempotencyKey` | `every_editor_write_lists_the_key_and_the_revision_in_its_schema` |\n| W13 | a session target accepts `ifRevision` and ignores it | `a_session_target_names_no_revision` |\n\n## Not in this row, by name\n\n- **`designsystem.commit` has no revision guard.** A design-system confirm\n  makes the next version. Retried with its key it replays; retried without a\n  key, or in the crash window (the confirm landed and the process died before\n  the ledger was saved), it makes a second version. Every other write turns\n  that window into a named refusal (`revisionMismatch`, `sceneAlreadyExists`,\n  `projectAlreadyExists`).\n- **A damaged scene file has no revision to compare.** Save to origin and a\n  delete with `ifRevision` go through for a scene file that does not parse as\n  JSON, as Save did before revisions; an agent cannot edit such a scene at all,\n  because the stored edit reads it through the closed reader first.\n- **The lock waits without a bound.** A writer that hangs while holding it\n  blocks the others in that project until it exits (the OS releases the lock\n  then).\n- **The Editor's own delete** from the project panel sends no `ifRevision`.\n- **Program-side writes** (`playout.*`, `outputs.configure`, `packages.*`) take\n  no idempotency key; cue and take are pinned by revision and content hash\n  (11.38). Not this row's surface.\n- **No replay marker.** A replayed answer is the first answer exactly; the\n  reply does not say it was replayed.\n"
+  },
+  "questions": {
+    "done_when_met": {
+      "type": "noul",
+      "instructions": "Does the recorded evidence show that this row's done-when was met by execution (tests run, commands run, figures recorded), not merely claimed?",
+      "criteria": {
+        "true": "Every clause of the done-when has executed evidence.",
+        "false": "A clause is unmet, only claimed, or the evidence does not name what was run."
+      }
+    },
+    "evidence_names_execution": {
+      "type": "noul",
+      "instructions": "Does the evidence name specific executed checks (test names, commands, counts, measured figures) rather than describing the feature?",
+      "criteria": {
+        "true": "Specific executed checks are named.",
+        "false": "The evidence describes the feature without naming what was run."
+      }
+    },
+    "silent_substitution_risk": {
+      "type": "noul",
+      "instructions": "Is there a risk that this row ships a silent substitution: something the done-when asks for that is approximated, skipped or deferred without being refused by name?",
+      "criteria": {
+        "true": "Yes, a clause appears approximated, skipped or deferred silently.",
+        "false": "No, every gap is named or refused."
+      }
+    },
+    "weakest": {
+      "type": "choice",
+      "instructions": "What is the weakest point of this row's evidence?",
+      "criteria": {
+        "none": "No weak point: evidence covers every clause with executed checks.",
+        "unexecuted_clause": "A done-when clause has no executed check.",
+        "platform_gap": "A platform the done-when names (e.g. macOS, hardware) was not run.",
+        "stale": "Later changes may have invalidated the recorded evidence.",
+        "vague_record": "The record is too vague to tell what was run."
+      }
+    },
+    "unrun_is_named": {
+      "type": "noul",
+      "instructions": "Does the evidence name every check or step it did not run, rather than leaving a gap unmentioned?",
+      "criteria": {
+        "true": "Everything not run is named in the evidence.",
+        "false": "Some gap is not mentioned in the evidence."
+      }
+    },
+    "mutations_can_fail": {
+      "type": "noul",
+      "instructions": "Do the recorded mutations show that the named checks can fail: each mutation was run alone, made at least one named check fail, and the file was restored identical?",
+      "criteria": {
+        "true": "Each recorded mutation names the check or test that failed and says the file was restored.",
+        "false": "A mutation survived, was not run alone, or does not name what failed."
+      }
+    },
+    "retry_does_not_duplicate": {
+      "type": "noul",
+      "instructions": "Does the evidence show by an executed test that a retry after a lost reply, through a new server process, returns the first answer and does not duplicate the write?",
+      "criteria": {
+        "true": "A named wire test does it with a write that would visibly duplicate.",
+        "false": "Only claimed or only in process."
+      }
+    },
+    "if_revision_enforced": {
+      "type": "noul",
+      "instructions": "Does the evidence show by execution that a stale ifRevision writes nothing and names the current revision, and a missing one is refused on stored writes?",
+      "criteria": {
+        "true": "Named tests over the wire and in the executor.",
+        "false": "Only claimed."
+      }
+    },
+    "through_write_semantics": {
+      "type": "noul",
+      "instructions": "Does the evidence show the editor MCP edit path takes both through gx-write-semantics (the plan reopening condition)?",
+      "criteria": {
+        "true": "cargo tree shows the dependents, and the guard and ledger are that crate.",
+        "false": "No."
+      }
+    },
+    "races_covered": {
+      "type": "noul",
+      "instructions": "Does the evidence show concurrent writers and concurrent retries are handled, with a mutation that removing the lock fails a test?",
+      "criteria": {
+        "true": "Race tests and the no-lock mutation are recorded.",
+        "false": "No."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "done_when_met",
+      "jev": 0.97,
+      "laya": 0.9187,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.97
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9187,
+        "confidence": 0.9187,
+        "answer_confidence": 0.9187,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "evidence_names_execution",
+      "jev": 0.99,
+      "laya": 0.9216,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.99
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9216,
+        "confidence": 0.9216,
+        "answer_confidence": 0.9216,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "silent_substitution_risk",
+      "jev": 0.41,
+      "laya": 0.9669,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.41
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9669,
+        "confidence": 0.9669,
+        "answer_confidence": 0.9669,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "weakest",
+      "jev": "none",
+      "laya": "vague_record",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "none",
+        "confidence": 0.37,
+        "probabilities": {
+          "none": 0.5,
+          "unexecuted_clause": 0.15,
+          "platform_gap": 0.05,
+          "stale": 0.29,
+          "vague_record": 0.01
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "vague_record",
+        "probabilities": {
+          "none": 0.015,
+          "unexecuted_clause": 0.055,
+          "platform_gap": 0.0036,
+          "stale": 0.01,
+          "vague_record": 0.9165
+        },
+        "confidence": 0.771,
+        "answer_confidence": 0.9165,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "unrun_is_named",
+      "jev": 0.43,
+      "laya": 0.8835,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.43
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.8835,
+        "confidence": 0.8835,
+        "answer_confidence": 0.8835,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "mutations_can_fail",
+      "jev": 0.98,
+      "laya": 0.8676,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.98
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.8676,
+        "confidence": 0.8676,
+        "answer_confidence": 0.8676,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "retry_does_not_duplicate",
+      "jev": 0.98,
+      "laya": 0.9069,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.98
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9069,
+        "confidence": 0.9069,
+        "answer_confidence": 0.9069,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "if_revision_enforced",
+      "jev": 0.98,
+      "laya": 0.9134,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.98
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9134,
+        "confidence": 0.9134,
+        "answer_confidence": 0.9134,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "through_write_semantics",
+      "jev": 0.98,
+      "laya": 0.9654,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.98
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9654,
+        "confidence": 0.9654,
+        "answer_confidence": 0.9654,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "races_covered",
+      "jev": 0.99,
+      "laya": 0.8894,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.99
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.8894,
+        "confidence": 0.8894,
+        "answer_confidence": 0.8894,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}
