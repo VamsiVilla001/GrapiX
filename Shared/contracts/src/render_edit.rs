@@ -162,6 +162,7 @@ pub fn create_shape(
     scene: &mut SceneDocument,
     name: &str,
     path: &BezierPath,
+    compound_paths: &[BezierPath],
 ) -> Result<EditEffect, Refusal> {
     refuse_duplicate_object_ids(scene)?;
     let name = name.trim();
@@ -186,20 +187,19 @@ pub fn create_shape(
     }
     let id = next_object_id(scene, "shape");
     bezier_arrays_match(&id, path)?;
-    let (mut low, mut high) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
-    for vertex in &path.vertices {
-        low = (low.0.min(vertex.x), low.1.min(vertex.y));
-        high = (high.0.max(vertex.x), high.1.max(vertex.y));
+    for (i, sub) in compound_paths.iter().enumerate() {
+        shape_path_valid(&id, sub, &format!("compoundPaths[{i}]"))?;
     }
+    let (width, height) = path_box(std::iter::once(path).chain(compound_paths));
     let mut base = crate::scene::ObjectBase::new(id.clone(), name.to_owned());
-    base.width = high.0 - low.0;
-    base.height = high.1 - low.1;
+    base.width = width;
+    base.height = height;
     base.fill = Some(default_fill());
     let before = scene.clone();
     scene.objects.push(SceneObject::Shape(ShapeObject {
         base,
         path: path.clone(),
-        compound_paths: None,
+        compound_paths: (!compound_paths.is_empty()).then(|| compound_paths.to_vec()),
         fill_enabled: true,
         stroke_enabled: false,
         fill_rule: FillRule::Nonzero,
@@ -207,8 +207,220 @@ pub fn create_shape(
         trim_end: None,
         trim_offset: None,
     }));
-    refuse_what_cannot_be_drawn(before, scene, &[(&id, &["path"])])?;
+    refuse_what_cannot_be_drawn(before, scene, &[(&id, &["path", "compoundPaths"])])?;
     Ok(EditEffect::ObjectCreated { object_id: id })
+}
+
+/// Whether `object` draws pixels of its own, so a blend mode, an anchor or an
+/// effect stack on it changes what is drawn. A group, a layer, a marker, a
+/// camera and a light draw nothing themselves; setting one there would be
+/// stored and never seen (invariant 18), so the edits below refuse it by name.
+fn draws_itself(object: &SceneObject) -> bool {
+    !matches!(
+        object,
+        SceneObject::Group(_)
+            | SceneObject::Layer(_)
+            | SceneObject::Marker(_)
+            | SceneObject::Camera(_)
+            | SceneObject::Light(_)
+    )
+}
+
+/// The indices of `object_ids`, each of which must exist and draw itself.
+fn drawing_targets(
+    scene: &SceneDocument,
+    object_ids: &[String],
+    field: &str,
+) -> Result<Vec<usize>, Refusal> {
+    if object_ids.is_empty() {
+        return Err(Refusal::EditTargetsEmpty);
+    }
+    let indices = object_ids
+        .iter()
+        .map(|id| object_index(scene, id))
+        .collect::<Result<Vec<_>, _>>()?;
+    let inapplicable: Vec<&SceneObject> = indices
+        .iter()
+        .map(|&i| &scene.objects[i])
+        .filter(|object| !draws_itself(object))
+        .collect();
+    if !inapplicable.is_empty() {
+        return Err(not_applicable(field, &inapplicable));
+    }
+    Ok(indices)
+}
+
+/// Set every listed object's layer blend mode (3.20); absent clears it to
+/// `normal`. Every one of the 38 modes is drawn, so the only refusals are an
+/// unknown object, a kind that draws nothing itself, and no change.
+pub fn set_blend_mode(
+    scene: &mut SceneDocument,
+    object_ids: &[String],
+    blend_mode: Option<crate::material::BlendMode>,
+) -> Result<EditEffect, Refusal> {
+    let indices = drawing_targets(scene, object_ids, "blendMode")?;
+    let changing: Vec<usize> = indices
+        .into_iter()
+        .filter(|&i| scene.objects[i].base().blend_mode != blend_mode)
+        .collect();
+    if changing.is_empty() {
+        return Err(Refusal::ObjectFieldUnchanged {
+            field: "blendMode".into(),
+        });
+    }
+    let before = scene.clone();
+    let mut ids = Vec::with_capacity(changing.len());
+    for &i in &changing {
+        scene.objects[i].base_mut().blend_mode = blend_mode;
+        ids.push(scene.objects[i].base().id.clone());
+    }
+    let edited: Vec<(&str, &[&str])> = ids
+        .iter()
+        .map(|id| (id.as_str(), &["blendMode"][..]))
+        .collect();
+    refuse_what_cannot_be_drawn(before, scene, &edited)?;
+    Ok(changed(ids))
+}
+
+/// Set every listed object's pivot (3.13): the object-local point it rotates
+/// and scales about; absent puts it back at the object's origin.
+pub fn set_anchor(
+    scene: &mut SceneDocument,
+    object_ids: &[String],
+    anchor: Option<crate::scene::Vec2>,
+) -> Result<EditEffect, Refusal> {
+    if let Some(anchor) = anchor {
+        if !anchor.x.is_finite() || !anchor.y.is_finite() {
+            return Err(Refusal::ObjectFieldValueInvalid {
+                field: "anchor".into(),
+                detail: "x and y must be finite".into(),
+            });
+        }
+    }
+    let indices = drawing_targets(scene, object_ids, "anchor")?;
+    let changing: Vec<usize> = indices
+        .into_iter()
+        .filter(|&i| scene.objects[i].base().anchor != anchor)
+        .collect();
+    if changing.is_empty() {
+        return Err(Refusal::ObjectFieldUnchanged {
+            field: "anchor".into(),
+        });
+    }
+    let before = scene.clone();
+    let mut ids = Vec::with_capacity(changing.len());
+    for &i in &changing {
+        scene.objects[i].base_mut().anchor = anchor;
+        ids.push(scene.objects[i].base().id.clone());
+    }
+    let edited: Vec<(&str, &[&str])> = ids
+        .iter()
+        .map(|id| (id.as_str(), &["anchor"][..]))
+        .collect();
+    refuse_what_cannot_be_drawn(before, scene, &edited)?;
+    Ok(changed(ids))
+}
+
+/// Replace one object's ordered effect stack (3.22); an empty list clears it.
+/// Each effect is checked by the same `validate_effects` the validator and
+/// the engine use, so an unknown parameter or an out-of-range value refuses
+/// `effectInvalid` naming the effect.
+pub fn set_effects(
+    scene: &mut SceneDocument,
+    object_id: &str,
+    effects: &[crate::effect::EffectInstance],
+) -> Result<EditEffect, Refusal> {
+    let index = drawing_targets(scene, &[object_id.to_owned()], "effects")?[0];
+    crate::effect::validate_effects(object_id, effects)?;
+    if scene.objects[index].base().effects() == effects {
+        return Err(Refusal::ObjectFieldUnchanged {
+            field: "effects".into(),
+        });
+    }
+    let before = scene.clone();
+    scene.objects[index].base_mut().effects = (!effects.is_empty()).then(|| effects.to_vec());
+    refuse_what_cannot_be_drawn(before, scene, &[(object_id, &["effects"])])?;
+    Ok(changed(vec![object_id.to_owned()]))
+}
+
+/// Check one bezier path of a shape the way `createShape` does.
+fn shape_path_valid(id: &str, path: &BezierPath, field: &str) -> Result<(), Refusal> {
+    let invalid = |detail: &str| Refusal::ObjectFieldValueInvalid {
+        field: field.into(),
+        detail: detail.into(),
+    };
+    if path.vertices.len() < 2 {
+        return Err(invalid("a shape path needs at least two vertices"));
+    }
+    if !path
+        .vertices
+        .iter()
+        .chain(&path.in_tangents)
+        .chain(&path.out_tangents)
+        .all(|p| p.x.is_finite() && p.y.is_finite())
+    {
+        return Err(invalid("a shape path's points must be finite"));
+    }
+    bezier_arrays_match(id, path)
+}
+
+/// Replace a shape's geometry: its primary path and all of its additional
+/// subpaths (a compound path, drawn with the shape's fill rule). An empty
+/// `compound_paths` leaves a single path. The box follows the vertex bounds of
+/// every subpath, as `createShape` sets it.
+pub fn set_shape_path(
+    scene: &mut SceneDocument,
+    shape_id: &str,
+    path: &BezierPath,
+    compound_paths: &[BezierPath],
+    fill_rule: Option<FillRule>,
+) -> Result<EditEffect, Refusal> {
+    let index = object_index(scene, shape_id)?;
+    if !matches!(scene.objects[index], SceneObject::Shape(_)) {
+        return Err(not_applicable("path", &[&scene.objects[index]]));
+    }
+    shape_path_valid(shape_id, path, "path")?;
+    for (i, sub) in compound_paths.iter().enumerate() {
+        shape_path_valid(shape_id, sub, &format!("compoundPaths[{i}]"))?;
+    }
+    let compound = (!compound_paths.is_empty()).then(|| compound_paths.to_vec());
+    if let SceneObject::Shape(shape) = &scene.objects[index] {
+        if shape.path == *path
+            && shape.compound_paths == compound
+            && fill_rule.is_none_or(|rule| rule == shape.fill_rule)
+        {
+            return Err(Refusal::ObjectFieldUnchanged {
+                field: "path".into(),
+            });
+        }
+    }
+    let before = scene.clone();
+    let (width, height) = path_box(std::iter::once(path).chain(compound_paths));
+    if let SceneObject::Shape(shape) = &mut scene.objects[index] {
+        shape.path = path.clone();
+        shape.compound_paths = compound;
+        if let Some(rule) = fill_rule {
+            shape.fill_rule = rule;
+        }
+        shape.base.width = width;
+        shape.base.height = height;
+    }
+    refuse_what_cannot_be_drawn(
+        before,
+        scene,
+        &[(shape_id, &["path", "compoundPaths", "fillRule"])],
+    )?;
+    Ok(changed(vec![shape_id.to_owned()]))
+}
+
+/// The width and height of the vertex bounds of `paths`.
+fn path_box<'a>(paths: impl Iterator<Item = &'a BezierPath>) -> (f64, f64) {
+    let (mut low, mut high) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
+    for vertex in paths.flat_map(|path| &path.vertices) {
+        low = (low.0.min(vertex.x), low.1.min(vertex.y));
+        high = (high.0.max(vertex.x), high.1.max(vertex.y));
+    }
+    (high.0 - low.0, high.1 - low.1)
 }
 
 /// Replace a group's ordered children (3.19's prerequisite for a clip group).
@@ -950,7 +1162,8 @@ mod tests {
             in_tangents: vec![v(0.0, 0.0); 2],
             out_tangents: vec![v(0.0, 0.0); 2],
         };
-        let Ok(EditEffect::ObjectCreated { object_id }) = create_shape(&mut s, " Wipe ", &line)
+        let Ok(EditEffect::ObjectCreated { object_id }) =
+            create_shape(&mut s, " Wipe ", &line, &[])
         else {
             panic!("a shape is created");
         };
@@ -964,7 +1177,7 @@ mod tests {
         assert!(created.base.fill.is_some());
         // A second one takes the next id.
         assert!(matches!(
-            create_shape(&mut s, "Again", &line),
+            create_shape(&mut s, "Again", &line, &[]),
             Ok(EditEffect::ObjectCreated { object_id }) if object_id == "shape-2"
         ));
         let mut short = line.clone();
@@ -972,23 +1185,23 @@ mod tests {
         short.in_tangents.truncate(1);
         short.out_tangents.truncate(1);
         assert!(matches!(
-            create_shape(&mut s, "Short", &short),
+            create_shape(&mut s, "Short", &short, &[]),
             Err(Refusal::ObjectFieldValueInvalid { field, .. }) if field == "path"
         ));
         let mut skewed = line.clone();
         skewed.in_tangents.pop();
         assert!(matches!(
-            create_shape(&mut s, "Skewed", &skewed),
+            create_shape(&mut s, "Skewed", &skewed, &[]),
             Err(Refusal::VectorTessellationFailed { .. })
         ));
         let mut nan = line.clone();
         nan.vertices[0].x = f64::NAN;
         assert!(matches!(
-            create_shape(&mut s, "Nan", &nan),
+            create_shape(&mut s, "Nan", &nan, &[]),
             Err(Refusal::ObjectFieldValueInvalid { .. })
         ));
         assert!(matches!(
-            create_shape(&mut s, "  ", &line),
+            create_shape(&mut s, "  ", &line, &[]),
             Err(Refusal::SceneObjectNameEmpty)
         ));
         assert_eq!(s.objects.len(), 9, "refused creations add nothing");
@@ -1067,5 +1280,214 @@ mod tests {
         assert!(set_paint(&mut s, &ids(&["disc"]), PaintSlot::Fill, Some(&solid(0.4))).is_ok());
         // Fixing it is allowed.
         assert!(set_object_masks(&mut s, "card", &[mask(MaskMode::Add)]).is_ok());
+    }
+
+    // --- the MCP gaps (16 Nov 2026) -------------------------------------------
+
+    fn exposure(stops: f64) -> crate::effect::EffectInstance {
+        crate::effect::EffectInstance::new(
+            "exposure",
+            crate::effect::Effect::Exposure(crate::effect::Exposure {
+                exposure: stops,
+                offset: 0.0,
+                gamma_correction: 1.0,
+            }),
+        )
+    }
+
+    fn square(x: f64, y: f64, side: f64) -> BezierPath {
+        BezierPath {
+            closed: true,
+            vertices: vec![
+                v(x, y),
+                v(x + side, y),
+                v(x + side, y + side),
+                v(x, y + side),
+            ],
+            in_tangents: vec![v(0.0, 0.0); 4],
+            out_tangents: vec![v(0.0, 0.0); 4],
+        }
+    }
+
+    #[test]
+    fn blend_mode_anchor_and_effects_refuse_what_draws_nothing_and_restore() {
+        use crate::material::BlendMode;
+        let mut s = scene();
+        let before = s.clone();
+        // A group draws nothing itself: refused by name, nothing changed.
+        assert_eq!(
+            set_blend_mode(&mut s, &ids(&["card", "stack"]), Some(BlendMode::Multiply)),
+            Err(Refusal::ObjectFieldNotApplicable {
+                field: "blendMode".into(),
+                kinds: vec!["group".into()],
+            })
+        );
+        assert_eq!(s, before);
+        assert!(matches!(
+            set_blend_mode(&mut s, &ids(&["ghost"]), None),
+            Err(Refusal::SceneObjectUnknown { .. })
+        ));
+        assert_eq!(
+            set_blend_mode(&mut s, &[], Some(BlendMode::Screen)),
+            Err(Refusal::EditTargetsEmpty)
+        );
+        // Set, unchanged, cleared.
+        set_blend_mode(&mut s, &ids(&["card", "disc"]), Some(BlendMode::Multiply)).unwrap();
+        assert_eq!(s.objects[0].base().blend_mode, Some(BlendMode::Multiply));
+        assert_eq!(s.objects[1].base().blend_mode, Some(BlendMode::Multiply));
+        assert!(matches!(
+            set_blend_mode(&mut s, &ids(&["card"]), Some(BlendMode::Multiply)),
+            Err(Refusal::ObjectFieldUnchanged { .. })
+        ));
+        set_blend_mode(&mut s, &ids(&["card"]), None).unwrap();
+        assert_eq!(s.objects[0].base().blend_mode, None);
+
+        // The anchor must be finite, and a group has no pivot of its own.
+        assert!(matches!(
+            set_anchor(&mut s, &ids(&["card"]), Some(v(f64::NAN, 0.0))),
+            Err(Refusal::ObjectFieldValueInvalid { field, .. }) if field == "anchor"
+        ));
+        assert!(matches!(
+            set_anchor(&mut s, &ids(&["stack"]), Some(v(1.0, 1.0))),
+            Err(Refusal::ObjectFieldNotApplicable { .. })
+        ));
+        set_anchor(&mut s, &ids(&["card"]), Some(v(50.0, 40.0))).unwrap();
+        assert_eq!(s.objects[0].base().anchor, Some(v(50.0, 40.0)));
+        set_anchor(&mut s, &ids(&["card"]), None).unwrap();
+        assert_eq!(s.objects[0].base().anchor, None);
+
+        // Effects are checked by the one validator, and replace the stack.
+        let held = s.clone();
+        assert!(matches!(
+            set_effects(&mut s, "card", &[exposure(99.0)]),
+            Err(Refusal::EffectInvalid { effect_id, .. }) if effect_id == "exposure"
+        ));
+        assert_eq!(s, held, "a refused effect changed nothing");
+        assert!(matches!(
+            set_effects(&mut s, "stack", &[exposure(1.0)]),
+            Err(Refusal::ObjectFieldNotApplicable { .. })
+        ));
+        set_effects(&mut s, "card", &[exposure(1.0)]).unwrap();
+        assert_eq!(s.objects[0].base().effects(), &[exposure(1.0)]);
+        assert!(matches!(
+            set_effects(&mut s, "card", &[exposure(1.0)]),
+            Err(Refusal::ObjectFieldUnchanged { .. })
+        ));
+        set_effects(&mut s, "card", &[]).unwrap();
+        assert_eq!(s.objects[0].base().effects, None, "an empty list clears");
+    }
+
+    #[test]
+    fn a_shape_takes_compound_subpaths_at_creation_and_by_replacement() {
+        let mut s = new_scene("s", "S", WorkingColorSpace::NEW_PROJECT);
+        let Ok(EditEffect::ObjectCreated { object_id }) = create_shape(
+            &mut s,
+            "Pair",
+            &square(0.0, 0.0, 50.0),
+            &[square(100.0, 0.0, 50.0)],
+        ) else {
+            panic!("a compound shape is created");
+        };
+        let SceneObject::Shape(created) = &s.objects[0] else {
+            panic!("a shape");
+        };
+        assert_eq!(
+            created.compound_paths.as_deref(),
+            Some(&[square(100.0, 0.0, 50.0)][..])
+        );
+        assert_eq!((created.base.width, created.base.height), (150.0, 50.0));
+        // A broken subpath is refused at its index, and nothing is created.
+        let held = s.clone();
+        let short = BezierPath {
+            closed: false,
+            vertices: vec![v(0.0, 0.0)],
+            in_tangents: vec![v(0.0, 0.0)],
+            out_tangents: vec![v(0.0, 0.0)],
+        };
+        assert!(matches!(
+            create_shape(&mut s, "Bad", &square(0.0, 0.0, 10.0), std::slice::from_ref(&short)),
+            Err(Refusal::ObjectFieldValueInvalid { field, .. }) if field == "compoundPaths[0]"
+        ));
+        assert_eq!(s, held);
+
+        // Replacement: the path and every subpath, the box following them.
+        set_shape_path(&mut s, &object_id, &square(0.0, 0.0, 80.0), &[], None).unwrap();
+        let SceneObject::Shape(replaced) = &s.objects[0] else {
+            panic!("a shape");
+        };
+        assert_eq!(replaced.path, square(0.0, 0.0, 80.0));
+        assert_eq!(replaced.compound_paths, None, "an empty list is one path");
+        assert_eq!((replaced.base.width, replaced.base.height), (80.0, 80.0));
+        assert!(matches!(
+            set_shape_path(&mut s, &object_id, &square(0.0, 0.0, 80.0), &[], None),
+            Err(Refusal::ObjectFieldUnchanged { .. })
+        ));
+        // The fill rule alone is a change; the same rule again is not.
+        set_shape_path(
+            &mut s,
+            &object_id,
+            &square(0.0, 0.0, 80.0),
+            &[],
+            Some(FillRule::Evenodd),
+        )
+        .unwrap();
+        let SceneObject::Shape(ruled) = &s.objects[0] else {
+            panic!("a shape");
+        };
+        assert_eq!(ruled.fill_rule, FillRule::Evenodd);
+        assert!(matches!(
+            set_shape_path(
+                &mut s,
+                &object_id,
+                &square(0.0, 0.0, 80.0),
+                &[],
+                Some(FillRule::Evenodd)
+            ),
+            Err(Refusal::ObjectFieldUnchanged { .. })
+        ));
+        assert!(matches!(
+            set_shape_path(&mut s, &object_id, &square(0.0, 0.0, 80.0), &[short], None),
+            Err(Refusal::ObjectFieldValueInvalid { field, .. }) if field == "compoundPaths[0]"
+        ));
+        let mut r = scene();
+        assert!(matches!(
+            set_shape_path(&mut r, "card", &square(0.0, 0.0, 10.0), &[], None),
+            Err(Refusal::ObjectFieldNotApplicable { .. })
+        ));
+    }
+
+    #[test]
+    fn width_height_and_draw_order_are_inspector_fields() {
+        use crate::object_edit::{set_object_field, ObjectField};
+        let mut s = scene();
+        set_object_field(&mut s, &ids(&["card", "disc"]), &ObjectField::Width(300.0)).unwrap();
+        assert_eq!(
+            (s.objects[0].base().width, s.objects[1].base().width),
+            (300.0, 300.0)
+        );
+        set_object_field(&mut s, &ids(&["card"]), &ObjectField::Height(10.0)).unwrap();
+        assert_eq!(s.objects[0].base().height, 10.0);
+        for bad in [-1.0, f64::NAN, f64::INFINITY] {
+            assert!(matches!(
+                set_object_field(&mut s, &ids(&["card"]), &ObjectField::Width(bad)),
+                Err(Refusal::ObjectFieldValueInvalid { field, .. }) if field == "width"
+            ));
+        }
+        // A shape's box follows its path, a line's its points, a group has none.
+        assert!(matches!(
+            set_object_field(&mut s, &ids(&["path", "rule", "stack"]), &ObjectField::Width(5.0)),
+            Err(Refusal::ObjectFieldNotApplicable { field, kinds })
+                if field == "width" && kinds == ["shape", "line", "group"]
+        ));
+        set_object_field(&mut s, &ids(&["disc"]), &ObjectField::ZIndex(3)).unwrap();
+        assert_eq!(s.objects[1].base().z_index, 3);
+        assert!(matches!(
+            set_object_field(&mut s, &ids(&["stack"]), &ObjectField::ZIndex(1)),
+            Err(Refusal::ObjectFieldNotApplicable { .. })
+        ));
+        assert!(matches!(
+            set_object_field(&mut s, &ids(&["disc"]), &ObjectField::ZIndex(3)),
+            Err(Refusal::ObjectFieldUnchanged { .. })
+        ));
     }
 }

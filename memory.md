@@ -118,6 +118,21 @@ not a euphemism for nearly done.
 
 ---
 
+## 2026-11-16 — The MCP edit gaps filled: size, draw order, blend, anchor, effects, compound paths (Claude, on the user's instruction)
+
+**Resume here.** User instruction 16 Nov: fill the gaps in the MCP edits. Done: `setObjectField` gains `width`,
+`height` (rect, ellipse, image, text; finite, not negative) and `zIndex` (drawing kinds); new edits `setBlendMode`,
+`setAnchor`, `setEffects` (replace the stack; `validate_effects`), `setShapePath` (path, every subpath, optional fill
+rule); `createShape` takes optional `compoundPaths`. Left out by name because the engine refuses them: `layerId`
+(3.16), 2D material slots (11.50), the 3D fields (11.48). Jev and Laya: design (agree on what to leave out and on
+compound paths; Jev taken on four splits), code review (Laya found no fill-rule edit for compound shapes: added),
+acceptance (both: met, 0.90 / 0.93; the record's gate pointer and the unrun GPU render named). Verified: contracts
+unit tests, the shipped binary (`layout_edit_surface`: every value set and read back, seven named refusals with the
+store unchanged, schema), the CPU reference drawing each edit's effect, 11 of 11 mutations. npm run check exit 0 (46
+Node, 412 Editor, 900 Rust passed, 0 failed, 38 ignored; conformance 594/0/9). Evidence
+`docs/evidence/mcp-layout-edits`. **Next:** report to the user; 3.21 needs a quiet reference GPU for its p99; 8.14
+and 7.3 remain open.
+
 ## 2026-11-16 — 3.21: the 1080p stats page's frame cut to 6.5 ms p50; p99 met in 3 of 6 runs on a shared GPU (Claude)
 
 **Resume here.** 3.21 stays active. Three exact changes: the output encode's refinement loops stop when a step does not

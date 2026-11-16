@@ -1,0 +1,302 @@
+{
+  "jev": {
+    "model": "jev-1.14.0"
+  },
+  "laya": {
+    "model": "convaiinnovations/laya-multilingual",
+    "max_len": 8192,
+    "input_tokens": 22551,
+    "output_tokens": 0,
+    "state_tokens": 2195,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "row": "User instruction: fill the gaps in the MCP edits (not a plan row)",
+    "done_when": "An MCP agent can set object width and height, draw order, blend mode, anchor, effects and compound shape paths through scenes.edit on the shipped binary, refused by name, drawn as set; anything the engine cannot draw is named and left out.",
+    "evidence_record": "# The MCP edit gaps: size, draw order, blend, anchor, effects, compound paths\n\n16 November 2026. Not a build-plan row: the user's instruction, \"fill the gaps\nin the MCP edits\", after the render-feature edits\n(`docs/evidence/mcp-render-edits`) named what an agent still could not set.\n\n## What an agent can now do\n\nThrough `scenes.edit` and the Editor alike, typed, atomic in a batch, one undo\nentry (`Shared/contracts/src/object_edit.rs`, `render_edit.rs`):\n\n| Edit | Sets | Refuses by name |\n| --- | --- | --- |\n| `setObjectField` `width`, `height` | the object's box: rect, ellipse, image, text | `objectFieldValueInvalid` (not finite, negative), `objectFieldNotApplicable` (a shape's box follows its path, a line's its points, a group has none) |\n| `setObjectField` `zIndex` | draw order within a layer | `objectFieldNotApplicable` (a kind that draws nothing) |\n| `setBlendMode` | the layer blend mode of every listed object; left out is `normal` | `objectFieldNotApplicable` (group, layer, marker, camera, light) |\n| `setAnchor` | the pivot every listed object rotates and scales about | `objectFieldValueInvalid` (not finite), `objectFieldNotApplicable` |\n| `setEffects` | one object's whole effect stack; empty clears | `effectInvalid` (from `validate_effects`, the validator's own check), `objectFieldNotApplicable` |\n| `setShapePath` | a shape's path, every additional subpath, and optionally its fill rule | `objectFieldValueInvalid` (at `path` or `compoundPaths[i]`), `objectFieldNotApplicable` (not a shape) |\n| `createShape` `compoundPaths` | a compound shape at creation | `objectFieldValueInvalid` at `compoundPaths[i]` |\n\nEach also refuses an unknown object (`sceneObjectUnknown`), an edit that\nchanges nothing (`objectFieldUnchanged`), and puts the scene back when it\nrefuses. The new render-side edits run the same drawability check before and\nafter as the render-feature edits (`refuse_what_cannot_be_drawn`). No new\n`Refusal` variant.\n\n## Design, run through Jev and Laya first (`design-jev-laya.json`)\n\n| Question | Jev | Laya | Decided |\n| --- | --- | --- | --- |\n| width and height | `setObjectField` fields (0.98) | a separate size edit | **fields** |\n| draw order | a `zIndex` field (1.0) | a reorder edit | **field** |\n| layer membership, 2D material slots, 3D fields | leave out, named (0.98) | leave out, named | leave out |\n| the effect stack | replace the list (1.0) | per-effect operations | **replace** |\n| compound paths | `setShapePath` plus `createShape` option (1.0) | same | same |\n| blend, anchor, effects on a kind that draws nothing | refuse by name (0.62) | store and ignore | **refuse** |\n| must the user approve | 0.42 | 0.94 | see below |\n\nBy hand: width and height are base fields like x and y, and a batch of two\nfield edits is already atomic, so a second size edit would be a second copy of\nthe field machinery; `zIndex` is what the renderer orders by; replacing the\neffect list is what both chose for masks; \"store and ignore\" is a silent\nno-op (invariant 18). On approval: the user asked for the gaps to be filled;\nwhat is left out is left out because the engine refuses it today, and is named\nbelow. The splits are reported to the user.\n\n## Code review by Jev and Laya (`review-jev-laya.json`)\n\n| Question | Jev | Laya |\n| --- | --- | --- |\n| every edit refuses by name and restores | 0.67 | 0.92 |\n| the existing check and validators are reused | 0.86 | 0.92 |\n| a shape's box is right | 0.95 | 0.91 |\n| leaving the three undrawable fields out is right | 0.89 | 0.93 |\n| weakest point | no GPU render test (0.43) | no fill-rule edit |\n| a defect to fix first | 0.60 | 0.89 |\n\nLaya's weakest point was real: a compound shape had no way to set its fill\nrule, so an agent could not cut a hole with even-odd. **Fixed**:\n`setShapePath` takes an optional `fillRule`, covered at every level below. Jev's\ndoubt on \"refuses by name\" was checked edit by edit; every new edit refuses all\nfour cases. The one place it does not hold is old: `setObjectField` ignores an\nunknown id when another listed id exists (named below). The GPU draws these\nfeatures already (3.17, 3.20, 3.22 compare the GPU with the CPU reference); a\nscene authored by these edits is an ordinary scene.\n\n## Verified by execution\n\n- `cargo test -p gx-contracts --lib render_edit` (11): refusals for kinds that\n  draw nothing, invalid values, no-ops and unknown objects, each leaving the\n  scene as it was; an invalid effect refused naming it; compound creation and\n  replacement with the box following every subpath; the fill rule alone is a\n  change and the same rule again is not.\n- `cargo test -p gx-editor-mcp --test layout_edit_surface`: the shipped\n  `gx-editor-mcp` binary, a real handshake. One `scenes.edit` batch creates a\n  rect, an ellipse, a group and two shapes and sets width, height, `zIndex`, a\n  blend mode on two objects, an anchor, an exposure effect, a compound\n  `createShape` and a `setShapePath` with two subpaths and even-odd; a second\n  process reads every value back; the scene passes `validate.preflight`. Seven\n  bad edits come back as named refusals with the stored scene unchanged; a\n  misspelt effect parameter (`exposur`) is refused naming it; `tools/list`\n  advertises a schema that accepts each new edit and rejects an unknown blend\n  mode.\n- `cargo test -p gx-render-worker --lib the_layout_edits_draw_what_they_say`:\n  the same kind of wire JSON drawn by the CPU reference. Width 300 lights x 250\n  and not x 350; the raised red rect is over the blue one; green multiplied\n  over red is black; both subpaths of the compound shape are lit and the gap\n  between them is not; the replaced path is a filled square; an even-odd ring\n  has its hole; one stop of exposure takes sRGB 64 to 90; the quarter turn is\n  about the anchor, not the corner.\n- Conformance: the witness batch carries all four new edits and the\n  `compoundPaths` and `fillRule` options; \"every SceneEdit variant executed\"\n  passes (gate below).\n- Mutations, one at a time, restored byte-identical (`mutate_gaps.py`): 11 of\n  11 fail named tests (width on a shape, a negative width accepted, a blend\n  mode on a group, effects skipping the validator, `setShapePath` or\n  `createShape` dropping subpaths, `zIndex` not applied, the anchor cleared at\n  dispatch, the blend mode not stored, the box ignoring subpaths, the fill rule\n  ignored).\n- Gate: see `memory.md` for the run on the committed tree.\n\n## Not in this slice, by name\n\n- **Layer membership** (`layerId`): the engine refuses any non-empty layer\n  today (3.16), so an edit could only be refused.\n- **Material slots on 2D objects**: refused by the engine (11.50); meshes, the\n  only kind whose slots draw, cannot be created over MCP.\n- **rotationX, rotationY, scaleZ, zDepth**: refused by the engine (11.48).\n- **`setObjectField` and unknown ids**: it ignores an id that names no object\n  when another listed id exists (it refuses only when none does). Older than\n  these edits and shared with the Editor; not changed here.\n- **A reorder edit** (move before or after another object): `zIndex` is the\n  field; a convenience edit can come later.\n- **Animating these values** stays with `11.47`, as for the render features.\n"
+  },
+  "questions": {
+    "done_when_met": {
+      "type": "noul",
+      "instructions": "Does the recorded evidence show that this row's done-when was met by execution (tests run, commands run, figures recorded), not merely claimed?",
+      "criteria": {
+        "true": "Every clause of the done-when has executed evidence.",
+        "false": "A clause is unmet, only claimed, or the evidence does not name what was run."
+      }
+    },
+    "evidence_names_execution": {
+      "type": "noul",
+      "instructions": "Does the evidence name specific executed checks (test names, commands, counts, measured figures) rather than describing the feature?",
+      "criteria": {
+        "true": "Specific executed checks are named.",
+        "false": "The evidence describes the feature without naming what was run."
+      }
+    },
+    "silent_substitution_risk": {
+      "type": "noul",
+      "instructions": "Is there a risk that this row ships a silent substitution: something the done-when asks for that is approximated, skipped or deferred without being refused by name?",
+      "criteria": {
+        "true": "Yes, a clause appears approximated, skipped or deferred silently.",
+        "false": "No, every gap is named or refused."
+      }
+    },
+    "weakest": {
+      "type": "choice",
+      "instructions": "What is the weakest point of this row's evidence?",
+      "criteria": {
+        "none": "No weak point: evidence covers every clause with executed checks.",
+        "unexecuted_clause": "A done-when clause has no executed check.",
+        "platform_gap": "A platform the done-when names (e.g. macOS, hardware) was not run.",
+        "stale": "Later changes may have invalidated the recorded evidence.",
+        "vague_record": "The record is too vague to tell what was run."
+      }
+    },
+    "unrun_is_named": {
+      "type": "noul",
+      "instructions": "Does the evidence name every check or step it did not run, rather than leaving a gap unmentioned?",
+      "criteria": {
+        "true": "Everything not run is named in the evidence.",
+        "false": "Some gap is not mentioned in the evidence."
+      }
+    },
+    "mutations_can_fail": {
+      "type": "noul",
+      "instructions": "Do the recorded mutations show that the named checks can fail: each mutation was run alone, made at least one named check fail, and the file was restored identical?",
+      "criteria": {
+        "true": "Each recorded mutation names the check or test that failed and says the file was restored.",
+        "false": "A mutation survived, was not run alone, or does not name what failed."
+      }
+    },
+    "every_gap_set_over_wire": {
+      "type": "noul",
+      "instructions": "Does the evidence show by an executed test over the shipped MCP binary that width, height, zIndex, blend mode, anchor, effects and compound shape paths are each set and read back from the store?",
+      "criteria": {
+        "true": "Yes, a named wire test.",
+        "false": "Only claimed or partly."
+      }
+    },
+    "refused_by_name": {
+      "type": "noul",
+      "instructions": "Does the evidence show bad edits refused by name over the wire with the store unchanged?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "draws_what_it_says": {
+      "type": "noul",
+      "instructions": "Does the evidence show a scene authored by these edits draws what they say?",
+      "criteria": {
+        "true": "A render test checks pixels for each.",
+        "false": "No."
+      }
+    },
+    "left_out_named": {
+      "type": "noul",
+      "instructions": "Is everything left out named with its reason?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "done_when_met",
+      "jev": 0.9,
+      "laya": 0.9317,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.9
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9317,
+        "confidence": 0.9317,
+        "answer_confidence": 0.9317,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "evidence_names_execution",
+      "jev": 0.99,
+      "laya": 0.9342,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.99
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9342,
+        "confidence": 0.9342,
+        "answer_confidence": 0.9342,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "silent_substitution_risk",
+      "jev": 0.64,
+      "laya": 0.9372,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.64
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9372,
+        "confidence": 0.9372,
+        "answer_confidence": 0.9372,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "weakest",
+      "jev": "none",
+      "laya": "vague_record",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "none",
+        "confidence": 0.34,
+        "probabilities": {
+          "none": 0.47,
+          "unexecuted_clause": 0.33,
+          "platform_gap": 0.14,
+          "stale": 0.05,
+          "vague_record": 0.01
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "vague_record",
+        "probabilities": {
+          "none": 0.2237,
+          "unexecuted_clause": 0.2604,
+          "platform_gap": 0.135,
+          "stale": 0.102,
+          "vague_record": 0.2788
+        },
+        "confidence": 0.0402,
+        "answer_confidence": 0.2788,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "unrun_is_named",
+      "jev": 0.55,
+      "laya": 0.9071,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.55
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9071,
+        "confidence": 0.9071,
+        "answer_confidence": 0.9071,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "mutations_can_fail",
+      "jev": 0.7,
+      "laya": 0.9129,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.7
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9129,
+        "confidence": 0.9129,
+        "answer_confidence": 0.9129,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "every_gap_set_over_wire",
+      "jev": 0.96,
+      "laya": 0.9488,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.96
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9488,
+        "confidence": 0.9488,
+        "answer_confidence": 0.9488,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "refused_by_name",
+      "jev": 0.97,
+      "laya": 0.961,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.97
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.961,
+        "confidence": 0.961,
+        "answer_confidence": 0.961,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "draws_what_it_says",
+      "jev": 0.97,
+      "laya": 0.9397,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.97
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9397,
+        "confidence": 0.9397,
+        "answer_confidence": 0.9397,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "left_out_named",
+      "jev": 0.74,
+      "laya": 0.9778,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.74
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9778,
+        "confidence": 0.9778,
+        "answer_confidence": 0.9778,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

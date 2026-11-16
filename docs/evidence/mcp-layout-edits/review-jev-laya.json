@@ -1,0 +1,198 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 44085,
+    "output_tokens": 0,
+    "state_tokens": 7296,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "request": "Fill the gaps in the MCP edits; Jev and Laya review what is built.",
+    "design_decided": "ObjectField width, height (finite, not negative; rect, ellipse, image, text only) and zIndex (drawing kinds only); setBlendMode, setAnchor, setEffects (replace the list, validate_effects), setShapePath (path and every subpath); createShape optional compoundPaths. Left out by name: layerId (engine refuses, 3.16), 2D material slots (11.50), 3D fields (11.48).",
+    "code_diff": "diff --git a/Shared/contracts/src/object_edit.rs b/Shared/contracts/src/object_edit.rs\nindex a9235a0..00a245b 100644\n--- a/Shared/contracts/src/object_edit.rs\n+++ b/Shared/contracts/src/object_edit.rs\n@@ -23,6 +23,13 @@ pub enum ObjectField {\n     FontId(String),\n     Size(f64),\n     Radius(f64),\n+    /// The object's box (`ObjectBase.width`, `height`): a rect and an image\n+    /// fill it, an ellipse is inscribed in it, paragraph text wraps inside it.\n+    /// Finite and not negative, as the engine draws it.\n+    Width(f64),\n+    Height(f64),\n+    /// Draw order within a layer (`ObjectBase.z_index`).\n+    ZIndex(i32),\n }\n \n impl ObjectField {\n@@ -38,6 +45,9 @@ impl ObjectField {\n             Self::FontId(_) => \"fontId\",\n             Self::Size(_) => \"size\",\n             Self::Radius(_) => \"radius\",\n+            Self::Width(_) => \"width\",\n+            Self::Height(_) => \"height\",\n+            Self::ZIndex(_) => \"zIndex\",\n         }\n     }\n \n@@ -47,6 +57,25 @@ impl ObjectField {\n                 matches!(object, SceneObject::Text(_))\n             }\n             Self::Radius(_) => matches!(object, SceneObject::Rect(_)),\n+            // The kinds that draw their box. A shape's box follows its path\n+            // and a line's its end points, so setting either would change\n+            // nothing drawn; a group, a layer and the rest draw no box.\n+            Self::Width(_) | Self::Height(_) => matches!(\n+                object,\n+                SceneObject::Rect(_)\n+                    | SceneObject::Ellipse(_)\n+                    | SceneObject::Image(_)\n+                    | SceneObject::Text(_)\n+            ),\n+            // Draw order means something only for an object that draws.\n+            Self::ZIndex(_) => !matches!(\n+                object,\n+                SceneObject::Group(_)\n+                    | SceneObject::Layer(_)\n+                    | SceneObject::Marker(_)\n+                    | SceneObject::Camera(_)\n+                    | SceneObject::Light(_)\n+            ),\n             _ => true,\n         }\n     }\n@@ -74,6 +103,9 @@ impl ObjectField {\n             {\n                 invalid(\"must be finite\")\n             }\n+            Self::Width(value) | Self::Height(value) if !value.is_finite() || *value < 0.0 => {\n+                invalid(\"must be finite and not negative\")\n+            }\n             Self::FontId(value) if value.trim().is_empty() => invalid(\"cannot be empty\"),\n             _ => Ok(()),\n         }\n@@ -97,6 +129,9 @@ impl ObjectField {\n             Self::Radius(value) => {\n                 matches!(object, SceneObject::Rect(rect) if !same_number(rect.radius, *value))\n             }\n+            Self::Width(value) => !same_number(object.base().width, *value),\n+            Self::Height(value) => !same_number(object.base().height, *value),\n+            Self::ZIndex(value) => object.base().z_index != *value,\n         }\n     }\n \n@@ -128,6 +163,9 @@ impl ObjectField {\n                     rect.radius = *value;\n                 }\n             }\n+            Self::Width(value) => object.base_mut().width = *value,\n+            Self::Height(value) => object.base_mut().height = *value,\n+            Self::ZIndex(value) => object.base_mut().z_index = *value,\n         }\n     }\n }\ndiff --git a/Shared/contracts/src/render_edit.rs b/Shared/contracts/src/render_edit.rs\nindex a50e5c0..42d7a1c 100644\n--- a/Shared/contracts/src/render_edit.rs\n+++ b/Shared/contracts/src/render_edit.rs\n@@ -162,6 +162,7 @@ pub fn create_shape(\n     scene: &mut SceneDocument,\n     name: &str,\n     path: &BezierPath,\n+    compound_paths: &[BezierPath],\n ) -> Result<EditEffect, Refusal> {\n     refuse_duplicate_object_ids(scene)?;\n     let name = name.trim();\n@@ -186,20 +187,19 @@ pub fn create_shape(\n     }\n     let id = next_object_id(scene, \"shape\");\n     bezier_arrays_match(&id, path)?;\n-    let (mut low, mut high) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));\n-    for vertex in &path.vertices {\n-        low = (low.0.min(vertex.x), low.1.min(vertex.y));\n-        high = (high.0.max(vertex.x), high.1.max(vertex.y));\n+    for (i, sub) in compound_paths.iter().enumerate() {\n+        shape_path_valid(&id, sub, &format!(\"compoundPaths[{i}]\"))?;\n     }\n+    let (width, height) = path_box(std::iter::once(path).chain(compound_paths));\n     let mut base = crate::scene::ObjectBase::new(id.clone(), name.to_owned());\n-    base.width = high.0 - low.0;\n-    base.height = high.1 - low.1;\n+    base.width = width;\n+    base.height = height;\n     base.fill = Some(default_fill());\n     let before = scene.clone();\n     scene.objects.push(SceneObject::Shape(ShapeObject {\n         base,\n         path: path.clone(),\n-        compound_paths: None,\n+        compound_paths: (!compound_paths.is_empty()).then(|| compound_paths.to_vec()),\n         fill_enabled: true,\n         stroke_enabled: false,\n         fill_rule: FillRule::Nonzero,\n@@ -207,10 +207,211 @@ pub fn create_shape(\n         trim_end: None,\n         trim_offset: None,\n     }));\n-    refuse_what_cannot_be_drawn(before, scene, &[(&id, &[\"path\"])])?;\n+    refuse_what_cannot_be_drawn(before, scene, &[(&id, &[\"path\", \"compoundPaths\"])])?;\n     Ok(EditEffect::ObjectCreated { object_id: id })\n }\n \n+/// Whether `object` draws pixels of its own, so a blend mode, an anchor or an\n+/// effect stack on it changes what is drawn. A group, a layer, a marker, a\n+/// camera and a light draw nothing themselves; setting one there would be\n+/// stored and never seen (invariant 18), so the edits below refuse it by name.\n+fn draws_itself(object: &SceneObject) -> bool {\n+    !matches!(\n+        object,\n+        SceneObject::Group(_)\n+            | SceneObject::Layer(_)\n+            | SceneObject::Marker(_)\n+            | SceneObject::Camera(_)\n+            | SceneObject::Light(_)\n+    )\n+}\n+\n+/// The indices of `object_ids`, each of which must exist and draw itself.\n+fn drawing_targets(\n+    scene: &SceneDocument,\n+    object_ids: &[String],\n+    field: &str,\n+) -> Result<Vec<usize>, Refusal> {\n+    if object_ids.is_empty() {\n+        return Err(Refusal::EditTargetsEmpty);\n+    }\n+    let indices = object_ids\n+        .iter()\n+        .map(|id| object_index(scene, id))\n+        .collect::<Result<Vec<_>, _>>()?;\n+    let inapplicable: Vec<&SceneObject> = indices\n+        .iter()\n+        .map(|&i| &scene.objects[i])\n+        .filter(|object| !draws_itself(object))\n+        .collect();\n+    if !inapplicable.is_empty() {\n+        return Err(not_applicable(field, &inapplicable));\n+    }\n+    Ok(indices)\n+}\n+\n+/// Set every listed object's layer blend mode (3.20); absent clears it to\n+/// `normal`. Every one of the 38 modes is drawn, so the only refusals are an\n+/// unknown object, a kind that draws nothing itself, and no change.\n+pub fn set_blend_mode(\n+    scene: &mut SceneDocument,\n+    object_ids: &[String],\n+    blend_mode: Option<crate::material::BlendMode>,\n+) -> Result<EditEffect, Refusal> {\n+    let indices = drawing_targets(scene, object_ids, \"blendMode\")?;\n+    let changing: Vec<usize> = indices\n+        .into_iter()\n+        .filter(|&i| scene.objects[i].base().blend_mode != blend_mode)\n+        .collect();\n+    if changing.is_empty() {\n+        return Err(Refusal::ObjectFieldUnchanged {\n+            field: \"blendMode\".into(),\n+        });\n+    }\n+    let before = scene.clone();\n+    let mut ids = Vec::with_capacity(changing.len());\n+    for &i in &changing {\n+        scene.objects[i].base_mut().blend_mode = blend_mode;\n+        ids.push(scene.objects[i].base().id.clone());\n+    }\n+    let edited: Vec<(&str, &[&str])> = ids\n+        .iter()\n+        .map(|id| (id.as_str(), &[\"blendMode\"][..]))\n+        .collect();\n+    refuse_what_cannot_be_drawn(before, scene, &edited)?;\n+    Ok(changed(ids))\n+}\n+\n+/// Set every listed object's pivot (3.13): the object-local point it rotates\n+/// and scales about; absent puts it back at the object's origin.\n+pub fn set_anchor(\n+    scene: &mut SceneDocument,\n+    object_ids: &[String],\n+    anchor: Option<crate::scene::Vec2>,\n+) -> Result<EditEffect, Refusal> {\n+    if let Some(anchor) = anchor {\n+        if !anchor.x.is_finite() || !anchor.y.is_finite() {\n+            return Err(Refusal::ObjectFieldValueInvalid {\n+                field: \"anchor\".into(),\n+                detail: \"x and y must be finite\".into(),\n+            });\n+        }\n+    }\n+    let indices = drawing_targets(scene, object_ids, \"anchor\")?;\n+    let changing: Vec<usize> = indices\n+        .into_iter()\n+        .filter(|&i| scene.objects[i].base().anchor != anchor)\n+        .collect();\n+    if changing.is_empty() {\n+        return Err(Refusal::ObjectFieldUnchanged {\n+            field: \"anchor\".into(),\n+        });\n+    }\n+    let before = scene.clone();\n+    let mut ids = Vec::with_capacity(changing.len());\n+    for &i in &changing {\n+        scene.objects[i].base_mut().anchor = anchor;\n+        ids.push(scene.objects[i].base().id.clone());\n+    }\n+    let edited: Vec<(&str, &[&str])> = ids\n+        .iter()\n+        .map(|id| (id.as_str(), &[\"anchor\"][..]))\n+        .collect();\n+    refuse_what_cannot_be_drawn(before, scene, &edited)?;\n+    Ok(changed(ids))\n+}\n+\n+/// Replace one object's ordered effect stack (3.22); an empty list clears it.\n+/// Each effect is checked by the same `validate_effects` the validator and\n+/// the engine use, so an unknown parameter or an out-of-range value refuses\n+/// `effectInvalid` naming the effect.\n+pub fn set_effects(\n+    scene: &mut SceneDocument,\n+    object_id: &str,\n+    effects: &[crate::effect::EffectInstance],\n+) -> Result<EditEffect, Refusal> {\n+    let index = drawing_targets(scene, &[object_id.to_owned()], \"effects\")?[0];\n+    crate::effect::validate_effects(object_id, effects)?;\n+    if scene.objects[index].base().effects() == effects {\n+        return Err(Refusal::ObjectFieldUnchanged {\n+            field: \"effects\".into(),\n+        });\n+    }\n+    let before = scene.clone();\n+    scene.objects[index].base_mut().effects = (!effects.is_empty()).then(|| effects.to_vec());\n+    refuse_what_cannot_be_drawn(before, scene, &[(object_id, &[\"effects\"])])?;\n+    Ok(changed(vec![object_id.to_owned()]))\n+}\n+\n+/// Check one bezier path of a shape the way `createShape` does.\n+fn shape_path_valid(id: &str, path: &BezierPath, field: &str) -> Result<(), Refusal> {\n+    let invalid = |detail: &str| Refusal::ObjectFieldValueInvalid {\n+        field: field.into(),\n+        detail: detail.into(),\n+    };\n+    if path.vertices.len() < 2 {\n+        return Err(invalid(\"a shape path needs at least two vertices\"));\n+    }\n+    if !path\n+        .vertices\n+        .iter()\n+        .chain(&path.in_tangents)\n+        .chain(&path.out_tangents)\n+        .all(|p| p.x.is_finite() && p.y.is_finite())\n+    {\n+        return Err(invalid(\"a shape path's points must be finite\"));\n+    }\n+    bezier_arrays_match(id, path)\n+}\n+\n+/// Replace a shape's geometry: its primary path and all of its additional\n+/// subpaths (a compound path, drawn with the shape's fill rule). An empty\n+/// `compound_paths` leaves a single path. The box follows the vertex bounds of\n+/// every subpath, as `createShape` sets it.\n+pub fn set_shape_path(\n+    scene: &mut SceneDocument,\n+    shape_id: &str,\n+    path: &BezierPath,\n+    compound_paths: &[BezierPath],\n+) -> Result<EditEffect, Refusal> {\n+    let index = object_index(scene, shape_id)?;\n+    if !matches!(scene.objects[index], SceneObject::Shape(_)) {\n+        return Err(not_applicable(\"path\", &[&scene.objects[index]]));\n+    }\n+    shape_path_valid(shape_id, path, \"path\")?;\n+    for (i, sub) in compound_paths.iter().enumerate() {\n+        shape_path_valid(shape_id, sub, &format!(\"compoundPaths[{i}]\"))?;\n+    }\n+    let compound = (!compound_paths.is_empty()).then(|| compound_paths.to_vec());\n+    if let SceneObject::Shape(shape) = &scene.objects[index] {\n+        if shape.path == *path && shape.compound_paths == compound {\n+            return Err(Refusal::ObjectFieldUnchanged {\n+                field: \"path\".into(),\n+            });\n+        }\n+    }\n+    let before = scene.clone();\n+    let (width, height) = path_box(std::iter::once(path).chain(compound_paths));\n+    if let SceneObject::Shape(shape) = &mut scene.objects[index] {\n+        shape.path = path.clone();\n+        shape.compound_paths = compound;\n+        shape.base.width = width;\n+        shape.base.height = height;\n+    }\n+    refuse_what_cannot_be_drawn(before, scene, &[(shape_id, &[\"path\", \"compoundPaths\"])])?;\n+    Ok(changed(vec![shape_id.to_owned()]))\n+}\n+\n+/// The width and height of the vertex bounds of `paths`.\n+fn path_box<'a>(paths: impl Iterator<Item = &'a BezierPath>) -> (f64, f64) {\n+    let (mut low, mut high) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));\n+    for vertex in paths.flat_map(|path| &path.vertices) {\n+        low = (low.0.min(vertex.x), low.1.min(vertex.y));\n+        high = (high.0.max(vertex.x), high.1.max(vertex.y));\n+    }\n+    (high.0 - low.0, high.1 - low.1)\n+}\n+\n /// Replace a group's ordered children (3.19's prerequisite for a clip group).\n /// An edit that leaves the hierarchy with a missing child, a cycle or a child\n /// two containers claim refuses `sceneHierarchyInvalid`, as the validator does,\n@@ -950,7 +1151,8 @@ mod tests {\n             in_tangents: vec![v(0.0, 0.0); 2],\n             out_tangents: vec![v(0.0, 0.0); 2],\n         };\n-        let Ok(EditEffect::ObjectCreated { object_id }) = create_shape(&mut s, \" Wipe \", &line)\n+        let Ok(EditEffect::ObjectCreated { object_id }) =\n+            create_shape(&mut s, \" Wipe \", &line, &[])\n         else {\n             panic!(\"a shape is created\");\n         };\n@@ -964,7 +1166,7 @@ mod tests {\n         assert!(created.base.fill.is_some());\n         // A second one takes the next id.\n         assert!(matches!(\n-            create_shape(&mut s, \"Again\", &line),\n+            create_shape(&mut s, \"Again\", &line, &[]),\n             Ok(EditEffect::ObjectCreated { object_id }) if object_id == \"shape-2\"\n         ));\n         let mut short = line.clone();\n@@ -972,23 +1174,23 @@ mod tests {\n         short.in_tangents.truncate(1);\n         short.out_tangents.truncate(1);\n         assert!(matches!(\n-            create_shape(&mut s, \"Short\", &short),\n+            create_shape(&mut s, \"Short\", &short, &[]),\n             Err(Refusal::ObjectFieldValueInvalid { field, .. }) if field == \"path\"\n         ));\n         let mut skewed = line.clone();\n         skewed.in_tangents.pop();\n         assert!(matches!(\n-            create_shape(&mut s, \"Skewed\", &skewed),\n+            create_shape(&mut s, \"Skewed\", &skewed, &[]),\n             Err(Refusal::VectorTessellationFailed { .. })\n         ));\n         let mut nan = line.clone();\n         nan.vertices[0].x = f64::NAN;\n         assert!(matches!(\n-            create_shape(&mut s, \"Nan\", &nan),\n+            create_shape(&mut s, \"Nan\", &nan, &[]),\n             Err(Refusal::ObjectFieldValueInvalid { .. })\n         ));\n         assert!(matches!(\n-            create_shape(&mut s, \"  \", &line),\n+            create_shape(&mut s, \"  \", &line, &[]),\n             Err(Refusal::SceneObjectNameEmpty)\n         ));\n         assert_eq!(s.objects.len(), 9, \"refused creations add nothing\");\n@@ -1068,4 +1270,190 @@ mod tests {\n         // Fixing it is allowed.\n         assert!(set_object_masks(&mut s, \"card\", &[mask(MaskMode::Add)]).is_ok());\n     }\n+\n",
+    "tests_run": [
+      "contracts unit tests: refusals by name for kinds that draw nothing, invalid values, no-ops, restore on refusal; compound create and replace with the box following every subpath.",
+      "shipped gx-editor-mcp binary: one scenes.edit batch sets every new field and edit; a second process reads them back; preflight passes; seven bad edits refused by name with the store unchanged; a misspelt effect parameter refused naming it; tools/list schema accepts each new edit.",
+      "CPU reference render of a scene authored only by these edits: width 300 lit, raised red on top, green multiplied over red is black, both compound subpaths lit and nothing between, the replaced path filled, one stop of exposure 64 to 90, the anchor rotates about the centre.",
+      "10 of 10 mutations fail named tests."
+    ]
+  },
+  "questions": {
+    "refusals_by_name": {
+      "type": "noul",
+      "instructions": "Does every new edit refuse an unknown object, an inapplicable kind, an invalid value and a no-op by name, leaving the scene unchanged?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "one_rule": {
+      "type": "noul",
+      "instructions": "Do the new edits reuse the existing drawability check and validators rather than a second copy of the rules?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "shape_box_correct": {
+      "type": "noul",
+      "instructions": "Is it right that width and height are not settable on a shape (its box follows its path) and that setShapePath sets the box from every subpath?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "leaving_out_right": {
+      "type": "noul",
+      "instructions": "Is leaving layerId, 2D material slots and the 3D fields without an edit, named, the right call while the engine refuses them?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    },
+    "weakest_point": {
+      "type": "choice",
+      "instructions": "Weakest point?",
+      "criteria": {
+        "no_gpu_render_test": "The render check is on the CPU reference; the GPU path is covered by 3.20 and 3.22 evidence only.",
+        "zindex_group": "zIndex on a group is refused though a group could order its children.",
+        "fill_rule_no_edit": "A compound shape has no edit for its fill rule.",
+        "none": "None."
+      }
+    },
+    "must_fix": {
+      "type": "noul",
+      "instructions": "Is there a defect to fix before committing?",
+      "criteria": {
+        "true": "Yes.",
+        "false": "No."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "refusals_by_name",
+      "jev": 0.67,
+      "laya": 0.9158,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.67
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9158,
+        "confidence": 0.9158,
+        "answer_confidence": 0.9158,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "one_rule",
+      "jev": 0.86,
+      "laya": 0.9209,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.86
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9209,
+        "confidence": 0.9209,
+        "answer_confidence": 0.9209,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "shape_box_correct",
+      "jev": 0.95,
+      "laya": 0.9139,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.95
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9139,
+        "confidence": 0.9139,
+        "answer_confidence": 0.9139,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "leaving_out_right",
+      "jev": 0.89,
+      "laya": 0.926,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.89
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.926,
+        "confidence": 0.926,
+        "answer_confidence": 0.926,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "weakest_point",
+      "jev": "no_gpu_render_test",
+      "laya": "fill_rule_no_edit",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "no_gpu_render_test",
+        "confidence": 0.43,
+        "probabilities": {
+          "no_gpu_render_test": 0.57,
+          "zindex_group": 0.21,
+          "fill_rule_no_edit": 0.14,
+          "none": 0.08
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "fill_rule_no_edit",
+        "probabilities": {
+          "no_gpu_render_test": 0.2936,
+          "zindex_group": 0.1869,
+          "fill_rule_no_edit": 0.3167,
+          "none": 0.2028
+        },
+        "confidence": 0.0183,
+        "answer_confidence": 0.3167,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "must_fix",
+      "jev": 0.6,
+      "laya": 0.8946,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.6
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.8946,
+        "confidence": 0.8946,
+        "answer_confidence": 0.8946,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

@@ -18,13 +18,16 @@ use crate::bindings::{self, BindingIssue};
 use crate::color::ColorValue;
 use crate::control::{self, ControlField, TakePage};
 use crate::design_system::{self, DesignSystem, DesignSystemCommit, MotionPreset};
+use crate::effect::EffectInstance;
 use crate::font::FontDefinition;
 use crate::import::ImportReport;
+use crate::material::BlendMode;
 use crate::object_edit::{self, ObjectField};
 use crate::phases::{self, TimelinePhase};
 use crate::render_edit::{self, PaintSlot};
 use crate::scene::{
-    AssetLibraryItem, BezierPath, DataContext, Mask, SceneDocument, StrokeStyle, TrackMatte,
+    AssetLibraryItem, BezierPath, DataContext, FillRule, Mask, SceneDocument, StrokeStyle,
+    TrackMatte, Vec2,
 };
 use crate::text_style::{self, TextStyle};
 use crate::{asset_edit, font_edit, material_edit, ContentHash, RationalRate, Refusal, Revision};
@@ -425,7 +428,15 @@ commands! {
         /// Create a shape from a bezier path (3.13). The path's own coordinates
         /// place it; its fill is grey and its stroke off until `setPaint` and
         /// `setStroke` say otherwise.
-        CreateShape = "createShape" { pub name: String, pub path: BezierPath },
+        CreateShape = "createShape" {
+            pub name: String,
+            pub path: BezierPath,
+            /// Additional subpaths, drawn with the primary path as one
+            /// compound shape under its fill rule; absent or empty is one path.
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub compound_paths: Option<Vec<BezierPath>>,
+        },
         /// Replace a group's ordered children (3.19). A child another group
         /// already claims, a missing child and a cycle refuse
         /// `sceneHierarchyInvalid`; a group is the only kind with children here.
@@ -485,6 +496,39 @@ commands! {
             #[serde(default, skip_serializing_if = "Option::is_none")]
             #[ts(optional)]
             pub style: Option<StrokeStyle>,
+        },
+        /// Set the layer blend mode of every listed object (3.20); left out
+        /// is `normal`. A kind that draws nothing itself (a group, a layer, a
+        /// marker, a camera, a light) refuses `objectFieldNotApplicable`.
+        SetBlendMode = "setBlendMode" {
+            pub object_ids: Vec<String>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub blend_mode: Option<BlendMode>,
+        },
+        /// Set the pivot every listed object rotates and scales about; left
+        /// out is the object's origin. Refuses a non-finite point by name.
+        SetAnchor = "setAnchor" {
+            pub object_ids: Vec<String>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub anchor: Option<Vec2>,
+        },
+        /// Replace one object's ordered effect stack (3.22); empty clears it.
+        /// Each effect is checked as the validator checks it (`effectInvalid`).
+        SetEffects = "setEffects" { pub object_id: String, pub effects: Vec<EffectInstance> },
+        /// Replace a shape's geometry: its path and every additional subpath
+        /// (a compound path); an empty list leaves one path. `fill_rule`, when
+        /// given, decides where overlapping subpaths fill (even-odd cuts a
+        /// hole); left out keeps the shape's rule.
+        SetShapePath = "setShapePath" {
+            pub shape_id: String,
+            pub path: BezierPath,
+            #[serde(default)]
+            pub compound_paths: Vec<BezierPath>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            pub fill_rule: Option<FillRule>,
         },
     }
 }
@@ -837,7 +881,12 @@ fn apply_edit(
             set_canvas(scene, p.frame_rate, p.width, p.height)?;
             EditEffect::None
         }
-        SceneEdit::CreateShape(p) => render_edit::create_shape(scene, &p.name, &p.path)?,
+        SceneEdit::CreateShape(p) => render_edit::create_shape(
+            scene,
+            &p.name,
+            &p.path,
+            p.compound_paths.as_deref().unwrap_or_default(),
+        )?,
         SceneEdit::SetGroupChildren(p) => {
             render_edit::set_group_children(scene, &p.group_id, &p.child_ids)?
         }
@@ -859,6 +908,18 @@ fn apply_edit(
         SceneEdit::SetStroke(p) => {
             render_edit::set_stroke(scene, &p.object_ids, p.width, p.style.as_ref())?
         }
+        SceneEdit::SetBlendMode(p) => {
+            render_edit::set_blend_mode(scene, &p.object_ids, p.blend_mode)?
+        }
+        SceneEdit::SetAnchor(p) => render_edit::set_anchor(scene, &p.object_ids, p.anchor)?,
+        SceneEdit::SetEffects(p) => render_edit::set_effects(scene, &p.object_id, &p.effects)?,
+        SceneEdit::SetShapePath(p) => render_edit::set_shape_path(
+            scene,
+            &p.shape_id,
+            &p.path,
+            &p.compound_paths,
+            p.fill_rule,
+        )?,
     })
 }
 
@@ -1012,6 +1073,10 @@ pub mod witness {
             SceneEdit::SetStroke(_) => 39,
             SceneEdit::CreateShape(_) => 40,
             SceneEdit::SetGroupChildren(_) => 41,
+            SceneEdit::SetBlendMode(_) => 42,
+            SceneEdit::SetAnchor(_) => 43,
+            SceneEdit::SetEffects(_) => 44,
+            SceneEdit::SetShapePath(_) => 45,
         }
     }
 
@@ -1540,6 +1605,7 @@ pub mod witness {
                     in_tangents: vec![Vec2 { x: 0.0, y: 0.0 }; 2],
                     out_tangents: vec![Vec2 { x: 0.0, y: 0.0 }; 2],
                 },
+                compound_paths: None,
             }),
             SceneEdit::CreateObject(CreateObject {
                 kind: "ellipse".into(),
@@ -1619,6 +1685,49 @@ pub mod witness {
                     dash: vec![12.0, 6.0],
                     dash_offset: 0.0,
                 }),
+            }),
+            SceneEdit::SetBlendMode(SetBlendMode {
+                object_ids: vec!["ellipse-1".into()],
+                blend_mode: Some(BlendMode::Multiply),
+            }),
+            SceneEdit::SetAnchor(SetAnchor {
+                object_ids: vec!["ellipse-1".into()],
+                anchor: Some(Vec2 { x: 10.0, y: 10.0 }),
+            }),
+            SceneEdit::SetEffects(SetEffects {
+                object_id: "ellipse-1".into(),
+                effects: vec![EffectInstance::new(
+                    "exposure",
+                    crate::effect::Effect::Exposure(crate::effect::Exposure {
+                        exposure: 0.5,
+                        offset: 0.0,
+                        gamma_correction: 1.0,
+                    }),
+                )],
+            }),
+            SceneEdit::SetShapePath(SetShapePath {
+                shape_id: "shape-1".into(),
+                path: BezierPath {
+                    closed: true,
+                    vertices: vec![
+                        Vec2 { x: 0.0, y: 0.0 },
+                        Vec2 { x: 100.0, y: 0.0 },
+                        Vec2 { x: 100.0, y: 100.0 },
+                    ],
+                    in_tangents: vec![Vec2 { x: 0.0, y: 0.0 }; 3],
+                    out_tangents: vec![Vec2 { x: 0.0, y: 0.0 }; 3],
+                },
+                compound_paths: vec![BezierPath {
+                    closed: true,
+                    vertices: vec![
+                        Vec2 { x: 20.0, y: 20.0 },
+                        Vec2 { x: 60.0, y: 20.0 },
+                        Vec2 { x: 60.0, y: 60.0 },
+                    ],
+                    in_tangents: vec![Vec2 { x: 0.0, y: 0.0 }; 3],
+                    out_tangents: vec![Vec2 { x: 0.0, y: 0.0 }; 3],
+                }],
+                fill_rule: Some(FillRule::Evenodd),
             }),
         ]
     }

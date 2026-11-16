@@ -1,0 +1,270 @@
+{
+  "jev": "jev-1.14.0",
+  "laya": "laya-multilingual max_len 8192",
+  "laya_usage": {
+    "input_tokens": 5028,
+    "output_tokens": 0,
+    "state_tokens": 649,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "state": {
+    "user_request_16_nov": "Fill the gaps in the MCP edits. The gaps named after the render-feature edits: no edit for object width or height, effects, blend mode, z-order (draw order), layer membership, material, anchor or compound paths. Jev and Laya agree design and acceptance and review what is built.",
+    "facts": [
+      "Every authoring write is a typed SceneEdit variant in Shared/contracts (11.36), with generated TS and JSON Schema, applied by apply_edits on the Editor command path and over MCP scenes.edit; a batch is atomic and one undo entry.",
+      "SetObjectField sets one typed inspector field over listed objects; ObjectField has opacity, x, y, rotation, scaleX, scaleY, text, fontId, size, radius. It refuses an inapplicable kind (objectFieldNotApplicable), a bad value (objectFieldValueInvalid) and a no-op (objectFieldUnchanged).",
+      "The render-feature edits (setObjectMasks, setTrackMatte, setPaint, setStroke, createShape, setGroupChildren...) follow one rule: apply to a copy, run drawability_refusals before and after, refuse any refusal at the edited fields or any new refusal, restore on refusal. No new Refusal variants.",
+      "ObjectBase.width and height are the object's box: a rect and an image fill it, an ellipse is inscribed in it, paragraph text wraps inside it. z_index is the draw order within a layer. anchor is an object-local pivot (finite x, y). blend_mode is one of the 38 layer blend modes, all drawn on the GPU (3.20). effects is the ordered effect stack of 16 typed effects, all drawn (3.22), validated by validate_effects.",
+      "ShapeObject has path (primary BezierPath) and compound_paths (additional subpaths, a compound path), drawn with its fill rule; createShape takes one path only and no edit replaces a shape's geometry.",
+      "The engine refuses by name (scenePropertyNotDrawable) a non-empty layerId (3.16), material slots on 2D objects (11.50) and rotationX, rotationY, scaleZ, zDepth (11.48). Meshes, the only kind whose material slots draw, are not creatable over MCP."
+    ],
+    "proposal": "Add ObjectField width, height (finite, at least 0; not on group, layer, marker or camera) and zIndex (an integer). New edits: setBlendMode {objectIds, blendMode or absent for normal}, setAnchor {objectIds, anchor or absent}, setEffects {objectId, effects: whole list, empty clears}, setShapePath {shapeId, path, compoundPaths: whole list}; createShape gains optional compoundPaths. All follow the one-rule pattern and reuse existing refusals. Leave out layer membership, material slots and the 3D fields: the engine refuses them, so an edit could only ever be refused; name them as not drawable yet."
+  },
+  "questions": {
+    "size_edit": {
+      "type": "choice",
+      "instructions": "How should width and height be set?",
+      "criteria": {
+        "object_field_variants": "Two new ObjectField variants, width and height, on the existing setObjectField, as x and y are.",
+        "separate_size_edit": "A new setObjectSize edit taking width and height together."
+      }
+    },
+    "z_order": {
+      "type": "choice",
+      "instructions": "How should draw order be set?",
+      "criteria": {
+        "object_field_z_index": "An ObjectField zIndex integer, the field the renderer orders by within a layer.",
+        "reorder_edit": "A new edit moving an object before or after another object.",
+        "both": "Both."
+      }
+    },
+    "undrawable_fields": {
+      "type": "choice",
+      "instructions": "What should be done about layer membership, material slots on 2D objects and the 3D fields, which the engine refuses by name today?",
+      "criteria": {
+        "leave_out_named": "Add no edit now; name them as not drawable yet, with the rows that will draw them.",
+        "edit_that_refuses": "Add edits that exist but are always refused until the engine draws them.",
+        "edit_that_stores": "Add edits that store the value though the engine refuses the scene at publish."
+      }
+    },
+    "effects_edit": {
+      "type": "choice",
+      "instructions": "How should an object's effects be edited?",
+      "criteria": {
+        "replace_list": "One edit replaces the whole ordered effect list; empty clears; validated by validate_effects.",
+        "per_effect_ops": "Separate add, update, remove and reorder edits by index."
+      }
+    },
+    "compound_paths": {
+      "type": "choice",
+      "instructions": "How should compound paths be authored?",
+      "criteria": {
+        "set_shape_path_and_create_option": "setShapePath replaces a shape's path and all its subpaths; createShape gains optional compoundPaths.",
+        "subpath_ops": "Edits that add or remove one subpath at a time."
+      }
+    },
+    "blend_on_non_drawing": {
+      "type": "choice",
+      "instructions": "What should setBlendMode, setAnchor or setEffects do for a kind that draws nothing itself (group, layer, marker, camera)?",
+      "criteria": {
+        "refuse_by_name": "Refuse objectFieldNotApplicable naming the kinds, as setPaint does.",
+        "store_and_ignore": "Store it; nothing draws it."
+      }
+    },
+    "needs_user": {
+      "type": "noul",
+      "instructions": "Must the user approve this design before implementation?",
+      "criteria": {
+        "true": "Yes, a product choice is made the recorded decisions do not cover.",
+        "false": "No, it follows from the user's instruction to fill the gaps and the existing command model."
+      }
+    }
+  },
+  "rows": [
+    {
+      "question": "size_edit",
+      "jev": "object_field_variants",
+      "laya": "separate_size_edit",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "object_field_variants",
+        "confidence": 0.98,
+        "probabilities": {
+          "object_field_variants": 0.99,
+          "separate_size_edit": 0.01
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "separate_size_edit",
+        "probabilities": {
+          "object_field_variants": 0.3372,
+          "separate_size_edit": 0.6628
+        },
+        "confidence": 0.0778,
+        "answer_confidence": 0.6628,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "z_order",
+      "jev": "object_field_z_index",
+      "laya": "reorder_edit",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "object_field_z_index",
+        "confidence": 1,
+        "probabilities": {
+          "object_field_z_index": 1,
+          "reorder_edit": 0,
+          "both": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "reorder_edit",
+        "probabilities": {
+          "object_field_z_index": 0.1078,
+          "reorder_edit": 0.6482,
+          "both": 0.244
+        },
+        "confidence": 0.2123,
+        "answer_confidence": 0.6482,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "undrawable_fields",
+      "jev": "leave_out_named",
+      "laya": "leave_out_named",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "leave_out_named",
+        "confidence": 0.98,
+        "probabilities": {
+          "leave_out_named": 0.99,
+          "edit_that_refuses": 0.01,
+          "edit_that_stores": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "leave_out_named",
+        "probabilities": {
+          "leave_out_named": 0.6137,
+          "edit_that_refuses": 0.1551,
+          "edit_that_stores": 0.2312
+        },
+        "confidence": 0.1559,
+        "answer_confidence": 0.6137,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "effects_edit",
+      "jev": "replace_list",
+      "laya": "per_effect_ops",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "replace_list",
+        "confidence": 1,
+        "probabilities": {
+          "replace_list": 1,
+          "per_effect_ops": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "per_effect_ops",
+        "probabilities": {
+          "replace_list": 0.1161,
+          "per_effect_ops": 0.8839
+        },
+        "confidence": 0.4819,
+        "answer_confidence": 0.8839,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "compound_paths",
+      "jev": "set_shape_path_and_create_option",
+      "laya": "set_shape_path_and_create_option",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "set_shape_path_and_create_option",
+        "confidence": 1,
+        "probabilities": {
+          "set_shape_path_and_create_option": 1,
+          "subpath_ops": 0
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "set_shape_path_and_create_option",
+        "probabilities": {
+          "set_shape_path_and_create_option": 0.917,
+          "subpath_ops": 0.083
+        },
+        "confidence": 0.5874,
+        "answer_confidence": 0.917,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "blend_on_non_drawing",
+      "jev": "refuse_by_name",
+      "laya": "store_and_ignore",
+      "jev_detail": {
+        "type": "choice",
+        "choice": "refuse_by_name",
+        "confidence": 0.62,
+        "probabilities": {
+          "refuse_by_name": 0.81,
+          "store_and_ignore": 0.19
+        }
+      },
+      "laya_detail": {
+        "type": "choice",
+        "choice": "store_and_ignore",
+        "probabilities": {
+          "refuse_by_name": 0.4226,
+          "store_and_ignore": 0.5774
+        },
+        "confidence": 0.0173,
+        "answer_confidence": 0.5774,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    },
+    {
+      "question": "needs_user",
+      "jev": 0.42,
+      "laya": 0.9417,
+      "jev_detail": {
+        "type": "noul",
+        "noul": 0.42
+      },
+      "laya_detail": {
+        "type": "noul",
+        "noul": 0.9417,
+        "confidence": 0.9417,
+        "answer_confidence": 0.9417,
+        "action": {
+          "act_probability": 1.0
+        }
+      }
+    }
+  ]
+}

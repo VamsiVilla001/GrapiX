@@ -6,4 +6,9 @@ import type { BezierPath } from "./BezierPath";
  * place it; its fill is grey and its stroke off until `setPaint` and
  * `setStroke` say otherwise.
  */
-export type CreateShape = { name: string, path: BezierPath, };
+export type CreateShape = { name: string, path: BezierPath,
+/**
+ * Additional subpaths, drawn with the primary path as one
+ * compound shape under its fill rule; absent or empty is one path.
+ */
+compoundPaths?: Array<BezierPath>, };

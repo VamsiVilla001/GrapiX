@@ -4,4 +4,4 @@
  * A typed inspector field/value pair. The adjacent tag makes an invalid field
  * and value combination unrepresentable on the command wire.
  */
-export type ObjectField = { "name": "opacity", "value": number } | { "name": "x", "value": number } | { "name": "y", "value": number } | { "name": "rotation", "value": number } | { "name": "scaleX", "value": number } | { "name": "scaleY", "value": number } | { "name": "text", "value": string } | { "name": "fontId", "value": string } | { "name": "size", "value": number } | { "name": "radius", "value": number };
+export type ObjectField = { "name": "opacity", "value": number } | { "name": "x", "value": number } | { "name": "y", "value": number } | { "name": "rotation", "value": number } | { "name": "scaleX", "value": number } | { "name": "scaleY", "value": number } | { "name": "text", "value": string } | { "name": "fontId", "value": string } | { "name": "size", "value": number } | { "name": "radius", "value": number } | { "name": "width", "value": number } | { "name": "height", "value": number } | { "name": "zIndex", "value": number };

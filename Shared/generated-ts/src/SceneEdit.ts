@@ -23,10 +23,13 @@ import type { ReplaceControl } from "./ReplaceControl";
 import type { ReplaceDataContext } from "./ReplaceDataContext";
 import type { ReplaceFont } from "./ReplaceFont";
 import type { SaveTextStyle } from "./SaveTextStyle";
+import type { SetAnchor } from "./SetAnchor";
 import type { SetAssetColorSpace } from "./SetAssetColorSpace";
 import type { SetBinding } from "./SetBinding";
+import type { SetBlendMode } from "./SetBlendMode";
 import type { SetCanvas } from "./SetCanvas";
 import type { SetClipChild } from "./SetClipChild";
+import type { SetEffects } from "./SetEffects";
 import type { SetGroupChildren } from "./SetGroupChildren";
 import type { SetObjectField } from "./SetObjectField";
 import type { SetObjectLocked } from "./SetObjectLocked";
@@ -36,6 +39,7 @@ import type { SetPaint } from "./SetPaint";
 import type { SetPhase } from "./SetPhase";
 import type { SetSceneId } from "./SetSceneId";
 import type { SetSceneName } from "./SetSceneName";
+import type { SetShapePath } from "./SetShapePath";
 import type { SetStroke } from "./SetStroke";
 import type { SetTrackMatte } from "./SetTrackMatte";
 import type { SetTrim } from "./SetTrim";
@@ -46,4 +50,4 @@ import type { UpdateKeyframe } from "./UpdateKeyframe";
  * One change to one scene document. Only carried inside
  * `EditorCommand::EditScene` and only applied through [`apply_edits`].
  */
-export type SceneEdit = { "edit": "createObject" } & CreateObject | { "edit": "deleteObject" } & DeleteObject | { "edit": "duplicateObject" } & DuplicateObject | { "edit": "renameObject" } & RenameObject | { "edit": "setObjectField" } & SetObjectField | { "edit": "setObjectVisible" } & SetObjectVisible | { "edit": "setObjectLocked" } & SetObjectLocked | { "edit": "editProperty" } & EditProperty | { "edit": "createKeyframe" } & CreateKeyframe | { "edit": "updateKeyframe" } & UpdateKeyframe | { "edit": "moveKeyframe" } & MoveKeyframe | { "edit": "removeKeyframe" } & RemoveKeyframe | { "edit": "applyPreset" } & ApplyPreset | { "edit": "setPhase" } & SetPhase | { "edit": "removePhase" } & RemovePhase | { "edit": "declareControl" } & DeclareControl | { "edit": "removeControl" } & RemoveControl | { "edit": "replaceControl" } & ReplaceControl | { "edit": "saveTextStyle" } & SaveTextStyle | { "edit": "applyTextStyle" } & ApplyTextStyle | { "edit": "setBinding" } & SetBinding | { "edit": "replaceDataContext" } & ReplaceDataContext | { "edit": "relinkMaterial" } & RelinkMaterial | { "edit": "deleteMaterial" } & DeleteMaterial | { "edit": "relinkAsset" } & RelinkAsset | { "edit": "setAssetColorSpace" } & SetAssetColorSpace | { "edit": "setSceneName" } & SetSceneName | { "edit": "setSceneId" } & SetSceneId | { "edit": "addFonts" } & AddFonts | { "edit": "removeFont" } & RemoveFont | { "edit": "updateFont" } & UpdateFont | { "edit": "replaceFont" } & ReplaceFont | { "edit": "addAssets" } & AddAssets | { "edit": "setCanvas" } & SetCanvas | { "edit": "createShape" } & CreateShape | { "edit": "setGroupChildren" } & SetGroupChildren | { "edit": "setObjectMasks" } & SetObjectMasks | { "edit": "setClipChild" } & SetClipChild | { "edit": "setTrackMatte" } & SetTrackMatte | { "edit": "setTrim" } & SetTrim | { "edit": "setPaint" } & SetPaint | { "edit": "setStroke" } & SetStroke;
+export type SceneEdit = { "edit": "createObject" } & CreateObject | { "edit": "deleteObject" } & DeleteObject | { "edit": "duplicateObject" } & DuplicateObject | { "edit": "renameObject" } & RenameObject | { "edit": "setObjectField" } & SetObjectField | { "edit": "setObjectVisible" } & SetObjectVisible | { "edit": "setObjectLocked" } & SetObjectLocked | { "edit": "editProperty" } & EditProperty | { "edit": "createKeyframe" } & CreateKeyframe | { "edit": "updateKeyframe" } & UpdateKeyframe | { "edit": "moveKeyframe" } & MoveKeyframe | { "edit": "removeKeyframe" } & RemoveKeyframe | { "edit": "applyPreset" } & ApplyPreset | { "edit": "setPhase" } & SetPhase | { "edit": "removePhase" } & RemovePhase | { "edit": "declareControl" } & DeclareControl | { "edit": "removeControl" } & RemoveControl | { "edit": "replaceControl" } & ReplaceControl | { "edit": "saveTextStyle" } & SaveTextStyle | { "edit": "applyTextStyle" } & ApplyTextStyle | { "edit": "setBinding" } & SetBinding | { "edit": "replaceDataContext" } & ReplaceDataContext | { "edit": "relinkMaterial" } & RelinkMaterial | { "edit": "deleteMaterial" } & DeleteMaterial | { "edit": "relinkAsset" } & RelinkAsset | { "edit": "setAssetColorSpace" } & SetAssetColorSpace | { "edit": "setSceneName" } & SetSceneName | { "edit": "setSceneId" } & SetSceneId | { "edit": "addFonts" } & AddFonts | { "edit": "removeFont" } & RemoveFont | { "edit": "updateFont" } & UpdateFont | { "edit": "replaceFont" } & ReplaceFont | { "edit": "addAssets" } & AddAssets | { "edit": "setCanvas" } & SetCanvas | { "edit": "createShape" } & CreateShape | { "edit": "setGroupChildren" } & SetGroupChildren | { "edit": "setObjectMasks" } & SetObjectMasks | { "edit": "setClipChild" } & SetClipChild | { "edit": "setTrackMatte" } & SetTrackMatte | { "edit": "setTrim" } & SetTrim | { "edit": "setPaint" } & SetPaint | { "edit": "setStroke" } & SetStroke | { "edit": "setBlendMode" } & SetBlendMode | { "edit": "setAnchor" } & SetAnchor | { "edit": "setEffects" } & SetEffects | { "edit": "setShapePath" } & SetShapePath;

@@ -33,9 +33,10 @@ use gx_contracts::command::{
     RelinkAsset, RelinkMaterial, RemoveControl, RemoveKeyframe, RemovePhase, RenameObject,
     ReplaceControl, ReplaceDataContext, SaveMotionPreset, SaveScene, SaveTakePage, SaveTarget,
     SaveTextStyle, SceneEdit, SceneOrigin, SceneSource, SceneTarget, SessionKey, SessionView,
-    SetBinding, SetClipChild, SetGroupChildren, SetObjectField, SetObjectLocked, SetObjectMasks,
-    SetObjectVisible, SetPaint, SetPhase, SetSceneId, SetSceneName, SetStroke, SetTrackMatte,
-    SetTrim, Undo, UpdateKeyframe,
+    SetAnchor, SetBinding, SetBlendMode, SetClipChild, SetEffects, SetGroupChildren,
+    SetObjectField, SetObjectLocked, SetObjectMasks, SetObjectVisible, SetPaint, SetPhase,
+    SetSceneId, SetSceneName, SetShapePath, SetStroke, SetTrackMatte, SetTrim, Undo,
+    UpdateKeyframe,
 };
 use gx_contracts::control::{ControlField, ControlFieldKind, ControlValue, TakePage};
 use gx_contracts::design_system::{
@@ -305,6 +306,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         SetTrim,
         SetPaint,
         SetStroke,
+        SetBlendMode,
+        SetAnchor,
+        SetEffects,
+        SetShapePath,
         EditEffect,
         SessionView,
         CommandOutcome,

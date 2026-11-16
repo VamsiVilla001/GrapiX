@@ -59,6 +59,16 @@
   "additionalProperties": false,
   "description": "Create a shape from a bezier path (3.13). The path's own coordinates\nplace it; its fill is grey and its stroke off until `setPaint` and\n`setStroke` say otherwise.",
   "properties": {
+    "compoundPaths": {
+      "description": "Additional subpaths, drawn with the primary path as one\ncompound shape under its fill rule; absent or empty is one path.",
+      "items": {
+        "$ref": "#/$defs/BezierPath"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
     "edit": {
       "const": "createShape"
     },

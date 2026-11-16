@@ -23,6 +23,13 @@ pub enum ObjectField {
     FontId(String),
     Size(f64),
     Radius(f64),
+    /// The object's box (`ObjectBase.width`, `height`): a rect and an image
+    /// fill it, an ellipse is inscribed in it, paragraph text wraps inside it.
+    /// Finite and not negative, as the engine draws it.
+    Width(f64),
+    Height(f64),
+    /// Draw order within a layer (`ObjectBase.z_index`).
+    ZIndex(i32),
 }
 
 impl ObjectField {
@@ -38,6 +45,9 @@ impl ObjectField {
             Self::FontId(_) => "fontId",
             Self::Size(_) => "size",
             Self::Radius(_) => "radius",
+            Self::Width(_) => "width",
+            Self::Height(_) => "height",
+            Self::ZIndex(_) => "zIndex",
         }
     }
 
@@ -47,6 +57,25 @@ impl ObjectField {
                 matches!(object, SceneObject::Text(_))
             }
             Self::Radius(_) => matches!(object, SceneObject::Rect(_)),
+            // The kinds that draw their box. A shape's box follows its path
+            // and a line's its end points, so setting either would change
+            // nothing drawn; a group, a layer and the rest draw no box.
+            Self::Width(_) | Self::Height(_) => matches!(
+                object,
+                SceneObject::Rect(_)
+                    | SceneObject::Ellipse(_)
+                    | SceneObject::Image(_)
+                    | SceneObject::Text(_)
+            ),
+            // Draw order means something only for an object that draws.
+            Self::ZIndex(_) => !matches!(
+                object,
+                SceneObject::Group(_)
+                    | SceneObject::Layer(_)
+                    | SceneObject::Marker(_)
+                    | SceneObject::Camera(_)
+                    | SceneObject::Light(_)
+            ),
             _ => true,
         }
     }
@@ -74,6 +103,9 @@ impl ObjectField {
             {
                 invalid("must be finite")
             }
+            Self::Width(value) | Self::Height(value) if !value.is_finite() || *value < 0.0 => {
+                invalid("must be finite and not negative")
+            }
             Self::FontId(value) if value.trim().is_empty() => invalid("cannot be empty"),
             _ => Ok(()),
         }
@@ -97,6 +129,9 @@ impl ObjectField {
             Self::Radius(value) => {
                 matches!(object, SceneObject::Rect(rect) if !same_number(rect.radius, *value))
             }
+            Self::Width(value) => !same_number(object.base().width, *value),
+            Self::Height(value) => !same_number(object.base().height, *value),
+            Self::ZIndex(value) => object.base().z_index != *value,
         }
     }
 
@@ -128,6 +163,9 @@ impl ObjectField {
                     rect.radius = *value;
                 }
             }
+            Self::Width(value) => object.base_mut().width = *value,
+            Self::Height(value) => object.base_mut().height = *value,
+            Self::ZIndex(value) => object.base_mut().z_index = *value,
         }
     }
 }

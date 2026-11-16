@@ -1975,4 +1975,151 @@ mod tests {
             "trim keeps 0 to 50"
         );
     }
+
+    /// The MCP gap edits (16 Nov 2026), as wire JSON through `apply_edits`, drawn
+    /// by the CPU reference: width, draw order, a blend mode, a compound shape, a
+    /// replaced shape path, an effect and an anchor each change what is drawn.
+    #[test]
+    fn the_layout_edits_draw_what_they_say() {
+        use gx_contracts::command::{apply_edits, EditContext, SceneEdit};
+        let field = |id: &str, name: &str, value: serde_json::Value| serde_json::json!({ "edit": "setObjectField", "objectIds": [id], "field": { "name": name, "value": value } });
+        let at = |id: &str, x: f64, y: f64| {
+            [
+                field(id, "x", serde_json::json!(x)),
+                field(id, "y", serde_json::json!(y)),
+            ]
+        };
+        let solid = |r: f64, g: f64, b: f64| serde_json::json!({ "type": "solid", "color": { "r": r, "g": g, "b": b, "a": 1.0, "space": "srgb" } });
+        let fill = |id: &str, paint: serde_json::Value| serde_json::json!({ "edit": "setPaint", "objectIds": [id], "slot": "fill", "paint": paint });
+        let square = |x: f64, y: f64, side: f64| {
+            let p = |x: f64, y: f64| serde_json::json!({ "x": x, "y": y });
+            let zero = p(0.0, 0.0);
+            serde_json::json!({
+                "closed": true,
+                "vertices": [p(x, y), p(x + side, y), p(x + side, y + side), p(x, y + side)],
+                "inTangents": [zero, zero, zero, zero],
+                "outTangents": [zero, zero, zero, zero],
+            })
+        };
+        let line = serde_json::json!({
+            "closed": false,
+            "vertices": [{ "x": 0.0, "y": 0.0 }, { "x": 60.0, "y": 0.0 }],
+            "inTangents": [{ "x": 0.0, "y": 0.0 }, { "x": 0.0, "y": 0.0 }],
+            "outTangents": [{ "x": 0.0, "y": 0.0 }, { "x": 0.0, "y": 0.0 }],
+        });
+        let mut edits: Vec<serde_json::Value> = (0..8)
+            .map(|i| serde_json::json!({ "edit": "createObject", "kind": "rect", "name": format!("R{i}") }))
+            .collect();
+        edits.push(serde_json::json!({ "edit": "createShape", "name": "Pair",
+            "path": square(0.0, 0.0, 50.0), "compoundPaths": [square(100.0, 0.0, 50.0)] }));
+        edits.push(serde_json::json!({ "edit": "createShape", "name": "Swap", "path": line }));
+        edits.push(serde_json::json!({ "edit": "createShape", "name": "Ring",
+            "path": square(0.0, 0.0, 100.0), "compoundPaths": [square(25.0, 25.0, 50.0)] }));
+        // Each 200 x 120 rect gets its place.
+        for (id, x, y) in [
+            ("rect-1", 0.0, 0.0),
+            ("rect-2", 400.0, 0.0),
+            ("rect-3", 400.0, 0.0),
+            ("rect-4", 800.0, 0.0),
+            ("rect-5", 800.0, 0.0),
+            ("rect-6", 0.0, 500.0),
+            ("rect-7", 300.0, 500.0),
+            ("rect-8", 800.0, 500.0),
+            ("shape-1", 0.0, 300.0),
+            ("shape-2", 400.0, 300.0),
+            ("shape-3", 0.0, 700.0),
+        ] {
+            // A shape is created at the origin; its x of 0 is no change.
+            if id.starts_with("shape") && x == 0.0 {
+                edits.push(field(id, "y", serde_json::json!(y)));
+            } else {
+                edits.extend(at(id, x, y));
+            }
+        }
+        edits.extend([
+            // Width: rect-1 grows from 200 to 300.
+            field("rect-1", "width", serde_json::json!(300.0)),
+            // Draw order: red rect-2 is raised over blue rect-3.
+            fill("rect-2", solid(1.0, 0.0, 0.0)),
+            fill("rect-3", solid(0.0, 0.0, 1.0)),
+            field("rect-2", "zIndex", serde_json::json!(1)),
+            // Blend: green rect-4 multiplies over red rect-5, which is black.
+            fill("rect-4", solid(0.0, 1.0, 0.0)),
+            fill("rect-5", solid(1.0, 0.0, 0.0)),
+            field("rect-4", "zIndex", serde_json::json!(1)),
+            serde_json::json!({ "edit": "setBlendMode", "objectIds": ["rect-4"], "blendMode": "multiply" }),
+            // A line becomes a filled square.
+            serde_json::json!({ "edit": "setShapePath", "shapeId": "shape-2", "path": square(0.0, 0.0, 60.0) }),
+            fill("shape-2", solid(1.0, 1.0, 1.0)),
+            // Even-odd cuts the inner square out of the ring.
+            serde_json::json!({ "edit": "setShapePath", "shapeId": "shape-3", "path": square(0.0, 0.0, 100.0),
+                "compoundPaths": [square(25.0, 25.0, 50.0)], "fillRule": "evenodd" }),
+            // The same grey, one with one stop of exposure.
+            fill("rect-6", solid(0.25, 0.25, 0.25)),
+            fill("rect-7", solid(0.25, 0.25, 0.25)),
+            serde_json::json!({ "edit": "setEffects", "objectId": "rect-7", "effects": [
+                { "effectId": "lift", "effect": "exposure", "exposure": 1.0, "offset": 0.0, "gammaCorrection": 1.0 }] }),
+            // Rotated a quarter turn about its centre rather than its corner.
+            serde_json::json!({ "edit": "setAnchor", "objectIds": ["rect-8"], "anchor": { "x": 100.0, "y": 60.0 } }),
+            field("rect-8", "rotation", serde_json::json!(90.0)),
+        ]);
+        let edits: Vec<SceneEdit> = serde_json::from_value(serde_json::Value::Array(edits))
+            .expect("the wire JSON is a batch of scene edits");
+        let mut scene = document(Vec::new());
+        apply_edits(&mut scene, &edits, &EditContext::default()).expect("the batch applies");
+        let prepared = PreparedScene::prepare(
+            scene,
+            &HashSet::new(),
+            &AssetBytes::new(),
+            &MaterialSupport::fixed_function(),
+        )
+        .expect("the authored scene prepares");
+        let frame = prepared.frame(OutputTransform::Srgb);
+        let px = |x: usize, y: usize| {
+            let i = (y * frame.width as usize + x) * 4;
+            [
+                frame.pixels[i],
+                frame.pixels[i + 1],
+                frame.pixels[i + 2],
+                frame.pixels[i + 3],
+            ]
+        };
+        let alpha = |x: usize, y: usize| px(x, y)[3];
+        assert_eq!([alpha(250, 60), alpha(350, 60)], [255, 0], "width 300");
+        let [r, _, b, _] = px(450, 60);
+        assert!(
+            r > 200 && b < 50,
+            "the raised red rect is on top: {:?}",
+            px(450, 60)
+        );
+        let [r, g, _, a] = px(850, 60);
+        assert!(
+            a == 255 && r < 20 && g < 20,
+            "green multiplied over red: {:?}",
+            px(850, 60)
+        );
+        assert_eq!(
+            [alpha(25, 325), alpha(75, 325), alpha(125, 325)],
+            [255, 0, 255],
+            "both subpaths of the compound shape, nothing between"
+        );
+        assert_eq!(alpha(430, 330), 255, "the replaced path is a filled square");
+        assert_eq!(
+            [alpha(10, 710), alpha(50, 750)],
+            [255, 0],
+            "an even-odd compound shape has a hole"
+        );
+        // One stop doubles linear light: sRGB 0.25 (code 64) is linear 0.051,
+        // doubled 0.102, which is sRGB code 90.
+        let (plain, lifted) = (px(50, 560)[0], px(350, 560)[0]);
+        assert_eq!(plain, 64, "the plain grey");
+        assert!(
+            (88..=92).contains(&lifted),
+            "one stop of exposure: {plain} to {lifted}"
+        );
+        // About its centre (anchor 100, 60 at x 800, y 500) the quarter-turned
+        // rect spans x 740..860 and y 400..600; about its corner it would not
+        // reach y 590 at x 800, and unrotated it would cover x 880.
+        assert_eq!([alpha(800, 590), alpha(880, 500)], [255, 0], "anchor");
+    }
 }
